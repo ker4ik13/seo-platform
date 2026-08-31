@@ -119,6 +119,27 @@ test("parses and narrows a valid public rank estimate", () => {
   assert.equal("ignoredInternalField" in parsed, false);
 });
 
+test("requires an explicit positive Core quote for platform-paid estimates", () => {
+  const platformEstimate = {
+    ...estimate,
+    credentialMode: "PLATFORM_PAID",
+    platformChargeMicro: "2500000"
+  } as const;
+  assert.equal(
+    parseRankEstimate(platformEstimate, {
+      projectId: "project-1",
+      trackingContextId: "context-1"
+    }).platformChargeMicro,
+    "2500000"
+  );
+  assert.throws(() =>
+    parseRankEstimate(
+      { ...platformEstimate, platformChargeMicro: "0" },
+      { projectId: "project-1", trackingContextId: "context-1" }
+    )
+  );
+});
+
 test("rejects cross-project, malformed and contradictory estimates", () => {
   assert.throws(
     () =>

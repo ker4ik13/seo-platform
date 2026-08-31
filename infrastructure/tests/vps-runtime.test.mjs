@@ -14,6 +14,7 @@ const shellScripts = [
   "bootstrap-runtime.sh",
   "billing-webhook-proxy.sh",
   "configure-auth-email.sh",
+  "configure-telegram-alerts.sh",
   "configure-yookassa.sh",
   "configure-web-push.sh",
   "migrate-runtime.sh",
@@ -75,7 +76,7 @@ test("VPS runtime uses UTC for PostgreSQL and every Node process", async () => {
   const nodeRuntimeCount = [...source.matchAll(/NODE_ENV=production \\/gu)].length;
   const utcRuntimeCount = [...source.matchAll(/TZ=UTC \\/gu)].length;
 
-  assert.equal(nodeRuntimeCount, 12);
+  assert.equal(nodeRuntimeCount, 13);
   assert.equal(utcRuntimeCount, nodeRuntimeCount);
   assert.match(source, /postgres[\s\S]*-c timezone=UTC/);
 });
@@ -118,6 +119,65 @@ test("VPS YooKassa adapter is operator-configurable and disabled by default", as
   assert.match(webhookSource, /\/api\/v1\/billing\/providers\/yookassa\/webhook/u);
   assert.match(webhookSource, /127\.0\.0\.1:4000/u);
   assert.match(webhookSource, /webhook_listen=\$public_host:443/u);
+});
+
+test("VPS platform rank credentials preserve price and secret boundaries", async () => {
+  const source = await readVpsFile("run-component.sh");
+  const bootstrapSource = await readVpsFile("bootstrap-runtime.sh");
+  const coreBlock = source.match(/  backend-core\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const executionBlock = source.match(/  backend-execution\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\|connector-worker-3\)[\s\S]*?    ;;/u)?.[0] ?? "";
+
+  assert.match(coreBlock, /PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR/u);
+  assert.match(coreBlock, /PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR/u);
+  assert.match(coreBlock, /PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR/u);
+  assert.match(coreBlock, /PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR/u);
+  assert.match(coreBlock, /PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR/u);
+  assert.match(coreBlock, /PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR/u);
+  assert.doesNotMatch(coreBlock, /PLATFORM_(?:XMLSTOCK|ARSENKIN)_API_KEY/u);
+  assert.match(executionBlock, /PLATFORM_XMLSTOCK_API_KEY/u);
+  assert.match(executionBlock, /PLATFORM_ARSENKIN_API_KEY/u);
+  assert.doesNotMatch(executionBlock, /RANK_KEYWORD_PRICE_MINOR/u);
+  assert.doesNotMatch(connectorBlock, /PLATFORM_(?:XMLSTOCK|ARSENKIN)_API_KEY/u);
+  assert.match(
+    coreBlock,
+    /JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN/u
+  );
+  assert.match(
+    connectorBlock,
+    /JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN/u
+  );
+  assert.match(
+    bootstrapSource,
+    /if ! grep -q '\^JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN=' "\$runtime_env_file"/u
+  );
+});
+
+test("VPS operational alerts isolate Telegram secret and hash error details", async () => {
+  const componentSource = await readVpsFile("run-component.sh");
+  const startSource = await readVpsFile("start-runtime.sh");
+  const statusSource = await readVpsFile("status-runtime.sh");
+  const supervisorSource = await readVpsFile("supervise-component.sh");
+  const configureSource = await readVpsFile("configure-telegram-alerts.sh");
+  const alertBlock = componentSource.match(/  operational-alerts\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const coreBlock = componentSource.match(/  backend-core\)[\s\S]*?    ;;/u)?.[0] ?? "";
+
+  assert.match(alertBlock, /BIND_ADDRESS=127\.0\.0\.1/u);
+  assert.match(alertBlock, /OPERATIONAL_ALERTS_PORT=4004/u);
+  assert.match(alertBlock, /TELEGRAM_ALERT_BOT_TOKEN/u);
+  assert.doesNotMatch(coreBlock, /TELEGRAM_ALERT_BOT_TOKEN/u);
+  assert.ok(
+    startSource.indexOf("start_window operational-alerts") <
+      startSource.indexOf("start_window backend-core")
+  );
+  assert.match(statusSource, /4004\/health\/ready/u);
+  assert.match(supervisorSource, /sha256sum \| cut -c1-16/u);
+  assert.match(supervisorSource, /CHILD_ERROR_LOG ERROR/u);
+  assert.match(supervisorSource, /UNEXPECTED_PROCESS_EXIT/u);
+  assert.doesNotMatch(supervisorSource, /body: JSON\.stringify\([^)]*line/u);
+  assert.match(configureSource, /read -r -s entered_token/u);
+  assert.match(configureSource, /Telegram canary failed/u);
+  assert.doesNotMatch(configureSource, /printf[^\n]*bot_token/u);
 });
 
 test("VPS auth-email keeps SMTP in one optional isolated worker", async () => {

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.mjs",
+    "dev": "pnpm --filter @seo-platform/operational-alerts build && node server.mjs",
     "build": "next build",
     "start": "node server.mjs",
     "typecheck": "tsc --noEmit",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@seo-platform/contracts": "workspace:*",
+    "@seo-platform/operational-alerts": "workspace:*",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8",

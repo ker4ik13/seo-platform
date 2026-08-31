@@ -29,6 +29,7 @@ const expectedFunctions = [
   "public.authorize_rank_connector_execution_submit( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT )",
   "public.claim_rank_connector_submit_bounded(TEXT, INTEGER, TEXT)",
   "public.read_rank_connector_submit_request( UUID, UUID, TEXT, UUID, INTEGER, INTEGER )",
+  "public.read_rank_connector_billing_settlement( UUID, UUID, TEXT, UUID, INTEGER, INTEGER )",
   "public.complete_rank_connector_submit( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, TEXT, JSONB, BYTEA, TEXT )",
   "public.claim_rank_connector_poll(TEXT, INTEGER, TEXT)",
   "public.complete_rank_connector_poll( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER, TIMESTAMPTZ, JSONB, BYTEA, TEXT, JSONB, BYTEA )",

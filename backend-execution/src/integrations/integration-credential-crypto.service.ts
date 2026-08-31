@@ -17,6 +17,20 @@ import { APP_CONFIG } from "../config/config.module.js";
 export interface IntegrationCredentialSecret {
   readonly apiKey: string;
   readonly accountIdentifier?: string;
+  /** Opaque HMAC-derived UUID. It is safe for Redis keys, but never logged. */
+  readonly rateLimitScopeId?: string;
+  readonly platformPool?: readonly PlatformCredentialPoolEntry[];
+}
+
+export interface PlatformCredentialPoolEntry {
+  readonly id: string;
+  readonly apiKey: string;
+  readonly accountIdentifier?: string;
+}
+
+export interface PlatformCredentialMaterial {
+  readonly apiKey: string;
+  readonly accountIdentifier?: string;
 }
 
 export interface EncryptedIntegrationCredential {
@@ -37,6 +51,7 @@ export interface IntegrationCredentialRequestFingerprintInput {
   readonly label: string;
   readonly apiKey: string;
   readonly accountIdentifier?: string;
+  readonly platformPool?: readonly PlatformCredentialMaterial[];
 }
 
 export interface IntegrationCredentialRequestFingerprint {
@@ -235,13 +250,56 @@ export class IntegrationCredentialCryptoService {
           provider: input.provider,
           label: input.label,
           apiKey: input.apiKey,
-          accountIdentifier: input.accountIdentifier ?? null
+          accountIdentifier: input.accountIdentifier ?? null,
+          ...(input.platformPool
+            ? {
+                platformPool: input.platformPool.map((entry) => ({
+                  apiKey: entry.apiKey,
+                  accountIdentifier: entry.accountIdentifier ?? null
+                }))
+              }
+            : {})
         }),
         "utf8"
       )
         .digest(),
       keyVersion: fingerprintKey.version
     };
+  }
+
+  public platformCredentialPoolSecret(
+    provider: Extract<IntegrationProvider, "XMLSTOCK" | "ARSENKIN">,
+    material: readonly PlatformCredentialMaterial[]
+  ): IntegrationCredentialSecret {
+    this.assertManagementRole();
+    if (material.length < 1 || material.length > 64) {
+      throw encryptionUnavailable();
+    }
+    const { key } = this.platformPoolFingerprintKey();
+    const entries = material.map((entry) => ({
+      id: platformPoolEntryId(key, provider, entry),
+      apiKey: entry.apiKey,
+      ...(entry.accountIdentifier
+        ? { accountIdentifier: entry.accountIdentifier }
+        : {})
+    }));
+    if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
+      throw encryptionUnavailable();
+    }
+    const first = entries[0]!;
+    return {
+      apiKey: first.apiKey,
+      ...(first.accountIdentifier
+        ? { accountIdentifier: first.accountIdentifier }
+        : {}),
+      rateLimitScopeId: first.id,
+      platformPool: entries
+    };
+  }
+
+  public platformCredentialFingerprintKeyVersion(): number {
+    this.assertManagementRole();
+    return this.platformPoolFingerprintKey().version;
   }
 
   private activeKey(): { readonly key: Buffer; readonly version: number } {
@@ -273,6 +331,24 @@ export class IntegrationCredentialCryptoService {
         : this.config.integrationCredentials.fingerprintKeys.get(version);
     if (!key || version === undefined) throw encryptionUnavailable();
     return { key, version };
+  }
+
+  private platformPoolFingerprintKey(): {
+    readonly key: Buffer;
+    readonly version: number;
+  } {
+    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
+      throw encryptionUnavailable();
+    }
+    const oldestVersion = [
+      ...this.config.integrationCredentials.fingerprintKeys.keys()
+    ]
+      .sort((left, right) => left - right)[0];
+    const key = oldestVersion === undefined
+      ? undefined
+      : this.config.integrationCredentials.fingerprintKeys.get(oldestVersion);
+    if (!key || oldestVersion === undefined) throw encryptionUnavailable();
+    return { key, version: oldestVersion };
   }
 
   private assertManagementRole(): void {
@@ -344,18 +420,105 @@ function credentialSecret(value: unknown): IntegrationCredentialSecret {
     typeof value.apiKey !== "string" ||
     (("accountIdentifier" in value) &&
       value.accountIdentifier !== undefined &&
-      typeof value.accountIdentifier !== "string")
+      typeof value.accountIdentifier !== "string") ||
+    (("rateLimitScopeId" in value) &&
+      value.rateLimitScopeId !== undefined &&
+      (typeof value.rateLimitScopeId !== "string" ||
+        !UUID_PATTERN.test(value.rateLimitScopeId)))
   ) {
     throw encryptionUnavailable();
   }
-  return {
+  const base = {
     apiKey: value.apiKey,
     ...("accountIdentifier" in value &&
     typeof value.accountIdentifier === "string"
       ? { accountIdentifier: value.accountIdentifier }
+      : {}),
+    ...("rateLimitScopeId" in value &&
+    typeof value.rateLimitScopeId === "string"
+      ? { rateLimitScopeId: value.rateLimitScopeId.toLowerCase() }
+      : {})
+  };
+  if (!("platformPool" in value) || value.platformPool === undefined) {
+    return base;
+  }
+  if (
+    !Array.isArray(value.platformPool) ||
+    value.platformPool.length < 1 ||
+    value.platformPool.length > 64
+  ) {
+    throw encryptionUnavailable();
+  }
+  const platformPool = value.platformPool.map(platformPoolEntry);
+  if (
+    new Set(platformPool.map((entry) => entry.id)).size !==
+      platformPool.length ||
+    base.rateLimitScopeId !== platformPool[0]?.id ||
+    base.apiKey !== platformPool[0]?.apiKey ||
+    base.accountIdentifier !== platformPool[0]?.accountIdentifier
+  ) {
+    throw encryptionUnavailable();
+  }
+  return { ...base, platformPool };
+}
+
+function platformPoolEntry(value: unknown): PlatformCredentialPoolEntry {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("id" in value) ||
+    typeof value.id !== "string" ||
+    !UUID_PATTERN.test(value.id) ||
+    !("apiKey" in value) ||
+    typeof value.apiKey !== "string" ||
+    ("accountIdentifier" in value &&
+      value.accountIdentifier !== undefined &&
+      typeof value.accountIdentifier !== "string")
+  ) {
+    throw encryptionUnavailable();
+  }
+  const accountIdentifier = "accountIdentifier" in value
+    ? value.accountIdentifier
+    : undefined;
+  return {
+    id: value.id.toLowerCase(),
+    apiKey: value.apiKey,
+    ...(typeof accountIdentifier === "string"
+      ? { accountIdentifier }
       : {})
   };
 }
+
+function platformPoolEntryId(
+  key: Buffer,
+  provider: Extract<IntegrationProvider, "XMLSTOCK" | "ARSENKIN">,
+  material: PlatformCredentialMaterial
+): string {
+  const bytes = createHmac("sha256", key)
+    .update("seo-platform:platform-provider-pool-entry:v1", "utf8")
+    .update("\0", "utf8")
+    .update(provider, "utf8")
+    .update("\0", "utf8")
+    .update(material.accountIdentifier ?? "", "utf8")
+    .update("\0", "utf8")
+    .update(material.apiKey, "utf8")
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x80;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20)
+  ].join("-");
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function payloadAad(
   workspaceId: string,

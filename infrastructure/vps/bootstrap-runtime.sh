@@ -168,8 +168,10 @@ if [ ! -f "$runtime_env_file" ]; then
     JOBS_TO_SEO_RANK_TOKEN \
     JOBS_TO_SEO_RANK_RESULT_TOKEN \
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN \
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN \
     JOBS_TO_PLATFORM_AUTOMATION_TOKEN \
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN \
+    OPERATIONAL_ALERT_TOKEN \
     RANK_HISTORY_CURSOR_KEY \
     AUTH_PASSWORD_PEPPER
   do
@@ -217,6 +219,8 @@ if [ ! -f "$runtime_env_file" ]; then
   write_environment_value NATS_NPD_RECEIPT_EVENT_SUBJECT production.email.billing.npd-receipt.delivery-requested.v1
   write_environment_value NATS_AUTH_EMAIL_DLQ_SUBJECT production.dlq.jobs.transactional-email.v1
   write_environment_value AUTH_EMAIL_ENABLED false
+  write_environment_value TELEGRAM_ALERTS_ENABLED false
+  write_environment_value TELEGRAM_ALERT_ENVIRONMENT production
 
   mv "$temporary_env_file" "$runtime_env_file"
   temporary_env_file=
@@ -280,6 +284,47 @@ if ! grep -q '^JOBS_TO_PLATFORM_AUTOMATION_TOKEN=' "$runtime_env_file"; then
   write_environment_value \
     JOBS_TO_PLATFORM_AUTOMATION_TOKEN \
     "$(random_url_secret)"
+  mv "$temporary_env_file" "$runtime_env_file"
+  temporary_env_file=
+  trap - EXIT INT TERM
+  chmod 600 "$runtime_env_file"
+fi
+
+if ! grep -q '^JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN=' "$runtime_env_file"; then
+  temporary_env_file=$runtime_root/runtime.env.tmp.$$
+  trap 'rm -f "$temporary_env_file"' EXIT INT TERM
+  cp "$runtime_env_file" "$temporary_env_file"
+  chmod 600 "$temporary_env_file"
+  write_environment_value \
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN \
+    "$(random_url_secret)"
+  mv "$temporary_env_file" "$runtime_env_file"
+  temporary_env_file=
+  trap - EXIT INT TERM
+  chmod 600 "$runtime_env_file"
+fi
+
+if ! grep -q '^OPERATIONAL_ALERT_TOKEN=' "$runtime_env_file"; then
+  temporary_env_file=$runtime_root/runtime.env.tmp.$$
+  trap 'rm -f "$temporary_env_file"' EXIT INT TERM
+  cp "$runtime_env_file" "$temporary_env_file"
+  chmod 600 "$temporary_env_file"
+  write_environment_value \
+    OPERATIONAL_ALERT_TOKEN \
+    "$(random_url_secret)"
+  mv "$temporary_env_file" "$runtime_env_file"
+  temporary_env_file=
+  trap - EXIT INT TERM
+  chmod 600 "$runtime_env_file"
+fi
+
+if ! grep -q '^TELEGRAM_ALERTS_ENABLED=' "$runtime_env_file"; then
+  temporary_env_file=$runtime_root/runtime.env.tmp.$$
+  trap 'rm -f "$temporary_env_file"' EXIT INT TERM
+  cp "$runtime_env_file" "$temporary_env_file"
+  chmod 600 "$temporary_env_file"
+  write_environment_value TELEGRAM_ALERTS_ENABLED false
+  write_environment_value TELEGRAM_ALERT_ENVIRONMENT production
   mv "$temporary_env_file" "$runtime_env_file"
   temporary_env_file=
   trap - EXIT INT TERM

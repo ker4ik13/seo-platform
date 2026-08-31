@@ -151,10 +151,10 @@ return level
 `;
 
 /**
- * Distributed XMLStock capacity keyed by credential and provider product.
- * Different BYOK credentials never share a bucket; every project using the
- * same credential does, because XMLStock applies limits to the API key rather
- * than to this platform's project or worker process.
+ * Distributed XMLStock capacity keyed by physical credential scope and
+ * provider product. BYOK uses the credential-row UUID; platform-paid pools
+ * use an opaque HMAC-derived UUID shared by every workspace that routes
+ * through the same physical key.
  */
 @Injectable()
 export class XmlStockHttpQuotaLimiter

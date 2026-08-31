@@ -87,6 +87,7 @@ import {
   writeSemanticManualAddPreferences
 } from "../lib/semantic-manual-add-preferences";
 import { semanticKeywordSearchPlaceholder } from "../lib/semantic-group-selection";
+import { normalizeSemanticGroupName } from "../lib/semantic-group-name-batch";
 import {
   semanticResearchImportSignature,
   shouldRefreshSemanticOperationMetrics,
@@ -2802,6 +2803,48 @@ export function SemanticCoreTable({
     onGroupsChanged();
   }
 
+  async function renameGroupInline(
+    group: SemanticGroupTreeItem,
+    draft: string
+  ): Promise<boolean> {
+    if (saving) return false;
+    let name: string;
+    try {
+      name = normalizeSemanticGroupName(draft);
+    } catch (error) {
+      setMutationError(
+        error instanceof Error ? error.message : "Проверьте название папки."
+      );
+      return false;
+    }
+    if (name === group.name) return true;
+
+    setSaving(true);
+    setMutationError(undefined);
+    try {
+      await browserApiRequest<SemanticKeywordGroup>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups/${encodeURIComponent(group.id)}`,
+        {
+          method: "PATCH",
+          ifMatch: group.version,
+          body: {
+            name,
+            color: group.color ?? null,
+            parentId: group.parentId ?? null
+          }
+        }
+      );
+      setBulkNotice(`Группа переименована в «${name}»`);
+      onGroupsChanged();
+      return true;
+    } catch (requestError) {
+      setMutationError(keywordMutationError(requestError));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function moveGroupsImmediately(
     selectedGroups: readonly SemanticGroupTreeItem[],
     target: SemanticGroupTreeDropTarget
@@ -3365,6 +3408,7 @@ export function SemanticCoreTable({
         onDropMove={(selectedGroups, target) =>
           void moveGroupsImmediately(selectedGroups, target)
         }
+        onInlineRename={renameGroupInline}
         onMoveRequest={(selectedGroups) => {
           setMobileGroupTreeOpen(false);
           setGroupDialog({
@@ -5376,6 +5420,16 @@ function keywordColumn(
       return (
         <>
           <strong className="semantic-query-line">
+            {!item.isTracked && (
+              <span
+                aria-label="Запрос не отслеживается"
+                className="semantic-query-tracking-indicator"
+                role="img"
+                title="Запрос не отслеживается"
+              >
+                <Icon name="eyeOff" />
+              </span>
+            )}
             <span className="semantic-query-text" title={item.textOriginal}>
               {item.isFavorite ? "★ " : ""}
               {item.textOriginal}

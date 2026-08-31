@@ -101,7 +101,8 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
   if (
     (!ready && !blocked) ||
     input.operation !== "POSITIONS" ||
-    input.credentialMode !== "BYOK_API_KEY" ||
+    (input.credentialMode !== "BYOK_API_KEY" &&
+      input.credentialMode !== "PLATFORM_PAID") ||
     scope.contextCount !== "1" ||
     scope.pairCount !== keywordCount ||
     !positiveInteger(scope.contextVersion) ||
@@ -153,7 +154,7 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
           connectorAttempts: connectorAttempts(input.connectorAttempts)
         }),
     operation: "POSITIONS",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode: input.credentialMode,
     scope: {
       keywordCount,
       contextCount: "1",

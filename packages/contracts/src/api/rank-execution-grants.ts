@@ -8,6 +8,10 @@ export const rankExecutionGrantSchemaVersion =
   "rank-execution-grant@1" as const;
 export const rankExecutionGrantDecisionSchemaVersion =
   "rank-execution-grant-decision@1" as const;
+export const rankExecutionGrantSettlementRequestSchemaVersion =
+  "rank-execution-grant-settlement-request@1" as const;
+export const rankExecutionGrantSettlementResultSchemaVersion =
+  "rank-execution-grant-settlement-result@1" as const;
 
 export const rankExecutionGrantRequestHashDomain =
   rankExecutionGrantRequestSchemaVersion;
@@ -71,6 +75,8 @@ export interface InternalRankExecutionGrantManifestV1 {
 export interface InternalRankExecutionGrantUsageIntentV1 {
   readonly meter: "RANK_PROVIDER_TASK";
   readonly quantity: "1";
+  /** Present only for PLATFORM_PAID and bound to the confirmed launch quote. */
+  readonly unitPriceMinor?: string;
 }
 
 /**
@@ -105,7 +111,7 @@ export interface InternalIssueRankExecutionGrantInputV1 {
   readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly capability: "SERP_RANK_TRACKING";
-  readonly credentialMode: "BYOK_API_KEY";
+  readonly credentialMode: "BYOK_API_KEY" | "PLATFORM_PAID";
   readonly manifest: InternalRankExecutionGrantManifestV1;
   readonly executionEvidenceHash: RankManifestHash;
   readonly policyVersion: string;
@@ -148,7 +154,7 @@ export interface InternalRankExecutionGrantScopeHashPreimageV1 {
   readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly capability: "SERP_RANK_TRACKING";
-  readonly credentialMode: "BYOK_API_KEY";
+  readonly credentialMode: "BYOK_API_KEY" | "PLATFORM_PAID";
   readonly manifest: InternalRankExecutionGrantManifestV1;
   readonly executionEvidenceHash: RankManifestHash;
   readonly policyVersion: string;
@@ -189,6 +195,17 @@ export interface InternalRankExecutionGrantDeniedDecisionV1
 export type InternalRankExecutionGrantDecisionV1 =
   | InternalRankExecutionGrantGrantedDecisionV1
   | InternalRankExecutionGrantDeniedDecisionV1;
+
+export interface InternalSettleRankExecutionGrantInputV1 {
+  readonly schemaVersion: "rank-execution-grant-settlement-request@1";
+  readonly action: "HOLD" | "CAPTURE";
+}
+
+export interface InternalRankExecutionGrantSettlementResultV1 {
+  readonly schemaVersion: "rank-execution-grant-settlement-result@1";
+  readonly grantId: string;
+  readonly status: "RESERVED" | "CAPTURED" | "NOT_APPLICABLE";
+}
 
 const UUID_V7_LOWERCASE_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -249,7 +266,9 @@ export function internalIssueRankExecutionGrantInput(
   );
   const usageIntent = exactRecord(
     input.usageIntent,
-    ["meter", "quantity"],
+    input.credentialMode === "PLATFORM_PAID"
+      ? ["meter", "quantity", "unitPriceMinor"]
+      : ["meter", "quantity"],
     "usageIntent"
   );
 
@@ -259,9 +278,12 @@ export function internalIssueRankExecutionGrantInput(
     (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
     input.operation !== "POSITIONS" ||
     input.capability !== "SERP_RANK_TRACKING" ||
-    input.credentialMode !== "BYOK_API_KEY" ||
+    (input.credentialMode !== "BYOK_API_KEY" &&
+      input.credentialMode !== "PLATFORM_PAID") ||
     usageIntent.meter !== "RANK_PROVIDER_TASK" ||
     usageIntent.quantity !== "1" ||
+    (input.credentialMode === "PLATFORM_PAID" &&
+      !positiveSafeDecimal(usageIntent.unitPriceMinor)) ||
     typeof input.policyVersion !== "string" ||
     !POLICY_VERSION_PATTERN.test(input.policyVersion)
   ) {
@@ -293,7 +315,7 @@ export function internalIssueRankExecutionGrantInput(
     provider: input.provider as InternalIssueRankExecutionGrantInputV1["provider"],
     operation: "POSITIONS",
     capability: "SERP_RANK_TRACKING",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode: input.credentialMode,
     manifest: {
       id: uuidV7(manifest.id, "manifest.id"),
       hash: manifestHash(manifest.hash, "manifest.hash"),
@@ -310,7 +332,10 @@ export function internalIssueRankExecutionGrantInput(
     policyVersion: input.policyVersion,
     usageIntent: {
       meter: "RANK_PROVIDER_TASK",
-      quantity: "1"
+      quantity: "1",
+      ...(input.credentialMode === "PLATFORM_PAID"
+        ? { unitPriceMinor: String(usageIntent.unitPriceMinor) }
+        : {})
     }
   };
 }
@@ -397,6 +422,52 @@ export function internalRankExecutionGrantDecision(
   };
 }
 
+export function internalSettleRankExecutionGrantInput(
+  value: unknown
+): InternalSettleRankExecutionGrantInputV1 {
+  const input = exactRecord(
+    value,
+    ["schemaVersion", "action"],
+    "settlement request"
+  );
+  if (
+    input.schemaVersion !==
+      rankExecutionGrantSettlementRequestSchemaVersion ||
+    input.action !== "HOLD" &&
+    input.action !== "CAPTURE"
+  ) {
+    throw invalid("settlement request");
+  }
+  return {
+    schemaVersion: rankExecutionGrantSettlementRequestSchemaVersion,
+    action: input.action
+  };
+}
+
+export function internalRankExecutionGrantSettlementResult(
+  value: unknown
+): InternalRankExecutionGrantSettlementResultV1 {
+  const input = exactRecord(
+    value,
+    ["schemaVersion", "grantId", "status"],
+    "settlement result"
+  );
+  if (
+    input.schemaVersion !==
+      rankExecutionGrantSettlementResultSchemaVersion ||
+    (input.status !== "RESERVED" &&
+      input.status !== "CAPTURED" &&
+      input.status !== "NOT_APPLICABLE")
+  ) {
+    throw invalid("settlement result");
+  }
+  return {
+    schemaVersion: rankExecutionGrantSettlementResultSchemaVersion,
+    grantId: uuidV7(input.grantId, "settlement grantId"),
+    status: input.status
+  };
+}
+
 /**
  * Rebuilds a decision through an explicit allowlist so credential/provider
  * diagnostics on a structurally compatible value cannot cross the boundary.
@@ -476,7 +547,10 @@ function copyRequest(
     policyVersion: input.policyVersion,
     usageIntent: {
       meter: input.usageIntent.meter,
-      quantity: input.usageIntent.quantity
+      quantity: input.usageIntent.quantity,
+      ...(input.usageIntent.unitPriceMinor === undefined
+        ? {}
+        : { unitPriceMinor: input.usageIntent.unitPriceMinor })
     }
   };
 }
@@ -570,6 +644,14 @@ function boundedNonNegativeInteger(
     throw invalid(name);
   }
   return Number(value);
+}
+
+function positiveSafeDecimal(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[1-9][0-9]{0,15}$/u.test(value) &&
+    BigInt(value) <= BigInt(Number.MAX_SAFE_INTEGER)
+  );
 }
 
 function canonicalTimestamp(value: unknown, name: string): string {

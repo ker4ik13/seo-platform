@@ -164,6 +164,52 @@ Manual adjustment требует причины, второго подтверж
 
 Если estimate истёк, перед запуском выполняется повторный расчёт и при существенном увеличении требуется новое подтверждение.
 
+### 8.1. Реализованный резерв внутренних токенов для provider usage
+
+Core API владеет `billing_usage_reservations`. Reserve выполняется внутри
+`Serializable` grant transaction, а capture/release — отдельными атомарными
+settlement-транзакциями Core:
+
+- workspace row блокируется до чтения баланса, поэтому параллельные платные
+  grants не могут потратить один остаток дважды;
+- расход сначала дебетует `PROMOTIONAL_LIABILITY` (included credits), затем
+  `CUSTOMER_PREPAID_LIABILITY`, а вся сумма кредитуется на `RESERVATION`;
+- capture дебетует reservation и кредитует platform `PROVIDER_COST`; release
+  возвращает точные исходные доли included/prepaid;
+- все записи ledger остаются balanced, положительными и immutable. Повтор
+  business reference сравнивает полный canonical transaction и entries, а не
+  только строковый ключ;
+- usage reservation хранит immutable workspace/project/actor/job/item,
+  provider, quantity, unit price, request hash и ссылки на ledger transactions;
+  terminal settlement нельзя переписать или удалить trigger-ом;
+- idempotency относится к оплачиваемому Job item. Технический новый
+  `executionAttempt` с тем же economic scope возвращает уже созданный capture,
+  но изменение provider, количества, цены либо tenant scope даёт conflict;
+- цена ограничена так, чтобы максимальный manual batch 15 000 keywords после
+  перевода minor → micro помещался в signed PostgreSQL `BIGINT`.
+
+Непосредственно перед первым синхронным XMLStock HTTP-вызовом connector
+запрашивает bounded `HOLD`: Core заново проверяет immutable grant receipt и
+живой reservation, а при остатке окна меньше минуты продлевает только
+`expiresAt` максимум до `now + 60s`. HOLD не создаёт ledger entry и не
+разрешает воскресить истёкший или released резерв. После подтверждённого
+платного provider outcome connector вызывает `CAPTURE` того же закрытого Core
+endpoint с точными workspace/project/actor/grant и отдельным
+`JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN`. Только exact `CAPTURED` разрешает
+Execution сохранить provider outcome. BYOK не обращается к settlement API.
+Если provider call не состоялся либо вернул rate-limit/reject/неоднозначный
+transport outcome, резерв не списывается; bounded reconciliation освобождает
+оставшийся `RESERVED` после 10 минут и восстанавливает точные доли
+included/prepaid.
+
+Таким порядком пользователь не оплачивает pre-network failure. Между
+получением provider response и подтверждением capture остаётся неизбежное для
+текущей распределённой схемы окно: при недоступности Core Execution не
+сохраняет outcome, но платформа уже могла понести provider cost. Поэтому
+provider flags по умолчанию выключены до fault-injection canary, проверки
+reconciliation/refund, hard budget, balance alert и внешних legal/provider
+activation gates. BYOK и обычный SaaS billing этими gates не блокируются.
+
 ## 9. Budgets
 
 Уровни:
@@ -183,6 +229,16 @@ Manual adjustment требует причины, второго подтверж
 - block;
 - use BYOK only;
 - disable fallback.
+
+Для реализованного `PLATFORM_PAID` rank обязательны operator-owned daily и
+monthly provider hard caps в minor units внутренних токенов. Reservation
+создаётся под provider-scoped PostgreSQL advisory transaction lock. В exposure
+входят captured суммы текущего UTC-day/month и все живые reservations,
+включая созданные в предыдущем окне и ещё способные перейти в capture. Таким
+образом параллельные workspace не могут независимо пройти одну и ту же
+проверку лимита. Released и expired reservations не расходуют provider cap;
+идемпотентный replay существующего business reference возвращает исходный
+результат. Превышение останавливает grant до ledger mutation и внешнего HTTP.
 
 ## 10. Billing UI
 

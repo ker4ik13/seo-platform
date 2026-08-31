@@ -3,7 +3,10 @@ import test from "node:test";
 import { utf8Sha256 } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import type { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
+import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
+import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
 import type { XmlStockHttpQuotaGate } from "../integrations/xmlstock-http-quota-limiter.js";
+import type { RankBillingSettlementClient } from "../platform-api/rank-billing-settlement.client.js";
 import type { ArsenkinRankConnector } from "./arsenkin-rank.connector.js";
 import type { XmlStockRankConnector } from "./xmlstock-rank.connector.js";
 import type {
@@ -27,7 +30,8 @@ const ids = {
   keyword: "01900000-0000-7000-8000-000000000009",
   credential: "01900000-0000-7000-8000-000000000010",
   execution: "01900000-0000-7000-8000-000000000011",
-  lease: "01900000-0000-7000-8000-000000000012"
+  lease: "01900000-0000-7000-8000-000000000012",
+  grant: "01900000-0000-7000-8000-000000000013"
 } as const;
 
 test("authorizes once, submits once and durably records an accepted task", async () => {
@@ -41,6 +45,10 @@ test("authorizes once, submits once and durably records an accepted task", async
     async readSubmitRequest() {
       calls.push("read");
       return requestIntent();
+    },
+    async readBillingSettlement() {
+      calls.push("billing");
+      return { grantId: ids.grant, required: true };
     },
     async authorizeSubmit() {
       calls.push("authorize");
@@ -86,18 +94,245 @@ test("authorizes once, submits once and durably records an accepted task", async
       };
     }
   } as unknown as ArsenkinRankConnector;
+  const settlements = {
+    async capture(
+      command: { readonly grantId: string },
+      context: { readonly idempotencyKey: string }
+    ) {
+      calls.push("settle");
+      assert.equal(command.grantId, ids.grant);
+      assert.equal(
+        context.idempotencyKey,
+        `rank-settlement:${ids.grant}:capture`
+      );
+      return {
+        schemaVersion: "rank-execution-grant-settlement-result@1" as const,
+        grantId: ids.grant,
+        status: "CAPTURED" as const
+      };
+    }
+  } as unknown as RankBillingSettlementClient;
 
   assert.equal(
-    await service(broker, connector, true).processOne("connector-worker"),
+    await service(
+      broker,
+      connector,
+      true,
+      1_000,
+      {} as XmlStockRankConnector,
+      allowXmlStockQuota(),
+      settlements
+    ).processOne("connector-worker"),
     "SUBMITTED"
   );
   assert.deepEqual(calls, [
     "claim",
     "read",
+    "billing",
     "authorize",
     "provider",
+    "settle",
     "complete:ACCEPTED"
   ]);
+});
+
+test("does not persist an accepted platform-paid outcome when capture fails", async () => {
+  let completeCalls = 0;
+  const broker = {
+    async claimSubmit() {
+      return claim();
+    },
+    async readSubmitRequest() {
+      return requestIntent();
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: true };
+    },
+    async authorizeSubmit() {
+      return {
+        executionId: ids.execution,
+        workspaceId: ids.workspace,
+        executionVersion: 3,
+        submitBytesStartedAt: new Date().toISOString()
+      };
+    },
+    async completeSubmit() {
+      completeCalls += 1;
+      throw new Error("must not complete");
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const connector = {
+    async submit() {
+      return {
+        status: "ACCEPTED" as const,
+        taskId: "3944",
+        request: {
+          tools_name: "positions" as const,
+          data: {
+            queries: ["seo audit"],
+            url: "example.com",
+            alt_urls: [],
+            subdomain: false,
+            se: [{ type: 11 as const, region: 1011969, depth: 30 as const }],
+            format: 0 as const
+          }
+        }
+      };
+    }
+  } as unknown as ArsenkinRankConnector;
+  const settlements = {
+    async capture() {
+      throw new Error("settlement unavailable");
+    }
+  } as unknown as RankBillingSettlementClient;
+
+  await assert.rejects(
+    service(
+      broker,
+      connector,
+      true,
+      1_000,
+      {} as XmlStockRankConnector,
+      allowXmlStockQuota(),
+      settlements
+    ).processOne("connector-worker"),
+    /settlement unavailable/u
+  );
+  assert.equal(completeCalls, 0);
+});
+
+test("does not charge a rejected platform-paid submit", async () => {
+  let completedOutcome: string | undefined;
+  const broker = {
+    async claimSubmit() {
+      return claim();
+    },
+    async readSubmitRequest() {
+      return requestIntent();
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: true };
+    },
+    async authorizeSubmit() {
+      return {
+        executionId: ids.execution,
+        workspaceId: ids.workspace,
+        executionVersion: 3,
+        submitBytesStartedAt: new Date().toISOString()
+      };
+    },
+    async completeSubmit(
+      _claim: unknown,
+      _permit: unknown,
+      outcome: { readonly status: string }
+    ) {
+      completedOutcome = outcome.status;
+      return {
+        executionId: ids.execution,
+        status: "FAILED_FINAL",
+        executionVersion: 4
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const connector = {
+    async submit() {
+      return {
+        status: "REJECTED" as const,
+        code: "PROVIDER_PLAN_OR_REQUEST_REJECTED" as const
+      };
+    }
+  } as unknown as ArsenkinRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      connector,
+      true,
+      1_000,
+      {} as XmlStockRankConnector,
+      allowXmlStockQuota(),
+      noBillingSettlement() as RankBillingSettlementClient
+    ).processOne("connector-worker"),
+    "SUBMIT_TERMINAL"
+  );
+  assert.equal(completedOutcome, "REJECTED");
+});
+
+test("defers synchronous XMLStock capture until its first paid poll", async () => {
+  let completed = false;
+  const submitClaim: RankConnectorSubmitClaim = {
+    ...claim(),
+    provider: "XMLSTOCK"
+  };
+  const intent = {
+    ...xmlStockRequestIntent(),
+    execution: {
+      ...xmlStockRequestIntent().execution,
+      providerMappingVersion: "xmlstock-yandex-live@2"
+    }
+  };
+  const broker = {
+    async claimSubmit() {
+      return submitClaim;
+    },
+    async readSubmitRequest() {
+      return intent;
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: true };
+    },
+    async authorizeSubmit() {
+      return {
+        executionId: ids.execution,
+        workspaceId: ids.workspace,
+        executionVersion: 3,
+        submitBytesStartedAt: new Date().toISOString()
+      };
+    },
+    async completeSubmit() {
+      completed = true;
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 4
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const xmlStock = {
+    async submit() {
+      return {
+        status: "ACCEPTED" as const,
+        taskId: "xml-live-3944",
+        request: {
+          provider: "XMLSTOCK" as const,
+          engine: "YANDEX" as const,
+          source: "LIVE" as const,
+          query: "seo audit",
+          regionCode: "213",
+          countryCode: "RU",
+          language: "ru",
+          device: "DESKTOP" as const,
+          depth: 30 as const,
+          delayed: false,
+          turbo: false
+        }
+      };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      true,
+      1_000,
+      xmlStock,
+      allowXmlStockQuota(),
+      noBillingSettlement() as RankBillingSettlementClient
+    ).processOne("connector-worker"),
+    "SUBMITTED"
+  );
+  assert.equal(completed, true);
 });
 
 test("polls an accepted task and stages only normalized output", async () => {
@@ -115,6 +350,9 @@ test("polls an accepted task and stages only normalized output", async () => {
   const broker = {
     async claimPoll() {
       return pollClaim;
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: false };
     },
     async completePoll(_claim: unknown, input: typeof completed) {
       completed = input;
@@ -178,6 +416,9 @@ test("rejects a malformed finished provider result instead of leaving the poll c
   const broker = {
     async claimPoll() {
       return pollClaim;
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: false };
     },
     async completePoll(_claim: unknown, input: typeof completed) {
       completed = input;
@@ -249,7 +490,7 @@ test("claims enough lease for check plus get and caps rank request timeout", asy
     ),
     "POLL_PENDING"
   );
-  assert.equal(claimedLeaseSeconds, 23);
+  assert.equal(claimedLeaseSeconds, 28);
   assert.equal(providerTimeoutMs, 10_000);
 });
 
@@ -265,6 +506,9 @@ test("claims a submit lease that fits inside the short execution grant", async (
     },
     async readSubmitRequest() {
       return requestIntent();
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: false };
     },
     async authorizeSubmit() {
       return {
@@ -307,7 +551,7 @@ test("claims a submit lease that fits inside the short execution grant", async (
     ),
     "SUBMITTED"
   );
-  assert.equal(claimedLeaseSeconds, 13);
+  assert.equal(claimedLeaseSeconds, 16);
 });
 
 test("treats an asynchronously lost submit lease as recoverable", async () => {
@@ -395,6 +639,9 @@ test("runs XMLStock Yandex Live Turbo without the standard account quota gate", 
     async claimPoll() {
       return pollClaim;
     },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: false };
+    },
     async completePoll(_claim: unknown, input: typeof completed) {
       completed = input;
       return {
@@ -451,12 +698,18 @@ test("persists an XMLStock Live page checkpoint before polling the next page", a
       }
     }
   };
+  const calls: string[] = [];
   let completed: { readonly outcome: string } | undefined;
   const broker = {
     async claimPoll() {
       return pollClaim;
     },
+    async readBillingSettlement() {
+      calls.push("billing");
+      return { grantId: ids.grant, required: true };
+    },
     async completePoll(_claim: unknown, input: { readonly outcome: string }) {
+      calls.push("complete");
       completed = input;
       return {
         executionId: ids.execution,
@@ -478,6 +731,7 @@ test("persists an XMLStock Live page checkpoint before polling the next page", a
   };
   const xmlStockConnector = {
     async fetchResult() {
+      calls.push("provider");
       return {
         status: "CHECKPOINTED" as const,
         progress,
@@ -485,6 +739,24 @@ test("persists an XMLStock Live page checkpoint before polling the next page", a
       };
     }
   } as unknown as XmlStockRankConnector;
+  const settlements = {
+    async hold() {
+      calls.push("hold");
+      return {
+        schemaVersion: "rank-execution-grant-settlement-result@1" as const,
+        grantId: ids.grant,
+        status: "RESERVED" as const
+      };
+    },
+    async capture() {
+      calls.push("settle");
+      return {
+        schemaVersion: "rank-execution-grant-settlement-result@1" as const,
+        grantId: ids.grant,
+        status: "CAPTURED" as const
+      };
+    }
+  } as unknown as RankBillingSettlementClient;
 
   assert.equal(
     await service(
@@ -492,11 +764,20 @@ test("persists an XMLStock Live page checkpoint before polling the next page", a
       {} as ArsenkinRankConnector,
       false,
       1_000,
-      xmlStockConnector
+      xmlStockConnector,
+      allowXmlStockQuota(),
+      settlements
     ).processOne("connector-worker"),
     "POLL_CHECKPOINTED"
   );
   assert.equal(completed?.outcome, "CHECKPOINTED");
+  assert.deepEqual(calls, [
+    "billing",
+    "hold",
+    "provider",
+    "settle",
+    "complete"
+  ]);
 });
 
 test("defers an XMLStock poll without an HTTP request when its credential product is full", async () => {
@@ -514,9 +795,27 @@ test("defers an XMLStock poll without an HTTP request when its credential produc
   };
   let providerCalls = 0;
   let deferredBy: number | undefined;
+  let quotaScope: string | undefined;
+  const platformSecret: IntegrationCredentialSecret = {
+    apiKey: "platform-key-one",
+    rateLimitScopeId: "01900000-0000-8000-8000-000000000021",
+    platformPool: [
+      {
+        id: "01900000-0000-8000-8000-000000000021",
+        apiKey: "platform-key-one"
+      },
+      {
+        id: "01900000-0000-8000-8000-000000000022",
+        apiKey: "platform-key-two"
+      }
+    ]
+  };
   const broker = {
     async claimPoll() {
       return pollClaim;
+    },
+    async readBillingSettlement() {
+      return { grantId: ids.grant, required: false };
     },
     async deferPollForProviderCapacity(
       _claim: RankConnectorPollClaim,
@@ -531,7 +830,8 @@ test("defers an XMLStock poll without an HTTP request when its credential produc
     }
   } as unknown as RankConnectorRuntimeBrokerService;
   const quota: XmlStockHttpQuotaGate = {
-    async tryAcquire() {
+    async tryAcquire(input) {
+      quotaScope = input.credentialId;
       return { allowed: false, retryAfterSeconds: 2 };
     },
     async release() {},
@@ -552,12 +852,23 @@ test("defers an XMLStock poll without an HTTP request when its credential produc
       false,
       1_000,
       xmlStockConnector,
-      quota
+      quota,
+      noBillingSettlement() as RankBillingSettlementClient,
+      platformSecret
     ).processOne("connector-worker"),
     "PROVIDER_CAPACITY_DELAYED"
   );
   assert.equal(providerCalls, 0);
   assert.equal(deferredBy, 5);
+  assert.equal(
+    quotaScope,
+    selectIntegrationCredentialSecret(
+      platformSecret,
+      ids.execution,
+      ids.credential
+    ).rateLimitScopeId
+  );
+  assert.notEqual(quotaScope, ids.credential);
 });
 
 function service(
@@ -566,15 +877,18 @@ function service(
   submitEnabled: boolean,
   timeoutMs = 1_000,
   xmlStockConnector = {} as XmlStockRankConnector,
-  quota: XmlStockHttpQuotaGate = allowXmlStockQuota()
+  quota: XmlStockHttpQuotaGate = allowXmlStockQuota(),
+  settlements = noBillingSettlement() as RankBillingSettlementClient,
+  credentialSecret: IntegrationCredentialSecret = { apiKey: "private-key" }
 ): RankConnectorRuntimeService {
   const crypto = {
     decrypt() {
-      return { apiKey: "private-key" };
+      return credentialSecret;
     }
   } as unknown as IntegrationCredentialCryptoService;
   const config = {
     integrationCredentialValidation: { timeoutMs },
+    platformApiCommandTimeoutMs: 2_500,
     rankExecution: { submitEnabled }
   } as unknown as AppConfig;
   return new RankConnectorRuntimeService(
@@ -583,8 +897,17 @@ function service(
     connector,
     xmlStockConnector,
     quota as never,
+    settlements,
     config
   );
+}
+
+function noBillingSettlement(): Pick<RankBillingSettlementClient, "capture"> {
+  return {
+    async capture() {
+      throw new Error("BYOK submit must not capture billing");
+    }
+  };
 }
 
 function allowXmlStockQuota(): XmlStockHttpQuotaGate {

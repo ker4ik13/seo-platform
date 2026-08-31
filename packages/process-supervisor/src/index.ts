@@ -1,10 +1,26 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 export interface ProcessDefinition {
   readonly name: string;
   readonly moduleUrl: URL;
   readonly environment: NodeJS.ProcessEnv;
+}
+
+export interface ProcessAlertReporter {
+  capture(alert: {
+    readonly source: string;
+    readonly code: string;
+    readonly severity: "ERROR" | "CRITICAL";
+    readonly fingerprint?: string;
+  }): boolean;
+  flush(): Promise<void>;
+}
+
+export interface ProcessSupervisorOptions {
+  readonly alertReporter?: ProcessAlertReporter;
 }
 
 const SAFE_BASE_ENVIRONMENT_KEYS = [
@@ -46,7 +62,8 @@ export function processEnvironment(
 }
 
 export async function superviseProcesses(
-  definitions: readonly ProcessDefinition[]
+  definitions: readonly ProcessDefinition[],
+  options: ProcessSupervisorOptions = {}
 ): Promise<void> {
   if (definitions.length === 0) {
     throw new Error("At least one supervised process is required");
@@ -89,11 +106,18 @@ export async function superviseProcesses(
             [fileURLToPath(definition.moduleUrl)],
             {
               env: definition.environment,
-              stdio: "inherit"
+              stdio: ["inherit", "inherit", "pipe"]
             }
           );
           children.set(definition.name, child);
+          observeStderr(child, definition.name, options.alertReporter);
           child.once("error", (error) => {
+            captureAlert(options.alertReporter, {
+              source: definition.name,
+              code: "PROCESS_START_FAILURE",
+              severity: "CRITICAL",
+              fingerprint: privateFingerprint(error)
+            });
             failure ??= new Error(
               `${definition.name} failed to start`,
               { cause: error }
@@ -103,11 +127,24 @@ export async function superviseProcesses(
           child.once("close", (code, signal) => {
             children.delete(definition.name);
             if (!stopping && (code !== 0 || signal !== null)) {
+              captureAlert(options.alertReporter, {
+                source: definition.name,
+                code: "UNEXPECTED_PROCESS_EXIT",
+                severity: "CRITICAL",
+                fingerprint: privateFingerprint(
+                  `${code ?? "NO_CODE"}:${signal ?? "NO_SIGNAL"}`
+                )
+              });
               failure ??= new Error(
                 `${definition.name} exited unexpectedly (${signal ?? code ?? "unknown"})`
               );
               stop("SIGTERM");
             } else if (!stopping) {
+              captureAlert(options.alertReporter, {
+                source: definition.name,
+                code: "UNEXPECTED_PROCESS_STOP",
+                severity: "CRITICAL"
+              });
               failure ??= new Error(
                 `${definition.name} stopped while the service was running`
               );
@@ -121,6 +158,98 @@ export async function superviseProcesses(
   } finally {
     process.off("SIGINT", signalHandler);
     process.off("SIGTERM", signalHandler);
+    try {
+      await options.alertReporter?.flush();
+    } catch {
+      process.stderr.write("[process-supervisor] alert flush unavailable\n");
+    }
   }
   if (failure) throw failure;
+}
+
+export function supervisedErrorLineFingerprint(
+  line: string
+): string | undefined {
+  const withoutAnsi = line.replaceAll(
+    new RegExp(
+      `${String.fromCodePoint(27)}\\[[0-?]*[ -/]*[@-~]`,
+      "gu"
+    ),
+    ""
+  );
+  const printable = Array.from(withoutAnsi, (character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 8 || code === 11 || code === 12 ||
+      (code >= 14 && code <= 31) || code === 127
+      ? " "
+      : character;
+  }).join("");
+  if (
+    !/(?:\b(?:error|fatal)\b|uncaught(?:exception)?|unhandled rejection)/iu.test(
+      printable
+    )
+  ) {
+    return undefined;
+  }
+  return privateFingerprint(line);
+}
+
+function observeStderr(
+  child: ChildProcess,
+  source: string,
+  reporter: ProcessAlertReporter | undefined
+): void {
+  if (!child.stderr) return;
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  const inspect = (line: string): void => {
+    const fingerprint = supervisedErrorLineFingerprint(line);
+    if (!fingerprint) return;
+    captureAlert(reporter, {
+      source,
+      code: "CHILD_ERROR_LOG",
+      severity: "ERROR",
+      fingerprint
+    });
+  };
+  child.stderr.on("data", (chunk: Buffer | string) => {
+    process.stderr.write(chunk);
+    pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
+    for (;;) {
+      const newline = pending.indexOf("\n");
+      if (newline === -1) break;
+      inspect(pending.slice(0, newline));
+      pending = pending.slice(newline + 1);
+    }
+    if (pending.length > 65_536) {
+      inspect(pending);
+      pending = "";
+    }
+  });
+  child.stderr.once("end", () => {
+    pending += decoder.end();
+    if (pending) inspect(pending);
+  });
+}
+
+function captureAlert(
+  reporter: ProcessAlertReporter | undefined,
+  alert: Parameters<ProcessAlertReporter["capture"]>[0]
+): void {
+  try {
+    reporter?.capture(alert);
+  } catch {
+    process.stderr.write("[process-supervisor] alert capture unavailable\n");
+  }
+}
+
+function privateFingerprint(value: unknown): string {
+  const preimage =
+    value instanceof Error
+      ? `${value.name}\u0000${value.stack ?? "NO_STACK"}`
+      : String(value);
+  return createHash("sha256")
+    .update(preimage, "utf8")
+    .digest("hex")
+    .slice(0, 16);
 }

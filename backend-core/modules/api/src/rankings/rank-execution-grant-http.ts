@@ -4,6 +4,10 @@ export const rankExecutionGrantActionPath =
   "rank-execution-grants" as const;
 export const rankExecutionGrantRoutePattern =
   `/${rankExecutionGrantControllerPath}/${rankExecutionGrantActionPath}` as const;
+export const rankExecutionGrantSettlementActionPath =
+  "rank-execution-grants/:grantId/settlements" as const;
+export const rankExecutionGrantSettlementRoutePattern =
+  `/${rankExecutionGrantControllerPath}/${rankExecutionGrantSettlementActionPath}` as const;
 
 interface RankExecutionGrantRouteRequest {
   readonly method: string;
@@ -26,7 +30,9 @@ export function applyRankExecutionGrantNoStore(
 ): void {
   if (
     request.method === "POST" &&
-    request.routeOptions.url === rankExecutionGrantRoutePattern
+    (request.routeOptions.url === rankExecutionGrantRoutePattern ||
+      request.routeOptions.url ===
+        rankExecutionGrantSettlementRoutePattern)
   ) {
     reply.header("Cache-Control", "no-store");
   }

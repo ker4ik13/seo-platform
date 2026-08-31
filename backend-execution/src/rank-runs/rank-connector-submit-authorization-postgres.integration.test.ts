@@ -30,7 +30,9 @@ const HASH = {
   domain: "94".repeat(32),
   manifest: "95".repeat(32),
   manifestDeduplication: "96".repeat(32),
-  estimateExecution: "97".repeat(32)
+  estimateExecution: "97".repeat(32),
+  providerRequest: "9c".repeat(32),
+  manifestChunk: "9d".repeat(32)
 } as const;
 
 test(
@@ -77,6 +79,13 @@ test(
       assert.equal(exactClaim.executionId, exactFixture.executionId);
       assert.equal(exactClaim.leaseGeneration, 1);
       assert.equal(exactClaim.executionVersion, 2);
+      assert.deepEqual(
+        await billingSettlement(setup, exactFixture, exactClaim),
+        [{
+          grantId: exactFixture.grantId,
+          credentialMode: "BYOK_API_KEY"
+        }]
+      );
 
       await assert.rejects(
         authorize(setup, exactFixture, exactClaim, {
@@ -103,6 +112,10 @@ test(
 
       const permit = only(
         await authorize(setup, exactFixture, exactClaim)
+      );
+      assert.equal(
+        (await billingSettlement(setup, exactFixture, exactClaim)).length,
+        0
       );
       assert.deepEqual(Object.keys(permit).sort(), [
         "authorizationExpiresAt",
@@ -225,24 +238,50 @@ test(
       await setup.query(`CREATE ROLE "${restrictedRoleName}" NOLOGIN`);
       restrictedRoleCreated = true;
       const publicExecute = await setup.query<{
-        readonly publicExecute: boolean;
+        readonly authorizationPublicExecute: boolean;
+        readonly settlementPublicExecute: boolean;
       }>(
-        `SELECT COALESCE(bool_or(
-           acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
-         ), false) AS "publicExecute"
-         FROM pg_proc procedure
-         LEFT JOIN LATERAL aclexplode(COALESCE(
-           procedure.proacl,
-           acldefault('f', procedure.proowner)
-         )) acl ON TRUE
-         WHERE procedure.oid =
-           'public.authorize_rank_connector_execution_submit(uuid,uuid,text,uuid,integer,integer,text)'::regprocedure`
+        `SELECT
+           EXISTS (
+             SELECT 1
+             FROM pg_proc procedure
+             CROSS JOIN LATERAL aclexplode(COALESCE(
+               procedure.proacl,
+               acldefault('f', procedure.proowner)
+             )) acl
+             WHERE procedure.oid =
+               'public.authorize_rank_connector_execution_submit(uuid,uuid,text,uuid,integer,integer,text)'::regprocedure
+               AND acl.grantee = 0
+               AND acl.privilege_type = 'EXECUTE'
+           ) AS "authorizationPublicExecute",
+           EXISTS (
+             SELECT 1
+             FROM pg_proc procedure
+             CROSS JOIN LATERAL aclexplode(COALESCE(
+               procedure.proacl,
+               acldefault('f', procedure.proowner)
+             )) acl
+             WHERE procedure.oid =
+               'public.read_rank_connector_billing_settlement(uuid,uuid,text,uuid,integer,integer)'::regprocedure
+               AND acl.grantee = 0
+               AND acl.privilege_type = 'EXECUTE'
+           ) AS "settlementPublicExecute"`
       );
-      assert.equal(publicExecute.rows[0]?.publicExecute, false);
+      assert.equal(
+        publicExecute.rows[0]?.authorizationPublicExecute,
+        false
+      );
+      assert.equal(publicExecute.rows[0]?.settlementPublicExecute, false);
       await setup.query(
         `GRANT EXECUTE ON FUNCTION
            public.authorize_rank_connector_execution_submit(
              uuid, uuid, text, uuid, integer, integer, text
+           ) TO "${restrictedRoleName}"`
+      );
+      await setup.query(
+        `GRANT EXECUTE ON FUNCTION
+           public.read_rank_connector_billing_settlement(
+             uuid, uuid, text, uuid, integer, integer
            ) TO "${restrictedRoleName}"`
       );
       for (const relation of [
@@ -275,6 +314,17 @@ test(
       try {
         await attacker.query(`SET LOCAL ROLE "${restrictedRoleName}"`);
         await attacker.query("SET LOCAL search_path = pg_temp, public");
+        assert.deepEqual(
+          await billingSettlement(
+            attacker,
+            shadowFixture,
+            shadowClaim
+          ),
+          [{
+            grantId: shadowFixture.grantId,
+            credentialMode: "BYOK_API_KEY"
+          }]
+        );
         assert.equal(
           (await authorize(attacker, shadowFixture, shadowClaim)).length,
           1
@@ -318,6 +368,12 @@ test(
       );
     } finally {
       if (restrictedRoleCreated) {
+        await setup.query(
+          `REVOKE ALL ON FUNCTION
+             public.read_rank_connector_billing_settlement(
+               uuid, uuid, text, uuid, integer, integer
+             ) FROM "${restrictedRoleName}"`
+        ).catch(() => undefined);
         await setup.query(
           `REVOKE ALL ON FUNCTION
              public.authorize_rank_connector_execution_submit(
@@ -438,6 +494,7 @@ interface ClaimFixture {
   readonly actorId: string;
   readonly credentialId: string;
   readonly executionId: string;
+  readonly grantId: string;
   readonly jobId: string;
   readonly jobItemId: string;
 }
@@ -519,6 +576,7 @@ async function createClaimableExecution(
       trackingContextId
   );
   const executionId = await databaseUuidV7(client);
+  const providerRequestIntentId = await databaseUuidV7(client);
   const verifiedAt = new Date();
 
   await client.query("BEGIN");
@@ -526,13 +584,15 @@ async function createClaimableExecution(
     await client.query(
       `INSERT INTO jobs (
          id, workspace_id, project_id, type, status, stage,
-         idempotency_scope, input_snapshot, scope_snapshot,
+         idempotency_scope, deduplication_key, input_snapshot, scope_snapshot,
          credential_mode, provider, correlation_id, version,
          finished_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid,
          'INTEGRATION_CREDENTIAL_VALIDATE', 'COMPLETED', 'FINISHED',
-         $4, jsonb_build_object(
+         $4,
+         'integration-credential-validation:' || $5::uuid::text || ':1',
+         jsonb_build_object(
            'kind', 'integration.credential.validation.v1',
            'credentialId', $5::uuid::text,
            'credentialMaterialVersion', 1,
@@ -838,10 +898,36 @@ async function createClaimableExecution(
       ]
     );
     await client.query(
+      `INSERT INTO rank_provider_request_intents (
+         id, workspace_id, project_id, job_id, job_item_id,
+         manifest_id, manifest_hash, manifest_chunk_index,
+         manifest_chunk_hash, schema_version, request_snapshot,
+         request_hash
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+         $6::uuid, decode($7, 'hex'), 0, decode($8, 'hex'),
+         'rank-provider-request-intent@1', '{}'::jsonb,
+         decode($9, 'hex')
+       )`,
+      [
+        providerRequestIntentId,
+        workspaceId,
+        projectId,
+        jobId,
+        jobItemId,
+        manifestId,
+        HASH.manifest,
+        HASH.manifestChunk,
+        HASH.providerRequest
+      ]
+    );
+    await client.query(
       `INSERT INTO rank_connector_executions (
          id, workspace_id, project_id, job_id, job_item_id,
          grant_attempt_id, execution_attempt, job_version, estimate_id,
-         manifest_id, manifest_hash, manifest_chunk_index, binding_id,
+         manifest_id, manifest_hash, manifest_chunk_index,
+         provider_request_intent_id, provider_request_intent_hash,
+         provider_request_intent_chunk_hash, binding_id,
          binding_version, route_id, credential_id, credential_version,
          credential_material_version, credential_validation_id,
          credential_validation_version,
@@ -851,10 +937,11 @@ async function createClaimableExecution(
          kill_switch_version, authorization_expires_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid,
-         1, 3, $7::uuid, $8::uuid, decode($9, 'hex'), 0, $10::uuid, 1,
-         $11::uuid, $12::uuid, 1, 1, $13::uuid, 1, $14,
-         $15::timestamptz, decode($16, 'hex'), decode($17, 'hex'),
-         $18, $19, $20, $21::timestamptz, clock_timestamp()
+         1, 3, $7::uuid, $8::uuid, decode($9, 'hex'), 0,
+         $10::uuid, decode($11, 'hex'), decode($12, 'hex'),
+         $13::uuid, 1, $14::uuid, $15::uuid, 1, 1, $16::uuid, 1, $17,
+         $18::timestamptz, decode($19, 'hex'), decode($20, 'hex'),
+         $21, $22, $23, $24::timestamptz, clock_timestamp()
        )`,
       [
         executionId,
@@ -866,6 +953,9 @@ async function createClaimableExecution(
         estimateId,
         manifestId,
         HASH.manifest,
+        providerRequestIntentId,
+        HASH.providerRequest,
+        HASH.manifestChunk,
         bindingId,
         routeId,
         credentialId,
@@ -898,9 +988,39 @@ async function createClaimableExecution(
     actorId,
     credentialId,
     executionId,
+    grantId,
     jobId,
     jobItemId
   };
+}
+
+async function billingSettlement(
+  client: Client,
+  fixture: ClaimFixture,
+  claimed: ClaimRow
+): Promise<readonly {
+  readonly grantId: string;
+  readonly credentialMode: string;
+}[]> {
+  const result = await client.query<{
+    readonly grantId: string;
+    readonly credentialMode: string;
+  }>(
+    `SELECT *
+     FROM public.read_rank_connector_billing_settlement(
+       $1::uuid, $2::uuid, $3::text, $4::uuid,
+       $5::integer, $6::integer
+     )`,
+    [
+      fixture.workspaceId,
+      fixture.executionId,
+      claimedLeaseOwner(claimed),
+      claimed.leaseToken,
+      claimed.leaseGeneration,
+      claimed.executionVersion
+    ]
+  );
+  return result.rows;
 }
 
 async function claim(

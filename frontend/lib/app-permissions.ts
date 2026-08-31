@@ -8,6 +8,12 @@ const INTEGRATION_VIEW_ROLES = new Set([
 ]);
 
 const INTEGRATION_MANAGE_ROLES = new Set(["OWNER", "ADMIN"]);
+const INTEGRATION_SYSTEM_CREDENTIAL_ROLES = new Set([
+  "OWNER",
+  "ADMIN",
+  "SEO_LEAD",
+  "SEO_SPECIALIST"
+]);
 const TEAM_VIEW_ROLES = new Set(["OWNER", "ADMIN", "SEO_LEAD"]);
 const TEAM_MANAGE_ROLES = new Set(["OWNER", "ADMIN"]);
 const WORKSPACE_UPDATE_ROLES = new Set(["OWNER", "ADMIN"]);
@@ -64,6 +70,14 @@ export function canTestWorkspaceIntegrations(
   roleCode: string | undefined
 ): boolean {
   return canViewWorkspaceIntegrations(roleCode);
+}
+
+export function canUseWorkspaceSystemCredentials(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(
+    roleCode && INTEGRATION_SYSTEM_CREDENTIAL_ROLES.has(roleCode)
+  );
 }
 
 export function canViewWorkspaceTeam(

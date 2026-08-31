@@ -29,6 +29,10 @@ const containerBoundaries = new Map([
     ["backend-core", "backend-execution"]
   ],
   [
+    "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN",
+    ["backend-core", "backend-execution"]
+  ],
+  [
     "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
     ["backend-core", "backend-execution"]
   ],
@@ -40,7 +44,11 @@ const containerBoundaries = new Map([
     "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
     ["backend-core", "backend-execution"]
   ],
-  ["RANK_HISTORY_CURSOR_KEY", ["backend-core"]]
+  ["RANK_HISTORY_CURSOR_KEY", ["backend-core"]],
+  [
+    "OPERATIONAL_ALERT_TOKEN",
+    ["backend-core", "backend-execution", "frontend"]
+  ]
 ]);
 
 test("service tokens reach only the two owning backend containers", async () => {
@@ -139,6 +147,9 @@ test("email and VAPID private material are mapped only to owning containers", as
   assert.ok(core.has("WEB_PUSH_VAPID_PRIVATE_KEY"));
   assert.equal(execution.has("WEB_PUSH_VAPID_PRIVATE_KEY"), false);
   assert.equal(frontend.has("WEB_PUSH_VAPID_PRIVATE_KEY"), false);
+  assert.ok(core.has("TELEGRAM_ALERT_BOT_TOKEN"));
+  assert.equal(execution.has("TELEGRAM_ALERT_BOT_TOKEN"), false);
+  assert.equal(frontend.has("TELEGRAM_ALERT_BOT_TOKEN"), false);
 });
 
 test("the retired shared token and legacy process services are absent", async () => {

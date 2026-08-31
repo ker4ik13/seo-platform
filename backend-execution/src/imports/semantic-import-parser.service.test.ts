@@ -334,6 +334,7 @@ function configFixture(): AppConfig {
       keys: new Map(),
       fingerprintKeys: new Map()
     },
+    platformProviderCredentials: {},
     integrationCredentialValidation: {
       timeoutMs: 10_000,
       leaseSeconds: 120,

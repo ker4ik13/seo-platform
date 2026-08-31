@@ -107,7 +107,7 @@ function crawlSummary(
   value: unknown,
   input: InternalDispatchCrawlAutomationRunInput
 ): TechnicalCrawlSummary {
-  const crawl = exactRecord(value, [
+  const fields = [
     "id",
     "jobId",
     "workspaceId",
@@ -121,13 +121,17 @@ function crawlSummary(
     "issueCount",
     "version",
     "createdAt"
-  ]);
+  ] as const;
+  const crawl =
+    exactRecord(value, fields) ??
+    exactRecord(value, [...fields, "actorId"]);
   if (
     !crawl ||
     !uuid(crawl.id) ||
     !uuid(crawl.jobId) ||
     crawl.workspaceId !== input.workspaceId ||
     crawl.projectId !== input.projectId ||
+    (crawl.actorId !== undefined && crawl.actorId !== input.actorId) ||
     crawl.status !== "QUEUED" ||
     !positiveInteger(crawl.version) ||
     !nonNegativeInteger(crawl.discoveredUrls) ||
@@ -153,6 +157,7 @@ function crawlSummary(
     jobId: crawl.jobId as string,
     workspaceId: input.workspaceId,
     projectId: input.projectId,
+    ...(crawl.actorId === undefined ? {} : { actorId: input.actorId }),
     status: "QUEUED",
     config,
     discoveredUrls: crawl.discoveredUrls as number,

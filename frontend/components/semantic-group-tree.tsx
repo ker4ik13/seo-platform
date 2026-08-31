@@ -5,15 +5,18 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent
 } from "react";
+import { createPortal } from "react-dom";
 import {
-  semanticGroupDropPlacement,
+  semanticGroupCanonicalDropTarget,
   type SemanticGroupDropPlacement
 } from "../lib/semantic-group-drag";
 import { semanticGroupColors } from "../lib/semantic-group-colors";
+import { normalizeSemanticGroupName } from "../lib/semantic-group-name-batch";
 import {
   semanticAllRegularGroupIds,
   semanticGroupIdsWithDescendants,
@@ -48,8 +51,15 @@ interface FlatGroup {
   readonly hasChildren: boolean;
 }
 
+interface SemanticGroupDragFeedback {
+  readonly x: number;
+  readonly y: number;
+  readonly kind: "group" | "keyword";
+}
+
 const EMPTY_GROUP_IDS: readonly string[] = [];
 const EMPTY_REMOTE_PRESENCE: readonly SemanticGroupRemotePresence[] = [];
+const KEYWORD_DRAG_TYPE = "application/x-seo-keyword-ids";
 const ROOT_PRESENCE_KEY = "root";
 export type SemanticGroupTreeDropTarget =
   | Readonly<{ placement: "root" }>
@@ -69,6 +79,7 @@ export function SemanticGroupTree({
   onExport,
   onColorChange,
   onDropMove,
+  onInlineRename,
   onMoveRequest,
   onOpenSelection,
   onReorder,
@@ -95,6 +106,10 @@ export function SemanticGroupTree({
     groups: readonly SemanticGroupTreeItem[],
     target: SemanticGroupTreeDropTarget
   ) => void;
+  onInlineRename: (
+    group: SemanticGroupTreeItem,
+    name: string
+  ) => Promise<boolean>;
   onMoveRequest: (groups: readonly SemanticGroupTreeItem[]) => void;
   onOpenSelection: (groupIds: readonly string[]) => void;
   onReorder: (group: SemanticGroupTreeItem, position: number) => void;
@@ -110,13 +125,26 @@ export function SemanticGroupTree({
   );
   const [draggingIds, setDraggingIds] = useState<readonly string[]>([]);
   const [dragTarget, setDragTarget] = useState<SemanticGroupTreeDropTarget>();
+  const [dragFeedback, setDragFeedback] = useState<SemanticGroupDragFeedback>();
+  const dragTargetRef = useRef<SemanticGroupTreeDropTarget | undefined>(
+    undefined
+  );
   const [search, setSearch] = useState("");
   const [contextMenu, setContextMenu] = useState<Readonly<{
     x: number;
     y: number;
     group: SemanticGroupTreeItem;
   }>>();
+  const [inlineRename, setInlineRename] = useState<Readonly<{
+    groupId: string;
+    value: string;
+    saving: boolean;
+    error?: string;
+  }>>();
   const hadActiveMultiGroupRef = useRef(false);
+  const inlineRenameCancelIdRef = useRef<string | undefined>(undefined);
+  const inlineRenameCommitIdRef = useRef<string | undefined>(undefined);
+  const inlineRenameInputRef = useRef<HTMLInputElement>(null);
   const selectionAnchorIdRef = useRef<string | undefined>(undefined);
   const activeGroupIdSet = useMemo(
     () => new Set(activeGroupIds),
@@ -154,6 +182,13 @@ export function SemanticGroupTree({
       ),
     [effectiveExpandedIds, groups, search]
   );
+  const groupById = useMemo(
+    () => new Map(groups.map((group) => [group.id, group] as const)),
+    [groups]
+  );
+  const dragTargetLabel = dragFeedback && dragTarget
+    ? semanticGroupDragTargetLabel(dragTarget, dragFeedback.kind, groupById)
+    : undefined;
   const systemGroups = useMemo(() => {
     const normalizedSearch = normalizeGroupSearch(search);
     return groups
@@ -190,7 +225,11 @@ export function SemanticGroupTree({
     return result;
   }, [flatGroups, groups, remotePresence]);
   useEffect(() => {
-    const clearDragTarget = () => setDragTarget(undefined);
+    const clearDragTarget = () => {
+      dragTargetRef.current = undefined;
+      setDragTarget(undefined);
+      setDragFeedback(undefined);
+    };
     document.addEventListener("dragend", clearDragTarget);
     return () => document.removeEventListener("dragend", clearDragTarget);
   }, []);
@@ -206,6 +245,98 @@ export function SemanticGroupTree({
   const selectedGroups = groups.filter(
     ({ id, systemKind }) => !systemKind && effectiveSelectedIds.has(id)
   );
+
+  function updateDragTarget(
+    target: SemanticGroupTreeDropTarget | undefined,
+    feedback?: SemanticGroupDragFeedback
+  ): void {
+    dragTargetRef.current = target;
+    setDragTarget(target);
+    if (!target) setDragFeedback(undefined);
+    else if (feedback) setDragFeedback(feedback);
+  }
+
+  function startInlineRename(
+    event: MouseEvent,
+    group: SemanticGroupTreeItem
+  ): void {
+    if (group.systemKind) return;
+    event.preventDefault();
+    event.stopPropagation();
+    inlineRenameCancelIdRef.current = undefined;
+    setContextMenu(undefined);
+    setInlineRename({
+      groupId: group.id,
+      value: group.name,
+      saving: false
+    });
+    requestAnimationFrame(() => {
+      inlineRenameInputRef.current?.focus();
+      inlineRenameInputRef.current?.select();
+    });
+  }
+
+  async function commitInlineRename(
+    group: SemanticGroupTreeItem
+  ): Promise<void> {
+    const current = inlineRename;
+    if (
+      !current ||
+      current.groupId !== group.id ||
+      current.saving ||
+      inlineRenameCommitIdRef.current
+    ) {
+      return;
+    }
+    let name: string;
+    try {
+      name = normalizeSemanticGroupName(current.value);
+    } catch (error) {
+      setInlineRename({
+        ...current,
+        error: error instanceof Error
+          ? error.message
+          : "Проверьте название папки."
+      });
+      requestAnimationFrame(() => inlineRenameInputRef.current?.focus());
+      return;
+    }
+    if (name === group.name) {
+      setInlineRename(undefined);
+      return;
+    }
+
+    inlineRenameCommitIdRef.current = group.id;
+    setInlineRename({
+      groupId: group.id,
+      value: name,
+      saving: true
+    });
+    let saved = false;
+    try {
+      saved = await onInlineRename(group, name);
+    } catch {
+      saved = false;
+    } finally {
+      inlineRenameCommitIdRef.current = undefined;
+    }
+    if (saved) {
+      setInlineRename((latest) =>
+        latest?.groupId === group.id ? undefined : latest
+      );
+      return;
+    }
+    setInlineRename((latest) =>
+      latest?.groupId === group.id
+        ? {
+            ...latest,
+            saving: false,
+            error: "Не удалось сохранить название. Повторите попытку."
+          }
+        : latest
+    );
+    requestAnimationFrame(() => inlineRenameInputRef.current?.focus());
+  }
 
   function chooseGroup(
     event: MouseEvent,
@@ -282,10 +413,15 @@ export function SemanticGroupTree({
   function drop(target: SemanticGroupTreeDropTarget): void {
     const moving = groups.filter(({ id }) => draggingIds.includes(id));
     setDraggingIds([]);
-    setDragTarget(undefined);
+    updateDragTarget(undefined);
     if (
       moving.length === 0 ||
-      ("group" in target && moving.some(({ id }) => id === target.group.id))
+      ("group" in target &&
+        moving.some(
+          ({ id, path }) =>
+            id === target.group.id ||
+            target.group.path.startsWith(`${path} / `)
+        ))
     ) return;
     onDropMove(moving, target);
   }
@@ -400,58 +536,91 @@ export function SemanticGroupTree({
     depth,
     group,
     hasChildren
-  }: FlatGroup) {
+  }: FlatGroup, flatIndex?: number) {
     const selected = effectiveSelectedIds.has(group.id);
     const groupPresence = remotePresenceByGroupId.get(group.id) ?? [];
     const primaryPresence = groupPresence[0];
+    const nextVisibleRow = flatIndex === undefined
+      ? undefined
+      : flatGroups[flatIndex + 1];
+    const rowDragPlacement =
+      dragTarget && "group" in dragTarget && dragTarget.group.id === group.id
+        ? dragTarget.placement
+        : undefined;
     return (
       <div
-        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${primaryPresence ? ` remote-presence presence-color-${primaryPresence.colorIndex}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${primaryPresence ? ` remote-presence presence-color-${primaryPresence.colorIndex}` : ""}${rowDragPlacement ? ` drag-${rowDragPlacement}` : ""}`}
         data-presence-cursor-anchor="true"
         data-presence-key={`semantic-group:${group.id}`}
-        draggable={!group.systemKind}
+        draggable={!group.systemKind && inlineRename?.groupId !== group.id}
         key={group.id}
         onContextMenu={(event) => openContextMenu(event, group)}
         onDragEnd={() => {
           setDraggingIds([]);
-          setDragTarget(undefined);
+          updateDragTarget(undefined);
         }}
         onDragStart={(event) => startDrag(event, group)}
         onDragOver={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          if (group.systemKind === "TRASH") return;
-          setDragTarget({
-            group,
-            placement: semanticGroupDropPlacement(
-              event.clientY,
-              event.currentTarget.getBoundingClientRect().top,
-              event.currentTarget.getBoundingClientRect().height
-            )
-          });
+          const feedback = dragFeedbackFromEvent(event);
+          if (group.systemKind) {
+            updateDragTarget(
+              feedback.kind === "keyword" && group.systemKind !== "TRASH"
+                ? { group, placement: "inside" }
+                : undefined,
+              feedback
+            );
+            return;
+          }
+          const row = event.currentTarget.getBoundingClientRect();
+          updateDragTarget(
+            feedback.kind === "keyword"
+              ? { group, placement: "inside" }
+              : semanticGroupCanonicalDropTarget(
+                  event.clientY,
+                  row.top,
+                  row.height,
+                  { group, depth },
+                  nextVisibleRow
+                ),
+            feedback
+          );
         }}
         onDrop={(event) => {
           event.preventDefault();
           event.stopPropagation();
           const keywordIds = draggedKeywordIds(event);
           if (keywordIds.length > 0) {
-            if (group.systemKind === "TRASH") return;
+            if (group.systemKind === "TRASH") {
+              updateDragTarget(undefined);
+              return;
+            }
             onKeywordDrop(keywordIds, group.id);
-            setDragTarget(undefined);
+            updateDragTarget(undefined);
             return;
           }
-          if (group.systemKind) return;
-          const placement = semanticGroupDropPlacement(
-            event.clientY,
-            event.currentTarget.getBoundingClientRect().top,
-            event.currentTarget.getBoundingClientRect().height
+          if (group.systemKind) {
+            updateDragTarget(undefined);
+            return;
+          }
+          const row = event.currentTarget.getBoundingClientRect();
+          drop(
+            dragTargetRef.current ??
+              semanticGroupCanonicalDropTarget(
+                event.clientY,
+                row.top,
+                row.height,
+                { group, depth },
+                nextVisibleRow
+              )
           );
-          drop({ group, placement });
         }}
         style={{
+          "--semantic-group-drop-inset": `${5 + depth * 10}px`,
           minWidth: `${180 + depth * 10}px`,
           paddingLeft: `${4 + depth * 10}px`
-        }}
+        } as CSSProperties}
       >
         {depth > 0 && (
           <span
@@ -485,20 +654,71 @@ export function SemanticGroupTree({
             </svg>
           )}
         </button>
-        <button
-          className="semantic-group-name"
-          onClick={(event) => chooseGroup(event, group)}
-          title={`${group.path}. Ctrl/Cmd+клик — множественный выбор`}
-          type="button"
-        >
-          <i style={{ background: group.color ?? "#a8a5b8" }} />
-          {group.systemKind && (
-            <span aria-hidden="true" className="semantic-system-group-icon">
-              <Icon name={group.systemKind === "TRASH" ? "trash" : "inbox"} />
-            </span>
-          )}
-          <span>{group.name}</span>
-        </button>
+        {inlineRename?.groupId === group.id ? (
+          <div className="semantic-group-name semantic-group-name-editing">
+            <i style={{ background: group.color ?? "#a8a5b8" }} />
+            <input
+              aria-label={`Новое название папки ${group.name}`}
+              aria-invalid={inlineRename.error ? "true" : undefined}
+              autoFocus
+              disabled={inlineRename.saving}
+              maxLength={255}
+              onBlur={() => {
+                if (inlineRenameCancelIdRef.current === group.id) {
+                  inlineRenameCancelIdRef.current = undefined;
+                  return;
+                }
+                void commitInlineRename(group);
+              }}
+              onChange={(event) =>
+                setInlineRename({
+                  groupId: group.id,
+                  value: event.target.value,
+                  saving: false
+                })
+              }
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  inlineRenameCancelIdRef.current = group.id;
+                  setInlineRename(undefined);
+                  return;
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void commitInlineRename(group);
+                }
+              }}
+              onMouseDown={(event) => event.stopPropagation()}
+              ref={inlineRenameInputRef}
+              spellCheck={false}
+              title={inlineRename.error}
+              value={inlineRename.value}
+            />
+          </div>
+        ) : (
+          <button
+            className="semantic-group-name"
+            onClick={(event) => chooseGroup(event, group)}
+            onDoubleClick={group.systemKind
+              ? undefined
+              : (event) => startInlineRename(event, group)}
+            title={group.systemKind
+              ? group.path
+              : `${group.path}. Двойной клик — переименовать; Ctrl/Cmd+клик — множественный выбор`}
+            type="button"
+          >
+            <i style={{ background: group.color ?? "#a8a5b8" }} />
+            {group.systemKind && (
+              <span aria-hidden="true" className="semantic-system-group-icon">
+                <Icon name={group.systemKind === "TRASH" ? "trash" : "inbox"} />
+              </span>
+            )}
+            <span>{group.name}</span>
+          </button>
+        )}
         <RemotePresenceDots participants={groupPresence} />
         <small>{formatInteger(group.keywordCount)}</small>
         <button
@@ -609,15 +829,24 @@ export function SemanticGroupTree({
         }}
         onDragEnter={(event) => {
           event.preventDefault();
-          setDragTarget({ placement: "root" });
+          updateDragTarget(
+            { placement: "root" },
+            dragFeedbackFromEvent(event)
+          );
         }}
-        onDragOver={(event) => event.preventDefault()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          updateDragTarget(
+            { placement: "root" },
+            dragFeedbackFromEvent(event)
+          );
+        }}
         onDrop={(event) => {
           event.preventDefault();
           const keywordIds = draggedKeywordIds(event);
           if (keywordIds.length > 0) {
             onKeywordDrop(keywordIds);
-            setDragTarget(undefined);
+            updateDragTarget(undefined);
             return;
           }
           drop({ placement: "root" });
@@ -636,7 +865,10 @@ export function SemanticGroupTree({
         onDragOver={(event) => {
           if (event.target !== event.currentTarget) return;
           event.preventDefault();
-          setDragTarget({ placement: "root" });
+          updateDragTarget(
+            { placement: "root" },
+            dragFeedbackFromEvent(event)
+          );
         }}
         onDrop={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -644,7 +876,7 @@ export function SemanticGroupTree({
           const keywordIds = draggedKeywordIds(event);
           if (keywordIds.length > 0) {
             onKeywordDrop(keywordIds);
-            setDragTarget(undefined);
+            updateDragTarget(undefined);
             return;
           }
           drop({ placement: "root" });
@@ -659,6 +891,20 @@ export function SemanticGroupTree({
           )}
         </div>
       )}
+      {dragFeedback && dragTargetLabel && typeof document !== "undefined" &&
+        createPortal(
+          <span
+            aria-hidden="true"
+            className="semantic-group-drop-label"
+            style={{
+              left: `clamp(92px, ${dragFeedback.x}px, calc(100vw - 92px))`,
+              top: `${Math.max(58, dragFeedback.y)}px`
+            }}
+          >
+            {dragTargetLabel}
+          </span>,
+          document.body
+        )}
       {contextMenu && (
         <ContextMenu
           afterItemId="export"
@@ -790,6 +1036,36 @@ function formatInteger(value: number): string {
 }
 
 function draggedKeywordIds(event: DragEvent): readonly string[] {
-  const value = event.dataTransfer.getData("application/x-seo-keyword-ids");
+  const value = event.dataTransfer.getData(KEYWORD_DRAG_TYPE);
   return value ? [...new Set(value.split(",").filter(Boolean))] : [];
+}
+
+function dragFeedbackFromEvent(event: DragEvent): SemanticGroupDragFeedback {
+  return {
+    x: event.clientX,
+    y: event.clientY,
+    kind: Array.from(event.dataTransfer.types).includes(KEYWORD_DRAG_TYPE)
+      ? "keyword"
+      : "group"
+  };
+}
+
+function semanticGroupDragTargetLabel(
+  target: SemanticGroupTreeDropTarget,
+  kind: SemanticGroupDragFeedback["kind"],
+  groupById: ReadonlyMap<string, SemanticGroupTreeItem>
+): string {
+  if (target.placement === "root") {
+    return kind === "keyword"
+      ? "Переместить без папки"
+      : "Корневой уровень";
+  }
+  if (target.placement === "inside") {
+    return kind === "keyword"
+      ? `В папку «${target.group.name}»`
+      : `Внутрь «${target.group.name}»`;
+  }
+  return target.group.parentId
+    ? `В «${groupById.get(target.group.parentId)?.name ?? "родительскую папку"}»`
+    : "Корневой уровень";
 }

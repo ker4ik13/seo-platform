@@ -51,6 +51,7 @@ import {
 import { JobsClient } from "../jobs/jobs.client.js";
 import {
   createIntegrationCredentialInput,
+  enablePlatformIntegrationCredentialInput,
   updateIntegrationCredentialInput
 } from "./integration-input.js";
 import { upsertWorkspaceConnectorBindingInput } from "./workspace-integration-input.js";
@@ -199,6 +200,49 @@ export class IntegrationController {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       action: "integration.credential.connected",
+      resourceType: "integration_credential",
+      resourceId: result.id,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result, result.version);
+  }
+
+  @Post("platform-credentials")
+  @RequirePermission("integration.use_system_credentials")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async enablePlatform(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<IntegrationCredentialSummary>> {
+    const context = requestContext(request);
+    const tenant = requiredTenant(request);
+    const idempotencyKey = requiredIdempotencyKey(
+      headerValue(request, "idempotency-key")
+    );
+    const input = enablePlatformIntegrationCredentialInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      action: "integration.platform_credential.connect_requested",
+      resourceType: "integration_credential",
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.jobs.enablePlatformIntegrationCredential(
+      {
+        tenant,
+        actorId: principal.userId,
+        requestId: context.requestId
+      },
+      input,
+      idempotencyKey
+    );
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      action: "integration.platform_credential.connected",
       resourceType: "integration_credential",
       resourceId: result.id,
       outcome: "SUCCESS",

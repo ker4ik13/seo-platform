@@ -5,12 +5,27 @@ import { assertUuid } from "../common/identifier.js";
 const RANK_RUN_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{16,180}$/u;
 
 export function createRankRunInput(value: unknown): CreateRankRunInput {
-  const input = exactRecord(value, ["estimateId"]);
+  const input = exactRecord(value, [
+    "estimateId",
+    "confirmedPlatformChargeMicro"
+  ]);
   if (typeof input.estimateId !== "string") {
     invalid("estimateId", "INVALID_IDENTIFIER", "A valid UUID is required");
   }
+  if (
+    typeof input.confirmedPlatformChargeMicro !== "string" ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(input.confirmedPlatformChargeMicro) ||
+    input.confirmedPlatformChargeMicro.length > 30
+  ) {
+    invalid(
+      "confirmedPlatformChargeMicro",
+      "INVALID_FORMAT",
+      "A bounded confirmed charge is required"
+    );
+  }
   return {
-    estimateId: assertUuid(input.estimateId, "estimateId")
+    estimateId: assertUuid(input.estimateId, "estimateId"),
+    confirmedPlatformChargeMicro: input.confirmedPlatformChargeMicro
   };
 }
 

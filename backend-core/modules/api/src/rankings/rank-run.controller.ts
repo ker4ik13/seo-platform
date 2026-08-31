@@ -171,8 +171,13 @@ export class RankRunController {
       requestId: context.requestId
     });
 
-    const command: InternalCreateRankRunInput = {
+    const command: Omit<
+      InternalCreateRankRunInput,
+      "providerPricesMinor"
+    > = {
       estimateId: input.estimateId,
+      confirmedPlatformChargeMicro:
+        input.confirmedPlatformChargeMicro,
       workspaceId: workspace.id,
       projectId: project.id,
       actorId: principal.userId,
@@ -315,7 +320,10 @@ export class RankRunController {
       outcome: "REQUESTED",
       requestId: context.requestId
     });
-    const command: InternalRetryRankJobInput = {
+    const command: Omit<
+      InternalRetryRankJobInput,
+      "providerPricesMinor"
+    > = {
       workspaceId: workspace.id,
       projectId: project.id,
       actorId: principal.userId,

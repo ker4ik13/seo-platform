@@ -57,14 +57,52 @@ test("forwards rank estimate through the dedicated credential boundary", async (
   }
 });
 
-function client(): JobsClient {
+test("quotes a platform Arsenkin batch per keyword", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    new Response(
+      JSON.stringify({
+        data: {
+          ...estimateResponse(),
+          credentialMode: "PLATFORM_PAID",
+          scope: {
+            ...estimateResponse().scope,
+            keywordCount: "3",
+            pairCount: "3"
+          }
+        }
+      }),
+      {
+        status: 201,
+        headers: { "content-type": "application/json" }
+      }
+    )) as typeof fetch;
+
+  try {
+    const result = await client({
+      PLATFORM_ARSENKIN_ENABLED: "true",
+      PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "25",
+      PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "1000",
+      PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "10000"
+    }).createRankEstimate(context(), internalInput(), "rank-estimate-002");
+
+    assert.equal(result.workload.taskCount, "1");
+    assert.equal(result.scope.keywordCount, "3");
+    assert.equal(result.platformChargeMicro, "750000");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function client(overrides: NodeJS.ProcessEnv = {}): JobsClient {
   return new JobsClient(
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
       PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32),
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
-      JOBS_INTERNAL_URL: "http://jobs.test:4002"
+      JOBS_INTERNAL_URL: "http://jobs.test:4002",
+      ...overrides
     })
   );
 }

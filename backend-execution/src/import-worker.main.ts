@@ -159,12 +159,12 @@ async function bootstrap(): Promise<void> {
   dispatchTimer.unref();
 
   worker.on("failed", (job, error) => {
-    logger.warn(
+    logger.error(
       `Semantic import failed for job ${job?.id ?? "unknown"} (${safeFailureCode(error)})`
     );
   });
   exportWorker.on("failed", (job, error) => {
-    logger.warn(
+    logger.error(
       `Semantic export failed for job ${job?.id ?? "unknown"} (${safeFailureCode(error)})`
     );
   });

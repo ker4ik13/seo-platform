@@ -82,6 +82,57 @@ test("separates credential validation command and read permissions", () => {
     Reflect.getMetadata(GUARDS_METADATA, prototype.getValidation),
     [SessionAuthGuard, TenantPermissionGuard]
   );
+  assert.equal(
+    Reflect.getMetadata(REQUIRED_PERMISSION, prototype.enablePlatform),
+    "integration.use_system_credentials"
+  );
+  assert.deepEqual(
+    Reflect.getMetadata(GUARDS_METADATA, prototype.enablePlatform),
+    [CsrfSessionGuard, TenantPermissionGuard]
+  );
+});
+
+test("enables a platform credential through the dedicated audited boundary", async () => {
+  const auditRecords: AuditRecord[] = [];
+  let captured: readonly unknown[] | undefined;
+  const platformCredential: IntegrationCredentialSummary = {
+    ...credential,
+    provider: "XMLSTOCK",
+    label: "XMLStock — внутренние токены",
+    mode: "PLATFORM_PAID",
+    displayHint: "Системный",
+    capabilities: ["SERP_RANK_TRACKING"]
+  };
+  const controller = new IntegrationController(
+    {
+      enablePlatformIntegrationCredential: async (...args: unknown[]) => {
+        captured = args;
+        return platformCredential;
+      }
+    } as unknown as JobsClient,
+    {
+      record: async (record: AuditRecord) => {
+        auditRecords.push(record);
+      }
+    } as unknown as AuditService
+  );
+
+  const response = await controller.enablePlatform(
+    { provider: "XMLSTOCK" },
+    tenantRequest({ "idempotency-key": "platform-credential-enable-001" }),
+    principal
+  );
+
+  assert.equal(response.data.mode, "PLATFORM_PAID");
+  assert.deepEqual(captured?.[1], { provider: "XMLSTOCK" });
+  assert.equal(captured?.[2], "platform-credential-enable-001");
+  assert.deepEqual(
+    auditRecords.map(({ action, outcome }) => [action, outcome]),
+    [
+      ["integration.platform_credential.connect_requested", "REQUESTED"],
+      ["integration.platform_credential.connected", "SUCCESS"]
+    ]
+  );
 });
 
 test("guards every credential mutation and records successful outcomes", async () => {

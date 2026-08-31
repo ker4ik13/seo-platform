@@ -17,6 +17,12 @@ import {
   browserApiCollectionRequest,
   browserApiRequest
 } from "../lib/browser-api";
+import {
+  billingBuyerBusinessFields,
+  billingDeliveryEmail,
+  billingRublesToMinor,
+  type BillingBuyerFormType
+} from "../lib/billing-form";
 import { browserIdempotencyKey } from "../lib/idempotency";
 
 interface BillingSnapshot {
@@ -28,11 +34,6 @@ interface BillingSnapshot {
   readonly methods: readonly BillingPaymentMethodSummary[];
   readonly receipts: readonly NpdReceiptObligationSummary[];
 }
-
-type BuyerType =
-  | "INDIVIDUAL"
-  | "INDIVIDUAL_ENTREPRENEUR"
-  | "LEGAL_ENTITY";
 
 const TERMS_VERSION = "terms-2026-07-01";
 
@@ -58,7 +59,8 @@ export function BillingSettings({
   const [busy, setBusy] = useState<string>();
   const [period, setPeriod] = useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [selectedPlan, setSelectedPlan] = useState<string>();
-  const [buyerType, setBuyerType] = useState<BuyerType>("INDIVIDUAL");
+  const [buyerType, setBuyerType] =
+    useState<BillingBuyerFormType>("INDIVIDUAL");
   const [buyerName, setBuyerName] = useState("");
   const [buyerInn, setBuyerInn] = useState("");
   const [deliveryEmail, setDeliveryEmail] = useState(defaultEmail);
@@ -156,6 +158,9 @@ export function BillingSettings({
     () => snapshot?.plans.find((plan) => plan.code === selectedPlan),
     [selectedPlan, snapshot?.plans]
   );
+  const selectedPrice = selected?.prices.find(
+    (price) => price.period === period
+  );
   const hasAnnualPlans = Boolean(
     snapshot?.plans.some((plan) =>
       plan.prices.some((price) => price.period === "ANNUAL")
@@ -200,11 +205,18 @@ export function BillingSettings({
   }
 
   function buyerPayload() {
+    const email = billingDeliveryEmail(deliveryEmail);
+    if ("error" in email) throw new Error(email.error);
+    const business = billingBuyerBusinessFields(
+      buyerType,
+      buyerName,
+      buyerInn
+    );
+    if ("error" in business) throw new Error(business.error);
     return {
       buyerType,
-      ...(buyerName.trim() ? { buyerName: buyerName.trim() } : {}),
-      ...(buyerInn.trim() ? { buyerInn: buyerInn.trim() } : {}),
-      deliveryEmail,
+      ...business.value,
+      deliveryEmail: email.value,
       savePaymentMethod,
       termsAccepted,
       termsVersion: TERMS_VERSION
@@ -213,6 +225,10 @@ export function BillingSettings({
 
   async function checkout() {
     if (!selected || !termsAccepted) return;
+    if (!selectedPrice) {
+      setError("Для выбранного тарифа этот период оплаты недоступен.");
+      return;
+    }
     await mutate(
       `plan-${selected.code}`,
       async () => {
@@ -235,8 +251,8 @@ export function BillingSettings({
   }
 
   async function topUp() {
-    const amountMinor = rublesToMinor(topUpRubles);
-    if (!termsAccepted || amountMinor === undefined || amountMinor < 10_000) {
+    const amountMinor = billingRublesToMinor(topUpRubles, 10_000);
+    if (!termsAccepted || amountMinor === undefined) {
       setError("Укажите сумму от 100 ₽ и примите условия оплаты.");
       return;
     }
@@ -268,7 +284,7 @@ export function BillingSettings({
 
   async function refund() {
     if (!refundTarget) return;
-    const amountMinor = rublesToMinor(refundRubles);
+    const amountMinor = billingRublesToMinor(refundRubles, 100);
     if (amountMinor === undefined || refundReason.trim().length < 3) {
       setError("Укажите корректную сумму и причину возврата.");
       return;
@@ -421,15 +437,15 @@ export function BillingSettings({
           )}
         </article>
         <article className="panel billing-balance-card">
-          <span className="billing-label">Кредиты платформы</span>
+          <span className="billing-label">Внутренние токены</span>
           <h2>{money(snapshot.balance.availableMinor)}</h2>
           <p>
             {money(snapshot.balance.includedCreditsMinor)} включено ·{" "}
             {money(snapshot.balance.prepaidMinor)} пополнено
           </p>
           <span className="billing-balance-note">
-            Системные съёмы списываются по фактическому использованию. BYOK
-            не расходует provider balance платформы.
+            Системные проверки списывают токены по подтверждённой цене. BYOK
+            не расходует внутренний баланс платформы.
           </span>
         </article>
         <article className="panel billing-payment-card">
@@ -504,7 +520,7 @@ export function BillingSettings({
             value={projectCount}
           />
           <BillingUsageMeter
-            label="Доступные кредиты"
+            label="Доступные токены"
             unit="₽"
             value={snapshot.balance.availableMinor / 100}
           />
@@ -644,7 +660,7 @@ export function BillingSettings({
             <h2>
               {selected
                 ? `Оплата тарифа ${selected.name}`
-                : "Пополнение data balance"}
+                : "Пополнение внутренних токенов"}
             </h2>
             <p>
               Реквизиты карты вводятся только на защищённой странице
@@ -657,7 +673,7 @@ export function BillingSettings({
               <CustomSelect
                 value={buyerType}
                 onChange={(event) =>
-                  setBuyerType(event.target.value as BuyerType)
+                  setBuyerType(event.target.value as BillingBuyerFormType)
                 }
               >
                 <option value="INDIVIDUAL">Физическое лицо</option>
@@ -730,15 +746,17 @@ export function BillingSettings({
               <>
                 <button
                   className="primary-button"
-                  disabled={Boolean(busy) || !termsAccepted}
+                  disabled={
+                    Boolean(busy) || !termsAccepted || !selectedPrice
+                  }
                   onClick={() => void checkout()}
                 >
-                  {busy?.startsWith("plan-")
+                  {!selectedPrice
+                    ? "Период недоступен"
+                    : busy?.startsWith("plan-")
                     ? "Создаём платёж…"
                     : `Перейти к оплате · ${money(
-                        selected.prices.find(
-                          (item) => item.period === period
-                        )?.amountMinor ?? 0
+                        selectedPrice.amountMinor
                       )}`}
                 </button>
                 <button
@@ -986,7 +1004,7 @@ function PlanCard({
         </li>
         <li>{number(plan.features.concurrentJobs)} одновременных задач</li>
         {plan.includedDataCreditsMinor > 0 && (
-          <li>{money(plan.includedDataCreditsMinor)} data credits</li>
+          <li>{money(plan.includedDataCreditsMinor)} внутренних токенов</li>
         )}
       </ul>
       {canManage && price && (
@@ -1073,14 +1091,6 @@ function goToConfirmation(order: BillingOrderSummary): boolean {
   }
   window.location.assign(url);
   return true;
-}
-
-function rublesToMinor(value: string): number | undefined {
-  if (!/^(?:0|[1-9][0-9]{0,6})(?:\.[0-9]{1,2})?$/u.test(value)) {
-    return undefined;
-  }
-  const amount = Math.round(Number(value) * 100);
-  return Number.isSafeInteger(amount) && amount > 0 ? amount : undefined;
 }
 
 function money(minor: number): string {

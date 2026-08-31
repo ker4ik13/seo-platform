@@ -25,6 +25,7 @@ import {
 import { RankPreparationService } from "./rank-preparation.service.js";
 import {
   assertExecutionProjectionCurrent,
+  confirmedPlatformChargeMicro,
   rankEstimatePolicyMatchesProvider,
   RankRunService
 } from "./rank-run.service.js";
@@ -57,6 +58,27 @@ test("uses the immutable policy generation of the selected rank provider", () =>
   assert.equal(
     rankEstimatePolicyMatchesProvider("UNSUPPORTED", "rank-estimate:v1"),
     false
+  );
+});
+
+test("prices a platform Arsenkin batch per keyword, not per provider task", () => {
+  const estimate = {
+    provider: "ARSENKIN",
+    credentialMode: "PLATFORM_PAID",
+    keywordCount: 3,
+    providerTaskCount: 1
+  } as RankEstimate;
+  const input = rankRunInput({ confirmedPlatformChargeMicro: "750000" });
+
+  assert.equal(confirmedPlatformChargeMicro(estimate, input), 750_000n);
+  assert.throws(
+    () =>
+      confirmedPlatformChargeMicro(estimate, {
+        ...input,
+        confirmedPlatformChargeMicro: "250000"
+      }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === 409
   );
 });
 
@@ -794,6 +816,7 @@ function rankRunInput(
     projectId,
     actorId,
     estimateId,
+    confirmedPlatformChargeMicro: "0",
     project: {
       id: projectId,
       workspaceId,
@@ -815,6 +838,10 @@ function rankRunInput(
       planVersion: 3,
       concurrentJobs: 10
     },
+    providerPricesMinor: {
+      ARSENKIN: "25",
+      XMLSTOCK: "30"
+    },
     ...overrides
   };
 }
@@ -829,7 +856,8 @@ function rankRetryInput(): InternalRetryRankJobInput {
     project: input.project,
     access: input.access,
     billingCurrency: input.billingCurrency,
-    jobCapacity: input.jobCapacity
+    jobCapacity: input.jobCapacity,
+    providerPricesMinor: input.providerPricesMinor
   };
 }
 

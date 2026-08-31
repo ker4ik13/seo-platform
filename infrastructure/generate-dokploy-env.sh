@@ -129,6 +129,7 @@ for secret_name in \
   PLATFORM_API_TO_REALTIME_TOKEN \
   JOBS_TO_SEO_RANK_TOKEN \
   JOBS_TO_PLATFORM_RANK_GRANT_TOKEN \
+  JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN \
   JOBS_TO_PLATFORM_AUTOMATION_TOKEN \
   JOBS_TO_SEO_RANK_RESULT_TOKEN \
   JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN \
@@ -136,6 +137,7 @@ for secret_name in \
   PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN \
   PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN \
   REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN \
+  OPERATIONAL_ALERT_TOKEN \
   AUTH_PASSWORD_PEPPER
 do
   write_override "$secret_name" "$(random_url_safe_secret)"
@@ -216,8 +218,9 @@ dokploy-env: generated unique internal secrets in:
 The file contains all $variable_count environment variable lines and has mode
 600. It is ignored by Git when the default name is used. Review only the
 $manual_comment_count fields described by comments starting with # ВРУЧНУЮ.
-Fill every empty field marked (обязательно); values for disabled YooKassa/Web
-Push features may remain empty, and documented SMTP/S3 defaults may stay as is.
+Fill every empty field marked (обязательно); values for disabled YooKassa,
+platform provider and Web Push features may remain empty, and documented
+SMTP/S3 defaults may stay as is.
 
 POSTGRES_PASSWORD is the only generated secret that must also be entered
 manually outside Compose: use that exact value in every Dokploy PostgreSQL

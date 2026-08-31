@@ -2,8 +2,10 @@ import { BadRequestException } from "@nestjs/common";
 import {
   integrationProviders,
   type CreateIntegrationCredentialInput,
+  type EnablePlatformIntegrationCredentialInput,
   type IntegrationProvider,
   type InternalCreateIntegrationCredentialInput,
+  type InternalEnablePlatformIntegrationCredentialInput,
   type InternalCreateIntegrationCredentialValidationInput,
   type InternalDeleteIntegrationCredentialInput,
   type InternalUpdateIntegrationCredentialInput,
@@ -49,6 +51,35 @@ export function internalCreateIntegrationCredentialInput(
     actorId: uuidField(input, "actorId"),
     idempotencyKey
   };
+}
+
+export function internalEnablePlatformIntegrationCredentialInput(
+  value: unknown
+): InternalEnablePlatformIntegrationCredentialInput {
+  const input = record(value);
+  const idempotencyKey = stringField(input, "idempotencyKey");
+  if (
+    Object.keys(input).length !== 4 ||
+    !IDEMPOTENCY_PATTERN.test(idempotencyKey)
+  ) {
+    invalid("idempotencyKey");
+  }
+  return {
+    ...enablePlatformIntegrationCredentialInput(input),
+    workspaceId: uuidField(input, "workspaceId"),
+    actorId: uuidField(input, "actorId"),
+    idempotencyKey
+  };
+}
+
+export function enablePlatformIntegrationCredentialInput(
+  value: unknown
+): EnablePlatformIntegrationCredentialInput {
+  const input = record(value);
+  if (input.provider !== "XMLSTOCK" && input.provider !== "ARSENKIN") {
+    invalid("provider");
+  }
+  return { provider: input.provider };
 }
 
 export function internalCreateIntegrationCredentialValidationInput(

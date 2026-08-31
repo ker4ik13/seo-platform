@@ -1,7 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
+import { RankBillingSettlementClient } from "../platform-api/rank-billing-settlement.client.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
+import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
 import {
   XmlStockHttpQuotaLimiter,
   type XmlStockHttpQuotaPermit,
@@ -31,6 +33,7 @@ import {
   xmlStockRankUsesQuota,
   xmlStockRankWireRequestHash
 } from "./xmlstock-rank.connector.js";
+import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent.js";
 
 export const ARSENKIN_RANK_CONNECTOR = Symbol(
   "ARSENKIN_RANK_CONNECTOR"
@@ -65,6 +68,7 @@ export class RankConnectorRuntimeService {
     @Inject(XMLSTOCK_RANK_CONNECTOR)
     private readonly xmlStockConnector: XmlStockRankConnector,
     private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
+    private readonly settlements: RankBillingSettlementClient,
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
@@ -101,6 +105,18 @@ export class RankConnectorRuntimeService {
     claim: RankConnectorSubmitClaim
   ): Promise<RankConnectorRuntimeOutcome> {
     const requestIntent = await this.broker.readSubmitRequest(claim);
+    const settlement = await this.broker.readBillingSettlement(claim);
+    const secret = selectIntegrationCredentialSecret(
+      this.crypto.decrypt(
+        claim.workspaceId,
+        claim.provider,
+        claim.credentialId,
+        claim.encryptedCredential
+      ),
+      claim.executionId,
+      claim.credentialId
+    );
+    const providerCredentialScopeId = secret.rateLimitScopeId!;
     const built = claim.provider === "XMLSTOCK"
       ? (() => {
           const request = buildXmlStockRankWireRequest(requestIntent);
@@ -117,7 +133,16 @@ export class RankConnectorRuntimeService {
           };
         })();
     const wireRequestHash = Buffer.from(built.hash, "hex");
-    this.assertNetworkBudget(claim.leaseExpiresAt, 1);
+    const settlesOnAcceptedSubmit =
+      claim.provider === "ARSENKIN" ||
+      ("delayed" in built.request && built.request.delayed);
+    this.assertNetworkBudget(
+      claim.leaseExpiresAt,
+      1,
+      settlement.required && settlesOnAcceptedSubmit
+        ? this.config.platformApiCommandTimeoutMs
+        : 0
+    );
     let quotaPermit: Extract<
       XmlStockHttpQuotaPermit,
       { readonly allowed: true }
@@ -128,7 +153,7 @@ export class RankConnectorRuntimeService {
       if (request.delayed && xmlStockRankUsesQuota(request)) {
         quotaProduct = xmlStockRankHttpProduct(request);
         const acquired = await this.xmlStockQuota.tryAcquire({
-          credentialId: claim.credentialId,
+          credentialId: providerCredentialScopeId,
           product: quotaProduct,
           leaseMs:
             this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
@@ -138,12 +163,6 @@ export class RankConnectorRuntimeService {
       }
     }
     try {
-      const secret = this.crypto.decrypt(
-        claim.workspaceId,
-        claim.provider,
-        claim.credentialId,
-        claim.encryptedCredential
-      );
       const permit = await this.broker.authorizeSubmit(
         claim,
         connectorVersion(claim.provider)
@@ -161,9 +180,21 @@ export class RankConnectorRuntimeService {
           );
       if (quotaProduct) {
         await this.observeXmlStockQuota(
-          claim.credentialId,
+          providerCredentialScopeId,
           quotaProduct,
           outcome
+        );
+      }
+      if (
+        settlement.required &&
+        outcome.status === "ACCEPTED" &&
+        settlesOnAcceptedSubmit
+      ) {
+        await this.settleUsage(
+          "CAPTURE",
+          settlement,
+          requestIntent,
+          claim.executionId
         );
       }
       await this.broker.completeSubmit(
@@ -184,22 +215,47 @@ export class RankConnectorRuntimeService {
   private async poll(
     claim: RankConnectorPollClaim
   ): Promise<RankConnectorRuntimeOutcome> {
+    const xmlStockRequest = claim.provider === "XMLSTOCK"
+      ? buildXmlStockRankWireRequest(claim.request)
+      : undefined;
+    const lateSettlement =
+      xmlStockRequest &&
+      !xmlStockRequest.delayed &&
+      claim.providerProgress === undefined
+        ? await this.broker.readBillingSettlement(claim)
+        : undefined;
     this.assertNetworkBudget(
       claim.leaseExpiresAt,
-      claim.provider === "XMLSTOCK" ? 1 : 2
+      claim.provider === "XMLSTOCK" ? 1 : 2,
+      lateSettlement?.required
+        ? this.config.platformApiCommandTimeoutMs * 2
+        : 0
     );
-    const secret = this.crypto.decrypt(
-      claim.workspaceId,
-      claim.provider,
-      claim.credentialId,
-      claim.encryptedCredential
+    const secret = selectIntegrationCredentialSecret(
+      this.crypto.decrypt(
+        claim.workspaceId,
+        claim.provider,
+        claim.credentialId,
+        claim.encryptedCredential
+      ),
+      claim.executionId,
+      claim.credentialId
     );
+    const providerCredentialScopeId = secret.rateLimitScopeId!;
     let outcome:
       | Awaited<ReturnType<XmlStockRankConnector["fetchResult"]>>
       | Awaited<ReturnType<ArsenkinRankConnector["fetchResult"]>>;
     if (claim.provider === "XMLSTOCK") {
-      const request = buildXmlStockRankWireRequest(claim.request);
+      const request = xmlStockRequest!;
       if (!xmlStockRankUsesQuota(request)) {
+        if (lateSettlement?.required) {
+          await this.settleUsage(
+            "HOLD",
+            lateSettlement,
+            claim.request,
+            claim.executionId
+          );
+        }
         outcome = await this.xmlStockConnector.fetchResult(
           claim.providerTaskId,
           secret,
@@ -210,7 +266,7 @@ export class RankConnectorRuntimeService {
       } else {
         const product = xmlStockRankHttpProduct(request);
         const acquired = await this.xmlStockQuota.tryAcquire({
-          credentialId: claim.credentialId,
+          credentialId: providerCredentialScopeId,
           product,
           leaseMs:
             this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
@@ -223,6 +279,14 @@ export class RankConnectorRuntimeService {
           return "PROVIDER_CAPACITY_DELAYED";
         }
         try {
+          if (lateSettlement?.required) {
+            await this.settleUsage(
+              "HOLD",
+              lateSettlement,
+              claim.request,
+              claim.executionId
+            );
+          }
           outcome = await this.xmlStockConnector.fetchResult(
             claim.providerTaskId,
             secret,
@@ -231,7 +295,7 @@ export class RankConnectorRuntimeService {
             claim.providerProgress
           );
           await this.observeXmlStockQuota(
-            claim.credentialId,
+            providerCredentialScopeId,
             product,
             outcome
           );
@@ -248,6 +312,14 @@ export class RankConnectorRuntimeService {
     }
     switch (outcome.status) {
       case "CHECKPOINTED":
+        if (lateSettlement?.required) {
+          await this.settleUsage(
+            "CAPTURE",
+            lateSettlement,
+            claim.request,
+            claim.executionId
+          );
+        }
         await this.broker.completePoll(claim, {
           outcome: "CHECKPOINTED",
           progress: outcome.progress,
@@ -304,6 +376,14 @@ export class RankConnectorRuntimeService {
           });
           return "POLL_TERMINAL";
         }
+        if (lateSettlement?.required) {
+          await this.settleUsage(
+            "CAPTURE",
+            lateSettlement,
+            claim.request,
+            claim.executionId
+          );
+        }
         await this.broker.completePoll(claim, {
           outcome: "READY",
           observedAt,
@@ -313,6 +393,32 @@ export class RankConnectorRuntimeService {
         return "RESULT_STAGED";
       }
     }
+  }
+
+  private settleUsage(
+    action: "HOLD" | "CAPTURE",
+    settlement: {
+      readonly grantId: string;
+      readonly required: boolean;
+    },
+    request: RankProviderRequestIntentV1,
+    executionId: string
+  ): Promise<unknown> {
+    const command = {
+      workspaceId: request.workspaceId,
+      projectId: request.projectId,
+      actorId: request.actorId,
+      grantId: settlement.grantId
+    };
+    const context = {
+      requestId: `rank-settle-${executionId}`,
+      idempotencyKey:
+        `rank-settlement:${settlement.grantId}:` +
+        action.toLowerCase()
+    };
+    return action === "HOLD"
+      ? this.settlements.hold(command, context)
+      : this.settlements.capture(command, context);
   }
 
   private submitLeaseSeconds(): number {
@@ -325,7 +431,8 @@ export class RankConnectorRuntimeService {
         5,
         Math.ceil(
           (this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS) /
-            1_000
+            1_000 +
+            this.config.platformApiCommandTimeoutMs / 1_000
         )
       )
     );
@@ -337,7 +444,8 @@ export class RankConnectorRuntimeService {
     // status request followed by one result request.
     const worstCasePollMs =
       this.providerRequestTimeoutMs() * 2 +
-      RANK_CONNECTOR_LEASE_MARGIN_MS;
+      RANK_CONNECTOR_LEASE_MARGIN_MS +
+      this.config.platformApiCommandTimeoutMs * 2;
     return Math.min(
       120,
       Math.max(
@@ -389,13 +497,15 @@ export class RankConnectorRuntimeService {
 
   private assertNetworkBudget(
     leaseExpiresAt: string,
-    maximumRequestCount: number
+    maximumRequestCount: number,
+    additionalTimeoutMs = 0
   ): void {
     const remainingMs = Date.parse(leaseExpiresAt) - Date.now();
     if (
       !Number.isFinite(remainingMs) ||
       remainingMs <
         this.providerRequestTimeoutMs() * maximumRequestCount +
+          additionalTimeoutMs +
           1_000
     ) {
       throw new RankConnectorLeaseLostError();

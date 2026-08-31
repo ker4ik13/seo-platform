@@ -5,12 +5,13 @@ import {
   acquireArsenkinHttpRateLimitPermit,
   ARSENKIN_HTTP_RATE_LIMIT,
   ARSENKIN_HTTP_RATE_LIMIT_KEY,
-  ARSENKIN_HTTP_RATE_WINDOW_MS
+  ARSENKIN_HTTP_RATE_WINDOW_MS,
+  arsenkinHttpRateLimitKey
 } from "./arsenkin-http-rate-limiter.js";
 
 const member = "01900000-0000-7000-8000-000000000001";
 
-test("uses one exact Redis rolling window for all Arsenkin HTTP requests", async () => {
+test("uses the legacy shared rolling window when no physical scope is supplied", async () => {
   const calls: unknown[][] = [];
   const redis = {
     async eval(...args: unknown[]) {
@@ -49,6 +50,26 @@ test("fails closed with a bounded retry delay when the rolling window is full", 
   assert.deepEqual(
     await acquireArsenkinHttpRateLimitPermit(redis, member),
     { allowed: false, retryAfterSeconds: 2 }
+  );
+});
+
+test("isolates rolling windows by opaque physical-key scope", async () => {
+  const calls: unknown[][] = [];
+  const redis = {
+    async eval(...args: unknown[]) {
+      calls.push(args);
+      return [1, 0];
+    }
+  } as unknown as Pick<Redis, "eval">;
+  const scopeId = "01900000-0000-8000-8000-000000000002";
+
+  await acquireArsenkinHttpRateLimitPermit(redis, member, scopeId);
+
+  assert.equal(calls[0]?.[2], arsenkinHttpRateLimitKey(scopeId));
+  assert.notEqual(calls[0]?.[2], ARSENKIN_HTTP_RATE_LIMIT_KEY);
+  assert.throws(
+    () => arsenkinHttpRateLimitKey("raw-api-key-must-not-be-used"),
+    /Invalid Arsenkin rate limit scope/u
   );
 });
 

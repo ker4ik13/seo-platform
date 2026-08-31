@@ -11,8 +11,11 @@ const estimateId = "01900000-0000-7000-8000-000000000001";
 
 test("parses the exact public rank run input", () => {
   assert.deepEqual(
-    createRankRunInput({ estimateId: estimateId.toUpperCase() }),
-    { estimateId }
+    createRankRunInput({
+      estimateId: estimateId.toUpperCase(),
+      confirmedPlatformChargeMicro: "250000"
+    }),
+    { estimateId, confirmedPlatformChargeMicro: "250000" }
   );
   assert.equal(
     requiredRankRunIdempotencyKey("rank-run-create-0001"),
@@ -24,8 +27,10 @@ test("rejects missing, malformed and additional rank run fields", () => {
   for (const value of [
     {},
     { estimateId: "not-a-uuid" },
-    { estimateId, provider: "ARSENKIN" },
-    { estimateId, workspaceId: estimateId },
+    { estimateId, confirmedPlatformChargeMicro: "-1" },
+    { estimateId, confirmedPlatformChargeMicro: "01" },
+    { estimateId, confirmedPlatformChargeMicro: "0", provider: "ARSENKIN" },
+    { estimateId, confirmedPlatformChargeMicro: "0", workspaceId: estimateId },
     [estimateId],
     undefined
   ]) {

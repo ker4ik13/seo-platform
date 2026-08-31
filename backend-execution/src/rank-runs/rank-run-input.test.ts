@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { maximumPlatformRankKeywordPriceMinor } from "@seo-platform/contracts";
 import {
   internalCancelRankJobInput,
   internalCreateRankRunInput,
@@ -12,6 +13,7 @@ const input = {
   projectId: "01900000-0000-7000-8000-000000000002",
   actorId: "01900000-0000-7000-8000-000000000003",
   estimateId: "01900000-0000-7000-8000-000000000004",
+  confirmedPlatformChargeMicro: "0",
   project: {
     id: "01900000-0000-7000-8000-000000000002",
     workspaceId: "01900000-0000-7000-8000-000000000001",
@@ -32,6 +34,10 @@ const input = {
     planCode: "PRO",
     planVersion: 2,
     concurrentJobs: 10
+  },
+  providerPricesMinor: {
+    ARSENKIN: "25",
+    XMLSTOCK: null
   }
 } as const;
 
@@ -40,6 +46,28 @@ test("accepts the exact authoritative run command", () => {
   assert.equal(
     rankRunIdempotencyKey("rank-run-command-0001"),
     "rank-run-command-0001"
+  );
+});
+
+test("keeps the full paid 15k launch inside PostgreSQL BIGINT", () => {
+  const maximum = String(maximumPlatformRankKeywordPriceMinor);
+  assert.equal(
+    internalCreateRankRunInput({
+      ...input,
+      providerPricesMinor: { ...input.providerPricesMinor, ARSENKIN: maximum }
+    }).providerPricesMinor.ARSENKIN,
+    maximum
+  );
+  assert.throws(
+    () =>
+      internalCreateRankRunInput({
+        ...input,
+        providerPricesMinor: {
+          ...input.providerPricesMinor,
+          ARSENKIN: String(maximumPlatformRankKeywordPriceMinor + 1)
+        }
+      }),
+    /Invalid providerPricesMinor\.ARSENKIN/u
   );
 });
 
@@ -80,7 +108,11 @@ test("parses teammate cancellation as tenant scope, not ownership", () => {
 });
 
 test("parses a continuation command without accepting browser keyword scope", () => {
-  const { estimateId, ...snapshot } = input;
+  const {
+    estimateId,
+    confirmedPlatformChargeMicro: _confirmedPlatformChargeMicro,
+    ...snapshot
+  } = input;
   const command = { ...snapshot, jobId: estimateId };
   assert.deepEqual(internalRetryRankJobInput(command), command);
   assert.throws(

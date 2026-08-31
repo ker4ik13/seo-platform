@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { canonicalizeJson } from "@seo-platform/contracts/canonical-json";
 import type {
   BillingLedgerAccountType,
   BillingLedgerDirection,
@@ -38,11 +39,33 @@ export class BillingLedgerService {
     const existing =
       await transaction.billingLedgerTransaction.findUnique({
         where: { businessReference: input.businessReference },
-        select: { id: true, status: true }
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          description: true,
+          occurredAt: true,
+          createdBy: true,
+          metadata: true,
+          reversalOfId: true,
+          entries: {
+            select: {
+              direction: true,
+              amountMinor: true,
+              currency: true,
+              account: {
+                select: { workspaceId: true, type: true }
+              }
+            }
+          }
+        }
       });
     if (existing) {
       if (existing.status !== "POSTED") {
         throw new Error("Existing billing ledger transaction is not posted");
+      }
+      if (!samePostedTransaction(existing, input)) {
+        throw new Error("Billing ledger idempotency conflict");
       }
       return existing.id;
     }
@@ -53,6 +76,17 @@ export class BillingLedgerService {
     const credit = total(input.entries, "CREDIT");
     if (debit <= 0n || debit !== credit) {
       throw new Error("Ledger transaction entries must balance");
+    }
+    const entryKeys = new Set<string>();
+    for (const entry of input.entries) {
+      if (entry.amountMinor <= 0n) {
+        throw new Error("Ledger entry amount must be positive");
+      }
+      const key = entryKey(entry);
+      if (entryKeys.has(key)) {
+        throw new Error("Ledger transaction contains a duplicate entry");
+      }
+      entryKeys.add(key);
     }
 
     const ledgerTransactionId = uuidV7();
@@ -72,9 +106,6 @@ export class BillingLedgerService {
     });
     const entries = [];
     for (const entry of input.entries) {
-      if (entry.amountMinor <= 0n) {
-        throw new Error("Ledger entry amount must be positive");
-      }
       const accountId = await this.accountId(
         transaction,
         entry.accountType,
@@ -171,6 +202,67 @@ export class BillingLedgerService {
     }
     return account.id;
   }
+}
+
+interface PostedTransaction {
+  readonly type: BillingLedgerTransactionType;
+  readonly description: string;
+  readonly occurredAt: Date;
+  readonly createdBy: string | null;
+  readonly metadata: Prisma.JsonValue;
+  readonly reversalOfId: string | null;
+  readonly entries: readonly {
+    readonly direction: BillingLedgerDirection;
+    readonly amountMinor: bigint;
+    readonly currency: string;
+    readonly account: {
+      readonly workspaceId: string | null;
+      readonly type: BillingLedgerAccountType;
+    };
+  }[];
+}
+
+function samePostedTransaction(
+  existing: PostedTransaction,
+  input: BillingLedgerPostInput
+): boolean {
+  if (
+    existing.type !== input.type ||
+    existing.description !== input.description ||
+    existing.occurredAt.getTime() !== input.occurredAt.getTime() ||
+    existing.createdBy !== (input.createdBy ?? null) ||
+    existing.reversalOfId !== (input.reversalOfId ?? null) ||
+    canonicalizeJson(existing.metadata) !== canonicalizeJson(input.metadata) ||
+    existing.entries.length !== input.entries.length
+  ) {
+    return false;
+  }
+
+  const actual = existing.entries
+    .map((entry) =>
+      entry.currency === "RUB"
+        ? entryKey({
+            ...(entry.account.workspaceId
+              ? { workspaceId: entry.account.workspaceId }
+              : {}),
+            accountType: entry.account.type,
+            direction: entry.direction,
+            amountMinor: entry.amountMinor
+          })
+        : "INVALID_CURRENCY"
+    )
+    .sort();
+  const expected = input.entries.map(entryKey).sort();
+  return actual.every((entry, index) => entry === expected[index]);
+}
+
+function entryKey(entry: BillingLedgerPostInput["entries"][number]): string {
+  return [
+    entry.workspaceId ?? "PLATFORM",
+    entry.accountType,
+    entry.direction,
+    entry.amountMinor.toString()
+  ].join("\u0000");
 }
 
 function total(

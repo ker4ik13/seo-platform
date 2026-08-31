@@ -48,20 +48,22 @@ test(
           ownerUserId: userId
         }
       });
+      const now = new Date();
       const planVersion = await prisma.billingPlanVersion.findFirstOrThrow({
         where: {
-          version: 3,
           status: "PUBLISHED",
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
           plan: { code: "AGENCY", status: "ACTIVE" }
         },
-        include: { plan: true }
+        include: { plan: true },
+        orderBy: { version: "desc" }
       });
       const search = await admin.searchWorkspaces(`${nonce}@admin.test`);
       assert.equal(search.data.length, 1);
       assert.equal(search.data[0]?.id, workspaceId);
       assert.equal(search.data[0]?.owner.displayName, "Workspace Admin Test");
 
-      const now = new Date();
       const input = {
         planCode: planVersion.plan.code,
         planVersion: planVersion.version,
@@ -80,7 +82,7 @@ test(
         now
       );
       assert.equal(first.planCode, "AGENCY");
-      assert.equal(first.planVersion, 3);
+      assert.equal(first.planVersion, planVersion.version);
       assert.equal(first.version, 1);
 
       const replay = await admin.grantSubscription(

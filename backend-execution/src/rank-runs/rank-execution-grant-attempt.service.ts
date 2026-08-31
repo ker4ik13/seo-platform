@@ -838,7 +838,8 @@ function validateLockedGraph(
     job.projectId === null ||
     job.actorId === null ||
     (job.provider !== "ARSENKIN" && job.provider !== "XMLSTOCK") ||
-    job.credentialMode !== "BYOK_API_KEY" ||
+    (job.credentialMode !== "BYOK_API_KEY" &&
+      job.credentialMode !== "PLATFORM_PAID") ||
     !grantableJobState(job) ||
     item.workspaceId !== job.workspaceId ||
     item.projectId !== job.projectId ||
@@ -876,7 +877,7 @@ function validateLockedGraph(
     estimate.workspaceId !== job.workspaceId ||
     estimate.projectId !== job.projectId ||
     estimate.provider !== job.provider ||
-    estimate.credentialMode !== "BYOK_API_KEY" ||
+    estimate.credentialMode !== job.credentialMode ||
     estimate.executionSnapshotHash === null ||
     run.projectStatus !== "ACTIVE" ||
     run.projectVersion !== estimate.projectVersion ||
@@ -934,7 +935,7 @@ function validateLockedGraph(
     route.position < 0 ||
     route.sourceKind !== "WORKSPACE_CREDENTIAL" ||
     route.credential.provider !== job.provider ||
-    route.credential.mode !== "BYOK_API_KEY" ||
+    route.credential.mode !== job.credentialMode ||
     route.credential.status !== "ACTIVE" ||
     route.credential.deletedAt !== null
   ) {
@@ -1021,6 +1022,12 @@ function requestFacts(
   }
   return {
     provider: job.provider as "ARSENKIN" | "XMLSTOCK",
+    credentialMode: job.credentialMode as
+      | "BYOK_API_KEY"
+      | "PLATFORM_PAID",
+    ...(job.credentialMode === "PLATFORM_PAID"
+      ? { platformUnitPriceMinor: platformUnitPriceMinor(job) }
+      : {}),
     workspaceId: job.workspaceId,
     projectId: job.projectId,
     actorId: job.actorId,
@@ -1057,6 +1064,28 @@ function requestFacts(
       config.rankExecution.killSwitchVersion
     )
   };
+}
+
+function platformUnitPriceMinor(job: RankGrantJobGraph): string {
+  const tasks = job.provider === "XMLSTOCK" ? job.progressTotal : 1n;
+  const chargeMicro = job.estimatedCostMicro;
+  if (
+    tasks === null ||
+    tasks < 1n ||
+    chargeMicro === null ||
+    chargeMicro < 1n ||
+    chargeMicro % 10_000n !== 0n
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false, "platform_price_invalid");
+  }
+  const chargeMinor = chargeMicro / 10_000n;
+  if (
+    chargeMinor % tasks !== 0n ||
+    chargeMinor / tasks > BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false, "platform_price_invalid");
+  }
+  return (chargeMinor / tasks).toString();
 }
 
 function validateProviderRequestIntent(

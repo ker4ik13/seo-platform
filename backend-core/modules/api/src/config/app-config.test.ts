@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { maximumPlatformRankKeywordPriceMinor } from "@seo-platform/contracts";
 import { loadAppConfig } from "./app-config.js";
+
+const xmlstockSpendLimits = {
+  PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
+  PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000"
+} as const;
+const arsenkinSpendLimits = {
+  PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+  PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "20000"
+} as const;
 
 test("loads explicit service configuration", () => {
   const config = loadAppConfig({
@@ -35,8 +45,95 @@ test("loads explicit service configuration", () => {
       enabled: false,
       intervalMs: 60_000,
       batchSize: 25
+    },
+    providerUsage: {
+      XMLSTOCK: { enabled: false },
+      ARSENKIN: { enabled: false }
     }
   });
+});
+
+test("requires an explicit positive token price for each enabled provider", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_XMLSTOCK_ENABLED: "true"
+      }),
+    /PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR/u
+  );
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_ARSENKIN_ENABLED: "true",
+    PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "25",
+    ...arsenkinSpendLimits
+  });
+  assert.deepEqual(config.billing.providerUsage.ARSENKIN, {
+    enabled: true,
+    rankKeywordPriceMinor: 25,
+    dailySpendLimitMinor: 2000,
+    monthlySpendLimitMinor: 20000
+  });
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "9007199254740992",
+        ...xmlstockSpendLimits
+      }),
+    /positive safe integer/u
+  );
+  assert.equal(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      PLATFORM_XMLSTOCK_ENABLED: "true",
+      PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: String(
+        maximumPlatformRankKeywordPriceMinor
+      ),
+      ...xmlstockSpendLimits
+    }).billing.providerUsage.XMLSTOCK.rankKeywordPriceMinor,
+    maximumPlatformRankKeywordPriceMinor
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: String(
+          maximumPlatformRankKeywordPriceMinor + 1
+        ),
+        ...xmlstockSpendLimits
+      }),
+    new RegExp(`no greater than ${maximumPlatformRankKeywordPriceMinor}`, "u")
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_ARSENKIN_ENABLED: "true",
+        PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "25"
+      }),
+    /PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR is required/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_ARSENKIN_ENABLED: "true",
+        PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "25",
+        PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+        PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "1999"
+      }),
+    /MONTHLY_SPEND_LIMIT_MINOR must be greater than or equal/u
+  );
 });
 
 test("requires complete YooKassa credentials and derives a safe return URL", () => {
@@ -170,6 +267,7 @@ test("does not allow development tokens in production", () => {
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
         REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "w".repeat(32),
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+        JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN: "b".repeat(32),
         JOBS_TO_PLATFORM_AUTOMATION_TOKEN: "a".repeat(32),
         JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
         WEB_PUBLIC_URL: "https://example.test",
@@ -329,6 +427,28 @@ test("rejects every documented service-token placeholder and unsafe header value
       /visible ASCII characters without whitespace or commas/u
     );
   }
+});
+
+test("requires an independent billing settlement token in production", () => {
+  assert.throws(
+    () =>
+      loadAppConfig(
+        productionEnvironment({
+          JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN: undefined
+        })
+      ),
+    /JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN:
+          "replace-with-a-distinct-random-billing-settlement-token"
+      }),
+    /must not use an example placeholder/u
+  );
 });
 
 test("requires a dedicated Realtime delivery authorization token in production", () => {
@@ -670,6 +790,7 @@ function productionEnvironment(
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
     REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "w".repeat(32),
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN: "b".repeat(32),
     JOBS_TO_PLATFORM_AUTOMATION_TOKEN: "a".repeat(32),
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
     WEB_PUBLIC_URL: "https://example.test",

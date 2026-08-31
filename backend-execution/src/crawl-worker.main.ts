@@ -81,7 +81,7 @@ async function bootstrap(): Promise<void> {
   timer.unref();
 
   worker.on("failed", (job) => {
-    logger.warn(`Crawl failed for ${job?.id ?? "unknown"}`);
+    logger.error(`Crawl failed for ${job?.id ?? "unknown"}`);
   });
   worker.on("error", () => logger.error("Crawl worker error"));
   queue.on("error", () => logger.error("Crawl queue error"));

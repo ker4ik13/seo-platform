@@ -569,11 +569,25 @@ export class BillingService {
           });
         }
         if (payment.order.kind === "TOP_UP") {
+          const workspaceOutstanding =
+            await transaction.billingRefund.aggregate({
+              where: {
+                workspaceId,
+                status: {
+                  in: ["CREATING", "PENDING", "FAILED_RETRYABLE"]
+                },
+                payment: { order: { kind: "TOP_UP" } }
+              },
+              _sum: { amountMinor: true }
+            });
+          const workspaceReservedMinor =
+            workspaceOutstanding._sum.amountMinor ?? 0n;
           const available = await this.ledger.balance(
             transaction,
             workspaceId
           );
-          const refundable = available.prepaidMinor - reservedMinor;
+          const refundable =
+            available.prepaidMinor - workspaceReservedMinor;
           if (amountMinor > refundable) {
             throw new DomainError({
               statusCode: 409,

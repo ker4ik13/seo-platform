@@ -1,12 +1,20 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import {
   currentRankProviderPolicyVersion,
-  supportedRankProviderPolicyVersions
+  supportedRankProviderPolicyVersions,
+  xmlStockRankProviderPolicyVersion
 } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
 import {
   BillingEntitlementService
 } from "../billing/billing-entitlement.service.js";
+import {
+  BillingUsageInsufficientBalanceError,
+  BillingUsageProviderBudgetExceededError,
+  BillingUsageService
+} from "../billing/billing-usage.service.js";
+import type { AppConfig } from "../config/app-config.js";
+import { APP_CONFIG } from "../config/config.module.js";
 
 export const RANK_EXECUTION_GRANT_POLICY = Symbol(
   "RANK_EXECUTION_GRANT_POLICY"
@@ -21,10 +29,13 @@ export interface RankExecutionGrantPolicyInput {
   readonly jobId: string;
   readonly jobItemId: string;
   readonly executionAttempt: number;
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly credentialMode: "BYOK_API_KEY" | "PLATFORM_PAID";
   readonly policyVersion: string;
   readonly usageIntent: {
     readonly meter: "RANK_PROVIDER_TASK";
     readonly quantity: 1;
+    readonly unitPriceMinor?: string;
   };
 }
 
@@ -57,7 +68,9 @@ export class ControlledBetaRankExecutionGrantPolicy
   implements RankExecutionGrantPolicy
 {
   public constructor(
-    private readonly entitlements: BillingEntitlementService
+    private readonly entitlements: BillingEntitlementService,
+    private readonly usage: BillingUsageService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public async evaluate(
@@ -69,7 +82,14 @@ export class ControlledBetaRankExecutionGrantPolicy
         input.policyVersion as (typeof supportedRankProviderPolicyVersions)[number]
       ) ||
       input.usageIntent.meter !== "RANK_PROVIDER_TASK" ||
-      input.usageIntent.quantity !== 1
+      input.usageIntent.quantity !== 1 ||
+      (input.credentialMode !== "BYOK_API_KEY" &&
+        input.credentialMode !== "PLATFORM_PAID") ||
+      (input.credentialMode === "BYOK_API_KEY" &&
+        input.usageIntent.unitPriceMinor !== undefined) ||
+      (input.credentialMode === "PLATFORM_PAID" &&
+        (!platformPolicyMatchesProvider(input.provider, input.policyVersion) ||
+          !positiveSafeMinor(input.usageIntent.unitPriceMinor)))
     ) {
       return {
         entitlement: "DENIED",
@@ -86,6 +106,57 @@ export class ControlledBetaRankExecutionGrantPolicy
         entitlement,
         quota: "NOT_AVAILABLE"
       };
+    }
+    if (input.credentialMode === "PLATFORM_PAID") {
+      const pricing = this.config.billing.providerUsage[input.provider];
+      if (
+        !pricing.enabled ||
+        pricing.dailySpendLimitMinor === undefined ||
+        pricing.monthlySpendLimitMinor === undefined
+      ) {
+        return {
+          entitlement: "ALLOWED",
+          quota: "NOT_AVAILABLE"
+        };
+      }
+      try {
+        const reserved = await this.usage.reserve(transaction, {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          jobId: input.jobId,
+          jobItemId: input.jobItemId,
+          executionAttempt: input.executionAttempt,
+          provider: input.provider,
+          operation: "POSITIONS",
+          quantity: 1,
+          unitPriceMinor: BigInt(input.usageIntent.unitPriceMinor!),
+          providerDailySpendLimitMinor:
+            BigInt(pricing.dailySpendLimitMinor),
+          providerMonthlySpendLimitMinor:
+            BigInt(pricing.monthlySpendLimitMinor),
+          businessReference:
+            `rank-provider-task:${input.workspaceId}:` +
+            input.jobItemId
+        });
+        if (reserved.status === "RELEASED") {
+          return {
+            entitlement: "ALLOWED",
+            quota: "NOT_AVAILABLE"
+          };
+        }
+      } catch (error) {
+        if (
+          error instanceof BillingUsageInsufficientBalanceError ||
+          error instanceof BillingUsageProviderBudgetExceededError
+        ) {
+          return {
+            entitlement: "ALLOWED",
+            quota: "EXHAUSTED"
+          };
+        }
+        throw error;
+      }
     }
     const [clock] = await transaction.$queryRaw<
       readonly { readonly now: Date }[]
@@ -124,6 +195,23 @@ export class ControlledBetaRankExecutionGrantPolicy
       quotaReservationId: reservation.id
     };
   }
+}
+
+function platformPolicyMatchesProvider(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  policyVersion: string
+): boolean {
+  return provider === "ARSENKIN"
+    ? policyVersion === currentRankProviderPolicyVersion
+    : policyVersion === xmlStockRankProviderPolicyVersion;
+}
+
+function positiveSafeMinor(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[1-9][0-9]{0,15}$/u.test(value) &&
+    BigInt(value) <= BigInt(Number.MAX_SAFE_INTEGER)
+  );
 }
 
 function utcDay(value: Date): Date {

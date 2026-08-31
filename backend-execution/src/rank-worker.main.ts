@@ -130,7 +130,7 @@ async function bootstrap(): Promise<void> {
   dispatchTimer.unref();
 
   worker.on("failed", (job) => {
-    logger.warn(`Rank preparation failed for job ${job?.id ?? "unknown"}`);
+    logger.error(`Rank preparation failed for job ${job?.id ?? "unknown"}`);
   });
   worker.on("error", () => {
     logger.error("Rank preparation worker error");

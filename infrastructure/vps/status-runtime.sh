@@ -35,6 +35,7 @@ for endpoint in \
   http://127.0.0.1:4001/health/ready \
   http://127.0.0.1:4002/health/ready \
   http://127.0.0.1:4003/health/ready \
+  http://127.0.0.1:4004/health/ready \
   http://127.0.0.1:3000/ru \
   http://127.0.0.1:9000/minio/health/ready \
   "$(public_storage_endpoint)/minio/health/ready"
@@ -60,5 +61,5 @@ else
 fi
 
 ss -lntp |
-  grep -E ':(3000|3310|4000|4001|4002|4003|4222|5432|6379|6380|8222|9000|9001|9443)([[:space:]]|$)' ||
+  grep -E ':(3000|3310|4000|4001|4002|4003|4004|4222|5432|6379|6380|8222|9000|9001|9443)([[:space:]]|$)' ||
   true

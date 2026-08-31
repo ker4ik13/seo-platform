@@ -17,8 +17,17 @@ const baseEnvironment = {
   EXECUTION_CONNECTOR_REDIS_URL: "redis://connector",
   INTEGRATION_CREDENTIAL_KEYS: "secret-keyring",
   INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: "secret-fingerprint",
+  OPERATIONAL_ALERT_TOKEN: "must-stay-in-supervisor",
+  TELEGRAM_ALERT_BOT_TOKEN: "must-not-enter-execution-child",
   PLATFORM_API_URL: "http://backend-core:4000",
-  PLATFORM_API_COMMAND_TIMEOUT_MS: "7000"
+  PLATFORM_API_COMMAND_TIMEOUT_MS: "7000",
+  JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN:
+    "billing-settlement-secret",
+  PLATFORM_XMLSTOCK_ENABLED: "true",
+  PLATFORM_XMLSTOCK_API_KEYS: "must-stay-in-http-1,must-stay-in-http-2",
+  PLATFORM_XMLSTOCK_ACCOUNT_IDS: "platform-account",
+  PLATFORM_ARSENKIN_ENABLED: "false",
+  PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http"
 } satisfies NodeJS.ProcessEnv;
 
 test("execution roles receive only their scoped database and secrets", () => {
@@ -40,6 +49,11 @@ test("execution roles receive only their scoped database and secrets", () => {
   const http = definitions.find(({ name }) => name === "http")?.environment;
   assert.equal(http?.PLATFORM_API_URL, "http://backend-core:4000");
   assert.equal(http?.PLATFORM_API_COMMAND_TIMEOUT_MS, "7000");
+  assert.equal(http?.PLATFORM_XMLSTOCK_ENABLED, "true");
+  assert.equal(
+    http?.PLATFORM_XMLSTOCK_API_KEYS,
+    "must-stay-in-http-1,must-stay-in-http-2"
+  );
   assert.equal(system?.PLATFORM_API_URL, undefined);
   const rank = definitions.find(({ name }) => name === "rank-worker")?.environment;
   assert.equal(rank?.DATABASE_URL, "postgresql://rank");
@@ -47,11 +61,43 @@ test("execution roles receive only their scoped database and secrets", () => {
   const connector = definitions.find(({ name }) => name === "connector-worker")?.environment;
   assert.equal(connector?.DATABASE_URL, "postgresql://connector");
   assert.equal(connector?.INTEGRATION_CREDENTIAL_KEYS, "secret-keyring");
+  assert.equal(
+    connector?.JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN,
+    "billing-settlement-secret"
+  );
   assert.equal(connector?.CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS, undefined);
   assert.equal(
     connector?.INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS,
     undefined
   );
+  for (const definition of definitions) {
+    assert.equal(definition.environment.OPERATIONAL_ALERT_TOKEN, undefined);
+    assert.equal(definition.environment.TELEGRAM_ALERT_BOT_TOKEN, undefined);
+    if (definition.name !== "http") {
+      assert.equal(
+        definition.environment.PLATFORM_XMLSTOCK_API_KEY,
+        undefined
+      );
+      assert.equal(
+        definition.environment.PLATFORM_XMLSTOCK_API_KEYS,
+        undefined
+      );
+      assert.equal(
+        definition.environment.PLATFORM_ARSENKIN_API_KEY,
+        undefined
+      );
+      assert.equal(
+        definition.environment.PLATFORM_ARSENKIN_API_KEYS,
+        undefined
+      );
+    }
+    if (!definition.name.startsWith("connector-worker")) {
+      assert.equal(
+        definition.environment.JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN,
+        undefined
+      );
+    }
+  }
 });
 
 test("rank and connector process counts scale without adding services", () => {

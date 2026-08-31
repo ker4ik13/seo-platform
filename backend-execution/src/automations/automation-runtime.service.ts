@@ -71,7 +71,7 @@ export class AutomationRuntimeService
       this.logger.error("Rank automation worker error");
     });
     this.worker.on("failed", () => {
-      this.logger.warn("One rank automation delivery failed");
+      this.logger.error("One rank automation delivery failed");
     });
     await this.reconcile();
     this.timer = setInterval(

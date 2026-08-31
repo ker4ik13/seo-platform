@@ -10,7 +10,7 @@ PostgreSQL/Redis/NATS, security preflight, tests, monitoring и VPS runbooks.
 | Service | Artifact | Internal ports |
 |---|---|---:|
 | `frontend` | `@seo-platform/frontend` | 3000 |
-| `backend-core` | `@seo-platform/backend-core` | 4000, 4001, 4003 |
+| `backend-core` | `@seo-platform/backend-core` | 4000, 4001, 4003, 4004 |
 | `backend-execution` | `@seo-platform/backend-execution` | 4002 |
 
 PostgreSQL, два Redis instance, NATS и опциональный ClamAV — data/runtime
@@ -35,7 +35,8 @@ bind mounts на transient Dokploy checkout нет.
 
 Ports в Compose используются через `expose`, а не host `ports`. Публичные
 domain routes создаются Dokploy/Traefik. PostgreSQL, Redis, NATS monitor,
-ClamAV и Execution API наружу не публикуются.
+ClamAV, Execution API и operational-alert receiver `4004` наружу не
+публикуются.
 
 ## PostgreSQL и Prisma
 
@@ -85,7 +86,8 @@ service tokens, DB/Redis passwords, NATS credentials и encryption keys долж
 NATS password/bcrypt парами. Точная double-dollar transport-форма совместима
 как со старым dotenv rewrite, так и с новым quoting Dokploy: runtime приводит
 её к canonical bcrypt перед проверкой и рендерингом. Вручную после этого
-заполняются только значения, выданные владельцем домена, SMTP и S3. Для четырёх
+заполняются только значения, выданные владельцем домена, SMTP, S3, Telegram и
+platform-provider account. Для четырёх
 Dokploy PostgreSQL backup jobs пароль отдельно не вводится: `postgres` передаёт тот же
 `POSTGRES_PASSWORD` как `PGPASSWORD` внутреннему `pg_dump`.
 
@@ -96,6 +98,13 @@ Dokploy PostgreSQL backup jobs пароль отдельно не вводитс
 - Realtime notification/Web Push credentials;
 - auth-email SMTP/NATS/DB credentials;
 - YooKassa secret только в Core child process.
+- Telegram bot token только в Core alert-receiver child process; остальные
+  supervisors получают отдельный `OPERATIONAL_ALERT_TOKEN`.
+- исходные platform XMLStock/Arsenkin credentials только в Execution HTTP
+  management child; Core получает лишь feature flag и customer price.
+- `JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN` получают только Core API и
+  connector child. Он не переиспользует rank-grant credential и разрешает
+  только exact capture после provider response.
 
 ## Optional capabilities
 
@@ -104,6 +113,14 @@ Dokploy PostgreSQL backup jobs пароль отдельно не вводитс
 - `MALWARE_SCANNER_ENABLED=false` не запускает inspection child;
 - `WEB_PUSH_DELIVERY_ENABLED=false` не запускает Web Push sender;
 - `YOOKASSA_ENABLED=false` не активирует payment adapter.
+- `TELEGRAM_ALERTS_ENABLED=false` оставляет private receiver доступным для
+  health, но отключает внешнюю доставку;
+- `PLATFORM_XMLSTOCK_ENABLED=false` и `PLATFORM_ARSENKIN_ENABLED=false`
+  скрывают системные provider credentials и платный rank path. При включении
+  plural-переменные `*_API_KEYS`/`*_ACCOUNT_IDS` принимают comma-separated
+  pool до 64 ключей; singular-варианты оставлены для одного legacy key.
+  `*_DAILY_SPEND_LIMIT_MINOR` и `*_MONTHLY_SPEND_LIMIT_MINOR` обязательны:
+  Core атомарно учитывает captured usage и все живые reservations по UTC.
 
 Transactional email в текущем Compose включён и требует отдельные
 `AUTH_EMAIL_*` credentials. Недоступная capability должна возвращать честное
@@ -137,6 +154,9 @@ pnpm infra:validate
 Database backup настраивается в Dokploy отдельно для каждой из четырёх
 логических PostgreSQL databases. Для Redis Jobs и NATS доступны дополнительные
 named-volume backups; Realtime Redis намеренно ephemeral.
+
+Настройка и canary внутренних ошибок описаны в
+[`runbooks/operational-alerts.md`](./runbooks/operational-alerts.md).
 
 Изменение application topology, data ownership, database/queue/event или
 security boundary требует обновить `PROJECT_MAP.md`; data ownership — также

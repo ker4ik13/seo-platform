@@ -90,7 +90,10 @@ test("creates a trusted rank command and returns project-scoped Location", async
   );
 
   const response = await controller.create(
-    { estimateId: estimateId.toUpperCase() },
+    {
+      estimateId: estimateId.toUpperCase(),
+      confirmedPlatformChargeMicro: "0"
+    },
     request({
       headers: { "idempotency-key": "rank-run-create-0001" }
     }),
@@ -124,6 +127,7 @@ test("creates a trusted rank command and returns project-scoped Location", async
   });
   assert.deepEqual(captured?.[1], {
     estimateId,
+    confirmedPlatformChargeMicro: "0",
     workspaceId,
     projectId,
     actorId,
@@ -358,7 +362,7 @@ test("rejects stale lifecycle and access snapshots before audit or RPC", async (
     await assert.rejects(
       () =>
         controller.create(
-          { estimateId },
+          { estimateId, confirmedPlatformChargeMicro: "0" },
           request({
             headers: {
               "idempotency-key": "rank-run-create-0002"

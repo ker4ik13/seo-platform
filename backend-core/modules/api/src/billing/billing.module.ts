@@ -10,6 +10,7 @@ import { BillingLedgerService } from "./billing-ledger.service.js";
 import { BillingPiiService } from "./billing-pii.service.js";
 import { BillingReconciliationService } from "./billing-reconciliation.service.js";
 import { BillingService } from "./billing.service.js";
+import { BillingUsageService } from "./billing-usage.service.js";
 import { BillingWebhookController } from "./billing-webhook.controller.js";
 import { YookassaClient } from "./yookassa.client.js";
 
@@ -26,8 +27,14 @@ import { YookassaClient } from "./yookassa.client.js";
     BillingPiiService,
     BillingReconciliationService,
     BillingService,
+    BillingUsageService,
     YookassaClient
   ],
-  exports: [BillingEntitlementService, BillingPiiService, BillingService]
+  exports: [
+    BillingEntitlementService,
+    BillingPiiService,
+    BillingService,
+    BillingUsageService
+  ]
 })
 export class BillingModule {}

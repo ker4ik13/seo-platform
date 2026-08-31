@@ -94,7 +94,7 @@ test("selects one capability binding and rejects duplicate projections", () => {
   );
 });
 
-test("only ACTIVE BYOK credentials with the requested capability are eligible", () => {
+test("only ACTIVE credentials with a mode supporting the capability are eligible", () => {
   assert.equal(
     isProjectConnectorCredentialEligible(
       activeCredential,
@@ -124,6 +124,24 @@ test("only ACTIVE BYOK credentials with the requested capability are eligible", 
     isProjectConnectorCredentialEligible(
       { ...activeCredential, capabilities: ["SERP_COLLECTION"] },
       RANK_TRACKING_CAPABILITY
+    ),
+    false
+  );
+  assert.equal(
+    isProjectConnectorCredentialEligible(
+      { ...activeCredential, mode: "PLATFORM_PAID" },
+      RANK_TRACKING_CAPABILITY
+    ),
+    true
+  );
+  assert.equal(
+    isProjectConnectorCredentialEligible(
+      {
+        ...activeCredential,
+        mode: "PLATFORM_PAID",
+        capabilities: ["KEYWORD_RESEARCH"]
+      },
+      "KEYWORD_RESEARCH"
     ),
     false
   );

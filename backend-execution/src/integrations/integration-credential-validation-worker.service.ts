@@ -8,6 +8,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialConnectorRegistry } from "./integration-credential-connector.registry.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
+import { selectIntegrationCredentialSecret } from "./platform-credential-pool.js";
 import {
   IntegrationCredentialExecutionBrokerService,
   type CredentialValidationClaim
@@ -114,6 +115,13 @@ export class IntegrationCredentialValidationWorkerService {
         claim.summary.credentialId,
         claim.encryptedCredential
       );
+      if (secret.platformPool) {
+        secret = selectIntegrationCredentialSecret(
+          secret,
+          claim.summary.credentialId,
+          claim.summary.credentialId
+        );
+      }
     } catch {
       return this.finishJobOnlyRetry(
         claim,

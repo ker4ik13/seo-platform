@@ -119,7 +119,7 @@ export function projectConnectorOptions(
 ): readonly ProjectConnectorCredentialOption[] {
   return settings.credentialOptions.filter(
     (credential) =>
-      credential.mode === "BYOK_API_KEY" &&
+      credentialModeSupportsCapability(credential.mode, capability) &&
       credential.capabilities.includes(capability)
   );
 }
@@ -173,7 +173,7 @@ export function projectConnectorIncompatibleOptions(
 ): readonly ProjectConnectorCredentialOption[] {
   return settings.credentialOptions.filter(
     (credential) =>
-      credential.mode === "BYOK_API_KEY" &&
+      credentialModeSupportsCapability(credential.mode, capability) &&
       !credential.capabilities.includes(capability)
   );
 }
@@ -183,9 +183,19 @@ export function isProjectConnectorCredentialEligible(
   capability: IntegrationCapability
 ): boolean {
   return (
-    credential.mode === "BYOK_API_KEY" &&
+    credentialModeSupportsCapability(credential.mode, capability) &&
     credential.status === "ACTIVE" &&
     credential.capabilities.includes(capability)
+  );
+}
+
+function credentialModeSupportsCapability(
+  mode: ProjectConnectorCredentialOption["mode"],
+  capability: IntegrationCapability
+): boolean {
+  return (
+    mode === "BYOK_API_KEY" ||
+    (mode === "PLATFORM_PAID" && capability === "SERP_RANK_TRACKING")
   );
 }
 

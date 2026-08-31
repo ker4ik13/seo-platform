@@ -192,12 +192,16 @@ test("rank run conflict details expose an attachable Job only for an equivalent 
   }
 });
 
-test("public create body contains only immutable estimate identity", () => {
+test("public create body carries immutable estimate identity and confirmed charge", () => {
   const input = {
-    estimateId: ids.estimateId
+    estimateId: ids.estimateId,
+    confirmedPlatformChargeMicro: "2500000"
   } satisfies CreateRankRunInput;
 
-  assert.deepEqual(Object.keys(input), ["estimateId"]);
+  assert.deepEqual(Object.keys(input), [
+    "estimateId",
+    "confirmedPlatformChargeMicro"
+  ]);
   assert.equal("projectId" in input, false);
   assert.equal("credentialId" in input, false);
   assert.equal("bindingId" in input, false);
@@ -410,6 +414,7 @@ test("public rank summary rejects contradictory lifecycle projections", () => {
 test("internal create carries trusted project and access snapshots without execution secrets", () => {
   const input = {
     estimateId: ids.estimateId,
+    confirmedPlatformChargeMicro: "2500000",
     workspaceId: ids.workspaceId,
     projectId: ids.projectId,
     actorId: ids.actorId,
@@ -439,6 +444,10 @@ test("internal create carries trusted project and access snapshots without execu
       planCode: "TEAM",
       planVersion: 3,
       concurrentJobs: 10
+    },
+    providerPricesMinor: {
+      ARSENKIN: "25",
+      XMLSTOCK: null
     }
   } as const satisfies InternalCreateRankRunInput;
 

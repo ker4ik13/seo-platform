@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   integrationProviderMetadata,
-  operationalIntegrationProviderCatalog
+  operationalIntegrationProviderCatalog,
+  operationalIntegrationProviderCatalogForPlatform
 } from "./integration-provider-catalog.js";
 
 test("Arsenkin catalog exposes its documented execution capabilities", () => {
@@ -48,5 +49,24 @@ test("public catalog only advertises operational provider workflows", () => {
   assert.deepEqual(
     integrationProviderMetadata("XMLSTOCK").capabilities,
     ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "KEYWORD_RESEARCH"]
+  );
+});
+
+test("advertises platform-paid mode only for configured rank providers", () => {
+  const catalog = operationalIntegrationProviderCatalogForPlatform(
+    new Set(["XMLSTOCK"])
+  );
+  assert.deepEqual(
+    catalog.find(({ provider }) => provider === "XMLSTOCK")?.supportedModes,
+    ["BYOK_API_KEY", "PLATFORM_PAID"]
+  );
+  assert.deepEqual(
+    catalog.find(({ provider }) => provider === "ARSENKIN")?.supportedModes,
+    ["BYOK_API_KEY"]
+  );
+  assert.match(
+    catalog.find(({ provider }) => provider === "XMLSTOCK")
+      ?.subscriptionNotice ?? "",
+    /внутренн/u
   );
 });

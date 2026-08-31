@@ -122,7 +122,7 @@ test(
     const fixture = await createGrantFixture(prisma);
     const service = new RankExecutionGrantService(
       prisma,
-      grantingPolicy(uuidV7())
+      grantingPolicy()
     );
 
     try {
@@ -422,15 +422,49 @@ function grantPrisma(url: string, poolSize: number): PrismaService {
   );
 }
 
-function grantingPolicy(
-  quotaReservationId: string
-): RankExecutionGrantPolicy {
+function grantingPolicy(): RankExecutionGrantPolicy {
   return {
-    evaluate: async () => ({
-      entitlement: "ALLOWED",
-      quota: "AVAILABLE",
-      quotaReservationId
-    })
+    evaluate: async (transaction, input) => {
+      const [clock] = await transaction.$queryRaw<
+        readonly { readonly now: Date }[]
+      >`SELECT clock_timestamp() AS "now"`;
+      assert.ok(clock?.now instanceof Date);
+      assert.equal(Number.isNaN(clock.now.getTime()), false);
+      const createdAt = clock.now;
+      const windowStartedAt = new Date(
+        Date.UTC(
+          createdAt.getUTCFullYear(),
+          createdAt.getUTCMonth(),
+          createdAt.getUTCDate()
+        )
+      );
+      const windowEndsAt = new Date(
+        windowStartedAt.getTime() + 24 * 60 * 60 * 1_000
+      );
+      const reservation =
+        await transaction.rankExecutionQuotaReservation.create({
+          data: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            actorId: input.actorId,
+            jobId: input.jobId,
+            jobItemId: input.jobItemId,
+            executionAttempt: input.executionAttempt,
+            meter: input.usageIntent.meter,
+            quantity: input.usageIntent.quantity,
+            policyVersion: input.policyVersion,
+            windowStartedAt,
+            windowEndsAt,
+            createdAt
+          },
+          select: { id: true }
+        });
+      return {
+        entitlement: "ALLOWED",
+        quota: "AVAILABLE",
+        quotaReservationId: reservation.id
+      };
+    }
   };
 }
 
@@ -448,11 +482,17 @@ function hash(character: string): RankManifestHash {
 }
 
 async function assertPostgres18(client: Client): Promise<void> {
-  const result = await client.query<{ readonly server_version_num: string }>(
-    "SHOW server_version_num"
-  );
-  const version = Number(result.rows[0]?.server_version_num);
+  const result = await client.query<{
+    readonly serverVersionNum: string;
+    readonly timezone: string;
+  }>(`
+    SELECT
+      current_setting('server_version_num') AS "serverVersionNum",
+      current_setting('TimeZone') AS "timezone"
+  `);
+  const version = Number(result.rows[0]?.serverVersionNum);
   assert.equal(Math.floor(version / 10_000), 18);
+  assert.equal(result.rows[0]?.timezone, "UTC");
 }
 
 async function waitForBlockedWorkspaceLock(client: Client): Promise<void> {

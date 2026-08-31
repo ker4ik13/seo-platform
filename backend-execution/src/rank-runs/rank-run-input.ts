@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { maximumPlatformRankKeywordPriceMinor } from "@seo-platform/contracts";
 import type {
   InternalCancelRankJobInput,
   InternalCreateRankRunInput,
@@ -15,7 +16,9 @@ const CREATE_FIELDS = [
   "project",
   "access",
   "billingCurrency",
-  "jobCapacity"
+  "jobCapacity",
+  "confirmedPlatformChargeMicro",
+  "providerPricesMinor"
 ] as const;
 const PROJECT_FIELDS = [
   "id",
@@ -49,6 +52,11 @@ export function internalCreateRankRunInput(
     input.jobCapacity,
     ["planCode", "planVersion", "concurrentJobs"],
     "jobCapacity"
+  );
+  const providerPricesMinor = exactRecord(
+    input.providerPricesMinor,
+    ["ARSENKIN", "XMLSTOCK"],
+    "providerPricesMinor"
   );
   const workspaceId = uuid(input.workspaceId, "workspaceId");
   const projectId = uuid(input.projectId, "projectId");
@@ -86,6 +94,11 @@ export function internalCreateRankRunInput(
     projectId,
     actorId,
     estimateId,
+    confirmedPlatformChargeMicro: boundedMoneyDecimal(
+      input.confirmedPlatformChargeMicro,
+      "confirmedPlatformChargeMicro",
+      true
+    ),
     project: {
       id: projectId,
       workspaceId,
@@ -109,6 +122,16 @@ export function internalCreateRankRunInput(
       planCode: jobCapacity.planCode,
       planVersion: Number(jobCapacity.planVersion),
       concurrentJobs: Number(jobCapacity.concurrentJobs)
+    },
+    providerPricesMinor: {
+      ARSENKIN: optionalProviderPrice(
+        providerPricesMinor.ARSENKIN,
+        "providerPricesMinor.ARSENKIN"
+      ),
+      XMLSTOCK: optionalProviderPrice(
+        providerPricesMinor.XMLSTOCK,
+        "providerPricesMinor.XMLSTOCK"
+      )
     }
   };
 }
@@ -142,12 +165,14 @@ export function internalRetryRankJobInput(
     "project",
     "access",
     "billingCurrency",
-    "jobCapacity"
+    "jobCapacity",
+    "providerPricesMinor"
   ], "rankRetry");
   const { jobId, ...createFields } = raw;
   const created = internalCreateRankRunInput({
     ...createFields,
-    estimateId: "00000000-0000-7000-8000-000000000000"
+    estimateId: "00000000-0000-7000-8000-000000000000",
+    confirmedPlatformChargeMicro: "0"
   });
   return {
     workspaceId: created.workspaceId,
@@ -157,7 +182,8 @@ export function internalRetryRankJobInput(
     project: created.project,
     access: created.access,
     billingCurrency: created.billingCurrency,
-    jobCapacity: created.jobCapacity
+    jobCapacity: created.jobCapacity,
+    providerPricesMinor: created.providerPricesMinor
   };
 }
 
@@ -272,6 +298,33 @@ function decimal(value: unknown, name: string): string {
     invalid(name);
   }
   return value;
+}
+
+function boundedMoneyDecimal(
+  value: unknown,
+  name: string,
+  allowZero: boolean
+): string {
+  const parsed = decimal(value, name);
+  if (
+    parsed.length > 30 ||
+    (!allowZero && parsed === "0")
+  ) {
+    invalid(name);
+  }
+  return parsed;
+}
+
+function optionalProviderPrice(
+  value: unknown,
+  name: string
+): string | null {
+  if (value === null) return null;
+  const parsed = boundedMoneyDecimal(value, name, false);
+  if (BigInt(parsed) > BigInt(maximumPlatformRankKeywordPriceMinor)) {
+    invalid(name);
+  }
+  return parsed;
 }
 
 function timestamp(value: unknown, name: string): string {

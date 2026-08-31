@@ -119,6 +119,15 @@ export class AutomationExecutionService {
         );
         return;
       }
+      if (estimate.credentialMode === "PLATFORM_PAID") {
+        await this.fail(
+          automation,
+          run,
+          "PLATFORM_PAID_REQUIRES_INTERACTIVE_ESTIMATE",
+          estimate.id
+        );
+        return;
+      }
       if (Number(estimate.scope.keywordCount) > definition.maxItems) {
         await this.fail(
           automation,
@@ -131,6 +140,7 @@ export class AutomationExecutionService {
 
       const runInput: InternalCreateRankRunInput = {
         estimateId: estimate.id,
+        confirmedPlatformChargeMicro: "0",
         workspaceId: automation.workspaceId,
         projectId: automation.projectId,
         actorId: definition.execution.actorId,
@@ -149,7 +159,11 @@ export class AutomationExecutionService {
           quota: { status: "NOT_AVAILABLE" }
         },
         billingCurrency: definition.execution.billingCurrency,
-        jobCapacity: definition.execution.jobCapacity
+        jobCapacity: definition.execution.jobCapacity,
+        providerPricesMinor: {
+          ARSENKIN: null,
+          XMLSTOCK: null
+        }
       };
       const job = await this.rankRuns.create(
         runInput,

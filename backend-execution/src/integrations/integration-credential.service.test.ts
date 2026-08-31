@@ -4,7 +4,10 @@ import {
   ConflictException,
   UnprocessableEntityException
 } from "@nestjs/common";
-import type { InternalCreateIntegrationCredentialInput } from "@seo-platform/contracts";
+import type {
+  InternalCreateIntegrationCredentialInput,
+  InternalEnablePlatformIntegrationCredentialInput
+} from "@seo-platform/contracts";
 import { loadAppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type {
@@ -35,6 +38,22 @@ const createInput: InternalCreateIntegrationCredentialInput =
     apiKey: "secret-api-key",
     accountIdentifier: "account-1"
   });
+const platformInput: InternalEnablePlatformIntegrationCredentialInput = {
+  workspaceId,
+  actorId,
+  idempotencyKey: "platform-credential-enable-001",
+  provider: "XMLSTOCK"
+};
+const platformMaterial = [
+  {
+    apiKey: "platform-xmlstock-secret-1",
+    accountIdentifier: "platform-account-1"
+  },
+  {
+    apiKey: "platform-xmlstock-secret-2",
+    accountIdentifier: "platform-account-2"
+  }
+] as const;
 
 test("lists the bounded active validation for the current credential material", async () => {
   const crypto = testCrypto();
@@ -283,6 +302,169 @@ test("creates one masked credential for an idempotent request", async () => {
     service.create({ ...createInput, apiKey: "another-secret-key" }),
     ConflictException
   );
+});
+
+test("enables one encrypted platform credential without exposing shared quota", async () => {
+  const crypto = testRotatingFingerprintCrypto();
+  const executor = testExecutionCrypto();
+  let stored: IntegrationCredential | null = null;
+  let createCount = 0;
+  let activeLookup: unknown;
+  const prisma = {
+    integrationCredential: {
+      findUnique: async ({ where }: { where: {
+        workspaceId_idempotencyKey: {
+          workspaceId: string;
+          idempotencyKey: string;
+        };
+      } }) =>
+        stored?.idempotencyKey ===
+        where.workspaceId_idempotencyKey.idempotencyKey
+          ? stored
+          : null,
+      findFirst: async ({ where }: { where: unknown }) => {
+        activeLookup = where;
+        return stored;
+      },
+      create: async ({
+        data
+      }: {
+        data: Readonly<Record<string, unknown>>;
+      }) => {
+        createCount += 1;
+        assert.deepEqual(data.providerMeta, {
+          accountIdentifierConfigured: true,
+          platformPoolSize: 2
+        });
+        stored = credentialRecord(
+          crypto,
+          {
+            ...createInput,
+            idempotencyKey: platformInput.idempotencyKey,
+            label: "XMLStock — внутренние токены",
+            apiKey: platformMaterial[0].apiKey,
+            accountIdentifier: platformMaterial[0].accountIdentifier
+          },
+          {
+            id: String(data.id),
+            label: String(data.label),
+            mode: "PLATFORM_PAID",
+            displayHint: String(data.displayHint),
+            capabilities: data.capabilities as string[],
+            ciphertext: bytes(data.ciphertext),
+            nonce: bytes(data.nonce),
+            authTag: bytes(data.authTag),
+            encryptedDataKey: bytes(data.encryptedDataKey),
+            dataKeyNonce: bytes(data.dataKeyNonce),
+            dataKeyAuthTag: bytes(data.dataKeyAuthTag),
+            requestFingerprint: bytes(data.requestFingerprint),
+            keyVersion: Number(data.keyVersion),
+            fingerprintKeyVersion: Number(data.fingerprintKeyVersion),
+            providerMeta: {
+              account: { balance: "999999.99", requestLimit: 999_999 }
+            },
+            lastSuccessAt: new Date("2026-08-27T12:00:00.000Z")
+          }
+        );
+        return stored;
+      }
+    }
+  } as unknown as PrismaService;
+  const service = new IntegrationCredentialService(prisma, crypto);
+
+  const first = await service.enablePlatform(platformInput, platformMaterial);
+  const replay = await service.enablePlatform(platformInput, platformMaterial);
+
+  assert.equal(createCount, 1);
+  assert.equal(replay.id, first.id);
+  assert.equal(first.mode, "PLATFORM_PAID");
+  assert.equal(first.displayHint, "Системный");
+  assert.deepEqual(first.capabilities, ["SERP_RANK_TRACKING"]);
+  assert.deepEqual(first.quota, { status: "NOT_AVAILABLE" });
+  assert.deepEqual(activeLookup, {
+    workspaceId,
+    provider: "XMLSTOCK",
+    mode: "PLATFORM_PAID",
+    deletedAt: null
+  });
+  const persisted = stored as IntegrationCredential | null;
+  if (!persisted) throw new Error("Platform credential was not stored");
+  assert.equal(persisted.fingerprintKeyVersion, 4);
+  const decrypted = executor.decrypt(workspaceId, "XMLSTOCK", persisted.id, {
+      ciphertext: Buffer.from(persisted.ciphertext),
+      nonce: Buffer.from(persisted.nonce),
+      authTag: Buffer.from(persisted.authTag),
+      encryptedDataKey: Buffer.from(persisted.encryptedDataKey),
+      dataKeyNonce: Buffer.from(persisted.dataKeyNonce),
+      dataKeyAuthTag: Buffer.from(persisted.dataKeyAuthTag),
+      keyVersion: persisted.keyVersion
+    });
+  assert.equal(decrypted.apiKey, platformMaterial[0].apiKey);
+  assert.equal(decrypted.platformPool?.length, 2);
+  assert.deepEqual(
+    decrypted.platformPool?.map(({ apiKey, accountIdentifier }) => ({
+      apiKey,
+      accountIdentifier
+    })),
+    platformMaterial
+  );
+  assert.equal(
+    decrypted.rateLimitScopeId,
+    decrypted.platformPool?.[0]?.id
+  );
+  assert.match(decrypted.rateLimitScopeId ?? "", /^[0-9a-f-]{36}$/u);
+
+  await assert.rejects(
+    service.enablePlatform(
+      { ...platformInput, idempotencyKey: "platform-credential-enable-002" },
+      platformMaterial
+    ),
+    ConflictException
+  );
+});
+
+test("does not replay a platform credential through the BYOK create boundary", async () => {
+  const crypto = testCrypto();
+  const platform = credentialRecord(crypto, createInput, {
+    mode: "PLATFORM_PAID"
+  });
+  const prisma = {
+    integrationCredential: { findUnique: async () => platform }
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    new IntegrationCredentialService(prisma, crypto).create(createInput),
+    ConflictException
+  );
+});
+
+test("prevents workspace users from editing a platform-owned secret", async () => {
+  const crypto = testCrypto();
+  let updateCalls = 0;
+  const platform = credentialRecord(crypto, createInput, {
+    mode: "PLATFORM_PAID"
+  });
+  const prisma = {
+    integrationCredential: {
+      findFirst: async () => platform,
+      update: async () => {
+        updateCalls += 1;
+        return platform;
+      }
+    }
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    new IntegrationCredentialService(prisma, crypto).update(credentialId, {
+      workspaceId,
+      actorId,
+      version: 1,
+      label: "Подмена системного ключа",
+      apiKey: "attacker-owned-key"
+    }),
+    UnprocessableEntityException
+  );
+  assert.equal(updateCalls, 0);
 });
 
 test("returns the concurrent create winner after a matching P2002 race", async () => {
@@ -538,6 +720,25 @@ function testCrypto(): IntegrationCredentialCryptoService {
       INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
       INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `4:${fingerprintKey}`,
       INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "4",
+      PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
+    })
+  );
+}
+
+function testRotatingFingerprintCrypto(): IntegrationCredentialCryptoService {
+  const key = Buffer.alloc(32, 7).toString("base64url");
+  const oldFingerprintKey = Buffer.alloc(32, 8).toString("base64url");
+  const activeFingerprintKey = Buffer.alloc(32, 9).toString("base64url");
+  return new IntegrationCredentialCryptoService(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTEGRATION_CREDENTIALS_ENABLED: "true",
+      INTEGRATION_CREDENTIAL_KEYS: `1:${key}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
+      INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS:
+        `4:${oldFingerprintKey},5:${activeFingerprintKey}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "5",
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
     })
   );

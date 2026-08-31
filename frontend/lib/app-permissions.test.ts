@@ -4,6 +4,7 @@ import {
   canManageWorkspaceTeam,
   canManageWorkspaceIntegrations,
   canTestWorkspaceIntegrations,
+  canUseWorkspaceSystemCredentials,
   canUpdateProject,
   canViewWorkspaceTeam,
   canViewProjectIntegrations,
@@ -46,6 +47,16 @@ test("SEO roles can run credential checks", () => {
   for (const role of ["ANALYST", "CONTENT_EDITOR", "CLIENT", "VIEWER"]) {
     assert.equal(canTestWorkspaceIntegrations(role), false);
   }
+});
+
+test("system credentials follow the integration.use_system_credentials matrix", () => {
+  for (const role of ["OWNER", "ADMIN", "SEO_LEAD", "SEO_SPECIALIST"]) {
+    assert.equal(canUseWorkspaceSystemCredentials(role), true);
+  }
+  for (const role of ["ANALYST", "CONTENT_EDITOR", "CLIENT", "VIEWER"]) {
+    assert.equal(canUseWorkspaceSystemCredentials(role), false);
+  }
+  assert.equal(canUseWorkspaceSystemCredentials(undefined), false);
 });
 
 test("project permissions intersect the workspace role with explicit access", () => {

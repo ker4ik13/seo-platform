@@ -138,6 +138,7 @@ export interface ExecutionProjection {
 
 export interface CredentialSnapshot {
   readonly provider?: "ARSENKIN" | "XMLSTOCK";
+  readonly credentialMode?: "BYOK_API_KEY" | "PLATFORM_PAID";
   readonly bindingId?: string;
   readonly bindingVersion?: number;
   readonly routeId?: string;
@@ -243,6 +244,7 @@ export class RankEstimateService {
             calculatedAt.getTime() + RANK_ESTIMATE_TTL_MILLISECONDS
           );
           const privateSnapshot = credentialSnapshot(projection);
+          const credentialMode = rankCredentialMode(projection);
           const provider = rankProvider(projection, input.provider);
           const providerPolicyVersion = rankProviderPolicyVersion(provider);
           const projectDomainHash = rankEstimateProjectDomainHash(
@@ -293,6 +295,7 @@ export class RankEstimateService {
             freshness,
             providerTaskCount,
             provider,
+            credentialMode,
             ...(resolvedRoute ? { resolvedRoute } : {}),
             providerPolicyVersion,
             ...(execution ? { execution } : {}),
@@ -347,7 +350,7 @@ export class RankEstimateService {
                 privateSnapshot.validationFinishedAt ?? null,
               credentialVerifiedAt: privateSnapshot.verifiedAt ?? null,
               provider,
-              credentialMode: "BYOK_API_KEY",
+              credentialMode,
               providerPolicyVersion,
               keywordCount,
               providerTaskCount,
@@ -499,7 +502,7 @@ export function rankEstimateContinuationScopeHash(
       snapshot.validationFinishedAt?.toISOString() ?? null,
     credentialVerifiedAt: snapshot.verifiedAt?.toISOString() ?? null,
     provider: stored.provider,
-    credentialMode: "BYOK_API_KEY",
+    credentialMode: stored.credentialMode,
     providerPolicyVersion: stored.providerPolicyVersion
   });
   return Buffer.from(result.value, "hex");
@@ -585,6 +588,10 @@ export function credentialSnapshot(
     route.credential.provider === "XMLSTOCK"
       ? { provider: route.credential.provider }
       : {}),
+    ...(route.credential.mode === "BYOK_API_KEY" ||
+    route.credential.mode === "PLATFORM_PAID"
+      ? { credentialMode: route.credential.mode }
+      : {}),
     bindingId: binding.id,
     bindingVersion: binding.version,
     routeId: route.id,
@@ -609,6 +616,14 @@ export function credentialSnapshot(
     route.credential.lastSuccessAt
   );
   return proof ? { ...base, ...proof } : base;
+}
+
+function rankCredentialMode(
+  projection: ExecutionProjection
+): "BYOK_API_KEY" | "PLATFORM_PAID" {
+  return projection.route?.credential.mode === "PLATFORM_PAID"
+    ? "PLATFORM_PAID"
+    : "BYOK_API_KEY";
 }
 
 function currentValidationProof(
@@ -744,7 +759,7 @@ function executionScopeHash(
         snapshot.validationFinishedAt?.toISOString() ?? null,
       credentialVerifiedAt: snapshot.verifiedAt?.toISOString() ?? null,
       provider,
-      credentialMode: "BYOK_API_KEY",
+      credentialMode: snapshot.credentialMode ?? "BYOK_API_KEY",
       providerPolicyVersion
   });
 }
@@ -835,7 +850,10 @@ function estimateBlockers(
       if (route.credential.provider !== provider) {
         blockers.add("CREDENTIAL_PROVIDER_MISMATCH");
       }
-      if (route.credential.mode !== "BYOK_API_KEY") {
+      if (
+        route.credential.mode !== "BYOK_API_KEY" &&
+        route.credential.mode !== "PLATFORM_PAID"
+      ) {
         blockers.add("CREDENTIAL_MODE_UNSUPPORTED");
       }
       if (
@@ -899,6 +917,7 @@ function publicEstimate(input: {
   readonly freshness: RankEstimateCredentialFreshness;
   readonly providerTaskCount: number;
   readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly credentialMode: "BYOK_API_KEY" | "PLATFORM_PAID";
   readonly resolvedRoute?: ResolvedConnectorRoute;
   readonly providerPolicyVersion: string;
   readonly execution?: InternalRankExecutionParameters;
@@ -920,7 +939,7 @@ function publicEstimate(input: {
         }
       : {}),
     operation: "POSITIONS",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode: input.credentialMode,
     scope: {
       keywordCount: input.scope.keywordCount,
       contextCount: "1",
@@ -1011,7 +1030,9 @@ export function verifiedRankEstimate(
     snapshot.trackingContextId !== stored.trackingContextId ||
     (stored.provider !== "ARSENKIN" && stored.provider !== "XMLSTOCK") ||
     snapshot.provider !== stored.provider ||
-    stored.credentialMode !== "BYOK_API_KEY" ||
+    (stored.credentialMode !== "BYOK_API_KEY" &&
+      stored.credentialMode !== "PLATFORM_PAID") ||
+    snapshot.credentialMode !== stored.credentialMode ||
     stored.contextVersion !== snapshot.scope.contextVersion ||
     stored.configurationVersion !==
       snapshot.scope.configurationVersion ||

@@ -529,7 +529,14 @@ function routeAvailability(
 ): ProjectConnectorBindingAvailability {
   if (credential.deletedAt) return "CREDENTIAL_UNAVAILABLE";
   if (credential.status === "PENDING_VERIFICATION") return "CREDENTIAL_PENDING";
-  if (credential.status !== "ACTIVE" || credential.mode !== "BYOK_API_KEY") {
+  if (
+    credential.status !== "ACTIVE" ||
+    (credential.mode !== "BYOK_API_KEY" &&
+      !(
+        credential.mode === "PLATFORM_PAID" &&
+        capabilityValue === "SERP_RANK_TRACKING"
+      ))
+  ) {
     return "CREDENTIAL_UNAVAILABLE";
   }
   return safeIntegrationCredentialCapabilities(

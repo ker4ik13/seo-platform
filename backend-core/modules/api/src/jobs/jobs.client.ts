@@ -38,11 +38,13 @@ import type {
   CreateUploadInput,
   CreateUploadPartUrlsInput,
   CreateIntegrationCredentialInput,
+  EnablePlatformIntegrationCredentialInput,
   IntegrationCredentialValidationSummary,
   IntegrationCredentialSummary,
   IntegrationProviderCatalogItem,
   CreateProjectConnectorBindingInput,
   InternalCreateIntegrationCredentialInput,
+  InternalEnablePlatformIntegrationCredentialInput,
   InternalCreateIntegrationCredentialValidationInput,
   InternalCreateProjectConnectorBindingInput,
   InternalCreateRankEstimateInput,
@@ -1546,6 +1548,26 @@ export class JobsClient {
     return credentialSummary(value);
   }
 
+  public async enablePlatformIntegrationCredential(
+    context: InternalContext,
+    input: EnablePlatformIntegrationCredentialInput,
+    idempotencyKey: string
+  ): Promise<IntegrationCredentialSummary> {
+    const body: InternalEnablePlatformIntegrationCredentialInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      actorId: context.actorId,
+      idempotencyKey
+    };
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      integrationPath(context, "platform-credentials"),
+      context,
+      body
+    );
+    return credentialSummary(value);
+  }
+
   public async updateIntegrationCredential(
     context: InternalContext,
     credentialId: string,
@@ -1764,20 +1786,27 @@ export class JobsClient {
       input,
       idempotencyKey
     );
-    return scopedRankEstimate(
-      value,
-      context.tenant.workspaceId,
-      projectId,
-      input.trackingContextId
+    return platformRankEstimateCharge(
+      scopedRankEstimate(
+        value,
+        context.tenant.workspaceId,
+        projectId,
+        input.trackingContextId
+      ),
+      this.config
     );
   }
 
   public async createRankRun(
     context: InternalContext,
-    input: InternalCreateRankRunInput,
+    input: Omit<InternalCreateRankRunInput, "providerPricesMinor">,
     idempotencyKey: string
   ): Promise<RankJobSummary> {
     const projectId = requiredProjectId(context.tenant);
+    const command: InternalCreateRankRunInput = {
+      ...input,
+      providerPricesMinor: platformProviderPricesMinor(this.config)
+    };
     const value = await this.requestIntegration<unknown>(
       "POST",
       rankRunCollectionPath(
@@ -1785,7 +1814,7 @@ export class JobsClient {
         projectId
       ),
       context,
-      input,
+      command,
       idempotencyKey
     );
     return scopedRankJobSummary(
@@ -1889,10 +1918,14 @@ export class JobsClient {
 
   public async retryMissingRankJob(
     context: InternalContext,
-    input: InternalRetryRankJobInput,
+    input: Omit<InternalRetryRankJobInput, "providerPricesMinor">,
     idempotencyKey: string
   ): Promise<RankJobSummary> {
     const projectId = requiredProjectId(context.tenant);
+    const command: InternalRetryRankJobInput = {
+      ...input,
+      providerPricesMinor: platformProviderPricesMinor(this.config)
+    };
     const value = await this.requestIntegration<unknown>(
       "POST",
       `${rankJobPath(
@@ -1901,7 +1934,7 @@ export class JobsClient {
         input.jobId
       )}/retry-missing`,
       context,
-      input,
+      command,
       idempotencyKey
     );
     return scopedRankJobSummary(
@@ -2850,6 +2883,56 @@ function invalidJobsResponse(): DomainError {
     message: "Jobs service returned an invalid response",
     retryable: true
   });
+}
+
+function platformRankEstimateCharge(
+  estimate: RankEstimate,
+  config: AppConfig
+): RankEstimate {
+  if (estimate.credentialMode === "BYOK_API_KEY") return estimate;
+  return {
+    ...estimate,
+    platformChargeMicro: platformRankChargeMicro(
+      estimate.provider,
+      BigInt(estimate.scope.keywordCount),
+      config
+    )
+  };
+}
+
+function platformRankChargeMicro(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  keywordCount: bigint,
+  config: AppConfig
+): string {
+  const pricing = config.billing.providerUsage[provider];
+  if (!pricing.enabled || pricing.rankKeywordPriceMinor === undefined) {
+    throw invalidJobsResponse();
+  }
+  return (
+    BigInt(pricing.rankKeywordPriceMinor) *
+    10_000n *
+    keywordCount
+  ).toString();
+}
+
+function platformProviderPricesMinor(
+  config: AppConfig
+): InternalCreateRankRunInput["providerPricesMinor"] {
+  return {
+    ARSENKIN: providerPriceMinor(config, "ARSENKIN"),
+    XMLSTOCK: providerPriceMinor(config, "XMLSTOCK")
+  };
+}
+
+function providerPriceMinor(
+  config: AppConfig,
+  provider: "ARSENKIN" | "XMLSTOCK"
+): string | null {
+  const pricing = config.billing.providerUsage[provider];
+  return pricing.enabled && pricing.rankKeywordPriceMinor !== undefined
+    ? String(pricing.rankKeywordPriceMinor)
+    : null;
 }
 
 function upstreamError(status: number, payload: unknown): DomainError {

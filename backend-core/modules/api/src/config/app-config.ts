@@ -1,4 +1,5 @@
 import {
+  maximumPlatformRankKeywordPriceMinor,
   sessionFamilyRevokedEventSubjectV1,
   transactionalEmailEventSubjectV1
 } from "@seo-platform/contracts";
@@ -19,6 +20,7 @@ export interface AppConfig {
   readonly realtimeNotificationApiToken?: string;
   readonly realtimeDeliveryAuthorizationApiToken?: string;
   readonly rankExecutionGrantApiToken?: string;
+  readonly rankBillingSettlementApiToken?: string;
   readonly automationDispatchApiToken?: string;
   readonly authEmailApiToken?: string;
   readonly webPublicUrl?: string;
@@ -62,6 +64,20 @@ export interface AppConfig {
       readonly intervalMs: number;
       readonly batchSize: number;
     };
+    readonly providerUsage: {
+      readonly XMLSTOCK: {
+        readonly enabled: boolean;
+        readonly rankKeywordPriceMinor?: number;
+        readonly dailySpendLimitMinor?: number;
+        readonly monthlySpendLimitMinor?: number;
+      };
+      readonly ARSENKIN: {
+        readonly enabled: boolean;
+        readonly rankKeywordPriceMinor?: number;
+        readonly dailySpendLimitMinor?: number;
+        readonly monthlySpendLimitMinor?: number;
+      };
+    };
   };
   readonly services: {
     readonly seoData: string;
@@ -104,8 +120,8 @@ function positiveInteger(
 ): number {
   const parsed = Number(value ?? fallback);
 
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${key} must be a positive integer`);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${key} must be a positive safe integer`);
   }
 
   return parsed;
@@ -123,6 +139,61 @@ function integerInRange(
     throw new Error(`${key} must be between ${minimum} and ${maximum}`);
   }
   return parsed;
+}
+
+function optionalPlatformRankKeywordPriceMinor(
+  value: string | undefined,
+  key: string
+): number | undefined {
+  const price = optionalPlatformAmountMinor(value, key);
+  if (
+    price !== undefined &&
+    price > maximumPlatformRankKeywordPriceMinor
+  ) {
+    throw new Error(
+      `${key} must be a positive safe integer no greater than ${maximumPlatformRankKeywordPriceMinor}`
+    );
+  }
+  return price;
+}
+
+function optionalPlatformAmountMinor(
+  value: string | undefined,
+  key: string
+): number | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  if (!/^[1-9][0-9]{0,15}$/u.test(value)) {
+    throw new Error(`${key} must be a positive safe integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${key} must be a positive safe integer`);
+  }
+  return parsed;
+}
+
+function validatePlatformSpendLimits(
+  enabled: boolean,
+  dailySpendLimitMinor: number | undefined,
+  monthlySpendLimitMinor: number | undefined,
+  provider: "XMLSTOCK" | "ARSENKIN"
+): void {
+  if (!enabled) return;
+  if (dailySpendLimitMinor === undefined) {
+    throw new Error(
+      `PLATFORM_${provider}_DAILY_SPEND_LIMIT_MINOR is required when ${provider} platform usage is enabled`
+    );
+  }
+  if (monthlySpendLimitMinor === undefined) {
+    throw new Error(
+      `PLATFORM_${provider}_MONTHLY_SPEND_LIMIT_MINOR is required when ${provider} platform usage is enabled`
+    );
+  }
+  if (monthlySpendLimitMinor < dailySpendLimitMinor) {
+    throw new Error(
+      `PLATFORM_${provider}_MONTHLY_SPEND_LIMIT_MINOR must be greater than or equal to PLATFORM_${provider}_DAILY_SPEND_LIMIT_MINOR`
+    );
+  }
 }
 
 function booleanValue(
@@ -217,6 +288,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
+  const rankBillingSettlementApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
+  );
   const automationDispatchApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_AUTOMATION_TOKEN"
@@ -254,6 +329,40 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.BILLING_RECONCILIATION_ENABLED,
     yookassaEnabled,
     "BILLING_RECONCILIATION_ENABLED"
+  );
+  const platformXmlstockEnabled = booleanValue(
+    env.PLATFORM_XMLSTOCK_ENABLED,
+    false,
+    "PLATFORM_XMLSTOCK_ENABLED"
+  );
+  const platformArsenkinEnabled = booleanValue(
+    env.PLATFORM_ARSENKIN_ENABLED,
+    false,
+    "PLATFORM_ARSENKIN_ENABLED"
+  );
+  const platformXmlstockRankKeywordPriceMinor = optionalPlatformRankKeywordPriceMinor(
+    env.PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR,
+    "PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR"
+  );
+  const platformArsenkinRankKeywordPriceMinor = optionalPlatformRankKeywordPriceMinor(
+    env.PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR,
+    "PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR"
+  );
+  const platformXmlstockDailySpendLimitMinor = optionalPlatformAmountMinor(
+    env.PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR,
+    "PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR"
+  );
+  const platformXmlstockMonthlySpendLimitMinor = optionalPlatformAmountMinor(
+    env.PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR,
+    "PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR"
+  );
+  const platformArsenkinDailySpendLimitMinor = optionalPlatformAmountMinor(
+    env.PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR,
+    "PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR"
+  );
+  const platformArsenkinMonthlySpendLimitMinor = optionalPlatformAmountMinor(
+    env.PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR,
+    "PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR"
   );
   const outboxPublisherEnabled = booleanValue(
     env.OUTBOX_PUBLISHER_ENABLED,
@@ -410,6 +519,16 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     nodeEnv === "production" &&
+    (!rankBillingSettlementApiToken ||
+      rankBillingSettlementApiToken.length < 32 ||
+      isPlaceholderSecret(rankBillingSettlementApiToken))
+  ) {
+    throw new Error(
+      "A generated JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
     (
       !automationDispatchApiToken ||
       automationDispatchApiToken.length < 32 ||
@@ -443,6 +562,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (isPlaceholderSecret(rankExecutionGrantApiToken)) {
     throw new Error(
       "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN must not use an example placeholder"
+    );
+  }
+  if (isPlaceholderSecret(rankBillingSettlementApiToken)) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN must not use an example placeholder"
     );
   }
   if (isPlaceholderSecret(automationDispatchApiToken)) {
@@ -505,6 +629,34 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
+    platformXmlstockEnabled &&
+    platformXmlstockRankKeywordPriceMinor === undefined
+  ) {
+    throw new Error(
+      "PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR is required when XMLStock platform usage is enabled"
+    );
+  }
+  if (
+    platformArsenkinEnabled &&
+    platformArsenkinRankKeywordPriceMinor === undefined
+  ) {
+    throw new Error(
+      "PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR is required when Arsenkin platform usage is enabled"
+    );
+  }
+  validatePlatformSpendLimits(
+    platformXmlstockEnabled,
+    platformXmlstockDailySpendLimitMinor,
+    platformXmlstockMonthlySpendLimitMinor,
+    "XMLSTOCK"
+  );
+  validatePlatformSpendLimits(
+    platformArsenkinEnabled,
+    platformArsenkinDailySpendLimitMinor,
+    platformArsenkinMonthlySpendLimitMinor,
+    "ARSENKIN"
+  );
+  if (
     nodeEnv === "production" &&
     yookassaEnabled &&
     !billingReconciliationEnabled
@@ -535,6 +687,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     realtimeNotificationApiToken,
     realtimeDeliveryAuthorizationApiToken,
     rankExecutionGrantApiToken,
+    rankBillingSettlementApiToken,
     automationDispatchApiToken,
     authEmailApiToken
   ].filter((value): value is string => Boolean(value));
@@ -600,6 +753,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : {}),
     ...(rankExecutionGrantApiToken
       ? { rankExecutionGrantApiToken }
+      : {}),
+    ...(rankBillingSettlementApiToken
+      ? { rankBillingSettlementApiToken }
       : {}),
     ...(automationDispatchApiToken
       ? { automationDispatchApiToken }
@@ -702,6 +858,44 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
           1,
           100
         )
+      },
+      providerUsage: {
+        XMLSTOCK: {
+          enabled: platformXmlstockEnabled,
+          ...(platformXmlstockRankKeywordPriceMinor !== undefined
+            ? {
+                rankKeywordPriceMinor:
+                  platformXmlstockRankKeywordPriceMinor
+              }
+            : {}),
+          ...(platformXmlstockDailySpendLimitMinor !== undefined
+            ? { dailySpendLimitMinor: platformXmlstockDailySpendLimitMinor }
+            : {}),
+          ...(platformXmlstockMonthlySpendLimitMinor !== undefined
+            ? {
+                monthlySpendLimitMinor:
+                  platformXmlstockMonthlySpendLimitMinor
+              }
+            : {})
+        },
+        ARSENKIN: {
+          enabled: platformArsenkinEnabled,
+          ...(platformArsenkinRankKeywordPriceMinor !== undefined
+            ? {
+                rankKeywordPriceMinor:
+                  platformArsenkinRankKeywordPriceMinor
+              }
+            : {}),
+          ...(platformArsenkinDailySpendLimitMinor !== undefined
+            ? { dailySpendLimitMinor: platformArsenkinDailySpendLimitMinor }
+            : {}),
+          ...(platformArsenkinMonthlySpendLimitMinor !== undefined
+            ? {
+                monthlySpendLimitMinor:
+                  platformArsenkinMonthlySpendLimitMinor
+              }
+            : {})
+        }
       }
     },
     services: {

@@ -430,6 +430,17 @@ export interface InternalCreateIntegrationCredentialInput
   readonly idempotencyKey: string;
 }
 
+export interface EnablePlatformIntegrationCredentialInput {
+  readonly provider: "XMLSTOCK" | "ARSENKIN";
+}
+
+export interface InternalEnablePlatformIntegrationCredentialInput
+  extends EnablePlatformIntegrationCredentialInput {
+  readonly workspaceId: string;
+  readonly actorId: string;
+  readonly idempotencyKey: string;
+}
+
 export interface UpdateIntegrationCredentialInput {
   readonly label: string;
   readonly apiKey?: string;

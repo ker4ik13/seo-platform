@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  maximumPlatformRankKeywordPriceMinor,
+  rankProviderKeywordLimit,
   rankEstimateBlockerCodes,
   rankEstimateCredentialFreshnessStatuses,
   rankEstimateCredentialModes,
@@ -15,6 +17,20 @@ import {
 } from "./rank-estimates.js";
 
 const SHA_256_FIXTURE = "a".repeat(64);
+
+test("full platform-price boundary fits signed PostgreSQL BIGINT", () => {
+  const fullLaunchMicro =
+    BigInt(maximumPlatformRankKeywordPriceMinor) *
+    BigInt(rankProviderKeywordLimit) *
+    10_000n;
+  assert.ok(fullLaunchMicro <= 9_223_372_036_854_775_807n);
+  assert.ok(
+    (BigInt(maximumPlatformRankKeywordPriceMinor) + 1n) *
+      BigInt(rankProviderKeywordLimit) *
+      10_000n >
+      9_223_372_036_854_775_807n
+  );
+});
 
 const publicEstimateFixture = {
   id: "01900000-0000-7000-8000-000000000001",
@@ -82,11 +98,14 @@ const publicEstimateFixture = {
   expiresAt: "2026-07-29T12:05:00.000Z"
 } as const satisfies RankEstimate;
 
-test("rank estimate finite vocabularies pin the provider-free first slice", () => {
+test("rank estimate finite vocabularies include BYOK and token-paid modes", () => {
   assert.deepEqual(rankEstimateStatuses, ["READY", "BLOCKED"]);
   assert.deepEqual(rankEstimateProviders, ["ARSENKIN", "XMLSTOCK"]);
   assert.deepEqual(rankEstimateOperations, ["POSITIONS"]);
-  assert.deepEqual(rankEstimateCredentialModes, ["BYOK_API_KEY"]);
+  assert.deepEqual(rankEstimateCredentialModes, [
+    "BYOK_API_KEY",
+    "PLATFORM_PAID"
+  ]);
   assert.deepEqual(rankEstimateScopeHashAvailabilities, [
     "AVAILABLE",
     "UNAVAILABLE"

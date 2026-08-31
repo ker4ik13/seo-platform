@@ -199,6 +199,13 @@ export function SemanticPositionDialog({
     contextDraft.searchSource,
     yandexLiveTurbo ? "TURBO" : undefined
   );
+  const platformChargeConfirmation =
+    estimate?.status === "READY" &&
+    estimate.credentialMode === "PLATFORM_PAID" &&
+    pendingRun.current?.estimate.id === estimate.id &&
+    !rankEstimateExpired(estimate.expiresAt, Date.now())
+      ? formatPlatformCharge(estimate.platformChargeMicro)
+      : undefined;
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
     resolving: boolean,
@@ -260,7 +267,7 @@ export function SemanticPositionDialog({
         groupIds: activeGroupId ? [activeGroupId] : []
       });
     }
-    setEstimate(undefined);
+    if (!pendingRun.current) setEstimate(undefined);
     pendingRun.current = undefined;
     estimateCommand.current = undefined;
     runCommand.current = undefined;
@@ -606,6 +613,7 @@ export function SemanticPositionDialog({
       }
 
       let nextEstimate = reusableRun?.estimate;
+      let calculatedEstimate = false;
       if (!nextEstimate) {
         stage = "ESTIMATE";
         estimateCommand.current = rankEstimateIdempotencyCommand(
@@ -636,6 +644,7 @@ export function SemanticPositionDialog({
           projectId,
           trackingContextId: selectedContext.id
         });
+        calculatedEstimate = true;
         estimateCommand.current = undefined;
         if (
           nextEstimate.scope.contextVersion !== selectedContext.version ||
@@ -674,17 +683,28 @@ export function SemanticPositionDialog({
         );
       }
 
+      if (
+        calculatedEstimate &&
+        selectedSource.mode === "PLATFORM_PAID"
+      ) {
+        return;
+      }
+
       stage = "RUN";
       runCommand.current = rankRunIdempotencyCommand(
         runCommand.current,
         nextEstimate.id,
+        nextEstimate.platformChargeMicro,
         () => `rank-run:${crypto.randomUUID()}`
       );
       const jobPayload = await browserApiRequest<unknown>(
         rankRunsApiPath(projectId),
         {
           method: "POST",
-          body: rankRunInput(nextEstimate.id),
+          body: rankRunInput(
+            nextEstimate.id,
+            nextEstimate.platformChargeMicro
+          ),
           idempotencyKey: runCommand.current.key
         }
       );
@@ -783,7 +803,7 @@ export function SemanticPositionDialog({
               <ProviderLogo provider={provider} size="compact" />
               <div><dt>Провайдер</dt><dd>{selectedSource?.label ?? integrationProviderLabel(provider)}</dd></div>
             </div>
-            <div><Icon name="frequency" /><div><dt>Расход</dt><dd>{providerUsage.usage}</dd></div></div>
+            <div><Icon name="frequency" /><div><dt>Расход</dt><dd>{platformChargeConfirmation ?? providerUsage.usage}</dd></div></div>
             <div><Icon name="checkDouble" /><div><dt>Доступно</dt><dd>{providerUsage.available}</dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
@@ -807,6 +827,8 @@ export function SemanticPositionDialog({
                 ? "Загружаем запросы…"
                 : running
                 ? "Проверяем и запускаем…"
+                : platformChargeConfirmation
+                ? `Подтвердить списание ${platformChargeConfirmation}`
                 : `Запустить съём (${keywordIds.length})`}
             </button>
           </div>
@@ -907,7 +929,18 @@ export function SemanticPositionDialog({
             />
           </>
         )}
-        {(estimate?.status === "BLOCKED" || error || scopeError || contextAssignmentError || addedSinceLastRun > 0) && <div className="semantic-workflow-feedback">
+        {(platformChargeConfirmation || estimate?.status === "BLOCKED" || error || scopeError || contextAssignmentError || addedSinceLastRun > 0) && <div className="semantic-workflow-feedback">
+          {platformChargeConfirmation && (
+            <div className="inline-alert info" role="status">
+              <strong>Подтвердите списание</strong>
+              <p>
+                За этот съём будет списано ровно {platformChargeConfirmation} из
+                внутренних токенов workspace. Расчёт действует до истечения
+                показанной оценки; запуск произойдёт только после повторного
+                подтверждения.
+              </p>
+            </div>
+          )}
           {addedSinceLastRun > 0 && (
             <div className="inline-alert warning" role="status">
               После прошлого запуска в выбранных папках появилось новых
@@ -1476,6 +1509,19 @@ function feedbackMessage(
   requestId: string | undefined
 ): string {
   return requestId ? `${message} Код запроса: ${requestId}.` : message;
+}
+
+function formatPlatformCharge(microAmount: string): string {
+  const amount = BigInt(microAmount);
+  const rubles = amount / 1_000_000n;
+  const fraction = (amount % 1_000_000n)
+    .toString()
+    .padStart(6, "0")
+    .replace(/0+$/u, "");
+  const decimal = fraction.length === 0
+    ? "00"
+    : fraction.padEnd(2, "0");
+  return `${new Intl.NumberFormat("ru-RU").format(rubles)},${decimal} ₽`;
 }
 
 interface PendingSemanticRankRun {

@@ -239,8 +239,8 @@ security/load/restore gates.
 четыре general caller/audience credentials и сохранил отдельные vault,
 notification и rank boundaries. Compose запускает network-less read-only
 one-shot `service-token-preflight` до credential-bearing processes и NATS:
-десять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
-пять NATS passwords
+четырнадцать service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords
+и пять NATS passwords — всего 28 credentials —
 должны быть глобально pairwise distinct, без placeholders и соответствовать
 deploy-алфавиту `[A-Za-z0-9._~-]` при длине `32..512`; пять соответствующих
 bcrypt verifier записей с canonical `$2a$` prefix и cost `11` и пять NATS

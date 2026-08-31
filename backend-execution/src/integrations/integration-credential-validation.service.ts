@@ -231,7 +231,10 @@ export class IntegrationCredentialValidationService {
   private assertValidationAllowed(
     credential: IntegrationCredential
   ): void {
-    if (credential.mode !== "BYOK_API_KEY") {
+    if (
+      credential.mode !== "BYOK_API_KEY" &&
+      credential.mode !== "PLATFORM_PAID"
+    ) {
       throw new UnprocessableEntityException(
         "Credential mode does not support API key validation"
       );

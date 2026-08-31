@@ -413,7 +413,7 @@ test("maps only expected create unique constraints to business conflicts", async
 });
 
 test("creates binding, route and redacted outbox event in one transaction", async () => {
-  const credential = credentialRecord();
+  const credential = credentialRecord({ mode: "PLATFORM_PAID" });
   let binding: ReturnType<typeof bindingRecord> | null = null;
   let route: StoredRoute | null = null;
   let event: Readonly<Record<string, unknown>> | null = null;
@@ -533,12 +533,28 @@ test("creates binding, route and redacted outbox event in one transaction", asyn
 
 test("rejects cross-workspace, pending and capability-mismatched credentials", async () => {
   const candidates = [
-    null,
-    credentialRecord({ status: "PENDING_VERIFICATION" }),
-    credentialRecord({ capabilities: ["KEYWORD_RESEARCH"] }),
-    credentialRecord({ mode: "PLATFORM_PAID" })
+    { credential: null, input: createInput },
+    {
+      credential: credentialRecord({ status: "PENDING_VERIFICATION" }),
+      input: createInput
+    },
+    {
+      credential: credentialRecord({ capabilities: ["KEYWORD_RESEARCH"] }),
+      input: createInput
+    },
+    {
+      credential: credentialRecord({
+        mode: "PLATFORM_PAID",
+        capabilities: ["KEYWORD_RESEARCH"]
+      }),
+      input: {
+        ...createInput,
+        idempotencyKey: "binding-create-platform-non-rank",
+        capability: "KEYWORD_RESEARCH" as const
+      }
+    }
   ];
-  for (const credential of candidates) {
+  for (const { credential, input } of candidates) {
     let createCalls = 0;
     const prisma = {
       projectConnectorBindingCreateReceipt: {
@@ -559,7 +575,7 @@ test("rejects cross-workspace, pending and capability-mismatched credentials", a
 
     await assert.rejects(
       new ProjectConnectorBindingService(prisma).create(
-        createInput,
+        input,
         "request-invalid"
       ),
       (error: unknown) => {

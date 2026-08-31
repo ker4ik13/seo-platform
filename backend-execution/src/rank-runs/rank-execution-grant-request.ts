@@ -12,6 +12,8 @@ import {
 
 export interface RankExecutionGrantRequestFacts {
   readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly credentialMode: "BYOK_API_KEY" | "PLATFORM_PAID";
+  readonly platformUnitPriceMinor?: string;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
@@ -125,7 +127,7 @@ export function buildRankExecutionGrantRequest(
     provider: facts.provider,
     operation: "POSITIONS",
     capability: "SERP_RANK_TRACKING",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode: facts.credentialMode,
     manifest: {
       id: facts.manifestId,
       hash: manifestHash,
@@ -135,7 +137,10 @@ export function buildRankExecutionGrantRequest(
     policyVersion: facts.providerPolicyVersion,
     usageIntent: {
       meter: "RANK_PROVIDER_TASK",
-      quantity: "1"
+      quantity: "1",
+      ...(facts.credentialMode === "PLATFORM_PAID"
+        ? { unitPriceMinor: facts.platformUnitPriceMinor }
+        : {})
     }
   });
   return { request, evidence, evidenceHash };

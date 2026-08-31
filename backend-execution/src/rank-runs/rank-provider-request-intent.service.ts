@@ -337,7 +337,8 @@ function intentSource(
     job.projectId === null ||
     job.actorId === null ||
     (job.provider !== "ARSENKIN" && job.provider !== "XMLSTOCK") ||
-    job.credentialMode !== "BYOK_API_KEY" ||
+    (job.credentialMode !== "BYOK_API_KEY" &&
+      job.credentialMode !== "PLATFORM_PAID") ||
     !grantableJobState(job) ||
     job.cancelRequestedAt !== null ||
     item.workspaceId !== job.workspaceId ||
@@ -373,7 +374,7 @@ function intentSource(
     estimate.workspaceId !== job.workspaceId ||
     estimate.projectId !== job.projectId ||
     estimate.provider !== job.provider ||
-    estimate.credentialMode !== "BYOK_API_KEY" ||
+    estimate.credentialMode !== job.credentialMode ||
     run.projectStatus !== "ACTIVE" ||
     run.projectVersion !== estimate.projectVersion
   ) {

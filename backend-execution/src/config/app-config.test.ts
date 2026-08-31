@@ -10,6 +10,7 @@ const credentialApiToken = "c".repeat(32);
 const rankManifestApiToken = "m".repeat(32);
 const rankResultApiToken = "r".repeat(32);
 const rankGrantApiToken = "g".repeat(32);
+const rankBillingSettlementApiToken = "b".repeat(32);
 const automationDispatchApiToken = "a".repeat(32);
 
 test("keeps optional adapters disabled by default", () => {
@@ -32,9 +33,120 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.rankManifestApiToken, undefined);
   assert.equal(config.rankGrantApiToken, undefined);
   assert.equal(config.rankExecution.submitEnabled, false);
+  assert.deepEqual(config.platformProviderCredentials, {});
   assert.equal(
     config.rankExecution.killSwitchVersion,
     "arsenkin-positions@4"
+  );
+});
+
+test("exposes only explicitly enabled and complete platform provider credentials", () => {
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_XMLSTOCK_ENABLED: "true",
+    PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-secret-1, xmlstock-secret-2",
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-42",
+    PLATFORM_ARSENKIN_ENABLED: "false",
+    PLATFORM_ARSENKIN_API_KEY: "ignored staged value with whitespace"
+  });
+
+  assert.deepEqual(config.platformProviderCredentials, {
+    XMLSTOCK: [
+      {
+        apiKey: "xmlstock-secret-1",
+        accountIdentifier: "account-42"
+      },
+      {
+        apiKey: "xmlstock-secret-2",
+        accountIdentifier: "account-42"
+      }
+    ]
+  });
+});
+
+test("loads comma-separated Arsenkin keys and paired XMLStock accounts", () => {
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_XMLSTOCK_ENABLED: "true",
+    PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-key-1,xmlstock-key-2",
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-1,account-2",
+    PLATFORM_ARSENKIN_ENABLED: "true",
+    PLATFORM_ARSENKIN_API_KEYS: "arsenkin-key-1, arsenkin-key-2"
+  });
+
+  assert.deepEqual(config.platformProviderCredentials, {
+    XMLSTOCK: [
+      { apiKey: "xmlstock-key-1", accountIdentifier: "account-1" },
+      { apiKey: "xmlstock-key-2", accountIdentifier: "account-2" }
+    ],
+    ARSENKIN: [
+      { apiKey: "arsenkin-key-1" },
+      { apiKey: "arsenkin-key-2" }
+    ]
+  });
+});
+
+test("rejects ambiguous or malformed platform credential pools", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_ARSENKIN_ENABLED: "true"
+  } as const;
+  assert.throws(
+    () => loadAppConfig({
+      ...base,
+      PLATFORM_ARSENKIN_API_KEY: "legacy-key",
+      PLATFORM_ARSENKIN_API_KEYS: "pooled-key"
+    }),
+    /conflicts with legacy/u
+  );
+  assert.throws(
+    () => loadAppConfig({
+      ...base,
+      PLATFORM_ARSENKIN_API_KEYS: "same-key,same-key"
+    }),
+    /must not contain duplicate keys/u
+  );
+  assert.throws(
+    () => loadAppConfig({
+      ...base,
+      PLATFORM_ARSENKIN_API_KEY: "legacy-key,second-key"
+    }),
+    /without whitespace or commas/u
+  );
+  assert.throws(
+    () => loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      PLATFORM_XMLSTOCK_ENABLED: "true",
+      PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-key-1,xmlstock-key-2",
+      PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-1,account-2,account-3"
+    }),
+    /one shared identifier or one identifier per API key/u
+  );
+});
+
+test("fails closed when an enabled platform provider has no complete credential", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_API_KEY: "xmlstock-secret"
+      }),
+    /PLATFORM_XMLSTOCK_API_KEYS and PLATFORM_XMLSTOCK_ACCOUNT_IDS/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_ARSENKIN_ENABLED: "true"
+      }),
+    /PLATFORM_ARSENKIN_API_KEYS is required/u
   );
 });
 
@@ -136,6 +248,19 @@ test("rejects rank tokens outside the isolated rank worker", () => {
   }
 });
 
+test("keeps the billing settlement token on the connector worker only", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN:
+          rankBillingSettlementApiToken
+      }),
+    /Only the connector worker/u
+  );
+});
+
 test("requires both dedicated tokens on the rank worker", () => {
   for (const token of [
     { JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken },
@@ -221,15 +346,34 @@ test("allows recorded provider submit only on the execution connector worker", (
     INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
     INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
     INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN:
+      rankBillingSettlementApiToken,
     RANK_PROVIDER_SUBMIT_ENABLED: "true",
     RANK_PROVIDER_KILL_SWITCH_VERSION: "arsenkin-positions@4"
   });
   assert.equal(development.rankExecution.submitEnabled, true);
   assert.equal(
+    development.rankBillingSettlementApiToken,
+    rankBillingSettlementApiToken
+  );
+  assert.equal(
     development.rankExecution.killSwitchVersion,
     "arsenkin-positions@4"
   );
 
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
+        INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+        INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
+        INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
+        RANK_PROVIDER_SUBMIT_ENABLED: "true"
+      }),
+    /JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN/u
+  );
   assert.throws(
     () =>
       loadAppConfig({
@@ -374,6 +518,23 @@ test("loads a least-privilege execution credential role", () => {
   assert.equal(config.integrationCredentials.role, "EXECUTION");
   assert.equal(config.integrationCredentials.fingerprintKeys.size, 0);
   assert.equal(config.integrationCredentialApiToken, undefined);
+});
+
+test("rejects staged platform source pools on every non-management process", () => {
+  const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+        INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
+        INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
+        PLATFORM_ARSENKIN_ENABLED: "false",
+        PLATFORM_ARSENKIN_API_KEYS: "must-never-reach-connector"
+      }),
+    /must not receive platform provider source credentials/u
+  );
 });
 
 test("allows a production execution worker with only SEO publication auth", () => {
@@ -799,7 +960,8 @@ test("validates the finite service-token format for every Jobs boundary", () => 
     "JOBS_TO_SEO_DATA_TOKEN",
     "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
     "JOBS_TO_SEO_RANK_TOKEN",
-    "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+    "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+    "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
   ] as const;
   const invalidTokens = [
     "x".repeat(31),
@@ -855,6 +1017,7 @@ test("rejects all application, database and adapter capabilities on the Redis-on
     ["PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN", "c".repeat(32)],
     ["JOBS_TO_SEO_RANK_TOKEN", "m".repeat(32)],
     ["JOBS_TO_PLATFORM_RANK_GRANT_TOKEN", "g".repeat(32)],
+    ["JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN", "b".repeat(32)],
     ["JOBS_TO_SEO_RANK_RESULT_TOKEN", "r".repeat(32)]
   ] as const;
 

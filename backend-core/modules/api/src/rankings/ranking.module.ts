@@ -6,6 +6,9 @@ import { JobsModule } from "../jobs/jobs.module.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { TenantModule } from "../tenants/tenant.module.js";
 import { RankExecutionGrantController } from "./rank-execution-grant.controller.js";
+import { RankExecutionGrantSettlementController } from "./rank-execution-grant-settlement.controller.js";
+import { RankExecutionGrantSettlementGuard } from "./rank-execution-grant-settlement.guard.js";
+import { RankExecutionGrantSettlementService } from "./rank-execution-grant-settlement.service.js";
 import { RankExecutionGrantGuard } from "./rank-execution-grant.guard.js";
 import {
   ControlledBetaRankExecutionGrantPolicy,
@@ -30,6 +33,7 @@ import { AutomationController } from "./automation.controller.js";
   controllers: [
     AutomationController,
     RankExecutionGrantController,
+    RankExecutionGrantSettlementController,
     RankEstimateController,
     RankHistoryController,
     RankRunController,
@@ -38,7 +42,9 @@ import { AutomationController } from "./automation.controller.js";
   providers: [
     ControlledBetaRankExecutionGrantPolicy,
     RankExecutionGrantGuard,
+    RankExecutionGrantSettlementGuard,
     RankExecutionGrantService,
+    RankExecutionGrantSettlementService,
     {
       provide: RANK_EXECUTION_GRANT_POLICY,
       useExisting: ControlledBetaRankExecutionGrantPolicy

@@ -238,9 +238,9 @@ embedded content отклоняется.
   SECURITY DEFINER operations. Прямой global read jobs/vault execution-role
   запрещён. Claim повторно проверяет tenant/job/item, lease, одноразовый
   lifecycle grant, binding/material/connector versions и kill switch.
-  Default-closed `claim_rank_connector_execution` уже реализован, а
-  `PUBLIC EXECUTE` отозван. Connector permission allowlist выдаёт exact
-  `EXECUTE` только на public claim и authorize functions. `CLAIMED` не разрешает
+  Default-closed pre-authorization claim и bounded submit claim уже
+  реализованы, а `PUBLIC EXECUTE` отозван. Connector permission allowlist
+  выдаёт exact `EXECUTE` только на перечисленные broker functions. `CLAIMED` не разрешает
   network. Authorize повторно проверяет полный current graph, lease fence и
   ожидаемые execution/control versions, атомарно устанавливает `SUBMITTING`
   и durable may-have-started marker. До grant отдельная append-only private
@@ -252,7 +252,8 @@ embedded content отклоняется.
   rank/validation/`SERP_RANK_TRACKING` graph, credential projection исключает
   ciphertext/DEK/nonces/tags, а DB guards запрещают фактические writes через
   lock-only column privileges. Runtime caller, recorded provider wire
-  request/status/result и остальные scoped operations ещё не реализованы.
+  request/status/result и остальные scoped operations записываются только
+  через lease-fenced brokers; raw provider payload не сохраняется.
   Retryable submit создаёт новый grant и monotonic execution attempt; исходная
   execution не возвращается в `READY_TO_SUBMIT`.
 - Platform API issuer защищён отдельным
@@ -263,6 +264,13 @@ embedded content отклоняется.
   остальных сервисов. Internal endpoint требует exact single-value
   request/tenant/actor/idempotency headers, `no-store` и path/header/body
   coherence.
+- Billing settlement защищён отдельным
+  `JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN`, который получают только Core
+  API и connector child. Exact `HOLD` подтверждает/ограниченно продлевает
+  живой резерв без ledger mutation; exact `CAPTURE` допустим только после
+  provider outcome. Connector читает из Jobs DB лишь grant ID и credential
+  mode через отдельную `SECURITY DEFINER` функцию без billing amount или
+  credential material.
 - Issuer сериализует owned authorization rows в порядке
   workspace → project → user → membership → project access и сохраняет
   immutable decision в той же transaction, где policy создаёт authoritative
@@ -340,7 +348,10 @@ JWT/mTLS действуют независимые caller/audience credentials:
 
 Dedicated `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
 `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, `JOBS_TO_SEO_RANK_TOKEN`,
-`JOBS_TO_SEO_RANK_RESULT_TOKEN`, `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` и
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`, `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
+`JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN`,
+`JOBS_TO_PLATFORM_AUTOMATION_TOKEN`,
+`REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN` и
 `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`
 сохраняют отдельные audiences. Наличие general credential не разрешает
 вызов dedicated route group.
@@ -355,9 +366,9 @@ combined значения и сравнивает token timing-safe. Любой 
 
 Deploy дополнительно обязан выполнить один общий fail-closed preflight до
 старта credential-bearing processes. Текущий Compose one-shot
-`service-token-preflight` получает десять service tokens,
+`service-token-preflight` получает четырнадцать service tokens,
 `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и пять NATS passwords,
-проверяет все 24 credentials на глобальную pairwise distinctness и отклоняет
+проверяет все 28 credentials на глобальную pairwise distinctness и отклоняет
 placeholders.
 Для каждого NATS client password deploy также обязан предоставить canonical
 bcrypt verifier с canonical `$2a$` prefix и cost `11`; пять verifier
@@ -450,8 +461,9 @@ processes и NATS стартуют только после его успешно
   historical canary не возвращается и не удерживает старый ключ. Пустой vault
   допустим. Ошибка содержит только `keyVersion`. Validation worker выполняет
   job-only bounded retry без изменения credential при runtime decrypt failure,
-  поэтому не создаёт массовый `DISABLED`. Cluster-wide circuit breaker и
-  incident alert после startup ещё не реализованы.
+  поэтому не создаёт массовый `DISABLED`. Runtime failure попадает в
+  error-level operational alert; отдельный cluster-wide circuit breaker ещё
+  не реализован.
 - Vault endpoints не принимают general `PLATFORM_API_TO_JOBS_TOKEN`:
   отдельный caller secret доступен только Platform API и credential-capable
   HTTP process, до плановой замены на service JWT/mTLS.
@@ -1136,6 +1148,39 @@ Page-worthy:
 
 Неизменяющийся внешний provider status не должен создавать бесконечный alert storm.
 
+### 32.1. Реализованный Telegram-канал внутренних ошибок
+
+Production Compose и одноузловой VPS runtime имеют private receiver на порту
+`4004`. Он принимает только exact JSON envelope версии 1 с allowlisted
+`service/source/code/severity/fingerprint`, отдельным
+`OPERATIONAL_ALERT_TOKEN`, лимитом тела 2 KiB и timing-safe проверкой
+авторизации. Произвольный текст исключения, request body, tenant/provider
+payload, URL и credential передать через этот контракт нельзя.
+
+В Telegram уходят:
+
+- unexpected child start/exit/stop;
+- stderr-строки, классифицированные как error/fatal/uncaught/unhandled, только
+  в виде локального SHA-256 fingerprint;
+- uncaught exception monitor backend supervisors;
+- ошибки Next request handler и Realtime upgrade proxy.
+
+Ожидаемые domain `4xx`, validation failures и пользовательские provider
+statuses не являются внутренними инцидентами и не алертятся. Неизвестный `5xx`
+должен попасть в structured error log и далее в supervisor alert.
+
+Telegram bot token получает только alert-receiver process; Frontend и
+Execution получают лишь внутренний URL и dedicated token. Receiver делает
+outbound HTTPS к фиксированному `api.telegram.org`, не следует redirect,
+использует timeout 5 секунд, подавляет одинаковый fingerprint на 5 минут и
+ограничивает канал двадцатью сообщениями за 5 минут. Сбой доставки создаёт
+только generic локальную диагностику без bot token и исходной ошибки.
+
+При `TELEGRAM_ALERTS_ENABLED=true` bot token, chat ID и optional topic ID
+валидируются fail-closed на startup. Release evidence обязано включать canary
+из `infrastructure/runbooks/operational-alerts.md`; сообщение в Telegram не
+является источником истины и не заменяет logs/metrics/traces.
+
 ## 33. Capacity management
 
 Еженедельно/ежемесячно оцениваются:
@@ -1233,8 +1278,13 @@ Radar/crawler capacity:
   отозван. Authorize атомарно фиксирует `SUBMITTING` и durable
   may-have-started marker; provider wire/task/poll/normalized state хранится
   через lease-fenced brokers. Raw provider body не пишется в БД, логи,
-  события или queue payload. Live BYOK smoke и операционные alerts остаются
-  release evidence, а не недостающей runtime-функцией.
+  события или queue payload. Live BYOK smoke и успешный Telegram canary
+  остаются обязательным release evidence; сам operational alert runtime уже
+  является частью versioned topology.
+- connector child дополнительно получает только dedicated
+  `JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN`; rank-worker, Jobs HTTP и
+  остальные process types его не получают. Для синхронного XMLStock порядок
+  фиксирован как HOLD → provider HTTP → CAPTURE → local checkpoint/result.
 
 ### 34.3. Jobs process capability isolation
 
@@ -1246,7 +1296,8 @@ Radar/crawler capacity:
 - inspection получает DB/Redis/S3 и malware scanner;
 - system worker получает только Redis и concurrency, без DB и service secrets;
 - rank получает DB/Redis и два dedicated rank credentials;
-- connector получает `jobs_connector`, Redis и execution KEK;
+- connector получает `jobs_connector`, Redis, execution KEK и dedicated Core
+  billing-settlement token;
 - auth-email получает `jobs_auth_email_runtime`, dedicated NATS consumer,
   Platform JIT token и SMTP; Redis и остальные capabilities запрещены.
 

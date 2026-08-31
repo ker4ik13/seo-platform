@@ -194,11 +194,11 @@ expect_status 200 integration-catalog
 jq -e '
   ([.data[].provider] | sort) == ["ARSENKIN", "KEYS_SO", "XMLSTOCK"] and
   ([.data[] | select(.provider == "ARSENKIN")][0].capabilities ==
-    ["SERP_RANK_TRACKING", "WORDSTAT"]) and
+    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "CLUSTERING", "KEYWORD_RESEARCH"]) and
   ([.data[] | select(.provider == "KEYS_SO")][0].capabilities ==
     ["KEYWORD_RESEARCH", "COMPETITOR_RESEARCH"]) and
   ([.data[] | select(.provider == "XMLSTOCK")][0].capabilities ==
-    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT"])
+    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "KEYWORD_RESEARCH"])
 ' "$response_body" >/dev/null ||
   runtime_fail "integration catalog advertises an unsupported workflow"
 
@@ -377,7 +377,37 @@ api_call POST \
   "smoke-crawl-automation-run-$(openssl rand -hex 16)" \
   "$crawl_automation_version"
 expect_status 202 run-crawl-automation
-scheduled_crawl_id=$(jq -er '.data.crawlId' "$response_body")
+scheduled_run_id=$(jq -er '.data.id' "$response_body")
+scheduled_run_status=$(jq -er '.data.status' "$response_body")
+scheduled_crawl_id=$(jq -r '.data.crawlId // empty' "$response_body")
+for ((attempt = 1; attempt <= 15; attempt += 1)); do
+  [ -n "$scheduled_crawl_id" ] && break
+  case "$scheduled_run_status" in
+    SKIPPED|FAILED)
+      scheduled_run_error=$(jq -r '.data.errorCode // "UNKNOWN"' "$response_body")
+      runtime_fail \
+        "scheduled crawl run finished with status $scheduled_run_status ($scheduled_run_error)"
+      ;;
+  esac
+  sleep 1
+  api_call GET \
+    "projects/$project_id/crawl-automations/$crawl_automation_id/runs"
+  expect_status 200 read-crawl-automation-runs
+  scheduled_run_status=$(
+    jq -er \
+      --arg runId "$scheduled_run_id" \
+      '.data.runs[] | select(.id == $runId) | .status' \
+      "$response_body"
+  )
+  scheduled_crawl_id=$(
+    jq -r \
+      --arg runId "$scheduled_run_id" \
+      '.data.runs[] | select(.id == $runId) | .crawlId // empty' \
+      "$response_body"
+  )
+done
+[ -n "$scheduled_crawl_id" ] ||
+  runtime_fail "scheduled crawl run did not expose a crawl before the smoke timeout"
 
 scheduled_crawl_status=QUEUED
 for ((attempt = 1; attempt <= 45; attempt += 1)); do

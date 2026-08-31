@@ -31,7 +31,9 @@ export class ArsenkinCredentialValidationConnector
     secret: IntegrationCredentialSecret,
     timeoutMs: number
   ): Promise<CredentialValidationResult> {
-    const permit = await this.rateLimiter.tryAcquire();
+    const permit = await this.rateLimiter.tryAcquire(
+      secret.rateLimitScopeId
+    );
     if (!permit.allowed) {
       return withProviderRetryAfter(
         rateLimited(),

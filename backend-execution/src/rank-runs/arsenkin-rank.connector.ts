@@ -143,7 +143,9 @@ export class ArsenkinRankConnector {
     timeoutMs: number
   ): Promise<ArsenkinRankSubmitResult> {
     const request = buildArsenkinRankWireRequest(intentValue);
-    const permit = await this.rateLimiter.tryAcquire();
+    const permit = await this.rateLimiter.tryAcquire(
+      secret.rateLimitScopeId
+    );
     if (!permit.allowed) {
       return rateLimited(permit.retryAfterSeconds);
     }
@@ -172,7 +174,9 @@ export class ArsenkinRankConnector {
     timeoutMs: number
   ): Promise<ArsenkinRankFetchResult> {
     const taskId = taskIdValueOf(taskIdValue);
-    const checkPermit = await this.rateLimiter.tryAcquire();
+    const checkPermit = await this.rateLimiter.tryAcquire(
+      secret.rateLimitScopeId
+    );
     if (!checkPermit.allowed) {
       return rateLimited(checkPermit.retryAfterSeconds);
     }
@@ -190,7 +194,9 @@ export class ArsenkinRankConnector {
       );
       if (checked.status !== "READY") return checked;
 
-      const getPermit = await this.rateLimiter.tryAcquire();
+      const getPermit = await this.rateLimiter.tryAcquire(
+        secret.rateLimitScopeId
+      );
       if (!getPermit.allowed) {
         return rateLimited(getPermit.retryAfterSeconds);
       }

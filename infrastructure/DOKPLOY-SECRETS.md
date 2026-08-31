@@ -42,6 +42,7 @@ Dokploy PostgreSQL backup jobs. Внутри Compose один и тот же var
 - два изолированных Redis: durable Jobs и ephemeral Realtime;
 - NATS JetStream;
 - ClamAV при `COMPOSE_PROFILES=inspection`;
+- private operational-alert receiver как child `backend-core`;
 - one-shot preflight, migrations и exact-permission containers.
 
 Постоянные данные находятся только в named volumes `postgres_data`,
@@ -133,6 +134,7 @@ JOBS_TO_SEO_DATA_TOKEN=
 PLATFORM_API_TO_REALTIME_TOKEN=
 JOBS_TO_SEO_RANK_TOKEN=
 JOBS_TO_PLATFORM_RANK_GRANT_TOKEN=
+JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN=
 JOBS_TO_PLATFORM_AUTOMATION_TOKEN=
 JOBS_TO_SEO_RANK_RESULT_TOKEN=
 JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN=
@@ -140,12 +142,30 @@ RANK_HISTORY_CURSOR_KEY=
 PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN=
 PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN=
 REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN=
+OPERATIONAL_ALERT_TOKEN=
 ```
 
 Preflight отклонит placeholder, повтор одного значения или не-URL-safe
 символ. Эти токены нельзя заменять одним «общим секретом».
 
-### 3.4. NATS
+### 3.4. Telegram operational alerts
+
+Для включения внешней доставки нужны:
+
+```dotenv
+TELEGRAM_ALERTS_ENABLED=true
+TELEGRAM_ALERT_BOT_TOKEN=
+TELEGRAM_ALERT_CHAT_ID=
+TELEGRAM_ALERT_THREAD_ID=
+TELEGRAM_ALERT_ENVIRONMENT=production
+```
+
+Bot token получает только `backend-core` alert child; Frontend и Execution
+получают `OPERATIONAL_ALERT_TOKEN`, но не Telegram destination. Порт 4004
+остаётся private. До production выполнить canary и failure checks по
+[`runbooks/operational-alerts.md`](./runbooks/operational-alerts.md).
+
+### 3.5. NATS
 
 Безопасные usernames уже заданы в `.env.example`; для каждой identity нужны
 отдельный plaintext client password и соответствующий ему canonical bcrypt
@@ -198,7 +218,7 @@ hash. Одни кавычки вокруг single-dollar hash для стары�
 автоматически: сгенерированные hash-строки уже содержат `$$`, вручную
 редактировать NATS пары не нужно.
 
-### 3.5. Шифрование и аутентификация
+### 3.6. Шифрование и аутентификация
 
 ```dotenv
 AUTH_PASSWORD_PEPPER=
@@ -220,7 +240,7 @@ openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
 Encryption key и fingerprint key не должны совпадать. После записи данных
 старую key version нельзя удалять из keyring до полной ротации данных.
 
-### 3.6. SMTP
+### 3.7. SMTP
 
 Transactional email включён в production-compose, поэтому нужны:
 
@@ -276,9 +296,41 @@ IAM policy приложения должна разрешать bucket listing/h
 `AbortMultipartUpload`, `ListBucketMultipartUploads`,
 `ListMultipartUploadParts`.
 
-Provider credentials XMLStock/Arsenkin не являются deploy secrets. Они
-добавляются владельцем рабочей области через UI интеграций и сохраняются в
-зашифрованном credential vault.
+BYOK credentials XMLStock/Arsenkin не являются deploy secrets. Они добавляются
+владельцем рабочей области через UI и сохраняются в зашифрованном vault.
+
+Системные platform-paid credentials являются отдельными deploy secrets:
+
+```dotenv
+PLATFORM_XMLSTOCK_ENABLED=false
+PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR=
+PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR=
+PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR=
+PLATFORM_XMLSTOCK_API_KEYS=
+PLATFORM_XMLSTOCK_ACCOUNT_IDS=
+PLATFORM_XMLSTOCK_API_KEY=
+PLATFORM_XMLSTOCK_ACCOUNT_ID=
+PLATFORM_ARSENKIN_ENABLED=false
+PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR=
+PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR=
+PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR=
+PLATFORM_ARSENKIN_API_KEYS=
+PLATFORM_ARSENKIN_API_KEY=
+```
+
+Цена задаётся в minor units за одну keyword-context проверку, положительным
+целым не больше `61489146912`. При включённом provider flag обязательны цена и
+все его credentials; preflight отклоняет частичную конфигурацию. Для пула
+используются plural-переменные со значениями через запятую. XMLStock принимает
+один общий account ID или список той же длины, что и API keys. Singular и
+plural одновременно задавать нельзя. Эти flags
+нельзя включать в production до письменного разрешения provider, заполненных
+суточного/месячного hard budgets,
+balance alert и fault-injection canary порядка reserve → provider response →
+Core settlement → local complete. Для синхронного XMLStock перед provider
+response выполняется bounded HOLD без ledger mutation. Dedicated settlement
+token получает только Core API и connector child; он не совпадает с grant
+token.
 
 ## 5. S3 destination для backup в Dokploy
 
@@ -361,8 +413,9 @@ Redis/NATS временно переводит backend в degraded state. `redis
 3. Прогнать `pnpm infra:validate` локально там, где установлен Docker Compose.
 4. Выполнить deploy и дождаться успешного завершения всех one-shot services.
 5. Проверить health/readiness из `DOKPLOY.md`.
-6. Настроить и вручную протестировать четыре DB backup.
-7. Экспортировать конфигурацию Dokploy и хранить recovery-доступ отдельно от
+6. При включённом Telegram выполнить operational canary и dedupe check.
+7. Настроить и вручную протестировать четыре DB backup.
+8. Экспортировать конфигурацию Dokploy и хранить recovery-доступ отдельно от
    production VPS.
 
 Официальные справки Dokploy:

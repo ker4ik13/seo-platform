@@ -98,12 +98,13 @@ test("builds project-safe paths and estimate-only public commands", () => {
     rankJobCancelApiPath("project/one", "job/two"),
     "/app/api/projects/project%2Fone/jobs/job%2Ftwo/cancel"
   );
-  assert.deepEqual(rankRunInput(ids.estimateId), {
-    estimateId: ids.estimateId
+  assert.deepEqual(rankRunInput(ids.estimateId, "2500000"), {
+    estimateId: ids.estimateId,
+    confirmedPlatformChargeMicro: "2500000"
   });
   assert.equal(
-    rankRunPayloadSignature(ids.estimateId),
-    `{"estimateId":"${ids.estimateId}"}`
+    rankRunPayloadSignature(ids.estimateId, "2500000"),
+    `{"estimateId":"${ids.estimateId}","confirmedPlatformChargeMicro":"2500000"}`
   );
 });
 
@@ -118,16 +119,19 @@ test("keeps one Idempotency-Key for explicit ambiguous retry only", () => {
   const first = rankRunIdempotencyCommand(
     undefined,
     ids.estimateId,
+    "2500000",
     () => "rank-run-key-1"
   );
   const ambiguousRetry = rankRunIdempotencyCommand(
     first,
     ids.estimateId,
+    "2500000",
     () => "rank-run-key-2"
   );
   const nextEstimate = rankRunIdempotencyCommand(
     ambiguousRetry,
     "01900000-0000-7000-8000-000000000006",
+    "2500000",
     () => "rank-run-key-3"
   );
 
@@ -249,6 +253,26 @@ test("parses every valid public lifecycle state through an allowlist", () => {
   assert.equal(
     failed.status === "FAILED" && "rawProviderBody" in failed.failure,
     false
+  );
+});
+
+test("requires an explicit positive Core charge on platform-paid jobs", () => {
+  const platformJob = {
+    ...base,
+    credentialMode: "PLATFORM_PAID",
+    platformChargeMicro: "2500000",
+    status: "PREPARING",
+    stage: "PREPARING_SCOPE"
+  } as const;
+  assert.equal(
+    parseRankJobSummary(platformJob, expected).platformChargeMicro,
+    "2500000"
+  );
+  assert.throws(() =>
+    parseRankJobSummary(
+      { ...platformJob, platformChargeMicro: "0" },
+      expected
+    )
   );
 });
 

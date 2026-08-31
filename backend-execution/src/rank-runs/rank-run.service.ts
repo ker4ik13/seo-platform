@@ -142,6 +142,10 @@ export class RankRunService {
 
           const verified = verifiedRankEstimate(estimate);
           assertExecutableEstimate(estimate, verified, input, clock.now);
+          const platformChargeMicro = confirmedPlatformChargeMicro(
+            estimate,
+            input
+          );
           const currentProjection = await executionProjection(
             transaction,
             input.workspaceId,
@@ -193,9 +197,9 @@ export class RankRunService {
               progressCurrent: 0n,
               progressTotal: BigInt(estimate.keywordCount),
               progressUnit: "KEYWORD",
-              estimatedCostMicro: 0n,
+              estimatedCostMicro: platformChargeMicro,
               currency: input.billingCurrency,
-              credentialMode: "BYOK_API_KEY",
+              credentialMode: estimate.credentialMode,
               provider: estimate.provider,
               maxAttempts: RANK_PREPARATION_MAX_ATTEMPTS,
               correlationId: boundedRequestId(requestId)
@@ -406,6 +410,12 @@ export class RankRunService {
           if (!parent?.rankRun) {
             throw rankJobNotFound("Partial rank Job not found");
           }
+          if (parent.credentialMode === "PLATFORM_PAID") {
+            throw rankJobConflict(
+              "ESTIMATE_STALE",
+              "Token-paid continuation requires a new confirmed estimate"
+            );
+          }
           const parentSummary = toRankJobSummary(parent);
           if (
             parentSummary.status !== "PARTIALLY_COMPLETED" ||
@@ -503,10 +513,12 @@ export class RankRunService {
             projectId: input.projectId,
             actorId: input.actorId,
             estimateId: continuationEstimate.id,
+            confirmedPlatformChargeMicro: "0",
             project: input.project,
             access: input.access,
             billingCurrency: input.billingCurrency,
-            jobCapacity: input.jobCapacity
+            jobCapacity: input.jobCapacity,
+            providerPricesMinor: input.providerPricesMinor
           };
           const command = rankManifestCommand(
             createInput,
@@ -546,7 +558,7 @@ export class RankRunService {
               progressUnit: "KEYWORD",
               estimatedCostMicro: 0n,
               currency: input.billingCurrency,
-              credentialMode: "BYOK_API_KEY",
+              credentialMode: continuationEstimate.credentialMode,
               provider: continuationEstimate.provider,
               maxAttempts: RANK_PREPARATION_MAX_ATTEMPTS,
               correlationId: boundedRequestId(requestId)
@@ -1055,6 +1067,51 @@ function assertExecutableEstimate(
       "Current access does not allow a rank run"
     );
   }
+}
+
+export function confirmedPlatformChargeMicro(
+  estimate: RankEstimate,
+  input: InternalCreateRankRunInput
+): bigint {
+  const confirmed = BigInt(input.confirmedPlatformChargeMicro);
+  if (estimate.credentialMode === "BYOK_API_KEY") {
+    if (confirmed !== 0n) {
+      throw rankJobConflict(
+        "ESTIMATE_STALE",
+        "BYOK estimate cannot carry a platform charge"
+      );
+    }
+    return 0n;
+  }
+  if (estimate.credentialMode !== "PLATFORM_PAID") {
+    throw rankJobConflict(
+      "ESTIMATE_STALE",
+      "Rank estimate credential mode is unsupported"
+    );
+  }
+  const provider = estimate.provider;
+  if (provider !== "ARSENKIN" && provider !== "XMLSTOCK") {
+    throw rankJobConflict(
+      "ESTIMATE_STALE",
+      "Rank estimate provider is unsupported"
+    );
+  }
+  const keywordPrice = input.providerPricesMinor[provider];
+  const keywords = BigInt(estimate.keywordCount);
+  if (keywordPrice === null || keywords < 1n) {
+    throw rankJobConflict(
+      "ESTIMATE_STALE",
+      "Platform provider pricing is unavailable"
+    );
+  }
+  const expected = BigInt(keywordPrice) * keywords * 10_000n;
+  if (confirmed !== expected || expected < 1n) {
+    throw rankJobConflict(
+      "ESTIMATE_STALE",
+      "Platform provider price changed; calculate a new estimate"
+    );
+  }
+  return expected;
 }
 
 function assertRetryableEstimate(

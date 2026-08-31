@@ -1,6 +1,11 @@
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import { pathToFileURL } from "node:url";
+import {
+  createOperationalAlertClient,
+  installUncaughtExceptionAlert,
+  localFingerprint
+} from "@seo-platform/operational-alerts";
 import next from "next";
 
 const REALTIME_PATH = "/socket.io/";
@@ -48,6 +53,8 @@ export function isRealtimeUpgradeUrl(value) {
 }
 
 export async function startFrontendServer(env = process.env) {
+  const alerts = createOperationalAlertClient(env, "frontend");
+  const removeExceptionMonitor = installUncaughtExceptionAlert(alerts);
   const development = env.NODE_ENV !== "production";
   const hostname = env.HOSTNAME || "127.0.0.1";
   const port = boundedPort(env.PORT ?? "3000");
@@ -57,7 +64,8 @@ export async function startFrontendServer(env = process.env) {
   const handleRequest = app.getRequestHandler();
   const handleNextUpgrade = app.getUpgradeHandler();
   const server = createServer((request, response) => {
-    void Promise.resolve(handleRequest(request, response)).catch(() => {
+    void Promise.resolve(handleRequest(request, response)).catch((error) => {
+      capture(alerts, "next-request", "REQUEST_HANDLER_FAILURE", error);
       if (!response.headersSent) response.writeHead(500);
       response.end();
     });
@@ -66,11 +74,14 @@ export async function startFrontendServer(env = process.env) {
   server.on("upgrade", (request, socket, head) => {
     if (!isRealtimeUpgradeUrl(request.url)) {
       void Promise.resolve(handleNextUpgrade(request, socket, head)).catch(
-        () => socket.destroy()
+        (error) => {
+          capture(alerts, "next-upgrade", "UPGRADE_HANDLER_FAILURE", error);
+          socket.destroy();
+        }
       );
       return;
     }
-    proxyRealtimeUpgrade(request, socket, head, realtime);
+    proxyRealtimeUpgrade(request, socket, head, realtime, alerts);
   });
 
   await new Promise((resolve, reject) => {
@@ -83,16 +94,26 @@ export async function startFrontendServer(env = process.env) {
   });
 
   const shutdown = () => {
-    server.close(() => process.exit(0));
+    server.close(() => {
+      removeExceptionMonitor();
+      void alerts.flush().finally(() => process.exit(0));
+    });
     const timer = setTimeout(() => process.exit(1), 10_000);
     timer.unref();
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
+  server.once("close", removeExceptionMonitor);
   return server;
 }
 
-function proxyRealtimeUpgrade(request, browserSocket, head, target) {
+function proxyRealtimeUpgrade(
+  request,
+  browserSocket,
+  head,
+  target,
+  alerts
+) {
   const headers = { ...request.headers };
   delete headers.authorization;
   delete headers.cookie;
@@ -112,6 +133,12 @@ function proxyRealtimeUpgrade(request, browserSocket, head, target) {
     headers
   });
   upstreamRequest.setTimeout(PROXY_TIMEOUT_MILLISECONDS, () => {
+    capture(
+      alerts,
+      "realtime-proxy",
+      "REALTIME_UPSTREAM_TIMEOUT",
+      "timeout"
+    );
     upstreamRequest.destroy();
     browserSocket.destroy();
   });
@@ -122,7 +149,15 @@ function proxyRealtimeUpgrade(request, browserSocket, head, target) {
     if (upstreamHead.length > 0) browserSocket.write(upstreamHead);
     if (head.length > 0) upstreamSocket.write(head);
     browserSocket.on("error", () => upstreamSocket.destroy());
-    upstreamSocket.on("error", () => browserSocket.destroy());
+    upstreamSocket.on("error", (error) => {
+      capture(
+        alerts,
+        "realtime-proxy",
+        "REALTIME_UPSTREAM_SOCKET_FAILURE",
+        error
+      );
+      browserSocket.destroy();
+    });
     browserSocket.on("close", () => upstreamSocket.destroy());
     upstreamSocket.on("close", () => browserSocket.destroy());
     browserSocket.pipe(upstreamSocket);
@@ -132,9 +167,30 @@ function proxyRealtimeUpgrade(request, browserSocket, head, target) {
     browserSocket.write(rawHttpResponse(response));
     response.pipe(browserSocket);
   });
-  upstreamRequest.on("error", () => browserSocket.destroy());
+  upstreamRequest.on("error", (error) => {
+    capture(
+      alerts,
+      "realtime-proxy",
+      "REALTIME_UPSTREAM_REQUEST_FAILURE",
+      error
+    );
+    browserSocket.destroy();
+  });
   browserSocket.on("close", () => upstreamRequest.destroy());
   upstreamRequest.end();
+}
+
+function capture(alerts, source, code, error) {
+  try {
+    alerts.capture({
+      source,
+      code,
+      severity: "ERROR",
+      fingerprint: localFingerprint(error)
+    });
+  } catch {
+    process.stderr.write("[frontend] alert capture unavailable\n");
+  }
 }
 
 function rawHttpResponse(response) {

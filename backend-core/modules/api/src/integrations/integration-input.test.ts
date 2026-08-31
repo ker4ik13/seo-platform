@@ -3,6 +3,7 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   createIntegrationCredentialInput,
+  enablePlatformIntegrationCredentialInput,
   updateIntegrationCredentialInput
 } from "./integration-input.js";
 
@@ -66,4 +67,22 @@ test("accepts a label-only credential update", () => {
       }),
     DomainError
   );
+});
+
+test("enables only the two token-paid rank providers", () => {
+  assert.deepEqual(
+    enablePlatformIntegrationCredentialInput({ provider: "XMLSTOCK" }),
+    { provider: "XMLSTOCK" }
+  );
+  assert.deepEqual(
+    enablePlatformIntegrationCredentialInput({ provider: "ARSENKIN" }),
+    { provider: "ARSENKIN" }
+  );
+  for (const value of [
+    { provider: "KEYS_SO" },
+    { provider: "XMLSTOCK", apiKey: "must-not-be-accepted" },
+    {}
+  ]) {
+    assert.throws(() => enablePlatformIntegrationCredentialInput(value), DomainError);
+  }
 });

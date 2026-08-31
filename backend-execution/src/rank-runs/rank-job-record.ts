@@ -56,7 +56,9 @@ export function rankRunRequestHash(
       workspaceId: input.workspaceId,
       projectId: input.projectId,
       actorId: input.actorId,
-      estimateId: input.estimateId
+      estimateId: input.estimateId,
+      confirmedPlatformChargeMicro:
+        input.confirmedPlatformChargeMicro
     }),
     "hex"
   );
@@ -182,13 +184,25 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
     stored.projectId !== run.projectId ||
     stored.projectId === null ||
     (stored.provider !== "ARSENKIN" && stored.provider !== "XMLSTOCK") ||
-    stored.credentialMode !== "BYOK_API_KEY" ||
+    (stored.credentialMode !== "BYOK_API_KEY" &&
+      stored.credentialMode !== "PLATFORM_PAID") ||
     stored.currency === null ||
     !/^[A-Z]{3}$/u.test(stored.currency) ||
     stored.progressTotal === null ||
+    stored.estimatedCostMicro === null ||
     stored.progressCurrent < 0n ||
     stored.progressTotal < 1n ||
     stored.progressCurrent > stored.progressTotal
+  ) {
+    invalid();
+  }
+  if (
+    stored.estimatedCostMicro < 0n ||
+    (stored.credentialMode === "BYOK_API_KEY" &&
+      stored.estimatedCostMicro !== 0n) ||
+    (stored.credentialMode === "PLATFORM_PAID" &&
+      (stored.estimatedCostMicro < 1n ||
+        stored.estimatedCostMicro % 10_000n !== 0n))
   ) {
     invalid();
   }
@@ -206,13 +220,13 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
       run.manifestCommand
     ),
     operation: "POSITIONS",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode: stored.credentialMode,
     progress: {
       current: stored.progressCurrent.toString(),
       total: stored.progressTotal.toString(),
       unit: "KEYWORD"
     },
-    platformChargeMicro: "0",
+    platformChargeMicro: stored.estimatedCostMicro.toString(),
     billingCurrency: stored.currency,
     createdAt: timestamp(stored.createdAt)
   } as const;

@@ -71,7 +71,7 @@ export class CrawlAutomationRuntimeService
       this.logger.error("Crawl automation worker error");
     });
     this.worker.on("failed", () => {
-      this.logger.warn("One crawl automation delivery failed");
+      this.logger.error("One crawl automation delivery failed");
     });
     await this.reconcile();
     this.timer = setInterval(

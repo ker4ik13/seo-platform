@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyRankExecutionGrantNoStore,
-  rankExecutionGrantRoutePattern
+  rankExecutionGrantRoutePattern,
+  rankExecutionGrantSettlementRoutePattern
 } from "./rank-execution-grant-http.js";
 
 test("applies no-store only to every response from the exact grant route", () => {
@@ -16,6 +17,11 @@ test("applies no-store only to every response from the exact grant route", () =>
       method: "GET",
       route: rankExecutionGrantRoutePattern,
       expected: undefined
+    },
+    {
+      method: "POST",
+      route: rankExecutionGrantSettlementRoutePattern,
+      expected: "no-store"
     },
     {
       method: "POST",

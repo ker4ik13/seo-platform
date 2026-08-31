@@ -14,7 +14,7 @@ stack. Итого это восемь long-running containers при включ�
 containers. One-shot containers завершаются до старта backend и не требуют
 отдельного управления как приложения.
 
-`backend-execution` запускает по умолчанию два rank и два connector child
+`backend-execution` запускает по умолчанию два rank и три connector child
 process. Это остаётся одним Dokploy service; масштаб регулируется
 `RANK_WORKER_PROCESSES` и `CONNECTOR_WORKER_PROCESSES`, а отдельные queue
 concurrency — `RANK_CONNECTOR_CONCURRENCY`,
@@ -22,6 +22,9 @@ concurrency — `RANK_CONNECTOR_CONCURRENCY`,
 Увеличение этих значений повышает локальный параллелизм, но не обходит общий
 provider capacity и поэтому само по себе не умножает платные запросы сверх
 настроенного broker limit.
+
+`backend-core` дополнительно запускает private operational-alert receiver на
+`4004`. Это child process того же service, а не четвёртое приложение Dokploy.
 
 ## 1. Создание проекта
 
@@ -53,8 +56,9 @@ provider capacity и поэтому само по себе не умножает
 | API domain | `backend-core` | 4000 |
 | Realtime domain или path | `backend-core` | 4003 |
 
-Порт 4001 — только internal SEO compatibility API. `backend-execution:4002`
-тоже internal-only. Data services и NATS monitor наружу не публиковать.
+Порты 4001 и 4004 — только internal SEO compatibility API и operational-alert
+receiver. `backend-execution:4002` тоже internal-only. Data services, receiver
+и NATS monitor наружу не публиковать.
 
 Значения должны совпадать с routes:
 
@@ -117,9 +121,17 @@ pnpm infra:validate
   затем включить registration/delivery flags.
 - YooKassa: заполнить shop/secret/return URL и только затем
   `YOOKASSA_ENABLED=true`.
+- Telegram: заполнить bot/chat destination, выполнить canary из runbook и
+  только затем поставить `TELEGRAM_ALERTS_ENABLED=true`.
+- Platform XMLStock/Arsenkin: исходный секрет, account ID где требуется и
+  per-keyword customer price, суточный и месячный hard spend cap заполняются
+  как deploy secrets. Feature flag оставлять `false` до legal approval,
+  balance alert и
+  fault-injection canary порядка provider response → billing settlement.
 
-XMLStock/Arsenkin credentials вводятся в интерфейсе интеграций и не
-добавляются в Compose environment.
+Пользовательские BYOK XMLStock/Arsenkin credentials по-прежнему вводятся в
+интерфейсе и не добавляются в Compose environment. `PLATFORM_*` variables —
+отдельный системный account платформы, недоступный пользователю.
 
 ## 5. Первый SUPER_ADMIN
 
@@ -157,12 +169,16 @@ platform role. Bootstrap проверяет активный аккаунт, п�
 
 - `backend-core:4000/health/ready`;
 - `backend-core:4003/health/ready`;
+- `backend-core:4004/health/ready` из private network;
 - `backend-execution:4002/health/ready` из private network;
 - `frontend:3000/ru`.
 
 Затем пройти: login/session refresh, создание проекта, ручной rank estimate и
 Top-100 run, task terminal state, Realtime reconnect. Проверить, что логи не
 содержат service tokens, database URLs, SMTP/provider credentials.
+Если Telegram включён, выполнить canary по
+[`runbooks/operational-alerts.md`](./runbooks/operational-alerts.md) и
+проверить deduplication повторного fingerprint.
 
 ## 7. Обновление и rollback
 

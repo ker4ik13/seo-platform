@@ -20,7 +20,7 @@ export type ArsenkinHttpRateLimitPermit =
   | { readonly allowed: false; readonly retryAfterSeconds: number };
 
 export interface ArsenkinHttpRateLimitGate {
-  tryAcquire(): Promise<ArsenkinHttpRateLimitPermit>;
+  tryAcquire(scopeId?: string): Promise<ArsenkinHttpRateLimitPermit>;
 }
 
 type RedisEvalPort = Pick<Redis, "eval">;
@@ -47,7 +47,7 @@ return {1, 0}
 `;
 
 /**
- * One shared, fail-closed rolling window for every Arsenkin HTTP request.
+ * One fail-closed rolling window per physical Arsenkin API key.
  * The Redis key is inside the connector worker's exact ACL namespace, so the
  * limit is shared by connector kinds and by horizontally scaled workers.
  */
@@ -69,10 +69,11 @@ export class ArsenkinHttpRateLimiter
     });
   }
 
-  public tryAcquire(): Promise<ArsenkinHttpRateLimitPermit> {
+  public tryAcquire(scopeId?: string): Promise<ArsenkinHttpRateLimitPermit> {
     return acquireArsenkinHttpRateLimitPermit(
       this.connection,
-      randomUUID()
+      randomUUID(),
+      scopeId
     );
   }
 
@@ -85,7 +86,8 @@ export class ArsenkinHttpRateLimiter
 
 export async function acquireArsenkinHttpRateLimitPermit(
   redis: RedisEvalPort,
-  member: string
+  member: string,
+  scopeId?: string
 ): Promise<ArsenkinHttpRateLimitPermit> {
   if (!UUID_PATTERN.test(member)) {
     throw new TypeError("Invalid Arsenkin rate limit member");
@@ -94,7 +96,7 @@ export async function acquireArsenkinHttpRateLimitPermit(
     redis.eval(
       SLIDING_WINDOW_SCRIPT,
       1,
-      ARSENKIN_HTTP_RATE_LIMIT_KEY,
+      arsenkinHttpRateLimitKey(scopeId),
       String(ARSENKIN_HTTP_RATE_LIMIT),
       String(ARSENKIN_HTTP_RATE_WINDOW_MS),
       member
@@ -115,6 +117,14 @@ export async function acquireArsenkinHttpRateLimitPermit(
     allowed: false,
     retryAfterSeconds: Math.max(1, Math.ceil(response[1] / 1_000))
   };
+}
+
+export function arsenkinHttpRateLimitKey(scopeId?: string): string {
+  if (scopeId === undefined) return ARSENKIN_HTTP_RATE_LIMIT_KEY;
+  if (!UUID_PATTERN.test(scopeId)) {
+    throw new TypeError("Invalid Arsenkin rate limit scope");
+  }
+  return `${ARSENKIN_HTTP_RATE_LIMIT_KEY}:${scopeId.toLowerCase()}`;
 }
 
 async function commandWithTimeout<T>(command: Promise<T>): Promise<T> {

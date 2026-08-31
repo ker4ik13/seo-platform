@@ -36,9 +36,15 @@ import { ArsenkinAiAnswerConnector } from "./ai-answer-collections/arsenkin-ai-a
 import { ArsenkinClusteringConnector } from "./clustering-runs/arsenkin-clustering.connector.js";
 import { ClusteringRuntimeBrokerService } from "./clustering-runs/clustering-runtime-broker.service.js";
 import { ClusteringRuntimeService } from "./clustering-runs/clustering-runtime.service.js";
+import { PlatformApiModule } from "./platform-api/platform-api.module.js";
 
 @Module({
-  imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule, SeoDataModule],
+  imports: [
+    ConfigModule.forRole("CONNECTOR_WORKER"),
+    DatabaseModule,
+    SeoDataModule,
+    PlatformApiModule
+  ],
   providers: [
     ArsenkinHttpRateLimiter,
     XmlStockHttpQuotaLimiter,

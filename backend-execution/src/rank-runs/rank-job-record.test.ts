@@ -242,6 +242,10 @@ test("keeps idempotency intent independent from mutable access snapshots", () =>
     ...original,
     actorId: "0190abcd-0000-7000-8000-000000000007"
   };
+  const anotherConfirmedPrice: InternalCreateRankRunInput = {
+    ...original,
+    confirmedPlatformChargeMicro: "250000"
+  };
 
   assert.deepEqual(
     rankRunRequestHash(original),
@@ -250,6 +254,42 @@ test("keeps idempotency intent independent from mutable access snapshots", () =>
   assert.notDeepEqual(
     rankRunRequestHash(original),
     rankRunRequestHash(anotherActor)
+  );
+  assert.notDeepEqual(
+    rankRunRequestHash(original),
+    rankRunRequestHash(anotherConfirmedPrice)
+  );
+});
+
+test("returns only mode-coherent immutable platform charges", () => {
+  assert.equal(
+    toRankJobSummary(
+      rankJob({
+        credentialMode: "PLATFORM_PAID",
+        estimatedCostMicro: 250_000n
+      })
+    ).platformChargeMicro,
+    "250000"
+  );
+  assert.throws(
+    () =>
+      toRankJobSummary(
+        rankJob({
+          credentialMode: "PLATFORM_PAID",
+          estimatedCostMicro: 250_001n
+        })
+      ),
+    /Invalid stored manual rank Job/u
+  );
+  assert.throws(
+    () =>
+      toRankJobSummary(
+        rankJob({
+          credentialMode: "BYOK_API_KEY",
+          estimatedCostMicro: 250_000n
+        })
+      ),
+    /Invalid stored manual rank Job/u
   );
 });
 
@@ -305,6 +345,7 @@ function rankRunInput(): InternalCreateRankRunInput {
     projectId,
     actorId,
     estimateId,
+    confirmedPlatformChargeMicro: "0",
     project: {
       id: projectId,
       workspaceId,
@@ -330,6 +371,10 @@ function rankRunInput(): InternalCreateRankRunInput {
       planCode: "TEAM",
       planVersion: 3,
       concurrentJobs: 10
+    },
+    providerPricesMinor: {
+      ARSENKIN: "25",
+      XMLSTOCK: "30"
     }
   };
 }

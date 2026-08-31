@@ -170,22 +170,31 @@ export function rankJobCancelApiPath(
   return `${rankJobApiPath(projectId, jobId)}/cancel`;
 }
 
-export function rankRunInput(estimateId: string): CreateRankRunInput {
-  return { estimateId };
+export function rankRunInput(
+  estimateId: string,
+  confirmedPlatformChargeMicro: string
+): CreateRankRunInput {
+  return { estimateId, confirmedPlatformChargeMicro };
 }
 
-export function rankRunPayloadSignature(estimateId: string): string {
-  return JSON.stringify(rankRunInput(estimateId));
+export function rankRunPayloadSignature(
+  estimateId: string,
+  confirmedPlatformChargeMicro: string
+): string {
+  return JSON.stringify(
+    rankRunInput(estimateId, confirmedPlatformChargeMicro)
+  );
 }
 
 export function rankRunIdempotencyCommand(
   current: IdempotentCommand | undefined,
   estimateId: string,
+  confirmedPlatformChargeMicro: string,
   createKey: () => string
 ): IdempotentCommand {
   return stableIdempotencyCommand(
     current,
-    rankRunPayloadSignature(estimateId),
+    rankRunPayloadSignature(estimateId, confirmedPlatformChargeMicro),
     createKey
   );
 }
@@ -214,6 +223,16 @@ export function parseRankJobSummary(
       : undefined;
   const executionPresentation = parseRankExecutionPresentation(input);
   const route = parseConnectorRoute(input);
+  const credentialMode =
+    input.credentialMode === "BYOK_API_KEY" ||
+    input.credentialMode === "PLATFORM_PAID"
+      ? input.credentialMode
+      : undefined;
+  const platformChargeMicro =
+    typeof input.platformChargeMicro === "string" &&
+    /^(?:0|[1-9]\d*)$/u.test(input.platformChargeMicro)
+      ? input.platformChargeMicro
+      : undefined;
 
   if (
     !id ||
@@ -229,8 +248,10 @@ export function parseRankJobSummary(
     executionPresentation === null ||
     route === null ||
     input.operation !== "POSITIONS" ||
-    input.credentialMode !== "BYOK_API_KEY" ||
-    input.platformChargeMicro !== "0" ||
+    !credentialMode ||
+    !platformChargeMicro ||
+    (credentialMode === "BYOK_API_KEY" && platformChargeMicro !== "0") ||
+    (credentialMode === "PLATFORM_PAID" && platformChargeMicro === "0") ||
     !billingCurrency ||
     !status ||
     !stage ||
@@ -250,9 +271,9 @@ export function parseRankJobSummary(
     ...executionPresentation,
     ...route,
     operation: "POSITIONS",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode,
     progress,
-    platformChargeMicro: "0",
+    platformChargeMicro,
     billingCurrency,
     createdAt
   } as const;

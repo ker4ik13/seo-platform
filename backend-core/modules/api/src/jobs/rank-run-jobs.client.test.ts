@@ -79,7 +79,10 @@ test("uses the dedicated boundary for create, list, scoped get, cancel and conti
       `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/rank-runs`
     );
     assert.equal(requests[0]?.method, "POST");
-    assert.deepEqual(requests[0]?.body, rankRunCommand());
+    assert.deepEqual(requests[0]?.body, {
+      ...rankRunCommand(),
+      providerPricesMinor: { ARSENKIN: null, XMLSTOCK: null }
+    });
     assert.equal(
       requests[0]?.headers.get("idempotency-key"),
       "rank-run-create-0001"
@@ -118,7 +121,10 @@ test("uses the dedicated boundary for create, list, scoped get, cancel and conti
       `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${jobId}/retry-missing`
     );
     assert.equal(requests[4]?.method, "POST");
-    assert.deepEqual(requests[4]?.body, rankRetryCommand());
+    assert.deepEqual(requests[4]?.body, {
+      ...rankRetryCommand(),
+      providerPricesMinor: { ARSENKIN: null, XMLSTOCK: null }
+    });
     assert.equal(
       requests[4]?.headers.get("idempotency-key"),
       "rank-retry-0001"
@@ -363,12 +369,16 @@ function context() {
   };
 }
 
-function rankRunCommand(): InternalCreateRankRunInput {
+function rankRunCommand(): Omit<
+  InternalCreateRankRunInput,
+  "providerPricesMinor"
+> {
   return {
     workspaceId,
     projectId,
     actorId,
     estimateId,
+    confirmedPlatformChargeMicro: "0",
     project: {
       id: projectId,
       workspaceId,
@@ -393,7 +403,10 @@ function rankRunCommand(): InternalCreateRankRunInput {
   };
 }
 
-function rankRetryCommand(): InternalRetryRankJobInput {
+function rankRetryCommand(): Omit<
+  InternalRetryRankJobInput,
+  "providerPricesMinor"
+> {
   const input = rankRunCommand();
   return {
     workspaceId: input.workspaceId,

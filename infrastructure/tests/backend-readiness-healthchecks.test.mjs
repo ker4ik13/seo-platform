@@ -19,7 +19,8 @@ test("all application containers use dependency-aware readiness", async () => {
   assert.match(core, /^      - "4000"$/mu);
   assert.match(core, /^      - "4001"$/mu);
   assert.match(core, /^      - "4003"$/mu);
-  assert.match(core, /Promise\.all\(\[4000,4003\]/u);
+  assert.match(core, /^      - "4004"$/mu);
+  assert.match(core, /Promise\.all\(\[4000,4003,4004\]/u);
   assert.match(execution, /^    stop_grace_period: 75s$/mu);
   assert.match(
     execution,

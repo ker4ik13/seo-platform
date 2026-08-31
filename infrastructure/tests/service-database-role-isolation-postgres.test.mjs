@@ -34,6 +34,9 @@ const connectorProvisionerPath = fileURLToPath(
     import.meta.url
   )
 );
+const connectorPermissionPath = fileURLToPath(
+  new URL("../postgres/permissions/jobs-connector.sql", import.meta.url)
+);
 const postgresEntrypointPath = fileURLToPath(
   new URL("../postgres/config/start-postgres.sh", import.meta.url)
 );
@@ -73,6 +76,17 @@ const mappings = [
   }
 ];
 
+const isolatedJobsRuntimes = Object.freeze([
+  Object.freeze({
+    runtime: "jobs_rank_runtime",
+    runtimeSecret: "JOBS_RANK_DATABASE_PASSWORD"
+  }),
+  Object.freeze({
+    runtime: "jobs_auth_email_runtime",
+    runtimeSecret: "JOBS_AUTH_EMAIL_DATABASE_PASSWORD"
+  })
+]);
+
 const rankBoundaryFixture = Object.freeze({
   workspaceId: "00000000-0000-7000-8000-000000000101",
   projectId: "00000000-0000-7000-8000-000000000102",
@@ -105,13 +119,14 @@ test(
           mapping.runtimeSecret
         ]),
         "JOBS_RANK_DATABASE_PASSWORD",
+        "JOBS_AUTH_EMAIL_DATABASE_PASSWORD",
         "JOBS_CONNECTOR_DATABASE_PASSWORD"
       ].map((secretName) => [
         secretName,
         `${secretName.toLowerCase().replaceAll("_", "-")}-${randomBytes(24).toString("base64url")}`
       ])
     );
-    assert.equal(new Set(Object.values(passwords)).size, 10);
+    assert.equal(new Set(Object.values(passwords)).size, 11);
 
     let originalHba;
     let hbaPath;
@@ -263,7 +278,7 @@ async function assertFreshPostgres18Administrator(admin) {
        FROM pg_roles
        WHERE rolname ~ '^(platform|seo|jobs|realtime)_(owner|runtime)$'
           OR rolname IN (
-            'jobs_rank_runtime', 'jobs_connector'
+            'jobs_rank_runtime', 'jobs_auth_email_runtime', 'jobs_connector'
           )`
     ),
     "0",
@@ -321,6 +336,7 @@ async function assertRoleCatalog(admin) {
          'platform_owner', 'platform_runtime',
          'seo_owner', 'seo_runtime',
          'jobs_owner', 'jobs_runtime', 'jobs_rank_runtime',
+         'jobs_auth_email_runtime',
          'realtime_owner', 'realtime_runtime',
          'jobs_connector'
        )
@@ -332,7 +348,7 @@ async function assertRoleCatalog(admin) {
          AND NOT rolreplication
          AND NOT rolbypassrls`
     ),
-    "10"
+    "11"
   );
   assert.equal(
     await checkedPsql(
@@ -345,6 +361,7 @@ async function assertRoleCatalog(admin) {
            'platform_owner', 'platform_runtime',
            'seo_owner', 'seo_runtime',
            'jobs_owner', 'jobs_runtime', 'jobs_rank_runtime',
+           'jobs_auth_email_runtime',
            'realtime_owner', 'realtime_runtime',
            'jobs_connector'
          )
@@ -354,6 +371,7 @@ async function assertRoleCatalog(admin) {
            'platform_owner', 'platform_runtime',
            'seo_owner', 'seo_runtime',
            'jobs_owner', 'jobs_runtime', 'jobs_rank_runtime',
+           'jobs_auth_email_runtime',
            'realtime_owner', 'realtime_runtime',
            'jobs_connector'
          )
@@ -381,6 +399,17 @@ async function assertRoleCatalog(admin) {
        FROM pg_shdepend
        WHERE refclassid = 'pg_authid'::regclass
          AND refobjid = 'jobs_rank_runtime'::regrole
+         AND deptype = 'o'`
+    ),
+    "0"
+  );
+  assert.equal(
+    await checkedPsql(
+      admin,
+      `SELECT count(*)
+       FROM pg_shdepend
+       WHERE refclassid = 'pg_authid'::regclass
+         AND refobjid = 'jobs_auth_email_runtime'::regrole
          AND deptype = 'o'`
     ),
     "0"
@@ -501,6 +530,10 @@ async function assertRuntimeCrudAndBoundaries(admin, passwords) {
     jobsRuntime,
     "SELECT count(*) FROM public.rank_provider_request_intents"
   );
+  await assertPsqlDenied(
+    jobsRuntime,
+    "SELECT count(*) FROM public.auth_email_delivery_attempts"
+  );
 
   const rankRuntime = roleEnvironment(
     admin,
@@ -609,8 +642,108 @@ async function assertRuntimeCrudAndBoundaries(admin, passwords) {
     "0"
   );
 
-  for (const lockOnlyTable of [
+  const authEmailRuntime = roleEnvironment(
+    admin,
+    "jobs_auth_email_runtime",
+    "jobs_db",
+    passwords.JOBS_AUTH_EMAIL_DATABASE_PASSWORD
+  );
+  const authEmailSourceEventId = "00000000-0000-7000-8000-000000000201";
+  assert.equal(
+    await checkedPsql(
+      authEmailRuntime,
+      `INSERT INTO public.auth_email_delivery_attempts (
+         source_event_id, event_type, source_event_hash, updated_at
+       ) VALUES (
+         '${authEmailSourceEventId}'::uuid,
+         'identity.email-verification.requested.v1',
+         decode(repeat('21', 32), 'hex'), clock_timestamp()
+       ) RETURNING status`
+    ),
+    "PENDING"
+  );
+  assert.equal(
+    await checkedPsql(
+      authEmailRuntime,
+      `UPDATE public.auth_email_delivery_attempts
+       SET status = 'SENDING', attempts = attempts + 1,
+           lease_owner = 'postgres-boundary-test', lease_token = uuidv7(),
+           lease_expires_at = clock_timestamp() + interval '1 minute',
+           version = version + 1, updated_at = clock_timestamp()
+       WHERE source_event_id = '${authEmailSourceEventId}'::uuid
+       RETURNING status`
+    ),
+    "SENDING"
+  );
+  await assertPsqlDenied(
+    authEmailRuntime,
+    `DELETE FROM public.auth_email_delivery_attempts
+     WHERE source_event_id = '${authEmailSourceEventId}'::uuid`
+  );
+  for (const forbiddenTable of [
+    "jobs",
     "job_items",
+    "rank_provider_request_intents",
+    "outbox_events",
+    "integration_credentials",
+    "runtime_permission_probe",
+    "_prisma_migrations"
+  ]) {
+    await assertPsqlDenied(
+      authEmailRuntime,
+      `SELECT count(*) FROM public.${forbiddenTable}`
+    );
+  }
+  assert.equal(
+    await checkedPsql(
+      { ...admin, PGDATABASE: "jobs_db" },
+      `SELECT concat_ws(',',
+         has_table_privilege(
+           'jobs_auth_email_runtime',
+           'public.auth_email_delivery_attempts',
+           'SELECT'
+         ),
+         has_table_privilege(
+           'jobs_auth_email_runtime',
+           'public.auth_email_delivery_attempts',
+           'INSERT'
+         ),
+         has_table_privilege(
+           'jobs_auth_email_runtime',
+           'public.auth_email_delivery_attempts',
+           'UPDATE'
+         ),
+         has_table_privilege(
+           'jobs_auth_email_runtime',
+           'public.auth_email_delivery_attempts',
+           'DELETE'
+         ),
+         has_table_privilege(
+           'jobs_auth_email_runtime',
+           'public.auth_email_delivery_attempts',
+           'TRUNCATE'
+         )
+       )`
+    ),
+    "t,t,t,f,f"
+  );
+
+  assert.equal(
+    await checkedPsql(
+      { ...admin, PGDATABASE: "jobs_db" },
+      `SELECT string_agg(attribute.attname, ',' ORDER BY attribute.attname)
+       FROM pg_attribute attribute
+       WHERE attribute.attrelid = 'public.job_items'::regclass
+         AND attribute.attnum > 0
+         AND NOT attribute.attisdropped
+         AND has_column_privilege(
+           'jobs_rank_runtime', attribute.attrelid, attribute.attnum, 'UPDATE'
+         )`
+    ),
+    "actual_cost_micro,attempt,error,output_reference,provider_request_id,retry_at,status,updated_at"
+  );
+
+  for (const lockOnlyTable of [
     "integration_credentials",
     "project_connector_bindings",
     "project_connector_routes"
@@ -740,7 +873,7 @@ async function assertRankRuntimeDomainBoundary(admin, passwords) {
        decode(repeat('13', 32), 'hex'),
        decode(repeat('14', 32), 'hex'),
        decode(repeat('15', 32), 'hex'),
-       'ARSENKIN', 'BYOK_API_KEY', 'rank-boundary@1',
+       'ARSENKIN', 'BYOK_API_KEY', 'manual-arsenkin-positions@1.0.0',
        1, 1, 1, 1, 1, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb,
        decode(repeat('16', 32), 'hex'),
        '2026-07-30 00:00:00+00'::timestamptz,
@@ -890,8 +1023,13 @@ async function assertRankRuntimeDomainBoundary(admin, passwords) {
     /cannot update non-rank jobs|violates row-level security/u
   );
 
+  await assertPsqlDenied(
+    rank,
+    `UPDATE public.job_items SET id = id
+     WHERE id = '${fixture.manualItemId}'::uuid`
+  );
+
   for (const [table, id] of [
-    ["job_items", fixture.manualItemId],
     ["integration_credentials", fixture.credentialId],
     ["project_connector_bindings", fixture.bindingId],
     ["project_connector_routes", fixture.routeId]
@@ -980,6 +1118,21 @@ async function assertOwnerBoundaries(admin, passwords) {
     /permission denied for database|pg_hba\.conf rejects connection|no pg_hba\.conf entry/u
   );
 
+  const authEmailRuntime = roleEnvironment(
+    admin,
+    "jobs_auth_email_runtime",
+    "jobs_db",
+    passwords.JOBS_AUTH_EMAIL_DATABASE_PASSWORD
+  );
+  assert.equal(
+    await checkedPsql(authEmailRuntime, "SELECT current_database()"),
+    "jobs_db"
+  );
+  await assertConnectionDenied(
+    { ...authEmailRuntime, PGDATABASE: "platform_db" },
+    /permission denied for database|pg_hba\.conf rejects connection|no pg_hba\.conf entry/u
+  );
+
 }
 
 async function assertPublicAndRoutineBoundaries(admin) {
@@ -1013,17 +1166,43 @@ async function assertPublicAndRoutineBoundaries(admin) {
       "0"
     );
   }
+  const connectorPermissionSql = await readFile(
+    connectorPermissionPath,
+    "utf8"
+  );
+  const expectedConnectorRoutines = [
+    ...connectorPermissionSql.replace(/\s+/gu, " ").matchAll(
+      /GRANT EXECUTE ON FUNCTION (public\.[a-z0-9_]+\([^)]*\)) TO %I/giu
+    )
+  ]
+    .map((match) => normalizeRoutineSignature(match[1]))
+    .sort();
+  assert.ok(expectedConnectorRoutines.length >= 8);
   assert.equal(
+    new Set(expectedConnectorRoutines).size,
+    expectedConnectorRoutines.length
+  );
+  const actualConnectorRoutines = (
     await checkedPsql(
       { ...admin, PGDATABASE: "jobs_db" },
-      `SELECT count(*)
+      `SELECT format(
+                '%I.%I(%s)',
+                namespace.nspname,
+                routine.proname,
+                oidvectortypes(routine.proargtypes)
+              )
        FROM pg_proc routine
        JOIN pg_namespace namespace ON namespace.oid = routine.pronamespace
        WHERE namespace.nspname = 'public'
-         AND has_function_privilege('jobs_connector', routine.oid, 'EXECUTE')`
-    ),
-    "8"
-  );
+         AND has_function_privilege('jobs_connector', routine.oid, 'EXECUTE')
+       ORDER BY 1`
+    )
+  )
+    .split("\n")
+    .filter(Boolean)
+    .map(normalizeRoutineSignature)
+    .sort();
+  assert.deepEqual(actualConnectorRoutines, expectedConnectorRoutines);
 }
 
 async function assertOwnerAuditFailsClosed(admin, passwords) {
@@ -1108,6 +1287,20 @@ async function assertLiveHbaBoundaries(admin, passwords) {
     }
   }
 
+  for (const isolatedRuntime of isolatedJobsRuntimes) {
+    const own = roleEnvironment(
+      admin,
+      isolatedRuntime.runtime,
+      "jobs_db",
+      passwords[isolatedRuntime.runtimeSecret]
+    );
+    assert.equal(await checkedPsql(own, "SELECT current_database()"), "jobs_db");
+    await assertConnectionDenied(
+      { ...own, PGDATABASE: "platform_db" },
+      /pg_hba\.conf rejects connection|no pg_hba\.conf entry/u
+    );
+  }
+
   const staleRole = "platform_runtime_stale";
   const stalePassword = `stale-${randomBytes(24).toString("base64url")}`;
   await checkedPsql(
@@ -1166,6 +1359,13 @@ function roleEnvironment(admin, role, database, password) {
     PGPASSWORD: password,
     PGOPTIONS: ""
   };
+}
+
+function normalizeRoutineSignature(signature) {
+  return signature
+    .replace(/\s+/gu, "")
+    .toLowerCase()
+    .replaceAll("timestampwithtimezone", "timestamptz");
 }
 
 async function assertPsqlDenied(environment, sql) {
@@ -1228,6 +1428,7 @@ async function cleanup(admin) {
     "seo_owner",
     "jobs_runtime",
     "jobs_rank_runtime",
+    "jobs_auth_email_runtime",
     "jobs_owner",
     "realtime_runtime",
     "realtime_owner"

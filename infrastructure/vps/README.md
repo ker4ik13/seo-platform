@@ -17,6 +17,7 @@ HA/репликацию и внешний secret manager.
 | SEO Data | `127.0.0.1:4001` | только loopback |
 | Jobs | `127.0.0.1:4002` | только loopback |
 | Realtime | `127.0.0.1:4003` | только loopback |
+| Operational alerts | `127.0.0.1:4004` | только loopback |
 | PostgreSQL 18 | `127.0.0.1:5432` | отдельные owner/runtime-роли |
 | Redis Jobs / Realtime | `127.0.0.1:6379/6380` | отдельные ACL |
 | NATS JetStream / monitor | `127.0.0.1:4222/8222` | отдельные identities |
@@ -105,6 +106,23 @@ Webhook YooKassa для текущего preview нужно направить �
 на порту 443; Platform API остаётся на loopback. Merchant credentials runner
 не генерирует, не выводит и в repository не сохраняет.
 
+Внутренние error/fatal-события и неожиданные остановки компонентов можно
+направить в отдельный private Telegram chat. Конфигуратор читает bot token без
+echo, сначала отправляет canary и меняет mode-600 `runtime.env` только после
+успеха:
+
+```bash
+infrastructure/vps/stop-runtime.sh
+SEO_PLATFORM_TELEGRAM_ALERT_CHAT_ID=-1001234567890 \
+  infrastructure/vps/configure-telegram-alerts.sh
+infrastructure/vps/start-runtime.sh
+```
+
+Supervisor отправляет только allowlisted code/severity и локальный SHA-256
+fingerprint; исходная строка лога, stack trace, tenant payload и секреты не
+покидают VPS. Подробный rollout и проверка — в
+[`../runbooks/operational-alerts.md`](../runbooks/operational-alerts.md).
+
 `bootstrap-runtime.sh` принимает уже проверенные локальные пути
 `POSTGRES_DISTRIBUTION_ROOT`, `REDIS_SERVER_BINARY`, `REDIS_CLI_BINARY` и
 `NATS_SERVER_BINARY`, проверяет точные major/version, создаёт mode-600
@@ -123,6 +141,10 @@ runtime directory до `start-runtime.sh`; start завершится ошибк
    при настроенных Web Push или transactional email также запускает их
    isolated sender/worker и ждёт readiness;
 6. ждёт readiness каждого обязательного компонента.
+
+Private alert receiver стартует до migrations/backend и всегда слушает только
+loopback; при выключенной Telegram-доставке он остаётся health endpoint без
+внешнего side effect.
 
 Полные логи находятся в
 `/home/dev/.local/share/seo-platform-runtime/logs`. Секреты не передаются в
@@ -177,6 +199,11 @@ root credential.
   webhook;
 - transactional email: SMTP host/user/password, verified sender и canary;
 - реальные SEO-съёмы: BYOK credentials соответствующего провайдера;
+- platform-paid XMLStock/Arsenkin: отдельный системный account, письменное
+  разрешение, price book, заполненные суточный/месячный hard budgets, balance
+  alert и fault-injection canary
+  billing settlement;
+- Telegram alerts: отдельный bot, private chat/topic и успешный canary;
 - DNS-домен, если вместо текущего TLS по публичному IP нужен обычный hostname.
 
 Эти значения должны храниться только в локальном `runtime.env` или внешнем

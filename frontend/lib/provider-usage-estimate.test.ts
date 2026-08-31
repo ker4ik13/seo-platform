@@ -60,3 +60,21 @@ test("shows the documented Turbo page range and higher tariff", () => {
     "24–120 запросов XMLStock Turbo · повышенный тариф"
   );
 });
+
+test("platform credentials never expose the shared provider account quota", () => {
+  const platform = {
+    ...xmlStock,
+    mode: "PLATFORM_PAID"
+  } as const satisfies ProjectConnectorCredentialOption;
+  assert.deepEqual(
+    rankProviderUsageEstimate(platform, 12, "YANDEX", 30, "LIVE"),
+    {
+      usage: "Точная стоимость после расчёта",
+      available: "Внутренние токены workspace"
+    }
+  );
+  assert.deepEqual(frequencyProviderUsageEstimate(platform, 12, 3), {
+    usage: "Точная стоимость после расчёта",
+    available: "Внутренние токены workspace"
+  });
+});

@@ -43,6 +43,7 @@ interface IntegrationOperationError {
 
 type CredentialOperationKind =
   | "create"
+  | "enable-platform"
   | "update"
   | "revoke"
   | "validation";
@@ -62,11 +63,13 @@ export function IntegrationSettings({
   workspaceId,
   canManage,
   canTest,
+  canUsePlatform,
   readOnly
 }: Readonly<{
   workspaceId: string;
   canManage: boolean;
   canTest: boolean;
+  canUsePlatform: boolean;
   readOnly: boolean;
 }>) {
   const [catalog, setCatalog] = useState<readonly ProviderCatalogItem[]>([]);
@@ -243,6 +246,56 @@ export function IntegrationSettings({
       );
     } finally {
       releaseCredentialOperation("create");
+    }
+  }
+
+  async function enablePlatformCredential(
+    provider: "XMLSTOCK" | "ARSENKIN"
+  ): Promise<void> {
+    const operationKey = platformOperationKey(provider);
+    if (!acquireCredentialOperation("enable-platform", operationKey)) return;
+    setListError(undefined);
+    setSuccess(undefined);
+    try {
+      let credential = await browserApiRequest<Credential>(
+        `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/platform-credentials`,
+        {
+          method: "POST",
+          idempotencyKey: `platform-credential:${provider}:${globalThis.crypto.randomUUID()}`,
+          body: { provider }
+        }
+      );
+      let validationWarning = "";
+      if (canTest) {
+        try {
+          const activeValidation = await browserApiRequest<
+            NonNullable<Credential["activeValidation"]>
+          >(
+            `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/credentials/${encodeURIComponent(credential.id)}/validations`,
+            {
+              method: "POST",
+              idempotencyKey:
+                `platform-credential-validation:${credential.id}:` +
+                globalThis.crypto.randomUUID()
+            }
+          );
+          credential = { ...credential, activeValidation };
+        } catch {
+          validationWarning =
+            " Автоматическую проверку запустить не удалось — используйте кнопку проверки в списке.";
+        }
+      }
+      setCredentials((current) => [
+        credential,
+        ...current.filter((item) => item.id !== credential.id)
+      ]);
+      setSuccess(
+        `${integrationProviderLabel(provider)} подключён для оплаты внутренними токенами.${validationWarning}`
+      );
+    } catch (requestError) {
+      setListError(integrationOperationError(requestError));
+    } finally {
+      releaseCredentialOperation("enable-platform", operationKey);
     }
   }
 
@@ -693,8 +746,8 @@ export function IntegrationSettings({
           <div className="panel-empty compact integration-empty">
             <strong>Подключений пока нет</strong>
             <p>
-              Добавьте собственный ключ, чтобы позже привязать источник к
-              проекту и запускать сбор данных.
+              Добавьте собственный ключ или включите системный XMLStock либо
+              Arsenkin с оплатой внутренними токенами.
             </p>
           </div>
         ) : (
@@ -773,17 +826,23 @@ export function IntegrationSettings({
                 {canManage && (
                   <footer className="integration-row-actions">
                     <div className="integration-credential-actions">
-                      <button
-                        className="secondary-button integration-card-action"
-                        disabled={Boolean(
-                          credentialOperations[credential.id] ||
-                            revokeTarget?.id === credential.id
-                        )}
-                        onClick={() => beginEdit(credential)}
-                        type="button"
-                      >
-                        Изменить
-                      </button>
+                      {credential.mode === "BYOK_API_KEY" ? (
+                        <button
+                          className="secondary-button integration-card-action"
+                          disabled={Boolean(
+                            credentialOperations[credential.id] ||
+                              revokeTarget?.id === credential.id
+                          )}
+                          onClick={() => beginEdit(credential)}
+                          type="button"
+                        >
+                          Изменить
+                        </button>
+                      ) : (
+                        <span className="integration-system-managed">
+                          Секрет управляется платформой
+                        </span>
+                      )}
                       <button
                         className="secondary-button danger-button integration-card-action"
                         disabled={Boolean(
@@ -813,13 +872,30 @@ export function IntegrationSettings({
           </div>
         </header>
         <div className="integration-catalog-grid">
-          {catalog.map((provider) => (
+          {catalog.map((provider) => {
+            const platformProvider =
+              provider.provider === "XMLSTOCK" ||
+              provider.provider === "ARSENKIN"
+                ? provider.provider
+                : undefined;
+            const platformSupported =
+              platformProvider !== undefined &&
+              provider.supportedModes.includes("PLATFORM_PAID");
+            const platformConnected = credentials.some(
+              (credential) =>
+                credential.provider === provider.provider &&
+                credential.mode === "PLATFORM_PAID"
+            );
+            const platformOperation = platformProvider
+                ? credentialOperations[platformOperationKey(platformProvider)]
+                : undefined;
+            return (
             <article className="panel integration-provider-card" key={provider.provider}>
               <header>
                 <ProviderLogo provider={provider.provider} />
                 <div>
                   <h2>{provider.displayName}</h2>
-                  <p>{providerDescription(provider.provider)}</p>
+                  <p>{provider.description}</p>
                 </div>
               </header>
               <div className="integration-capabilities">
@@ -829,14 +905,15 @@ export function IntegrationSettings({
                   </span>
                 ))}
               </div>
-              <small>{providerNotice(provider.provider)}</small>
+              <small>{provider.subscriptionNotice}</small>
               <div className="integration-provider-actions">
                 {provider.provider === "KEYS_SO" && (
                   <a className="text-button integration-workflow-link" href="/app/competitors">
                     Собрать семантику конкурента
                   </a>
                 )}
-                {provider.provider === "ARSENKIN" && (
+                {(provider.provider === "ARSENKIN" ||
+                  provider.provider === "XMLSTOCK") && (
                   <a className="text-button integration-workflow-link" href="/app/semantics">
                     Проверить позиции
                   </a>
@@ -851,12 +928,29 @@ export function IntegrationSettings({
                     }}
                     type="button"
                   >
-                    Подключить
+                    Подключить свой ключ
+                  </button>
+                )}
+                {canUsePlatform && platformSupported && platformProvider && (
+                  <button
+                    className="primary-button"
+                    disabled={platformConnected || Boolean(platformOperation)}
+                    onClick={() =>
+                      void enablePlatformCredential(platformProvider)
+                    }
+                    type="button"
+                  >
+                    {platformOperation === "enable-platform"
+                      ? "Подключаем…"
+                      : platformConnected
+                        ? "Подключено за токены"
+                        : "Подключить за токены"}
                   </button>
                 )}
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -1151,6 +1245,13 @@ function IntegrationOverviewStat({
 function IntegrationCredentialQuota({
   credential
 }: Readonly<{ credential: IntegrationCredentialSummary }>) {
+  if (credential.mode === "PLATFORM_PAID") {
+    return (
+      <span className="integration-quota-unavailable">
+        Точная стоимость во внутренних токенах показывается перед запуском
+      </span>
+    );
+  }
   const quota = credential.quota;
   if (quota.status === "NOT_AVAILABLE") {
     return (
@@ -1228,29 +1329,6 @@ function formatDateTime(value: string): string {
   }).format(new Date(value));
 }
 
-function providerDescription(provider: Provider): string {
-  const descriptions: Readonly<Record<Provider, string>> = {
-    XMLSTOCK:
-      "Поисковая выдача, съём позиций и Wordstat через ваш аккаунт.",
-    ARSENKIN:
-      "Съём позиций через проверенный собственный API-ключ.",
-    KEYS_SO:
-      "Запросы конкурентов с предпросмотром и импортом в ядро."
-  };
-  return descriptions[provider];
-}
-
-function providerNotice(provider: Provider): string {
-  const notices: Readonly<Record<Provider, string>> = {
-    XMLSTOCK:
-      "Запросы оплачиваются по условиям вашего собственного аккаунта XMLStock.",
-    ARSENKIN:
-      "Тариф Arsenkin Tools с доступом к API оплачивается отдельно.",
-    KEYS_SO: "Тариф Keys.so с доступом к REST API оплачивается отдельно."
-  };
-  return notices[provider];
-}
-
 function integrationErrorMessage(error: unknown): string {
   if (error instanceof BrowserApiError) {
     if (error.status === 402) {
@@ -1323,6 +1401,10 @@ function validateEditCredential(
 
 function newCredentialIdempotencyKey(): string {
   return `credential:${globalThis.crypto.randomUUID()}`;
+}
+
+function platformOperationKey(provider: "XMLSTOCK" | "ARSENKIN"): string {
+  return `__platform_credential_${provider}__`;
 }
 
 function apiKeyValidationError(value: string): string | undefined {

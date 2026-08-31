@@ -754,6 +754,60 @@ test("forwards a credential idempotency key with trusted workspace context", asy
   }
 });
 
+test("enables platform credentials without forwarding provider secret material", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    capturedBody = JSON.parse(String(init?.body)) as Readonly<
+      Record<string, unknown>
+    >;
+    return new Response(
+      JSON.stringify({
+        data: {
+          ...credentialResponseData(),
+          provider: "XMLSTOCK",
+          label: "XMLStock — внутренние токены",
+          mode: "PLATFORM_PAID",
+          displayHint: "Системный",
+          capabilities: ["SERP_RANK_TRACKING"],
+          quota: { status: "NOT_AVAILABLE" }
+        }
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await client().enablePlatformIntegrationCredential(
+      context("request-platform-credential-001"),
+      { provider: "XMLSTOCK" },
+      "platform-credential-enable-001"
+    );
+
+    assert.equal(result.mode, "PLATFORM_PAID");
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/workspaces/${workspaceId}/integrations/platform-credentials`
+    );
+    assert.deepEqual(capturedBody, {
+      workspaceId,
+      actorId,
+      idempotencyKey: "platform-credential-enable-001",
+      provider: "XMLSTOCK"
+    });
+    assert.equal(JSON.stringify(capturedBody).includes("apiKey"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("preserves the authoritative current-material active validation in the credential list", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (): Promise<Response> =>

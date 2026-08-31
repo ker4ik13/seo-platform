@@ -762,8 +762,9 @@ EXECUTION права записывать canary и не применяется 
 `MANAGEMENT` также сохраняет агрегированную проверку encryption/fingerprint
 coverage.
 Validation worker по-прежнему обрабатывает любой runtime decrypt failure как
-job-only bounded retry без изменения credential status. Cluster-wide circuit
-breaker и incident alert для ошибок после startup ещё не реализованы.
+job-only bounded retry без изменения credential status. Ошибка логируется на
+error-level и попадает в operational alert supervisor; отдельный cluster-wide
+circuit breaker всё ещё не реализован.
 
 Runtime validation ограничивает provider timeout диапазоном
 `1 000–120 000 ms`, lease — `10–600 s` и минимум `timeout + 5 s`,
@@ -1051,8 +1052,10 @@ credential projection и оставляет execution в pre-network `CLAIMED`.
 Authorize под canonical locks повторно проверяет current graph,
 owner/token/generation fence, ожидаемые execution и control versions,
 атомарно устанавливает `SUBMITTING` и durable may-have-started marker.
-Runtime caller и outbound provider request всё ещё не реализованы, поэтому
-provider submit запрещён.
+Runtime caller выполняет outbound provider request, post-response billing
+settlement для `PLATFORM_PAID` и локальный complete только через lease-fenced
+brokers. Submit остаётся default-off kill switch и включается лишь после
+provider/legal/operational canary gates.
 
 ### 17.7. Jobs-owned execution grant intent и atomic consume
 
@@ -1137,8 +1140,11 @@ Legacy `INTERNAL_API_TOKEN` выведен из эксплуатации и от
 - `PLATFORM_API_TO_REALTIME_TOKEN`: Platform API → Realtime general HTTP.
 
 `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, `JOBS_TO_SEO_RANK_TOKEN`,
-`JOBS_TO_SEO_RANK_RESULT_TOKEN`, `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` и
-`PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` остаются отдельными dedicated
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`, `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
+`JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN`,
+`JOBS_TO_PLATFORM_AUTOMATION_TOKEN`,
+`PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` и
+`REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN` остаются отдельными dedicated
 credentials своих узких границ. General token не расширяет их permissions.
 
 Runtime принимает только generated distinct tokens длиной `32..512` visible
@@ -1148,6 +1154,89 @@ duplicate/array/combined значения. Все реализованные int
 задают `redirect: "error"`, поэтому credential не пересылается на другой
 origin. Это symmetric-token hardening текущего среза, а не замена целевой
 service JWT/mTLS identity и не доказательство полной production готовности.
+
+### 17.9. Реализованный platform-paid rank slice
+
+Для ручного съёма позиций реализован второй credential mode
+`PLATFORM_PAID` для XMLStock и Arsenkin:
+
+- пользователь включает системное подключение только с workspace permission
+  `integration.use_system_credentials`; browser передаёт лишь provider и
+  idempotency key, но не цену и не секрет;
+- исходные platform API credentials находятся только в environment
+  management-role Jobs HTTP process. Рекомендуемые переменные
+  `PLATFORM_XMLSTOCK_API_KEYS`, `PLATFORM_XMLSTOCK_ACCOUNT_IDS` и
+  `PLATFORM_ARSENKIN_API_KEYS` принимают до 64 значений через запятую;
+  XMLStock допускает один общий account ID либо список той же длины. Legacy
+  singular-переменные поддерживаются для одного ключа, смешивание форматов и
+  дубликаты отклоняются fail-closed;
+- при включении весь пул шифруется vault-моделью в отдельную workspace
+  credential row, после чего connector worker получает материал через тот же
+  lease-fenced decrypt boundary, что и BYOK. API keys, account IDs и даже их
+  маски не попадают в browser, Redis, Job payload или operational alerts;
+- каждому физическому ключу management-role выводит стабильный непрозрачный
+  UUID через самый старый ещё покрывающий active credentials HMAC fingerprint
+  key. Platform credential request fingerprint сохраняется с той же key
+  version, поэтому startup key-coverage запрещает убрать её до revoke всех
+  зависимых credential rows; overlap-ротация active fingerprint version не
+  делит Redis bucket. Rank
+  runtime выбирает ключ rendezvous
+  hashing по immutable execution ID: распределение не зависит от порядка
+  списка, а submit/poll/retry после рестарта остаются на одном ключе;
+- XMLStock Redis quota buckets и Arsenkin rolling window используют этот
+  непрозрачный UUID, поэтому лимит одного физического ключа делится между
+  workspace и всеми connector replicas, но не блокирует остальные ключи.
+  Redis fail-closed ограничивает внешний HTTP и не является источником Job,
+  billing или provider-task state;
+- одновременно допускается не более одной активной platform credential одного
+  provider на workspace. Её нельзя редактировать как пользовательский ключ;
+  смена platform secret выполняется через revoke/re-enable после controlled
+  rotation;
+- catalog показывает системный вариант только при одновременной конфигурации
+  provider flag, секрета и Core price book. После создания запускается обычная
+  read-only validation, а quota/account metadata platform account наружу не
+  выдаётся;
+- Core вычисляет customer price на одну keyword-context проверку из trusted
+  environment price book. Execution повторно связывает эту цену с immutable
+  estimate и сохраняет полную стоимость Job; browser может только подтвердить
+  точную `platformChargeMicro` из estimate;
+- для каждого включённого provider обязательны
+  `PLATFORM_*_DAILY_SPEND_LIMIT_MINOR` и
+  `PLATFORM_*_MONTHLY_SPEND_LIMIT_MINOR`, причём monthly не меньше daily.
+  Перед созданием нового reservation Core берёт provider-scoped PostgreSQL
+  advisory transaction lock и атомарно считает captured usage текущего
+  UTC-day/month плюс все неистёкшие reservations между всеми workspace.
+  Новый grant, превышающий хотя бы один hard cap, получает `EXHAUSTED` до
+  ledger mutation и provider I/O; idempotent replay уже созданного reservation
+  не списывается и не блокируется повторно;
+- Arsenkin создаёт один provider task до 15 000 keywords, но customer charge
+  считается по каждой keyword, а не как одна единица за task. XMLStock
+  распределяет ту же per-keyword цену по item/chunk graph;
+- grant создаёт double-entry usage reservation из included credits, затем
+  prepaid balance. Stable business reference привязан к Job item, поэтому
+  новый технический execution attempt для того же неиспользованного item не
+  списывает токены повторно;
+- перед первым синхронным XMLStock HTTP request connector получает bounded
+  `HOLD`, который проверяет живой резерв и может продлить его только на
+  минутное provider/capture окно без ledger mutation. После подтверждённого
+  платного provider outcome connector вызывает `CAPTURE` отдельного закрытого
+  Core settlement endpoint. Только exact `CAPTURED` разрешает локально
+  завершить submit/checkpoint/result; reject, rate limit и transport ambiguity
+  токены не списывают. BYOK проходит тот же runtime без обращения к ledger.
+  Неиспользованный резерв автоматически release-ится bounded reconciliation
+  после 10 минут;
+- platform-paid automations и `retry-missing` намеренно отклоняются: до
+  отдельного product/finance решения платный режим разрешён только для явно
+  подтверждённого ручного запуска.
+
+Capability по умолчанию выключена. Reserve происходит до provider call,
+bounded HOLD — непосредственно перед первым синхронным вызовом, capture —
+после подтверждённого outcome провайдера и до сохранения локального outcome. При
+недоступности settlement Core пользователь не списывается и outcome не
+фиксируется, хотя платформа уже могла понести provider cost. Production flag
+нельзя включать до fault-injection canary этого окна, проверки
+refund/reconciliation, заполнения hard budget, provider balance alert и выполнения
+legal/provider activation gates.
 
 ## 18. OAuth connections
 
@@ -1249,9 +1338,12 @@ Connector учитывает provider quotas и не подменяет офиц
 - ответы разбираются потоковым bounded XML parser либо bounded JSON parser;
   raw provider payload не сохраняется, наружу выходят только нормализованные
   позиции, релевантные URL, частотности и безопасные error codes;
-- режим первого релиза: BYOK. Пользователь вводит XMLStock `USER ID + KEY`,
+- BYOK остаётся доступным режимом первого релиза. Пользователь вводит XMLStock `USER ID + KEY`,
   которые хранятся одним зашифрованным credential payload;
-- platform-paid режим включается только после согласования допустимой схемы коммерческого использования;
+- технический platform-paid rank path существует за выключенным feature flag
+  и включается только после согласования допустимой схемы коммерческого
+  использования и выполнения activation gates из разделов 17.9 и 26 billing
+  specification;
 - `soft_id`/партнёрская атрибуция не передаётся без отдельной коммерческой
   конфигурации владельца платформы;
 - отдельный продукт сохранения raw SERP, Yandex Live, HTML response и provider
@@ -1306,13 +1398,17 @@ Connector учитывает provider quotas и не подменяет офиц
   тогда как XMLStock сохраняет явный пользовательский лимит. После preview
   импорт поддерживает общую папку, автоматические подпапки по seed-фразам и
   абсолютное переопределение папки для отдельных строк;
-- в первом релизе используется BYOK;
+- BYOK остаётся доступным режимом первого релиза;
 - пользователь должен иметь тариф Arsenkin Tools с API;
-- platform-paid режим включается только после согласования с провайдером коммерческой схемы и передачи результатов третьим лицам;
+- технический platform-paid rank path существует за выключенным feature flag
+  и включается только после согласования с провайдером коммерческой схемы,
+  передачи результатов третьим лицам и выполнения activation gates из
+  раздела 17.9 и billing specification;
 - connector получает отдельное разрешение на каждый Arsenkin `set`, `check`,
   `get` и credential `info` через общий для workflows и replicas Redis
-  sliding-window limiter: не более 30 HTTP requests за 60 секунд, fail-closed
-  при недоступности limiter;
+  sliding-window limiter: для platform pool rank bucket разделён по
+  HMAC-идентификатору физического ключа, не более 30 HTTP requests за 60 секунд
+  на ключ, fail-closed при недоступности limiter;
 - fenced DB-bound cap резервирует не более пяти одновременных provider tasks
   суммарно для Rank, Wordstat, AI answer и clustering; ожидание свободного slot откладывает Job без
   расходования poll attempt и без повторного `set`.

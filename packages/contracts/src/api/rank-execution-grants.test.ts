@@ -4,8 +4,10 @@ import test from "node:test";
 import { canonicalJsonSha256 } from "../canonical-json.js";
 import * as contracts from "../index.js";
 import {
+  internalSettleRankExecutionGrantInput,
   internalIssueRankExecutionGrantInput,
   internalRankExecutionGrantDecision,
+  internalRankExecutionGrantSettlementResult,
   rankExecutionGrantDecisionSchemaVersion,
   rankExecutionGrantDecisionStatuses,
   rankExecutionGrantDenialReasons,
@@ -16,6 +18,8 @@ import {
   rankExecutionGrantScopeHashDomain,
   rankExecutionGrantScopeHashPreimage,
   rankExecutionGrantScopeSchemaVersion,
+  rankExecutionGrantSettlementRequestSchemaVersion,
+  rankExecutionGrantSettlementResultSchemaVersion,
   rankEstimateProjectDomainHashDomain,
   rankEstimateProjectDomainHashPreimage,
   redactInternalRankExecutionGrantDecision,
@@ -68,6 +72,14 @@ test("pins the versioned grant vocabularies and independent hash domains", () =>
     "rank-execution-grant-decision@1"
   );
   assert.equal(
+    rankExecutionGrantSettlementRequestSchemaVersion,
+    "rank-execution-grant-settlement-request@1"
+  );
+  assert.equal(
+    rankExecutionGrantSettlementResultSchemaVersion,
+    "rank-execution-grant-settlement-result@1"
+  );
+  assert.equal(
     rankExecutionGrantRequestHashDomain,
     "rank-execution-grant-request@1"
   );
@@ -95,6 +107,64 @@ test("pins the versioned grant vocabularies and independent hash domains", () =>
     "QUOTA_NOT_AVAILABLE",
     "QUOTA_EXHAUSTED"
   ]);
+});
+
+test("strictly parses hold/capture requests and finite settlement results", () => {
+  for (const action of ["HOLD", "CAPTURE"] as const) {
+    assert.deepEqual(
+      internalSettleRankExecutionGrantInput({
+        schemaVersion: "rank-execution-grant-settlement-request@1",
+        action
+      }),
+      {
+        schemaVersion: "rank-execution-grant-settlement-request@1",
+        action
+      }
+    );
+  }
+  for (const status of [
+    "RESERVED",
+    "CAPTURED",
+    "NOT_APPLICABLE"
+  ] as const) {
+    assert.deepEqual(
+      internalRankExecutionGrantSettlementResult({
+        schemaVersion: "rank-execution-grant-settlement-result@1",
+        grantId,
+        status
+      }),
+      {
+        schemaVersion: "rank-execution-grant-settlement-result@1",
+        grantId,
+        status
+      }
+    );
+  }
+  for (const candidate of [
+    {
+      schemaVersion: "rank-execution-grant-settlement-request@1",
+      action: "RELEASE"
+    },
+    {
+      schemaVersion: "rank-execution-grant-settlement-request@1",
+      action: "CAPTURE",
+      amountMinor: "1"
+    }
+  ]) {
+    assert.throws(
+      () => internalSettleRankExecutionGrantInput(candidate),
+      TypeError
+    );
+  }
+  assert.throws(
+    () =>
+      internalRankExecutionGrantSettlementResult({
+        schemaVersion: "rank-execution-grant-settlement-result@1",
+        grantId,
+        status: "RELEASED"
+      }),
+    TypeError
+  );
 });
 
 test("pins the existing project-domain SHA-256 byte recipe", () => {
@@ -142,11 +212,24 @@ test("strictly parses the exact fail-closed request shape", () => {
   ]) {
     assert.equal(serialized.includes(forbidden), false);
   }
+
+  assert.equal(
+    internalIssueRankExecutionGrantInput({
+      ...input,
+      credentialMode: "PLATFORM_PAID",
+      usageIntent: {
+        ...input.usageIntent,
+        unitPriceMinor: "25"
+      }
+    }).credentialMode,
+    "PLATFORM_PAID"
+  );
 });
 
 test("request parser rejects malformed IDs, hashes, bounds and literals", () => {
   const valid = request();
   const invalid: readonly unknown[] = [
+    { ...valid, credentialMode: "PLATFORM_PAID" },
     { ...valid, schemaVersion: "rank-execution-grant-request@2" },
     { ...valid, workspaceId: "01900000-0000-7000-8000-00000000000A" },
     { ...valid, projectId: "01900000-0000-6000-8000-000000000002" },
@@ -165,7 +248,7 @@ test("request parser rejects malformed IDs, hashes, bounds and literals", () => 
     { ...valid, purpose: "CHECK_PROVIDER" },
     { ...valid, operation: "SERP" },
     { ...valid, capability: "SERP_COLLECTION" },
-    { ...valid, credentialMode: "PLATFORM_PAID" },
+    { ...valid, credentialMode: "PLATFORM_INCLUDED" },
     { ...valid, manifest: { ...valid.manifest, chunkIndex: -1 } },
     { ...valid, manifest: { ...valid.manifest, chunkIndex: 15_000 } },
     {

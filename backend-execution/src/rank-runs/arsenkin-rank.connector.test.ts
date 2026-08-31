@@ -97,9 +97,11 @@ test("builds the documented positions payload with exact query order and trackin
 test("submits only through POST with Bearer auth and keeps transport ambiguity explicit", async () => {
   let called = false;
   let permits = 0;
+  let receivedScope: string | undefined;
   const connector = new ArsenkinRankConnector({
-    async tryAcquire() {
+    async tryAcquire(scopeId) {
       permits += 1;
+      receivedScope = scopeId;
       return { allowed: true };
     }
   }, async (url, init) => {
@@ -117,7 +119,14 @@ test("submits only through POST with Bearer auth and keeps transport ambiguity e
     return json({ task_id: 3944 });
   });
   assert.deepEqual(
-    await connector.submit(intent(), { apiKey: "private-key" }, 1_000),
+    await connector.submit(
+      intent(),
+      {
+        apiKey: "private-key",
+        rateLimitScopeId: "01900000-0000-8000-8000-000000000001"
+      },
+      1_000
+    ),
     {
       status: "ACCEPTED",
       taskId: "3944",
@@ -126,6 +135,10 @@ test("submits only through POST with Bearer auth and keeps transport ambiguity e
   );
   assert.equal(called, true);
   assert.equal(permits, 1);
+  assert.equal(
+    receivedScope,
+    "01900000-0000-8000-8000-000000000001"
+  );
 
   const ambiguous = new ArsenkinRankConnector(allowAll(), async () => {
     throw new Error("connection reset");

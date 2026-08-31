@@ -103,6 +103,8 @@ test(
       jobId,
       jobItemId,
       executionAttempt: 1,
+      provider: "ARSENKIN",
+      credentialMode: "BYOK_API_KEY",
       policyVersion: "manual-arsenkin-positions@1.0.0",
       usageIntent: {
         meter: "RANK_PROVIDER_TASK",

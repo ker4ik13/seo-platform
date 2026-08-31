@@ -76,6 +76,11 @@ export function scopedRankEstimate(
   const calculatedAt = isoDate(estimate.calculatedAt);
   const expiresAt = isoDate(estimate.expiresAt);
   const executionAllowed = estimate.executionAllowed;
+  const credentialMode =
+    estimate.credentialMode === "BYOK_API_KEY" ||
+    estimate.credentialMode === "PLATFORM_PAID"
+      ? estimate.credentialMode
+      : undefined;
   if (
     responseWorkspaceId !== workspaceId ||
     responseProjectId !== projectId ||
@@ -83,7 +88,7 @@ export function scopedRankEstimate(
     !["READY", "BLOCKED"].includes(String(estimate.status)) ||
     provider === undefined ||
     estimate.operation !== "POSITIONS" ||
-    estimate.credentialMode !== "BYOK_API_KEY" ||
+    credentialMode === undefined ||
     exactStatus(estimate.providerLimits) !== "NOT_AVAILABLE" ||
     exactStatus(estimate.expectedDuration) !== "NOT_AVAILABLE" ||
     estimate.platformChargeMicro !== "0" ||
@@ -121,7 +126,7 @@ export function scopedRankEstimate(
           connectorAttempts: connectorAttempts(estimate.connectorAttempts)
         }),
     operation: "POSITIONS",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode,
     scope,
     workload,
     providerLimits: { status: "NOT_AVAILABLE" },

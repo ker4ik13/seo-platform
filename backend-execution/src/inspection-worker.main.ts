@@ -73,7 +73,7 @@ async function bootstrap(): Promise<void> {
   dispatchTimer.unref();
 
   worker.on("failed", (job) => {
-    logger.warn(`Upload inspection failed for job ${job?.id ?? "unknown"}`);
+    logger.error(`Upload inspection failed for job ${job?.id ?? "unknown"}`);
   });
 
   let shuttingDown = false;

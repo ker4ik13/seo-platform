@@ -666,7 +666,7 @@ function bindingAvailability(
   }
   if (
     credential.status !== "ACTIVE" ||
-    credential.mode !== "BYOK_API_KEY"
+    !credentialModeSupportsCapability(credential.mode, capability)
   ) {
     return "CREDENTIAL_UNAVAILABLE";
   }
@@ -845,7 +845,7 @@ async function assertCredentialAvailable(
   const provider = providerValue(credential.provider);
   if (
     credential.status !== "ACTIVE" ||
-    credential.mode !== "BYOK_API_KEY" ||
+    !credentialModeSupportsCapability(credential.mode, capability) ||
     !safeIntegrationCredentialCapabilities(
       provider,
       credential.capabilities
@@ -1129,7 +1129,8 @@ function projectConnectorRouteSnapshot(
     !Number.isSafeInteger(route.position) ||
     Number(route.position) < 0 ||
     route.sourceKind !== "WORKSPACE_CREDENTIAL" ||
-    credentialMode !== "BYOK_API_KEY"
+    (credentialMode !== "BYOK_API_KEY" &&
+      credentialMode !== "PLATFORM_PAID")
   ) {
     throw invalidStoredReceipt();
   }
@@ -1147,6 +1148,16 @@ function projectConnectorRouteSnapshot(
     createdAt: storedTimestamp(route.createdAt),
     updatedAt: storedTimestamp(route.updatedAt)
   };
+}
+
+function credentialModeSupportsCapability(
+  mode: string,
+  capability: IntegrationCapability
+): boolean {
+  return (
+    mode === "BYOK_API_KEY" ||
+    (mode === "PLATFORM_PAID" && capability === "SERP_RANK_TRACKING")
+  );
 }
 
 function storedRouteList(value: unknown): readonly ProjectConnectorRoute[] {

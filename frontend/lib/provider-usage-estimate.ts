@@ -14,6 +14,9 @@ export function frequencyProviderUsageEstimate(
   typeCount: number
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
+  if (source.mode === "PLATFORM_PAID") {
+    return platformTokenEstimate();
+  }
   if (source.provider === "XMLSTOCK") {
     return {
       usage: `до ${formatInteger(keywordCount * typeCount)} запросов XMLStock`,
@@ -38,6 +41,9 @@ export function rankProviderUsageEstimate(
   yandexLiveMode?: "TURBO"
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
+  if (source.mode === "PLATFORM_PAID") {
+    return platformTokenEstimate();
+  }
   if (source.provider === "XMLSTOCK") {
     if (
       yandexLiveMode === "TURBO" &&
@@ -81,6 +87,9 @@ export function rankProviderUsageEstimate(
 export function providerQuotaLabel(
   source: ProjectConnectorCredentialOption
 ): string {
+  if (source.mode === "PLATFORM_PAID") {
+    return "Внутренние токены workspace";
+  }
   const quota = source.quota;
   if (!quota || quota.status !== "AVAILABLE") {
     return "Квота обновится после проверки API";
@@ -117,5 +126,12 @@ function unavailableEstimate(): ProviderUsageEstimate {
   return {
     usage: "Недоступно",
     available: "Квота недоступна"
+  };
+}
+
+function platformTokenEstimate(): ProviderUsageEstimate {
+  return {
+    usage: "Точная стоимость после расчёта",
+    available: "Внутренние токены workspace"
   };
 }

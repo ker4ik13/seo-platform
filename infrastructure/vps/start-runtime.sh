@@ -16,6 +16,7 @@ tmux has-session -t "$runtime_session" 2>/dev/null &&
 
 for build_artifact in \
   backend-core/dist/core.main.js \
+  backend-core/dist/alert.main.js \
   backend-core/dist/realtime.main.js \
   backend-core/dist/web-push-worker.main.js \
   backend-execution/dist/http.main.js \
@@ -50,6 +51,8 @@ start_window() {
 
 start_window postgres
 wait_for_postgres
+start_window operational-alerts
+wait_for_http http://127.0.0.1:4004/health/ready
 "$script_dir/migrate-runtime.sh"
 
 env \

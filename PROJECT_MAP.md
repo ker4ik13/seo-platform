@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 20 августа 2026 года.
+Актуально на 29 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -13,7 +13,7 @@
 | Сервис | Каталог | Назначение | Порты |
 |---|---|---|---:|
 | Frontend | `frontend` | единый Next.js: публичный сайт, `/app`, `/admin`, BFF | 3000 |
-| Backend Core | `backend-core` | Platform API, SEO domain, Realtime, опциональный Web Push | 4000, 4001, 4003 |
+| Backend Core | `backend-core` | Platform API, SEO domain, Realtime, operational alerts, опциональный Web Push | 4000, 4001, 4003, 4004 |
 | Backend Execution | `backend-execution` | Jobs API, очереди, импорт, rank/crawl/connectors, email | 4002 |
 
 PostgreSQL, Redis, NATS, S3 и ClamAV — инфраструктурные зависимости, а
@@ -53,8 +53,9 @@ fail-closed; повреждённый canary или неверный key materia
 Перед первым Dokploy deploy `pnpm dokploy:env:generate` создаёт локальный
 `.env.dokploy.generated` с уникальными DB/Redis/service secrets,
 base64url-keyrings и согласованными NATS plaintext/bcrypt парами. Генератор не
-перезаписывает файл и не выводит секреты; внешние доменные, SMTP и S3 значения
-остаются явными placeholders. Для NATS hash он заранее удваивает `$`, чтобы
+перезаписывает файл и не выводит секреты; внешние доменные, SMTP, S3,
+Telegram и platform-provider значения остаются явными placeholders. Для NATS
+hash он заранее удваивает `$`, чтобы
 значение пережило dotenv rewrite Dokploy. Старые и новые версии Dokploy
 по-разному экранируют такой transport value, поэтому preflight и NATS renderer
 принимают как canonical `$2a$11$…`, так и точную transport-форму
@@ -78,6 +79,7 @@ backup Dokploy запускает `pg_dump` внутри контейнера и
 | `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency/clustering workers |
 | `packages/contracts` | общие versioned HTTP/event/error contracts без бизнес-логики |
 | `packages/process-supervisor` | запуск child roles, signal forwarding и env allowlists |
+| `packages/operational-alerts` | private exact-envelope receiver/client, Telegram delivery, dedupe и redacted fingerprints |
 | `infrastructure` | Dokploy Compose, migrations, ACL/preflight, VPS runtime, monitoring/runbooks |
 | `docs/technical-spec` | нормативное продуктовое и техническое ТЗ |
 | `docs/adr` | принятые архитектурные решения и rollback paths |
@@ -165,6 +167,13 @@ checkbox-выбор для массовых операций; контекстн
 все папки подряд на одном выбранном уровне либо откатывает весь список.
 «Создать рядом» передаёт точную позицию сразу после исходной папки; Core SEO под
 блокировкой дерева нормализует позиции siblings.
+В основном дереве расширенные кромки строки меняют ручной порядок, а центр
+явно вкладывает папку. Обычный промежуток имеет одну цель; при завершении
+раскрытого поддерева вложенный и внешний уровни доступны раздельно и до drop
+обозначаются разным отступом линии и плавающей над drag-preview подписью.
+Двойной клик заменяет только
+название обычной папки inline-полем той же геометрии; Enter/blur сохраняют, а
+Escape отменяет изменение.
 На экранах до `920px` скрытое desktop-дерево заменяет доступная из шапки
 выдвижная панель групп; на телефонах контекстное меню и portaled picker папки
 открываются поверх рабочей области как нижние листы, а footer modal остаётся
@@ -183,8 +192,10 @@ integer без продуктовой границы `1999`. Правый кли
 курсором, а правый клик внутри сохраняет batch scope.
 Серверный cursor и filter hash привязаны ко всему набору; union принудительно
 добавляет регулируемую колонку группы, а обычная плотность показывает под
-запросом компактные теги без служебной подписи языка/отслеживания. Компактная
-плотность оставляет одну строку и скрывает inline-теги. Настройки
+запросом компактные теги без служебной текстовой подписи языка/отслеживания.
+Неотслеживаемый запрос в обеих плотностях получает компактную иконку
+перечёркнутого глаза непосредственно перед текстом. Компактная плотность
+оставляет одну строку и скрывает inline-теги. Настройки
 колонок/представлений и журнал операций не
 перезагружают layout. Прогресс rank/frequency остаётся серверным источником
 истины, а браузер по изменению safe progress-проекции перечитывает уже
@@ -478,6 +489,7 @@ SEO Data. При недоступности SEO Data каталог остаёт
 ### `backend-core`
 
 - `src/main.ts` — supervisor;
+- `src/alert.main.ts` — private operational-alert receiver, порт 4004;
 - `src/core.main.ts` — Platform API + in-process SEO, порты 4000/4001;
 - `src/realtime.main.ts` — Realtime HTTP/WebSocket, порт 4003;
 - `src/web-push-worker.main.ts` — опциональная Web Push delivery role.
@@ -510,6 +522,12 @@ child processes (`RANK_WORKER_PROCESSES`, `CONNECTOR_WORKER_PROCESSES`), но
 работает отдельным быстрым тиком (по умолчанию 1 секунда), а credential
 maintenance сохраняет собственный медленный интервал. Одноузловой VPS runtime
 запускает три connector child process, совпадая с production default Compose.
+Оба backend supervisors и Frontend отправляют внутренние ошибки в private
+receiver через отдельный `OPERATIONAL_ALERT_TOKEN`; только Core child
+`alert.main.ts` получает Telegram bot destination. Exact envelope не содержит
+message/stack/request/tenant payload, одинаковые fingerprints дедуплицируются,
+а порт 4004 не публикуется. Split-process VPS supervisor хэширует error/fatal
+строку локально и передаёт только code/severity/fingerprint.
 После успешной операторской SMTP-проверки тот же runtime опционально запускает
 отдельный `auth-email-worker` с единственными разрешёнными Jobs DB, NATS,
 Platform JIT и SMTP credentials; без `AUTH_EMAIL_ENABLED=true` процесс не
@@ -523,7 +541,7 @@ claim/renew/submit/defer/fail/complete. Роль connector-а имеет `EXECUT
 проверяется по Job type, project/credential route, version, lease и точному
 набору items при каждом переходе.
 XMLStock HTTP ограничивается распределёнными Redis buckets по
-`credentialId + product` (`YANDEX_LIVE`, `GOOGLE_LIVE`,
+`physicalCredentialScopeId + product` (`YANDEX_LIVE`, `GOOGLE_LIVE`,
 `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют друг друга,
 один ключ делит лимит между своими проектами. Permit удерживает только внешний
 HTTP, не `POLL_WAIT`; базовые окна соответствуют provider boundary:
@@ -533,6 +551,21 @@ Search API — `48 / 50`, Wordstat — `10 / 10`. Throttling адаптивно 
 `seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
 предпочитает менее занятую пару credential/project, оставаясь source of truth
 для Job, lease и progress.
+Platform-paid XMLStock/Arsenkin поддерживает до 64 operator-owned credentials
+в comma-separated plural env. Management-role Jobs HTTP формирует
+HMAC-derived opaque UUID каждого физического ключа (через самый старый
+fingerprint key); platform credential request fingerprint сохраняется с той
+же key version, поэтому key-coverage удерживает её во время overlap rotation.
+Весь пул остаётся только
+в зашифрованном workspace vault payload. Новый модуль
+`backend-execution/src/integrations/platform-credential-pool.ts` выбирает ключ
+rendezvous hashing по immutable execution ID: выбор стабилен для submit/poll и
+рестартов, не зависит от порядка env и равномерно распределяет параллельные
+Jobs. Connector использует opaque UUID как общий между workspace/replicas
+Redis scope; raw key и account ID в Redis/Job/log не попадают. Arsenkin rank
+получает отдельный rolling window `30 requests / 60 seconds` на физический
+ключ, а общий PostgreSQL lifecycle cap пяти task остаётся консервативной
+source-of-truth защитой provider task graph.
 Яндекс Live Turbo является отдельным явно оплаченным mapping: connector
 передаёт `tbm=turbo` и не применяет к нему стандартный Redis bucket XMLStock,
 поскольку provider документирует неограниченное число потоков. Turbo также не
@@ -547,7 +580,7 @@ concurrency, lease fencing и PostgreSQL claim остаются bounded safety �
 
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
-| users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
+| users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing ledger/usage reservations, audit, platform admin command receipts | Core API | `platform_db` |
 | semantics (включая keyword notes, saved views, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
@@ -567,16 +600,43 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
    содержит явный `includeUntracked`.
 2. Execution фиксирует immutable snapshot binding/route/credential versions.
 3. Rank role создаёт sealed manifest в Core SEO.
-4. Core повторно проверяет lifecycle, RBAC и BYOK entitlement и выдаёт
-   короткий grant. Внутренней дневной квоты на BYOK rank нет; статус estimate
-   — `UNLIMITED`.
-5. Connector role выполняет fenced submit/poll/get через DB broker.
+4. Core повторно проверяет lifecycle, RBAC и entitlement и выдаёт короткий
+   grant. Внутренней дневной квоты на BYOK rank нет; статус estimate —
+   `UNLIMITED`. Для `PLATFORM_PAID` trusted price book сначала создаёт
+   double-entry резерв included/prepaid токенов с stable economic reference
+   на Job item; новый execution attempt не списывает его повторно.
+5. Connector role выполняет fenced provider submit через DB broker. Для
+   синхронного XMLStock перед первым HTTP request он читает только `grantId`
+   и credential mode через закрытую `SECURITY DEFINER` функцию и получает у
+   Core bounded `HOLD`, который не меняет ledger. После подтверждённого
+   платного provider outcome connector вызывает `CAPTURE` с отдельным
+   `JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN`; только exact `CAPTURED`
+   разрешает сохранить provider outcome. Reject/rate-limit/transport
+   ambiguity не списывают токены. BYOK не обращается к ledger; просроченные
+   неиспользованные резервы release-ятся bounded reconciliation через 10 минут.
 6. Rank role публикует normalized chunks и terminal result. Для XMLStock тот
    же hash-bound chunk содержит упорядоченную выдачу до выбранной глубины
    Top-100, для Arsenkin — доступную в ответе `top20` проекцию и найденный URL.
    Raw provider response не сохраняется: Core SEO пакетно создаёт дочерние
    immutable строки rank snapshot, а frontend читает только tenant-scoped
    проекцию.
+
+System XMLStock/Arsenkin credential создаётся только пользователем с
+`integration.use_system_credentials`: Core передаёт provider, а Execution HTTP
+шифрует operator-owned deploy secret pool в workspace vault и запускает обычную
+read-only validation. Browser не получает platform account/quota/secret и не
+задаёт цену. Arsenkin customer charge считается по keyword, хотя provider
+получает один batch task. Platform flags по умолчанию выключены; текущий
+runtime выполняет reserve до provider call и capture после provider response,
+до локального complete. Для каждого provider Core требует deploy-настройки
+суточного и месячного hard spend cap: provider-scoped advisory transaction
+lock сериализует reservations между workspace, а budget exposure включает
+captured usage текущего UTC-окна и все живые reservations. Превышение
+останавливает grant до ledger/provider I/O. Индексы миграции
+`20260829103000_provider_spend_budget_indexes` ограничивают global budget read.
+Production activation всё ещё ждёт fault-injection canary,
+refund/reconciliation, legal approval и provider balance alert.
+Paid automations и `retry-missing` до этого не разрешены.
 
 Миграция `20260818150000_rank_serp_results_top100` расширяет только DB-check
 immutable `rank_serp_results.position` с Top-10 до Top-100; существующие
@@ -1190,6 +1250,8 @@ raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку
 - Инструкция развёртывания: `infrastructure/DOKPLOY.md`.
 - Secrets, application S3 и четыре PostgreSQL backup job:
   `infrastructure/DOKPLOY-SECRETS.md`.
+- Telegram alert rollout/canary:
+  `infrastructure/runbooks/operational-alerts.md`.
 - Local production-like runtime: `infrastructure/vps/README.md`.
 
 ## 8. Проверка
@@ -1212,7 +1274,12 @@ Docker Compose. Изменение Prisma migrations требует ручног
 - Физическое объединение трёх Core compatibility databases в schema-based
   `app_db` не выполнено и требует отдельного replayable cutover.
 - Production release требует operator-owned SMTP, provider/YooKassa canaries,
-  alerting и проверенных backup/restore drills.
+  успешного Telegram canary и проверенных backup/restore drills.
+- Platform-paid XMLStock/Arsenkin остаётся выключенным до внешних legal и
+  provider gates, заполнения hard budget, balance alert и fault-injection canary окна
+  provider-response → Core settlement. В этом окне пользователь не
+  списывается и локальный outcome не сохраняется, но provider cost уже мог
+  возникнуть.
 - Dokploy database backups являются logical dump; PostgreSQL PITR/WAL остаётся
   отдельным production hardening шагом при более строгом RPO.
 - Если измерения потребуют независимого масштабирования отдельной child role,

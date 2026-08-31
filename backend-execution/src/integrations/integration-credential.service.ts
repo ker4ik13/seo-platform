@@ -10,12 +10,14 @@ import type {
   IntegrationCredentialValidationSummary,
   IntegrationProvider,
   InternalCreateIntegrationCredentialInput,
+  InternalEnablePlatformIntegrationCredentialInput,
   InternalUpdateIntegrationCredentialInput
 } from "@seo-platform/contracts";
 import type { IntegrationCredential } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeIntegrationCredentialCapabilities } from "./integration-credential-capabilities.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
+import type { PlatformCredentialMaterial } from "./integration-credential-crypto.service.js";
 import { integrationCredentialId } from "./integration-credential-id.js";
 import {
   ACTIVE_INTEGRATION_CREDENTIAL_VALIDATION_JOB_STATUSES,
@@ -189,12 +191,83 @@ export class IntegrationCredentialService {
     }
   }
 
+  public async enablePlatform(
+    input: InternalEnablePlatformIntegrationCredentialInput,
+    material: readonly PlatformCredentialMaterial[]
+  ): Promise<IntegrationCredentialSummary> {
+    const existing = await this.findPlatformIdempotent(input, material);
+    if (existing) return toSummary(existing);
+    if (await this.findActivePlatform(input)) {
+      throw platformAlreadyEnabled();
+    }
+
+    const credentialId = integrationCredentialId();
+    const label = platformCredentialLabel(input.provider);
+    const secret = this.crypto.platformCredentialPoolSecret(
+      input.provider,
+      material
+    );
+    const encrypted = this.crypto.encrypt(
+      input.workspaceId,
+      input.provider,
+      credentialId,
+      secret
+    );
+    const fingerprintKeyVersion =
+      this.crypto.platformCredentialFingerprintKeyVersion();
+    const requestFingerprint = this.crypto.requestFingerprint(
+      platformFingerprintInput(input, material, label),
+      fingerprintKeyVersion
+    );
+    try {
+      const credential = await this.prisma.integrationCredential.create({
+        data: {
+          id: credentialId,
+          workspaceId: input.workspaceId,
+          provider: input.provider,
+          label,
+          mode: "PLATFORM_PAID",
+          status: "PENDING_VERIFICATION",
+          idempotencyKey: input.idempotencyKey,
+          requestFingerprint: databaseBytes(requestFingerprint.digest),
+          fingerprintKeyVersion: requestFingerprint.keyVersion,
+          createdBy: input.actorId,
+          updatedBy: input.actorId,
+          ...encryptedForDatabase(encrypted),
+          displayHint: "Системный",
+          capabilities: ["SERP_RANK_TRACKING"],
+          providerMeta: {
+            accountIdentifierConfigured: material.every((entry) =>
+              Boolean(entry.accountIdentifier)
+            ),
+            platformPoolSize: material.length
+          }
+        }
+      });
+      return toSummary(credential);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        const winner = await this.findPlatformIdempotent(input, material);
+        if (winner) return toSummary(winner);
+        if (await this.findActivePlatform(input)) {
+          throw platformAlreadyEnabled();
+        }
+      }
+      throw error;
+    }
+  }
+
   public async update(
     credentialId: string,
     input: InternalUpdateIntegrationCredentialInput
   ): Promise<IntegrationCredentialSummary> {
     const current = await this.load(credentialId, input.workspaceId);
     if (current.version !== input.version) throw versionConflict();
+    if (current.mode !== "BYOK_API_KEY") {
+      throw new UnprocessableEntityException(
+        "Platform credentials cannot be edited"
+      );
+    }
     const provider = providerValue(current.provider);
     const secretChanged =
       input.apiKey !== undefined || input.accountIdentifier !== undefined;
@@ -343,7 +416,13 @@ export class IntegrationCredentialService {
         }
       });
     if (!credential) return null;
-    if (credential.deletedAt) throw idempotencyConflict();
+    if (
+      credential.deletedAt ||
+      credential.mode !== "BYOK_API_KEY" ||
+      credential.provider !== input.provider
+    ) {
+      throw idempotencyConflict();
+    }
     const candidate = this.crypto.requestFingerprint(
       requestFingerprintInput(input),
       credential.fingerprintKeyVersion
@@ -355,6 +434,71 @@ export class IntegrationCredentialService {
       )
     ) {
       throw idempotencyConflict();
+    }
+    return credential;
+  }
+
+  private findActivePlatform(
+    input: InternalEnablePlatformIntegrationCredentialInput
+  ): Promise<IntegrationCredential | null> {
+    return this.prisma.integrationCredential.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+        mode: "PLATFORM_PAID",
+        deletedAt: null
+      }
+    });
+  }
+
+  private async findPlatformIdempotent(
+    input: InternalEnablePlatformIntegrationCredentialInput,
+    material: readonly PlatformCredentialMaterial[]
+  ): Promise<IntegrationCredential | null> {
+    const credential =
+      await this.prisma.integrationCredential.findUnique({
+        where: {
+          workspaceId_idempotencyKey: {
+            workspaceId: input.workspaceId,
+            idempotencyKey: input.idempotencyKey
+          }
+        }
+      });
+    if (!credential) return null;
+    if (
+      credential.deletedAt ||
+      credential.mode !== "PLATFORM_PAID" ||
+      credential.provider !== input.provider
+    ) {
+      throw idempotencyConflict();
+    }
+    const candidate = this.crypto.requestFingerprint(
+      platformFingerprintInput(
+        input,
+        material,
+        platformCredentialLabel(input.provider)
+      ),
+      credential.fingerprintKeyVersion
+    );
+    const storedFingerprint = Buffer.from(credential.requestFingerprint);
+    if (!safeEqual(storedFingerprint, candidate.digest)) {
+      const legacyCandidate = material.length === 1
+        ? this.crypto.requestFingerprint(
+            platformFingerprintInput(
+              input,
+              material,
+              platformCredentialLabel(input.provider),
+              false
+            ),
+            credential.fingerprintKeyVersion
+          )
+        : undefined;
+      if (
+        !legacyCandidate ||
+        !safeEqual(storedFingerprint, legacyCandidate.digest)
+      ) {
+        throw idempotencyConflict();
+      }
     }
     return credential;
   }
@@ -376,6 +520,42 @@ function requestFingerprintInput(
       ? { accountIdentifier: input.accountIdentifier }
       : {})
   };
+}
+
+function platformFingerprintInput(
+  input: InternalEnablePlatformIntegrationCredentialInput,
+  material: readonly PlatformCredentialMaterial[],
+  label: string,
+  includePool = true
+): Parameters<
+  IntegrationCredentialCryptoService["requestFingerprint"]
+>[0] {
+  const first = material[0];
+  if (!first) {
+    throw new UnprocessableEntityException(
+      "Platform credential pool cannot be empty"
+    );
+  }
+  return {
+    workspaceId: input.workspaceId,
+    actorId: input.actorId,
+    idempotencyKey: input.idempotencyKey,
+    provider: input.provider,
+    label,
+    apiKey: first.apiKey,
+    ...(first.accountIdentifier
+      ? { accountIdentifier: first.accountIdentifier }
+      : {}),
+    ...(includePool ? { platformPool: material } : {})
+  };
+}
+
+function platformCredentialLabel(
+  provider: "XMLSTOCK" | "ARSENKIN"
+): string {
+  return provider === "XMLSTOCK"
+    ? "XMLStock — внутренние токены"
+    : "Arsenkin — внутренние токены";
 }
 
 function encryptedForDatabase(
@@ -421,11 +601,14 @@ function toSummary(
       provider,
       credential.capabilities
     ),
-    quota: safeCredentialQuota(
-      provider,
-      credential.providerMeta,
-      credential.lastSuccessAt
-    ),
+    quota:
+      credential.mode === "PLATFORM_PAID"
+        ? { status: "NOT_AVAILABLE" }
+        : safeCredentialQuota(
+            provider,
+            credential.providerMeta,
+            credential.lastSuccessAt
+          ),
     ...(credential.verifiedAt
       ? { verifiedAt: credential.verifiedAt.toISOString() }
       : {}),
@@ -547,6 +730,12 @@ function versionConflict(): ConflictException {
 function idempotencyConflict(): ConflictException {
   return new ConflictException(
     "Idempotency key was already used for another credential request"
+  );
+}
+
+function platformAlreadyEnabled(): ConflictException {
+  return new ConflictException(
+    "Platform credential is already enabled for this provider"
   );
 }
 

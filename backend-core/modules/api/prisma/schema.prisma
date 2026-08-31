@@ -181,6 +181,12 @@ enum BillingRefundStatus {
   FAILED_FINAL
 }
 
+enum BillingUsageReservationStatus {
+  RESERVED
+  CAPTURED
+  RELEASED
+}
+
 enum BillingLedgerAccountType {
   CUSTOMER_PREPAID_LIABILITY
   PROMOTIONAL_LIABILITY
@@ -460,6 +466,7 @@ model Workspace {
   billingOrders               BillingOrder[]
   billingPaymentMethods       BillingPaymentMethod[]
   billingLedgerAccounts       BillingLedgerAccount[]
+  billingUsageReservations    BillingUsageReservation[]
   npdReceiptObligations       NpdReceiptObligation[]
   rankExecutionQuotaOverride  RankExecutionQuotaOverride?
   projectCapacityOverride     ProjectCapacityOverride?
@@ -946,6 +953,9 @@ model BillingLedgerTransaction {
   reversalOf BillingLedgerTransaction?  @relation("LedgerTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
   reversals  BillingLedgerTransaction[] @relation("LedgerTransactionReversal")
   entries    BillingLedgerEntry[]
+  reservedUsages BillingUsageReservation[] @relation("BillingUsageReservationTransaction")
+  capturedUsages BillingUsageReservation[] @relation("BillingUsageCaptureTransaction")
+  releasedUsages BillingUsageReservation[] @relation("BillingUsageReleaseTransaction")
 
   @@index([occurredAt, id])
   @@map("billing_ledger_transactions")
@@ -966,6 +976,47 @@ model BillingLedgerEntry {
   @@unique([transactionId, accountId, direction], map: "billing_ledger_entries_transaction_account_direction_key")
   @@index([accountId, createdAt])
   @@map("billing_ledger_entries")
+}
+
+model BillingUsageReservation {
+  id                       String                        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId              String                        @map("workspace_id") @db.Uuid
+  projectId                String                        @map("project_id") @db.Uuid
+  actorId                  String                        @map("actor_id") @db.Uuid
+  jobId                    String                        @map("job_id") @db.Uuid
+  jobItemId                String                        @map("job_item_id") @db.Uuid
+  executionAttempt         Int                           @map("execution_attempt")
+  provider                 String                        @db.VarChar(32)
+  operation                String                        @db.VarChar(64)
+  quantity                 Int
+  unitPriceMinor           BigInt                        @map("unit_price_minor")
+  amountMinor              BigInt                        @map("amount_minor")
+  includedAmountMinor      BigInt                        @map("included_amount_minor")
+  prepaidAmountMinor       BigInt                        @map("prepaid_amount_minor")
+  status                   BillingUsageReservationStatus @default(RESERVED)
+  businessReference        String                        @unique(map: "billing_usage_reservations_business_reference_key") @map("business_reference") @db.VarChar(180)
+  requestHash              Bytes                         @map("request_hash")
+  reservationTransactionId String                        @map("reservation_transaction_id") @db.Uuid
+  captureTransactionId     String?                       @map("capture_transaction_id") @db.Uuid
+  releaseTransactionId     String?                       @map("release_transaction_id") @db.Uuid
+  reservedAt               DateTime                      @map("reserved_at") @db.Timestamptz(6)
+  expiresAt                DateTime                      @map("expires_at") @db.Timestamptz(6)
+  capturedAt               DateTime?                     @map("captured_at") @db.Timestamptz(6)
+  releasedAt               DateTime?                     @map("released_at") @db.Timestamptz(6)
+  createdAt                DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace              Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reservationTransaction BillingLedgerTransaction @relation("BillingUsageReservationTransaction", fields: [reservationTransactionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  captureTransaction     BillingLedgerTransaction? @relation("BillingUsageCaptureTransaction", fields: [captureTransactionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  releaseTransaction     BillingLedgerTransaction? @relation("BillingUsageReleaseTransaction", fields: [releaseTransactionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workspaceId, jobItemId, executionAttempt], map: "billing_usage_reservations_item_attempt_key")
+  @@index([workspaceId, status, expiresAt], map: "billing_usage_reservations_expiry_idx")
+  @@index([workspaceId, projectId, createdAt], map: "billing_usage_reservations_project_idx")
+  @@index([provider, status, capturedAt], map: "billing_usage_provider_captured_budget_idx")
+  @@index([provider, status, expiresAt], map: "billing_usage_provider_reserved_budget_idx")
+  @@map("billing_usage_reservations")
 }
 
 model BillingWebhookInbox {

@@ -16,6 +16,8 @@ import type {
 
 export interface CreateRankRunInput {
   readonly estimateId: string;
+  /** Exact estimate amount explicitly confirmed by the caller. */
+  readonly confirmedPlatformChargeMicro: string;
 }
 
 export const rankJobStatuses = [
@@ -317,9 +319,9 @@ interface RankJobSummaryBase {
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
   readonly operation: "POSITIONS";
-  readonly credentialMode: "BYOK_API_KEY";
+  readonly credentialMode: "BYOK_API_KEY" | "PLATFORM_PAID";
   readonly progress: RankJobProgress;
-  readonly platformChargeMicro: "0";
+  readonly platformChargeMicro: string;
   readonly billingCurrency: string;
   readonly createdAt: string;
 }
@@ -426,9 +428,12 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
     input.type !== "MANUAL_RANK_CHECK" ||
     !["ARSENKIN", "XMLSTOCK"].includes(input.provider) ||
     input.operation !== "POSITIONS" ||
-    input.credentialMode !== "BYOK_API_KEY" ||
+    (input.credentialMode !== "BYOK_API_KEY" &&
+      input.credentialMode !== "PLATFORM_PAID") ||
     input.progress.unit !== "KEYWORD" ||
-    input.platformChargeMicro !== "0" ||
+    !/^(?:0|[1-9]\d*)$/u.test(input.platformChargeMicro) ||
+    (input.credentialMode === "BYOK_API_KEY" &&
+      input.platformChargeMicro !== "0") ||
     (input.searchSource !== undefined &&
       input.searchSource !== "SEARCH_API" &&
       input.searchSource !== "LIVE") ||
@@ -744,6 +749,11 @@ export interface InternalCreateRankRunInput extends CreateRankRunInput {
   readonly access: InternalRankRunAccessSnapshot;
   readonly billingCurrency: string;
   readonly jobCapacity: JobCapacityEntitlement;
+  /** Trusted Core per-keyword price book; provider secrets are never present. */
+  readonly providerPricesMinor: {
+    readonly ARSENKIN: string | null;
+    readonly XMLSTOCK: string | null;
+  };
 }
 
 /**
@@ -753,7 +763,10 @@ export interface InternalCreateRankRunInput extends CreateRankRunInput {
  * browser can never supply keyword identifiers.
  */
 export interface InternalRetryRankJobInput
-  extends Omit<InternalCreateRankRunInput, "estimateId">,
+  extends Omit<
+      InternalCreateRankRunInput,
+      "estimateId" | "confirmedPlatformChargeMicro"
+    >,
     InternalRankJobQuery {}
 
 /**

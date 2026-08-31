@@ -62,6 +62,11 @@ export interface RankConnectorSubmitPermit {
   readonly submitBytesStartedAt: string;
 }
 
+export interface RankConnectorBillingSettlement {
+  readonly grantId: string;
+  readonly required: boolean;
+}
+
 export interface RankConnectorCompletion {
   readonly executionId: string;
   readonly status: string;
@@ -132,6 +137,40 @@ export class RankConnectorRuntimeBrokerService {
     const expected = buffer(row.requestHash, "request hash", 32);
     if (!timingSafeEqual(actual, expected)) invalid("request hash");
     return request;
+  }
+
+  public async readBillingSettlement(
+    claimValue: RankConnectorClaim
+  ): Promise<RankConnectorBillingSettlement> {
+    const rows = await this.prisma.$queryRaw<
+      readonly BillingSettlementRow[]
+    >(
+      Prisma.sql`
+        SELECT *
+        FROM public.read_rank_connector_billing_settlement(
+          ${claimValue.workspaceId}::uuid,
+          ${claimValue.executionId}::uuid,
+          ${claimValue.leaseOwner}::text,
+          ${claimValue.leaseToken}::uuid,
+          ${claimValue.leaseGeneration}::integer,
+          ${claimValue.executionVersion}::integer
+        )
+      `
+    );
+    if (rows.length !== 1 || !rows[0]) {
+      throw new RankConnectorLeaseLostError();
+    }
+    const row = rows[0];
+    if (
+      row.credentialMode !== "BYOK_API_KEY" &&
+      row.credentialMode !== "PLATFORM_PAID"
+    ) {
+      invalid("billing credential mode");
+    }
+    return {
+      grantId: uuid(row.grantId, "billing grant id"),
+      required: row.credentialMode === "PLATFORM_PAID"
+    };
   }
 
   public async authorizeSubmit(
@@ -423,6 +462,11 @@ interface SubmitRequestRow {
   readonly workspaceId: string;
   readonly requestSnapshot: unknown;
   readonly requestHash: Uint8Array;
+}
+
+interface BillingSettlementRow {
+  readonly grantId: string;
+  readonly credentialMode: string;
 }
 
 interface SubmitPermitRow {

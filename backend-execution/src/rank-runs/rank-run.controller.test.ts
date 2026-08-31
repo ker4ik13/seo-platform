@@ -227,10 +227,15 @@ function body(): Readonly<Record<string, unknown>> {
       }
     },
     billingCurrency: "RUB",
+    confirmedPlatformChargeMicro: "0",
     jobCapacity: {
       planCode: "PRO",
       planVersion: 2,
       concurrentJobs: 10
+    },
+    providerPricesMinor: {
+      ARSENKIN: null,
+      XMLSTOCK: null
     }
   };
 }
@@ -245,7 +250,8 @@ function retryBody(): Readonly<Record<string, unknown>> {
     project: value.project,
     access: value.access,
     billingCurrency: value.billingCurrency,
-    jobCapacity: value.jobCapacity
+    jobCapacity: value.jobCapacity,
+    providerPricesMinor: value.providerPricesMinor
   };
 }
 

@@ -7,7 +7,9 @@ import {
 } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
+import { PrismaService } from "../database/prisma.service.js";
 import { BillingService } from "./billing.service.js";
+import { BillingUsageService } from "./billing-usage.service.js";
 
 @Injectable()
 export class BillingReconciliationService
@@ -19,13 +21,13 @@ export class BillingReconciliationService
 
   public constructor(
     private readonly billing: BillingService,
+    private readonly usage: BillingUsageService,
+    private readonly prisma: PrismaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public onApplicationBootstrap(): void {
-    if (this.config.billing.reconciliation.enabled) {
-      this.schedule(Math.min(10_000, this.intervalMs()));
-    }
+    this.schedule(Math.min(10_000, this.intervalMs()));
   }
 
   public onApplicationShutdown(): void {
@@ -42,10 +44,15 @@ export class BillingReconciliationService
     if (this.stopping) return;
     try {
       const batchSize = this.config.billing.reconciliation.batchSize;
-      await this.billing.reconcilePending(batchSize);
-      await this.billing.reconcileSubscriptions(batchSize);
+      await this.prisma.$transaction((transaction) =>
+        this.usage.releaseExpired(transaction, batchSize)
+      );
+      if (this.config.billing.reconciliation.enabled) {
+        await this.billing.reconcilePending(batchSize);
+        await this.billing.reconcileSubscriptions(batchSize);
+      }
     } catch {
-      this.logger.warn("Billing reconciliation cycle failed");
+      this.logger.error("BILLING_RECONCILIATION_CYCLE_FAILED");
     } finally {
       if (!this.stopping) this.schedule(this.intervalMs());
     }

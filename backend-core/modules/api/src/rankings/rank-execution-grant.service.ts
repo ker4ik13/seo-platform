@@ -336,8 +336,16 @@ async function authorizeGrant(
     jobId: input.jobId,
     jobItemId: input.jobItemId,
     executionAttempt: input.executionAttempt,
+    provider: input.provider,
+    credentialMode: input.credentialMode,
     policyVersion: input.policyVersion,
-    usageIntent: { meter: "RANK_PROVIDER_TASK", quantity: 1 }
+    usageIntent: {
+      meter: "RANK_PROVIDER_TASK",
+      quantity: 1,
+      ...(input.usageIntent.unitPriceMinor === undefined
+        ? {}
+        : { unitPriceMinor: input.usageIntent.unitPriceMinor })
+    }
   });
   return policyAuthorization(policyDecision);
 }

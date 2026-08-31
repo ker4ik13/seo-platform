@@ -6,10 +6,12 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   Patch,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards
 } from "@nestjs/common";
 import type {
@@ -19,6 +21,8 @@ import type {
   IntegrationProviderCatalogItem
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
+import type { AppConfig } from "../config/app-config.js";
+import { APP_CONFIG } from "../config/config.module.js";
 import {
   assertInternalWorkspaceContext,
   internalUuid,
@@ -29,18 +33,20 @@ import {
   internalCreateIntegrationCredentialInput,
   internalCreateIntegrationCredentialValidationInput,
   internalDeleteIntegrationCredentialInput,
+  internalEnablePlatformIntegrationCredentialInput,
   internalUpdateIntegrationCredentialInput
 } from "./integration-credential-input.js";
 import { IntegrationCredentialService } from "./integration-credential.service.js";
 import { IntegrationCredentialValidationService } from "./integration-credential-validation.service.js";
-import { operationalIntegrationProviderCatalog } from "./integration-provider-catalog.js";
+import { operationalIntegrationProviderCatalogForPlatform } from "./integration-provider-catalog.js";
 
 @Controller("internal/v1/workspaces/:workspaceId/integrations")
 @UseGuards(IntegrationCredentialApiGuard)
 export class IntegrationCredentialController {
   public constructor(
     private readonly credentials: IntegrationCredentialService,
-    private readonly validations: IntegrationCredentialValidationService
+    private readonly validations: IntegrationCredentialValidationService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   @Get("catalog")
@@ -50,7 +56,34 @@ export class IntegrationCredentialController {
     @Req() request: FastifyRequest
   ): ApiResponse<readonly IntegrationProviderCatalogItem[]> {
     workspaceContext(workspaceId, headers);
-    return response(request, operationalIntegrationProviderCatalog);
+    return response(
+      request,
+      operationalIntegrationProviderCatalogForPlatform(
+        configuredPlatformProviders(this.config)
+      )
+    );
+  }
+
+  @Post("platform-credentials")
+  public async enablePlatform(
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<IntegrationCredentialSummary>> {
+    const context = workspaceContext(workspaceId, headers);
+    const input = internalEnablePlatformIntegrationCredentialInput(body);
+    assertInternalWorkspaceContext(input, context);
+    const material = this.config.platformProviderCredentials[input.provider];
+    if (!material) {
+      throw new ServiceUnavailableException(
+        "Platform provider credential is not configured"
+      );
+    }
+    return response(
+      request,
+      await this.credentials.enablePlatform(input, material)
+    );
   }
 
   @Get("credentials")
@@ -162,6 +195,19 @@ export class IntegrationCredentialController {
     );
     return response(request, { revoked: true });
   }
+}
+
+function configuredPlatformProviders(
+  config: AppConfig
+): ReadonlySet<"XMLSTOCK" | "ARSENKIN"> {
+  const providers = new Set<"XMLSTOCK" | "ARSENKIN">();
+  if (config.platformProviderCredentials.XMLSTOCK) {
+    providers.add("XMLSTOCK");
+  }
+  if (config.platformProviderCredentials.ARSENKIN) {
+    providers.add("ARSENKIN");
+  }
+  return providers;
 }
 
 function workspaceContext(

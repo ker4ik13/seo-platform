@@ -33,7 +33,10 @@ export const rankEstimateOperations = ["POSITIONS"] as const;
 
 export type RankEstimateOperation = (typeof rankEstimateOperations)[number];
 
-export const rankEstimateCredentialModes = ["BYOK_API_KEY"] as const;
+export const rankEstimateCredentialModes = [
+  "BYOK_API_KEY",
+  "PLATFORM_PAID"
+] as const;
 
 export type RankEstimateCredentialMode =
   (typeof rankEstimateCredentialModes)[number];
@@ -47,6 +50,12 @@ export type RankEstimateCredentialMode =
 export const rankProviderKeywordLimit = 15_000 as const;
 export const rankProviderOverflowCount = 15_001 as const;
 export const rankManifestSingleTaskChunkSize = 15_000 as const;
+
+/**
+ * Highest per-keyword price that keeps a full 15k paid launch inside a
+ * signed PostgreSQL BIGINT after converting minor units to 1/10,000 units.
+ */
+export const maximumPlatformRankKeywordPriceMinor = 61_489_146_912 as const;
 
 /** Read-only compatibility for immutable runs sealed before the 15k policy. */
 export const legacyRankProviderKeywordLimit = 1_000 as const;
@@ -335,7 +344,7 @@ export interface RankEstimate {
   readonly workload: RankEstimateProviderWorkload;
   readonly providerLimits: RankEstimateProviderLimits;
   readonly expectedDuration: RankEstimateExpectedDuration;
-  readonly platformChargeMicro: "0";
+  readonly platformChargeMicro: string;
   readonly billingCurrency: string;
   readonly quota: RankEstimateQuota;
   readonly credentialFreshness: RankEstimateCredentialFreshness;

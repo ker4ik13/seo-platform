@@ -60,6 +60,16 @@ export interface IntegrationCredentialEncryptionConfig {
   readonly activeFingerprintKeyVersion?: number;
 }
 
+export interface PlatformProviderCredentialsConfig {
+  readonly XMLSTOCK?: readonly {
+    readonly apiKey: string;
+    readonly accountIdentifier: string;
+  }[];
+  readonly ARSENKIN?: readonly {
+    readonly apiKey: string;
+  }[];
+}
+
 export interface AppConfig {
   readonly processRole: JobsProcessRole;
   readonly nodeEnv: "development" | "test" | "production";
@@ -75,6 +85,7 @@ export interface AppConfig {
   readonly rankManifestApiToken?: string;
   readonly rankResultApiToken?: string;
   readonly rankGrantApiToken?: string;
+  readonly rankBillingSettlementApiToken?: string;
   readonly automationDispatchApiToken?: string;
   readonly authEmailApiToken?: string;
   readonly internalCommandTimeoutMs: number;
@@ -92,6 +103,7 @@ export interface AppConfig {
   readonly email: EmailConfig;
   readonly malwareScanner: MalwareScannerConfig;
   readonly integrationCredentials: IntegrationCredentialEncryptionConfig;
+  readonly platformProviderCredentials: PlatformProviderCredentialsConfig;
   readonly integrationCredentialValidation: {
     readonly timeoutMs: number;
     readonly leaseSeconds: number;
@@ -185,6 +197,7 @@ const SERVICE_TOKEN_ENVIRONMENT_VARIABLES = [
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN",
   "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
   "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
 ] as const;
@@ -251,6 +264,14 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "INTEGRATION_VALIDATION_LEASE_SECONDS",
   "INTEGRATION_VALIDATION_DISPATCH_SECONDS",
   "INTEGRATION_VALIDATION_CONCURRENCY",
+  "PLATFORM_XMLSTOCK_ENABLED",
+  "PLATFORM_XMLSTOCK_API_KEY",
+  "PLATFORM_XMLSTOCK_API_KEYS",
+  "PLATFORM_XMLSTOCK_ACCOUNT_ID",
+  "PLATFORM_XMLSTOCK_ACCOUNT_IDS",
+  "PLATFORM_ARSENKIN_ENABLED",
+  "PLATFORM_ARSENKIN_API_KEY",
+  "PLATFORM_ARSENKIN_API_KEYS",
   "CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS",
   "RANK_CONNECTOR_CONCURRENCY",
   "FREQUENCY_COLLECTION_CONCURRENCY",
@@ -520,6 +541,152 @@ function smtpSecret(value: string | undefined): string | undefined {
   return value;
 }
 
+function providerApiKey(
+  value: string | undefined,
+  key: string
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (
+    value.length < 8 ||
+    value.length > 2_048 ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0);
+      return (
+        codePoint === undefined ||
+        codePoint <= 0x20 ||
+        codePoint >= 0x7f ||
+        character === ","
+      );
+    })
+  ) {
+    throw new Error(
+      `${key} must contain 8 to 2048 visible ASCII characters without whitespace or commas`
+    );
+  }
+  return value;
+}
+
+const PLATFORM_PROVIDER_POOL_MAX_SIZE = 64;
+
+function providerApiKeys(
+  pluralValue: string | undefined,
+  legacyValue: string | undefined,
+  pluralKey: string,
+  legacyKey: string
+): readonly string[] | undefined {
+  const pluralConfigured =
+    pluralValue !== undefined && pluralValue.trim() !== "";
+  const legacyConfigured =
+    legacyValue !== undefined && legacyValue.trim() !== "";
+  if (pluralConfigured && legacyConfigured) {
+    throw new Error(`${pluralKey} conflicts with legacy ${legacyKey}`);
+  }
+  const source = pluralConfigured
+    ? pluralValue
+    : legacyConfigured
+      ? legacyValue
+      : undefined;
+  if (source === undefined) return undefined;
+  const values = pluralConfigured ? source.split(",") : [source];
+  if (values.length > PLATFORM_PROVIDER_POOL_MAX_SIZE) {
+    throw new Error(
+      `${pluralKey} must contain at most ${PLATFORM_PROVIDER_POOL_MAX_SIZE} keys`
+    );
+  }
+  const parsed = values.map((value, index) => {
+    const normalized = value.trim();
+    if (!normalized) {
+      throw new Error(
+        `${pluralKey} contains an empty item at position ${index + 1}`
+      );
+    }
+    return providerApiKey(normalized, pluralKey)!;
+  });
+  if (new Set(parsed).size !== parsed.length) {
+    throw new Error(`${pluralKey} must not contain duplicate keys`);
+  }
+  return parsed;
+}
+
+function providerAccountIdentifier(
+  value: string | undefined,
+  key: string
+): string | undefined {
+  const identifier = value?.trim();
+  if (!identifier) return undefined;
+  if (
+    identifier.length > 255 ||
+    [...identifier].some((character) => {
+      const codePoint = character.codePointAt(0);
+      return (
+        codePoint === undefined ||
+        codePoint < 0x20 ||
+        codePoint === 0x7f ||
+        character === ","
+      );
+    })
+  ) {
+    throw new Error(
+      `${key} must be a bounded printable identifier without commas`
+    );
+  }
+  return identifier;
+}
+
+function providerAccountIdentifiers(
+  pluralValue: string | undefined,
+  legacyValue: string | undefined,
+  pluralKey: string,
+  legacyKey: string
+): readonly string[] | undefined {
+  const pluralConfigured =
+    pluralValue !== undefined && pluralValue.trim() !== "";
+  const legacyConfigured =
+    legacyValue !== undefined && legacyValue.trim() !== "";
+  if (pluralConfigured && legacyConfigured) {
+    throw new Error(`${pluralKey} conflicts with legacy ${legacyKey}`);
+  }
+  const source = pluralConfigured
+    ? pluralValue
+    : legacyConfigured
+      ? legacyValue
+      : undefined;
+  if (source === undefined) return undefined;
+  const values = pluralConfigured ? source.split(",") : [source];
+  if (values.length > PLATFORM_PROVIDER_POOL_MAX_SIZE) {
+    throw new Error(
+      `${pluralKey} must contain at most ${PLATFORM_PROVIDER_POOL_MAX_SIZE} identifiers`
+    );
+  }
+  return values.map((value, index) => {
+    const identifier = providerAccountIdentifier(value, pluralKey);
+    if (!identifier) {
+      throw new Error(
+        `${pluralKey} contains an empty item at position ${index + 1}`
+      );
+    }
+    return identifier;
+  });
+}
+
+function xmlStockPlatformCredentials(
+  apiKeys: readonly string[],
+  accountIdentifiers: readonly string[]
+): PlatformProviderCredentialsConfig["XMLSTOCK"] {
+  if (
+    accountIdentifiers.length !== 1 &&
+    accountIdentifiers.length !== apiKeys.length
+  ) {
+    throw new Error(
+      "PLATFORM_XMLSTOCK_ACCOUNT_IDS must contain one shared identifier or one identifier per API key"
+    );
+  }
+  return apiKeys.map((apiKey, index) => ({
+    apiKey,
+    accountIdentifier: accountIdentifiers[index] ?? accountIdentifiers[0]!
+  }));
+}
+
 function versionedKeyring(
   value: string | undefined,
   environmentVariable: string
@@ -649,6 +816,10 @@ export function loadAppConfig(
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
+  const rankBillingSettlementApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
+  );
   const automationDispatchApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_AUTOMATION_TOKEN"
@@ -686,6 +857,79 @@ export function loadAppConfig(
       : credentialExecutionEnabled
         ? "CONNECTOR_WORKER"
         : "HTTP");
+  const platformXmlstockEnabled = bool(
+    env.PLATFORM_XMLSTOCK_ENABLED
+  );
+  const platformArsenkinEnabled = bool(
+    env.PLATFORM_ARSENKIN_ENABLED
+  );
+  const platformXmlstockApiKeys = platformXmlstockEnabled
+    ? providerApiKeys(
+        env.PLATFORM_XMLSTOCK_API_KEYS,
+        env.PLATFORM_XMLSTOCK_API_KEY,
+        "PLATFORM_XMLSTOCK_API_KEYS",
+        "PLATFORM_XMLSTOCK_API_KEY"
+      )
+    : undefined;
+  const platformXmlstockAccountIdentifiers = platformXmlstockEnabled
+    ? providerAccountIdentifiers(
+        env.PLATFORM_XMLSTOCK_ACCOUNT_IDS,
+        env.PLATFORM_XMLSTOCK_ACCOUNT_ID,
+        "PLATFORM_XMLSTOCK_ACCOUNT_IDS",
+        "PLATFORM_XMLSTOCK_ACCOUNT_ID"
+      )
+    : undefined;
+  const platformArsenkinApiKeys = platformArsenkinEnabled
+    ? providerApiKeys(
+        env.PLATFORM_ARSENKIN_API_KEYS,
+        env.PLATFORM_ARSENKIN_API_KEY,
+        "PLATFORM_ARSENKIN_API_KEYS",
+        "PLATFORM_ARSENKIN_API_KEY"
+      )
+    : undefined;
+  if (
+    (platformXmlstockApiKeys === undefined) !==
+    (platformXmlstockAccountIdentifiers === undefined)
+  ) {
+    throw new Error(
+      "PLATFORM_XMLSTOCK_API_KEYS and PLATFORM_XMLSTOCK_ACCOUNT_IDS must be configured together"
+    );
+  }
+  if (
+    platformXmlstockEnabled &&
+    (!platformXmlstockApiKeys || !platformXmlstockAccountIdentifiers)
+  ) {
+    throw new Error(
+      "PLATFORM_XMLSTOCK_API_KEYS and PLATFORM_XMLSTOCK_ACCOUNT_IDS are required when XMLStock platform usage is enabled"
+    );
+  }
+  if (platformArsenkinEnabled && !platformArsenkinApiKeys) {
+    throw new Error(
+      "PLATFORM_ARSENKIN_API_KEYS is required when Arsenkin platform usage is enabled"
+    );
+  }
+  const platformXmlstockCredentials =
+    platformXmlstockApiKeys && platformXmlstockAccountIdentifiers
+      ? xmlStockPlatformCredentials(
+          platformXmlstockApiKeys,
+          platformXmlstockAccountIdentifiers
+        )
+      : undefined;
+  if (
+    processRole !== "HTTP" &&
+    [
+      env.PLATFORM_XMLSTOCK_API_KEY,
+      env.PLATFORM_XMLSTOCK_API_KEYS,
+      env.PLATFORM_XMLSTOCK_ACCOUNT_ID,
+      env.PLATFORM_XMLSTOCK_ACCOUNT_IDS,
+      env.PLATFORM_ARSENKIN_API_KEY,
+      env.PLATFORM_ARSENKIN_API_KEYS
+    ].some((value) => value !== undefined && value.trim() !== "")
+  ) {
+    throw new Error(
+      `${processRole} must not receive platform provider source credentials`
+    );
+  }
   if (processRole === "SYSTEM_WORKER") {
     throw new Error(
       "SYSTEM_WORKER must use loadSystemWorkerConfig to avoid receiving database and application capabilities"
@@ -724,6 +968,24 @@ export function loadAppConfig(
   ) {
     throw new Error(
       "Only the enabled rank preparation worker may receive rank execution service tokens"
+    );
+  }
+  if (
+    rankBillingSettlementApiToken &&
+    processRole !== "CONNECTOR_WORKER"
+  ) {
+    throw new Error(
+      "Only the connector worker may receive JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
+    );
+  }
+  if (
+    processRole === "CONNECTOR_WORKER" &&
+    rankProviderSubmitEnabled &&
+    (!rankBillingSettlementApiToken ||
+      rankBillingSettlementApiToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN with at least 32 characters is required when connector rank submit is enabled"
     );
   }
   if (
@@ -1281,6 +1543,8 @@ export function loadAppConfig(
     JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
     JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN:
+      rankBillingSettlementApiToken,
     JOBS_TO_PLATFORM_AUTOMATION_TOKEN: automationDispatchApiToken,
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: authEmailApiToken
   });
@@ -1309,6 +1573,9 @@ export function loadAppConfig(
     ...(rankManifestApiToken ? { rankManifestApiToken } : {}),
     ...(rankResultApiToken ? { rankResultApiToken } : {}),
     ...(rankGrantApiToken ? { rankGrantApiToken } : {}),
+    ...(rankBillingSettlementApiToken
+      ? { rankBillingSettlementApiToken }
+      : {}),
     ...(automationDispatchApiToken
       ? { automationDispatchApiToken }
       : {}),
@@ -1389,6 +1656,19 @@ export function loadAppConfig(
         ? {
             activeFingerprintKeyVersion:
               integrationCredentialActiveFingerprintKeyVersion
+          }
+        : {})
+    },
+    platformProviderCredentials: {
+      ...(platformXmlstockEnabled &&
+      platformXmlstockCredentials
+        ? {
+            XMLSTOCK: platformXmlstockCredentials
+          }
+        : {}),
+      ...(platformArsenkinEnabled && platformArsenkinApiKeys
+        ? {
+            ARSENKIN: platformArsenkinApiKeys.map((apiKey) => ({ apiKey }))
           }
         : {})
     },

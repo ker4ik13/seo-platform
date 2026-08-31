@@ -320,7 +320,7 @@ async function createPendingRankJob(
         scopeHash: bytes(5),
         provider: "ARSENKIN",
         credentialMode: "BYOK_API_KEY",
-        providerPolicyVersion: "arsenkin-positions@1",
+        providerPolicyVersion: "manual-arsenkin-positions@2.0.0",
         keywordCount: 3,
         providerTaskCount: 1,
         minimumSubmitRequestCount: 1,

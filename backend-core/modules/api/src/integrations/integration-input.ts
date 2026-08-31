@@ -1,6 +1,7 @@
 import {
   integrationProviders,
   type CreateIntegrationCredentialInput,
+  type EnablePlatformIntegrationCredentialInput,
   type IntegrationProvider,
   type UpdateIntegrationCredentialInput
 } from "@seo-platform/contracts";
@@ -35,6 +36,19 @@ export function createIntegrationCredentialInput(
     apiKey,
     ...(accountIdentifier ? { accountIdentifier } : {})
   };
+}
+
+export function enablePlatformIntegrationCredentialInput(
+  value: unknown
+): EnablePlatformIntegrationCredentialInput {
+  const input = inputObject(value);
+  if (
+    Object.keys(input).length !== 1 ||
+    (input.provider !== "XMLSTOCK" && input.provider !== "ARSENKIN")
+  ) {
+    invalid("provider");
+  }
+  return { provider: input.provider };
 }
 
 export function updateIntegrationCredentialInput(

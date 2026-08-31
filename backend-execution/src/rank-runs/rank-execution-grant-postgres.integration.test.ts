@@ -10,7 +10,9 @@ const HASH = {
   domain: "44".repeat(32),
   manifest: "55".repeat(32),
   manifestDeduplication: "66".repeat(32),
-  estimateExecution: "77".repeat(32)
+  estimateExecution: "77".repeat(32),
+  providerRequest: "88".repeat(32),
+  manifestChunk: "99".repeat(32)
 } as const;
 
 test(
@@ -155,6 +157,7 @@ interface ExecutionFixture {
   readonly bindingId: string;
   readonly routeId: string;
   readonly credentialId: string;
+  readonly providerRequestIntentId: string;
   readonly grantAttemptId: string;
   readonly grantId: string;
   readonly itemSequence: number;
@@ -206,6 +209,7 @@ async function createExecutionGraph(
   );
   const grantId = await databaseUuidV7(client);
   const trackingContextId = await databaseUuidV7(client);
+  const providerRequestIntentId = await databaseUuidV7(client);
   const verifiedAt = new Date();
 
   await client.query("BEGIN");
@@ -213,14 +217,21 @@ async function createExecutionGraph(
     await client.query(
       `INSERT INTO jobs (
          id, workspace_id, project_id, type, status, stage,
-         idempotency_scope, input_snapshot, scope_snapshot,
+         idempotency_scope, deduplication_key, input_snapshot, scope_snapshot,
          credential_mode, provider, correlation_id, version,
          finished_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid,
          'INTEGRATION_CREDENTIAL_VALIDATE', 'COMPLETED', 'FINISHED',
-         $4, '{}'::jsonb, '{}'::jsonb, 'BYOK_API_KEY', 'ARSENKIN',
-         'rank-grant-postgres-validation', 1, $5::timestamptz,
+         $4,
+         'integration-credential-validation:' || $5::uuid::text || ':1',
+         jsonb_build_object(
+           'kind', 'integration.credential.validation.v1',
+           'credentialId', $5::uuid::text,
+           'credentialMaterialVersion', 1,
+           'connectorVersion', 'arsenkin@1'
+         ), '{}'::jsonb, 'BYOK_API_KEY', 'ARSENKIN',
+         'rank-grant-postgres-validation', 1, $6::timestamptz,
          clock_timestamp()
        )`,
       [
@@ -228,6 +239,7 @@ async function createExecutionGraph(
         workspaceId,
         projectId,
         `rank-grant-validation:${validationJobId}`,
+        credentialId,
         verifiedAt
       ]
     );
@@ -244,7 +256,8 @@ async function createExecutionGraph(
          decode(repeat('02', 12), 'hex'),
          decode(repeat('03', 16), 'hex'), decode('04', 'hex'),
          decode(repeat('05', 12), 'hex'),
-         decode(repeat('06', 16), 'hex'), 1, '{}'::jsonb, $3,
+         decode(repeat('06', 16), 'hex'), 1,
+         '["SERP_RANK_TRACKING"]'::jsonb, $3,
          decode(repeat('07', 32), 'hex'), 1, 1, $4::timestamptz, 1,
          clock_timestamp()
        )`,
@@ -299,7 +312,8 @@ async function createExecutionGraph(
          decode(repeat('0a', 32), 'hex'), $10::uuid, 1, $11::uuid,
          $12::uuid, 'ACTIVE', 1, 1, $13::uuid, 1, 'arsenkin@1',
          $14::timestamptz, $14::timestamptz, 'ARSENKIN', 'BYOK_API_KEY',
-         'arsenkin-positions@1', 1, 1, 1, 1, 1, '[]'::jsonb, '{}'::jsonb,
+         'manual-arsenkin-positions@1.0.0', 1, 1, 1, 1, 1,
+         '[]'::jsonb, '{}'::jsonb,
          '{}'::jsonb, decode($15, 'hex'), $16::timestamptz,
          $16::timestamptz + INTERVAL '5 minutes'
        )`,
@@ -420,6 +434,31 @@ async function createExecutionGraph(
        )`,
       [jobItemId, workspaceId, projectId, jobId, itemSequence, manifestId]
     );
+    await client.query(
+      `INSERT INTO rank_provider_request_intents (
+         id, workspace_id, project_id, job_id, job_item_id,
+         manifest_id, manifest_hash, manifest_chunk_index,
+         manifest_chunk_hash, schema_version, request_snapshot,
+         request_hash
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+         $6::uuid, decode($7, 'hex'), $8, decode($9, 'hex'),
+         'rank-provider-request-intent@1', '{}'::jsonb,
+         decode($10, 'hex')
+       )`,
+      [
+        providerRequestIntentId,
+        workspaceId,
+        projectId,
+        jobId,
+        jobItemId,
+        manifestId,
+        HASH.manifest,
+        itemSequence,
+        HASH.manifestChunk,
+        HASH.providerRequest
+      ]
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -439,6 +478,7 @@ async function createExecutionGraph(
     bindingId,
     routeId,
     credentialId,
+    providerRequestIntentId,
     grantAttemptId,
     grantId,
     itemSequence,
@@ -551,7 +591,9 @@ async function insertConnectorExecution(
     `INSERT INTO rank_connector_executions (
        workspace_id, project_id, job_id, job_item_id, grant_attempt_id,
        execution_attempt, job_version, estimate_id, manifest_id,
-       manifest_hash, manifest_chunk_index, binding_id, binding_version,
+       manifest_hash, manifest_chunk_index, provider_request_intent_id,
+       provider_request_intent_hash, provider_request_intent_chunk_hash,
+       binding_id, binding_version,
        route_id, credential_id, credential_version,
        credential_material_version, credential_validation_id,
        credential_validation_version,
@@ -561,11 +603,13 @@ async function insertConnectorExecution(
        kill_switch_version, authorization_expires_at, updated_at
      ) VALUES (
        $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 1, 2,
-       $6::uuid, $7::uuid, decode($8, 'hex'), $9, $10::uuid, 1,
-       $11::uuid, $12::uuid, 1, 1, $13::uuid, 1, 'arsenkin@1',
-       $14::timestamptz, decode($15, 'hex'), decode($16, 'hex'),
-       'arsenkin@1', 'arsenkin-positions@1', 'rank-submit-disabled@1',
-       $17::timestamptz, clock_timestamp()
+       $6::uuid, $7::uuid, decode($8, 'hex'), $9, $10::uuid,
+       decode($11, 'hex'), decode($12, 'hex'), $13::uuid, 1,
+       $14::uuid, $15::uuid, 1, 1, $16::uuid, 1, 'arsenkin@1',
+       $17::timestamptz, decode($18, 'hex'), decode($19, 'hex'),
+       'arsenkin@1', 'manual-arsenkin-positions@1.0.0',
+       'rank-submit-disabled@1',
+       $20::timestamptz, clock_timestamp()
      )`,
     [
       overrides.workspaceId ?? fixture.workspaceId,
@@ -577,6 +621,9 @@ async function insertConnectorExecution(
       fixture.manifestId,
       HASH.manifest,
       fixture.itemSequence,
+      fixture.providerRequestIntentId,
+      HASH.providerRequest,
+      HASH.manifestChunk,
       fixture.bindingId,
       fixture.routeId,
       fixture.credentialId,

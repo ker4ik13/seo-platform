@@ -270,8 +270,14 @@ export function parseRankEstimate(
   const operation =
     estimate.operation === "POSITIONS" ? estimate.operation : undefined;
   const credentialMode =
-    estimate.credentialMode === "BYOK_API_KEY"
+    estimate.credentialMode === "BYOK_API_KEY" ||
+    estimate.credentialMode === "PLATFORM_PAID"
       ? estimate.credentialMode
+      : undefined;
+  const platformChargeMicro =
+    typeof estimate.platformChargeMicro === "string" &&
+    /^(?:0|[1-9]\d*)$/u.test(estimate.platformChargeMicro)
+      ? estimate.platformChargeMicro
       : undefined;
   const scope = parseScope(estimate.scope);
   const workload = scope && provider
@@ -320,7 +326,9 @@ export function parseRankEstimate(
     !workload ||
     providerLimits.status !== "NOT_AVAILABLE" ||
     expectedDuration.status !== "NOT_AVAILABLE" ||
-    estimate.platformChargeMicro !== "0" ||
+    !platformChargeMicro ||
+    (credentialMode === "BYOK_API_KEY" && platformChargeMicro !== "0") ||
+    (credentialMode === "PLATFORM_PAID" && platformChargeMicro === "0") ||
     !billingCurrency ||
     !quota ||
     !credentialFreshness ||
@@ -356,7 +364,7 @@ export function parseRankEstimate(
     workload,
     providerLimits: { status: "NOT_AVAILABLE" },
     expectedDuration: { status: "NOT_AVAILABLE" },
-    platformChargeMicro: "0",
+    platformChargeMicro,
     billingCurrency,
     quota,
     credentialFreshness,

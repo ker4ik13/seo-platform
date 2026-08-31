@@ -20,10 +20,12 @@ const credentialNames = [
   "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN",
   "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
   "RANK_HISTORY_CURSOR_KEY",
+  "OPERATIONAL_ALERT_TOKEN",
   "REDIS_JOBS_API_PASSWORD",
   "REDIS_JOBS_SYSTEM_PASSWORD",
   "REDIS_JOBS_INSPECTION_PASSWORD",
@@ -71,13 +73,140 @@ test("preflight script is valid POSIX shell and accepts distinct credentials", a
 
   assert.match(
     result.stdout,
-    /validated 26 distinct deploy credentials, 5 distinct NATS bcrypt verifiers and 5 distinct NATS usernames/u
+    /validated 28 distinct deploy credentials, 5 distinct NATS bcrypt verifiers, 5 distinct NATS usernames and 0 enabled platform providers/u
   );
   assert.equal(result.stderr, "");
   assertDoesNotExposeCredentials(
     `${result.stdout}${result.stderr}`,
     environment
   );
+});
+
+test("preflight accepts complete enabled platform providers", async () => {
+  const environment = validEnvironment();
+  Object.assign(environment, {
+    PLATFORM_XMLSTOCK_ENABLED: "true",
+    PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "17",
+    PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
+    PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000",
+    PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-provider-secret-1,xmlstock-provider-secret-2",
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "xmlstock-account",
+    PLATFORM_ARSENKIN_ENABLED: "true",
+    PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
+    PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+    PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "20000",
+    PLATFORM_ARSENKIN_API_KEYS: "arsenkin-provider-secret-1,arsenkin-provider-secret-2"
+  });
+
+  const result = await runPreflight(environment);
+
+  assert.match(result.stdout, /2 enabled platform providers/u);
+  assert.equal(result.stderr, "");
+  assertDoesNotExposeCredentials(
+    `${result.stdout}${result.stderr}`,
+    environment
+  );
+});
+
+test("preflight fails closed for incomplete or malformed platform configuration", async () => {
+  const cases = [
+    {
+      patch: { PLATFORM_XMLSTOCK_ENABLED: "yes" },
+      expected: /PLATFORM_XMLSTOCK_ENABLED must be true or false/u
+    },
+    {
+      patch: {
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "0",
+        PLATFORM_XMLSTOCK_API_KEY: "xmlstock-provider-secret",
+        PLATFORM_XMLSTOCK_ACCOUNT_ID: "xmlstock-account"
+      },
+      expected: /PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR must be a positive safe integer/u
+    },
+    {
+      patch: {
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "61489146913",
+        PLATFORM_XMLSTOCK_API_KEY: "xmlstock-provider-secret",
+        PLATFORM_XMLSTOCK_ACCOUNT_ID: "xmlstock-account"
+      },
+      expected: /no greater than 61489146912/u
+    },
+    {
+      patch: {
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "17",
+        PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
+        PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000",
+        PLATFORM_XMLSTOCK_API_KEY: "xmlstock-provider-secret"
+      },
+      expected: /PLATFORM_XMLSTOCK_ACCOUNT_IDS is required/u
+    },
+    {
+      patch: {
+        PLATFORM_ARSENKIN_ENABLED: "true",
+        PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
+        PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+        PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "20000",
+        PLATFORM_ARSENKIN_API_KEY: "has whitespace"
+      },
+      expected: /PLATFORM_ARSENKIN_API_KEY items must contain/u
+    },
+    {
+      patch: {
+        PLATFORM_ARSENKIN_ENABLED: "true",
+        PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
+        PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+        PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "20000",
+        PLATFORM_ARSENKIN_API_KEYS: "duplicate-key,duplicate-key"
+      },
+      expected: /platform provider API keys must be distinct/u
+    },
+    {
+      patch: {
+        PLATFORM_ARSENKIN_ENABLED: "true",
+        PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
+        PLATFORM_ARSENKIN_API_KEY: "arsenkin-provider-secret"
+      },
+      expected: /PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR is required/u
+    },
+    {
+      patch: {
+        PLATFORM_ARSENKIN_ENABLED: "true",
+        PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
+        PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+        PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "1999",
+        PLATFORM_ARSENKIN_API_KEY: "arsenkin-provider-secret"
+      },
+      expected: /MONTHLY_SPEND_LIMIT_MINOR must be greater than or equal/u
+    }
+  ];
+
+  for (const invalidCase of cases) {
+    const environment = { ...validEnvironment(), ...invalidCase.patch };
+    const failure = await captureFailure(environment);
+    assert.match(failure.stderr, invalidCase.expected);
+    assertDoesNotExposeCredentials(failure.stderr, environment);
+  }
+});
+
+test("preflight rejects provider key reuse without logging the secret", async () => {
+  const environment = validEnvironment();
+  Object.assign(environment, {
+    PLATFORM_ARSENKIN_ENABLED: "true",
+    PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
+    PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
+    PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "20000",
+    PLATFORM_ARSENKIN_API_KEY: environment.OPERATIONAL_ALERT_TOKEN
+  });
+
+  const failure = await captureFailure(environment);
+
+  assert.match(
+    failure.stderr,
+    /PLATFORM_ARSENKIN_API_KEY must differ from OPERATIONAL_ALERT_TOKEN/u
+  );
+  assertDoesNotExposeCredentials(failure.stderr, environment);
 });
 
 test("preflight accepts generated URL-safe credentials containing hyphens", async () => {
@@ -351,13 +480,27 @@ function validEnvironment() {
         name,
         `smtp-identity-${index}-${"z".repeat(24)}`
       ])
-    )
+    ),
+    PLATFORM_XMLSTOCK_ENABLED: "false",
+    PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "",
+    PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "",
+    PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "",
+    PLATFORM_XMLSTOCK_API_KEYS: "",
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "",
+    PLATFORM_XMLSTOCK_API_KEY: "",
+    PLATFORM_XMLSTOCK_ACCOUNT_ID: "",
+    PLATFORM_ARSENKIN_ENABLED: "false",
+    PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "",
+    PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "",
+    PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: "",
+    PLATFORM_ARSENKIN_API_KEYS: "",
+    PLATFORM_ARSENKIN_API_KEY: ""
   };
 }
 
 function assertDoesNotExposeCredentials(output, environment) {
   for (const value of Object.values(environment)) {
-    if (value === "") continue;
+    if (value.length < 8) continue;
     assert.equal(
       output.includes(value),
       false,

@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   createIntegrationCredentialInput,
   internalCreateIntegrationCredentialInput,
+  internalEnablePlatformIntegrationCredentialInput,
   updateIntegrationCredentialInput
 } from "./integration-credential-input.js";
 
@@ -109,4 +110,35 @@ test("canonicalizes UUIDs before AAD and idempotency fingerprinting", () => {
     "0190abcd-0000-7000-8000-0000000000ef"
   );
   assert.equal(input.actorId, "0190abcd-0000-7000-8000-0000000000aa");
+});
+
+test("accepts only an exact trusted platform credential command", () => {
+  const value = {
+    workspaceId: "0190ABCD-0000-7000-8000-0000000000EF",
+    actorId: "0190ABCD-0000-7000-8000-0000000000AA",
+    idempotencyKey: "platform-credential-enable-001",
+    provider: "ARSENKIN"
+  };
+  assert.deepEqual(internalEnablePlatformIntegrationCredentialInput(value), {
+    workspaceId: "0190abcd-0000-7000-8000-0000000000ef",
+    actorId: "0190abcd-0000-7000-8000-0000000000aa",
+    idempotencyKey: "platform-credential-enable-001",
+    provider: "ARSENKIN"
+  });
+  assert.throws(
+    () =>
+      internalEnablePlatformIntegrationCredentialInput({
+        ...value,
+        apiKey: "browser-must-not-supply-this"
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalEnablePlatformIntegrationCredentialInput({
+        ...value,
+        provider: "KEYS_SO"
+      }),
+    BadRequestException
+  );
 });

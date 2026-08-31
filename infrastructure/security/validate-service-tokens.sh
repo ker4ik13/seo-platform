@@ -12,10 +12,12 @@ PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN
 REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN
 JOBS_TO_SEO_RANK_TOKEN
 JOBS_TO_PLATFORM_RANK_GRANT_TOKEN
+JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN
 JOBS_TO_PLATFORM_AUTOMATION_TOKEN
 JOBS_TO_SEO_RANK_RESULT_TOKEN
 JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN
 RANK_HISTORY_CURSOR_KEY
+OPERATIONAL_ALERT_TOKEN
 REDIS_JOBS_API_PASSWORD
 REDIS_JOBS_SYSTEM_PASSWORD
 REDIS_JOBS_INSPECTION_PASSWORD
@@ -269,4 +271,224 @@ done
 unset auth_email_smtp_user auth_email_smtp_password
 unset smtp_name
 
-echo "service-token-preflight: validated $validated_count distinct deploy credentials, $validated_nats_hash_count distinct NATS bcrypt verifiers and $validated_username_count distinct NATS usernames; auth-email SMTP credentials are isolated"
+validated_platform_providers=0
+validated_provider_secret_values=""
+
+for provider_name in XMLSTOCK ARSENKIN; do
+  enabled_name="PLATFORM_${provider_name}_ENABLED"
+  price_name="PLATFORM_${provider_name}_RANK_KEYWORD_PRICE_MINOR"
+  daily_budget_name="PLATFORM_${provider_name}_DAILY_SPEND_LIMIT_MINOR"
+  monthly_budget_name="PLATFORM_${provider_name}_MONTHLY_SPEND_LIMIT_MINOR"
+  legacy_api_key_name="PLATFORM_${provider_name}_API_KEY"
+  pool_api_key_name="PLATFORM_${provider_name}_API_KEYS"
+
+  if ! printenv "$enabled_name" >/dev/null; then
+    echo "service-token-preflight: $enabled_name is required" >&2
+    exit 1
+  fi
+  enabled_value="$(printenv "$enabled_name"; printf 'x')"
+  enabled_value=${enabled_value%x}
+  enabled_value=${enabled_value%?}
+  case "$enabled_value" in
+    true|false) ;;
+    *)
+      echo "service-token-preflight: $enabled_name must be true or false" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ "$enabled_value" = false ]; then
+    unset enabled_name enabled_value price_name daily_budget_name monthly_budget_name legacy_api_key_name pool_api_key_name
+    continue
+  fi
+
+  if ! printenv "$price_name" >/dev/null; then
+    echo "service-token-preflight: $price_name is required when $enabled_name=true" >&2
+    exit 1
+  fi
+
+  price_value="$(printenv "$price_name"; printf 'x')"
+  price_value=${price_value%x}
+  price_value=${price_value%?}
+  # 61,489,146,912 * 15,000 keywords * 10,000 micro/minor fits BIGINT.
+  if ! printf '%s' "$price_value" | grep -Eq '^[0-9]{1,11}$' ||
+    [ "$price_value" -lt 1 ] ||
+    [ "$price_value" -gt 61489146912 ]; then
+    echo "service-token-preflight: $price_name must be a positive safe integer no greater than 61489146912" >&2
+    exit 1
+  fi
+
+  for budget_name in "$daily_budget_name" "$monthly_budget_name"; do
+    if ! printenv "$budget_name" >/dev/null; then
+      echo "service-token-preflight: $budget_name is required when $enabled_name=true" >&2
+      exit 1
+    fi
+    budget_value="$(printenv "$budget_name"; printf 'x')"
+    budget_value=${budget_value%x}
+    budget_value=${budget_value%?}
+    if [ -z "$budget_value" ]; then
+      echo "service-token-preflight: $budget_name is required when $enabled_name=true" >&2
+      exit 1
+    fi
+    if ! printf '%s' "$budget_value" | grep -Eq '^[0-9]{1,16}$' ||
+      [ "$budget_value" -lt 1 ] ||
+      [ "$budget_value" -gt 9007199254740991 ]; then
+      echo "service-token-preflight: $budget_name must be a positive safe integer" >&2
+      exit 1
+    fi
+    if [ "$budget_name" = "$daily_budget_name" ]; then
+      daily_budget_value=$budget_value
+    else
+      monthly_budget_value=$budget_value
+    fi
+  done
+  if [ "$monthly_budget_value" -lt "$daily_budget_value" ]; then
+    echo "service-token-preflight: $monthly_budget_name must be greater than or equal to $daily_budget_name" >&2
+    exit 1
+  fi
+
+  legacy_api_key_value="$(printenv "$legacy_api_key_name" 2>/dev/null || true; printf 'x')"
+  legacy_api_key_value=${legacy_api_key_value%x}
+  legacy_api_key_value=${legacy_api_key_value%?}
+  pool_api_key_value="$(printenv "$pool_api_key_name" 2>/dev/null || true; printf 'x')"
+  pool_api_key_value=${pool_api_key_value%x}
+  pool_api_key_value=${pool_api_key_value%?}
+  if [ -n "$legacy_api_key_value" ] && [ -n "$pool_api_key_value" ]; then
+    echo "service-token-preflight: $pool_api_key_name conflicts with legacy $legacy_api_key_name" >&2
+    exit 1
+  fi
+  if [ -n "$pool_api_key_value" ]; then
+    api_key_name=$pool_api_key_name
+    api_keys_value=$pool_api_key_value
+  elif [ -n "$legacy_api_key_value" ]; then
+    api_key_name=$legacy_api_key_name
+    api_keys_value=$legacy_api_key_value
+  else
+    echo "service-token-preflight: $pool_api_key_name is required when $enabled_name=true" >&2
+    exit 1
+  fi
+  case "$api_keys_value" in
+    ,*|*,|*,,*)
+      echo "service-token-preflight: $api_key_name must be a comma-separated list without empty items" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$api_key_name" = "$legacy_api_key_name" ]; then
+    case "$api_keys_value" in
+      *,*)
+        echo "service-token-preflight: $legacy_api_key_name must not contain commas" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  old_ifs=$IFS
+  if [ "$api_key_name" = "$legacy_api_key_name" ]; then
+    set -- "$api_keys_value"
+  else
+    IFS=,
+    set -f
+    set -- $api_keys_value
+    set +f
+  fi
+  IFS=$old_ifs
+  if [ "$#" -lt 1 ] || [ "$#" -gt 64 ]; then
+    echo "service-token-preflight: $api_key_name must contain 1..64 keys" >&2
+    exit 1
+  fi
+  api_key_count=$#
+  for raw_api_key_value in "$@"; do
+    api_key_value="$(printf '%s' "$raw_api_key_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if ! LC_ALL=C printf '%s' "$api_key_value" |
+      grep -Eq '^[!-~]{8,2048}$'; then
+      echo "service-token-preflight: $api_key_name items must contain 8..2048 visible ASCII characters without whitespace" >&2
+      exit 1
+    fi
+    for credential_name in $token_names; do
+      credential_value="$(printenv "$credential_name")"
+      if [ "$api_key_value" = "$credential_value" ]; then
+        echo "service-token-preflight: $api_key_name must differ from $credential_name" >&2
+        exit 1
+      fi
+      unset credential_value
+    done
+    set -f
+    for previous_provider_secret in $validated_provider_secret_values; do
+      if [ "$api_key_value" = "$previous_provider_secret" ]; then
+        echo "service-token-preflight: platform provider API keys must be distinct" >&2
+        exit 1
+      fi
+    done
+    set +f
+    validated_provider_secret_values="$validated_provider_secret_values $api_key_value"
+    unset api_key_value raw_api_key_value
+  done
+
+  if [ "$provider_name" = XMLSTOCK ]; then
+    legacy_account_name=PLATFORM_XMLSTOCK_ACCOUNT_ID
+    pool_account_name=PLATFORM_XMLSTOCK_ACCOUNT_IDS
+    legacy_account_value="$(printenv "$legacy_account_name" 2>/dev/null || true; printf 'x')"
+    legacy_account_value=${legacy_account_value%x}
+    legacy_account_value=${legacy_account_value%?}
+    pool_account_value="$(printenv "$pool_account_name" 2>/dev/null || true; printf 'x')"
+    pool_account_value=${pool_account_value%x}
+    pool_account_value=${pool_account_value%?}
+    if [ -n "$legacy_account_value" ] && [ -n "$pool_account_value" ]; then
+      echo "service-token-preflight: $pool_account_name conflicts with legacy $legacy_account_name" >&2
+      exit 1
+    fi
+    if [ -n "$pool_account_value" ]; then
+      account_name=$pool_account_name
+      account_values=$pool_account_value
+    elif [ -n "$legacy_account_value" ]; then
+      account_name=$legacy_account_name
+      account_values=$legacy_account_value
+    else
+      echo "service-token-preflight: $pool_account_name is required when $enabled_name=true" >&2
+      exit 1
+    fi
+    case "$account_values" in
+      ,*|*,|*,,*)
+        echo "service-token-preflight: $account_name must be a comma-separated list without empty items" >&2
+        exit 1
+        ;;
+    esac
+    if [ "$account_name" = "$legacy_account_name" ]; then
+      case "$account_values" in
+        *,*)
+          echo "service-token-preflight: $legacy_account_name must not contain commas" >&2
+          exit 1
+          ;;
+      esac
+    fi
+    old_ifs=$IFS
+    if [ "$account_name" = "$legacy_account_name" ]; then
+      set -- "$account_values"
+    else
+      IFS=,
+      set -f
+      set -- $account_values
+      set +f
+    fi
+    IFS=$old_ifs
+    if [ "$#" -ne 1 ] && [ "$#" -ne "$api_key_count" ]; then
+      echo "service-token-preflight: $account_name must contain one shared identifier or one identifier per API key" >&2
+      exit 1
+    fi
+    for raw_account_value in "$@"; do
+      account_value="$(printf '%s' "$raw_account_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if ! LC_ALL=C printf '%s' "$account_value" |
+        grep -Eq '^[ -~]{1,255}$' ||
+        [ -z "$(printf '%s' "$account_value" | tr -d '[:space:]')" ]; then
+        echo "service-token-preflight: $account_name items must be bounded printable identifiers" >&2
+        exit 1
+      fi
+    done
+    unset account_name account_value account_values legacy_account_name legacy_account_value pool_account_name pool_account_value raw_account_value
+  fi
+
+  validated_platform_providers=$((validated_platform_providers + 1))
+  unset enabled_name enabled_value price_name price_value daily_budget_name daily_budget_value monthly_budget_name monthly_budget_value budget_name budget_value api_key_name api_keys_value api_key_count legacy_api_key_name legacy_api_key_value pool_api_key_name pool_api_key_value old_ifs
+done
+
+echo "service-token-preflight: validated $validated_count distinct deploy credentials, $validated_nats_hash_count distinct NATS bcrypt verifiers, $validated_username_count distinct NATS usernames and $validated_platform_providers enabled platform providers; auth-email SMTP and provider credentials are isolated"

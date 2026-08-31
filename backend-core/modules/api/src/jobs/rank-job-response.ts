@@ -95,6 +95,16 @@ export function scopedRankJobSummary(
       ? undefined
       : numericMember(input.depth, [30, 50, 100] as const);
   const routing = routeSummary(input.routingScope, input.connectorAttempts);
+  const credentialMode =
+    input.credentialMode === "BYOK_API_KEY" ||
+    input.credentialMode === "PLATFORM_PAID"
+      ? input.credentialMode
+      : undefined;
+  const platformChargeMicro =
+    typeof input.platformChargeMicro === "string" &&
+    DECIMAL_PATTERN.test(input.platformChargeMicro)
+      ? input.platformChargeMicro
+      : undefined;
 
   if (
     responseWorkspaceId !== workspaceId ||
@@ -105,8 +115,12 @@ export function scopedRankJobSummary(
     input.type !== "MANUAL_RANK_CHECK" ||
     provider === undefined ||
     input.operation !== "POSITIONS" ||
-    input.credentialMode !== "BYOK_API_KEY" ||
-    input.platformChargeMicro !== "0" ||
+    credentialMode === undefined ||
+    platformChargeMicro === undefined ||
+    (credentialMode === "BYOK_API_KEY" &&
+      platformChargeMicro !== "0") ||
+    (credentialMode === "PLATFORM_PAID" &&
+      platformChargeMicro === "0") ||
     (searchSource !== undefined && searchEngine === undefined) ||
     (searchEngine === "GOOGLE" && searchSource === "SEARCH_API") ||
     typeof input.status !== "string" ||
@@ -130,9 +144,9 @@ export function scopedRankJobSummary(
     ...(depth === undefined ? {} : { depth }),
     ...routing,
     operation: "POSITIONS",
-    credentialMode: "BYOK_API_KEY",
+    credentialMode,
     progress,
-    platformChargeMicro: "0",
+    platformChargeMicro,
     billingCurrency,
     createdAt
   } as const;
