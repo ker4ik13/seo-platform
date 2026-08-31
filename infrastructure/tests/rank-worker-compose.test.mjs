@@ -23,6 +23,26 @@ test("rank work is a scoped child role of backend-execution", async () => {
   );
   assert.match(execution, /JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:/u);
   assert.match(execution, /JOBS_TO_SEO_RANK_RESULT_TOKEN:/u);
+  assert.match(
+    execution,
+    /EXECUTION_CONNECTOR_DATABASE_POOL_MAX: \$\{JOBS_CONNECTOR_DATABASE_POOL_MAX:-12\}/u
+  );
+  assert.match(
+    execution,
+    /INTEGRATION_VALIDATION_CONCURRENCY: \$\{INTEGRATION_VALIDATION_CONCURRENCY:-1\}/u
+  );
+  assert.match(
+    execution,
+    /RANK_CONNECTOR_CONCURRENCY: \$\{RANK_CONNECTOR_CONCURRENCY:-4\}/u
+  );
+  assert.match(
+    execution,
+    /FREQUENCY_COLLECTION_CONCURRENCY: \$\{FREQUENCY_COLLECTION_CONCURRENCY:-1\}/u
+  );
+  assert.match(
+    execution,
+    /KEYWORD_RESEARCH_CONCURRENCY: \$\{KEYWORD_RESEARCH_CONCURRENCY:-1\}/u
+  );
 
   assert.match(
     runtime,

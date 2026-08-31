@@ -1424,6 +1424,39 @@ export function loadAppConfig(
     10,
     600
   );
+  const integrationValidationConcurrency = boundedInteger(
+    env.INTEGRATION_VALIDATION_CONCURRENCY,
+    1,
+    "INTEGRATION_VALIDATION_CONCURRENCY",
+    1,
+    32
+  );
+  const rankConnectorConcurrency = boundedInteger(
+    env.RANK_CONNECTOR_CONCURRENCY,
+    4,
+    "RANK_CONNECTOR_CONCURRENCY",
+    1,
+    64
+  );
+  const frequencyCollectionConcurrency = boundedInteger(
+    env.FREQUENCY_COLLECTION_CONCURRENCY,
+    1,
+    "FREQUENCY_COLLECTION_CONCURRENCY",
+    1,
+    64
+  );
+  const keywordResearchConcurrency = boundedInteger(
+    env.KEYWORD_RESEARCH_CONCURRENCY,
+    1,
+    "KEYWORD_RESEARCH_CONCURRENCY",
+    1,
+    32
+  );
+  const databasePoolMax = positiveInteger(
+    env.DATABASE_POOL_MAX,
+    20,
+    "DATABASE_POOL_MAX"
+  );
   const rankPreparationLeaseSeconds = boundedInteger(
     env.RANK_PREPARATION_LEASE_SECONDS,
     120,
@@ -1523,6 +1556,19 @@ export function loadAppConfig(
       "INTEGRATION_VALIDATION_LEASE_SECONDS must exceed the provider timeout by at least 5 seconds"
     );
   }
+  if (processRole === "CONNECTOR_WORKER") {
+    const connectorConcurrency =
+      integrationValidationConcurrency +
+      rankConnectorConcurrency +
+      frequencyCollectionConcurrency +
+      keywordResearchConcurrency;
+    const minimumDatabasePoolMax = connectorConcurrency + 1;
+    if (databasePoolMax < minimumDatabasePoolMax) {
+      throw new Error(
+        `DATABASE_POOL_MAX must be at least ${minimumDatabasePoolMax} for the configured connector concurrency`
+      );
+    }
+  }
   if (
     [...integrationCredentialKeys.values()].some((encryptionKey) =>
       [...integrationCredentialFingerprintKeys.values()].some(
@@ -1559,11 +1605,7 @@ export function loadAppConfig(
     port: positiveInteger(env.PORT, 4002, "PORT"),
     version: optional(env, "SERVICE_VERSION") || "0.1.0",
     databaseUrl: required(env, "DATABASE_URL"),
-    databasePoolMax: positiveInteger(
-      env.DATABASE_POOL_MAX,
-      20,
-      "DATABASE_POOL_MAX"
-    ),
+    databasePoolMax,
     redisUrl: env.REDIS_URL?.trim() || "redis://127.0.0.1:6379",
     ...(platformApiToken ? { platformApiToken } : {}),
     ...(seoDataApiToken ? { seoDataApiToken } : {}),
@@ -1682,13 +1724,7 @@ export function loadAppConfig(
         5,
         300
       ),
-      concurrency: boundedInteger(
-        env.INTEGRATION_VALIDATION_CONCURRENCY,
-        2,
-        "INTEGRATION_VALIDATION_CONCURRENCY",
-        1,
-        32
-      )
+      concurrency: integrationValidationConcurrency
     },
     connectorRuntime: {
       dispatchIntervalMs: boundedInteger(
@@ -1698,27 +1734,9 @@ export function loadAppConfig(
         250,
         60_000
       ),
-      rankConcurrency: boundedInteger(
-        env.RANK_CONNECTOR_CONCURRENCY,
-        16,
-        "RANK_CONNECTOR_CONCURRENCY",
-        1,
-        64
-      ),
-      frequencyConcurrency: boundedInteger(
-        env.FREQUENCY_COLLECTION_CONCURRENCY,
-        8,
-        "FREQUENCY_COLLECTION_CONCURRENCY",
-        1,
-        64
-      ),
-      keywordResearchConcurrency: boundedInteger(
-        env.KEYWORD_RESEARCH_CONCURRENCY,
-        2,
-        "KEYWORD_RESEARCH_CONCURRENCY",
-        1,
-        32
-      )
+      rankConcurrency: rankConnectorConcurrency,
+      frequencyConcurrency: frequencyCollectionConcurrency,
+      keywordResearchConcurrency
     },
     rankPreparation: {
       enabled: rankPreparationEnabled,

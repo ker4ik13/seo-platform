@@ -28,7 +28,7 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.integrationCredentials.keys.size, 0);
   assert.equal(config.integrationCredentials.fingerprintKeys.size, 0);
   assert.equal(config.connectorRuntime.dispatchIntervalMs, 1_000);
-  assert.equal(config.connectorRuntime.rankConcurrency, 16);
+  assert.equal(config.connectorRuntime.rankConcurrency, 4);
   assert.equal(config.rankPreparation.enabled, false);
   assert.equal(config.rankManifestApiToken, undefined);
   assert.equal(config.rankGrantApiToken, undefined);
@@ -706,6 +706,50 @@ test("bounds the fast connector runtime dispatch interval", () => {
       /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS must be between/u
     );
   }
+});
+
+test("requires database capacity for all connector worker queues", () => {
+  const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
+  const connectorEnvironment = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+    INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
+    INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
+  } as const;
+
+  assert.throws(
+    () =>
+      loadAppConfig(
+        {
+          ...connectorEnvironment,
+          DATABASE_POOL_MAX: "5",
+          INTEGRATION_VALIDATION_CONCURRENCY: "2",
+          RANK_CONNECTOR_CONCURRENCY: "16",
+          FREQUENCY_COLLECTION_CONCURRENCY: "8",
+          KEYWORD_RESEARCH_CONCURRENCY: "2"
+        },
+        "CONNECTOR_WORKER"
+      ),
+    /DATABASE_POOL_MAX must be at least 29/u
+  );
+
+  const config = loadAppConfig(
+    {
+      ...connectorEnvironment,
+      DATABASE_POOL_MAX: "12",
+      INTEGRATION_VALIDATION_CONCURRENCY: "1",
+      RANK_CONNECTOR_CONCURRENCY: "4",
+      FREQUENCY_COLLECTION_CONCURRENCY: "1",
+      KEYWORD_RESEARCH_CONCURRENCY: "1"
+    },
+    "CONNECTOR_WORKER"
+  );
+  assert.equal(config.databasePoolMax, 12);
+  assert.equal(config.connectorRuntime.rankConcurrency, 4);
+  assert.equal(config.connectorRuntime.frequencyConcurrency, 1);
+  assert.equal(config.connectorRuntime.keywordResearchConcurrency, 1);
+  assert.equal(config.integrationCredentialValidation.concurrency, 1);
 });
 
 test("requires an independent fingerprint keyring for idempotency", () => {
