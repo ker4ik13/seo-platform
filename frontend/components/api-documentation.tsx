@@ -14,6 +14,7 @@ import {
   type ApiDocSectionSlug,
   type ApiEndpointDoc
 } from "../lib/api-docs";
+import { copyText } from "../lib/clipboard";
 import styles from "./api-documentation.module.css";
 
 export function ApiDocumentation({
@@ -249,8 +250,9 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
       />
       <Callout title="Базовый URL">
         Все пути в справочнике добавляются после <code>{baseUrl}</code>.
-        Идентификаторы workspace и проектов можно скопировать на экране{" "}
-        <Link href="/app/settings/api">Настройки → API-ключи</Link>.
+        Домен берётся из настроек текущего окружения. Идентификаторы заранее
+        передавать агенту не нужно: первый запрос <code>GET /access</code>
+        вернёт доступную рабочую область, проекты и права ключа.
       </Callout>
       <Section title="1. Создайте ключ">
         <ol>
@@ -262,13 +264,13 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
       </Section>
       <Section title="2. Выполните первый запрос">
         <EndpointHeader
-          description="Возвращает только проекты, разрешённые этому ключу."
+          description="Возвращает контекст самого ключа без workspaceId или projectId в URL."
           method="GET"
-          path="/workspaces/{workspaceId}/projects"
-          scope="projects:read"
+          path="/access"
+          scope="token:discover · встроено"
         />
         <CodeBlock
-          code={`curl "${baseUrl}/workspaces/<workspaceId>/projects" \\
+          code={`curl "${baseUrl}/access" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
   -H "Accept: application/json"`}
           language="bash"
@@ -276,24 +278,52 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
         />
         <CodeBlock
           code={`{
-  "data": [
-    {
-      "id": "019fb800-b45b-7852-8a4e-a17d20f30cbd",
-      "workspaceId": "019fb800-917f-7efd-8484-8f9e4313dc77",
+  "data": {
+    "apiVersion": "v1",
+    "token": {
+      "id": "<tokenId>",
+      "name": "SEO-агент",
+      "scopes": ["semantics:read", "positions:run"],
+      "allProjects": false
+    },
+    "workspace": {
+      "id": "<workspaceId>",
+      "name": "Рабочая область агентства",
+      "slug": "agency",
+      "status": "ACTIVE"
+    },
+    "projects": [{
+      "id": "<projectId>",
+      "workspaceId": "<workspaceId>",
       "name": "Нейролюб",
       "domain": "neurolub.ru",
-      "status": "ACTIVE",
-      "version": 4
-    }
-  ],
-  "page": { "hasNext": false },
+      "slug": "neirolub",
+      "status": "ACTIVE"
+    }]
+  },
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
           title="200 · Ответ"
         />
       </Section>
-      <Section title="3. Обрабатывайте ответ">
+      <Section title="3. Используйте найденные идентификаторы">
+        <p>
+          Подставляйте <code>data.workspace.id</code> и нужный
+          <code> data.projects[].id</code> в остальные маршруты. Коллекция уже
+          учитывает allowlist ключа и актуальные права создавшего его
+          пользователя. Один ключ всегда относится к одной рабочей области;
+          для другой рабочей области создайте отдельный ключ.
+        </p>
+        <CodeBlock
+          code={`curl "${baseUrl}/projects/<projectId>/keywords?limit=100" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H "Accept: application/json"`}
+          language="bash"
+          title="Следующий запрос"
+        />
+      </Section>
+      <Section title="4. Обрабатывайте ответ">
         <ul>
           <li><code>data</code> содержит ресурс или массив ресурсов.</li>
           <li><code>meta.requestId</code> сохраняйте для диагностики.</li>
@@ -365,6 +395,12 @@ Accept: application/json`}
           ))}
         </div>
       </Section>
+      <Callout title="Discovery без отдельного scope">
+        Любой действующий ключ может вызвать <code>GET /access</code>. Endpoint
+        не расширяет доступ: он показывает только workspace, allowlisted
+        проекты и scopes самого ключа, повторно проверяя актуальное членство и
+        права пользователя.
+      </Callout>
       <Callout title="Ротация">
         При обычном перевыпуске старый секрет действует ещё 10 минут. Команда
         отзыва отключает текущий и переходный секрет немедленно.
@@ -381,6 +417,11 @@ function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
         title="Проекты"
       />
       <RouteSummary section="projects" />
+      <Callout title="Сначала определите доступ">
+        Если клиент ещё не знает идентификаторы, вызовите <code>GET /access</code>
+        и возьмите workspaceId и projectId из ответа. Передавать их агенту
+        вручную не требуется.
+      </Callout>
       <Section title="Список проектов">
         <EndpointHeader method="GET" path="/workspaces/{workspaceId}/projects" scope="projects:read" />
         <CodeBlock
@@ -1011,7 +1052,7 @@ function Reference() {
       />
       <div className={styles.referenceGroups}>
         {apiDocSections
-          .filter(({ slug }) => !["quick-start", "authentication", "jobs", "errors"].includes(slug))
+          .filter(({ slug }) => !["jobs", "errors"].includes(slug))
           .map((section) => {
             const endpoints = apiEndpointCatalog.filter(
               (endpoint) => endpoint.section === section.slug
@@ -1206,32 +1247,6 @@ function matchesSearch(haystack: string, normalizedQuery: string): boolean {
   return normalizedQuery
     .split(/\s+/u)
     .every((term) => normalizedHaystack.includes(term));
-}
-
-async function copyText(value: string): Promise<boolean> {
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.readOnly = true;
-  textarea.style.position = "fixed";
-  textarea.style.left = "-10000px";
-  textarea.style.top = "0";
-  document.body.append(textarea);
-  textarea.select();
-  textarea.setSelectionRange(0, value.length);
-  const copiedSynchronously = document.execCommand("copy");
-  textarea.remove();
-  if (copiedSynchronously) return true;
-
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(value);
-      return true;
-    } catch {
-      // The button exposes a selectable-code fallback when browser policy
-      // blocks both clipboard mechanisms.
-    }
-  }
-  return false;
 }
 
 function runScope(scope: string): string {

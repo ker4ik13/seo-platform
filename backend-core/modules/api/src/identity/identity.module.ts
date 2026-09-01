@@ -4,6 +4,7 @@ import { OutboxModule } from "../outbox/outbox.module.js";
 import { AuthCryptoService } from "./auth-crypto.service.js";
 import { AuthRateLimitService } from "./auth-rate-limit.service.js";
 import { ApiTokenAuthenticationService } from "./api-token-authentication.service.js";
+import { ApiTokenOnlyGuard } from "./api-token-only.guard.js";
 import { IdentityController } from "./identity.controller.js";
 import { IdentityService } from "./identity.service.js";
 import { MfaController } from "./mfa.controller.js";
@@ -36,6 +37,7 @@ const sessionExpirySweeperScheduler: SessionExpirySweeperScheduler = {
     AuthCryptoService,
     AuthRateLimitService,
     ApiTokenAuthenticationService,
+    ApiTokenOnlyGuard,
     IdentityService,
     MfaService,
     RecentAuthenticationService,
@@ -61,6 +63,7 @@ const sessionExpirySweeperScheduler: SessionExpirySweeperScheduler = {
     SessionService,
     AuthCryptoService,
     ApiTokenAuthenticationService,
+    ApiTokenOnlyGuard,
     RecentAuthenticationService,
     SessionCookieService,
     SessionAuthGuard,

@@ -42,6 +42,21 @@ test("catalog contains only public, searchable and valid API routes", () => {
   }
 });
 
+test("documents identifier-free access discovery for API agents", () => {
+  const discovery = apiEndpointCatalog.find(
+    ({ id }) => id === "access-discovery"
+  );
+
+  assert.deepEqual(discovery, {
+    id: "access-discovery",
+    method: "GET",
+    path: "/access",
+    scope: "token:discover",
+    description: "Рабочая область, проекты и права текущего API-ключа",
+    section: "quick-start"
+  });
+});
+
 test("sidebar groups preserve every section exactly once", () => {
   const groupedSections = apiDocSectionsByGroup().flatMap(
     ({ sections }) => sections

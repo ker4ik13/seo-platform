@@ -85,6 +85,10 @@ test("fails closed for API-token management and account endpoints", () => {
   );
 });
 
+test("keeps identifier-free discovery outside the tenant route scope mapper", () => {
+  assert.equal(apiTokenScopeForRoute("GET", "/api/v1/access"), undefined);
+});
+
 test("treats an automatic HEAD route as read-only", () => {
   assert.equal(
     apiTokenScopeForRoute(

@@ -4,6 +4,7 @@ import type { ExecutionContext } from "@nestjs/common";
 import { GUARDS_METADATA } from "@nestjs/common/constants.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { DomainError } from "../common/domain-error.js";
+import { ApiTokenOnlyGuard } from "./api-token-only.guard.js";
 import type { ApiTokenAuthenticationService } from "./api-token-authentication.service.js";
 import type { AuthenticatedRequest } from "./identity.types.js";
 import type { SessionCookieService } from "./session-cookie.service.js";
@@ -81,6 +82,24 @@ test("fails closed for Bearer on session-only routes", async () => {
   assert.equal(apiCalls, 0);
 });
 
+test("authenticates Bearer on an explicit token-only discovery route", async () => {
+  const request = authenticatedRequest();
+  const guard = new SessionAuthGuard(
+    {} as SessionService,
+    {} as SessionCookieService,
+    reflector(undefined),
+    {
+      authenticate: async () => ({ principal, authorization })
+    } as unknown as ApiTokenAuthenticationService
+  );
+
+  assert.equal(
+    await guard.canActivate(context(request, ApiTokenOnlyGuard)),
+    true
+  );
+  assert.equal(request.apiTokenAuthorization, authorization);
+});
+
 function authenticatedRequest(): AuthenticatedRequest {
   return {
     headers: { authorization: `Bearer seo_pat_${"a".repeat(43)}` },
@@ -94,9 +113,12 @@ function reflector(permission: string | undefined) {
   } as never;
 }
 
-function context(request: AuthenticatedRequest): ExecutionContext {
+function context(
+  request: AuthenticatedRequest,
+  routeGuard: unknown = TenantPermissionGuard
+): ExecutionContext {
   function handler() {}
-  Reflect.defineMetadata(GUARDS_METADATA, [TenantPermissionGuard], handler);
+  Reflect.defineMetadata(GUARDS_METADATA, [routeGuard], handler);
   return {
     switchToHttp: () => ({ getRequest: () => request }),
     getHandler: () => handler,

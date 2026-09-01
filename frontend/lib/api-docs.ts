@@ -83,6 +83,7 @@ export interface ApiEndpointDoc {
 }
 
 export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
+  endpoint("access-discovery", "GET", "/access", "token:discover", "Рабочая область, проекты и права текущего API-ключа", "quick-start"),
   endpoint("projects-list", "GET", "/workspaces/{workspaceId}/projects", "projects:read", "Список доступных ключу проектов", "projects"),
   endpoint("projects-capabilities", "GET", "/workspaces/{workspaceId}/project-capabilities", "projects:read", "Доступность создания и общего порядка проектов", "projects"),
   endpoint("projects-create", "POST", "/workspaces/{workspaceId}/projects", "projects:write", "Создать проект в рабочей области", "projects"),

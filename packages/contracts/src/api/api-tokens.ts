@@ -47,6 +47,31 @@ export interface ApiTokenCollection {
   readonly tokens: readonly ApiTokenSummary[];
 }
 
+export interface ApiTokenAccessDiscovery {
+  readonly apiVersion: "v1";
+  readonly token: {
+    readonly id: string;
+    readonly name: string;
+    readonly scopes: readonly ApiTokenScope[];
+    readonly allProjects: boolean;
+  };
+  readonly workspace: {
+    readonly id: string;
+    readonly name: string;
+    readonly slug: string;
+    readonly status: "ACTIVE" | "READ_ONLY";
+  };
+  readonly projects: readonly {
+    readonly id: string;
+    readonly workspaceId: string;
+    readonly name: string;
+    readonly slug: string;
+    readonly domain: string;
+    readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+    readonly accessLevel?: "VIEWER" | "MEMBER" | "MANAGER";
+  }[];
+}
+
 export interface CreateApiTokenInput {
   readonly name: string;
   readonly scopes: readonly ApiTokenScope[];

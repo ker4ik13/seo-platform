@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  type ClipboardEvent,
   type FormEvent,
   useCallback,
   useEffect,
@@ -21,7 +22,9 @@ import {
   BrowserApiError,
   browserApiRequest
 } from "../lib/browser-api";
+import { copyText } from "../lib/clipboard";
 import { Icon } from "./icon";
+import { SemanticModal } from "./semantic-modal";
 import styles from "./api-token-settings.module.css";
 
 interface ScopeGroup {
@@ -81,6 +84,8 @@ export function ApiTokenSettings({
   const [editingId, setEditingId] = useState<string>();
   const [draft, setDraft] = useState<Draft>(() => newDraft(projects));
   const [issued, setIssued] = useState<IssuedApiToken>();
+  const [issuedCopied, setIssuedCopied] = useState(false);
+  const [issuedCopyError, setIssuedCopyError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -151,7 +156,7 @@ export function ApiTokenSettings({
           method: "POST",
           body
         });
-        setIssued(result);
+        revealIssued(result);
         setNotice("API-ключ создан. Скопируйте секрет сейчас.");
       }
       setEditingId(undefined);
@@ -224,7 +229,7 @@ export function ApiTokenSettings({
         }
       );
       if (operation === "rotate" && "token" in result) {
-        setIssued(result);
+        revealIssued(result);
         setNotice(
           "API-ключ перевыпущен. Старый секрет действует ещё 10 минут для безопасной замены."
         );
@@ -242,23 +247,53 @@ export function ApiTokenSettings({
 
   async function copyIssuedToken(): Promise<void> {
     if (!issued) return;
-    try {
-      await navigator.clipboard.writeText(issued.token);
-      setError(undefined);
-      setNotice("API-ключ скопирован в буфер обмена.");
-    } catch {
-      setError(
+    if (await copyText(issued.token)) {
+      confirmIssuedTokenCopied();
+    } else {
+      setIssuedCopyError(
         "Не удалось скопировать ключ. Выделите секрет и скопируйте его вручную."
       );
     }
   }
 
+  function revealIssued(token: IssuedApiToken): void {
+    setIssued(token);
+    setIssuedCopied(false);
+    setIssuedCopyError(undefined);
+  }
+
+  function handleIssuedTokenCopy(event: ClipboardEvent<HTMLElement>): void {
+    const secretText = event.currentTarget.textContent;
+    if (
+      !issued ||
+      secretText !== issued.token ||
+      window.getSelection()?.toString() !== secretText
+    ) {
+      setIssuedCopyError("Скопируйте ключ целиком, без пропущенных символов.");
+      return;
+    }
+    confirmIssuedTokenCopied();
+  }
+
+  function confirmIssuedTokenCopied(): void {
+    setIssuedCopied(true);
+    setIssuedCopyError(undefined);
+    setError(undefined);
+    setNotice("API-ключ скопирован в буфер обмена.");
+  }
+
+  function closeIssuedToken(): void {
+    if (!issuedCopied) return;
+    setIssued(undefined);
+    setIssuedCopyError(undefined);
+    setNotice("Секрет сохранён и больше не будет показан.");
+  }
+
   async function copyIdentifier(value: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       setCopiedIdentifier(value);
       setError(undefined);
-    } catch {
+    } else {
       setError(
         "Не удалось скопировать идентификатор. Выделите его и скопируйте вручную."
       );
@@ -292,39 +327,58 @@ export function ApiTokenSettings({
       )}
 
       {issued && (
-        <section className={`${styles.secretCard} panel`} role="status">
-          <div className={styles.secretHeading}>
-            <span className={styles.sectionKicker}>Показывается только один раз</span>
-            <h2>Скопируйте секрет API-ключа</h2>
-            <p>
-              После закрытия восстановить его нельзя — только перевыпустить
-              ключ.
-            </p>
-          </div>
-          <code>{issued.token}</code>
-          <div className={styles.actions}>
+        <SemanticModal
+          className={styles.secretModal ?? ""}
+          closeDisabled={!issuedCopied}
+          description="Секрет показывается только один раз"
+          footer={
+            <div className={styles.secretModalFooter}>
+              <span aria-live="polite">
+                {issuedCopied
+                  ? "Ключ скопирован — окно можно закрыть."
+                  : "Скопируйте ключ, чтобы закрыть окно."}
+              </span>
+              <button
+                className="primary-button"
+                disabled={!issuedCopied}
+                onClick={closeIssuedToken}
+                type="button"
+              >
+                Готово
+              </button>
+            </div>
+          }
+          onClose={closeIssuedToken}
+          title="Сохраните новый API-ключ"
+        >
+          <div className={styles.secretModalBody}>
+            <div className={styles.secretWarning}>
+              После закрытия восстановить секрет нельзя — ключ придётся
+              перевыпустить. Не отправляйте его в сообщения или промпты.
+            </div>
+            <code
+              aria-label="Секрет API-ключа"
+              className={styles.secretValue}
+              onCopy={handleIssuedTokenCopy}
+              tabIndex={0}
+            >
+              {issued.token}
+            </code>
+            {issuedCopyError && (
+              <div className="inline-alert danger" role="alert">
+                {issuedCopyError}
+              </div>
+            )}
             <button
-              className="primary-button"
+              className={`primary-button ${styles.secretCopyButton}`}
               onClick={() => void copyIssuedToken()}
               type="button"
             >
-              <Icon name="copy" />
-              Копировать
-            </button>
-            <button
-              className="secondary-button"
-              onClick={() => {
-                setIssued(undefined);
-                setNotice(
-                  "Секрет скрыт. При необходимости перевыпустите API-ключ."
-                );
-              }}
-              type="button"
-            >
-              Я сохранил ключ
+              <Icon name={issuedCopied ? "checkDouble" : "copy"} />
+              {issuedCopied ? "Скопировано" : "Копировать ключ"}
             </button>
           </div>
-        </section>
+        </SemanticModal>
       )}
 
       <section className={`${styles.identifiersCard} panel`}>
@@ -333,8 +387,9 @@ export function ApiTokenSettings({
             <span className={styles.sectionKicker}>Идентификаторы API</span>
             <h2>Рабочая область и проекты</h2>
             <p>
-              Используйте эти UUID в путях API. Это не секреты — доступ к
-              данным всё равно проверяется по правам ключа.
+              Для ручной настройки UUID можно скопировать здесь. ИИ-агент
+              может получить эти же данные самостоятельно через GET /access;
+              доступ всё равно ограничивается правами ключа.
             </p>
           </div>
         </header>

@@ -1008,6 +1008,16 @@ audits, pages, notes, integrations или automations. Position и frequency run
 scopes намеренно не взаимозаменяемы. Restricted token получает только
 allowlisted проекты даже из workspace project collection.
 
+Identifier-free discovery выполняется через token-only
+`GET /api/v1/access`. Запрос не содержит workspace/project ID и возвращает
+metadata текущего ключа, одну workspace (personal token всегда tenant-bound)
+и проекты в общем сохранённом порядке. Результат является пересечением
+актуального active membership, role/project access и token allowlist;
+deleted/moved/отозванные ресурсы не раскрываются. Отдельный scope не нужен,
+поскольку endpoint не выполняет доменную операцию и не расширяет доступ.
+Cookie-session, параметры другого tenant и API-token management на этом пути
+не принимаются.
+
 `GET /api/v1/workspaces/{workspaceId}/project-capabilities` возвращает
 effective возможность создания, usage/limit и право менять общий порядок.
 `PUT /api/v1/workspaces/{workspaceId}/projects/order` принимает
@@ -1018,7 +1028,8 @@ access и отклоняет restricted token, неизвестный/повто
 presentation limit и всегда следует Core-owned `display_order`.
 
 Bearer принимается только handler-ом, где одновременно заданы
-`@RequirePermission` и `TenantPermissionGuard`; account, team, billing,
+`@RequirePermission` и `TenantPermissionGuard`, либо явным identifier-free
+discovery handler-ом с `ApiTokenOnlyGuard`; account, team, billing,
 realtime ticket и управление самими API tokens остаются session-only. При
 наличии Authorization невалидный Bearer никогда не заменяется cookie-сессией.
 Отдельный per-token DB rate bucket ограничивает 600 запросов в минуту, а

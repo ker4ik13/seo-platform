@@ -161,12 +161,17 @@ embedded content отклоняется.
   только после create/rotate и хранится в Platform DB только как HMAC-SHA-256
   hash с server-side pepper. Display prefix, expiry, last-used, revoke state,
   ordered scopes и tenant-bound project allowlist не содержат token material.
+  One-time modal нельзя закрыть Escape, backdrop, крестиком или финальной
+  кнопкой, пока UI не подтвердил clipboard copy либо пользователь не выполнил
+  `copy` из отображённого секрета.
   Rotation сохраняет предыдущий hash максимум на 10 минут; revoke перекрывает
   обе версии сразу.
 - API token не является отдельным RBAC principal: каждый запрос повторно
   пересекается с актуальным status/membership/role/project access создавшего
-  пользователя. Bearer разрешён только на явной tenant guard boundary;
-  session-only routes и API-token management закрыты fail-closed.
+  пользователя. Bearer разрешён только на явной tenant guard boundary или на
+  token-only identifier discovery boundary, которая выводит только
+  пересечение текущего доступа и allowlist; session-only routes и API-token
+  management закрыты fail-closed.
 - Высокорисковые admin actions требуют reason и step-up auth.
 - Impersonation не передаёт права выше разрешённого support scope.
 
@@ -935,9 +940,10 @@ gate.
 workspace, два проекта, семантические запросы и personal token. Он проверяет
 create/list/update/rotate/revoke без повторной выдачи secret, немедленное
 применение scopes и allowlist, запрет cross-project/cross-workspace, отсутствие
-cookie fallback при неверном Bearer, session-only token management, semantic
-read/write, tracking context, rank estimate/run и optimistic общий порядок
-проектов. Полный provider run обязан либо перейти в `202`, либо вернуть
+cookie fallback при неверном Bearer, session-only token management,
+identifier-free discovery с запретом cookie-session, semantic read/write,
+tracking context, rank estimate/run и optimistic общий порядок проектов.
+Полный provider run обязан либо перейти в `202`, либо вернуть
 явный billing/provider blocker; тест не принимает ложный success. Скрипт
 требует отдельного подтверждающего env-флага и не печатает token material.
 

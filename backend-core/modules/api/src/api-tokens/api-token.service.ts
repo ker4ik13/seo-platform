@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import {
   apiTokenScopes,
+  type ApiTokenAccessDiscovery,
   type ApiTokenCollection,
   type ApiTokenScope,
   type ApiTokenSummary,
@@ -11,11 +12,15 @@ import {
 import type { Prisma } from "../generated/prisma/client.js";
 import { AuditService } from "../audit/audit.service.js";
 import { AuthorizationService } from "../authorization/authorization.service.js";
+import { hasSystemPermission } from "../authorization/permissions.js";
 import { DomainError } from "../common/domain-error.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { AuthCryptoService } from "../identity/auth-crypto.service.js";
-import type { RequestContext } from "../identity/identity.types.js";
+import type {
+  ApiTokenAuthorization,
+  RequestContext
+} from "../identity/identity.types.js";
 
 type StoredApiToken = Prisma.ApiTokenGetPayload<{
   include: { projectAccesses: { select: { projectId: true } } };
@@ -51,6 +56,131 @@ export class ApiTokenService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }]
     });
     return { tokens: tokens.map(toApiTokenSummary) };
+  }
+
+  public async discover(
+    actorId: string,
+    token: ApiTokenAuthorization
+  ): Promise<ApiTokenAccessDiscovery> {
+    const membership = await this.prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: token.workspaceId,
+          userId: actorId
+        }
+      },
+      select: {
+        id: true,
+        status: true,
+        roleCode: true,
+        allProjects: true,
+        workspace: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            status: true
+          }
+        }
+      }
+    });
+    if (
+      !membership ||
+      membership.status !== "ACTIVE" ||
+      ["DELETING", "DELETED"].includes(membership.workspace.status)
+    ) {
+      discoveryNotFound();
+    }
+    if (membership.workspace.status === "SUSPENDED") {
+      throw new DomainError({
+        statusCode: 403,
+        code: "FORBIDDEN",
+        message: "Workspace access is suspended"
+      });
+    }
+    if (
+      !["ACTIVE", "READ_ONLY"].includes(membership.workspace.status) ||
+      !hasSystemPermission(membership.roleCode, "project.view")
+    ) {
+      throw new DomainError({
+        statusCode: 403,
+        code: "FORBIDDEN",
+        message: "Project access is unavailable"
+      });
+    }
+
+    const projects = await this.prisma.project.findMany({
+      where: {
+        workspaceId: token.workspaceId,
+        status: { notIn: ["DELETING", "DELETED"] },
+        ...(membership.allProjects
+          ? {
+              memberAccesses: {
+                none: { memberId: membership.id, level: "NONE" }
+              }
+            }
+          : {
+              memberAccesses: {
+                some: {
+                  memberId: membership.id,
+                  level: { not: "NONE" }
+                }
+              }
+            })
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        name: true,
+        slug: true,
+        domain: true,
+        status: true,
+        memberAccesses: {
+          where: { memberId: membership.id },
+          select: { level: true },
+          take: 1
+        }
+      },
+      orderBy: [
+        { displayOrder: "asc" },
+        { createdAt: "asc" },
+        { id: "asc" }
+      ]
+    });
+    const tokenProjectIds = new Set(token.projectIds);
+    const visibleProjects = token.allProjects
+      ? projects
+      : projects.filter(({ id }) => tokenProjectIds.has(id));
+    const workspaceStatus = membership.workspace.status;
+    if (workspaceStatus !== "ACTIVE" && workspaceStatus !== "READ_ONLY") {
+      throw new Error("Unexpected workspace status after discovery checks");
+    }
+
+    return {
+      apiVersion: "v1",
+      token: {
+        id: token.tokenId,
+        name: token.name,
+        scopes: token.scopes,
+        allProjects: token.allProjects
+      },
+      workspace: {
+        id: membership.workspace.id,
+        name: membership.workspace.name,
+        slug: membership.workspace.slug,
+        status: workspaceStatus
+      },
+      projects: visibleProjects.map(({ memberAccesses, ...project }) => {
+        const accessLevel = memberAccesses[0]?.level;
+        return {
+          ...project,
+          status: discoveredProjectStatus(project.status),
+          ...(accessLevel && accessLevel !== "NONE"
+            ? { accessLevel }
+            : {})
+        };
+      })
+    };
   }
 
   public async create(
@@ -484,4 +614,21 @@ function versionConflict(currentVersion?: number): never {
       ? {}
       : { details: { currentVersion } })
   });
+}
+
+function discoveryNotFound(): never {
+  throw new DomainError({
+    statusCode: 404,
+    code: "NOT_FOUND",
+    message: "API token access is unavailable"
+  });
+}
+
+function discoveredProjectStatus(
+  status: string
+): "DRAFT" | "ACTIVE" | "ARCHIVED" {
+  if (status === "DRAFT" || status === "ACTIVE" || status === "ARCHIVED") {
+    return status;
+  }
+  throw new Error("Unexpected project status after discovery checks");
 }

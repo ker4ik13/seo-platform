@@ -490,10 +490,18 @@ SEO Data. При недоступности SEO Data каталог остаёт
 - Внешний клиент входит теми же `/api/v1` tenant routes через Bearer personal
   API token. Plaintext `seo_pat_*` показывается один раз; Platform DB хранит
   только HMAC hash, display prefix, expiry, scopes и project allowlist.
+  Create/rotate открывает обязательную one-time modal: Escape, backdrop,
+  close и финальная кнопка заблокированы до подтверждённого clipboard copy
+  либо пользовательского `copy` из выделенного секрета.
   При rotate предыдущий hash остаётся допустим ровно 10 минут для bounded
   handover; revoke немедленно блокирует и текущий, и предыдущий material.
   Session-only workspace/account/team/billing/API-token-management routes fail
   closed.
+  Отдельный token-only `GET /api/v1/access` не принимает cookie-session и без
+  входных tenant ID возвращает workspace, scopes и упорядоченное пересечение
+  текущего project access пользователя с allowlist ключа. Это единственное
+  parameterless исключение из обычной `TenantPermissionGuard` boundary;
+  `ApiTokenOnlyGuard` делает его явным и fail-closed.
   Публичная документация берёт canonical API origin только из runtime
   `API_PUBLIC_URL` (в local development — из `PLATFORM_API_INTERNAL_URL`),
   поэтому curl-примеры не зависят от домена конкретного окружения.
@@ -528,8 +536,9 @@ SEO Data. При недоступности SEO Data каталог остаёт
   `/app/tools` содержит только реализованный project workflow проверки HTTP.
 - публичная документация `/docs/api` разбита на отдельные section routes с
   общим searchable sidebar, копируемыми примерами запросов/ответов и
-  постраничной навигацией; единый каталог разделов и public endpoints хранится
-  в `frontend/lib/api-docs.ts`.
+  постраничной навигацией; quick start начинает с identifier-free
+  `GET /access`, а единый каталог разделов и public endpoints хранится в
+  `frontend/lib/api-docs.ts`.
 - `lib/server-runtime-origin.ts` валидирует canonical `WEB_PUBLIC_URL` и
   внутренний Platform API origin; production web origin обязан использовать
   HTTPS и не может быть локальным именем.
@@ -1331,8 +1340,8 @@ raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку
   `infrastructure/vps/smoke-public-api.sh`; он запускается только с явным
   `SEO_PLATFORM_API_SMOKE_CONFIRM=CREATE_TEST_DATA`, создаёт изолированные
   синтетические tenant-данные и проверяет token lifecycle, scope/project/
-  cross-tenant boundaries, семантику, rank estimate/run и общий порядок
-  проектов без вывода plaintext token.
+  cross-tenant boundaries, cookie-denied identifier discovery, семантику,
+  rank estimate/run и общий порядок проектов без вывода plaintext token.
 
 ## 8. Проверка
 

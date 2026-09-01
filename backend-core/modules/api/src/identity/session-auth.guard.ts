@@ -13,6 +13,7 @@ import { ApiTokenAuthenticationService } from "./api-token-authentication.servic
 import { SessionService } from "./session.service.js";
 import { SessionCookieService } from "./session-cookie.service.js";
 import type { AuthenticatedRequest } from "./identity.types.js";
+import { ApiTokenOnlyGuard } from "./api-token-only.guard.js";
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
@@ -83,6 +84,7 @@ function assertTenantApiRoute(
     ...metadataGuards(context.getClass()),
     ...metadataGuards(context.getHandler())
   ];
+  if (guards.includes(ApiTokenOnlyGuard)) return;
   if (permission && guards.includes(TenantPermissionGuard)) return;
   throw new DomainError({
     statusCode: 403,

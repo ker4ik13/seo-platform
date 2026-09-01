@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AuditRecord, AuditService } from "../audit/audit.service.js";
 import type { AuthorizationService } from "../authorization/authorization.service.js";
+import { DomainError } from "../common/domain-error.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { AuthCryptoService } from "../identity/auth-crypto.service.js";
 import { ApiTokenService } from "./api-token.service.js";
@@ -118,6 +119,116 @@ test("creates a restricted token without overriding the relation-owned workspace
   });
 });
 
+test("discovers only the current membership and token project intersection", async () => {
+  const allowedProjectId = "01900000-0000-7000-8000-000000000010";
+  const hiddenProjectId = "01900000-0000-7000-8000-000000000011";
+  const service = serviceWith(
+    {
+      workspaceMember: {
+        findUnique: async () => ({
+          id: "01900000-0000-7000-8000-000000000012",
+          status: "ACTIVE",
+          roleCode: "OWNER",
+          allProjects: true,
+          workspace: {
+            id: workspaceId,
+            name: "Agency",
+            slug: "agency",
+            status: "ACTIVE"
+          }
+        })
+      },
+      project: {
+        findMany: async () => [
+          discoveredProject(allowedProjectId, "Allowed"),
+          discoveredProject(hiddenProjectId, "Hidden")
+        ]
+      }
+    } as unknown as PrismaService,
+    {} as AuditService
+  );
+
+  const result = await service.discover(actorId, {
+    tokenId,
+    workspaceId,
+    name: "Semantic agent",
+    scopes: ["semantics:read"],
+    allProjects: false,
+    projectIds: [allowedProjectId]
+  });
+
+  assert.deepEqual(result, {
+    apiVersion: "v1",
+    token: {
+      id: tokenId,
+      name: "Semantic agent",
+      scopes: ["semantics:read"],
+      allProjects: false
+    },
+    workspace: {
+      id: workspaceId,
+      name: "Agency",
+      slug: "agency",
+      status: "ACTIVE"
+    },
+    projects: [
+      {
+        id: allowedProjectId,
+        workspaceId,
+        name: "Allowed",
+        slug: "allowed",
+        domain: "allowed.example",
+        status: "ACTIVE"
+      }
+    ]
+  });
+});
+
+test("fails discovery closed after membership revocation", async () => {
+  let projectReads = 0;
+  const service = serviceWith(
+    {
+      workspaceMember: {
+        findUnique: async () => ({
+          id: "01900000-0000-7000-8000-000000000012",
+          status: "SUSPENDED",
+          roleCode: "OWNER",
+          allProjects: true,
+          workspace: {
+            id: workspaceId,
+            name: "Agency",
+            slug: "agency",
+            status: "ACTIVE"
+          }
+        })
+      },
+      project: {
+        findMany: async () => {
+          projectReads += 1;
+          return [];
+        }
+      }
+    } as unknown as PrismaService,
+    {} as AuditService
+  );
+
+  await assert.rejects(
+    service.discover(actorId, {
+      tokenId,
+      workspaceId,
+      name: "Agent",
+      scopes: ["positions:run"],
+      allProjects: true,
+      projectIds: []
+    }),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.statusCode === 404 &&
+      error.code === "NOT_FOUND"
+  );
+  assert.equal(projectReads, 0);
+});
+
 function serviceWith(
   prisma: PrismaService,
   audit: AuditService,
@@ -164,6 +275,18 @@ function storedToken() {
     createdAt: now,
     updatedAt: now,
     projectAccesses: []
+  };
+}
+
+function discoveredProject(id: string, name: string) {
+  return {
+    id,
+    workspaceId,
+    name,
+    slug: name.toLowerCase(),
+    domain: `${name.toLowerCase()}.example`,
+    status: "ACTIVE" as const,
+    memberAccesses: []
   };
 }
 

@@ -12,6 +12,7 @@ export function SemanticModal({
   bodyClassName,
   children,
   className,
+  closeDisabled = false,
   description,
   footer,
   headerActions,
@@ -24,6 +25,7 @@ export function SemanticModal({
   bodyClassName?: string;
   children: ReactNode;
   className?: string;
+  closeDisabled?: boolean;
   description?: string;
   footer?: ReactNode;
   headerActions?: ReactNode;
@@ -55,7 +57,7 @@ export function SemanticModal({
       data-presence-key={presenceKey ?? "semantic-modal"}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        if (!closeDisabled) onClose();
       }}
       onMouseDown={(event) => {
         // Portalled controls (for example CustomSelect) are mounted under the
@@ -69,7 +71,7 @@ export function SemanticModal({
           event.clientX > bounds.right ||
           event.clientY < bounds.top ||
           event.clientY > bounds.bottom;
-        if (outside) onClose();
+        if (outside && !closeDisabled) onClose();
       }}
       ref={dialogRef}
       style={style}
@@ -84,14 +86,22 @@ export function SemanticModal({
           <button
             aria-label="Закрыть окно"
             className="semantic-modal-close"
+            disabled={closeDisabled}
             onClick={onClose}
+            title={
+              closeDisabled
+                ? "Сначала выполните обязательное действие"
+                : undefined
+            }
             type="button"
           >
             ×
           </button>
         </div>
       </header>
-      <div className={`semantic-modal-body${bodyClassName ? ` ${bodyClassName}` : ""}`}>
+      <div
+        className={`semantic-modal-body${bodyClassName ? ` ${bodyClassName}` : ""}`}
+      >
         {children}
       </div>
       {footer && <footer className="semantic-modal-footer">{footer}</footer>}

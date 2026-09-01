@@ -16,7 +16,6 @@
 
 .editor,
 .listCard,
-.secretCard,
 .docsCard,
 .identifiersCard {
   padding: 24px;
@@ -39,7 +38,6 @@
 .editor :global(.security-card-header) h2,
 .listCard :global(.security-card-header) h2,
 .identifiersCard :global(.security-card-header) h2,
-.secretCard h2,
 .docsCard h2 {
   font-size: 22px;
   letter-spacing: -.025em;
@@ -49,7 +47,6 @@
 .editor :global(.security-card-header) p,
 .listCard :global(.security-card-header) p,
 .identifiersCard :global(.security-card-header) p,
-.secretCard p,
 .docsCard p {
   color: var(--muted);
   font-size: 14px;
@@ -345,29 +342,78 @@
   font-size: 13px;
 }
 
-.secretCard {
-  align-items: flex-end;
-  border-color: #9688fa;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: space-between;
+.secretModal {
+  width: min(680px, calc(100vw - 28px));
 }
 
-.secretHeading {
-  min-width: min(100%, 420px);
+.secretModal :global(.semantic-modal-header) {
+  padding: 19px 20px 15px;
 }
 
-.secretCard code {
-  background: #171526;
-  border-radius: 10px;
-  color: #fff;
-  flex: 1 1 100%;
+.secretModal :global(.semantic-modal-header h2) {
+  font-size: 22px;
+}
+
+.secretModal :global(.semantic-modal-header p) {
+  font-size: 13px;
+}
+
+.secretModal :global(.semantic-modal-body) {
+  padding: 20px;
+}
+
+.secretModal :global(.semantic-modal-footer) {
+  padding: 14px 20px;
+}
+
+.secretModalBody {
+  display: grid;
+  gap: 15px;
+}
+
+.secretWarning {
+  background: #fff9eb;
+  border: 1px solid #f1ddaa;
+  border-radius: 11px;
+  color: #654d17;
   font-size: 14px;
   line-height: 1.5;
+  padding: 12px 14px;
+}
+
+.secretValue {
+  background: #171526;
+  border-radius: 11px;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
   overflow-wrap: anywhere;
-  padding: 15px;
+  padding: 17px;
   user-select: all;
+}
+
+.secretValue:focus-visible {
+  box-shadow: 0 0 0 3px rgba(91, 61, 245, .22);
+}
+
+.secretCopyButton {
+  justify-content: center;
+  width: 100%;
+}
+
+.secretModalFooter {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.secretModalFooter span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .tokenList {
@@ -569,7 +615,6 @@
 @media (max-width: 760px) {
   .editor,
   .listCard,
-  .secretCard,
   .docsCard,
   .identifiersCard {
     padding: 17px;
@@ -578,7 +623,6 @@
   .editor :global(.security-card-header) h2,
   .listCard :global(.security-card-header) h2,
   .identifiersCard :global(.security-card-header) h2,
-  .secretCard h2,
   .docsCard h2 {
     font-size: 20px;
   }
@@ -590,8 +634,7 @@
   }
 
   .fieldsetHeading,
-  .docsCard,
-  .secretCard {
+  .docsCard {
     align-items: stretch;
     flex-direction: column;
   }
@@ -622,9 +665,16 @@
     justify-self: start;
   }
 
-  .docsCard :global(.primary-button),
-  .secretCard :global(.primary-button),
-  .secretCard :global(.secondary-button) {
+  .docsCard :global(.primary-button) {
+    width: 100%;
+  }
+
+  .secretModalFooter {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .secretModalFooter :global(.primary-button) {
     width: 100%;
   }
 

@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common/constants.js";
 import { AppModule } from "../app.module.js";
 import { ApiTokenAuthenticationService } from "./api-token-authentication.service.js";
+import { ApiTokenOnlyGuard } from "./api-token-only.guard.js";
 import { IdentityModule } from "./identity.module.js";
 import { SessionCookieService } from "./session-cookie.service.js";
 import {
@@ -58,6 +59,7 @@ test("IdentityModule exports session guard dependencies to controller modules", 
     SessionService,
     SessionCookieService,
     ApiTokenAuthenticationService,
+    ApiTokenOnlyGuard,
     SessionAuthGuard,
     CsrfSessionGuard
   ]) {

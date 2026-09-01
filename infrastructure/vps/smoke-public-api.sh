@@ -226,6 +226,27 @@ jq -e \
   "$response_body" >/dev/null ||
   runtime_fail "API token list leaks or omits token metadata"
 
+token_call GET access
+expect_status 200 restricted-access-discovery
+jq -e \
+  --arg tokenId "$token_id" \
+  --arg workspaceId "$workspace_id" \
+  --arg projectId "$project_alpha" \
+  --arg secret "$api_token" \
+  '.data.apiVersion == "v1" and
+   .data.token.id == $tokenId and
+   .data.token.name == "Restricted read agent" and
+   .data.token.allProjects == false and
+   .data.workspace.id == $workspaceId and
+   .data.workspace.name == "Public API smoke" and
+   (.data.projects | length == 1 and .[0].id == $projectId and .[0].name == "API Alpha") and
+   ((tostring | contains($secret)) | not)' \
+  "$response_body" >/dev/null ||
+  runtime_fail "restricted access discovery leaks or omits token context"
+
+session_call GET access
+expect_status 403 access-discovery-cookie-denied
+
 token_call GET "workspaces/$workspace_id/projects"
 expect_status 200 restricted-project-list
 jq -e \
@@ -294,6 +315,17 @@ session_call PATCH \
   "$token_version"
 expect_status 200 api-token-rights-update
 token_version=$(jq -er '.data.version' "$response_body")
+
+token_call GET access
+expect_status 200 expanded-access-discovery
+jq -e \
+  --arg alpha "$project_alpha" \
+  --arg beta "$project_beta" \
+  '.data.token.allProjects == true and
+   (.data.token.scopes | index("positions:run") != null) and
+   (.data.projects | length == 2 and .[0].id == $alpha and .[1].id == $beta)' \
+  "$response_body" >/dev/null ||
+  runtime_fail "access discovery did not apply updated token rights"
 
 token_call POST "projects/$project_beta/keywords" \
   '{"text":"created through public api","language":"en","priority":10,"isFavorite":true,"isTracked":true,"tagNames":["agent"]}'
