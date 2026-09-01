@@ -516,6 +516,25 @@ expiry `UNAUTHENTICATED` формируется только после успе
 `semantic.delete`, hash предварительного preview и optimistic selection
 versions; preset mutations требуют `semantic.update` и `If-Match`.
 
+Публичные удаления семантики входят в стабильный контракт API v1:
+
+- `DELETE /api/v1/projects/{projectId}/keywords/{keywordId}` требует
+  `semantic.delete`, а для API token — scope `semantics:write`, и обязательный
+  `If-Match`. Без тела запрос атомарно перемещается в системную корзину.
+  `{ "permanent": true }` допускается только для уже удалённого запроса с
+  актуальной версией и очищает пользовательские значения, сохраняя opaque
+  tombstone для неизменяемой истории;
+- `DELETE /api/v1/projects/{projectId}/keyword-groups/{groupId}` требует
+  `semantic.update`, а для API token — scope `semantics:write`, и обязательный
+  `If-Match`. Опциональные boolean-поля `deleteKeywords` и `promoteChildren`
+  по умолчанию равны `false`: удаляется всё поддерево, запросы сохраняются, а
+  оставшиеся без обычной папки переходят в системную «Без группы».
+  `promoteChildren: true` удаляет только выбранную папку и поднимает прямых
+  потомков; `deleteKeywords: true` перемещает затронутые запросы в корзину.
+  Системные папки удалить нельзя;
+- обе команды возвращают `204 No Content` без response body. Устаревшая
+  версия возвращает `412`, попытка permanent-delete активного запроса — `409`.
+
 ### 13.4. Сбор данных
 
 - `/projects/{projectId}/tracking-contexts`;

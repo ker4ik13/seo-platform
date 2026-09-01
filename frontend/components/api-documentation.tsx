@@ -597,6 +597,87 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
           title="201 · Ответ"
         />
       </Section>
+      <Section title="Удалить запрос">
+        <EndpointHeader
+          method="DELETE"
+          path="/projects/{projectId}/keywords/{keywordId}"
+          scope="semantics:write"
+        />
+        <p>
+          Передайте актуальную версию запроса в <code>If-Match</code>. Без
+          тела запроса ключ перемещается в системную папку «Корзина», а API
+          возвращает <code>204 No Content</code> без JSON.
+        </p>
+        <CodeBlock
+          code={`curl -X DELETE "${baseUrl}/projects/<projectId>/keywords/<keywordId>" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H 'If-Match: "v7"'`}
+          language="bash"
+          title="Запрос · Переместить в корзину"
+        />
+        <p>
+          Окончательная очистка допускается только для запроса, который уже
+          находится в корзине. Получите его актуальную версию после первого
+          удаления и явно передайте <code>permanent: true</code>. Исторические
+          замеры остаются неизменяемыми, а пользовательские значения запроса
+          очищаются.
+        </p>
+        <CodeBlock
+          code={`curl -X DELETE "${baseUrl}/projects/<projectId>/keywords/<keywordId>" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H 'If-Match: "v8"' \\
+  -H "Content-Type: application/json" \\
+  -d '{"permanent":true}'`}
+          language="bash"
+          title="Запрос · Окончательная очистка"
+        />
+        <Callout title="Защита от случайного удаления">
+          Попытка окончательно удалить активный запрос вернёт 409, а
+          устаревший If-Match — 412. Автоматически повторять такую команду с
+          новой версией нельзя.
+        </Callout>
+      </Section>
+      <Section title="Удалить папку">
+        <EndpointHeader
+          method="DELETE"
+          path="/projects/{projectId}/keyword-groups/{groupId}"
+          scope="semantics:write"
+        />
+        <p>
+          Команда требует актуальный <code>If-Match</code> и возвращает
+          <code>204 No Content</code>. Системные папки «Без группы» и «Корзина»
+          удалить нельзя. Если тело отсутствует, удаляется всё поддерево,
+          запросы сохраняются, а оставшиеся без папки запросы переходят в
+          «Без группы».
+        </p>
+        <CodeBlock
+          code={`curl -X DELETE "${baseUrl}/projects/<projectId>/keyword-groups/<groupId>" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H 'If-Match: "v4"' \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "deleteKeywords": false,
+    "promoteChildren": true
+  }'`}
+          language="bash"
+          title="Запрос · Удалить папку и поднять дочерние"
+        />
+        <Table
+          columns={["Поле", "По умолчанию", "Поведение при true"]}
+          rows={[
+            [
+              <code key="promote-children">promoteChildren</code>,
+              "Удалить папку вместе с поддеревом",
+              "Удалить только выбранную папку и поднять её прямых потомков на уровень выше"
+            ],
+            [
+              <code key="delete-keywords">deleteKeywords</code>,
+              "Сохранить запросы и перенести оставшиеся без папки в «Без группы»",
+              "Переместить затронутые удалением запросы в «Корзину»"
+            ]
+          ]}
+        />
+      </Section>
       <Callout title="Большие выборки">
         Не переносите тысячи идентификаторов в query string. Используйте
         cursor-pagination и предусмотренные bulk/import/export маршруты.

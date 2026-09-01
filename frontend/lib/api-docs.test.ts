@@ -57,6 +57,31 @@ test("documents identifier-free access discovery for API agents", () => {
   });
 });
 
+test("documents keyword and group deletion as stable public routes", () => {
+  const deletionEndpoints = apiEndpointCatalog.filter(({ id }) =>
+    ["group-delete", "keyword-delete"].includes(id)
+  );
+
+  assert.deepEqual(deletionEndpoints, [
+    {
+      id: "group-delete",
+      method: "DELETE",
+      path: "/projects/{projectId}/keyword-groups/{groupId}",
+      scope: "semantics:write",
+      description: "Удалить папку с выбранной стратегией для дочерних папок и запросов",
+      section: "semantics"
+    },
+    {
+      id: "keyword-delete",
+      method: "DELETE",
+      path: "/projects/{projectId}/keywords/{keywordId}",
+      scope: "semantics:write",
+      description: "Переместить запрос в корзину или окончательно очистить его данные",
+      section: "semantics"
+    }
+  ]);
+});
+
 test("sidebar groups preserve every section exactly once", () => {
   const groupedSections = apiDocSectionsByGroup().flatMap(
     ({ sections }) => sections
