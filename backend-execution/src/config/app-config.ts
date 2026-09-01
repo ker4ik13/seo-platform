@@ -120,6 +120,7 @@ export interface AppConfig {
     readonly enabled: boolean;
     readonly leaseSeconds: number;
     readonly dispatchSeconds: number;
+    readonly resultPersistenceDispatchIntervalMs: number;
     readonly concurrency: number;
   };
   readonly rankExecution: {
@@ -279,6 +280,7 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "RANK_PREPARATION_ENABLED",
   "RANK_PREPARATION_LEASE_SECONDS",
   "RANK_PREPARATION_DISPATCH_SECONDS",
+  "RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS",
   "RANK_PREPARATION_CONCURRENCY",
   "RANK_PROVIDER_SUBMIT_ENABLED",
   "RANK_PROVIDER_KILL_SWITCH_VERSION",
@@ -1747,6 +1749,13 @@ export function loadAppConfig(
         "RANK_PREPARATION_DISPATCH_SECONDS",
         5,
         300
+      ),
+      resultPersistenceDispatchIntervalMs: boundedInteger(
+        env.RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS,
+        1_000,
+        "RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS",
+        250,
+        60_000
       ),
       concurrency: boundedInteger(
         env.RANK_PREPARATION_CONCURRENCY,

@@ -204,6 +204,10 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.platformApiCommandTimeoutMs, 5_000);
   assert.equal(config.rankPreparation.leaseSeconds, 120);
   assert.equal(config.rankPreparation.dispatchSeconds, 15);
+  assert.equal(
+    config.rankPreparation.resultPersistenceDispatchIntervalMs,
+    1_000
+  );
   assert.equal(config.rankPreparation.concurrency, 2);
 });
 
@@ -216,7 +220,8 @@ test("loads an isolated rank preparation worker", () => {
     JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
     PLATFORM_API_URL: "http://backend-core:4000",
-    PLATFORM_API_COMMAND_TIMEOUT_MS: "2500"
+    PLATFORM_API_COMMAND_TIMEOUT_MS: "2500",
+    RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: "750"
   });
 
   assert.equal(config.rankPreparation.enabled, true);
@@ -225,6 +230,10 @@ test("loads an isolated rank preparation worker", () => {
   assert.equal(config.rankGrantApiToken, rankGrantApiToken);
   assert.equal(config.services.platformApi, "http://backend-core:4000");
   assert.equal(config.platformApiCommandTimeoutMs, 2_500);
+  assert.equal(
+    config.rankPreparation.resultPersistenceDispatchIntervalMs,
+    750
+  );
   assert.equal(config.integrationCredentials.role, "DISABLED");
   assert.equal(config.platformApiToken, undefined);
   assert.equal(config.seoDataApiToken, undefined);

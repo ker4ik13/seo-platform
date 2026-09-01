@@ -27,7 +27,8 @@ const baseEnvironment = {
   PLATFORM_XMLSTOCK_API_KEYS: "must-stay-in-http-1,must-stay-in-http-2",
   PLATFORM_XMLSTOCK_ACCOUNT_IDS: "platform-account",
   PLATFORM_ARSENKIN_ENABLED: "false",
-  PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http"
+  PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http",
+  RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: "750"
 } satisfies NodeJS.ProcessEnv;
 
 test("execution roles receive only their scoped database and secrets", () => {
@@ -57,6 +58,10 @@ test("execution roles receive only their scoped database and secrets", () => {
   assert.equal(system?.PLATFORM_API_URL, undefined);
   const rank = definitions.find(({ name }) => name === "rank-worker")?.environment;
   assert.equal(rank?.DATABASE_URL, "postgresql://rank");
+  assert.equal(
+    rank?.RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS,
+    "750"
+  );
   assert.equal(rank?.INTEGRATION_CREDENTIAL_KEYS, undefined);
   const connector = definitions.find(({ name }) => name === "connector-worker")?.environment;
   assert.equal(connector?.DATABASE_URL, "postgresql://connector");
@@ -66,6 +71,10 @@ test("execution roles receive only their scoped database and secrets", () => {
     "billing-settlement-secret"
   );
   assert.equal(connector?.CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS, undefined);
+  assert.equal(
+    connector?.RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS,
+    undefined
+  );
   assert.equal(
     connector?.INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS,
     undefined

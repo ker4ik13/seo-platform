@@ -312,6 +312,11 @@ dispatcher подготавливает до 48 keyword executions одного 
 чтобы заполнить три connector process по 16 rank workers. Общая DB capacity
 из пяти задач остаётся Arsenkin-only; один XMLStock credential всё равно
 строго ограничен своим Redis product bucket.
+Нормализованные `STAGED` rank-results сохраняются отдельным секундным bounded
+dispatcher. Короткий PostgreSQL claim сначала выравнивает число активных
+persistence leases между workspace, затем между Job одного workspace и только
+после этого выбирает oldest chunk внутри Job; крупный старый съём поэтому не
+может скрыто удерживать весь ingest новых съёмов.
 Finalization рассматривает только
 последнюю execution attempt каждого manifest chunk; предыдущие безопасно
 прерванные attempts остаются immutable audit history и не меняют cardinality

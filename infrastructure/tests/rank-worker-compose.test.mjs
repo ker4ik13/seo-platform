@@ -43,6 +43,10 @@ test("rank work is a scoped child role of backend-execution", async () => {
     execution,
     /KEYWORD_RESEARCH_CONCURRENCY: \$\{KEYWORD_RESEARCH_CONCURRENCY:-1\}/u
   );
+  assert.match(
+    execution,
+    /RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: \$\{RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS:-1000\}/u
+  );
 
   assert.match(
     runtime,

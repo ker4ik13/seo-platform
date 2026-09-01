@@ -792,6 +792,7 @@ test("does not let a second worker steal an unexpired preparation lease", async 
       enabled: true,
       leaseSeconds: 90,
       dispatchSeconds: 5,
+      resultPersistenceDispatchIntervalMs: 1_000,
       concurrency: 2
     }
   } as AppConfig;

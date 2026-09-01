@@ -92,12 +92,6 @@ async function bootstrap(): Promise<void> {
         }
         }
       );
-      await Promise.all(
-        Array.from(
-          { length: config.rankPreparation.concurrency },
-          () => resultPersistence.processOne(`rank-result-${randomUUID()}`)
-        )
-      );
       const finalizationIds = await finalization.pendingJobIds();
       await forEachConcurrent(
         finalizationIds,
@@ -122,12 +116,43 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  await dispatchPending();
+  let resultDispatching = false;
+  async function dispatchResults(): Promise<void> {
+    if (resultDispatching) return;
+    resultDispatching = true;
+    try {
+      await Promise.all(
+        Array.from(
+          { length: config.rankPreparation.concurrency },
+          async () => {
+            try {
+              await resultPersistence.processOne(
+                `rank-result-${randomUUID()}`
+              );
+            } catch (error) {
+              logger.error(
+                `Unable to persist one rank result: ${safeErrorSummary(error)}`
+              );
+            }
+          }
+        )
+      );
+    } finally {
+      resultDispatching = false;
+    }
+  }
+
+  await Promise.all([dispatchPending(), dispatchResults()]);
   const dispatchTimer = setInterval(
     () => void dispatchPending(),
     config.rankPreparation.dispatchSeconds * 1_000
   );
   dispatchTimer.unref();
+  const resultDispatchTimer = setInterval(
+    () => void dispatchResults(),
+    config.rankPreparation.resultPersistenceDispatchIntervalMs
+  );
+  resultDispatchTimer.unref();
 
   worker.on("failed", (job) => {
     logger.error(`Rank preparation failed for job ${job?.id ?? "unknown"}`);
@@ -144,6 +169,7 @@ async function bootstrap(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(dispatchTimer);
+    clearInterval(resultDispatchTimer);
     await worker.close();
     await queue.close();
     await workerConnection.quit();

@@ -150,8 +150,11 @@ fail-closed.
 - `RANK_PREPARATION_ENABLED=true`;
 - `JOBS_TO_SEO_RANK_TOKEN` длиной не менее 32 символов, совпадающий только с
   validator token в SEO Data;
+- `JOBS_TO_SEO_RANK_RESULT_TOKEN` длиной не менее 32 символов для
+  идемпотентного ingest нормализованных результатов;
 - `RANK_PREPARATION_LEASE_SECONDS`,
   `RANK_PREPARATION_DISPATCH_SECONDS`,
+  `RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS`,
   `RANK_PREPARATION_CONCURRENCY`;
 - supervisor-level `RANK_WORKER_PROCESSES` (по умолчанию `2`);
 - `INTEGRATION_CREDENTIAL_ROLE=DISABLED`.
@@ -159,7 +162,6 @@ fail-closed.
 Lease обязан превышать timeout команды SEO Data минимум на пять секунд.
 Rank-worker не должен получать `PLATFORM_API_TO_JOBS_TOKEN`,
 `JOBS_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
-`JOBS_TO_SEO_RANK_RESULT_TOKEN`,
 `RANK_HISTORY_CURSOR_KEY`, credential keyrings, NATS credentials, S3 access
 keys или SMTP credentials. `JOBS_TO_SEO_RANK_TOKEN`
 также запрещён HTTP, generic, import, inspection и connector processes,

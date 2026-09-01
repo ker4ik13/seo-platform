@@ -251,6 +251,7 @@ function configFixture(): AppConfig {
       enabled: false,
       leaseSeconds: 120,
       dispatchSeconds: 15,
+      resultPersistenceDispatchIntervalMs: 1_000,
       concurrency: 2
     },
     rankExecution: {
