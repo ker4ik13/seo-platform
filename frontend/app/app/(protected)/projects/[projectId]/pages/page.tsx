@@ -32,9 +32,11 @@ export default async function ProjectPagesPage({
           <div className="project-page-title-row">
             <h1>Карта страниц</h1>
             <ProjectContextSelect
+              canReorder={context.projectCapabilities?.canReorder ?? false}
               destination="pages"
               projectId={project.id}
               projects={context.projects}
+              workspaceId={workspace.id}
             />
           </div>
           <p>

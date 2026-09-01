@@ -82,6 +82,7 @@ import type {
   RankRunConflictDetails,
   RankRunConflictReason,
   RankJobSummary,
+  InternalRankOperationScope,
   RankRuntimeDiagnostics,
   SemanticImportSummary,
   StorageCapacityEntitlement,
@@ -143,6 +144,7 @@ import {
   scopedRankJobSummary,
   scopedRankRuntimeDiagnostics
 } from "./rank-job-response.js";
+import { scopedRankOperationScope } from "./rank-operation-response.js";
 import { scopedRankEstimate } from "./rank-estimate-response.js";
 import {
   scopedAutomation,
@@ -1867,6 +1869,38 @@ export class JobsClient {
       context.tenant.workspaceId,
       projectId,
       jobId
+    );
+  }
+
+  public async getRankOperationScope(
+    context: InternalContext,
+    jobId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<InternalRankOperationScope> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `${rankJobPath(
+        context.tenant.workspaceId,
+        projectId,
+        jobId
+      )}/result-scope`,
+      this.config.services.jobs
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      url.toString(),
+      context
+    );
+    return scopedRankOperationScope(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId,
+      limit,
+      cursor
     );
   }
 

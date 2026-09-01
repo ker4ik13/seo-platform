@@ -1,23 +1,27 @@
 import { Prisma, type Automation } from "../generated/prisma/client.js";
 import type {
   AutomationExecutionAccessSnapshot,
-  AutomationSchedule,
+  RankTrackingAutomationSchedule,
   InternalCreateRankTrackingAutomationInput,
   InternalRankEstimateProjectSnapshot,
   InternalRunRankTrackingAutomationInput,
   InternalUpdateRankTrackingAutomationInput,
   RankTrackingAutomationSummary
 } from "@seo-platform/contracts";
-import { automationSchedule } from "./automation-input.js";
+import { rankAutomationSchedule } from "./automation-input.js";
 
 export const AUTOMATION_DEFINITION_SCHEMA =
+  "rank-tracking-schedule@3";
+const PREVIOUS_AUTOMATION_DEFINITION_SCHEMA =
+  "rank-tracking-schedule@2";
+const LEGACY_AUTOMATION_DEFINITION_SCHEMA =
   "rank-tracking-schedule@1";
 
 export interface StoredAutomationDefinition {
   readonly schemaVersion: typeof AUTOMATION_DEFINITION_SCHEMA;
   readonly trackingContextId: string;
-  readonly schedule: AutomationSchedule;
-  readonly maxItems: number;
+  readonly schedule: RankTrackingAutomationSchedule;
+  readonly maxPlatformChargeMicro: string;
   readonly failureThreshold: number;
   readonly execution: {
     readonly actorId: string;
@@ -37,7 +41,7 @@ export function automationDefinition(
     schemaVersion: AUTOMATION_DEFINITION_SCHEMA,
     trackingContextId: input.trackingContextId,
     schedule: input.schedule,
-    maxItems: input.maxItems,
+    maxPlatformChargeMicro: input.maxPlatformChargeMicro,
     failureThreshold: input.failureThreshold,
     execution: {
       actorId: input.actorId,
@@ -75,21 +79,30 @@ export function automationRunDefinition(
 export function storedAutomationDefinition(
   value: unknown
 ): StoredAutomationDefinition {
+  const envelope = record(value);
+  const schemaVersion = envelope.schemaVersion;
+  const legacy = schemaVersion === LEGACY_AUTOMATION_DEFINITION_SCHEMA;
+  const previous =
+    schemaVersion === PREVIOUS_AUTOMATION_DEFINITION_SCHEMA;
+  const current = schemaVersion === AUTOMATION_DEFINITION_SCHEMA;
+  if (!legacy && !previous && !current) invalid();
   const input = exactRecord(value, [
     "schemaVersion",
     "trackingContextId",
     "schedule",
-    "maxItems",
+    ...(legacy || previous ? ["maxItems"] : []),
+    ...(legacy ? [] : ["maxPlatformChargeMicro"]),
     "failureThreshold",
     "execution"
   ]);
   if (
-    input.schemaVersion !== AUTOMATION_DEFINITION_SCHEMA ||
     typeof input.trackingContextId !== "string" ||
     !UUID_PATTERN.test(input.trackingContextId) ||
-    !Number.isSafeInteger(input.maxItems) ||
-    Number(input.maxItems) < 1 ||
-    Number(input.maxItems) > 1_000 ||
+    ((legacy || previous) &&
+      (!Number.isSafeInteger(input.maxItems) ||
+        Number(input.maxItems) < 1 ||
+        Number(input.maxItems) > 1_000)) ||
+    (!legacy && !validMoneyLimit(input.maxPlatformChargeMicro)) ||
     !Number.isSafeInteger(input.failureThreshold) ||
     Number(input.failureThreshold) < 1 ||
     Number(input.failureThreshold) > 10
@@ -164,8 +177,10 @@ export function storedAutomationDefinition(
   return {
     schemaVersion: AUTOMATION_DEFINITION_SCHEMA,
     trackingContextId: input.trackingContextId,
-    schedule: automationSchedule(input.schedule),
-    maxItems: Number(input.maxItems),
+    schedule: rankAutomationSchedule(input.schedule),
+    maxPlatformChargeMicro: legacy
+      ? "0"
+      : String(input.maxPlatformChargeMicro),
     failureThreshold: Number(input.failureThreshold),
     execution: {
       actorId: execution.actorId,
@@ -203,7 +218,8 @@ export function toAutomationSummary(
   if (
     automation.pausedReason !== null &&
     automation.pausedReason !== "MANUAL" &&
-    automation.pausedReason !== "FAILURE_THRESHOLD"
+    automation.pausedReason !== "FAILURE_THRESHOLD" &&
+    automation.pausedReason !== "ONE_TIME_COMPLETED"
   ) {
     invalid();
   }
@@ -215,7 +231,7 @@ export function toAutomationSummary(
     trackingContextId: definition.trackingContextId,
     timezone: automation.timezone,
     schedule: definition.schedule,
-    maxItems: definition.maxItems,
+    maxPlatformChargeMicro: definition.maxPlatformChargeMicro,
     failureThreshold: definition.failureThreshold,
     enabled: automation.enabled,
     ...(automation.pausedReason
@@ -261,10 +277,7 @@ function exactRecord(
   value: unknown,
   fields: readonly string[]
 ): Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    invalid();
-  }
-  const input = value as Readonly<Record<string, unknown>>;
+  const input = record(value);
   if (
     Object.keys(input).length !== fields.length ||
     fields.some((field) => !(field in input)) ||
@@ -273,6 +286,21 @@ function exactRecord(
     invalid();
   }
   return input;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid();
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function validMoneyLimit(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^(?:0|[1-9]\d{0,29})$/u.test(value) &&
+    BigInt(value) <= 9_223_372_036_854_775_807n
+  );
 }
 
 function invalid(): never {

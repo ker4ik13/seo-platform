@@ -1,10 +1,16 @@
 import { BadRequestException } from "@nestjs/common";
-import { maximumPlatformRankKeywordPriceMinor } from "@seo-platform/contracts";
+import {
+  maximumPlatformRankKeywordPriceMinor,
+  operationResultDefaultPageSize,
+  operationResultPageSizes,
+  rankProviderKeywordLimit
+} from "@seo-platform/contracts";
 import type {
   InternalCancelRankJobInput,
   InternalCreateRankRunInput,
   InternalRankJobQuery,
   InternalRetryRankJobInput,
+  OperationResultPageSize,
   RankEstimateQuota
 } from "@seo-platform/contracts";
 
@@ -146,6 +152,31 @@ export function internalRankJobQuery(
     actorId: uuid(input.actorId, "actorId"),
     jobId: uuid(input.jobId, "jobId")
   };
+}
+
+export function rankResultPageLimit(
+  value: unknown
+): OperationResultPageSize {
+  if (value === undefined) return operationResultDefaultPageSize;
+  const parsed = Number(value);
+  if (
+    typeof value !== "string" ||
+    !Number.isSafeInteger(parsed) ||
+    !operationResultPageSizes.some((size) => size === parsed)
+  ) {
+    invalid("result limit");
+  }
+  return parsed as OperationResultPageSize;
+}
+
+export function rankResultCursor(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,4})$/u.test(value)) {
+    invalid("result cursor");
+  }
+  const parsed = Number(value);
+  if (parsed >= rankProviderKeywordLimit) invalid("result cursor");
+  return parsed;
 }
 
 export function internalCancelRankJobInput(

@@ -3,8 +3,13 @@ import { requireProtectedAppContext } from "../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({
+  searchParams
+}: Readonly<{
+  searchParams: Promise<{ readonly create?: string }>;
+}>) {
   const context = await requireProtectedAppContext();
+  const query = await searchParams;
 
   return (
     <>
@@ -23,6 +28,10 @@ export default async function ProjectsPage() {
       ) : (
         <ProjectCatalog
           {...(context.project ? { activeProjectId: context.project.id } : {})}
+          {...(context.projectCapabilities
+            ? { capabilities: context.projectCapabilities }
+            : {})}
+          initialCreateOpen={query.create === "1"}
           projects={context.projects}
           workspace={context.workspace}
         />

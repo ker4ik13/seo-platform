@@ -427,6 +427,7 @@ Automation состоит из:
 ### 10.1. Triggers
 
 - cron/schedule;
+- delayed one-time schedule;
 - data became stale;
 - position changed;
 - keyword entered/exited TOP;
@@ -498,6 +499,25 @@ Automation состоит из:
 - Для повторяемых jobs используются актуальные BullMQ Job Schedulers.
 - Scheduler ID стабилен и связан с Automation version.
 - Изменение schedule выполняется upsert без дублирования.
+- Rank schedule `ONCE` использует один stable delayed BullMQ job, а не cron.
+  PostgreSQL Automation остаётся source of truth: schedule run и переход в
+  `ONE_TIME_COMPLETED` создаются одной транзакцией, поэтому reconciliation не
+  может поставить одноразовое задание второй раз. Изменённая future-дата
+  заменяет ещё не начавшийся delayed job; active delivery не удаляется.
+- Rank schedule хранит `maxPlatformChargeMicro` как явный per-run budget.
+  Значение `0` разрешает только BYOK. Каждый scheduled/manual occurrence после
+  PostgreSQL claim вызывает Core через scoped automation token; Core заново
+  проверяет actor RBAC, tenant lifecycle, entitlement, quota, capacity и
+  trusted price book, создаёт fresh estimate и запускает обычный RankRun только
+  если точная цена не превышает cap. В Jobs не хранится цена как authority и
+  scheduler не списывает токены напрямую.
+- Rank schedule не хранит пользовательский `maxItems` и не обрезает контекст:
+  каждый запуск берёт все актуальные ключи выбранного tracking context.
+  Provider/plan capacity по-прежнему проверяется estimate-ом и исполняется
+  штатными chunk/batch-механизмами без скрытого сокращения scope.
+- `AutomationCapacityEntitlement.scheduledAutomations` ограничивает только
+  суммарное число включённых rank/crawl-расписаний workspace. Счётчик вида
+  «N из M активных расписаний» не является лимитом ключей.
 - Timezone/DST тестируются отдельно.
 - Пропущенный запуск имеет policy: skip, run once, catch up limited.
 - Radar scheduler перед enqueue проверяет per-host budget, active crawl,
@@ -1230,9 +1250,17 @@ service JWT/mTLS identity и не доказательство полной prod
   токены не списывают. BYOK проходит тот же runtime без обращения к ledger.
   Неиспользованный резерв автоматически release-ится bounded reconciliation
   после 10 минут;
-- platform-paid automations и `retry-missing` намеренно отклоняются: до
-  отдельного product/finance решения платный режим разрешён только для явно
-  подтверждённого ручного запуска.
+- platform-paid rank automations разрешены только с сохранённым явным
+  `maxPlatformChargeMicro` на один запуск. Каждый occurrence получает fresh
+  estimate через закрытый Jobs → Core dispatch, повторно проходит актуальные
+  RBAC/lifecycle/entitlement/quota/capacity checks и использует стандартные
+  reservation, HOLD, CAPTURE и settlement boundaries RankRun. Цена выше cap,
+  недоступный баланс или изменившиеся права завершают automation run до
+  provider I/O; `0` сохраняет BYOK-only. Paid `retry-missing` остаётся
+  намеренно отклонённым до отдельного product/finance решения. Пользовательский
+  keyword cap отсутствует: fresh estimate охватывает весь текущий tracking
+  context, а старый `maxItems` из definition schema `@1/@2` только читается для
+  совместимости и отбрасывается при нормализации в `@3`.
 
 Capability по умолчанию выключена. Reserve происходит до provider call,
 bounded HOLD — непосредственно перед первым синхронным вызовом, capture —

@@ -5,6 +5,7 @@ import {
   createProjectInput,
   createWorkspaceInput,
   deleteProjectInput,
+  reorderProjectsInput,
   updateProjectInput,
   updateProjectLogoInput,
   updateWorkspaceAvatarInput,
@@ -131,4 +132,36 @@ test("requires an exact non-empty project deletion confirmation", () => {
     confirmation: "Нейролюб"
   });
   assert.throws(() => deleteProjectInput({ confirmation: "" }), DomainError);
+});
+
+test("accepts only exact unique project-order arrays", () => {
+  const first = "01900000-0000-7000-8000-000000000061";
+  const second = "01900000-0000-7000-8000-000000000062";
+  assert.deepEqual(
+    reorderProjectsInput({
+      expectedProjectIds: [first, second],
+      projectIds: [second, first]
+    }),
+    {
+      expectedProjectIds: [first, second],
+      projectIds: [second, first]
+    }
+  );
+  assert.throws(
+    () =>
+      reorderProjectsInput({
+        expectedProjectIds: [first, first],
+        projectIds: [first]
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      reorderProjectsInput({
+        expectedProjectIds: [first],
+        projectIds: [first],
+        workspaceId: first
+      }),
+    DomainError
+  );
 });

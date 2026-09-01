@@ -1,4 +1,8 @@
-import { projectAccessLevels } from "@seo-platform/contracts";
+import {
+  projectAccessLevels,
+  projectCreationAvailabilityReasons,
+  type ProjectCollectionCapabilities
+} from "@seo-platform/contracts";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import type {
@@ -53,9 +57,14 @@ export const loadProtectedAppContext = cache(
       };
     }
 
-    const projectsPayload = await platformApiCollection(
-      `/api/v1/workspaces/${encodeURIComponent(workspace.id)}/projects`
-    );
+    const [projectsPayload, capabilitiesPayload] = await Promise.all([
+      platformApiCollection(
+        `/api/v1/workspaces/${encodeURIComponent(workspace.id)}/projects`
+      ),
+      platformApiData<unknown>(
+        `/api/v1/workspaces/${encodeURIComponent(workspace.id)}/project-capabilities`
+      )
+    ]);
     const projects = projectsPayload.map(appProject);
     const preferredProjectId = cookieStore.get("seo_project")?.value;
     const project =
@@ -65,6 +74,7 @@ export const loadProtectedAppContext = cache(
       ...base,
       workspace,
       projects,
+      projectCapabilities: appProjectCapabilities(capabilitiesPayload),
       ...(project ? { project } : {})
     };
   }
@@ -92,7 +102,14 @@ export const loadProtectedProjectAppContext = cache(
       }
     );
     if (!context) throw invalidResponse();
-    return context;
+    return {
+      ...context,
+      projectCapabilities: appProjectCapabilities(
+        await platformApiData<unknown>(
+          `/api/v1/workspaces/${encodeURIComponent(context.workspace!.id)}/project-capabilities`
+        )
+      )
+    };
   }
 );
 
@@ -272,6 +289,30 @@ function appProject(payload: unknown): AppProject {
         }),
     ...(projectAccessLevel ? { projectAccessLevel } : {}),
     version: numberValue(project.version)
+  };
+}
+
+function appProjectCapabilities(
+  payload: unknown
+): ProjectCollectionCapabilities {
+  const capabilities = record(payload);
+  const creation = record(capabilities.creation);
+  const reason = stringValue(creation.reason);
+  if (
+    typeof capabilities.canReorder !== "boolean" ||
+    typeof creation.allowed !== "boolean" ||
+    !projectCreationAvailabilityReasons.some((value) => value === reason)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    canReorder: capabilities.canReorder,
+    creation: {
+      allowed: creation.allowed,
+      reason: reason as ProjectCollectionCapabilities["creation"]["reason"],
+      used: nonNegativeNumberValue(creation.used),
+      limit: nonNegativeNumberValue(creation.limit)
+    }
   };
 }
 

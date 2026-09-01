@@ -17,6 +17,7 @@ redis_server_binary=${REDIS_SERVER_BINARY:-}
 redis_cli_binary=${REDIS_CLI_BINARY:-}
 nats_server_binary=${NATS_SERVER_BINARY:-}
 public_url=${SEO_PLATFORM_PUBLIC_URL:-}
+api_public_url=${API_PUBLIC_URL:-}
 
 case "$postgres_distribution_root" in
   /*) ;;
@@ -38,6 +39,15 @@ case "$public_url" in
   https://*) ;;
   *) runtime_fail "SEO_PLATFORM_PUBLIC_URL must be an HTTPS URL" ;;
 esac
+if [ -n "$api_public_url" ]; then
+  case "$api_public_url" in
+    https://*) ;;
+    *) runtime_fail "API_PUBLIC_URL must be an HTTPS origin" ;;
+  esac
+  case "${api_public_url#https://}" in
+    ''|*/*|*\?*|*\#*|*@*) runtime_fail "API_PUBLIC_URL must not contain a path, credentials, query or fragment" ;;
+  esac
+fi
 
 [ -x "$postgres_distribution_root/usr/lib/postgresql/18/bin/postgres" ] ||
   runtime_fail "POSTGRES_DISTRIBUTION_ROOT does not contain PostgreSQL 18"
@@ -135,6 +145,9 @@ if [ ! -f "$runtime_env_file" ]; then
   chmod 600 "$temporary_env_file"
 
   write_environment_value SEO_PLATFORM_PUBLIC_URL "$public_url"
+  if [ -n "$api_public_url" ]; then
+    write_environment_value API_PUBLIC_URL "$api_public_url"
+  fi
   write_environment_value POSTGRES_BOOTSTRAP_PASSWORD "$(random_url_secret)"
 
   for secret_name in \

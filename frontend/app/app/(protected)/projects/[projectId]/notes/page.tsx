@@ -26,9 +26,11 @@ export default async function ProjectNotesPage({
           <div className="project-page-title-row">
             <h1>Заметки</h1>
             <ProjectContextSelect
+              canReorder={context.projectCapabilities?.canReorder ?? false}
               destination="notes"
               projectId={context.project.id}
               projects={context.projects}
+              workspaceId={context.workspace.id}
             />
           </div>
           <p>

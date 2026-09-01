@@ -9,6 +9,7 @@ import type { TenantRequest } from "./authorization.types.js";
 import { AuthorizationService } from "./authorization.service.js";
 import type { Permission } from "./permissions.js";
 import { REQUIRED_PERMISSION } from "./require-permission.js";
+import { assertApiTokenAccess } from "./api-token-access.js";
 
 @Injectable()
 export class TenantPermissionGuard implements CanActivate {
@@ -40,6 +41,13 @@ export class TenantPermissionGuard implements CanActivate {
       typeof params.projectId === "string" ? params.projectId : undefined;
     const workspaceId =
       typeof params.workspaceId === "string" ? params.workspaceId : undefined;
+
+    if (request.apiTokenAuthorization) {
+      assertApiTokenAccess(request, request.apiTokenAuthorization, {
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(projectId ? { projectId } : {})
+      });
+    }
 
     if (projectId) {
       request.tenantAuthorization = await this.authorization.forProject(

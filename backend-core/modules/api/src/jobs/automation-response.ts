@@ -1,7 +1,7 @@
 import type {
   AutomationRunCollection,
   AutomationRunSummary,
-  AutomationSchedule,
+  RankTrackingAutomationSchedule,
   RankTrackingAutomationCollection,
   RankTrackingAutomationSummary
 } from "@seo-platform/contracts";
@@ -67,7 +67,7 @@ export function scopedAutomation(
     "trackingContextId",
     "timezone",
     "schedule",
-    "maxItems",
+    "maxPlatformChargeMicro",
     "failureThreshold",
     "enabled",
     ...optional,
@@ -88,7 +88,7 @@ export function scopedAutomation(
     input.timezone.length < 1 ||
     input.timezone.length > 64 ||
     !uuid(input.trackingContextId) ||
-    !positiveInteger(input.maxItems, 1_000) ||
+    !moneyLimit(input.maxPlatformChargeMicro) ||
     !positiveInteger(input.failureThreshold, 10) ||
     typeof input.enabled !== "boolean" ||
     !nonnegativeInteger(input.consecutiveErrors) ||
@@ -98,7 +98,7 @@ export function scopedAutomation(
     (input.nextRunAt !== undefined && !iso(input.nextRunAt)) ||
     (input.lastRunAt !== undefined && !iso(input.lastRunAt)) ||
     (input.pausedReason !== undefined &&
-      !["MANUAL", "FAILURE_THRESHOLD"].includes(
+      !["MANUAL", "FAILURE_THRESHOLD", "ONE_TIME_COMPLETED"].includes(
         String(input.pausedReason)
       )) ||
     (input.enabled && input.pausedReason !== undefined)
@@ -114,7 +114,7 @@ export function scopedAutomation(
     trackingContextId: input.trackingContextId,
     timezone: input.timezone,
     schedule,
-    maxItems: Number(input.maxItems),
+    maxPlatformChargeMicro: input.maxPlatformChargeMicro,
     failureThreshold: Number(input.failureThreshold),
     enabled: input.enabled,
     ...(input.pausedReason !== undefined
@@ -281,8 +281,13 @@ function validRunLifecycle(
   );
 }
 
-function automationSchedule(value: unknown): AutomationSchedule {
+function automationSchedule(value: unknown): RankTrackingAutomationSchedule {
   const input = record(value);
+  if (input.cadence === "ONCE") {
+    exactFields(input, ["cadence", "runAt"]);
+    if (!iso(input.runAt)) invalid();
+    return { cadence: "ONCE", runAt: input.runAt as string };
+  }
   const fields =
     input.cadence === "WEEKLY"
       ? ["cadence", "hour", "minute", "weekdays"]
@@ -369,6 +374,14 @@ function positiveInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER) {
 
 function nonnegativeInteger(value: unknown): boolean {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function moneyLimit(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^(?:0|[1-9]\d{0,29})$/u.test(value) &&
+    BigInt(value) <= 9_223_372_036_854_775_807n
+  );
 }
 
 function iso(value: unknown): value is string {

@@ -75,11 +75,15 @@ interface ProjectTask {
 }
 
 export function TaskCenter({
+  canReorderProjects,
   projectId,
-  projects
+  projects,
+  workspaceId
 }: Readonly<{
+  canReorderProjects: boolean;
   projectId: string;
   projects: readonly AppProject[];
+  workspaceId: string;
 }>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
@@ -293,9 +297,11 @@ export function TaskCenter({
           <div className="project-page-title-row">
             <h1>История операций</h1>
             <ProjectContextSelect
+              canReorder={canReorderProjects}
               destination="tasks"
               projectId={projectId}
               projects={projects}
+              workspaceId={workspaceId}
             />
           </div>
           <p>Построчный журнал запусков с входными параметрами, прогрессом и результатом.</p>

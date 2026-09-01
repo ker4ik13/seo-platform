@@ -195,6 +195,65 @@ test("does not expose runtime diagnostics for a non-XMLStock rank run", async ()
   assert.equal(rawQueryCalls, 0);
 });
 
+test("returns the paged per-key XMLStock result scope with the latest poll count", async () => {
+  const prisma = {
+    job: {
+      findFirst: async () => ({
+        items: [
+          { sequence: 0, status: "COMPLETED", error: null },
+          {
+            sequence: 1,
+            status: "FAILED_FINAL",
+            error: { code: "PROVIDER_TEMPORARY_FAILURE" }
+          }
+        ]
+      })
+    },
+    rankConnectorExecution: {
+      findMany: async () => [
+        {
+          manifestChunkIndex: 0,
+          pollAttemptCount: 5,
+          lastErrorCode: null
+        },
+        {
+          manifestChunkIndex: 1,
+          pollAttemptCount: 50,
+          lastErrorCode: "PROVIDER_UNAVAILABLE"
+        },
+        {
+          manifestChunkIndex: 1,
+          pollAttemptCount: 7,
+          lastErrorCode: null
+        }
+      ]
+    }
+  } as unknown as PrismaService;
+
+  const scope = await new RankRunService(prisma, queue([])).resultScope(
+    workspaceId,
+    projectId,
+    jobId,
+    200
+  );
+
+  assert.deepEqual(scope, {
+    workspaceId,
+    projectId,
+    jobId,
+    items: [
+      { sequence: 0, status: "COMPLETED", pollAttempts: 5 },
+      {
+        sequence: 1,
+        status: "FAILED_FINAL",
+        pollAttempts: 50,
+        errorCode: "PROVIDER_UNAVAILABLE"
+      }
+    ],
+    page: { hasNext: false }
+  });
+});
+
 test("permits a newer successful validation for the unchanged credential material during execution", () => {
   const estimatedAt = new Date("2026-08-05T10:00:00.000Z");
   const refreshedAt = new Date("2026-08-05T11:00:00.000Z");

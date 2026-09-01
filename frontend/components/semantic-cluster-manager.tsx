@@ -15,6 +15,10 @@ import type {
 } from "@seo-platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
+import {
+  applySemanticClusterPageMappingInBatches,
+  previewSemanticClusterPageMappingInBatches
+} from "../lib/semantic-cluster-bulk";
 
 type ClusterEditor =
   | Readonly<{
@@ -155,10 +159,6 @@ export function SemanticClusterManager({
       );
       return;
     }
-    if (selectedClusterIds.length >= 200) {
-      setError("За одну операцию можно выбрать не больше 200 кластеров.");
-      return;
-    }
     setSelectedClusterIds((current) => [...current, clusterId]);
   }
 
@@ -171,10 +171,7 @@ export function SemanticClusterManager({
       setSelectedClusterIds([]);
       return;
     }
-    setSelectedClusterIds(clusters.slice(0, 200).map(({ id }) => id));
-    if (clusters.length > 200) {
-      setBulkNotice("Выбраны первые 200 кластеров — максимум одной операции.");
-    }
+    setSelectedClusterIds(clusters.map(({ id }) => id));
   }
 
   function changeBulkAction(value: string): void {
@@ -203,10 +200,7 @@ export function SemanticClusterManager({
     setBulkNotice(undefined);
     try {
       setBulkPreview(
-        await browserApiRequest<SemanticClusterPageBulkPreview>(
-          clusterPath(projectId, "page-mapping-preview"),
-          { method: "POST", body }
-        )
+        await previewSemanticClusterPageMappingInBatches(projectId, body)
       );
     } catch (requestError) {
       setBulkPreview(undefined);
@@ -230,9 +224,9 @@ export function SemanticClusterManager({
     setError(undefined);
     setBulkNotice(undefined);
     try {
-      const result = await browserApiRequest<SemanticClusterPageBulkResult>(
-        clusterPath(projectId, "page-mapping-bulk"),
-        { method: "POST", body }
+      const result = await applySemanticClusterPageMappingInBatches(
+        projectId,
+        body
       );
       setClusters((current) => mergeClusters(current, result.updatedClusters));
       setSelectedClusterIds([]);

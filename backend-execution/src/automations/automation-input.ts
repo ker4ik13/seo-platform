@@ -1,8 +1,9 @@
 import { BadRequestException } from "@nestjs/common";
 import type {
+  AutomationSchedule,
   AutomationCapacityEntitlement,
   AutomationExecutionAccessSnapshot,
-  AutomationSchedule,
+  RankTrackingAutomationSchedule,
   InternalAutomationStatusInput,
   InternalCreateRankTrackingAutomationInput,
   InternalRankEstimateProjectSnapshot,
@@ -24,7 +25,7 @@ export function internalCreateAutomationInput(
     "trackingContextId",
     "timezone",
     "schedule",
-    "maxItems",
+    "maxPlatformChargeMicro",
     "failureThreshold",
     "enabled",
     "workspaceId",
@@ -63,7 +64,7 @@ export function internalUpdateAutomationInput(
     "trackingContextId",
     "timezone",
     "schedule",
-    "maxItems",
+    "maxPlatformChargeMicro",
     "failureThreshold",
     "enabled",
     "workspaceId",
@@ -161,6 +162,23 @@ export function internalRunAutomationInput(
     billingCurrency: currency(input.billingCurrency),
     jobCapacity: jobCapacityEntitlement(input.jobCapacity)
   };
+}
+
+export function rankAutomationSchedule(value: unknown): RankTrackingAutomationSchedule {
+  const input = record(value, "schedule");
+  const cadence = input.cadence;
+  if (cadence === "ONCE") {
+    exactFields(input, ["cadence", "runAt"], "schedule");
+    const runAt = text(input.runAt, "schedule.runAt");
+    if (
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(runAt) ||
+      Number.isNaN(Date.parse(runAt))
+    ) {
+      invalid("schedule.runAt");
+    }
+    return { cadence, runAt: new Date(runAt).toISOString() };
+  }
+  return automationSchedule(value);
 }
 
 export function automationSchedule(value: unknown): AutomationSchedule {
@@ -261,8 +279,11 @@ function automationFields(input: Readonly<Record<string, unknown>>) {
       "trackingContextId"
     ),
     timezone,
-    schedule: automationSchedule(input.schedule),
-    maxItems: integer(input.maxItems, "maxItems", 1, 1_000),
+    schedule: rankAutomationSchedule(input.schedule),
+    maxPlatformChargeMicro: moneyLimit(
+      input.maxPlatformChargeMicro,
+      "maxPlatformChargeMicro"
+    ),
     failureThreshold: integer(
       input.failureThreshold,
       "failureThreshold",
@@ -271,6 +292,17 @@ function automationFields(input: Readonly<Record<string, unknown>>) {
     ),
     enabled: boolean(input.enabled, "enabled")
   };
+}
+
+function moneyLimit(value: unknown, path: string): string {
+  if (
+    typeof value !== "string" ||
+    !/^(?:0|[1-9]\d{0,29})$/u.test(value) ||
+    BigInt(value) > 9_223_372_036_854_775_807n
+  ) {
+    invalid(path);
+  }
+  return value;
 }
 
 function projectSnapshot(

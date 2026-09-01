@@ -1,19 +1,22 @@
 "use client";
 
 import type { AppProject } from "../lib/app-types";
-import { CustomSelect } from "./custom-select";
-import { ProjectSelectOption } from "./project-select-option";
+import { ProjectSelect } from "./project-select";
 
 type ProjectDestination = "notes" | "pages" | "tasks";
 
 export function ProjectContextSelect({
   destination,
+  canReorder,
   projectId,
-  projects
+  projects,
+  workspaceId
 }: Readonly<{
   destination: ProjectDestination;
+  canReorder: boolean;
   projectId: string;
   projects: readonly AppProject[];
+  workspaceId: string;
 }>) {
   function selectProject(nextProjectId: string): void {
     if (!nextProjectId || nextProjectId === projectId) return;
@@ -23,20 +26,15 @@ export function ProjectContextSelect({
   }
 
   return (
-    <CustomSelect
-      aria-label="Выбрать проект"
+    <ProjectSelect
+      ariaLabel="Выбрать проект"
+      canReorder={canReorder}
       className="project-context-select"
-      onChange={(event) => selectProject(event.currentTarget.value)}
-      searchable={projects.length > 8}
-      showSelectedCheck={false}
+      onChange={selectProject}
+      projects={projects}
       value={projectId}
-    >
-      {projects.map((project) => (
-        <option key={project.id} value={project.id}>
-          <ProjectSelectOption project={project} />
-        </option>
-      ))}
-    </CustomSelect>
+      workspaceId={workspaceId}
+    />
   );
 }
 

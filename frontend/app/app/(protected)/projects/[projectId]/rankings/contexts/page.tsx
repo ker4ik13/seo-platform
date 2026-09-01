@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { TrackingContextSettingsPanel } from "../../../../../../../components/tracking-context-settings";
+import { RankAutomationPanel } from "../../../../../../../components/rank-automation-panel";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Контексты позиций",
+  title: "Съём позиций",
   robots: {
     index: false,
     follow: false
@@ -26,10 +27,10 @@ export default async function TrackingContextsPage({
     <>
       <section className="page-heading">
         <div>
-          <h1>Контексты позиций</h1>
+          <h1>Съём позиций</h1>
           <p>
-            Сохраняйте папки, поисковик, регион, устройство и глубину для
-            повторных проверок без ручной настройки.
+            Настраивайте профили запуска, запускайте съём позже или создавайте
+            регулярные проверки по расписанию.
           </p>
         </div>
       </section>
@@ -41,7 +42,10 @@ export default async function TrackingContextsPage({
         projectId={project.id}
         workspaceRoleCode={context.workspace?.roleCode}
       />
-      <TrackingContextSettingsPanel projectId={project.id} />
+      <div className="ranking-contexts-settings-stack">
+        <RankAutomationPanel projectId={project.id} />
+        <TrackingContextSettingsPanel projectId={project.id} />
+      </div>
     </>
   );
 }

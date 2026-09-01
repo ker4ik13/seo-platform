@@ -86,6 +86,20 @@ Turbo для XMLStock Яндекс Live является launch-only execution o
 Расписание, provider/fallback и budget настраиваются связанными automation и
 connector policy, а не дублируются в context.
 
+Экран настройки называется «Съём позиций» и содержит как редактор профилей,
+так и список связанных расписаний. Rank automation поддерживает `DAILY`,
+`WEEKLY` и отложенный одноразовый `ONCE` с точным UTC `runAt`. ONCE после
+атомарного claim первого schedule run отключается с причиной
+`ONE_TIME_COMPLETED`; повторное планирование требует нового будущего runAt.
+No-overlap, optimistic version, manual run, pause/resume, max items и
+failure-threshold одинаковы для UI и публичного API. Automation хранит явный
+`maxPlatformChargeMicro` на один запуск: `0` означает BYOK-only. Перед каждым
+scheduled/manual run Jobs вызывает закрытый Core dispatch, а Core заново
+проверяет текущие RBAC, lifecycle, entitlement, quota, job capacity и trusted
+price book. Fresh estimate переходит в обычный RankRun reservation/settlement
+только когда точная цена не превышает cap; старые definitions нормализуются в
+BYOK-only и не получают неявного права списывать внутренние токены.
+
 Изменение контекста не переписывает историю. Любое изменение поисковой
 конфигурации создаёт новую immutable configuration version; rename,
 archive/restore меняют только revision логической сущности.
@@ -741,6 +755,13 @@ Private provider intent не открывается general Jobs runtime таб�
 owner-owned tenant-scoped projection возвращает только текст ключа и
 allowlisted execution-поля, а active-state вычисляет без физического имени
 worker.
+
+Один XMLStock keyword execution выполняет максимум 50 фактических provider
+HTTP попыток. Capacity/quota deferral не считается попыткой; READY на 50-й
+попытке разрешён, иначе item завершается `FAILED_FINAL` без 51-го запроса.
+Terminal result projection возвращает status, pollAttempts и allowlisted
+errorCode, а Web показывает такие keywords отдельным списком неснятых запросов.
+Arsenkin batch polling сохраняет собственную более длинную task-level границу.
 
 Источник выдачи является обязательной частью immutable estimate и request
 snapshot. В первом контуре поддерживаются XMLStock Яндекс Search API, Яндекс

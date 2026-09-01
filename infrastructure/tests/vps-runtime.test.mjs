@@ -20,10 +20,12 @@ const shellScripts = [
   "migrate-runtime.sh",
   "prepare-clamav.sh",
   "provision-object-storage.sh",
+  "public-api-proxy.sh",
   "rotate-nats-credentials.sh",
   "rotate-object-storage-root.sh",
   "run-component.sh",
   "runtime-lib.sh",
+  "smoke-public-api.sh",
   "smoke-runtime.sh",
   "start-runtime.sh",
   "status-runtime.sh",
@@ -247,6 +249,28 @@ test("public object-storage proxy is exact, TLS-enabled and never receives crede
     componentSource.match(/storage-proxy\)[\s\S]*?;;/)?.[0] ?? "",
     /MINIO_ROOT_|S3_ACCESS_KEY|S3_SECRET/,
   );
+});
+
+test("public API proxy exposes only versioned API routes over TLS", async () => {
+  const proxySource = await readVpsFile("public-api-proxy.sh");
+  const componentSource = await readVpsFile("run-component.sh");
+  const runtimeLibrarySource = await readVpsFile("runtime-lib.sh");
+  const startSource = await readVpsFile("start-runtime.sh");
+  const stopSource = await readVpsFile("stop-runtime.sh");
+
+  assert.match(proxySource, /API_PUBLIC_URL/u);
+  assert.match(proxySource, /api_listen=\$public_host:443/u);
+  assert.match(proxySource, /public_authority=\$public_host:4000/u);
+  assert.match(proxySource, /"\/api\/v1", "\/api\/v1\/\*"/u);
+  assert.doesNotMatch(proxySource, /\/internal\/v1/u);
+  assert.match(proxySource, /upstreams: \[\{dial: "127\.0\.0\.1:4000"\}\]/u);
+  assert.match(proxySource, /tls_connection_policies: \[\{\}\]/u);
+  assert.match(runtimeLibrarySource, /if \[ -n "\$\{API_PUBLIC_URL:-\}" \]/u);
+  assert.match(runtimeLibrarySource, /printf '%s\\n' "\$API_PUBLIC_URL"/u);
+  assert.match(componentSource, /API_PUBLIC_URL="\$\(public_api_endpoint\)"/u);
+  assert.match(componentSource, /API_PUBLIC_URL="\$\{API_PUBLIC_URL:-\}"/u);
+  assert.match(startSource, /start_window public-api-proxy[\s\S]*wait_for_public_api/u);
+  assert.match(stopSource, /public-api-proxy\.sh[\s\S]*remove/u);
 });
 
 test("runtime starts storage inspection before uploads and executes a real semantic smoke", async () => {

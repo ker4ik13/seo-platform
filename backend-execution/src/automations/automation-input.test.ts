@@ -38,7 +38,7 @@ const trusted = {
   }
 } as const;
 
-test("parses and normalizes a trusted weekly schedule", () => {
+test("accepts Core's exact paid schedule envelope and normalizes weekdays", () => {
   const value = {
     ...trusted,
     name: "Ночной съём",
@@ -50,7 +50,7 @@ test("parses and normalizes a trusted weekly schedule", () => {
       minute: 15,
       weekdays: [5, 1]
     },
-    maxItems: 500,
+    maxPlatformChargeMicro: "12500000",
     failureThreshold: 3,
     enabled: true,
     idempotencyKey: "rank-automation:create:one",
@@ -79,7 +79,7 @@ test("rejects unsafe schedule, entitlement and unknown fields", () => {
     trackingContextId: contextId,
     timezone: "UTC",
     schedule: { cadence: "DAILY", hour: 2, minute: 0 },
-    maxItems: 100,
+    maxPlatformChargeMicro: "0",
     failureThreshold: 3,
     enabled: true,
     idempotencyKey: "rank-automation:create:two",
@@ -92,7 +92,8 @@ test("rejects unsafe schedule, entitlement and unknown fields", () => {
   for (const value of [
     { ...base, timezone: "Invalid/Timezone" },
     { ...base, schedule: { cadence: "DAILY", hour: 24, minute: 0 } },
-    { ...base, maxItems: 1001 },
+    { ...base, maxItems: 100 },
+    { ...base, maxPlatformChargeMicro: "01" },
     {
       ...base,
       entitlement: { ...base.entitlement, scheduledAutomations: 0 }

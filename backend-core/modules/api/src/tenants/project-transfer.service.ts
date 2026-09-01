@@ -27,6 +27,10 @@ import type { RequestContext } from "../identity/identity.types.js";
 import { JobsClient } from "../jobs/jobs.client.js";
 import { OutboxService } from "../outbox/outbox.service.js";
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
+import {
+  lockWorkspaceProjectOrders,
+  nextProjectDisplayOrder
+} from "./project-order.js";
 
 const TRANSFER_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const RECONCILE_INTERVAL_MS = 5_000;
@@ -588,6 +592,18 @@ export class ProjectTransferService implements OnModuleInit, OnModuleDestroy {
         throw stateConflict("Destination workspace access changed during transfer");
       }
 
+      const lockedWorkspaces = await lockWorkspaceProjectOrders(transaction, [
+        current.workspaceId,
+        current.destinationWorkspaceId
+      ]);
+      if (lockedWorkspaces.length !== 2) {
+        throw stateConflict("Project transfer workspace is no longer available");
+      }
+      const displayOrder = await nextProjectDisplayOrder(
+        transaction,
+        current.destinationWorkspaceId
+      );
+
       const now = await databaseClock(transaction);
       const slug = await availableProjectSlug(
         transaction,
@@ -597,6 +613,15 @@ export class ProjectTransferService implements OnModuleInit, OnModuleDestroy {
       );
       await transaction.projectMemberAccess.deleteMany({
         where: { projectId: current.projectId }
+      });
+      // Project-scoped API grants belong to the source workspace. Keeping
+      // them would both retain stale authority and violate the composite
+      // project/workspace foreign key during the move.
+      await transaction.apiTokenProjectAccess.deleteMany({
+        where: {
+          projectId: current.projectId,
+          workspaceId: current.workspaceId
+        }
       });
       const projectChanged = await transaction.project.updateMany({
         where: {
@@ -609,6 +634,7 @@ export class ProjectTransferService implements OnModuleInit, OnModuleDestroy {
           workspaceId: current.destinationWorkspaceId,
           ownerUserId: current.toUserId,
           slug,
+          displayOrder,
           status: current.sourceProjectStatus,
           archivedAt:
             current.sourceProjectStatus === "ARCHIVED"

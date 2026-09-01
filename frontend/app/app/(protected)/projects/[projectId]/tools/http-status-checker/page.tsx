@@ -24,7 +24,12 @@ export default async function HttpStatusCheckerPage({
         <span aria-hidden="true">/</span>
         <span aria-current="page">Обход сайта</span>
       </nav>
-      <HttpStatusCheckTool project={project} projects={context.projects} />
+      <HttpStatusCheckTool
+        canReorderProjects={context.projectCapabilities?.canReorder ?? false}
+        project={project}
+        projects={context.projects}
+        workspaceId={context.workspace!.id}
+      />
     </>
   );
 }

@@ -160,6 +160,148 @@ test("soft-deletes a versioned project and emits an auditable event", async () =
   );
 });
 
+test("persists one complete shared project order under a workspace lock", async () => {
+  const workspaceId = "01900000-0000-7000-8000-000000000030";
+  const firstId = "01900000-0000-7000-8000-000000000031";
+  const secondId = "01900000-0000-7000-8000-000000000032";
+  const audits: unknown[] = [];
+  let updated = false;
+  const transaction = {
+    $queryRaw: async () => [{ id: workspaceId, status: "ACTIVE" }],
+    $executeRaw: async () => {
+      updated = true;
+      return 2;
+    },
+    workspaceMember: {
+      findUnique: async () => ({
+        id: "01900000-0000-7000-8000-000000000033",
+        allProjects: true,
+        projectAccesses: []
+      })
+    },
+    project: {
+      findMany: async () => [{ id: firstId }, { id: secondId }]
+    }
+  };
+  const service = new TenantService(
+    {
+      $transaction: async (
+        callback: (client: typeof transaction) => Promise<unknown>
+      ) => callback(transaction)
+    } as unknown as PrismaService,
+    {
+      record: async (input: unknown) => {
+        audits.push(input);
+      }
+    } as unknown as AuditService,
+    {} as OutboxService,
+    {} as BillingEntitlementService
+  );
+
+  const result = await service.reorderProjects(
+    currentUserId,
+    workspaceId,
+    {
+      expectedProjectIds: [firstId, secondId],
+      projectIds: [secondId, firstId]
+    },
+    { requestId: "request-project-order-001" }
+  );
+
+  assert.deepEqual(result.projectIds, [secondId, firstId]);
+  assert.equal(updated, true);
+  assert.equal(
+    (audits[0] as { action: string }).action,
+    "project.order.updated"
+  );
+});
+
+test("rejects a stale or incomplete project order before writing", async () => {
+  const workspaceId = "01900000-0000-7000-8000-000000000040";
+  const firstId = "01900000-0000-7000-8000-000000000041";
+  const secondId = "01900000-0000-7000-8000-000000000042";
+  let updated = false;
+  const transaction = {
+    $queryRaw: async () => [{ id: workspaceId, status: "ACTIVE" }],
+    $executeRaw: async () => {
+      updated = true;
+      return 1;
+    },
+    workspaceMember: {
+      findUnique: async () => ({ allProjects: true, projectAccesses: [] })
+    },
+    project: {
+      findMany: async () => [{ id: firstId }, { id: secondId }]
+    }
+  };
+  const service = new TenantService(
+    {
+      $transaction: async (
+        callback: (client: typeof transaction) => Promise<unknown>
+      ) => callback(transaction)
+    } as unknown as PrismaService,
+    {} as AuditService,
+    {} as OutboxService,
+    {} as BillingEntitlementService
+  );
+
+  await assert.rejects(
+    service.reorderProjects(
+      currentUserId,
+      workspaceId,
+      {
+        expectedProjectIds: [secondId, firstId],
+        projectIds: [firstId, secondId]
+      },
+      { requestId: "request-project-order-stale" }
+    ),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "VERSION_CONFLICT"
+  );
+  assert.equal(updated, false);
+});
+
+test("reports project creation capacity and shared-order permission", async () => {
+  const workspaceId = "01900000-0000-7000-8000-000000000050";
+  const service = new TenantService(
+    {
+      workspaceMember: {
+        findUnique: async () => ({
+          id: "01900000-0000-7000-8000-000000000051",
+          allProjects: true,
+          projectAccesses: []
+        })
+      }
+    } as unknown as PrismaService,
+    {} as AuditService,
+    {} as OutboxService,
+    {
+      projectCapacity: async () => ({ used: 2, limit: 3 })
+    } as unknown as BillingEntitlementService
+  );
+
+  assert.deepEqual(
+    await service.projectCollectionCapabilities(
+      currentUserId,
+      workspaceId,
+      "OWNER",
+      "ACTIVE"
+    ),
+    {
+      creation: {
+        allowed: true,
+        reason: "AVAILABLE",
+        used: 2,
+        limit: 3
+      },
+      canReorder: true
+    }
+  );
+});
+
 function workspace(id: string, ownerUserId: string, name: string) {
   const createdAt = new Date("2026-08-01T10:00:00.000Z");
   return {

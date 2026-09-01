@@ -4,6 +4,7 @@ import { CrawlNotificationClient } from "./crawl-notification.client.js";
 import { JobNotificationClient } from "./job-notification.client.js";
 import { RankBillingSettlementClient } from "./rank-billing-settlement.client.js";
 import { RankExecutionGrantClient } from "./rank-execution-grant.client.js";
+import { RankAutomationDispatchClient } from "./rank-automation-dispatch.client.js";
 
 @Module({
   providers: [
@@ -11,14 +12,16 @@ import { RankExecutionGrantClient } from "./rank-execution-grant.client.js";
     CrawlNotificationClient,
     JobNotificationClient,
     RankBillingSettlementClient,
-    RankExecutionGrantClient
+    RankExecutionGrantClient,
+    RankAutomationDispatchClient
   ],
   exports: [
     CrawlAutomationDispatchClient,
     CrawlNotificationClient,
     JobNotificationClient,
     RankBillingSettlementClient,
-    RankExecutionGrantClient
+    RankExecutionGrantClient,
+    RankAutomationDispatchClient
   ]
 })
 export class PlatformApiModule {}

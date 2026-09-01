@@ -1,7 +1,7 @@
 import { validationError } from "../common/domain-error.js";
 import type {
-  AutomationSchedule,
   CreateRankTrackingAutomationInput,
+  RankTrackingAutomationSchedule,
   UpdateRankTrackingAutomationInput
 } from "@seo-platform/contracts";
 import { assertUuid } from "../common/identifier.js";
@@ -32,15 +32,18 @@ export function assertEmptyAutomationStatusInput(value: unknown): void {
 function automationInput(
   value: unknown
 ): CreateRankTrackingAutomationInput {
-  const input = exactRecord(value, [
+  const input = record(value, "body");
+  exactFields(input, [
     "name",
     "trackingContextId",
     "timezone",
     "schedule",
-    "maxItems",
+    ...(input.maxPlatformChargeMicro === undefined
+      ? []
+      : ["maxPlatformChargeMicro"]),
     "failureThreshold",
     "enabled"
-  ]);
+  ], "body");
   const name = text(input.name, "name").normalize("NFC");
   if (
     name.length > 160 ||
@@ -57,7 +60,13 @@ function automationInput(
     ),
     timezone: timezone(input.timezone),
     schedule: schedule(input.schedule),
-    maxItems: integer(input.maxItems, "maxItems", 1, 1_000),
+    maxPlatformChargeMicro:
+      input.maxPlatformChargeMicro === undefined
+        ? "0"
+        : moneyLimit(
+            input.maxPlatformChargeMicro,
+            "maxPlatformChargeMicro"
+          ),
     failureThreshold: integer(
       input.failureThreshold,
       "failureThreshold",
@@ -68,9 +77,28 @@ function automationInput(
   };
 }
 
-function schedule(value: unknown): AutomationSchedule {
+function moneyLimit(value: unknown, path: string): string {
+  if (
+    typeof value !== "string" ||
+    !/^(?:0|[1-9]\d{0,29})$/u.test(value) ||
+    BigInt(value) > 9_223_372_036_854_775_807n
+  ) {
+    invalid(path);
+  }
+  return value;
+}
+
+function schedule(value: unknown): RankTrackingAutomationSchedule {
   const input = record(value, "schedule");
   const cadence = input.cadence;
+  if (cadence === "ONCE") {
+    exactFields(input, ["cadence", "runAt"], "schedule");
+    const runAt = iso(input.runAt, "schedule.runAt");
+    if (Date.parse(runAt) < Date.now() + 30_000) {
+      invalid("schedule.runAt");
+    }
+    return { cadence, runAt };
+  }
   exactFields(
     input,
     cadence === "WEEKLY"
@@ -99,6 +127,17 @@ function schedule(value: unknown): AutomationSchedule {
     invalid("schedule.weekdays");
   }
   return { cadence, hour, minute, weekdays };
+}
+
+function iso(value: unknown, path: string): string {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value) ||
+    Number.isNaN(Date.parse(value))
+  ) {
+    invalid(path);
+  }
+  return new Date(value).toISOString();
 }
 
 function timezone(value: unknown): string {
@@ -138,15 +177,6 @@ function boolean(value: unknown, path: string): boolean {
 function text(value: unknown, path: string): string {
   if (typeof value !== "string" || !value.trim()) invalid(path);
   return value.trim();
-}
-
-function exactRecord(
-  value: unknown,
-  fields: readonly string[]
-): Readonly<Record<string, unknown>> {
-  const input = record(value, "body");
-  exactFields(input, fields, "body");
-  return input;
 }
 
 function exactFields(

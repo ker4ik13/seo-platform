@@ -294,6 +294,7 @@ model User {
   platformRoles         PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleUser")
   assignedPlatformRoles PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleAssignedBy")
   revokedPlatformRoles  PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleRevokedBy")
+  apiTokens             ApiToken[]
 
   @@index([status, createdAt])
   @@map("users")
@@ -438,6 +439,50 @@ model AuthRateLimitBucket {
   @@map("auth_rate_limit_buckets")
 }
 
+model ApiToken {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  createdBy   String    @map("created_by") @db.Uuid
+  name        String    @db.VarChar(100)
+  prefix      String    @db.VarChar(24)
+  tokenHash   String    @unique(map: "api_tokens_token_hash_key") @map("token_hash") @db.Char(64)
+  previousTokenHash       String?   @map("previous_token_hash") @db.Char(64)
+  previousTokenValidUntil DateTime? @map("previous_token_valid_until") @db.Timestamptz(6)
+  scopes      Json
+  allProjects Boolean   @default(false) @map("all_projects")
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace       Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator         User                    @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  projectAccesses ApiTokenProjectAccess[]
+
+  @@unique([id, workspaceId], map: "api_tokens_tenant_id_key")
+  @@index([workspaceId, createdBy, createdAt])
+  @@index([workspaceId, revokedAt, expiresAt])
+  @@index([previousTokenHash, previousTokenValidUntil])
+  @@map("api_tokens")
+}
+
+model ApiTokenProjectAccess {
+  apiTokenId String   @map("api_token_id") @db.Uuid
+  workspaceId String  @map("workspace_id") @db.Uuid
+  projectId  String   @map("project_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  apiToken  ApiToken  @relation(fields: [apiTokenId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([apiTokenId, projectId])
+  @@index([workspaceId, projectId])
+  @@map("api_token_project_accesses")
+}
+
 model Workspace {
   id              String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name            String          @db.VarChar(160)
@@ -470,6 +515,8 @@ model Workspace {
   npdReceiptObligations       NpdReceiptObligation[]
   rankExecutionQuotaOverride  RankExecutionQuotaOverride?
   projectCapacityOverride     ProjectCapacityOverride?
+  apiTokens                   ApiToken[]
+  apiTokenProjectAccesses     ApiTokenProjectAccess[]
 
   @@index([ownerUserId])
   @@index([status, createdAt])
@@ -562,6 +609,7 @@ model Project {
   searchCityYandexRegionCode String?       @map("search_city_yandex_region_code") @db.VarChar(16)
   searchCityGoogleRegionCode String?       @map("search_city_google_region_code") @db.VarChar(16)
   status                     ProjectStatus @default(DRAFT)
+  displayOrder               Int           @default(0) @map("display_order")
   createdBy                  String        @map("created_by") @db.Uuid
   ownerUserId                String        @map("owner_user_id") @db.Uuid
   version                    Int           @default(1)
@@ -574,8 +622,11 @@ model Project {
   logo             ProjectLogo?
   memberAccesses   ProjectMemberAccess[]
   transferRequests ProjectTransferRequest[]
+  apiTokenAccesses ApiTokenProjectAccess[]
 
   @@unique([workspaceId, slug])
+  @@unique([id, workspaceId], map: "projects_tenant_id_key")
+  @@index([workspaceId, displayOrder, createdAt, id])
   @@index([workspaceId, status, createdAt])
   @@index([ownerUserId, status])
   @@map("projects")

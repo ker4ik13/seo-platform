@@ -8,7 +8,10 @@ import type {
   InternalUpdateSemanticClusterInput,
   SemanticClusterPageSource
 } from "@seo-platform/contracts";
-import { semanticClusterPageSources } from "@seo-platform/contracts";
+import {
+  semanticClusterPageBulkMaxItems,
+  semanticClusterPageSources
+} from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
 
 const PAGE_SOURCES = new Set<string>(semanticClusterPageSources);
@@ -64,7 +67,11 @@ export function internalSemanticClusterPageBulkInput(
     "pageMappingRationale"
   ]);
   if (!Object.hasOwn(input, "primaryPageId")) invalid("primaryPageId");
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > semanticClusterPageBulkMaxItems
+  ) {
     invalid("items");
   }
   const items = input.items.map((value) => {

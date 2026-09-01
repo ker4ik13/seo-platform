@@ -5,6 +5,7 @@ import {
   MODULE_METADATA
 } from "@nestjs/common/constants.js";
 import { AppModule } from "../app.module.js";
+import { ApiTokenAuthenticationService } from "./api-token-authentication.service.js";
 import { IdentityModule } from "./identity.module.js";
 import { SessionCookieService } from "./session-cookie.service.js";
 import {
@@ -29,6 +30,7 @@ test("every controller module using session guards imports IdentityModule", () =
   visitModule(AppModule, visitedModules, guardedModules);
 
   assert.deepEqual(guardedModules.sort(), [
+    "ApiTokenModule",
     "BillingModule",
     "CrawlModule",
     "IntegrationModule",
@@ -55,6 +57,7 @@ test("IdentityModule exports session guard dependencies to controller modules", 
   for (const requiredExport of [
     SessionService,
     SessionCookieService,
+    ApiTokenAuthenticationService,
     SessionAuthGuard,
     CsrfSessionGuard
   ]) {

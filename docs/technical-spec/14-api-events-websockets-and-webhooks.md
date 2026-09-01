@@ -993,11 +993,47 @@ Bulk update принимает:
   IP limits, отдельную очередь и не принимает API tokens;
 - Trial получает sandbox/ограниченный read API без системных платных расходов.
 
+Реализованный personal API token MVP использует существующие tenant-scoped
+`/api/v1` controllers, поэтому UI и агент не расходятся по estimate,
+idempotency, billing и permission checks. Управление доступно cookie-session
+пользователю на `/api/v1/workspaces/{workspaceId}/api-tokens`: list, create,
+full rights/project replacement, rotate и revoke. Token имеет формат
+`seo_pat_*`; plaintext возвращается только create/rotate response, после чего
+остаётся HMAC hash и display prefix. При rotate прежний hash действует ещё 10
+минут для bounded handover; revoke блокирует обе версии немедленно. Каждый
+запрос ограничен workspace,
+project allowlist, current permissions создавшего пользователя и одним из
+отдельных scopes: projects, semantics, positions, frequency, AI, research,
+audits, pages, notes, integrations или automations. Position и frequency run
+scopes намеренно не взаимозаменяемы. Restricted token получает только
+allowlisted проекты даже из workspace project collection.
+
+`GET /api/v1/workspaces/{workspaceId}/project-capabilities` возвращает
+effective возможность создания, usage/limit и право менять общий порядок.
+`PUT /api/v1/workspaces/{workspaceId}/projects/order` принимает
+`expectedProjectIds` и `projectIds` как две полные перестановки текущей
+workspace collection. Endpoint требует `workspace.update`, полный project
+access и отклоняет restricted token, неизвестный/повторный ID и concurrent
+изменение precondition-ошибкой. Collection проектов не имеет искусственного
+presentation limit и всегда следует Core-owned `display_order`.
+
+Bearer принимается только handler-ом, где одновременно заданы
+`@RequirePermission` и `TenantPermissionGuard`; account, team, billing,
+realtime ticket и управление самими API tokens остаются session-only. При
+наличии Authorization невалидный Bearer никогда не заменяется cookie-сессией.
+Отдельный per-token DB rate bucket ограничивает 600 запросов в минуту, а
+`lastUsedAt` записывается не чаще одного раза в минуту. Полная human-readable
+документация и примеры опубликованы на `/docs/api`.
+
 Документация:
 
-- индексируемый портал — `https://example.com/docs/api`;
+- индексируемый портал — `${WEB_PUBLIC_URL}/docs/api`;
+- base URL каждого примера вычисляется во время SSR как
+  `${API_PUBLIC_URL}/api/v1`; IP, hostname и порт окружения в исходниках не
+  фиксируются;
 - versioned reference генерируется из `platform-contracts`;
-- OpenAPI JSON — `https://api.example.com/openapi/v1.json`;
+- OpenAPI JSON публикуется относительно того же `API_PUBLIC_URL` после
+  включения generated reference;
 - интерактивный Explorer хранит token только в памяти вкладки;
 - examples используют синтетические данные;
 - breaking changes публикуются до отключения версии.

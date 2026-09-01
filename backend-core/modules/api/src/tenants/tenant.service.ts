@@ -4,13 +4,17 @@ import {
   type CreateProjectInput,
   type CreateWorkspaceInput,
   type DeleteProjectInput,
+  type ProjectCollectionCapabilities,
   type ProjectDeletionResult,
+  type ProjectOrderResult,
   type ProjectSummary,
+  type ReorderProjectsInput,
   type UpdateProjectInput,
   type UpdateWorkspaceInput,
   type WorkspaceSummary
 } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
+import { hasSystemPermission } from "../authorization/permissions.js";
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import {
   DomainError,
@@ -33,6 +37,10 @@ import {
   toWorkspaceSummary
 } from "./tenant.mapper.js";
 import type { WorkspaceAvatarInput } from "./tenant-input.js";
+import {
+  lockWorkspaceProjectOrders,
+  nextProjectDisplayOrder
+} from "./project-order.js";
 
 interface WorkspaceOwnerRecord {
   readonly id: string;
@@ -434,12 +442,162 @@ export class TenantService {
           take: 1
         }
       },
-      orderBy: { createdAt: "asc" },
-      take: 1_000
+      orderBy: [
+        { displayOrder: "asc" },
+        { createdAt: "asc" },
+        { id: "asc" }
+      ]
     });
     return projects.map(({ logo, memberAccesses, ...project }) =>
       toProjectSummary(project, memberAccesses[0]?.level, logo)
     );
+  }
+
+  public async projectCollectionCapabilities(
+    userId: string,
+    workspaceId: string,
+    roleCode: string,
+    workspaceStatus: "ACTIVE" | "READ_ONLY"
+  ): Promise<ProjectCollectionCapabilities> {
+    const [capacity, membership] = await Promise.all([
+      this.entitlements.projectCapacity(workspaceId),
+      this.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId, userId } },
+        select: {
+          id: true,
+          allProjects: true,
+          projectAccesses: {
+            where: { level: "NONE" },
+            select: { id: true },
+            take: 1
+          }
+        }
+      })
+    ]);
+    if (!membership) throw this.notFound();
+    const canCreateByRole = hasSystemPermission(roleCode, "project.create");
+    const reason =
+      workspaceStatus !== "ACTIVE"
+        ? "WORKSPACE_READ_ONLY"
+        : !canCreateByRole
+          ? "PERMISSION_REQUIRED"
+          : capacity.used >= capacity.limit
+            ? "LIMIT_REACHED"
+            : "AVAILABLE";
+    return {
+      creation: {
+        allowed: reason === "AVAILABLE",
+        reason,
+        ...capacity
+      },
+      canReorder:
+        workspaceStatus === "ACTIVE" &&
+        hasSystemPermission(roleCode, "workspace.update") &&
+        membership.allProjects &&
+        membership.projectAccesses.length === 0
+    };
+  }
+
+  public async reorderProjects(
+    userId: string,
+    workspaceId: string,
+    input: ReorderProjectsInput,
+    context: RequestContext
+  ): Promise<ProjectOrderResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      const locked = await lockWorkspaceProjectOrders(transaction, [workspaceId]);
+      if (locked.length !== 1) throw this.notFound();
+      if (locked[0]?.status !== "ACTIVE") {
+        throw new DomainError({
+          statusCode: 402,
+          code: "PAYMENT_REQUIRED",
+          message: "Workspace is read-only; project order cannot be changed"
+        });
+      }
+      const membership = await transaction.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId, userId } },
+        select: {
+          id: true,
+          allProjects: true,
+          projectAccesses: {
+            where: { level: "NONE" },
+            select: { id: true },
+            take: 1
+          }
+        }
+      });
+      if (
+        !membership?.allProjects ||
+        membership.projectAccesses.length !== 0
+      ) {
+        throw new DomainError({
+          statusCode: 403,
+          code: "FORBIDDEN",
+          message: "Complete workspace project access is required to reorder projects"
+        });
+      }
+      const current = await transaction.project.findMany({
+        where: {
+          workspaceId,
+          status: { notIn: ["DELETING", "DELETED"] }
+        },
+        select: { id: true },
+        orderBy: [
+          { displayOrder: "asc" },
+          { createdAt: "asc" },
+          { id: "asc" }
+        ]
+      });
+      const currentProjectIds = current.map(({ id }) => id);
+      if (!sameOrder(input.expectedProjectIds, currentProjectIds)) {
+        throw new DomainError({
+          statusCode: 412,
+          code: "VERSION_CONFLICT",
+          message: "Project order was changed by another user",
+          details: { currentProjectIds }
+        });
+      }
+      if (!sameProjectSet(input.projectIds, currentProjectIds)) {
+        throw validationError(
+          "projectIds",
+          "INCOMPLETE_PROJECT_ORDER",
+          "Project order must contain every active workspace project exactly once"
+        );
+      }
+      if (sameOrder(input.projectIds, currentProjectIds)) {
+        return { projectIds: currentProjectIds };
+      }
+      const changed = await transaction.$executeRaw`
+        WITH requested AS (
+          SELECT value::uuid AS "id", (ordinality - 1)::integer AS "display_order"
+          FROM jsonb_array_elements_text(${JSON.stringify(input.projectIds)}::jsonb)
+          WITH ORDINALITY
+        )
+        UPDATE "projects" AS project
+        SET
+          "display_order" = requested."display_order",
+          "updated_at" = clock_timestamp()
+        FROM requested
+        WHERE project."id" = requested."id"
+          AND project."workspace_id" = ${workspaceId}::uuid
+          AND project."status" NOT IN ('DELETING', 'DELETED')
+      `;
+      if (changed !== input.projectIds.length) {
+        throw new Error("Project order update did not cover the complete workspace")
+      }
+      await this.audit.record(
+        {
+          actorId: userId,
+          workspaceId,
+          action: "project.order.updated",
+          resourceType: "workspace",
+          resourceId: workspaceId,
+          requestId: context.requestId
+        },
+        transaction
+      );
+      return { projectIds: [...input.projectIds] };
+    });
   }
 
   public async createProject(
@@ -472,6 +630,15 @@ export class TenantService {
 
     try {
       const project = await this.prisma.$transaction(async (transaction) => {
+        const locked = await lockWorkspaceProjectOrders(transaction, [workspaceId]);
+        if (locked.length !== 1) throw this.notFound();
+        if (locked[0]?.status !== "ACTIVE") {
+          throw new DomainError({
+            statusCode: 402,
+            code: "PAYMENT_REQUIRED",
+            message: "New projects are unavailable in workspace read-only mode"
+          });
+        }
         await this.entitlements.assertCanCreateProject(
           transaction,
           workspaceId
@@ -496,6 +663,10 @@ export class TenantService {
                 }
               : {}),
             status: "ACTIVE",
+            displayOrder: await nextProjectDisplayOrder(
+              transaction,
+              workspaceId
+            ),
             createdBy: userId,
             ownerUserId: workspace.ownerUserId
           }
@@ -892,4 +1063,23 @@ function requiredWorkspaceOwner(
     throw new Error("Workspace owner record is missing");
   }
   return owner;
+}
+
+function sameOrder(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((projectId, index) => projectId === right[index])
+  );
+}
+
+function sameProjectSet(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  if (left.length !== right.length) return false;
+  const expected = new Set(right);
+  return left.every((projectId) => expected.has(projectId));
 }

@@ -134,7 +134,7 @@ import {
   type KeywordDataGridRowPresence
 } from "./keyword-data-grid";
 import { Icon } from "./icon";
-import { ProjectSelectOption } from "./project-select-option";
+import { ProjectSelect } from "./project-select";
 import {
   requestProjectOperationActivityRefresh,
   useProjectActiveOperationCount
@@ -289,6 +289,7 @@ const MANUAL_KEYWORD_LIMIT = 2_000;
 const SEMANTIC_KEYWORD_EDITOR_FORM_ID = "semantic-keyword-editor-form";
 
 interface SemanticCoreTableProps {
+  readonly canReorderProjects: boolean;
   readonly currentUserId: string;
   readonly columnRefreshVersion: number;
   readonly clusterRefreshVersion: number;
@@ -323,6 +324,7 @@ interface SemanticExportDialogState {
 }
 
 export function SemanticCoreTable({
+  canReorderProjects,
   currentUserId,
   columnRefreshVersion,
   clusterRefreshVersion,
@@ -3224,19 +3226,14 @@ export function SemanticCoreTable({
             <span className="semantic-desktop-title">Семантическое ядро</span>
             <span className="semantic-mobile-title">Семантика</span>
           </h1>
-          <CustomSelect
-            aria-label="Проект семантического ядра"
-            onChange={(event) => selectProject(event.target.value)}
-            searchable={projectOptions.length > 8}
-            showSelectedCheck={false}
+          <ProjectSelect
+            ariaLabel="Проект семантического ядра"
+            canReorder={canReorderProjects}
+            onChange={selectProject}
+            projects={projectOptions}
             value={projectId}
-          >
-            {projectOptions.map((project) => (
-              <option key={project.id} value={project.id}>
-                <ProjectSelectOption project={project} />
-              </option>
-            ))}
-          </CustomSelect>
+            workspaceId={workspaceId}
+          />
         </div>
         <dl className="semantic-summary">
           <div>

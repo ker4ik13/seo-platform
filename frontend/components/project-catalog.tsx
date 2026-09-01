@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import type { ProjectCollectionCapabilities } from "@seo-platform/contracts";
 import type { AppProject, AppWorkspace } from "../lib/app-types";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import { projectCreationErrorMessage } from "../lib/project-creation-error";
@@ -9,15 +10,22 @@ import { ProjectFavicon } from "./project-favicon";
 
 export function ProjectCatalog({
   activeProjectId,
+  capabilities,
+  initialCreateOpen = false,
   projects,
   workspace
 }: Readonly<{
   activeProjectId?: string;
+  capabilities?: ProjectCollectionCapabilities;
+  initialCreateOpen?: boolean;
   projects: readonly AppProject[];
   workspace: AppWorkspace;
 }>) {
   const [query, setQuery] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  const canCreate = capabilities?.creation.allowed ?? false;
+  const [createOpen, setCreateOpen] = useState(
+    initialCreateOpen && canCreate
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [duplicateConfirmation, setDuplicateConfirmation] = useState(false);
@@ -96,7 +104,13 @@ export function ProjectCatalog({
           />
         </label>
         <span>{visibleProjects.length} из {projects.length}</span>
-        <button className="primary-button" onClick={() => setCreateOpen(true)} type="button">
+        <button
+          className="primary-button"
+          disabled={!canCreate}
+          onClick={() => setCreateOpen(true)}
+          title={projectCreationAvailabilityLabel(capabilities)}
+          type="button"
+        >
           <Icon name="plus" /> Новый проект
         </button>
       </div>
@@ -111,7 +125,13 @@ export function ProjectCatalog({
               : "Измените поисковый запрос или очистите поле."}
           </p>
           {projects.length === 0 && (
-            <button className="primary-button" onClick={() => setCreateOpen(true)} type="button">
+            <button
+              className="primary-button"
+              disabled={!canCreate}
+              onClick={() => setCreateOpen(true)}
+              title={projectCreationAvailabilityLabel(capabilities)}
+              type="button"
+            >
               <Icon name="plus" /> Создать проект
             </button>
           )}
@@ -245,4 +265,18 @@ function projectAccessLabel(level: AppProject["projectAccessLevel"]): string {
   if (level === "VIEWER") return "Наблюдатель";
   if (level === "NONE") return "Нет доступа";
   return "По роли";
+}
+
+function projectCreationAvailabilityLabel(
+  capabilities: ProjectCollectionCapabilities | undefined
+): string | undefined {
+  const creation = capabilities?.creation;
+  if (!creation || creation.allowed) return undefined;
+  if (creation.reason === "LIMIT_REACHED") {
+    return `Лимит проектов исчерпан: ${creation.used} из ${creation.limit}`;
+  }
+  if (creation.reason === "WORKSPACE_READ_ONLY") {
+    return "Рабочая область доступна только для чтения";
+  }
+  return "Недостаточно прав для создания проекта";
 }

@@ -51,6 +51,14 @@ do
   printf 'endpoint=%s status=%s\n' "$endpoint" "${status:-unreachable}"
 done
 
+public_api_status=$(
+  curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --max-time 2 "$(public_api_endpoint)/api/v1/workspaces" 2>/dev/null || true
+)
+printf 'endpoint=%s status=%s\n' \
+  "$(public_api_endpoint)/api/v1/workspaces" \
+  "${public_api_status:-unreachable}"
+
 if python3 -c \
   'import socket; s=socket.create_connection(("127.0.0.1",3310),2); s.sendall(b"zPING\0"); ok=s.recv(16)==b"PONG\0"; s.close(); raise SystemExit(0 if ok else 1)' \
   >/dev/null 2>&1

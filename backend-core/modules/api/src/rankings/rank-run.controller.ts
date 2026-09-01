@@ -113,7 +113,33 @@ export class RankRunController {
       )
     ]);
     const { workspaceId: _workspaceId, projectId: _projectId, ...safe } = result;
-    return apiResponse(request, { ...safe, job });
+    if (job.provider !== "XMLSTOCK") {
+      return apiResponse(request, { ...safe, job });
+    }
+    const scope = await this.jobs.getRankOperationScope(
+      context,
+      canonicalJobId,
+      page.limit,
+      page.cursor
+    );
+    if (
+      scope.page.hasNext !== safe.page.hasNext ||
+      scope.page.nextCursor !== safe.page.nextCursor ||
+      scope.items.length !== safe.rows.length
+    ) {
+      throw new Error("XMLStock rank operation scope does not match result page");
+    }
+    return apiResponse(request, {
+      ...safe,
+      job,
+      rows: safe.rows.map((row, index) => {
+        const item = scope.items[index];
+        if (!item || item.sequence !== row.sequence) {
+          throw new Error("XMLStock rank operation result join is incomplete");
+        }
+        return { ...row, ...item };
+      })
+    });
   }
 
   @Get("jobs/:jobId/runtime-diagnostics")

@@ -173,6 +173,37 @@ export interface ProjectSummary {
   readonly createdAt: string;
 }
 
+export const projectCreationAvailabilityReasons = [
+  "AVAILABLE",
+  "PERMISSION_REQUIRED",
+  "WORKSPACE_READ_ONLY",
+  "LIMIT_REACHED"
+] as const;
+
+export type ProjectCreationAvailabilityReason =
+  (typeof projectCreationAvailabilityReasons)[number];
+
+export interface ProjectCollectionCapabilities {
+  readonly creation: {
+    readonly allowed: boolean;
+    readonly reason: ProjectCreationAvailabilityReason;
+    readonly used: number;
+    readonly limit: number;
+  };
+  readonly canReorder: boolean;
+}
+
+export interface ReorderProjectsInput {
+  /** Exact order last observed by the caller. Used as an optimistic precondition. */
+  readonly expectedProjectIds: readonly string[];
+  /** Exact complete workspace order requested by the caller. */
+  readonly projectIds: readonly string[];
+}
+
+export interface ProjectOrderResult {
+  readonly projectIds: readonly string[];
+}
+
 export interface ProjectSearchCity {
   readonly name: string;
   readonly yandexRegionCode: string;

@@ -24,7 +24,7 @@ export class CrawlAutomationDispatchGuard implements CanActivate {
     const expected = this.config.automationDispatchApiToken;
     if (!expected) {
       throw new ServiceUnavailableException(
-        "Crawl automation dispatch authentication is not configured"
+        "Automation dispatch authentication is not configured"
       );
     }
     const provided = singleDispatchHeader(
@@ -33,7 +33,7 @@ export class CrawlAutomationDispatchGuard implements CanActivate {
     );
     if (!provided || !tokensEqual(expected, provided)) {
       throw new UnauthorizedException(
-        "Crawl automation dispatch authentication failed"
+        "Automation dispatch authentication failed"
       );
     }
     return true;

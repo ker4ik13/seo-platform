@@ -23,6 +23,7 @@ export function SettingsTabs({
     | "roles"
     | "project"
     | "security"
+    | "api"
     | "notifications"
     | "integrations"
     | "project-notifications"
@@ -59,6 +60,16 @@ export function SettingsTabs({
         <Icon name="bell" />
         Уведомления
       </Link>
+      {workspaceRoleCode && (
+        <Link
+          aria-current={active === "api" ? "page" : undefined}
+          className={active === "api" ? "active" : undefined}
+          href="/app/settings/api"
+        >
+          <Icon name="tools" />
+          API-ключи
+        </Link>
+      )}
       <span className="settings-tabs-heading">Рабочая область</span>
       <Link
         aria-current={active === "workspace" ? "page" : undefined}
@@ -162,7 +173,7 @@ export function SettingsTabs({
             href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}
           >
             <Icon name="positions" />
-            Контексты позиций
+            Съём позиций
           </Link>
         </>
       )}

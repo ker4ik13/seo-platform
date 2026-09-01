@@ -49,6 +49,10 @@ import {
 import { operationStatusLabel } from "../lib/operation-status-presentation";
 import { projectPresenceAvatarUrl } from "../lib/project-presence";
 import {
+  rankFailureReason,
+  rankPollAttempts
+} from "../lib/rank-result-presentation";
+import {
   rememberClusterFolderAction,
   rememberClusterFolderDestination,
   serializeClusterFolderOverride,
@@ -1983,23 +1987,63 @@ function formatRuntimeNextAction(value: string | undefined): string {
 
 function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.job.status)} />;
+  const active = isActiveStatus(result.job.status);
+  const failedRows = active
+    ? []
+    : result.rows.filter(({ state }) => state === "PENDING");
+  const resultRows = failedRows.length === 0
+    ? result.rows
+    : result.rows.filter(({ state }) => state !== "PENDING");
   return (
-    <div className={styles.tableScroll}>
-      <table className={styles.table}>
-        <caption>Позиции запросов этого запуска</caption>
-        <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Проверено</th></tr></thead>
-        <tbody>{result.rows.map((row) => (
-          <tr key={`${row.sequence}:${row.keywordId}`}>
-            <td>{row.sequence + 1}</td>
-            <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
-            <td><RankState state={row.state} /></td>
-            <td className={styles.numberCell}>{rankPosition(row)}</td>
-            <td className={styles.urlCell}><ExternalUrl value={row.rankingUrl} /></td>
-            <td className={styles.longCell} title={row.title ?? row.snippet}>{row.title ?? row.snippet ?? "—"}</td>
-            <td>{formatDateTime(row.observedAt)}</td>
-          </tr>
-        ))}</tbody>
-      </table>
+    <div className={styles.rankResults}>
+      {resultRows.length > 0 && (
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <caption>Позиции запросов этого запуска</caption>
+            <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Проверено</th></tr></thead>
+            <tbody>{resultRows.map((row) => (
+              <tr key={`${row.sequence}:${row.keywordId}`}>
+                <td>{row.sequence + 1}</td>
+                <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
+                <td><RankState state={row.state} /></td>
+                <td className={styles.numberCell}>{rankPosition(row)}</td>
+                <td className={styles.urlCell}><ExternalUrl value={row.rankingUrl} /></td>
+                <td className={styles.longCell} title={row.title ?? row.snippet}>{row.title ?? row.snippet ?? "—"}</td>
+                <td>{formatDateTime(row.observedAt)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {failedRows.length > 0 && (
+        <section className={styles.rankFailures} aria-labelledby="rank-failures-title">
+          <header>
+            <div>
+              <strong id="rank-failures-title">Не удалось снять позиции</strong>
+              <small>Эти запросы завершены с ошибкой и больше не выполняются в этом запуске.</small>
+            </div>
+            <span>{formatInteger(failedRows.length)}</span>
+          </header>
+          <div className={styles.tableScroll}>
+            <table className={`${styles.table} ${styles.rankFailureTable}`}>
+              <caption>Запросы без результата после завершения сбора</caption>
+              <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Причина</th><th>Попытки провайдера</th></tr></thead>
+              <tbody>{failedRows.map((row) => (
+                <tr key={`failed:${row.sequence}:${row.keywordId}`}>
+                  <td>{row.sequence + 1}</td>
+                  <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
+                  <td><span className={`${styles.itemStatus} ${styles.failed}`}>Не снят</span></td>
+                  <td className={styles.rankFailureReason} title={row.errorCode}>
+                    <strong>{rankFailureReason(row, result.job.provider)}</strong>
+                    {row.errorCode && <small>{row.errorCode}</small>}
+                  </td>
+                  <td className={styles.numberCell}>{rankPollAttempts(row)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { AuditModule } from "../audit/audit.module.js";
 import { OutboxModule } from "../outbox/outbox.module.js";
 import { AuthCryptoService } from "./auth-crypto.service.js";
 import { AuthRateLimitService } from "./auth-rate-limit.service.js";
+import { ApiTokenAuthenticationService } from "./api-token-authentication.service.js";
 import { IdentityController } from "./identity.controller.js";
 import { IdentityService } from "./identity.service.js";
 import { MfaController } from "./mfa.controller.js";
@@ -34,6 +35,7 @@ const sessionExpirySweeperScheduler: SessionExpirySweeperScheduler = {
   providers: [
     AuthCryptoService,
     AuthRateLimitService,
+    ApiTokenAuthenticationService,
     IdentityService,
     MfaService,
     RecentAuthenticationService,
@@ -58,6 +60,7 @@ const sessionExpirySweeperScheduler: SessionExpirySweeperScheduler = {
     IdentityService,
     SessionService,
     AuthCryptoService,
+    ApiTokenAuthenticationService,
     RecentAuthenticationService,
     SessionCookieService,
     SessionAuthGuard,

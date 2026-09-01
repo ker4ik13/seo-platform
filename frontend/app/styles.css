@@ -390,6 +390,14 @@ button {
 .docs-layout article section h2 { font-size: 22px; margin-bottom: 16px; }
 .docs-layout article section p { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .docs-layout pre { background: #1e1f26; border-radius: 12px; color: #f4f3fb; font-size: 12px; overflow-x: auto; padding: 20px; }
+.docs-layout article li { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 5px 0; }
+.docs-layout article code { overflow-wrap: anywhere; }
+.api-note { background: #f4f2ff; border: 1px solid #ded8ff; border-radius: 12px; color: #4f466e; font-size: 13px; line-height: 1.65; margin-top: 24px; padding: 14px 16px; }
+.api-table-scroll { overflow-x: auto; width: 100%; }
+.api-doc-table { border-collapse: collapse; font-size: 12px; min-width: 640px; width: 100%; }
+.api-doc-table th, .api-doc-table td { border-bottom: 1px solid var(--line); line-height: 1.5; padding: 10px 9px; text-align: left; vertical-align: top; }
+.api-doc-table th { color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.api-method { background: #eeeafd; border-radius: 5px; color: #5e4fa3; display: inline-block; font-size: 9px; font-weight: 800; padding: 3px 5px; }
 .api-list { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .api-list > div { align-items: center; display: grid; gap: 18px; grid-template-columns: minmax(210px, .9fr) 1fr; padding: 13px 15px; }
 .api-list > div + div { border-top: 1px solid var(--line); }

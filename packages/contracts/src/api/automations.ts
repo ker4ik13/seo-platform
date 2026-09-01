@@ -18,12 +18,24 @@ export type AutomationSchedule =
       readonly weekdays: readonly number[];
     };
 
+export type RankTrackingAutomationSchedule =
+  | AutomationSchedule
+  | {
+      readonly cadence: "ONCE";
+      /** Exact UTC occurrence for a delayed one-time rank check. */
+      readonly runAt: string;
+    };
+
 export interface CreateRankTrackingAutomationInput {
   readonly name: string;
   readonly trackingContextId: string;
   readonly timezone: string;
-  readonly schedule: AutomationSchedule;
-  readonly maxItems: number;
+  readonly schedule: RankTrackingAutomationSchedule;
+  /**
+   * Maximum platform charge for one run in 1/1,000,000 currency units.
+   * "0" keeps the schedule BYOK-only.
+   */
+  readonly maxPlatformChargeMicro: string;
   readonly failureThreshold: number;
   readonly enabled: boolean;
 }
@@ -99,11 +111,14 @@ export interface RankTrackingAutomationSummary {
   readonly name: string;
   readonly trackingContextId: string;
   readonly timezone: string;
-  readonly schedule: AutomationSchedule;
-  readonly maxItems: number;
+  readonly schedule: RankTrackingAutomationSchedule;
+  readonly maxPlatformChargeMicro: string;
   readonly failureThreshold: number;
   readonly enabled: boolean;
-  readonly pausedReason?: "MANUAL" | "FAILURE_THRESHOLD";
+  readonly pausedReason?:
+    | "MANUAL"
+    | "FAILURE_THRESHOLD"
+    | "ONE_TIME_COMPLETED";
   readonly nextRunAt?: string;
   readonly lastRunAt?: string;
   readonly consecutiveErrors: number;
@@ -114,6 +129,7 @@ export interface RankTrackingAutomationSummary {
 
 export interface RankTrackingAutomationCollection {
   readonly automations: readonly RankTrackingAutomationSummary[];
+  /** Plan limit for enabled schedules in the workspace, not a keyword limit. */
   readonly limit: number;
   readonly enabledCount: number;
   readonly truncated: boolean;
@@ -161,4 +177,24 @@ export interface AutomationRunSummary {
 export interface AutomationRunCollection {
   readonly runs: readonly AutomationRunSummary[];
   readonly truncated: boolean;
+}
+
+/** Trusted Jobs -> Platform command for one already-claimed automation run. */
+export interface InternalDispatchRankAutomationRunInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly automationId: string;
+  readonly automationVersion: number;
+  readonly runId: string;
+  readonly idempotencyKey: string;
+  readonly scheduledFor: string;
+  readonly trackingContextId: string;
+  readonly maxPlatformChargeMicro: string;
+}
+
+/** Minimal secret-free receipt returned after Platform creates the paid/BYOK Job. */
+export interface InternalDispatchRankAutomationRunReceipt {
+  readonly estimateId: string;
+  readonly jobId: string;
 }

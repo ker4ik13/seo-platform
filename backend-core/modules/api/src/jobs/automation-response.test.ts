@@ -20,7 +20,7 @@ const automation = {
   trackingContextId: contextId,
   timezone: "Europe/Moscow",
   schedule: { cadence: "DAILY", hour: 2, minute: 0 },
-  maxItems: 500,
+  maxPlatformChargeMicro: "0",
   failureThreshold: 3,
   enabled: true,
   nextRunAt: "2026-08-01T23:00:00.000Z",
@@ -65,6 +65,7 @@ test("rejects cross-tenant or secret-bearing dependency responses", () => {
   for (const value of [
     { ...automation, workspaceId: runId },
     { ...automation, credentialId: runId },
+    { ...automation, maxItems: 500 },
     { ...automation, schedule: { cadence: "DAILY", hour: 24, minute: 0 } }
   ]) {
     assert.throws(

@@ -124,6 +124,15 @@ case "$component" in
       "$script_dir/storage-proxy.sh" \
       watch
     ;;
+  public-api-proxy)
+    exec env \
+      -i \
+      PATH="/usr/bin:/bin" \
+      SEO_PLATFORM_PUBLIC_URL="$SEO_PLATFORM_PUBLIC_URL" \
+      API_PUBLIC_URL="${API_PUBLIC_URL:-}" \
+      "$script_dir/public-api-proxy.sh" \
+      watch
+    ;;
   billing-webhook-proxy)
     exec env \
       -i \
@@ -539,6 +548,7 @@ case "$component" in
       NODE_ENV=production \
       TZ=UTC \
       WEB_PUBLIC_URL="$SEO_PLATFORM_PUBLIC_URL" \
+      API_PUBLIC_URL="$(public_api_endpoint)" \
       PLATFORM_API_INTERNAL_URL=http://127.0.0.1:4000 \
       REALTIME_INTERNAL_URL=http://127.0.0.1:4003 \
       AUTH_ACCESS_COOKIE_NAME=seo_access \

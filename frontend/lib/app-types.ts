@@ -1,5 +1,6 @@
 import type {
   ProjectAccessLevel,
+  ProjectCollectionCapabilities,
   ProjectSearchCity
 } from "@seo-platform/contracts";
 
@@ -54,4 +55,5 @@ export interface ProtectedAppContext {
   readonly workspace?: AppWorkspace;
   readonly projects: readonly AppProject[];
   readonly project?: AppProject;
+  readonly projectCapabilities?: ProjectCollectionCapabilities;
 }

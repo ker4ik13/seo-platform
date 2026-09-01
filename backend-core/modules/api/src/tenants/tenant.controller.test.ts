@@ -92,6 +92,45 @@ test("adds active operation counts only to projects visible to the member", asyn
   assert.deepEqual(response.data, [{ ...project, activeOperationCount: 2 }]);
 });
 
+test("filters a workspace project list by the API token allowlist", async () => {
+  const second = {
+    ...project,
+    id: "01900000-0000-7000-8000-000000000104",
+    slug: "second",
+    name: "Second"
+  };
+  const controller = new TenantController(
+    {
+      listProjects: async () => [project, second]
+    } as unknown as TenantService,
+    {} as ProjectLogoService
+  );
+  const request = {
+    id: "request-token-project-list",
+    headers: {},
+    ip: "127.0.0.1",
+    tenantAuthorization: {
+      workspaceId: project.workspaceId,
+      workspaceStatus: "ACTIVE",
+      roleCode: "OWNER"
+    },
+    apiTokenAuthorization: {
+      tokenId: "01900000-0000-7000-8000-000000000105",
+      workspaceId: project.workspaceId,
+      name: "Agent",
+      scopes: ["projects:read"],
+      allProjects: false,
+      projectIds: [project.id]
+    }
+  } as unknown as TenantRequest;
+
+  const response = await controller.projects(request, {
+    userId: project.ownerUserId
+  } as AuthenticatedPrincipal);
+
+  assert.deepEqual(response.data, [project]);
+});
+
 test("returns an authoritative activity projection only for visible projects", async () => {
   const hiddenProjectId = "01900000-0000-7000-8000-000000000199";
   const controller = new TenantController(

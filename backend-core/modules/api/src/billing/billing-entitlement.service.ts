@@ -33,6 +33,11 @@ export interface BillingEntitlementSnapshot {
   readonly source: "SUBSCRIPTION" | "ONBOARDING";
 }
 
+export interface ProjectCapacitySnapshot {
+  readonly used: number;
+  readonly limit: number;
+}
+
 export type RankProviderEntitlement =
   | "ALLOWED"
   | "DENIED"
@@ -167,6 +172,40 @@ export class BillingEntitlementService {
       transaction,
       workspaceId
     );
+    const capacity = await this.projectCapacityInTransaction(
+      transaction,
+      workspaceId,
+      entitlement
+    );
+    this.assertCapacity(
+      "projects",
+      capacity.used,
+      capacity.limit,
+      entitlement
+    );
+  }
+
+  public async projectCapacity(
+    workspaceId: string
+  ): Promise<ProjectCapacitySnapshot> {
+    return this.prisma.$transaction(async (transaction) => {
+      const entitlement = await this.requiredEntitlement(
+        transaction,
+        workspaceId
+      );
+      return this.projectCapacityInTransaction(
+        transaction,
+        workspaceId,
+        entitlement
+      );
+    });
+  }
+
+  private async projectCapacityInTransaction(
+    transaction: Prisma.TransactionClient,
+    workspaceId: string,
+    entitlement: BillingEntitlementSnapshot
+  ): Promise<ProjectCapacitySnapshot> {
     const [projects, incomingTransfers] = await Promise.all([
       transaction.project.count({
         where: {
@@ -181,18 +220,12 @@ export class BillingEntitlementService {
         }
       })
     ]);
-    const current = projects + incomingTransfers;
-    const projectLimit = await this.projectCapacityLimit(
+    const limit = await this.projectCapacityLimit(
       transaction,
       workspaceId,
       entitlement.features.projects
     );
-    this.assertCapacity(
-      "projects",
-      current,
-      projectLimit,
-      entitlement
-    );
+    return { used: projects + incomingTransfers, limit };
   }
 
   public async projectCapacityLimit(

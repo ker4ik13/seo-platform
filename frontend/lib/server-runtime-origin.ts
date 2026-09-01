@@ -23,6 +23,27 @@ export function platformApiInternalOrigin(
   return canonicalOrigin(required(env, "PLATFORM_API_INTERNAL_URL"));
 }
 
+export function apiPublicOrigin(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const configured = env.API_PUBLIC_URL;
+  if (!configured && env.NODE_ENV !== "production") {
+    return platformApiInternalOrigin(env);
+  }
+  const origin = canonicalOrigin(required(env, "API_PUBLIC_URL"));
+  const parsed = new URL(origin);
+  if (
+    (env.NODE_ENV === "production" && parsed.protocol !== "https:") ||
+    parsed.hostname === LOCALHOST ||
+    parsed.hostname.endsWith(`.${LOCALHOST}`)
+  ) {
+    throw new Error(
+      "API_PUBLIC_URL must be the canonical public HTTPS origin in production"
+    );
+  }
+  return origin;
+}
+
 function canonicalOrigin(value: string): string {
   let parsed: URL;
   try {

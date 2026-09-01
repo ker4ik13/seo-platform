@@ -270,6 +270,7 @@ workspace role; отсутствие записи означает полный 
 - tags;
 - template_id;
 - owner_user_id;
+- display_order integer not null;
 - created_by;
 - created_at;
 - updated_at;
@@ -280,8 +281,15 @@ workspace role; отсутствие записи означает полный 
 Indexes:
 
 - `(workspace_id, status, updated_at desc)`;
+- `(workspace_id, display_order, created_at, id)`;
 - `(workspace_id, domain_normalized)`;
 - `(workspace_id, slug)` unique.
+
+`display_order` — Core-owned общий порядок внутри workspace. Additive migration
+детерминированно backfill-ит его по `(created_at, id)`. Reorder, create и
+меж-workspace transfer берут row lock workspace перед вычислением/изменением
+позиций; reorder принимает только точную перестановку полного текущего набора,
+поэтому concurrent либо неполная команда не может затереть чужой проект.
 
 `owner_user_id` backfill-ится из владельца workspace и обязателен. `created_by`
 остаётся неизменяемой исторической ссылкой на автора и не используется как

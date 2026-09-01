@@ -246,6 +246,105 @@ test("returns rank and crawl results without internal tenant envelope fields", a
   );
 });
 
+test("joins XMLStock rank rows with per-key attempts and final errors", async () => {
+  const rankController = new RankRunController(
+    {
+      getRankJob: async () => ({
+        id: jobId,
+        workspaceId,
+        projectId,
+        provider: "XMLSTOCK"
+      }),
+      getRankOperationScope: async (
+        _context: unknown,
+        requestedJobId: string,
+        limit: number,
+        cursor?: string
+      ) => {
+        assert.equal(requestedJobId, jobId);
+        assert.equal(limit, 200);
+        assert.equal(cursor, undefined);
+        return {
+          workspaceId,
+          projectId,
+          jobId,
+          items: [
+            { sequence: 0, status: "COMPLETED", pollAttempts: 5 },
+            {
+              sequence: 1,
+              status: "FAILED_FINAL",
+              pollAttempts: 50,
+              errorCode: "PROVIDER_UNAVAILABLE"
+            }
+          ],
+          page: { hasNext: false }
+        };
+      }
+    } as unknown as JobsClient,
+    {} as TenantService,
+    {} as AuditService,
+    {} as BillingEntitlementService,
+    {
+      rankOperationResult: async () => ({
+        workspaceId,
+        projectId,
+        jobId,
+        trackingContextId: firstKeywordId,
+        contextName: "Яндекс · Москва",
+        execution: {},
+        rows: [
+          {
+            sequence: 0,
+            keywordId: firstKeywordId,
+            keyword: "готовый запрос",
+            state: "NOT_FOUND",
+            dataQualityFlags: []
+          },
+          {
+            sequence: 1,
+            keywordId: secondKeywordId,
+            keyword: "неснятый запрос",
+            state: "PENDING",
+            dataQualityFlags: []
+          }
+        ],
+        page: { hasNext: false }
+      })
+    } as unknown as SeoDataClient
+  );
+
+  const response = await rankController.result(
+    jobId,
+    undefined,
+    undefined,
+    request(),
+    principal
+  );
+
+  assert.deepEqual(
+    response.data.rows.map(({ sequence, status, pollAttempts, errorCode }) => ({
+      sequence,
+      status,
+      pollAttempts,
+      errorCode
+    })),
+    [
+      {
+        sequence: 0,
+        status: "COMPLETED",
+        pollAttempts: 5,
+        errorCode: undefined
+      },
+      {
+        sequence: 1,
+        status: "FAILED_FINAL",
+        pollAttempts: 50,
+        errorCode: "PROVIDER_UNAVAILABLE"
+      }
+    ]
+  );
+});
+
 function assertRoute(
   method: (...args: never[]) => unknown,
   path: string,

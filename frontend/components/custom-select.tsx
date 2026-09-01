@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent,
   type FocusEvent,
   type KeyboardEvent,
   type ReactElement,
@@ -23,6 +24,7 @@ import {
 } from "../lib/dropdown-events";
 import {
   filterSelectOptions,
+  moveSelectValue,
   nextSelectIndex,
   normalizeSelectSearchText
 } from "../lib/custom-select";
@@ -56,6 +58,10 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly defaultValue?: string | number;
   readonly emptyMessage?: string;
   readonly onChange?: (event: CustomSelectChangeEvent) => void;
+  readonly onOptionOrderChange?: (
+    values: readonly string[]
+  ) => void | Promise<void>;
+  readonly optionOrderLabel?: string;
   readonly popoverFooter?: ReactNode;
   readonly searchPlaceholder?: string;
   readonly searchable?: boolean;
@@ -77,6 +83,7 @@ export function CustomSelect({
   name = "",
   onBlur,
   onChange,
+  onOptionOrderChange,
   onFocus,
   popoverFooter,
   required = false,
@@ -84,6 +91,7 @@ export function CustomSelect({
   searchable = false,
   showSelectedCheck = true,
   title,
+  optionOrderLabel = "Изменить порядок",
   value
 }: CustomSelectProps) {
   const generatedId = useId();
@@ -103,11 +111,42 @@ export function CustomSelect({
     String(defaultValue ?? "")
   );
   const options = useMemo(() => collectOptions(children), [children]);
+  const sourceOptionOrder = JSON.stringify(options.map(({ value }) => value));
+  const sourceOptionValues = useMemo(
+    () => JSON.parse(sourceOptionOrder) as readonly string[],
+    [sourceOptionOrder]
+  );
+  const [orderedValues, setOrderedValues] = useState<readonly string[]>(() =>
+    options.map(({ value }) => value)
+  );
+  const [draggedValue, setDraggedValue] = useState<string>();
+  const [dropTarget, setDropTarget] = useState<{
+    readonly edge: "before" | "after";
+    readonly value: string;
+  }>();
+  const [ordering, setOrdering] = useState(false);
+  const [orderMessage, setOrderMessage] = useState<string>();
+  const suppressChooseRef = useRef(false);
+  useEffect(() => {
+    setOrderedValues(sourceOptionValues);
+  }, [sourceOptionValues]);
+  const orderedOptions = useMemo(() => {
+    const byValue = new Map(options.map((option) => [option.value, option]));
+    return [
+      ...orderedValues.flatMap((value) => {
+        const option = byValue.get(value);
+        return option ? [option] : [];
+      }),
+      ...options.filter((option) => !orderedValues.includes(option.value))
+    ];
+  }, [options, orderedValues]);
   const selectedValue = value === undefined ? uncontrolledValue : String(value);
-  const selectedOption = options.find((option) => option.value === selectedValue);
+  const selectedOption = orderedOptions.find(
+    (option) => option.value === selectedValue
+  );
   const filteredOptions = useMemo(
-    () => filterSelectOptions(options, query),
-    [options, query]
+    () => filterSelectOptions(orderedOptions, query),
+    [orderedOptions, query]
   );
 
   useEffect(() => {
@@ -217,7 +256,7 @@ export function CustomSelect({
   }
 
   function choose(option: CustomSelectOption): void {
-    if (option.disabled) return;
+    if (option.disabled || suppressChooseRef.current) return;
     if (value === undefined) setUncontrolledValue(option.value);
     const event = {
       currentTarget: { name, value: option.value },
@@ -228,6 +267,29 @@ export function CustomSelect({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>): void {
+    if (
+      open &&
+      onOptionOrderChange &&
+      !query &&
+      event.altKey &&
+      (event.key === "ArrowUp" || event.key === "ArrowDown")
+    ) {
+      event.preventDefault();
+      const option = filteredOptions[activeIndex];
+      const target = filteredOptions[
+        activeIndex + (event.key === "ArrowUp" ? -1 : 1)
+      ];
+      if (option && target && !option.disabled && !target.disabled) {
+        const next = moveSelectValue(
+          orderedOptions.map(({ value }) => value),
+          option.value,
+          target.value,
+          event.key === "ArrowUp" ? "before" : "after"
+        );
+        void commitOptionOrder(next, option.searchText);
+      }
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (!open) {
@@ -267,6 +329,93 @@ export function CustomSelect({
       const option = filteredOptions[activeIndex];
       if (option) choose(option);
     }
+  }
+
+  async function commitOptionOrder(
+    nextValues: readonly string[],
+    movedLabel: string
+  ): Promise<void> {
+    if (!onOptionOrderChange || ordering) return;
+    const previous = orderedOptions.map(({ value }) => value);
+    if (
+      nextValues.length === previous.length &&
+      nextValues.every((value, index) => value === previous[index])
+    ) return;
+    setOrderedValues(nextValues);
+    setOrdering(true);
+    setOrderMessage("Сохраняем порядок…");
+    try {
+      await onOptionOrderChange(nextValues);
+      setOrderMessage(`Порядок сохранён: ${movedLabel}`);
+    } catch (error) {
+      setOrderedValues(previous);
+      setOrderMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось сохранить порядок"
+      );
+    } finally {
+      setOrdering(false);
+    }
+  }
+
+  function startOptionDrag(
+    event: DragEvent<HTMLButtonElement>,
+    option: CustomSelectOption
+  ): void {
+    if (!onOptionOrderChange || query || ordering || option.disabled) {
+      event.preventDefault();
+      return;
+    }
+    suppressChooseRef.current = true;
+    setDraggedValue(option.value);
+    setOrderMessage(undefined);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", option.value);
+  }
+
+  function updateOptionDropTarget(
+    event: DragEvent<HTMLButtonElement>,
+    option: CustomSelectOption
+  ): void {
+    if (!draggedValue || draggedValue === option.value || query || ordering) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setDropTarget({
+      value: option.value,
+      edge: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after"
+    });
+  }
+
+  function dropOption(
+    event: DragEvent<HTMLButtonElement>,
+    option: CustomSelectOption
+  ): void {
+    event.preventDefault();
+    if (!draggedValue || !dropTarget || dropTarget.value !== option.value) {
+      endOptionDrag();
+      return;
+    }
+    const dragged = orderedOptions.find(({ value }) => value === draggedValue);
+    const next = moveSelectValue(
+      orderedOptions.map(({ value }) => value),
+      draggedValue,
+      option.value,
+      dropTarget.edge
+    );
+    endOptionDrag();
+    void commitOptionOrder(next, dragged?.searchText ?? draggedValue);
+  }
+
+  function endOptionDrag(): void {
+    setDraggedValue(undefined);
+    setDropTarget(undefined);
+    window.setTimeout(() => {
+      suppressChooseRef.current = false;
+    }, 0);
   }
 
   function handleBlur(event: FocusEvent<HTMLDivElement>): void {
@@ -365,16 +514,30 @@ export function CustomSelect({
                 <button
                   aria-disabled={option.disabled}
                   aria-selected={option.value === selectedValue}
-                  className={`custom-select-option${index === activeIndex ? " is-active" : ""}${option.value === selectedValue ? " is-selected" : ""}`}
+                  className={`custom-select-option${index === activeIndex ? " is-active" : ""}${option.value === selectedValue ? " is-selected" : ""}${draggedValue === option.value ? " is-dragging" : ""}${dropTarget?.value === option.value ? ` drop-${dropTarget.edge}` : ""}${onOptionOrderChange ? " is-reorderable" : ""}`}
                   disabled={option.disabled}
+                  draggable={Boolean(onOptionOrderChange && !query && !ordering && !option.disabled)}
                   id={`${listboxId}-option-${index}`}
                   key={option.key}
                   onClick={() => choose(option)}
+                  onDragEnd={endOptionDrag}
+                  onDragOver={(event) => updateOptionDropTarget(event, option)}
+                  onDragStart={(event) => startOptionDrag(event, option)}
+                  onDrop={(event) => dropOption(event, option)}
                   onMouseEnter={() => setActiveIndex(index)}
                   role="option"
                   tabIndex={-1}
                   type="button"
                 >
+                  {onOptionOrderChange && (
+                    <span
+                      aria-hidden="true"
+                      className="custom-select-drag-handle"
+                      title={`${optionOrderLabel}. Также доступно Alt + стрелка`}
+                    >
+                      ⋮⋮
+                    </span>
+                  )}
                   {showSelectedCheck && (
                     <span className="custom-select-check" aria-hidden="true">
                       {option.value === selectedValue ? "✓" : ""}
@@ -397,6 +560,14 @@ export function CustomSelect({
             >
               {popoverFooter}
             </div>
+          )}
+          {onOptionOrderChange && (
+            <p
+              aria-live="polite"
+              className={`custom-select-order-status${orderMessage && !ordering && orderMessage.startsWith("Не удалось") ? " is-error" : ""}`}
+            >
+              {orderMessage ?? `${optionOrderLabel}: перетащите строку или нажмите Alt + ↑/↓`}
+            </p>
           )}
         </div>,
         portalTarget

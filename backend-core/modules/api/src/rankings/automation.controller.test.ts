@@ -52,7 +52,7 @@ const summary: RankTrackingAutomationSummary = {
   trackingContextId: contextId,
   timezone: "Europe/Moscow",
   schedule: { cadence: "DAILY", hour: 2, minute: 0 },
-  maxItems: 500,
+  maxPlatformChargeMicro: "100000000",
   failureThreshold: 3,
   enabled: true,
   nextRunAt: "2026-08-01T23:00:00.000Z",
@@ -80,7 +80,7 @@ const createInput = {
   trackingContextId: contextId,
   timezone: "Europe/Moscow",
   schedule: { cadence: "DAILY", hour: 2, minute: 0 },
-  maxItems: 500,
+  maxPlatformChargeMicro: "100000000",
   failureThreshold: 3,
   enabled: true
 } as const;

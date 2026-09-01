@@ -149,12 +149,33 @@ export interface AiAnswerOperationResult {
   readonly page: OperationResultPageInfo;
 }
 
+/** Jobs-owned per-key execution state for an XMLStock rank run. */
+export interface InternalRankOperationScopeItem {
+  readonly sequence: number;
+  readonly status: OperationResultItemStatus;
+  readonly pollAttempts: number;
+  readonly errorCode?: string;
+}
+
+export interface InternalRankOperationScope {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly items: readonly InternalRankOperationScopeItem[];
+  readonly page: OperationResultPageInfo;
+}
+
 export interface RankOperationResultRow {
   readonly sequence: number;
   readonly keywordId: string;
   /** Current tenant-visible keyword label, not the secret-bearing manifest field. */
   readonly keyword: string;
   readonly state: "PENDING" | "FOUND" | "NOT_FOUND";
+  /** Present for one-key-per-task providers such as XMLStock. */
+  readonly status?: OperationResultItemStatus;
+  /** Number of real provider poll requests; local capacity deferrals are excluded. */
+  readonly pollAttempts?: number;
+  readonly errorCode?: string;
   readonly position?: number;
   readonly absolutePosition?: number;
   readonly pixelPosition?: number;

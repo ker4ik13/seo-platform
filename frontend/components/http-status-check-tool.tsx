@@ -16,6 +16,7 @@ import {
 import { operationResultHref } from "../lib/operation-result-routes";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { ProjectSelect } from "./project-select";
 import styles from "./http-status-check-tool.module.css";
 
 type ScopeMode = "FULL_SITE" | "URL_LIST";
@@ -29,11 +30,15 @@ const SPEEDS = [
 ] as const;
 
 export function HttpStatusCheckTool({
+  canReorderProjects,
   project,
-  projects
+  projects,
+  workspaceId
 }: Readonly<{
+  canReorderProjects: boolean;
   project: AppProject;
   projects: readonly AppProject[];
+  workspaceId: string;
 }>) {
   const rootUrl = useMemo(() => projectRootUrl(project.domain), [project.domain]);
   const [settings, setSettings] = useState<TechnicalCrawlSettings>();
@@ -220,14 +225,14 @@ export function HttpStatusCheckTool({
 
             <label className={styles.field}>
               <span>Проект</span>
-              <CustomSelect
-                onChange={(event) => selectProject(event.target.value)}
+              <ProjectSelect
+                ariaLabel="Проект для обхода"
+                canReorder={canReorderProjects}
+                onChange={selectProject}
+                projects={projects}
                 value={project.id}
-              >
-                {projects.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name} · {item.domain}</option>
-                ))}
-              </CustomSelect>
+                workspaceId={workspaceId}
+              />
             </label>
 
             <div className={styles.segmented} role="radiogroup" aria-label="Источник URL">

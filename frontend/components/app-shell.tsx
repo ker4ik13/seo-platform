@@ -146,6 +146,7 @@ export function AppShell({
         <TenantSwitcher
           currentUserId={context.user.id}
           project={context.project}
+          projectCapabilities={context.projectCapabilities}
           projects={context.projects}
           workspace={context.workspace}
           workspaces={context.workspaces}

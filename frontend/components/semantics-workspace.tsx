@@ -17,6 +17,7 @@ import { useProjectPresence } from "./project-presence-provider";
 type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS";
 
 export function SemanticsWorkspace({
+  canReorderProjects,
   currentUserId,
   projectId,
   projectName,
@@ -24,6 +25,7 @@ export function SemanticsWorkspace({
   workspaceId,
   workspaceRoleCode
 }: Readonly<{
+  canReorderProjects: boolean;
   currentUserId: string;
   projectId: string;
   projectName: string;
@@ -56,6 +58,7 @@ export function SemanticsWorkspace({
   return (
     <div className="semantic-workspace">
       <SemanticCoreTable
+        canReorderProjects={canReorderProjects}
         currentUserId={currentUserId}
         columnRefreshVersion={columnRefreshVersion}
         clusterRefreshVersion={clusterRefreshVersion + semanticChangeVersion}

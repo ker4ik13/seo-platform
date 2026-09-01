@@ -73,7 +73,7 @@ backup Dokploy запускает `pg_dump` внутри контейнера и
 |---|---|
 | `frontend` | Next.js routes, UI, `/app`, `/admin`, browser/server BFF helpers |
 | `backend-core` | composition root и supervisor Core |
-| `backend-core/modules/api` | identity, workspace/project/RBAC, billing, audit, public API orchestration |
+| `backend-core/modules/api` | identity, workspace/project/RBAC, hashed personal API tokens, billing, audit, public API orchestration |
 | `backend-core/modules/seo` | semantics, clustering proposals/apply, project Markdown notes, pages, rank manifests/results/history, crawl snapshots |
 | `backend-core/modules/realtime` | Socket.IO, session revoke, notifications и Web Push persistence |
 | `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency/clustering workers |
@@ -262,6 +262,14 @@ project-scoped локальное предпочтение точного creden
 его среди актуальных подключений workspace, помечает ровно одно подключение и
 предупреждает, если после прошлого запуска в выбранных папках появились новые
 canonical keywords. Credential ID не попадает в публичный context/job summary.
+Проектный экран `/app/projects/{projectId}/rankings/contexts` называется
+«Съём позиций» и рядом с профилями показывает связанные rank automations.
+Регулярные режимы `DAILY/WEEKLY` используют timezone-aware BullMQ Job
+Scheduler, а `ONCE` создаёт один stable delayed job на точный UTC `runAt`.
+Одноразовое расписание атомарно получает `ONE_TIME_COMPLETED` при claim первого
+run и больше не enqueue-ится reconciliation; повторный запуск требует явно
+задать будущий `runAt`. Пауза, optimistic `If-Match`, no-overlap и
+failure-threshold остаются общей Automation-моделью, новая таблица не добавлена.
 Для явно выбранной связки XMLStock + Яндекс Live мастер дополнительно предлагает
 платный Turbo только на текущий запуск. Режим не записывается в provider-neutral
 профиль: estimate фиксирует отдельный immutable mapping
@@ -385,6 +393,11 @@ redirect target. `PLATFORM_API_INTERNAL_URL` задаётся отдельно �
 custom Next server принимает только exact Socket.IO upgrade path, удаляет
 Cookie/Authorization перед proxy и направляет соединение на canonical
 `REALTIME_INTERNAL_URL`, не открывая порт 4003 и внутренний hostname браузеру.
+Production публикует Platform API на отдельном `API_PUBLIC_URL`. Одноузловой
+VPS runtime создаёт эквивалентный TLS-вход на `https://<public-host>:4000`:
+Caddy проксирует только `/api/v1[/…]` на loopback Core, а `/internal/v1` и
+остальные пути на этом listener получают `404`. Поэтому `/docs/api` всегда
+показывает проверяемый внешний origin, не подменяя его Web/BFF-адресом.
 
 Browser BFF-клиент обрабатывает истечение короткого access token централизованно:
 параллельные `401` объединяются в одну rotation через `POST /app/auth/refresh`,
@@ -403,6 +416,18 @@ favicon из HTML, manifest и стандартных путей сайта. В�
 workspace/project обозначаются заливкой строки без дублирующей галочки. Один
 project-option renderer показывает logo как в открытом списке, так и в закрытом
 значении sidebar, семантики и project-scoped экранов.
+Порядок проектов является общей workspace-настройкой Core, а не локальным
+предпочтением браузера. Все project selectors используют один `ProjectSelect`
+и получают authoritative порядок `display_order`. Пользователь с полным
+доступом ко всем проектам и `workspace.update` может перетащить строку либо
+использовать `Alt+ArrowUp/ArrowDown`; Web отправляет полный исходный и новый
+списки ID на `PUT /api/v1/workspaces/:workspaceId/projects/order`. Core
+сериализует перестановку workspace-lock, отклоняет неполный, чужой или
+устаревший список с precondition error и тем самым сохраняет одинаковый
+порядок для всех участников. Перенесённый или созданный проект добавляется в
+конец списка. Footer sidebar показывает «Создать проект» только при
+`project.create`, активной workspace и свободной тарифной capacity; причина
+недоступности остаётся видимой, но искусственного лимита размера списка нет.
 Если у пользователя нет workspace, tenant switcher остаётся раскрываемым и
 показывает в footer явное действие создания, ведущее в тот же onboarding.
 Общий operation scope picker объединяет выбранные папки в один exact union,
@@ -462,6 +487,21 @@ SEO Data. При недоступности SEO Data каталог остаёт
 - Tenant boundary — `workspace`; проект принадлежит ровно одному workspace.
 - Browser входит через `frontend` и публичный API `backend-core`; переданный
   browser-ом workspace/actor context не считается доверенным.
+- Внешний клиент входит теми же `/api/v1` tenant routes через Bearer personal
+  API token. Plaintext `seo_pat_*` показывается один раз; Platform DB хранит
+  только HMAC hash, display prefix, expiry, scopes и project allowlist.
+  При rotate предыдущий hash остаётся допустим ровно 10 минут для bounded
+  handover; revoke немедленно блокирует и текущий, и предыдущий material.
+  Session-only workspace/account/team/billing/API-token-management routes fail
+  closed.
+  Публичная документация берёт canonical API origin только из runtime
+  `API_PUBLIC_URL` (в local development — из `PLATFORM_API_INTERNAL_URL`),
+  поэтому curl-примеры не зависят от домена конкретного окружения.
+  Tenant guard сначала пересекает route scope и allowlist, затем повторно
+  проверяет текущие RBAC/project permissions пользователя-создателя; поэтому
+  token не переживает отзыв членства и не расширяет права principal. При
+  переносе проекта в другой workspace старые project allowlist grants
+  удаляются в той же транзакции до смены tenant ownership.
 - `backend-execution` не обращается к Core databases, Core — к `jobs_db`.
 - До отдельного data cutover Core использует compatibility databases
   `platform_db`, `seo_db`, `realtime_db`; cross-database foreign keys нет.
@@ -486,6 +526,10 @@ SEO Data. При недоступности SEO Data каталог остаёт
   одном процессе.
 - публичный `/tools` является landing без anonymous runners; рабочий каталог
   `/app/tools` содержит только реализованный project workflow проверки HTTP.
+- публичная документация `/docs/api` разбита на отдельные section routes с
+  общим searchable sidebar, копируемыми примерами запросов/ответов и
+  постраничной навигацией; единый каталог разделов и public endpoints хранится
+  в `frontend/lib/api-docs.ts`.
 - `lib/server-runtime-origin.ts` валидирует canonical `WEB_PUBLIC_URL` и
   внутренний Platform API origin; production web origin обязан использовать
   HTTPS и не может быть локальным именем.
@@ -584,7 +628,7 @@ concurrency, lease fencing и PostgreSQL claim остаются bounded safety �
 
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
-| users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing ledger/usage reservations, audit, platform admin command receipts | Core API | `platform_db` |
+| users (включая bounded account avatar до 512 KiB), sessions, hashed personal API tokens и project allowlists, workspaces (включая bounded workspace avatar до 512 KiB), projects, их общий `display_order` и bounded project logos до 512 KiB, project transfer requests, RBAC, billing ledger/usage reservations, audit, platform admin command receipts | Core API | `platform_db` |
 | semantics (включая keyword notes, saved views, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
@@ -640,7 +684,19 @@ captured usage текущего UTC-окна и все живые reservations. 
 `20260829103000_provider_spend_budget_indexes` ограничивают global budget read.
 Production activation всё ещё ждёт fault-injection canary,
 refund/reconciliation, legal approval и provider balance alert.
-Paid automations и `retry-missing` до этого не разрешены.
+Rank automation может использовать этот же paid path только с сохранённым
+явным `maxPlatformChargeMicro` на один запуск. Каждое расписание и ручной
+automation run вызывает закрытый Core dispatch через
+`JOBS_TO_PLATFORM_AUTOMATION_TOKEN`; Core заново проверяет текущие RBAC,
+workspace/project lifecycle, entitlement, quota, job capacity и trusted price
+book, создаёт fresh estimate и продолжает стандартным reservation/settlement
+RankRun лишь если точная цена не выше cap. Значение `0` сохраняет BYOK-only
+поведение старых расписаний. Rank automation definition `@3` больше не содержит
+пользовательский `maxItems`: каждый occurrence снимает весь актуальный tracking
+context, а сохранённый cap из `@1/@2` валидируется только при чтении и затем
+отбрасывается. Показываемый тарифный лимит относится к числу включённых
+rank/crawl-расписаний workspace, а не к ключам. `retry-missing` для paid mode
+пока не разрешён.
 
 Миграция `20260818150000_rank_serp_results_top100` расширяет только DB-check
 immutable `rank_serp_results.position` с Top-10 до Top-100; существующие
@@ -661,8 +717,16 @@ XMLStock Google Top-100 собирается десятью последоват
 distributed RPS limiter всё равно сериализует внешний GET. Provider pending
 и retryable failure остаются в отложенной очереди с `next_action_at` и не
 удерживают connector worker.
-Poll/recovery остаётся lease-fenced и bounded (до 720 попыток), чтобы
-permanent provider failure не превращался в бесконечный платный цикл.
+Poll/recovery остаётся lease-fenced и bounded. Для одного XMLStock keyword
+execution разрешено не больше 50 фактических provider HTTP poll/get попыток:
+capacity deferral откатывает счётчик, READY на 50-й попытке сохраняется, любой
+другой исход после неё становится `FAILED_FINAL` без 51-го запроса. Старые
+`POLL_WAIT`/просроченные `FETCHING` строки выше границы migration завершает без
+provider I/O. Arsenkin batch lifecycle сохраняет отдельную прежнюю границу 720,
+потому что один provider task содержит весь batch, а не один keyword.
+Terminal XMLStock result scope добавляет каждой строке status, pollAttempts и
+allowlisted errorCode; Web отделяет неснятые запросы в блок «Не удалось снять
+позиции», не смешивая их с успешными snapshots.
 Для Yandex Live Turbo первая страница определяет документированный размер
 `10/20/30/40/50`, который сохраняется в checkpoint v2; Top-100 поэтому требует
 от двух до десяти GET в зависимости от настройки количества результатов в
@@ -859,11 +923,14 @@ membership папок и semantic versions пакетами до 500 измен�
 режим «Не переносить» сохраняет их. Reject закрывает proposal без доменных изменений. Решение
 зафиксировано в `docs/adr/ADR-2026-044-arsenkin-clustering-proposals.md`.
 
-Массовый редактор запросов не обрезает selection scope на синхронном пределе:
-Web делит выбор на versioned команды по
-`semanticKeywordBulkCommandMaxItems=200` строк и агрегирует результат. Поэтому
-смена SEO-кластера для 457 и более выбранных строк проходит без ошибки
-валидации, сохраняя короткие bounded HTTP-команды.
+Массовый редактор, перенос запросов в папку и preview/apply очистки не обрезают
+selection scope на синхронном пределе: общий frontend orchestrator делит выбор
+на versioned команды по `semanticKeywordBulkCommandMaxItems=200` строк и
+агрегирует полный результат. Поэтому 457 и более выбранных строк проходят без
+ошибки валидации, сохраняя короткие bounded HTTP-команды. Аналогично массовое
+назначение посадочной сохраняет все выбранные кластеры, а Web делит только
+транспорт на команды по `semanticClusterPageBulkMaxItems=200`; атомарные
+merge/split сохраняют собственные смысловые ограничения.
 
 ### Сбор частотности
 
@@ -1241,6 +1308,9 @@ raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку
 ## 7. Конфигурация и эксплуатация
 
 - Node.js 24+, pnpm 11, TypeScript strict.
+- Workspace override удерживает транзитивный Prisma CLI dependency
+  `mysql2@3.24.2` на исправленной ветке; runtime приложения использует только
+  PostgreSQL, но production dependency graph всё равно обязан проходить audit.
 - `.env.example` содержит только имена и безопасные placeholders.
 - Redis разделён на durable Jobs (`AOF`, `noeviction`) и ephemeral Realtime
   Pub/Sub/TTL presence; named users ограничены versioned key/channel
@@ -1257,6 +1327,12 @@ raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку
 - Telegram alert rollout/canary:
   `infrastructure/runbooks/operational-alerts.md`.
 - Local production-like runtime: `infrastructure/vps/README.md`.
+- Мутирующий public API security smoke:
+  `infrastructure/vps/smoke-public-api.sh`; он запускается только с явным
+  `SEO_PLATFORM_API_SMOKE_CONFIRM=CREATE_TEST_DATA`, создаёт изолированные
+  синтетические tenant-данные и проверяет token lifecycle, scope/project/
+  cross-tenant boundaries, семантику, rank estimate/run и общий порядок
+  проектов без вывода plaintext token.
 
 ## 8. Проверка
 

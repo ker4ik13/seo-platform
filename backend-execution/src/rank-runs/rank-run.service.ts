@@ -9,6 +9,8 @@ import {
   rankRunConflictDetails,
   type InternalCancelRankJobInput,
   type InternalCreateRankRunInput,
+  type InternalRankOperationScope,
+  type InternalRankOperationScopeItem,
   type InternalRetryRankJobInput,
   type InternalRankRunConflictDetails,
   type InternalRankJobQuery,
@@ -255,6 +257,95 @@ export class RankRunService {
     );
     if (!stored) throw rankJobNotFound("Manual rank Job not found");
     return toRankJobSummary(stored);
+  }
+
+  public async resultScope(
+    workspaceId: string,
+    projectId: string,
+    jobId: string,
+    limit: number,
+    cursor?: number
+  ): Promise<InternalRankOperationScope> {
+    const job = await this.prisma.job.findFirst({
+      where: {
+        id: jobId,
+        workspaceId,
+        projectId,
+        type: MANUAL_RANK_CHECK_JOB_TYPE,
+        provider: "XMLSTOCK"
+      },
+      select: {
+        items: {
+          ...(cursor === undefined
+            ? {}
+            : { where: { sequence: { gt: cursor } } }),
+          orderBy: { sequence: "asc" },
+          take: limit + 1,
+          select: {
+            sequence: true,
+            status: true,
+            error: true
+          }
+        }
+      }
+    });
+    if (!job) throw rankJobNotFound("XMLStock rank result scope not found");
+
+    const items = job.items.slice(0, limit);
+    const sequences = items.map(({ sequence }) => sequence);
+    const executions = sequences.length === 0
+      ? []
+      : await this.prisma.rankConnectorExecution.findMany({
+          where: {
+            workspaceId,
+            projectId,
+            jobId,
+            provider: "XMLSTOCK",
+            manifestChunkIndex: { in: sequences }
+          },
+          orderBy: [
+            { manifestChunkIndex: "asc" },
+            { executionAttempt: "desc" },
+            { id: "desc" }
+          ],
+          select: {
+            manifestChunkIndex: true,
+            pollAttemptCount: true,
+            lastErrorCode: true
+          }
+        });
+    const latestBySequence = new Map<
+      number,
+      (typeof executions)[number]
+    >();
+    for (const execution of executions) {
+      if (!latestBySequence.has(execution.manifestChunkIndex)) {
+        latestBySequence.set(execution.manifestChunkIndex, execution);
+      }
+    }
+
+    const firstSequence = cursor === undefined ? 0 : cursor + 1;
+    const scopeItems = items.map((item, index) => {
+      if (item.sequence !== firstSequence + index) {
+        throw new Error("Invalid stored XMLStock rank result sequence");
+      }
+      return rankResultScopeItem(
+        item,
+        latestBySequence.get(item.sequence)
+      );
+    });
+    const hasNext = job.items.length > limit;
+    const last = scopeItems.at(-1);
+    return {
+      workspaceId,
+      projectId,
+      jobId,
+      items: scopeItems,
+      page: {
+        hasNext,
+        ...(hasNext && last ? { nextCursor: String(last.sequence) } : {})
+      }
+    };
   }
 
   public async runtimeDiagnostics(
@@ -837,6 +928,57 @@ interface RankRuntimeEntryRow {
   readonly errorCode: string | null;
   readonly active: boolean;
   readonly updatedAt: Date;
+}
+
+const RANK_RESULT_ITEM_STATUSES = new Set([
+  "PENDING",
+  "QUEUED",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED_RETRYABLE",
+  "FAILED_FINAL",
+  "CANCELLED"
+]);
+
+function rankResultScopeItem(
+  item: Readonly<{
+    sequence: number;
+    status: string;
+    error: unknown;
+  }>,
+  execution: Readonly<{
+    pollAttemptCount: number;
+    lastErrorCode: string | null;
+  }> | undefined
+): InternalRankOperationScopeItem {
+  if (
+    !Number.isSafeInteger(item.sequence) ||
+    item.sequence < 0 ||
+    !RANK_RESULT_ITEM_STATUSES.has(item.status)
+  ) {
+    throw new Error("Invalid stored XMLStock rank result item");
+  }
+  const pollAttempts = execution?.pollAttemptCount ?? 0;
+  if (!Number.isSafeInteger(pollAttempts) || pollAttempts < 0) {
+    throw new Error("Invalid stored XMLStock rank poll count");
+  }
+  const storedError =
+    typeof item.error === "object" &&
+    item.error !== null &&
+    !Array.isArray(item.error) &&
+    "code" in item.error
+      ? item.error.code
+      : undefined;
+  const errorCode = [execution?.lastErrorCode, storedError].find(
+    (value): value is string =>
+      typeof value === "string" && /^[A-Z0-9_]{1,100}$/u.test(value)
+  );
+  return {
+    sequence: item.sequence,
+    status: item.status as InternalRankOperationScopeItem["status"],
+    pollAttempts,
+    ...(errorCode ? { errorCode } : {})
+  };
 }
 
 function rankRuntimeProduct(

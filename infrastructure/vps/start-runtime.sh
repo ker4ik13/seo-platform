@@ -129,6 +129,8 @@ wait_for_http http://127.0.0.1:4002/health/ready
 start_window realtime
 wait_for_http http://127.0.0.1:4003/health/ready
 wait_for_http http://127.0.0.1:4000/health/ready
+start_window public-api-proxy
+wait_for_public_api
 if [ "${AUTH_EMAIL_ENABLED:-false}" = true ]; then
   auth_email_ready_file=/tmp/seo-platform-auth-email-worker.ready
   rm -f "$auth_email_ready_file"
@@ -169,4 +171,5 @@ printf '%s\n' \
   "seo-platform-vps: runtime is ready" \
   "seo-platform-vps: tmux session: $runtime_session" \
   "seo-platform-vps: logs: $runtime_root/logs" \
-  "seo-platform-vps: public URL: $SEO_PLATFORM_PUBLIC_URL"
+  "seo-platform-vps: public URL: $SEO_PLATFORM_PUBLIC_URL" \
+  "seo-platform-vps: public API: $(public_api_endpoint)"

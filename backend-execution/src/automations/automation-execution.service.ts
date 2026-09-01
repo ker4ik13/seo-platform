@@ -7,10 +7,8 @@ import {
 import type {
   AutomationRunCollection,
   AutomationRunSummary,
-  InternalCreateRankEstimateInput,
-  InternalCreateRankRunInput,
-  InternalRunRankTrackingAutomationInput,
-  RankEstimate
+  InternalDispatchRankAutomationRunInput,
+  InternalRunRankTrackingAutomationInput
 } from "@seo-platform/contracts";
 import type {
   Automation,
@@ -21,8 +19,7 @@ import type {
 import { databaseClock } from "../database/database-clock.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { QueueService } from "../queue/queue.service.js";
-import { RankEstimateService } from "../rank-estimates/rank-estimate.service.js";
-import { RankRunService } from "../rank-runs/rank-run.service.js";
+import { RankAutomationDispatchClient } from "../platform-api/rank-automation-dispatch.client.js";
 import {
   automationDefinitionJson,
   automationRunDefinition,
@@ -45,8 +42,7 @@ const TERMINAL_JOB_STATUSES = new Set<JobStatus>([
 export class AutomationExecutionService {
   public constructor(
     private readonly prisma: PrismaService,
-    private readonly estimates: RankEstimateService,
-    private readonly rankRuns: RankRunService,
+    private readonly dispatchClient: RankAutomationDispatchClient,
     private readonly queue: QueueService
   ) {}
 
@@ -86,90 +82,21 @@ export class AutomationExecutionService {
     automation: Automation,
     run: AutomationRun
   ): Promise<void> {
-    let estimate: RankEstimate | undefined;
     try {
       const definition = storedAutomationDefinition(run.definition);
-      const estimateInput: InternalCreateRankEstimateInput = {
+      const command: InternalDispatchRankAutomationRunInput = {
+        workspaceId: automation.workspaceId,
+        projectId: automation.projectId,
+        actorId: definition.execution.actorId,
+        automationId: automation.id,
+        automationVersion: run.automationVersion,
+        runId: run.id,
+        idempotencyKey: `rank-automation-dispatch-${run.id}`,
+        scheduledFor: run.scheduledFor.toISOString(),
         trackingContextId: definition.trackingContextId,
-        workspaceId: automation.workspaceId,
-        projectId: automation.projectId,
-        actorId: definition.execution.actorId,
-        project: definition.execution.project,
-        access: {
-          workspaceStatus:
-            definition.execution.access.workspaceStatus,
-          canRunRanking:
-            definition.execution.access.canRunRanking,
-          entitlementStatus:
-            definition.execution.access.entitlementStatus
-        },
-        billingCurrency: definition.execution.billingCurrency,
-        quota: { status: "NOT_AVAILABLE" }
+        maxPlatformChargeMicro: definition.maxPlatformChargeMicro
       };
-      estimate = await this.estimates.create(
-        estimateInput,
-        `automation-estimate-${run.id}`
-      );
-      if (estimate.status !== "READY" || !estimate.executionAllowed) {
-        await this.fail(
-          automation,
-          run,
-          estimate.blockers[0]?.code ?? "ESTIMATE_BLOCKED",
-          estimate.id
-        );
-        return;
-      }
-      if (estimate.credentialMode === "PLATFORM_PAID") {
-        await this.fail(
-          automation,
-          run,
-          "PLATFORM_PAID_REQUIRES_INTERACTIVE_ESTIMATE",
-          estimate.id
-        );
-        return;
-      }
-      if (Number(estimate.scope.keywordCount) > definition.maxItems) {
-        await this.fail(
-          automation,
-          run,
-          "MAX_ITEMS_EXCEEDED",
-          estimate.id
-        );
-        return;
-      }
-
-      const runInput: InternalCreateRankRunInput = {
-        estimateId: estimate.id,
-        confirmedPlatformChargeMicro: "0",
-        workspaceId: automation.workspaceId,
-        projectId: automation.projectId,
-        actorId: definition.execution.actorId,
-        project: definition.execution.project,
-        access: {
-          workspaceStatus:
-            definition.execution.access.workspaceStatus,
-          membershipId:
-            definition.execution.access.membershipId,
-          membershipVersion:
-            definition.execution.access.membershipVersion,
-          canRunRanking:
-            definition.execution.access.canRunRanking,
-          entitlementStatus:
-            definition.execution.access.entitlementStatus,
-          quota: { status: "NOT_AVAILABLE" }
-        },
-        billingCurrency: definition.execution.billingCurrency,
-        jobCapacity: definition.execution.jobCapacity,
-        providerPricesMinor: {
-          ARSENKIN: null,
-          XMLSTOCK: null
-        }
-      };
-      const job = await this.rankRuns.create(
-        runInput,
-        `automation-rank-${run.id}`,
-        `automation-${run.id}`
-      );
+      const receipt = await this.dispatchClient.dispatch(command);
       await this.prisma.$transaction(async (transaction) => {
         await lockAutomation(transaction, automation.id);
         await transaction.automationRun.updateMany({
@@ -180,8 +107,8 @@ export class AutomationExecutionService {
           },
           data: {
             status: "DISPATCHED",
-            estimateId: estimate!.id,
-            jobId: job.id
+            estimateId: receipt.estimateId,
+            jobId: receipt.jobId
           }
         });
         await transaction.automation.updateMany({
@@ -192,12 +119,7 @@ export class AutomationExecutionService {
         });
       });
     } catch (error) {
-      await this.fail(
-        automation,
-        run,
-        safeAutomationError(error),
-        estimate?.id
-      );
+      await this.fail(automation, run, safeAutomationError(error));
     }
   }
 
@@ -336,6 +258,11 @@ export class AutomationExecutionService {
             finishedAt: now
           }
         });
+        await completeOneTimeAutomation(
+          transaction,
+          automation,
+          definition
+        );
         return { automation, run: skipped };
       }
       const run = await transaction.automationRun.create({
@@ -353,6 +280,11 @@ export class AutomationExecutionService {
           startedAt: now
         }
       });
+      await completeOneTimeAutomation(
+        transaction,
+        automation,
+        definition
+      );
       return { automation, run };
     });
   }
@@ -583,6 +515,30 @@ export class AutomationExecutionService {
         .removeRankAutomationScheduler(automation.id)
         .catch(() => undefined);
     }
+  }
+}
+
+async function completeOneTimeAutomation(
+  transaction: Prisma.TransactionClient,
+  automation: Automation,
+  definition: ReturnType<typeof storedAutomationDefinition>
+): Promise<void> {
+  if (definition.schedule.cadence !== "ONCE") return;
+  const changed = await transaction.automation.updateMany({
+    where: {
+      id: automation.id,
+      version: automation.version,
+      enabled: true
+    },
+    data: {
+      enabled: false,
+      pausedReason: "ONE_TIME_COMPLETED",
+      nextRunAt: null,
+      version: { increment: 1 }
+    }
+  });
+  if (changed.count !== 1) {
+    throw new Error("One-time automation state changed while claiming run");
   }
 }
 

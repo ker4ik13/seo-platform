@@ -139,7 +139,7 @@ function createInput(): InternalCreateRankTrackingAutomationInput {
     trackingContextId: contextId,
     timezone: "Europe/Moscow",
     schedule: { cadence: "DAILY", hour: 2, minute: 0 },
-    maxItems: 500,
+    maxPlatformChargeMicro: "0",
     failureThreshold: 3,
     enabled: true,
     workspaceId,
@@ -203,7 +203,7 @@ function automation(
       schemaVersion: "rank-tracking-schedule@1",
       trackingContextId: contextId,
       schedule: input.schedule,
-      maxItems: input.maxItems,
+      maxItems: 500,
       failureThreshold: input.failureThreshold,
       execution: {
         actorId,

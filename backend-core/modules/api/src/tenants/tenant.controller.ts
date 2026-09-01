@@ -18,7 +18,9 @@ import type {
   ApiCollectionResponse,
   ApiResponse,
   ProjectDeletionResult,
+  ProjectCollectionCapabilities,
   ProjectOperationActivityCollection,
+  ProjectOrderResult,
   ProjectSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
@@ -43,6 +45,7 @@ import {
   createProjectInput,
   createWorkspaceInput,
   deleteProjectInput,
+  reorderProjectsInput,
   updateProjectInput,
   updateProjectLogoInput,
   updateWorkspaceAvatarInput,
@@ -194,9 +197,9 @@ export class TenantController {
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiCollectionResponse<ProjectSummary>> {
     const workspaceId = requiredWorkspaceId(request);
-    const projects = await this.tenants.listProjects(
-      principal.userId,
-      workspaceId
+    const projects = apiTokenVisibleProjects(
+      await this.tenants.listProjects(principal.userId, workspaceId),
+      request
     );
     let activity = new Map<string, number>();
     if (this.jobs && request.tenantAuthorization) {
@@ -238,9 +241,9 @@ export class TenantController {
         "Operation activity is temporarily unavailable"
       );
     }
-    const visibleProjects = await this.tenants.listProjects(
-      principal.userId,
-      workspaceId
+    const visibleProjects = apiTokenVisibleProjects(
+      await this.tenants.listProjects(principal.userId, workspaceId),
+      request
     );
     const visibleProjectIds = new Set(visibleProjects.map(({ id }) => id));
     let activity: ReadonlyMap<string, number>;
@@ -266,6 +269,45 @@ export class TenantController {
           activeOperationCount
         }))
     });
+  }
+
+  @Get("workspaces/:workspaceId/project-capabilities")
+  @RequirePermission("project.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async projectCapabilities(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectCollectionCapabilities>> {
+    const tenant = request.tenantAuthorization;
+    if (!tenant) throw new Error("Workspace authorization is missing");
+    return apiResponse(
+      request,
+      await this.tenants.projectCollectionCapabilities(
+        principal.userId,
+        tenant.workspaceId,
+        tenant.roleCode,
+        tenant.workspaceStatus
+      )
+    );
+  }
+
+  @Put("workspaces/:workspaceId/projects/order")
+  @RequirePermission("workspace.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async reorderProjects(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectOrderResult>> {
+    return apiResponse(
+      request,
+      await this.tenants.reorderProjects(
+        principal.userId,
+        requiredWorkspaceId(request),
+        reorderProjectsInput(body),
+        requestContext(request)
+      )
+    );
   }
 
   @Post("workspaces/:workspaceId/projects")
@@ -456,6 +498,17 @@ export class TenantController {
     return apiResponse(request, result);
   }
 }
+
+function apiTokenVisibleProjects(
+  projects: readonly ProjectSummary[],
+  request: TenantRequest
+): readonly ProjectSummary[] {
+  const token = request.apiTokenAuthorization;
+  if (!token || token.allProjects) return projects;
+  const allowed = new Set(token.projectIds);
+  return projects.filter(({ id }) => allowed.has(id));
+}
+
 function requiredWorkspaceId(request: TenantRequest): string {
   const workspaceId = request.tenantAuthorization?.workspaceId;
   if (!workspaceId) throw new Error("Workspace authorization is missing");

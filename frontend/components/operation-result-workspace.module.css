@@ -139,6 +139,39 @@
 .crawlToolbar > span { color: #7b8191; font-size: 9px; text-align: right; white-space: nowrap; }
 .visuallyHidden { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0 0 0 0); }
 .tableScroll { min-width: 100%; }
+.rankResults { min-width: 100%; }
+.rankFailures { border-top: 10px solid #f4f5f8; min-width: 900px; }
+.rankFailures > header {
+  align-items: center;
+  background: #fff7f8;
+  border-bottom: 1px solid #f2cfd4;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 9px 12px;
+}
+.rankFailures > header > div { display: grid; gap: 3px; min-width: 0; }
+.rankFailures > header strong { color: #8f2938; font-size: 12px; }
+.rankFailures > header small { color: #856a70; font-size: 10px; }
+.rankFailures > header > span {
+  background: #fff;
+  border: 1px solid #edc5cb;
+  border-radius: 999px;
+  color: #a52f40;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 5px 8px;
+}
+.rankFailureTable { min-width: 900px; }
+.rankFailureTable th:nth-child(2) { width: 260px; }
+.rankFailureTable th:nth-child(3) { width: 115px; }
+.rankFailureTable th:nth-child(5) { width: 150px; }
+.rankFailureReason strong,
+.rankFailureReason small { display: block; }
+.rankFailureReason strong { color: #5d343a; font-size: 11px; font-weight: 700; }
+.rankFailureReason small { color: #a55b66; font-size: 8px; margin-top: 2px; }
 .table { border-collapse: separate; border-spacing: 0; min-width: 900px; table-layout: fixed; width: 100%; }
 .wideTable { min-width: 1420px; }
 .httpTable { min-width: 1120px; }
@@ -172,6 +205,7 @@
 .httpSuccess { background: #eaf8ef; color: #238849; }
 .notFound,
 .httpWarning { background: #fff6e7; color: #9a6416; }
+.failed { background: #fff0f2; color: #b32636; }
 .httpError { background: #fff0f2; color: #b32636; }
 .httpRedirect { background: #eeecff; color: #5b46ed; }
 .noIssues { color: #27884a; }

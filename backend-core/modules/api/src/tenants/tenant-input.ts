@@ -4,6 +4,7 @@ import type {
   DeleteProjectInput,
   ProjectLogoContentType,
   ProjectSearchCity,
+  ReorderProjectsInput,
   UpdateProjectInput,
   UpdateWorkspaceInput
 } from "@seo-platform/contracts";
@@ -15,6 +16,7 @@ import {
   stringField
 } from "../common/input.js";
 import { validationError } from "../common/domain-error.js";
+import { assertUuid } from "../common/identifier.js";
 import {
   avatarImageInput,
   type AvatarImageInput
@@ -261,4 +263,43 @@ export function deleteProjectInput(value: unknown): DeleteProjectInput {
   return {
     confirmation: stringField(input, "confirmation", { min: 1, max: 160 })
   };
+}
+
+export function reorderProjectsInput(value: unknown): ReorderProjectsInput {
+  const input = inputObject(value);
+  if (
+    Object.keys(input).length !== 2 ||
+    !("expectedProjectIds" in input) ||
+    !("projectIds" in input)
+  ) {
+    throw validationError(
+      "$",
+      "INVALID_FIELDS",
+      "Only expectedProjectIds and projectIds are allowed"
+    );
+  }
+  return {
+    expectedProjectIds: projectIdList(
+      input.expectedProjectIds,
+      "expectedProjectIds"
+    ),
+    projectIds: projectIdList(input.projectIds, "projectIds")
+  };
+}
+
+function projectIdList(value: unknown, path: string): readonly string[] {
+  if (!Array.isArray(value)) {
+    throw validationError(path, "ARRAY_REQUIRED", "An array is required");
+  }
+  const ids = value.map((projectId, index) =>
+    assertUuid(projectId, `${path}.${index}`)
+  );
+  if (new Set(ids).size !== ids.length) {
+    throw validationError(
+      path,
+      "DUPLICATE_PROJECT",
+      "Project IDs must be unique"
+    );
+  }
+  return ids;
 }

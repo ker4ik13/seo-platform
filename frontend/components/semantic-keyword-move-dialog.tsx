@@ -2,7 +2,8 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import type { SemanticKeywordBulkResult } from "@seo-platform/contracts";
-import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { BrowserApiError } from "../lib/browser-api";
+import { updateSemanticKeywordsInBatches } from "../lib/semantic-keyword-bulk";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import { SemanticModal } from "./semantic-modal";
 import { Icon } from "./icon";
@@ -47,15 +48,10 @@ export function SemanticKeywordMoveDialog({
     setSaving(true);
     setError(undefined);
     try {
-      const result = await browserApiRequest<SemanticKeywordBulkResult>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/bulk-commands`,
-        {
-          method: "POST",
-          body: {
-            items: selections.map(({ id, version }) => ({ id, version })),
-            patch: { groupId: groupId || null }
-          }
-        }
+      const result = await updateSemanticKeywordsInBatches(
+        projectId,
+        selections,
+        { groupId: groupId || null }
       );
       onCompleted(result);
     } catch (requestError) {

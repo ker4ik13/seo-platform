@@ -8,12 +8,14 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UseGuards
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  InternalRankOperationScope,
   RankJobSummary,
   RankRuntimeDiagnostics
 } from "@seo-platform/contracts";
@@ -29,6 +31,8 @@ import {
   internalCreateRankRunInput,
   internalRetryRankJobInput,
   internalRankJobQuery,
+  rankResultCursor,
+  rankResultPageLimit,
   rankRunIdempotencyKey
 } from "./rank-run-input.js";
 import { RankRunService } from "./rank-run.service.js";
@@ -122,6 +126,30 @@ export class RankRunController {
     });
     return {
       data: await this.rankRuns.runtimeDiagnostics(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get("jobs/:jobId/result-scope")
+  public async resultScope(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Query("limit") limit: unknown,
+    @Query("cursor") cursor: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalRankOperationScope>> {
+    const context = internalCommandContext(headers);
+    assertPathContext(workspaceId, projectId, context);
+    return {
+      data: await this.rankRuns.resultScope(
+        context.workspaceId,
+        context.projectId,
+        internalUuid(jobId, "jobId"),
+        rankResultPageLimit(limit),
+        rankResultCursor(cursor)
+      ),
       meta: { requestId: request.id }
     };
   }

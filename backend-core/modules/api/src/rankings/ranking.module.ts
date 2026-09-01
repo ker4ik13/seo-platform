@@ -20,6 +20,8 @@ import { RankHistoryController } from "./rank-history.controller.js";
 import { RankRunController } from "./rank-run.controller.js";
 import { TrackingContextController } from "./tracking-context.controller.js";
 import { AutomationController } from "./automation.controller.js";
+import { CrawlAutomationDispatchGuard } from "../crawls/crawl-automation-dispatch.guard.js";
+import { RankAutomationDispatchController } from "./rank-automation-dispatch.controller.js";
 
 @Module({
   imports: [
@@ -32,6 +34,7 @@ import { AutomationController } from "./automation.controller.js";
   ],
   controllers: [
     AutomationController,
+    RankAutomationDispatchController,
     RankExecutionGrantController,
     RankExecutionGrantSettlementController,
     RankEstimateController,
@@ -41,6 +44,7 @@ import { AutomationController } from "./automation.controller.js";
   ],
   providers: [
     ControlledBetaRankExecutionGrantPolicy,
+    CrawlAutomationDispatchGuard,
     RankExecutionGrantGuard,
     RankExecutionGrantSettlementGuard,
     RankExecutionGrantService,

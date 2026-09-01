@@ -1,5 +1,5 @@
 import type { Job, Queue } from "bullmq";
-import type { AutomationSchedule } from "@seo-platform/contracts";
+import type { RankTrackingAutomationSchedule } from "@seo-platform/contracts";
 
 export const RANK_AUTOMATION_QUEUE = "rank-automation";
 export const RANK_AUTOMATION_JOB = "rank.automation.run";
@@ -18,10 +18,16 @@ export async function upsertRankAutomationScheduler(
   input: {
     readonly automationId: string;
     readonly automationVersion: number;
-    readonly schedule: AutomationSchedule;
+    readonly schedule: RankTrackingAutomationSchedule;
     readonly timezone: string;
   }
 ): Promise<Date> {
+  if (input.schedule.cadence === "ONCE") {
+    return upsertOneTimeRankAutomation(queue, {
+      ...input,
+      schedule: input.schedule
+    });
+  }
   const job = await queue.upsertJobScheduler(
     automationSchedulerId(input.automationId),
     {
@@ -59,7 +65,7 @@ export function removeRankAutomationScheduler(
   queue: Queue<RankAutomationJobData>,
   automationId: string
 ): Promise<boolean> {
-  return queue.removeJobScheduler(automationSchedulerId(automationId));
+  return removeRankAutomationSchedule(queue, automationId);
 }
 
 export function scheduledOccurrence(job: Job<RankAutomationJobData>): Date {
@@ -71,10 +77,13 @@ export function scheduledOccurrence(job: Job<RankAutomationJobData>): Date {
       if (!Number.isNaN(occurrence.getTime())) return occurrence;
     }
   }
+  if (job.id?.startsWith("rank-automation-once-")) {
+    return new Date(job.timestamp + Math.max(job.delay, 0));
+  }
   return new Date(job.timestamp);
 }
 
-export function cronPattern(schedule: AutomationSchedule): string {
+export function cronPattern(schedule: Exclude<RankTrackingAutomationSchedule, { readonly cadence: "ONCE" }>): string {
   if (schedule.cadence === "DAILY") {
     return `${schedule.minute} ${schedule.hour} * * *`;
   }
@@ -82,6 +91,74 @@ export function cronPattern(schedule: AutomationSchedule): string {
     .map((weekday) => (weekday === 7 ? 0 : weekday))
     .join(",");
   return `${schedule.minute} ${schedule.hour} * * ${weekdays}`;
+}
+
+async function upsertOneTimeRankAutomation(
+  queue: Queue<RankAutomationJobData>,
+  input: {
+    readonly automationId: string;
+    readonly automationVersion: number;
+    readonly schedule: Extract<RankTrackingAutomationSchedule, { readonly cadence: "ONCE" }>;
+    readonly timezone: string;
+  }
+): Promise<Date> {
+  await queue.removeJobScheduler(automationSchedulerId(input.automationId));
+  const runAt = new Date(input.schedule.runAt);
+  if (Number.isNaN(runAt.getTime())) {
+    throw new Error("Invalid one-time automation occurrence");
+  }
+  const jobId = oneTimeAutomationJobId(input.automationId);
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (
+      existing.data.automationVersion === input.automationVersion &&
+      (state === "delayed" || state === "waiting")
+    ) {
+      return runAt;
+    }
+    if (state === "active") {
+      throw new Error("One-time automation delivery is active");
+    }
+    await existing.remove();
+  }
+  await queue.add(
+    RANK_AUTOMATION_JOB,
+    {
+      automationId: input.automationId,
+      automationVersion: input.automationVersion
+    },
+    {
+      jobId,
+      delay: Math.max(runAt.getTime() - Date.now(), 0),
+      attempts: 5,
+      backoff: { type: "exponential", delay: 5_000, jitter: 0.5 },
+      removeOnComplete: { age: 7 * 24 * 60 * 60, count: 10_000 },
+      removeOnFail: { age: 30 * 24 * 60 * 60, count: 10_000 }
+    }
+  );
+  return runAt;
+}
+
+async function removeRankAutomationSchedule(
+  queue: Queue<RankAutomationJobData>,
+  automationId: string
+): Promise<boolean> {
+  const [schedulerRemoved, oneTimeJob] = await Promise.all([
+    queue.removeJobScheduler(automationSchedulerId(automationId)),
+    queue.getJob(oneTimeAutomationJobId(automationId))
+  ]);
+  if (!oneTimeJob) return schedulerRemoved;
+  try {
+    await oneTimeJob.remove();
+    return true;
+  } catch {
+    return schedulerRemoved;
+  }
+}
+
+function oneTimeAutomationJobId(automationId: string): string {
+  return `rank-automation-once-${automationId}`;
 }
 
 function scheduledJobDate(job: Job<RankAutomationJobData>): Date {

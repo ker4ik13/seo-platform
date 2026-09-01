@@ -20,6 +20,7 @@ import { PageModule } from "./pages/page.module.js";
 import { CrawlModule } from "./crawls/crawl.module.js";
 import { KeywordResearchModule } from "./keyword-research/keyword-research.module.js";
 import { ProjectNoteModule } from "./notes/project-note.module.js";
+import { ApiTokenModule } from "./api-tokens/api-token.module.js";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ProjectNoteModule } from "./notes/project-note.module.js";
     AuthEmailDeliveryModule,
     HealthModule,
     IdentityModule,
+    ApiTokenModule,
     IntegrationModule,
     TenantModule,
     UploadModule,

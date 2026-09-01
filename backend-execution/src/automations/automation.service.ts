@@ -216,6 +216,20 @@ export class AutomationService {
         const definition = storedAutomationDefinition(
           current.definition
         );
+        if (
+          definition.schedule.cadence === "ONCE" &&
+          Date.parse(definition.schedule.runAt) <= Date.now()
+        ) {
+          throw new HttpException(
+            {
+              error: {
+                code: "RESOURCE_STATE_CONFLICT",
+                message: "A completed one-time automation must be rescheduled"
+              }
+            },
+            HttpStatus.CONFLICT
+          );
+        }
         return transaction.automation.update({
           where: { id: current.id },
           data: {

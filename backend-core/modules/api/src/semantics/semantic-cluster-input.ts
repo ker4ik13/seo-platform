@@ -6,7 +6,10 @@ import type {
   SemanticClusterPageSource,
   UpdateSemanticClusterInput
 } from "@seo-platform/contracts";
-import { semanticClusterPageSources } from "@seo-platform/contracts";
+import {
+  semanticClusterPageBulkMaxItems,
+  semanticClusterPageSources
+} from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 
 const PAGE_SOURCES = new Set<string>(semanticClusterPageSources);
@@ -47,8 +50,15 @@ export function semanticClusterPageBulkInput(
   if (!Object.hasOwn(input, "primaryPageId")) {
     invalid("primaryPageId", "Is required");
   }
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
-    invalid("items", "Must select between 1 and 200 clusters");
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > semanticClusterPageBulkMaxItems
+  ) {
+    invalid(
+      "items",
+      `Must select between 1 and ${semanticClusterPageBulkMaxItems} clusters`
+    );
   }
   const items = input.items.map((value, index) => {
     const item = exactRecordWithFields(value, ["id", "version"]);

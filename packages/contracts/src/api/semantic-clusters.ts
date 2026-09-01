@@ -100,6 +100,9 @@ export interface SemanticClusterPageBulkSelection {
   readonly version: number;
 }
 
+/** Synchronous write batch; clients aggregate larger page-mapping selections. */
+export const semanticClusterPageBulkMaxItems = 200;
+
 export interface SemanticClusterPageBulkInput {
   readonly items: readonly SemanticClusterPageBulkSelection[];
   readonly primaryPageId: string | null;

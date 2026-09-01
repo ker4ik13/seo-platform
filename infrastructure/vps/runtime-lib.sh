@@ -147,6 +147,43 @@ public_storage_endpoint() {
   printf 'https://%s:9443\n' "$host"
 }
 
+public_api_endpoint() {
+  if [ -n "${API_PUBLIC_URL:-}" ]; then
+    case "$API_PUBLIC_URL" in
+      https://*) ;;
+      *) runtime_fail "API_PUBLIC_URL must be an HTTPS origin" ;;
+    esac
+    local explicit_authority=${API_PUBLIC_URL#https://}
+    case "$explicit_authority" in
+      ''|*/*|*\?*|*\#*|*@*) runtime_fail "API_PUBLIC_URL must be an explicit HTTPS origin" ;;
+    esac
+    printf '%s\n' "$API_PUBLIC_URL"
+    return
+  fi
+  local authority=${SEO_PLATFORM_PUBLIC_URL#https://}
+  authority=${authority%%/*}
+  local host=${authority%%:*}
+  case "$host" in
+    ''|*[!A-Za-z0-9.-]*) runtime_fail "public URL host is not supported" ;;
+  esac
+  printf 'https://%s:4000\n' "$host"
+}
+
+wait_for_public_api() {
+  local endpoint
+  local response_code
+  endpoint=$(public_api_endpoint)
+  for ((attempt = 1; attempt <= 60; attempt += 1)); do
+    response_code=$(
+      curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+        --max-time 2 "$endpoint/api/v1/workspaces" 2>/dev/null || true
+    )
+    [ "$response_code" = 401 ] && return 0
+    sleep 1
+  done
+  runtime_fail "timed out waiting for public API at $endpoint"
+}
+
 wait_for_object_storage() {
   local url=${1:-http://127.0.0.1:9000}
   for ((attempt = 1; attempt <= 90; attempt += 1)); do

@@ -38,7 +38,8 @@ import {
   upsertRankAutomationScheduler
 } from "./rank-automation.queue.js";
 import type {
-  AutomationSchedule
+  AutomationSchedule,
+  RankTrackingAutomationSchedule
 } from "@seo-platform/contracts";
 import {
   CRAWL_QUEUE,
@@ -242,7 +243,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   public async upsertRankAutomationScheduler(input: {
     readonly automationId: string;
     readonly automationVersion: number;
-    readonly schedule: AutomationSchedule;
+    readonly schedule: RankTrackingAutomationSchedule;
     readonly timezone: string;
   }): Promise<Date> {
     if (!this.rankAutomationQueue) {

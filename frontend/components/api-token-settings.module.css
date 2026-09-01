@@ -1,0 +1,659 @@
+.stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.pageHeading h1 {
+  font-size: clamp(26px, 2vw, 30px);
+}
+
+.pageHeading > div > p:last-child {
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 5px;
+}
+
+.editor,
+.listCard,
+.secretCard,
+.docsCard,
+.identifiersCard {
+  padding: 24px;
+}
+
+.editor {
+  scroll-margin-top: 88px;
+}
+
+.sectionKicker {
+  color: var(--brand);
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.editor :global(.security-card-header) h2,
+.listCard :global(.security-card-header) h2,
+.identifiersCard :global(.security-card-header) h2,
+.secretCard h2,
+.docsCard h2 {
+  font-size: 22px;
+  letter-spacing: -.025em;
+  line-height: 1.2;
+}
+
+.editor :global(.security-card-header) p,
+.listCard :global(.security-card-header) p,
+.identifiersCard :global(.security-card-header) p,
+.secretCard p,
+.docsCard p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+  margin-top: 7px;
+}
+
+.pageAlert {
+  align-items: center;
+  display: flex;
+  font-size: 14px;
+  gap: 14px;
+  justify-content: space-between;
+  min-height: 44px;
+}
+
+.pageAlert :global(.text-button) {
+  color: inherit;
+  flex: 0 0 auto;
+  font-size: 13px;
+  min-height: 30px;
+  padding: 5px 2px;
+}
+
+.identifierList {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  margin-top: 18px;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.identifierList > div {
+  align-items: center;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(180px, .8fr) minmax(280px, 1.4fr) auto;
+  min-height: 64px;
+  padding: 10px 14px;
+}
+
+.identifierList > div + div {
+  border-top: 1px solid var(--line);
+}
+
+.identifierList span,
+.scopeCopy,
+.allProjects span,
+.projectList span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.identifierList strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.identifierList small,
+.scopeCopy small,
+.allProjects small,
+.projectList small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.identifierList small,
+.projectList small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identifierList code {
+  color: #414756;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.copyButton {
+  font-size: 13px;
+}
+
+.copyButton svg {
+  height: 15px;
+  width: 15px;
+}
+
+.editorForm {
+  display: grid;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.basicFields {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(280px, 1.5fr) minmax(260px, .8fr);
+  max-width: 1050px;
+}
+
+.editorForm :global(.form-field) {
+  gap: 8px;
+}
+
+.editorForm :global(.form-field) > span {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.editorForm :global(.form-field) input {
+  font-size: 15px;
+  min-height: 48px;
+  padding-inline: 13px;
+}
+
+.editorForm :global(.form-field) small {
+  font-size: 13px;
+}
+
+.scopeFieldset,
+.projectFieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.fieldsetHeading {
+  align-items: flex-end;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  margin-bottom: 13px;
+}
+
+.fieldsetHeading legend {
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -.01em;
+  padding: 0;
+}
+
+.fieldsetHeading p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.quickActions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-end;
+}
+
+.quickActions :global(.text-button) {
+  font-size: 13px;
+  min-height: 30px;
+}
+
+.scopeGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.scopeCard {
+  align-items: start;
+  background: #f9fafc;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  min-height: 116px;
+  padding: 16px;
+}
+
+.scopeCard:has(input:checked) {
+  background: #f7f6ff;
+  border-color: #d5d0fb;
+}
+
+.scopeCopy strong,
+.allProjects strong,
+.projectList strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.scopeCopy {
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.scopeChecks {
+  display: grid;
+  flex: 0 0 176px;
+  gap: 10px;
+}
+
+.scopeChecks :global(.checkbox-field) {
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 8px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  line-height: 1.35;
+  min-height: 26px;
+}
+
+.scopeChecks input,
+.allProjects input,
+.projectList input {
+  flex: 0 0 18px;
+  height: 18px;
+  margin: 0;
+  width: 18px;
+}
+
+.allProjects,
+.projectList label {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  cursor: pointer;
+  display: flex;
+  gap: 11px;
+  min-width: 0;
+  padding: 13px 14px;
+}
+
+.allProjects {
+  background: #fff;
+  min-height: 68px;
+}
+
+.allProjects:has(input:checked),
+.projectList label:has(input:checked) {
+  background: #f7f6ff;
+  border-color: #cfc9fb;
+  box-shadow: inset 0 0 0 1px rgba(91, 61, 245, .05);
+}
+
+.projectList {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 9px;
+}
+
+.projectList label {
+  background: #fafbfc;
+  min-height: 62px;
+}
+
+.selectionCount {
+  background: #f2f0ff;
+  border-radius: 999px;
+  color: var(--brand-dark);
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+
+.emptyProjects,
+.emptyState {
+  background: #fafbfc;
+  border: 1px dashed var(--line-strong);
+  border-radius: 11px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 9px;
+  padding: 16px;
+}
+
+.editorForm :global(.settings-savebar) {
+  bottom: 10px;
+  margin-top: 0;
+}
+
+.editorForm :global(.settings-savebar) > span {
+  font-size: 13px;
+}
+
+.secretCard {
+  align-items: flex-end;
+  border-color: #9688fa;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.secretHeading {
+  min-width: min(100%, 420px);
+}
+
+.secretCard code {
+  background: #171526;
+  border-radius: 10px;
+  color: #fff;
+  flex: 1 1 100%;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  padding: 15px;
+  user-select: all;
+}
+
+.tokenList {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.tokenList article {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.tokenMain,
+.actions,
+.docsCard {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.tokenMain > div {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tokenMain strong {
+  font-size: 16px;
+}
+
+.tokenMain code,
+.tokenList p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tokenList p {
+  line-height: 1.5;
+  margin: 8px 0 13px;
+}
+
+.active,
+.expired,
+.revoked {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 9px;
+}
+
+.active {
+  background: #e9f8ef;
+  color: #167541;
+}
+
+.expired,
+.revoked {
+  background: #f3f1f5;
+  color: #6e6877;
+}
+
+.actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.tokenAction {
+  font-size: 13px;
+}
+
+.loadingState {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 14px;
+  gap: 12px;
+  min-height: 92px;
+}
+
+.loadingState :global(.spinner) {
+  height: 22px;
+  width: 22px;
+}
+
+.emptyState {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  text-align: center;
+}
+
+.emptyState strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.docsCard {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.docsCard > div {
+  min-width: min(100%, 380px);
+}
+
+.docsCard p {
+  max-width: 760px;
+}
+
+.docsCard :global(.primary-button) svg {
+  height: 17px;
+  width: 17px;
+}
+
+.stack :global(.primary-button),
+.stack :global(.secondary-button),
+.stack :global(.danger-button) {
+  font-size: 14px;
+  min-height: 44px;
+  padding-inline: 16px;
+}
+
+.stack :global(.text-button) {
+  font-size: 13px;
+  min-height: 36px;
+}
+
+/* The global settings header is intentionally compact. API management has
+   dense permission copy, so it uses the regular application heading scale. */
+:global(.content-settings) > .pageHeading.pageHeading h1 {
+  font-size: clamp(26px, 2vw, 30px);
+}
+
+:global(.content-settings) > .pageHeading.pageHeading > div > p:last-child {
+  font-size: 14px;
+}
+
+@media (min-width: 761px) {
+  :global(.content.content-settings):has(> .stack.stack) {
+    padding-bottom: 0 !important;
+  }
+}
+
+@media (max-width: 1280px) {
+  .scopeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .projectList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Between the application sidebar and the settings rail, 901–1100 px leaves
+   one comfortable content column. Two columns at this width clip controls. */
+@media (min-width: 901px) and (max-width: 1100px) {
+  .basicFields,
+  .scopeGrid,
+  .projectList {
+    grid-template-columns: 1fr;
+  }
+
+  .fieldsetHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .quickActions {
+    justify-content: flex-start;
+  }
+
+  .identifierList > div {
+    align-items: stretch;
+    gap: 8px;
+    grid-template-columns: 1fr;
+    padding: 13px;
+  }
+
+  .copyButton {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 900px) {
+  .scopeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .identifierList > div {
+    grid-template-columns: minmax(150px, .8fr) minmax(250px, 1.4fr) auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .editor,
+  .listCard,
+  .secretCard,
+  .docsCard,
+  .identifiersCard {
+    padding: 17px;
+  }
+
+  .editor :global(.security-card-header) h2,
+  .listCard :global(.security-card-header) h2,
+  .identifiersCard :global(.security-card-header) h2,
+  .secretCard h2,
+  .docsCard h2 {
+    font-size: 20px;
+  }
+
+  .basicFields,
+  .scopeGrid,
+  .projectList {
+    grid-template-columns: 1fr;
+  }
+
+  .fieldsetHeading,
+  .docsCard,
+  .secretCard {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .quickActions {
+    justify-content: flex-start;
+  }
+
+  .scopeCard {
+    align-items: stretch;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .scopeChecks {
+    flex-basis: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .identifierList > div {
+    align-items: stretch;
+    gap: 8px;
+    grid-template-columns: 1fr;
+    padding: 13px;
+  }
+
+  .copyButton {
+    justify-self: start;
+  }
+
+  .docsCard :global(.primary-button),
+  .secretCard :global(.primary-button),
+  .secretCard :global(.secondary-button) {
+    width: 100%;
+  }
+
+  .editorForm :global(.settings-savebar) {
+    bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 430px) {
+  .quickActions {
+    align-items: flex-start;
+    display: grid;
+    gap: 5px;
+  }
+
+  .scopeChecks {
+    grid-template-columns: 1fr;
+  }
+
+  .tokenMain {
+    align-items: flex-start;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .tokenAction {
+    width: 100%;
+  }
+}

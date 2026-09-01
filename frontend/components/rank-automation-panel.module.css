@@ -1,0 +1,242 @@
+.panel {
+  padding: 24px;
+}
+
+.header,
+.itemHead,
+.formActions,
+.itemActions,
+.enabled {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.header,
+.itemHead {
+  justify-content: space-between;
+}
+
+.header > div > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.header h2 {
+  font-size: 22px;
+  letter-spacing: -.025em;
+  line-height: 1.2;
+  margin: 4px 0 0;
+}
+
+.header p,
+.itemHead span,
+.list article > p,
+.empty,
+.wide small,
+.enabled small {
+  color: var(--text-muted);
+}
+
+.header p {
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 7px 0 0;
+  max-width: 720px;
+}
+
+.counter,
+.active,
+.inactive {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.counter,
+.inactive {
+  background: #f2f0f6;
+  color: #6c6578;
+}
+
+.active {
+  background: #e9f8ef;
+  color: #167541;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 16px;
+  margin-top: 24px;
+}
+
+.form > label:not(.enabled) {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.form > label > span,
+.weekdays legend {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.form input:not([type="checkbox"]):not([type="radio"]) {
+  background: #fff;
+  border: 1px solid var(--line-strong, #dfe1e7);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  min-height: 46px;
+  outline: 0;
+  padding: 0 13px;
+  width: 100%;
+}
+
+.form input:not([type="checkbox"]):not([type="radio"]):focus {
+  border-color: #aaa1f4;
+  box-shadow: 0 0 0 3px rgba(103, 88, 239, .1);
+}
+
+.form :global(.custom-select-trigger) {
+  border-radius: 10px;
+  font-size: 14px;
+  min-height: 46px;
+  padding-inline: 13px;
+}
+
+.form small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wide,
+.weekdays,
+.enabled,
+.formActions {
+  grid-column: 1 / -1;
+}
+
+.weekdays {
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.weekdays legend {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.weekdays label {
+  align-items: center;
+  background: #f9fafc;
+  border: 1px solid var(--border-color, #e7e7ef);
+  border-radius: 9px;
+  display: flex;
+  font-size: 13px;
+  gap: 7px;
+  min-height: 38px;
+  padding: 7px 10px;
+}
+
+.enabled {
+  align-items: start;
+  background: #fafbfc;
+  border: 1px solid var(--border-color, #e7e7ef);
+  border-radius: 11px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  min-height: 72px;
+  padding: 14px;
+}
+
+.enabled:has(input:checked) {
+  background: #f7f6ff;
+  border-color: #d5d0fb;
+}
+
+.enabled > input {
+  height: 18px;
+  margin: 2px 0 0;
+  width: 18px;
+}
+
+.enabled > span {
+  display: grid;
+  gap: 4px;
+}
+
+.enabled strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.formActions,
+.itemActions {
+  flex-wrap: wrap;
+}
+
+.formActions {
+  padding-top: 2px;
+}
+
+.formActions :global(.primary-button),
+.formActions :global(.secondary-button) {
+  font-size: 14px;
+  min-height: 44px;
+  padding-inline: 17px;
+}
+
+.list {
+  border-top: 1px solid var(--border-color, #e7e7ef);
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+.list article {
+  border: 1px solid var(--border-color, #e7e7ef);
+  border-radius: 12px;
+  padding: 15px;
+}
+
+.itemHead > div {
+  display: grid;
+  gap: 4px;
+}
+
+.list article > p {
+  margin: 9px 0 11px;
+}
+
+.empty {
+  font-size: 14px;
+  margin: 20px 0 0;
+}
+
+@media (max-width: 760px) {
+  .form {
+    grid-template-columns: 1fr;
+  }
+
+  .header,
+  .itemHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

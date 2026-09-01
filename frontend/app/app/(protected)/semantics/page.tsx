@@ -18,6 +18,7 @@ export default async function SemanticsPage() {
         )
       ) : (
         <SemanticsWorkspace
+          canReorderProjects={context.projectCapabilities?.canReorder ?? false}
           currentUserId={context.user.id}
           projectId={context.project.id}
           projectName={context.project.name}

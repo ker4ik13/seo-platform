@@ -157,6 +157,16 @@ embedded content отклоняется.
 - Последнего workspace owner нельзя удалить или понизить без передачи владения.
 - Service accounts не входят через пользовательский UI.
 - API token scopes и project restrictions отображаются перед созданием.
+- Personal API token secret имеет high-entropy формат `seo_pat_*`, показывается
+  только после create/rotate и хранится в Platform DB только как HMAC-SHA-256
+  hash с server-side pepper. Display prefix, expiry, last-used, revoke state,
+  ordered scopes и tenant-bound project allowlist не содержат token material.
+  Rotation сохраняет предыдущий hash максимум на 10 минут; revoke перекрывает
+  обе версии сразу.
+- API token не является отдельным RBAC principal: каждый запрос повторно
+  пересекается с актуальным status/membership/role/project access создавшего
+  пользователя. Bearer разрешён только на явной tenant guard boundary;
+  session-only routes и API-token management закрыты fail-closed.
 - Высокорисковые admin actions требуют reason и step-up auth.
 - Impersonation не передаёт права выше разрешённого support scope.
 
@@ -627,6 +637,9 @@ host firewall или egress proxy по provider DNS/hostname allowlist.
 ## 15. Supply chain и container security
 
 - Lockfiles обязательны.
+- Транзитивные CLI-зависимости также входят в production audit: даже если
+  конкретный database driver не используется runtime-топологией, известная
+  high vulnerability устраняется точным workspace override и lockfile.
 - Renovate/Dependabot-equivalent создаёт контролируемые обновления.
 - SCA проверяет известные уязвимости.
 - Secret scanning и license policy в CI.
@@ -917,6 +930,16 @@ gate.
 - credential rotation;
 - project deletion/restore;
 - admin suspension.
+
+Версионируемый mutating public API smoke создаёт отдельные синтетические
+workspace, два проекта, семантические запросы и personal token. Он проверяет
+create/list/update/rotate/revoke без повторной выдачи secret, немедленное
+применение scopes и allowlist, запрет cross-project/cross-workspace, отсутствие
+cookie fallback при неверном Bearer, session-only token management, semantic
+read/write, tracking context, rank estimate/run и optimistic общий порядок
+проектов. Полный provider run обязан либо перейти в `202`, либо вернуть
+явный billing/provider blocker; тест не принимает ложный success. Скрипт
+требует отдельного подтверждающего env-флага и не печатает token material.
 
 ### 24.5. Non-functional
 

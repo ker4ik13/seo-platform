@@ -53,6 +53,11 @@ env \
 env \
   -i \
   PATH="/usr/bin:/bin" \
+  "$script_dir/public-api-proxy.sh" \
+  remove || true
+env \
+  -i \
+  PATH="/usr/bin:/bin" \
   "$script_dir/billing-webhook-proxy.sh" \
   remove || true
 printf '%s\n' "seo-platform-vps: runtime stopped"
