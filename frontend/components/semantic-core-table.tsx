@@ -65,8 +65,7 @@ import {
 import {
   hasSemanticAiAnswerSnapshot,
   rankChangePresentation,
-  sameSemanticRankingUrl,
-  semanticRankingUrlMatch
+  sameSemanticRankingUrl
 } from "../lib/semantic-rank-presentation";
 import {
   clampSemanticColumnWidth,
@@ -5808,7 +5807,7 @@ function keywordRelevantUrl(
     (candidate) => candidate.searchEngine === searchEngine
   );
   if (position && !position.found) return keywordNotFoundMark(searchEngine);
-  return keywordRankingUrl(item.targetUrl, position?.rankingUrl);
+  return keywordRankingUrl(position?.rankingUrl);
 }
 
 function keywordAiRelevantUrl(
@@ -5819,45 +5818,27 @@ function keywordAiRelevantUrl(
     (candidate) => candidate.searchEngine === searchEngine
   );
   if (answer && !answer.siteFound) return keywordNotFoundMark(searchEngine, "AI");
-  return keywordRankingUrl(item.targetUrl, answer?.rankingUrl);
+  return keywordRankingUrl(answer?.rankingUrl);
 }
 
-function keywordRankingUrl(targetUrl: string | undefined, url: string | undefined) {
+function keywordRankingUrl(url: string | undefined) {
   const presentation = url
     ? externalPageUrlPresentation(url, Number.MAX_SAFE_INTEGER)
     : undefined;
   if (!presentation || !url) {
     return <span className="semantic-metric-empty">—</span>;
   }
-  const match = semanticRankingUrlMatch(targetUrl, url);
-  const matchLabel = match === "MATCH"
-    ? "Совпадает с целевым"
-    : match === "MISMATCH"
-      ? "Не совпадает с целевым"
-      : "Целевой URL не задан";
   return (
-    <span className="semantic-ranking-url-cell">
-      <a
-        className="semantic-ranking-url-link"
-        href={presentation.href}
-        onClick={(event) => event.stopPropagation()}
-        rel="noreferrer noopener"
-        target="_blank"
-        title={presentation.href}
-      >
-        {presentation.label}
-      </a>
-      <span
-        className={`semantic-ranking-url-match ${match.toLocaleLowerCase("en")}`}
-        title={
-          match === "NO_TARGET"
-            ? matchLabel
-            : `${matchLabel}: ${targetUrl}`
-        }
-      >
-        {matchLabel}
-      </span>
-    </span>
+    <a
+      className="semantic-ranking-url-link"
+      href={presentation.href}
+      onClick={(event) => event.stopPropagation()}
+      rel="noreferrer noopener"
+      target="_blank"
+      title={presentation.href}
+    >
+      {presentation.label}
+    </a>
   );
 }
 

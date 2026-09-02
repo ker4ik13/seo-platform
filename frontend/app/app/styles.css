@@ -10340,39 +10340,6 @@ svg { display: block; }
   word-break: break-word;
 }
 
-.semantic-ranking-url-cell {
-  align-items: start;
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.semantic-ranking-url-match {
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 8px;
-  font-weight: 750;
-  justify-self: start;
-  line-height: 1.2;
-  padding: 2px 6px;
-  white-space: nowrap;
-}
-
-.semantic-ranking-url-match.match {
-  background: #def5e6;
-  color: #168247;
-}
-
-.semantic-ranking-url-match.mismatch {
-  background: #fff1dc;
-  color: #b86600;
-}
-
-.semantic-ranking-url-match.no_target {
-  background: #f0f1f5;
-  color: var(--muted);
-}
-
 .project-notes-layout {
   display: grid;
   grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
