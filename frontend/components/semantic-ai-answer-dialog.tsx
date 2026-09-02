@@ -38,6 +38,7 @@ export function SemanticAiAnswerDialog({
   activeGroupId,
   groups,
   initialSelections,
+  mode = "positions",
   onClose,
   onStarted,
   projectDomain,
@@ -46,11 +47,13 @@ export function SemanticAiAnswerDialog({
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
+  mode?: "positions" | "competitors";
   onClose: () => void;
   onStarted: (collection: AiAnswerCollectionSummary) => void;
   projectDomain: string;
   projectId: string;
 }>) {
+  const competitorMode = mode === "competitors";
   const formId = useId();
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
@@ -60,6 +63,7 @@ export function SemanticAiAnswerDialog({
   const [host, setHost] = useState(() => projectHost(projectDomain));
   const [excludeSubdomains, setExcludeSubdomains] = useState(false);
   const [brandsText, setBrandsText] = useState("");
+  const [saveProjectPosition, setSaveProjectPosition] = useState(false);
   const [selections, setSelections] = useState<readonly SemanticOperationSelection[]>(initialSelections);
   const [resolvingScope, setResolvingScope] = useState(false);
   const [scopeError, setScopeError] = useState<string>();
@@ -135,12 +139,12 @@ export function SemanticAiAnswerDialog({
     event.preventDefault();
     if (running) return;
     setError(undefined);
-    const normalizedHost = projectHost(host);
+    const normalizedHost = projectHost(competitorMode ? projectDomain : host);
     if (!normalizedHost) {
       setError("Укажите домен проекта без пути, например nt-g.ru.");
       return;
     }
-    if (brands.length > 10) {
+    if (!competitorMode && brands.length > 10) {
       setError("Арсенкин принимает не больше 10 брендов за один запуск.");
       return;
     }
@@ -154,15 +158,21 @@ export function SemanticAiAnswerDialog({
         `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`,
         {
           method: "POST",
-          idempotencyKey: `semantic-ai-answer:${crypto.randomUUID()}`,
+          idempotencyKey: `${competitorMode ? "semantic-ai-competitors" : "semantic-ai-answer"}:${crypto.randomUUID()}`,
           body: {
             items: selections.map(({ id, version }) => ({ id, version })),
             searchEngine,
             regionCode,
             device,
             host: normalizedHost,
-            excludeSubdomains,
-            brands
+            excludeSubdomains: competitorMode ? false : excludeSubdomains,
+            brands: competitorMode ? [] : brands,
+            ...(competitorMode
+              ? {
+                  purpose: "COMPETITOR_SERP" as const,
+                  saveProjectPosition
+                }
+              : {})
           }
         }
       );
@@ -214,27 +224,44 @@ export function SemanticAiAnswerDialog({
 
   return (
     <SemanticModal
-      description="Проверка ИИ-ответов Яндекса или Google через Arsenkin выполняется в фоне и расходует 2 лимита за каждый запрос."
+      description={competitorMode
+        ? "Собирает ИИ-выдачу и источники конкурентов через Arsenkin без ручного ввода домена. Домен автоматически берётся из настроек проекта."
+        : "Проверка ИИ-ответов Яндекса или Google через Arsenkin выполняется в фоне и расходует 2 лимита за каждый запрос."}
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
             <div><Icon name="semantic" /><div><dt>К проверке</dt><dd>{selections.length} запросов</dd></div></div>
             <div><Icon name="ai" /><div><dt>Поисковик</dt><dd>{searchEngine === "YANDEX" ? "Яндекс" : "Google"}</dd></div></div>
             <div><Icon name="operations" /><div><dt>Лимитов Arsenkin</dt><dd>{selections.length * 2}</dd></div></div>
-            <div><Icon name="checkDouble" /><div><dt>Брендов</dt><dd>{brands.length} из 10</dd></div></div>
+            {competitorMode ? (
+              <div>
+                <Icon name="rankCheck" />
+                <div><dt>Позиция сайта</dt><dd>{saveProjectPosition ? "Сохранять" : "Не сохранять"}</dd></div>
+              </div>
+            ) : (
+              <div><Icon name="checkDouble" /><div><dt>Брендов</dt><dd>{brands.length} из 10</dd></div></div>
+            )}
           </dl>
           <div className="semantic-modal-actions">
             <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
-            <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || !host || selections.length === 0 || brands.length > 10} form={formId} type="submit">
-              {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Проверить ИИ-ответы (${selections.length})`}
+            <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || !projectHost(competitorMode ? projectDomain : host) || selections.length === 0 || (!competitorMode && brands.length > 10)} form={formId} type="submit">
+              {resolvingScope
+                ? "Загружаем запросы…"
+                : running
+                  ? "Запускаем…"
+                  : competitorMode
+                    ? `Собрать ИИ-выдачу (${selections.length})`
+                    : `Проверить ИИ-ответы (${selections.length})`}
             </button>
           </div>
         </div>
       )}
       onClose={running ? () => undefined : onClose}
-      presenceKey="semantic-modal:ai-answers"
+      presenceKey={competitorMode
+        ? "semantic-modal:ai-competitors"
+        : "semantic-modal:ai-answers"}
       size="large"
-      title="Проверить ИИ-ответы"
+      title={competitorMode ? "Сбор ИИ-выдачи" : "Проверить ИИ-ответы"}
     >
       <form className="semantic-ai-answer-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         <div className="semantic-workflow-grid semantic-ai-answer-workflow-grid">
@@ -295,7 +322,11 @@ export function SemanticAiAnswerDialog({
           <section className="semantic-workflow-panel semantic-ai-geo-panel">
             <header>
               <h3>География и устройство</h3>
-              <p>Параметры отдельного среза ИИ-ответов.</p>
+              <p>
+                {competitorMode
+                  ? "Параметры отдельного среза ИИ-выдачи конкурентов."
+                  : "Параметры отдельного среза ИИ-ответов."}
+              </p>
             </header>
               <label className="semantic-workflow-field">
                 <span>Регион</span>
@@ -324,24 +355,54 @@ export function SemanticAiAnswerDialog({
                   ))}
                 </div>
               </fieldset>
-              <label className="semantic-workflow-field">
-                <span>Домен проекта</span>
-                <input onChange={(event) => setHost(event.target.value)} placeholder="nt-g.ru" required value={host} />
-                <small>По нему определяется позиция сайта внутри ИИ-ответа.</small>
-              </label>
-              <label className="semantic-check-row">
-                <input checked={excludeSubdomains} onChange={(event) => setExcludeSubdomains(event.target.checked)} type="checkbox" />
-                <span><strong>Не учитывать поддомены</strong><small>Арсенкин проверит только основной домен.</small></span>
-              </label>
-              <label className="semantic-workflow-field semantic-ai-brands-field">
-                <span>Бренды <small>необязательно, до 10</small></span>
-                <textarea onChange={(event) => setBrandsText(event.target.value)} placeholder="По одному бренду на строку" rows={3} value={brandsText} />
-              </label>
+              {competitorMode ? (
+                <>
+                  <label className="semantic-check-row semantic-competitor-position-toggle">
+                    <input
+                      checked={saveProjectPosition}
+                      onChange={(event) =>
+                        setSaveProjectPosition(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>Сохранять позицию сайта из этой ИИ-выдачи</strong>
+                      <small>
+                        Если сайт проекта найден среди источников, позиция
+                        сохранится без отдельного API-запроса. При выключенной
+                        галочке сохраняются только ИИ-ответ и конкуренты.
+                      </small>
+                    </span>
+                  </label>
+                  {!projectHost(projectDomain) && (
+                    <div className="inline-alert warning" role="alert">
+                      В проекте не задан домен. Укажите его в настройках проекта,
+                      чтобы Arsenkin мог выполнить сбор ИИ-выдачи.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label className="semantic-workflow-field">
+                    <span>Домен проекта</span>
+                    <input onChange={(event) => setHost(event.target.value)} placeholder="nt-g.ru" required value={host} />
+                    <small>По нему определяется позиция сайта внутри ИИ-ответа.</small>
+                  </label>
+                  <label className="semantic-check-row">
+                    <input checked={excludeSubdomains} onChange={(event) => setExcludeSubdomains(event.target.checked)} type="checkbox" />
+                    <span><strong>Не учитывать поддомены</strong><small>Арсенкин проверит только основной домен.</small></span>
+                  </label>
+                  <label className="semantic-workflow-field semantic-ai-brands-field">
+                    <span>Бренды <small>необязательно, до 10</small></span>
+                    <textarea onChange={(event) => setBrandsText(event.target.value)} placeholder="По одному бренду на строку" rows={3} value={brandsText} />
+                  </label>
+                </>
+              )}
           </section>
 
           <section className="semantic-workflow-panel semantic-ai-scope-panel">
             <header>
-              <h3>Охват проверки</h3>
+              <h3>{competitorMode ? "Охват сбора" : "Охват проверки"}</h3>
               <p>Выберите все запросы, текущее выделение или папки.</p>
             </header>
             <SemanticOperationScope

@@ -11,6 +11,7 @@ import {
   type MouseEvent
 } from "react";
 import { createPortal } from "react-dom";
+import type { SemanticGroupColorLegend } from "@seo-platform/contracts";
 import {
   semanticGroupCanonicalDropTarget,
   type SemanticGroupDropPlacement
@@ -25,6 +26,7 @@ import {
 } from "../lib/semantic-group-selection";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import { Icon } from "./icon";
+import { SemanticGroupColorLegendControl } from "./semantic-group-color-legend";
 
 export interface SemanticGroupTreeItem {
   readonly id: string;
@@ -87,6 +89,8 @@ export function SemanticGroupTree({
   onRename,
   onSelect,
   onExpandedIdsChange,
+  projectId,
+  refreshVersion,
   remotePresence = EMPTY_REMOTE_PRESENCE,
   total
 }: Readonly<{
@@ -117,6 +121,8 @@ export function SemanticGroupTree({
   onRename: (group: SemanticGroupTreeItem) => void;
   onSelect: (groupId?: string) => void;
   onExpandedIdsChange: (expandedIds: ReadonlySet<string>) => void;
+  projectId: string;
+  refreshVersion: number;
   remotePresence?: readonly SemanticGroupRemotePresence[];
   total?: number;
 }>) {
@@ -130,6 +136,7 @@ export function SemanticGroupTree({
     undefined
   );
   const [search, setSearch] = useState("");
+  const [colorLegend, setColorLegend] = useState<SemanticGroupColorLegend>();
   const [contextMenu, setContextMenu] = useState<Readonly<{
     x: number;
     y: number;
@@ -376,7 +383,10 @@ export function SemanticGroupTree({
     if (
       !(event.metaKey || event.ctrlKey) ||
       event.key.toLocaleLowerCase("en") !== "a" ||
-      event.target instanceof HTMLInputElement
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      event.target instanceof HTMLSelectElement ||
+      (event.target instanceof HTMLElement && event.target.isContentEditable)
     ) {
       return;
     }
@@ -531,6 +541,12 @@ export function SemanticGroupTree({
         }
       ]
     : [];
+  const contextColorNote = contextMenu && !contextMenu.group.systemKind
+    ? colorLegend?.entries.find(
+        ({ color }) =>
+          color === (contextMenu.group.color ?? "#a8a5b8").toLowerCase()
+      )?.note
+    : undefined;
 
   function renderGroupRow({
     depth,
@@ -748,7 +764,14 @@ export function SemanticGroupTree({
       onKeyDown={handleTreeKeyDown}
     >
       <header>
-        <strong>Группы</strong>
+        <div className="semantic-group-tree-heading">
+          <strong>Группы</strong>
+          <SemanticGroupColorLegendControl
+            onLegendChange={setColorLegend}
+            projectId={projectId}
+            refreshVersion={refreshVersion}
+          />
+        </div>
         <div>
           {selectedGroups.length > 0 && <span>{selectedGroups.length}</span>}
           <button
@@ -908,6 +931,15 @@ export function SemanticGroupTree({
       {contextMenu && (
         <ContextMenu
           afterItemId="export"
+          footer={contextColorNote ? (
+            <div className="semantic-group-context-note">
+              <Icon name="info" />
+              <span>
+                <strong>Примечание к цвету</strong>
+                {contextColorNote}
+              </span>
+            </div>
+          ) : undefined}
           items={contextItems}
           label={`Действия с группой ${contextMenu.group.name}`}
           onClose={() => setContextMenu(undefined)}

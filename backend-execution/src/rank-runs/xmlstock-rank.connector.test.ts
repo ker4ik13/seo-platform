@@ -179,6 +179,49 @@ test("builds a secret-free one-key wire request", () => {
   });
 });
 
+test("collects only TOP-10 competitors and saves project position only on request", () => {
+  const collectOnly = intent(
+    "YANDEX",
+    "xmlstock-yandex-search-api@2",
+    { purpose: "COMPETITOR_SERP", saveProjectPosition: false, depth: 100 }
+  );
+  assert.equal(buildXmlStockRankWireRequest(collectOnly).depth, 10);
+  const providerResult = {
+    schemaVersion: "xmlstock-rank-wire-result@1",
+    engine: "YANDEX",
+    documents: [
+      { position: 1, url: "https://foreign.example/", title: "Чужой" },
+      {
+        position: 2,
+        url: "HTTPS://WWW.Example.COM:443/catalog#result",
+        title: "Каталог",
+        snippet: "Купить диван"
+      }
+    ]
+  };
+  const withoutPosition = stageXmlStockRankResult(
+    providerResult,
+    "task_123",
+    collectOnly,
+    "2026-09-02T12:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(withoutPosition?.found, false);
+  assert.equal(withoutPosition?.serpResults?.length, 2);
+
+  const withPosition = stageXmlStockRankResult(
+    providerResult,
+    "task_123",
+    intent("YANDEX", "xmlstock-yandex-search-api@2", {
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: true,
+      depth: 100
+    }),
+    "2026-09-02T12:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(withPosition?.found, true);
+  assert.equal(withPosition?.position, 2);
+});
+
 test("loads documented Yandex Live pages with device and language", async () => {
   const pages: string[] = [];
   const connector = new XmlStockRankConnector(async (url) => {
@@ -460,6 +503,8 @@ function intent(
   overrides: {
     readonly device?: "DESKTOP" | "MOBILE";
     readonly depth?: 30 | 50 | 100;
+    readonly purpose?: "COMPETITOR_SERP";
+    readonly saveProjectPosition?: boolean;
   } = {}
 ): RankProviderRequestIntentV1 {
   return {
@@ -474,6 +519,10 @@ function intent(
     operation: "POSITIONS",
     project: { domain: "example.com", version: 1 },
     execution: {
+      ...(overrides.purpose ? { purpose: overrides.purpose } : {}),
+      ...(overrides.saveProjectPosition === undefined
+        ? {}
+        : { saveProjectPosition: overrides.saveProjectPosition }),
       searchEngine,
       countryCode: "RU",
       regionCode: "213",

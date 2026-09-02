@@ -68,6 +68,7 @@ export async function previousAiAnswerPositions(
         AND snapshot.keyword_id = anchors.keyword_id
         AND snapshot.search_engine = anchors.search_engine
         AND snapshot.site_found = TRUE
+        AND snapshot.position_tracking_enabled = TRUE
         AND snapshot.position IS NOT NULL
         AND (snapshot.observed_at, snapshot.id) <
             (anchors.observed_at, anchors.snapshot_id)

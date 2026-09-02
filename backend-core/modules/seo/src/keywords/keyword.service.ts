@@ -402,7 +402,11 @@ export class KeywordService {
       keywordIds.length === 0
         ? Promise.resolve([])
         : this.prisma.currentRank.findMany({
-            where: { workspaceId, projectId, keywordId: { in: keywordIds } },
+            where: {
+              workspaceId,
+              projectId,
+              keywordId: { in: keywordIds }
+            },
             orderBy: [
               { observedAt: "desc" },
               { snapshotId: "desc" },
@@ -424,7 +428,12 @@ export class KeywordService {
       keywordIds.length === 0
         ? Promise.resolve([])
         : this.prisma.aiAnswerSnapshot.findMany({
-            where: { workspaceId, projectId, keywordId: { in: keywordIds } },
+            where: {
+              workspaceId,
+              projectId,
+              keywordId: { in: keywordIds },
+              positionTrackingEnabled: true
+            },
             orderBy: [
               { keywordId: "asc" },
               { searchEngine: "asc" },
@@ -724,7 +733,11 @@ export class KeywordService {
       aiSourceSnapshots
     ] = await Promise.all([
       this.prisma.frequencySnapshot.findMany({
-        where: { workspaceId, projectId, keywordId },
+        where: {
+          workspaceId,
+          projectId,
+          keywordId
+        },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 100
       }),
@@ -742,6 +755,7 @@ export class KeywordService {
           trackingContextId: true,
           configurationVersion: true,
           provider: true,
+          positionTrackingEnabled: true,
           found: true,
           position: true,
           observedAt: true,
@@ -751,7 +765,12 @@ export class KeywordService {
         }
       }),
       this.prisma.aiAnswerSnapshot.findMany({
-        where: { workspaceId, projectId, keywordId },
+        where: {
+          workspaceId,
+          projectId,
+          keywordId,
+          positionTrackingEnabled: true
+        },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 240,
         select: {
@@ -948,6 +967,7 @@ export class KeywordService {
         }];
       }),
       positionHistory: rankSnapshots.flatMap((snapshot) => {
+        if (!snapshot.positionTrackingEnabled) return [];
         const context = contextById.get(snapshot.trackingContextId);
         const configuration = configurationById.get(
           `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
@@ -3060,6 +3080,7 @@ async function previousFoundPositions(
         AND snapshot.keyword_id = anchors.keyword_id
         AND configuration.search_engine::text = anchors.search_engine
         AND snapshot.found = TRUE
+        AND snapshot.position_tracking_enabled = TRUE
         AND snapshot.position IS NOT NULL
         AND (snapshot.observed_at, snapshot.id) <
             (anchors.observed_at, anchors.snapshot_id)
@@ -3190,6 +3211,7 @@ async function metricSortedKeywordPage(
                   AND previous.project_id = current_ai.project_id
                   AND previous.keyword_id = current_ai.keyword_id
                   AND previous.search_engine = current_ai.search_engine
+                  AND previous.position_tracking_enabled = TRUE
                   AND previous.site_found = TRUE
                   AND previous.position IS NOT NULL
                   AND (previous.observed_at, previous.id) <
@@ -3202,6 +3224,7 @@ async function metricSortedKeywordPage(
               AND current_ai.project_id = k.project_id
               AND current_ai.keyword_id = k.id
               AND current_ai.search_engine = ${rankEngine}
+              AND current_ai.position_tracking_enabled = TRUE
             ORDER BY current_ai.observed_at DESC, current_ai.id DESC
             LIMIT 1
           ) latest_ai
@@ -3215,6 +3238,7 @@ async function metricSortedKeywordPage(
             AND latest_ai.project_id = k.project_id
             AND latest_ai.keyword_id = k.id
             AND latest_ai.search_engine = ${rankEngine}
+            AND latest_ai.position_tracking_enabled = TRUE
           ORDER BY latest_ai.observed_at DESC, latest_ai.id DESC
           LIMIT 1
         ) metric_source ON TRUE`
@@ -3239,6 +3263,7 @@ async function metricSortedKeywordPage(
                     AND previous.project_id = cr.project_id
                     AND previous.keyword_id = cr.keyword_id
                     AND previous.found = TRUE
+                    AND previous.position_tracking_enabled = TRUE
                     AND previous.position IS NOT NULL
                     AND previous_tcv.search_engine::text = ${rankEngine}
                     AND (previous.observed_at, previous.id) <

@@ -56,6 +56,32 @@ test("accepts Turbo only for an explicit XMLStock Yandex Live estimate", () => {
   }
 });
 
+test("accepts competitor SERP policy and rejects the position flag elsewhere", () => {
+  assert.deepEqual(
+    createRankEstimateInput({
+      trackingContextId: contextId,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: true,
+      provider: "ARSENKIN",
+      searchSource: "LIVE"
+    }),
+    {
+      trackingContextId: contextId,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: true,
+      provider: "ARSENKIN",
+      searchSource: "LIVE"
+    }
+  );
+  assert.throws(
+    () => createRankEstimateInput({
+      trackingContextId: contextId,
+      saveProjectPosition: false
+    }),
+    DomainError
+  );
+});
+
 test("rejects unknown, missing and malformed estimate fields", () => {
   for (const value of [
     {},

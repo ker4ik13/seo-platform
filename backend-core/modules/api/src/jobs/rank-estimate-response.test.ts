@@ -82,6 +82,33 @@ test("maps unlimited BYOK rank allowance without invented quota values", () => {
   );
 });
 
+test("preserves the exact competitor estimate policy from Jobs", () => {
+  const competitorEstimate = {
+    ...blockedEstimate,
+    purpose: "COMPETITOR_SERP",
+    saveProjectPosition: false
+  } as const;
+
+  const result = scopedRankEstimate(
+    competitorEstimate,
+    workspaceId,
+    projectId,
+    contextId
+  );
+
+  assert.equal(result.purpose, "COMPETITOR_SERP");
+  assert.equal(result.saveProjectPosition, false);
+  assert.throws(
+    () => scopedRankEstimate(
+      { ...competitorEstimate, saveProjectPosition: undefined },
+      workspaceId,
+      projectId,
+      contextId
+    ),
+    invalidDependencyResponse
+  );
+});
+
 test("rejects secret projections and cross-tenant responses", () => {
   for (const value of [
     { ...blockedEstimate, credentialId: contextId },

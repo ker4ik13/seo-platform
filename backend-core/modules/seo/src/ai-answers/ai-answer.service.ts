@@ -105,7 +105,11 @@ export class AiAnswerService {
         throw new ConflictException("Keyword changed before AI answer persistence");
       }
       const snapshots = await transaction.aiAnswerSnapshot.createMany({
-        data: input.items.map(({ keywordId, snapshot }) => ({
+        data: input.items.map(({
+          keywordId,
+          positionTrackingEnabled,
+          snapshot
+        }) => ({
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           keywordId,
@@ -119,6 +123,7 @@ export class AiAnswerService {
           ...(snapshot.rankingUrl === undefined ? {} : { rankingUrl: snapshot.rankingUrl }),
           brandFound: snapshot.brandFound,
           ...(snapshot.answerMarkdown === undefined ? {} : { answerMarkdown: snapshot.answerMarkdown }),
+          positionTrackingEnabled,
           provider: input.provider,
           sourceMode: "BYOK",
           jobId: input.jobId,
@@ -170,7 +175,12 @@ export class AiAnswerService {
     });
     if (!keyword) throw new NotFoundException("Keyword not found");
     const snapshots = await this.prisma.aiAnswerSnapshot.findMany({
-      where: { workspaceId, projectId, keywordId },
+      where: {
+        workspaceId,
+        projectId,
+        keywordId,
+        positionTrackingEnabled: true
+      },
       orderBy: [
         { searchEngine: "asc" },
         { observedAt: "desc" },
@@ -244,6 +254,7 @@ export class AiAnswerService {
         projectId: input.projectId,
         keywordId: input.keywordId,
         sourceMode: "BYOK",
+        positionTrackingEnabled: true,
         ...(cursor
           ? {
               OR: [

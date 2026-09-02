@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type {
   InternalRankExecutionParameters,
+  RankCollectionPurpose,
   TrackingContextConfigurationInput,
   TrackingDomainMatchRule
 } from "@seo-platform/contracts";
@@ -16,6 +17,12 @@ export const ARSENKIN_YANDEX_LIVE_MAPPING_VERSION =
   "arsenkin-yandex-live@2" as const;
 export const ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION =
   "arsenkin-google-live@2" as const;
+export const ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION =
+  "arsenkin-check-top-yandex-xml@1" as const;
+export const ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION =
+  "arsenkin-check-top-yandex-live@1" as const;
+export const ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION =
+  "arsenkin-check-top-google-live@1" as const;
 export const XMLSTOCK_YANDEX_SEARCH_API_MAPPING_VERSION =
   "xmlstock-yandex-search-api@2" as const;
 export const XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION =
@@ -30,6 +37,9 @@ const SUPPORTED_MAPPING_VERSIONS = [
   ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION,
   ARSENKIN_YANDEX_LIVE_MAPPING_VERSION,
   ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION,
+  ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION,
+  ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION,
+  ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION,
   XMLSTOCK_YANDEX_SEARCH_API_MAPPING_VERSION,
   XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION,
   XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION,
@@ -44,7 +54,9 @@ export function rankEstimateExecutionParameters(
   provider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN",
   searchSource: "SEARCH_API" | "LIVE" =
     configuration.searchEngine === "GOOGLE" ? "LIVE" : "SEARCH_API",
-  yandexLiveMode?: "TURBO"
+  yandexLiveMode?: "TURBO",
+  purpose: RankCollectionPurpose = "POSITION_TRACKING",
+  saveProjectPosition?: boolean
 ): InternalRankExecutionParameters | undefined {
   if (
     !SUPPORTED_SEARCH_ENGINES.includes(configuration.searchEngine) ||
@@ -67,6 +79,12 @@ export function rankEstimateExecutionParameters(
     return undefined;
   }
   return {
+    ...(purpose === "COMPETITOR_SERP"
+      ? {
+          purpose,
+          saveProjectPosition: saveProjectPosition ?? false
+        }
+      : {}),
     searchEngine: configuration.searchEngine,
     countryCode: configuration.countryCode,
     ...(configuration.regionCode
@@ -87,7 +105,8 @@ export function rankEstimateExecutionParameters(
         provider,
         configuration.searchEngine,
         searchSource,
-        yandexLiveMode
+        yandexLiveMode,
+        purpose
       )
   };
 }
@@ -133,6 +152,10 @@ export function parseRankExecutionParameters(
   value: unknown
 ): InternalRankExecutionParameters {
   const input = exactRecord(value, [
+    ...(hasField(value, "purpose") ? ["purpose"] : []),
+    ...(hasField(value, "saveProjectPosition")
+      ? ["saveProjectPosition"]
+      : []),
     "searchEngine",
     "countryCode",
     ...(hasField(value, "regionCode") ? ["regionCode"] : []),
@@ -150,6 +173,11 @@ export function parseRankExecutionParameters(
     !SUPPORTED_SEARCH_ENGINES.includes(
       input.searchEngine as (typeof SUPPORTED_SEARCH_ENGINES)[number]
     ) ||
+    (input.purpose !== undefined &&
+      input.purpose !== "POSITION_TRACKING" &&
+      input.purpose !== "COMPETITOR_SERP") ||
+    (input.saveProjectPosition !== undefined &&
+      typeof input.saveProjectPosition !== "boolean") ||
     typeof input.countryCode !== "string" ||
     !/^[A-Z]{2}$/u.test(input.countryCode) ||
     ("regionCode" in input &&
@@ -173,6 +201,12 @@ export function parseRankExecutionParameters(
     invalid();
   }
   return {
+    ...(input.purpose === undefined
+      ? {}
+      : { purpose: input.purpose as RankCollectionPurpose }),
+    ...(input.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: input.saveProjectPosition }),
     searchEngine:
       input.searchEngine as InternalRankExecutionParameters["searchEngine"],
     countryCode: input.countryCode,
@@ -196,9 +230,18 @@ function providerMappingVersion(
   provider: "ARSENKIN" | "XMLSTOCK",
   searchEngine: "GOOGLE" | "YANDEX",
   searchSource: "SEARCH_API" | "LIVE",
-  yandexLiveMode?: "TURBO"
+  yandexLiveMode: "TURBO" | undefined,
+  purpose: RankCollectionPurpose
 ): (typeof SUPPORTED_MAPPING_VERSIONS)[number] {
   if (provider === "ARSENKIN") {
+    if (purpose === "COMPETITOR_SERP") {
+      if (searchEngine === "GOOGLE") {
+        return ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION;
+      }
+      return searchSource === "LIVE"
+        ? ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION
+        : ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION;
+    }
     if (searchEngine === "GOOGLE") return ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION;
     return searchSource === "LIVE"
       ? ARSENKIN_YANDEX_LIVE_MAPPING_VERSION

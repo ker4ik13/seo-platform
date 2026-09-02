@@ -72,6 +72,7 @@ test("persists one sealed chunk and updates current ranks atomically", async () 
       jobId,
       jobItemId,
       observedAt: new Date(observedAt),
+      positionTrackingEnabled: true,
       serpFeatures: [],
       dataQualityFlags: [
         "ABSOLUTE_POSITION_UNAVAILABLE",
@@ -198,6 +199,28 @@ test("persists normalized SERP evidence with its immutable snapshot", async () =
   });
 });
 
+test("keeps competitor SERP evidence out of position projections when disabled", async () => {
+  const harness = resultHarness(
+    1,
+    "ARSENKIN",
+    competitorExecution(false)
+  );
+
+  const result = await new RankResultService(harness.prisma).ingest(
+    validInput()
+  );
+
+  assert.equal(result.persistedCount, "1");
+  assert.equal(result.currentUpdatedCount, "0");
+  assert.equal(result.currentSkippedCount, "1");
+  assert.equal(harness.currentInputCount, 0);
+  assert.equal(
+    (harness.persistedSnapshot as { positionTrackingEnabled?: unknown })
+      .positionTrackingEnabled,
+    false
+  );
+});
+
 function validInput(entryCount = 1): InternalIngestRankChunkInput {
   const value = command({}, entryCount);
   return {
@@ -305,12 +328,14 @@ function hash(value: string): RankManifestHash {
 
 function resultHarness(
   entryCount = 1,
-  manifestProvider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN"
+  manifestProvider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN",
+  manifestExecution: Record<string, unknown> = positionExecution()
 ) {
   let status: "SEALED" | "CLOSED" = "SEALED";
   let receipt: Record<string, unknown> | null = null;
   let snapshotWrites = 0;
   let currentUpserts = 0;
+  let currentInputCount = 0;
   let receiptWrites = 0;
   let serpWrites = 0;
   let persistedSnapshot: unknown;
@@ -344,6 +369,7 @@ function resultHarness(
             configurationVersion: 2,
             provider: manifestProvider,
             operation: "POSITIONS",
+            execution: manifestExecution,
             pairCount: entryCount,
             chunkCount: 1,
             chunkSize: 15_000,
@@ -378,7 +404,9 @@ function resultHarness(
       }
       if (sql.includes('INSERT INTO "current_ranks"')) {
         currentUpserts += 1;
-        return [{ updatedCount: entryCount }];
+        const rows = JSON.parse(String(values[0])) as readonly unknown[];
+        currentInputCount += rows.length;
+        return [{ updatedCount: rows.length }];
       }
       throw new Error(`Unexpected SQL in rank result test: ${sql}`);
     },
@@ -454,6 +482,9 @@ function resultHarness(
     get currentUpserts() {
       return currentUpserts;
     },
+    get currentInputCount() {
+      return currentInputCount;
+    },
     get receiptWrites() {
       return receiptWrites;
     },
@@ -466,6 +497,34 @@ function resultHarness(
     get persistedSerpResult() {
       return persistedSerpResult;
     }
+  };
+}
+
+function positionExecution(): Record<string, unknown> {
+  return {
+    searchEngine: "GOOGLE",
+    countryCode: "US",
+    regionCode: "us-ca",
+    language: "en",
+    device: "DESKTOP",
+    depth: 30,
+    domainMatchRule: { mode: "EXACT_HOST" },
+    safeSearch: false,
+    format: "SIMPLE",
+    rawSerp: false,
+    fallbackMode: "NONE",
+    providerMappingVersion: "arsenkin-google-live@2"
+  };
+}
+
+function competitorExecution(
+  saveProjectPosition: boolean
+): Record<string, unknown> {
+  return {
+    ...positionExecution(),
+    purpose: "COMPETITOR_SERP",
+    saveProjectPosition,
+    providerMappingVersion: "arsenkin-check-top-google-live@1"
   };
 }
 

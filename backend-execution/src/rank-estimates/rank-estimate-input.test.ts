@@ -73,6 +73,22 @@ test("accepts an exact authoritative rank estimate command", () => {
     rankEstimateIdempotencyKey("rank-estimate-0001"),
     "rank-estimate-0001"
   );
+  assert.deepEqual(
+    internalCreateRankEstimateInput({
+      ...input,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false,
+      provider: "ARSENKIN",
+      searchSource: "LIVE"
+    }),
+    {
+      ...input,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false,
+      provider: "ARSENKIN",
+      searchSource: "LIVE"
+    }
+  );
 });
 
 test("rejects unknown fields, tenant mismatch and inconsistent quota", () => {

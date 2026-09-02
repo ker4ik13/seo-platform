@@ -71,6 +71,10 @@ export class RankEstimateController {
 
     const command: InternalCreateRankEstimateInput = {
       trackingContextId: input.trackingContextId,
+      ...(input.purpose ? { purpose: input.purpose } : {}),
+      ...(typeof input.saveProjectPosition === "boolean"
+        ? { saveProjectPosition: input.saveProjectPosition }
+        : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.credentialId ? { credentialId: input.credentialId } : {}),
       ...(input.searchSource ? { searchSource: input.searchSource } : {}),

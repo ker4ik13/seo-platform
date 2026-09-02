@@ -26,6 +26,8 @@ const RESPONSE_FIELDS = [
   "trackingContextId",
   "type",
   "provider",
+  "purpose",
+  "saveProjectPosition",
   "searchEngine",
   "searchSource",
   "depth",
@@ -82,6 +84,19 @@ export function scopedRankJobSummary(
     input.provider === "ARSENKIN" || input.provider === "XMLSTOCK"
       ? input.provider
       : undefined;
+  const purpose =
+    input.purpose === undefined
+      ? undefined
+      : member(
+          input.purpose,
+          ["POSITION_TRACKING", "COMPETITOR_SERP"] as const
+        );
+  const saveProjectPosition =
+    input.saveProjectPosition === undefined
+      ? undefined
+      : typeof input.saveProjectPosition === "boolean"
+        ? input.saveProjectPosition
+        : null;
   const searchEngine =
     input.searchEngine === undefined
       ? undefined
@@ -116,6 +131,8 @@ export function scopedRankJobSummary(
     provider === undefined ||
     input.operation !== "POSITIONS" ||
     credentialMode === undefined ||
+    saveProjectPosition === null ||
+    (purpose === undefined) !== (saveProjectPosition === undefined) ||
     platformChargeMicro === undefined ||
     (credentialMode === "BYOK_API_KEY" &&
       platformChargeMicro !== "0") ||
@@ -139,6 +156,9 @@ export function scopedRankJobSummary(
     trackingContextId,
     type: "MANUAL_RANK_CHECK",
     provider,
+    ...(purpose === undefined
+      ? {}
+      : { purpose, saveProjectPosition: saveProjectPosition as boolean }),
     ...(searchEngine === undefined ? {} : { searchEngine }),
     ...(searchSource === undefined ? {} : { searchSource }),
     ...(depth === undefined ? {} : { depth }),

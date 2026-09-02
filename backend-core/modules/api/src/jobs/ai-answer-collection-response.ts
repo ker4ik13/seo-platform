@@ -27,13 +27,28 @@ export function scopedAiAnswerCollection(
   ) invalid();
   const hasScope = input.routingScope !== undefined;
   const hasAttempts = input.connectorAttempts !== undefined;
-  if (hasScope !== hasAttempts) invalid();
+  const purpose = input.purpose === undefined
+    ? undefined
+    : member(input.purpose, ["POSITION_TRACKING", "COMPETITOR_SERP"] as const);
+  const saveProjectPosition = input.saveProjectPosition === undefined
+    ? undefined
+    : typeof input.saveProjectPosition === "boolean"
+      ? input.saveProjectPosition
+      : null;
+  if (
+    hasScope !== hasAttempts ||
+    saveProjectPosition === null ||
+    (purpose === undefined) !== (saveProjectPosition === undefined)
+  ) invalid();
   return {
     id,
     workspaceId,
     projectId,
     ...(input.actorId === undefined ? {} : { actorId: uuid(input.actorId) }),
     provider: "ARSENKIN",
+    ...(purpose === undefined
+      ? {}
+      : { purpose, saveProjectPosition: saveProjectPosition as boolean }),
     ...(hasScope ? { routingScope: member(input.routingScope, connectorRoutingScopes) } : {}),
     ...(hasAttempts ? { connectorAttempts: attempts(input.connectorAttempts) } : {}),
     status: member(input.status, aiAnswerCollectionStatuses),

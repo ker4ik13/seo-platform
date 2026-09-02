@@ -94,6 +94,40 @@ test("builds the documented positions payload with exact query order and trackin
   assert.doesNotThrow(() => arsenkinRankWireRequestHash(yandexSearchApi));
 });
 
+test("builds and normalizes documented Check Top competitor output", () => {
+  const collectOnly = competitorIntent(false);
+  assert.deepEqual(buildArsenkinRankWireRequest(collectOnly), {
+    tools_name: "check-top",
+    data: {
+      queries: ["купить диван", "seo audit"],
+      is_snippet: true,
+      noreask: false,
+      se: [{ type: 11, region: 1011969 }],
+      depth: 10
+    }
+  });
+
+  const providerResult = checkTopResultBody();
+  const withoutPosition = normalizeArsenkinRankResult(
+    providerResult,
+    "3944",
+    collectOnly
+  );
+  assert.equal(withoutPosition[0]?.found, false);
+  assert.equal(withoutPosition[0]?.serpResults?.length, 2);
+  assert.equal(withoutPosition[0]?.serpResults?.[0]?.title, "Конкурент");
+
+  const withPosition = normalizeArsenkinRankResult(
+    providerResult,
+    "3944",
+    competitorIntent(true)
+  );
+  assert.equal(withPosition[0]?.found, true);
+  assert.equal(withPosition[0]?.position, 2);
+  assert.equal(withPosition[0]?.rankingUrl, "https://www.example.com/catalog");
+  assert.equal(withPosition[1]?.found, false);
+});
+
 test("submits only through POST with Bearer auth and keeps transport ambiguity explicit", async () => {
   let called = false;
   let permits = 0;
@@ -621,6 +655,53 @@ function intent(
     ]
   };
   return { ...base, ...overrides };
+}
+
+function competitorIntent(
+  saveProjectPosition: boolean
+): RankProviderRequestIntentV1 {
+  const base = intent();
+  return intent({
+    execution: {
+      ...base.execution,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition,
+      providerMappingVersion: "arsenkin-check-top-google-live@1"
+    }
+  });
+}
+
+function checkTopResultBody(): unknown {
+  return {
+    code: "TASK_RESULT",
+    task_id: "3944",
+    result: {
+      request: {
+        queries: ["купить диван", "seo audit"],
+        depth: 10,
+        ss: [{ ss: 11, region: 1011969 }],
+        is_snippet: true,
+        is_noreask: false
+      },
+      result: {
+        collect: [[
+          [
+            "https://competitor.example/one",
+            "https://www.example.com/catalog"
+          ],
+          ["https://competitor.example/audit"]
+        ]],
+        snippets: {
+          "https://competitor.example/one": [
+            { title: "Конкурент", snippet: "Описание" }
+          ],
+          "https://www.example.com/catalog": {
+            "1": { title: "Каталог", snippet: "Наш результат" }
+          }
+        }
+      }
+    }
+  };
 }
 
 function resultBody(position = 2): {

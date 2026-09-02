@@ -113,7 +113,11 @@ export function rankJobScopeJson(
   trackingContextId: string,
   execution: Pick<
     InternalRankExecutionParameters,
-    "searchEngine" | "depth" | "providerMappingVersion"
+    | "purpose"
+    | "saveProjectPosition"
+    | "searchEngine"
+    | "depth"
+    | "providerMappingVersion"
   >,
   estimate?: Pick<RankEstimate, "routingScope" | "connectorAttempts">
 ): Prisma.InputJsonValue {
@@ -126,6 +130,10 @@ export function rankJobScopeJson(
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     trackingContextId,
+    ...(execution.purpose ? { purpose: execution.purpose } : {}),
+    ...(execution.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: execution.saveProjectPosition }),
     searchEngine: execution.searchEngine,
     ...(searchSource ? { searchSource } : {}),
     depth: execution.depth,
@@ -366,6 +374,8 @@ function rankScopeSummary(
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: "SEARCH_API" | "LIVE";
   readonly depth?: 30 | 50 | 100;
+  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
+  readonly saveProjectPosition?: boolean;
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
 } {
@@ -420,16 +430,23 @@ function rankExecutionPresentation(
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: "SEARCH_API" | "LIVE";
   readonly depth?: 30 | 50 | 100;
+  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
+  readonly saveProjectPosition?: boolean;
 } {
   const searchEngine = input.searchEngine;
   const searchSource = input.searchSource;
   const depth = input.depth;
+  const purpose = input.purpose;
+  const saveProjectPosition = input.saveProjectPosition;
+  const manifestPresentation = manifestExecutionPresentation(manifestCommand);
   if (
     searchEngine === undefined &&
     searchSource === undefined &&
-    depth === undefined
+    depth === undefined &&
+    purpose === undefined &&
+    saveProjectPosition === undefined
   ) {
-    return manifestExecutionPresentation(manifestCommand);
+    return manifestPresentation;
   }
   if (
     (searchEngine !== "GOOGLE" && searchEngine !== "YANDEX") ||
@@ -437,11 +454,15 @@ function rankExecutionPresentation(
     (searchSource !== undefined &&
       searchSource !== "SEARCH_API" &&
       searchSource !== "LIVE") ||
-    (searchEngine === "GOOGLE" && searchSource === "SEARCH_API")
+    (searchEngine === "GOOGLE" && searchSource === "SEARCH_API") ||
+    (purpose !== undefined &&
+      purpose !== "POSITION_TRACKING" &&
+      purpose !== "COMPETITOR_SERP") ||
+    (saveProjectPosition !== undefined &&
+      typeof saveProjectPosition !== "boolean")
   ) {
     invalid();
   }
-  const manifestPresentation = manifestExecutionPresentation(manifestCommand);
   return {
     searchEngine,
     ...(searchSource
@@ -451,7 +472,17 @@ function rankExecutionPresentation(
           manifestPresentation.searchSource
         ? { searchSource: manifestPresentation.searchSource }
         : {}),
-    depth
+    depth,
+    ...(purpose === undefined
+      ? manifestPresentation.purpose
+        ? { purpose: manifestPresentation.purpose }
+        : {}
+      : { purpose }),
+    ...(saveProjectPosition === undefined
+      ? manifestPresentation.saveProjectPosition === undefined
+        ? {}
+        : { saveProjectPosition: manifestPresentation.saveProjectPosition }
+      : { saveProjectPosition })
   };
 }
 
@@ -461,6 +492,8 @@ function manifestExecutionPresentation(
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: "SEARCH_API" | "LIVE";
   readonly depth?: 30 | 50 | 100;
+  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
+  readonly saveProjectPosition?: boolean;
 } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {};
@@ -476,9 +509,16 @@ function manifestExecutionPresentation(
   const stored = execution as Readonly<Record<string, unknown>>;
   const searchEngine = stored.searchEngine;
   const depth = stored.depth;
+  const purpose = stored.purpose;
+  const saveProjectPosition = stored.saveProjectPosition;
   if (
     (searchEngine !== "GOOGLE" && searchEngine !== "YANDEX") ||
-    (depth !== 30 && depth !== 50 && depth !== 100)
+    (depth !== 30 && depth !== 50 && depth !== 100) ||
+    (purpose !== undefined &&
+      purpose !== "POSITION_TRACKING" &&
+      purpose !== "COMPETITOR_SERP") ||
+    (saveProjectPosition !== undefined &&
+      typeof saveProjectPosition !== "boolean")
   ) {
     return {};
   }
@@ -492,6 +532,10 @@ function manifestExecutionPresentation(
       : undefined;
   return {
     searchEngine,
+    ...(purpose === undefined ? {} : { purpose }),
+    ...(saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition }),
     ...(searchSource ? { searchSource } : {}),
     depth
   };

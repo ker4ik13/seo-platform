@@ -152,6 +152,10 @@ credentials других process boundaries не переиспользуютс�
 - Access token короткоживущий.
 - Refresh session хранится в `HttpOnly`, `Secure`, `SameSite` cookie.
 - Refresh tokens ротируются.
+- Открытие `/app/login` при действующей access session или наличии refresh
+  session выполняет серверный redirect на `/app`. Если access token уже истёк,
+  protected layout запускает штатную refresh rotation; недействительная refresh
+  session очищается refresh route перед возвратом на форму входа.
 - Browser API при `401` от истёкшего access token выполняет одну общую
   refresh rotation для всех параллельных запросов и повторяет каждый исходный
   same-origin запрос не более одного раза. Повтор использует новый CSRF token;

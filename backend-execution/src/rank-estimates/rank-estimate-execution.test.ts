@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION,
+  ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION,
+  ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION,
   ARSENKIN_YANDEX_LIVE_MAPPING_VERSION,
   ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION,
   XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION,
@@ -128,6 +130,46 @@ test("maps every supported provider, source, device and depth combination", () =
     assert.ok(execution, JSON.stringify(value));
     assert.equal(execution.providerMappingVersion, value.mapping);
   }
+});
+
+test("seals competitor TOP-10 purpose and optional project position", () => {
+  const google = rankEstimateExecutionParameters(
+    configuration,
+    "ARSENKIN",
+    "LIVE",
+    undefined,
+    "COMPETITOR_SERP",
+    false
+  );
+  assert.ok(google);
+  assert.equal(google.purpose, "COMPETITOR_SERP");
+  assert.equal(google.saveProjectPosition, false);
+  assert.equal(
+    google.providerMappingVersion,
+    ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION
+  );
+
+  const yandex = rankEstimateExecutionParameters(
+    {
+      ...configuration,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      language: "ru",
+      depth: 30
+    },
+    "ARSENKIN",
+    "SEARCH_API",
+    undefined,
+    "COMPETITOR_SERP",
+    true
+  );
+  assert.ok(yandex);
+  assert.equal(yandex.saveProjectPosition, true);
+  assert.equal(
+    yandex.providerMappingVersion,
+    ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION
+  );
 });
 
 test("database request counts distinguish XMLStock Yandex Live from Search API", async () => {

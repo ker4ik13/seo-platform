@@ -228,6 +228,8 @@ function DocumentationPage({
       return <Semantics baseUrl={baseUrl} />;
     case "positions":
       return <Positions baseUrl={baseUrl} />;
+    case "ai-answers":
+      return <AiAnswers baseUrl={baseUrl} />;
     case "frequency":
       return <Frequency baseUrl={baseUrl} />;
     case "automations":
@@ -690,8 +692,8 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Надёжный запуск состоит из четырёх шагов: контекст → оценка → подтверждение → результат."
-        title="Съём позиций"
+        description="Один estimate/run-контур собирает позиции либо обычную Топ-10 выдачу конкурентов."
+        title="Позиции и конкуренты"
       />
       <RouteSummary section="positions" />
       <Flow steps={["Контекст", "Оценка", "Запуск", "Результат"]} />
@@ -734,6 +736,7 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
   -H "Idempotency-Key: rank-estimate:agent:2026-09-01T16:00" \\
   -d '{
     "trackingContextId": "<contextId>",
+    "purpose": "POSITION_TRACKING",
     "provider": "XMLSTOCK",
     "searchSource": "LIVE"
   }'`}
@@ -747,6 +750,7 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "trackingContextId": "<contextId>",
     "status": "READY",
     "provider": "XMLSTOCK",
+    "purpose": "POSITION_TRACKING",
     "credentialMode": "PLATFORM_PAID",
     "scope": {
       "keywordCount": "2130",
@@ -835,6 +839,113 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
           Один ключ опрашивается максимум 50 фактических раз. Неснятые ключи
           остаются в результате с errorCode и pollAttempts; успешные строки не теряются.
         </Callout>
+      </Section>
+      <Section title="5. Собрать обычную выдачу конкурентов">
+        <p>
+          Используйте тот же контекст, estimate и подтверждение, но передайте
+          <code> purpose: &quot;COMPETITOR_SERP&quot;</code>. Провайдер всегда
+          собирает Топ-10: Arsenkin запускает инструмент <code>check-top</code>,
+          XMLStock — соответствующую Yandex/Google SERP-выдачу.
+        </p>
+        <CodeBlock
+          code={`curl -X POST "${baseUrl}/projects/<projectId>/rank-estimates" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: competitors:estimate:batch-42" \\
+  -d '{
+    "trackingContextId": "<contextId>",
+    "purpose": "COMPETITOR_SERP",
+    "saveProjectPosition": true,
+    "provider": "ARSENKIN",
+    "searchSource": "LIVE"
+  }'`}
+          language="bash"
+          title="Оценка сбора конкурентов"
+        />
+        <Callout title="Позиция сайта без второго запроса">
+          <code>saveProjectPosition</code> разрешён только при
+          <code> purpose: &quot;COMPETITOR_SERP&quot;</code>. Если флаг включён и
+          домен проекта найден в собранной Топ-10, эта позиция попадает в
+          текущую проекцию и историю. Если флаг выключен либо сайт не найден,
+          конкурентная выдача сохраняется, а позиционная история не меняется.
+          Отдельный платный запрос для позиции не выполняется.
+        </Callout>
+      </Section>
+    </article>
+  );
+}
+
+function AiAnswers({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  return (
+    <article className={styles.document}>
+      <PageHeading
+        description="Один Arsenkin ai-serp workflow собирает ответ и источники; purpose определяет, обновлять ли позиционную проекцию."
+        title="ИИ-ответы и ИИ-выдача"
+      />
+      <RouteSummary section="ai-answers" />
+      <Section title="Собрать ИИ-ответы и позицию">
+        <EndpointHeader method="POST" path="/projects/{projectId}/ai-answer-collections" scope="ai:run" />
+        <CodeBlock
+          code={`curl -X POST "${baseUrl}/projects/<projectId>/ai-answer-collections" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: ai-answer:batch-42" \\
+  -d '{
+    "items": [{ "id": "<keywordId>", "version": 7 }],
+    "searchEngine": "YANDEX",
+    "regionCode": "213",
+    "device": "DESKTOP",
+    "host": "example.ru",
+    "excludeSubdomains": false,
+    "brands": [],
+    "purpose": "POSITION_TRACKING"
+  }'`}
+          language="bash"
+          title="Обычный ИИ-съём"
+        />
+      </Section>
+      <Section title="Собрать конкурентов ИИ">
+        <p>
+          Для конкурентного режима передайте
+          <code> purpose: &quot;COMPETITOR_SERP&quot;</code>. В Web-интерфейсе
+          отдельного поля домена нет: он берётся из проекта автоматически.
+          В публичном API <code>host</code> остаётся обязательным, потому что
+          его требует Arsenkin <code>ai-serp</code>; передавайте домен того же
+          проекта.
+        </p>
+        <CodeBlock
+          code={`{
+  "items": [{ "id": "<keywordId>", "version": 7 }],
+  "searchEngine": "GOOGLE",
+  "regionCode": "1011969",
+  "device": "DESKTOP",
+  "host": "example.ru",
+  "excludeSubdomains": false,
+  "brands": [],
+  "purpose": "COMPETITOR_SERP",
+  "saveProjectPosition": false
+}`}
+          language="json"
+          title="JSON · ИИ-конкуренты без сохранения позиции"
+        />
+        <Callout title="Что делает галочка">
+          При <code>saveProjectPosition: true</code> найденная среди источников
+          страница проекта обновляет ИИ-позицию и историю из этого же ответа.
+          При <code>false</code> ответ и источники конкурентов сохраняются, но
+          позиционная проекция не меняется. Второй запрос к Arsenkin не
+          создаётся. Поле допустимо только для конкурентного purpose.
+        </Callout>
+      </Section>
+      <Section title="Статус и результат">
+        <CodeBlock
+          code={`curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"
+
+curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>/result?limit=200" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"`}
+          language="bash"
+          title="Polling и постраничный результат"
+        />
       </Section>
     </article>
   );

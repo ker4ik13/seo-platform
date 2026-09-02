@@ -63,8 +63,10 @@ import {
   toggleSemanticHighlightedSelection
 } from "../lib/semantic-row-selection";
 import {
+  hasSemanticAiAnswerSnapshot,
   rankChangePresentation,
-  sameSemanticRankingUrl
+  sameSemanticRankingUrl,
+  semanticRankingUrlMatch
 } from "../lib/semantic-rank-presentation";
 import {
   clampSemanticColumnWidth,
@@ -156,6 +158,7 @@ import {
   semanticFolderSortViewName,
   semanticFolderSortViewPrefix,
   semanticProjectTableViewName,
+  semanticViewConfigForCurrentSchema,
   type SemanticKeywordIntent,
   type SemanticKeywordSort,
   type SemanticQueryIndicator,
@@ -462,9 +465,11 @@ export function SemanticCoreTable({
   const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
   const [actionIds, setActionIds] = useState<ReadonlySet<string> | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
+  const [competitorDialogOpen, setCompetitorDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
   const [wordstatDialogOpen, setWordstatDialogOpen] = useState(false);
   const [aiAnswerDialogOpen, setAiAnswerDialogOpen] = useState(false);
+  const [aiCompetitorDialogOpen, setAiCompetitorDialogOpen] = useState(false);
   const [clusteringDialogOpen, setClusteringDialogOpen] = useState(false);
   const [aiAnswerKeyword, setAiAnswerKeyword] = useState<SemanticKeyword>();
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
@@ -481,6 +486,12 @@ export function SemanticCoreTable({
     x: number;
     y: number;
   }>>();
+  const [commandMenu, setCommandMenu] = useState<Readonly<{
+    kind: "WORDSTAT" | "POSITIONS" | "COMPETITORS";
+    x: number;
+    y: number;
+  }>>();
+  const commandMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const selectAllAbortRef = useRef<AbortController | undefined>(undefined);
   const multiSearchActionRef = useRef<
@@ -1290,7 +1301,9 @@ export function SemanticCoreTable({
         const defaultSharedView = preferredProjectSharedView(visibleViews);
         const appliedView = explicitlyAppliedView ?? defaultSharedView;
         const storedConfig = semanticViewConfigWithoutAppliedView(
-          appliedView?.config ?? projectView?.config ?? defaultSemanticViewConfig
+          semanticViewConfigForCurrentSchema(
+            appliedView?.config ?? projectView?.config ?? defaultSemanticViewConfig
+          )
         );
         const nextConfig = appliedView || projectView
           ? storedConfig
@@ -1866,7 +1879,9 @@ export function SemanticCoreTable({
   }
 
   async function applySavedView(view: SemanticSavedView): Promise<void> {
-    const nextConfig = semanticViewConfigWithoutAppliedView(view.config);
+    const nextConfig = semanticViewConfigWithoutAppliedView(
+      semanticViewConfigForCurrentSchema(view.config)
+    );
     const nextColumnWidths = nextConfig.columnWidths ?? {};
     const nextExpandedGroupIds = nextConfig.expandedGroupIds ?? [];
     const nextPageSize = nextConfig.pageSize ?? layoutPreferencesRef.current.pageSize;
@@ -1913,13 +1928,16 @@ export function SemanticCoreTable({
 
   function activateSavedView(
     view?: SemanticSavedView,
-    appliedConfig: SemanticViewConfig = view?.config ?? defaultSemanticViewConfig
+    appliedConfig?: SemanticViewConfig
   ): void {
+    const currentConfig = semanticViewConfigForCurrentSchema(
+      appliedConfig ?? view?.config ?? defaultSemanticViewConfig
+    );
     activeSavedViewRef.current = view;
     activeSavedViewProjectIdRef.current = view ? projectId : "";
     setActiveSavedView(view);
     savedViewAutosaveBaselineRef.current = view
-      ? semanticViewConfigSignature(appliedConfig)
+      ? semanticViewConfigSignature(currentConfig)
       : "";
     setActiveSavedViewBaseline(savedViewAutosaveBaselineRef.current);
   }
@@ -2512,10 +2530,11 @@ export function SemanticCoreTable({
           ? "SELECTED"
           : "CURRENT_FILTER"
     );
+    const columns = semanticExportColumnsWithRankingUrls(viewConfig.columns);
     setExportColumns(
-      exportContent === "FOLDER_MAP" && !viewConfig.columns.includes("query")
-        ? ["query", ...viewConfig.columns]
-        : viewConfig.columns
+      exportContent === "FOLDER_MAP" && !columns.includes("query")
+        ? ["query", ...columns]
+        : columns
     );
     const contextualGroupIds = groupId
       ? [groupId]
@@ -3112,6 +3131,58 @@ export function SemanticCoreTable({
     .filter(({ systemKind }) => !systemKind)
     .find(({ id }) => id === viewConfig.filters.groupId);
   const mutationIds = actionIds ?? checkedIds;
+  const projectHasKeywords = (rootTotal ?? items.length) > 0;
+  const commandMenuItems: readonly ContextMenuItem[] = commandMenu
+    ? commandMenu.kind === "WORDSTAT"
+      ? [
+          {
+            id: "frequency",
+            label: "Собрать частотность",
+            icon: <Icon name="frequency" />,
+            disabled: !projectHasKeywords,
+            onSelect: () => setFrequencyDialogOpen(true)
+          },
+          {
+            id: "wordstat-parsing",
+            label: "Парсинг",
+            icon: <Icon name="search" />,
+            onSelect: () => setWordstatDialogOpen(true)
+          }
+        ]
+      : commandMenu.kind === "POSITIONS"
+        ? [
+            {
+              id: "positions",
+              label: "Собрать позиции",
+              icon: <Icon name="rankCheck" />,
+              disabled: !projectHasKeywords,
+              onSelect: () => setPositionDialogOpen(true)
+            },
+            {
+              id: "ai-answers",
+              label: "Собрать ИИ-ответы",
+              icon: <Icon name="ai" />,
+              disabled: !projectHasKeywords,
+              onSelect: () => setAiAnswerDialogOpen(true)
+            }
+          ]
+        : [
+            {
+              id: "competitors",
+              label: "Собрать конкурентов",
+              icon: <Icon name="competitors" />,
+              disabled: !projectHasKeywords,
+              onSelect: () => setCompetitorDialogOpen(true)
+            },
+            {
+              id: "ai-competitors",
+              label: "Собрать ИИ-выдачу",
+              icon: <Icon name="ai" />,
+              disabled: !projectHasKeywords,
+              onSelect: () => setAiCompetitorDialogOpen(true)
+            }
+          ]
+    : [];
   const rowMenuItems: readonly ContextMenuItem[] = rowContextMenu
     ? [
         {
@@ -3207,6 +3278,22 @@ export function SemanticCoreTable({
     ]
       .filter(Boolean)
       .join(" ") || undefined;
+  };
+  const toggleCommandMenu = (
+    event: MouseEvent<HTMLButtonElement>,
+    kind: "WORDSTAT" | "POSITIONS" | "COMPETITORS"
+  ): void => {
+    commandMenuTriggerRef.current = event.currentTarget;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setCommandMenu((current) =>
+      current?.kind === kind
+        ? undefined
+        : {
+            kind,
+            x: bounds.left,
+            y: bounds.bottom + 4
+      }
+    );
   };
   return (
     <section
@@ -3333,10 +3420,47 @@ export function SemanticCoreTable({
       >
         <button className={activityButtonClass("SEMANTIC_ADD")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:add" onClick={openCreate} type="button"><Icon name="plus" />Добавить</button>
         <button className={activityButtonClass("SEMANTIC_IMPORT")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:import" onClick={onOpenImport} type="button"><Icon name="import" />Импорт</button>
-        <button className={activityButtonClass("SEMANTIC_FREQUENCY")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:frequency" disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
-        <button className={activityButtonClass("SEMANTIC_WORDSTAT")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:wordstat" onClick={() => setWordstatDialogOpen(true)} title="Вставьте исходные фразы или выберите запросы и папки проекта" type="button"><Icon name="search" />Парсинг Wordstat</button>
-        <button className={activityButtonClass("SEMANTIC_POSITIONS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:positions" disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
-        <button className={activityButtonClass("SEMANTIC_AI_ANSWERS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:ai-answers" disabled={(rootTotal ?? items.length) === 0} onClick={() => setAiAnswerDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Проверить ИИ-ответы Яндекса или Google через Arsenkin"} type="button"><Icon name="ai" />Проверить ИИ-ответы</button>
+        <button
+          aria-expanded={commandMenu?.kind === "WORDSTAT"}
+          className={activityButtonClass("SEMANTIC_WORDSTAT", "semantic-command-menu-trigger")}
+          data-presence-cursor-anchor="true"
+          data-presence-key="semantic-action:wordstat"
+          onClick={(event) => toggleCommandMenu(event, "WORDSTAT")}
+          title="Частотность и парсинг Wordstat"
+          type="button"
+        >
+          <Icon name="frequency" />
+          <span>Wordstat</span>
+          <Icon className="semantic-command-chevron" name="chevronDown" />
+        </button>
+        <button
+          aria-expanded={commandMenu?.kind === "POSITIONS"}
+          className={activityButtonClass("SEMANTIC_POSITIONS", "semantic-command-menu-trigger")}
+          data-presence-cursor-anchor="true"
+          data-presence-key="semantic-action:positions"
+          disabled={!projectHasKeywords}
+          onClick={(event) => toggleCommandMenu(event, "POSITIONS")}
+          title={projectHasKeywords ? "Сбор обычных и ИИ-позиций" : "В проекте пока нет запросов"}
+          type="button"
+        >
+          <Icon name="rankCheck" />
+          <span>Сбор позиций</span>
+          <Icon className="semantic-command-chevron" name="chevronDown" />
+        </button>
+        <button
+          aria-expanded={commandMenu?.kind === "COMPETITORS"}
+          className={activityButtonClass("SEMANTIC_POSITIONS", "semantic-command-menu-trigger")}
+          data-presence-cursor-anchor="true"
+          data-presence-key="semantic-action:competitors"
+          disabled={!projectHasKeywords}
+          onClick={(event) => toggleCommandMenu(event, "COMPETITORS")}
+          title={projectHasKeywords ? "Сбор обычной и ИИ-выдачи конкурентов" : "В проекте пока нет запросов"}
+          type="button"
+        >
+          <Icon name="competitors" />
+          <span>Сбор конкурентов</span>
+          <Icon className="semantic-command-chevron" name="chevronDown" />
+        </button>
         <button className={activityButtonClass("SEMANTIC_CLUSTERING")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:clustering" disabled={(rootTotal ?? items.length) === 0} onClick={() => setClusteringDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Разбить выбранные запросы или папки на группы по выдаче"} type="button"><Icon name="cluster" />Кластеризовать</button>
         <button className={activityButtonClass("SEMANTIC_NEGATIVE_KEYWORDS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:negative-keywords" disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title="Найти запросы по минус-словам и переместить их в корзину" type="button"><Icon name="warning" />Минус-слова</button>
         <button className={activityButtonClass("SEMANTIC_DUPLICATES")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:duplicates" disabled={(rootTotal ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title="Найти фразы с одинаковым набором слов и удалить лишние варианты" type="button"><Icon name="checkDouble" />Дубли</button>
@@ -3353,6 +3477,21 @@ export function SemanticCoreTable({
           </div>
         )}
       </nav>
+
+      {commandMenu && (
+        <ContextMenu
+          items={commandMenuItems}
+          label={commandMenu.kind === "WORDSTAT"
+            ? "Действия Wordstat"
+            : commandMenu.kind === "POSITIONS"
+              ? "Действия сбора позиций"
+              : "Действия сбора конкурентов"}
+          onClose={() => setCommandMenu(undefined)}
+          triggerRef={commandMenuTriggerRef}
+          x={commandMenu.x}
+          y={commandMenu.y}
+        />
+      )}
 
       {mobileGroupTreeOpen && (
         <>
@@ -3433,6 +3572,8 @@ export function SemanticCoreTable({
         }}
         onReorder={(group, position) => void reorderGroup(group, position)}
         onExpandedIdsChange={updateExpandedGroupIds}
+        projectId={projectId}
+        refreshVersion={groupRefreshVersion}
         onSelect={(groupId) => {
           selectGroup(groupId);
           setMobileGroupTreeOpen(false);
@@ -4153,7 +4294,7 @@ export function SemanticCoreTable({
               </CustomSelect>
             </label>
             <label className="semantic-editor-url">
-              <span>Целевая URL</span>
+              <span>Целевой URL</span>
               <input
                 maxLength={2048}
                 onChange={(event) =>
@@ -4647,17 +4788,22 @@ export function SemanticCoreTable({
           }
           onOpenAiAnswer={() => setAiAnswerKeyword(focusedKeyword)}
           onUpdated={(updated) => {
-            setItems((current) => current.map((keyword) =>
-              keyword.id === updated.id
-                ? {
-                    ...keyword,
-                    hasNote: updated.hasNote ?? false,
-                    isTracked: updated.isTracked,
-                    updatedAt: updated.updatedAt,
-                    version: updated.version
-                  }
-                : keyword
-            ));
+            setItems((current) =>
+              current.map((keyword) => {
+                if (keyword.id !== updated.id) return keyword;
+                const { targetUrl: _previousTargetUrl, ...unchanged } = keyword;
+                return {
+                  ...unchanged,
+                  hasNote: updated.hasNote ?? false,
+                  isTracked: updated.isTracked,
+                    ...(updated.targetUrl
+                      ? { targetUrl: updated.targetUrl }
+                      : {}),
+                  updatedAt: updated.updatedAt,
+                  version: updated.version
+                };
+              })
+            );
           }}
           projectDomain={projectDomain}
           projectId={projectId}
@@ -4821,6 +4967,33 @@ export function SemanticCoreTable({
           workspaceId={workspaceId}
         />
       )}
+      {competitorDialogOpen && (
+        <SemanticPositionDialog
+          activeGroupId={viewConfig.filters.groupId}
+          groups={groups}
+          initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal, isTracked }) => ({
+              id,
+              version,
+              label: textOriginal,
+              isTracked
+            }))}
+          mode="competitors"
+          onClose={() => setCompetitorDialogOpen(false)}
+          onStarted={() => {
+            setCompetitorDialogOpen(false);
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice(
+              "Сбор конкурентов запущен в фоне. Топ-10 появится в данных запроса после завершения."
+            );
+            setRightSidebar({ type: "OPERATIONS" });
+          }}
+          projectSearchCity={projects.find(({ id }) => id === projectId)?.searchCity}
+          projectId={projectId}
+          workspaceId={workspaceId}
+        />
+      )}
       {aiAnswerDialogOpen && (
         <SemanticAiAnswerDialog
           activeGroupId={viewConfig.filters.groupId}
@@ -4833,6 +5006,31 @@ export function SemanticCoreTable({
             setAiAnswerDialogOpen(false);
             setOperationsRefreshVersion((value) => value + 1);
             setBulkNotice("Проверка ИИ-ответов запущена в фоне. Результаты появятся в отдельных колонках.");
+            setRightSidebar({ type: "OPERATIONS" });
+          }}
+          projectDomain={projectDomain}
+          projectId={projectId}
+        />
+      )}
+      {aiCompetitorDialogOpen && (
+        <SemanticAiAnswerDialog
+          activeGroupId={viewConfig.filters.groupId}
+          groups={groups}
+          initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({
+              id,
+              version,
+              label: textOriginal
+            }))}
+          mode="competitors"
+          onClose={() => setAiCompetitorDialogOpen(false)}
+          onStarted={() => {
+            setAiCompetitorDialogOpen(false);
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice(
+              "Сбор ИИ-выдачи конкурентов запущен в фоне. Ответы и источники появятся после завершения."
+            );
             setRightSidebar({ type: "OPERATIONS" });
           }}
           projectDomain={projectDomain}
@@ -5150,19 +5348,21 @@ const semanticColumns: readonly Readonly<{
   { key: "frequencyFixed", label: '"!"' },
   { key: "wordCount", label: "WS" },
   { key: "yandexPosition", label: "Позиция Яндекс" },
+  { key: "yandexRelevantUrl", label: "URL из съёма Яндекс" },
   { key: "googlePosition", label: "Позиция Google" },
-  { key: "yandexRelevantUrl", label: "Релевантный URL Яндекс" },
-  { key: "googleRelevantUrl", label: "Релевантный URL Google" },
+  { key: "googleRelevantUrl", label: "URL из съёма Google" },
+  { key: "yandexAiPosition", label: "ИИ позиция Яндекс" },
+  { key: "yandexAiRelevantUrl", label: "URL ИИ-выдачи Яндекс" },
+  { key: "googleAiPosition", label: "ИИ позиция Google" },
+  { key: "googleAiRelevantUrl", label: "URL ИИ-выдачи Google" },
   { key: "yandexCheckedAt", label: "Дата съёма Яндекс" },
   { key: "googleCheckedAt", label: "Дата съёма Google" },
-  { key: "yandexAiPosition", label: "ИИ позиция Яндекс" },
-  { key: "googleAiPosition", label: "ИИ позиция Google" },
   { key: "yandexAiCheckedAt", label: "Дата съёма ИИ Яндекс" },
   { key: "googleAiCheckedAt", label: "Дата съёма ИИ Google" },
   { key: "visibility", label: "Видимость" },
   { key: "group", label: "Группа" },
   { key: "cluster", label: "Кластер" },
-  { key: "targetUrl", label: "Целевая страница" },
+  { key: "targetUrl", label: "Целевой URL" },
   { key: "tags", label: "Теги" },
   { key: "intent", label: "Интент" },
   { key: "priority", label: "Приоритет" },
@@ -5179,6 +5379,23 @@ const semanticCompetitorExportColumns: readonly Readonly<{
   { key: "aiCompetitorUrls", label: "ИИ-конкуренты" },
   { key: "aiCompetitorSerp", label: "SERP ИИ-конкурентов" }
 ];
+
+function semanticExportColumnsWithRankingUrls(
+  columns: readonly SemanticViewColumn[]
+): readonly SemanticExportColumnKey[] {
+  const result: SemanticExportColumnKey[] = [...columns];
+  for (const [positionColumn, urlColumn] of [
+    ["yandexPosition", "yandexRelevantUrl"],
+    ["googlePosition", "googleRelevantUrl"],
+    ["yandexAiPosition", "yandexAiRelevantUrl"],
+    ["googleAiPosition", "googleAiRelevantUrl"]
+  ] as const) {
+    if (result.includes(urlColumn)) continue;
+    const position = result.indexOf(positionColumn);
+    result.splice(position < 0 ? result.length : position + 1, 0, urlColumn);
+  }
+  return result;
+}
 
 function nextSemanticColumnSort(
   column: SemanticViewColumn,
@@ -5293,6 +5510,12 @@ function columnHeader(
   if (column === "googleRelevantUrl") {
     return <span className="semantic-engine-header"><SearchEngineLogo engine="GOOGLE" size="compact" /> URL</span>;
   }
+  if (column === "yandexAiRelevantUrl") {
+    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="YANDEX" size="compact" /><Icon name="ai" /> ИИ URL</span>;
+  }
+  if (column === "googleAiRelevantUrl") {
+    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="GOOGLE" size="compact" /><Icon name="ai" /> ИИ URL</span>;
+  }
   if (column === "yandexCheckedAt") {
     return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> Съём</span>;
   }
@@ -5368,11 +5591,19 @@ function SemanticSiteResultsModal({
 function keywordHasTargetUrlMismatch(item: SemanticKeyword): boolean {
   return Boolean(
     item.targetUrl &&
-    item.positions?.some(
-      ({ found, rankingUrl }) =>
-        found &&
-        rankingUrl !== undefined &&
-        !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
+    (
+      item.positions?.some(
+        ({ found, rankingUrl }) =>
+          found &&
+          rankingUrl !== undefined &&
+          !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
+      ) ||
+      item.aiAnswers?.some(
+        ({ siteFound, rankingUrl }) =>
+          siteFound &&
+          rankingUrl !== undefined &&
+          !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
+      )
     )
   );
 }
@@ -5465,20 +5696,20 @@ function keywordColumn(
                 </button>
               )}
               {queryIndicators.includes("AI_ANSWER") &&
-                item.aiAnswers?.some(({ answerPresent }) => answerPresent) && (
-                <button
-                  aria-label="Открыть сохранённый ИИ-ответ"
-                  className="semantic-keyword-ai-indicator"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenAiAnswer();
-                  }}
-                  title="Открыть полный ИИ-ответ и его источники"
-                  type="button"
-                >
-                  <Icon name="search" />
-                </button>
-              )}
+                hasSemanticAiAnswerSnapshot(item.aiAnswers) && (
+                  <button
+                    aria-label="Открыть сохранённую ИИ-выдачу"
+                    className="semantic-keyword-ai-indicator"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenAiAnswer();
+                    }}
+                    title="Открыть сохранённую ИИ-выдачу и её источники"
+                    type="button"
+                  >
+                    <Icon name="ai" />
+                  </button>
+                )}
             </span>
           </strong>
           {density !== "COMPACT" && item.tags.length > 0 && (
@@ -5513,6 +5744,10 @@ function keywordColumn(
       return keywordRelevantUrl(item, "YANDEX");
     case "googleRelevantUrl":
       return keywordRelevantUrl(item, "GOOGLE");
+    case "yandexAiRelevantUrl":
+      return keywordAiRelevantUrl(item, "YANDEX");
+    case "googleAiRelevantUrl":
+      return keywordAiRelevantUrl(item, "GOOGLE");
     case "yandexCheckedAt":
       return keywordCheckedAt(item, "YANDEX");
     case "googleCheckedAt":
@@ -5573,15 +5808,57 @@ function keywordRelevantUrl(
     (candidate) => candidate.searchEngine === searchEngine
   );
   if (position && !position.found) return keywordNotFoundMark(searchEngine);
-  const url = position?.rankingUrl;
+  return keywordRankingUrl(item.targetUrl, position?.rankingUrl);
+}
+
+function keywordAiRelevantUrl(
+  item: SemanticKeyword,
+  searchEngine: "GOOGLE" | "YANDEX"
+) {
+  const answer = item.aiAnswers?.find(
+    (candidate) => candidate.searchEngine === searchEngine
+  );
+  if (answer && !answer.siteFound) return keywordNotFoundMark(searchEngine, "AI");
+  return keywordRankingUrl(item.targetUrl, answer?.rankingUrl);
+}
+
+function keywordRankingUrl(targetUrl: string | undefined, url: string | undefined) {
   const presentation = url
     ? externalPageUrlPresentation(url, Number.MAX_SAFE_INTEGER)
     : undefined;
-  return presentation ? (
-    <a href={presentation.href} onClick={(event) => event.stopPropagation()} rel="noreferrer noopener" target="_blank" title={presentation.href}>
-      {presentation.label}
-    </a>
-  ) : <span className="semantic-metric-empty">—</span>;
+  if (!presentation || !url) {
+    return <span className="semantic-metric-empty">—</span>;
+  }
+  const match = semanticRankingUrlMatch(targetUrl, url);
+  const matchLabel = match === "MATCH"
+    ? "Совпадает с целевым"
+    : match === "MISMATCH"
+      ? "Не совпадает с целевым"
+      : "Целевой URL не задан";
+  return (
+    <span className="semantic-ranking-url-cell">
+      <a
+        className="semantic-ranking-url-link"
+        href={presentation.href}
+        onClick={(event) => event.stopPropagation()}
+        rel="noreferrer noopener"
+        target="_blank"
+        title={presentation.href}
+      >
+        {presentation.label}
+      </a>
+      <span
+        className={`semantic-ranking-url-match ${match.toLocaleLowerCase("en")}`}
+        title={
+          match === "NO_TARGET"
+            ? matchLabel
+            : `${matchLabel}: ${targetUrl}`
+        }
+      >
+        {matchLabel}
+      </span>
+    </span>
+  );
 }
 
 function keywordCheckedAt(
@@ -5656,13 +5933,17 @@ function keywordAiCheckedAt(
   ) : <span className="semantic-metric-empty">—</span>;
 }
 
-function keywordNotFoundMark(searchEngine: "GOOGLE" | "YANDEX") {
+function keywordNotFoundMark(
+  searchEngine: "GOOGLE" | "YANDEX",
+  source: "AI" | "RANK" = "RANK"
+) {
+  const sourceLabel = source === "AI" ? "ИИ-выдаче" : "выдаче";
   return (
     <span
-      aria-label={`${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: позиция не найдена`}
+      aria-label={`${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: URL в ${sourceLabel} не найден`}
       className="semantic-rank-not-found"
       role="img"
-      title="Съём выполнен, позиция не найдена"
+      title={`Съём выполнен, URL проекта в ${sourceLabel} не найден`}
     >
       ×
     </span>

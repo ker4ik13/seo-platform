@@ -54,7 +54,15 @@ export function internalPersistAiAnswerSnapshotBatchInput(
     input.items.length > internalAiAnswerPersistBatchLimit
   ) invalid("items");
   const items = input.items.map((candidate, index) => {
-    const item = record(candidate, ["keywordId", "keywordVersion", "snapshot"]);
+    const item = record(candidate, [
+      "keywordId",
+      "keywordVersion",
+      "positionTrackingEnabled",
+      "snapshot"
+    ]);
+    if (typeof item.positionTrackingEnabled !== "boolean") {
+      invalid(`items.${index}.positionTrackingEnabled`);
+    }
     const snapshot = record(item.snapshot, [
       "answerPresent",
       "siteFound",
@@ -114,6 +122,7 @@ export function internalPersistAiAnswerSnapshotBatchInput(
     return {
       keywordId: uuid(item.keywordId, `items.${index}.keywordId`),
       keywordVersion: integer(item.keywordVersion, `items.${index}.keywordVersion`, 1, Number.MAX_SAFE_INTEGER),
+      positionTrackingEnabled: item.positionTrackingEnabled,
       snapshot: {
         answerPresent: snapshot.answerPresent,
         siteFound: snapshot.siteFound,

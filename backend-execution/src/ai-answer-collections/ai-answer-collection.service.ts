@@ -67,6 +67,13 @@ export class AiAnswerCollectionService {
               idempotencyKey: input.idempotencyKey,
               requestHash: Buffer.from(hash, "hex"),
               inputSnapshot: {
+                ...(input.purpose === "COMPETITOR_SERP"
+                  ? {
+                      purpose: "COMPETITOR_SERP" as const,
+                      saveProjectPosition:
+                        input.saveProjectPosition ?? false
+                    }
+                  : {}),
                 searchEngine: input.searchEngine,
                 regionCode: input.regionCode,
                 device: input.device,
@@ -256,6 +263,12 @@ function requestHash(input: InternalCreateAiAnswerCollectionInput): string {
     .update(JSON.stringify({
       projectId: input.projectId,
       items: input.items,
+      ...(input.purpose === "COMPETITOR_SERP"
+        ? {
+            purpose: "COMPETITOR_SERP" as const,
+            saveProjectPosition: input.saveProjectPosition ?? false
+          }
+        : {}),
       searchEngine: input.searchEngine,
       regionCode: input.regionCode,
       device: input.device,

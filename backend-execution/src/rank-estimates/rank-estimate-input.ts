@@ -39,6 +39,10 @@ export function internalCreateRankEstimateInput(
     [
       ...INPUT_FIELDS,
       ...(Object.hasOwn(raw, "provider") ? ["provider"] : []),
+      ...(Object.hasOwn(raw, "purpose") ? ["purpose"] : []),
+      ...(Object.hasOwn(raw, "saveProjectPosition")
+        ? ["saveProjectPosition"]
+        : []),
       ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
       ...(Object.hasOwn(raw, "searchSource") ? ["searchSource"] : []),
       ...(Object.hasOwn(raw, "yandexLiveMode") ? ["yandexLiveMode"] : [])
@@ -90,6 +94,18 @@ export function internalCreateRankEstimateInput(
   const provider = input.provider === undefined
     ? undefined
     : rankProvider(input.provider, "provider");
+  const purpose = input.purpose === undefined
+    ? undefined
+    : rankPurpose(input.purpose);
+  const saveProjectPosition = input.saveProjectPosition === undefined
+    ? undefined
+    : boolean(input.saveProjectPosition, "saveProjectPosition");
+  if (
+    saveProjectPosition !== undefined &&
+    purpose !== "COMPETITOR_SERP"
+  ) {
+    invalid("saveProjectPosition");
+  }
   const searchSource = input.searchSource === undefined
     ? undefined
     : rankSearchSource(input.searchSource);
@@ -110,6 +126,10 @@ export function internalCreateRankEstimateInput(
       input.trackingContextId,
       "trackingContextId"
     ),
+    ...(purpose === undefined ? {} : { purpose }),
+    ...(saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition }),
     ...(provider === undefined ? {} : { provider }),
     ...(input.credentialId === undefined
       ? {}
@@ -134,6 +154,20 @@ export function internalCreateRankEstimateInput(
     billingCurrency,
     quota: quota(input.quota)
   };
+}
+
+function rankPurpose(
+  value: unknown
+): "POSITION_TRACKING" | "COMPETITOR_SERP" {
+  if (value !== "POSITION_TRACKING" && value !== "COMPETITOR_SERP") {
+    invalid("purpose");
+  }
+  return value;
+}
+
+function boolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
 }
 
 function rankSearchSource(value: unknown): "SEARCH_API" | "LIVE" {

@@ -7,7 +7,11 @@ import type {
   AppWorkspace,
   ProtectedAppContext
 } from "../lib/app-types";
-import { shouldShowWorkspaceCreationAction } from "../lib/app-navigation";
+import {
+  readLastWorkspaceProjectId,
+  shouldShowWorkspaceCreationAction,
+  writeLastWorkspaceProjectId
+} from "../lib/app-navigation";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { ProjectSelect } from "./project-select";
@@ -46,16 +50,36 @@ export function TenantSwitcher({
       "seo_project",
       projectId && projectWorkspaceId === workspaceId ? projectId : ""
     );
-  }, [projectId, projectWorkspaceId, workspaceId]);
+    writeLastWorkspaceProjectId(
+      window.localStorage,
+      currentUserId,
+      workspaceId,
+      projectId && projectWorkspaceId === workspaceId ? projectId : undefined
+    );
+  }, [currentUserId, projectId, projectWorkspaceId, workspaceId]);
 
   function selectWorkspace(workspaceId: string): void {
     writePreference("seo_workspace", workspaceId);
-    writePreference("seo_project", "");
+    writePreference(
+      "seo_project",
+      readLastWorkspaceProjectId(
+        window.localStorage,
+        currentUserId,
+        workspaceId
+      ) ?? ""
+    );
     window.location.assign("/app");
   }
 
   function selectProject(projectId: string): void {
+    if (!workspaceId || !projects.some(({ id }) => id === projectId)) return;
     writePreference("seo_project", projectId);
+    writeLastWorkspaceProjectId(
+      window.localStorage,
+      currentUserId,
+      workspaceId,
+      projectId
+    );
     window.location.assign("/app");
   }
 

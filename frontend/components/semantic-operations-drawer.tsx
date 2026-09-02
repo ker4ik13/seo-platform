@@ -432,12 +432,16 @@ export function SemanticOperationsDrawer({
         title={openedOperation.kind === "FREQUENCY"
           ? "Сбор частотности"
           : openedOperation.kind === "AI_ANSWER"
-            ? "Сбор ИИ-ответов"
+            ? openedOperation.competitorCollection
+              ? "Сбор ИИ-выдачи конкурентов"
+              : "Сбор ИИ-ответов"
             : openedOperation.kind === "CLUSTERING"
               ? "Кластеризация запросов"
               : openedOperation.kind === "RESEARCH"
                 ? openedOperation.title
-            : "Проверка позиций"}
+            : openedOperation.competitorCollection
+              ? "Сбор конкурентов"
+              : "Проверка позиций"}
       />
     )}
     {stopConfirmation && (
@@ -477,6 +481,7 @@ interface Operation {
   readonly finishedAt?: string;
   readonly durationLabel?: string;
   readonly resultLabel?: string;
+  readonly competitorCollection?: boolean;
 }
 
 function frequencyOperation(value: FrequencyCollectionSummary): Operation {
@@ -513,6 +518,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
 }
 
 function rankOperation(value: RankJobSummary): Operation {
+  const competitorCollection = value.purpose === "COMPETITOR_SERP";
   const current = Number(value.progress.current);
   const total = Number(value.progress.total);
   const providerName = value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin";
@@ -522,14 +528,14 @@ function rankOperation(value: RankJobSummary): Operation {
   const description = [
     providerName,
     searchSystem,
-    value.depth ? `Топ-${value.depth}` : undefined
+    value.depth ? `Топ-${competitorCollection ? 10 : value.depth}` : undefined
   ].filter((part): part is string => Boolean(part)).join(" · ");
   const durationLabel = operationDurationLabel(value);
   return {
     id: value.id,
     kind: "RANK",
     provider: value.provider,
-    title: `Проверка позиций · ${description}`,
+    title: `${competitorCollection ? "Конкуренты" : "Проверка позиций"} · ${description}`,
     description,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${current} из ${total}`,
@@ -540,9 +546,10 @@ function rankOperation(value: RankJobSummary): Operation {
       value.status === "PARTIALLY_COMPLETED" &&
       Number(value.result.failedCount) > 0 &&
       Number(value.result.submitOutcomeUnknownCount) === 0,
-    retryLabel: "Дособрать позиции",
+    retryLabel: competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
     downloadable: false,
     version: 1,
+    ...(competitorCollection ? { competitorCollection: true } : {}),
     ...(value.routingScope
       ? {
           routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`
@@ -558,12 +565,17 @@ function rankOperation(value: RankJobSummary): Operation {
       ? { durationLabel }
       : {}),
     ...(value.result
-      ? { resultLabel: `Найдено позиций: ${formatInteger(Number(value.result.foundCount))}` }
+      ? {
+          resultLabel: competitorCollection
+            ? `Сохранено срезов: ${formatInteger(Number(value.result.persistedCount))}`
+            : `Найдено позиций: ${formatInteger(Number(value.result.foundCount))}`
+        }
       : {})
   };
 }
 
 function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
+  const competitorCollection = value.purpose === "COMPETITOR_SERP";
   const done = value.completedKeywords + value.failedKeywords;
   const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
   const device = value.device === "DESKTOP" ? "десктоп" : "мобильное";
@@ -572,7 +584,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     id: value.id,
     kind: "AI_ANSWER",
     provider: "ARSENKIN",
-    title: `ИИ-ответы · ${engine}`,
+    title: `${competitorCollection ? "ИИ-выдача конкурентов" : "ИИ-ответы"} · ${engine}`,
     description: `Arsenkin · ${engine} · регион ${value.regionCode} · ${device}`,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${done} из ${value.selectedKeywords}`,
@@ -591,6 +603,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     retryLabel: "",
     downloadable: false,
     version: value.version,
+    ...(competitorCollection ? { competitorCollection: true } : {}),
     ...(value.routingScope
       ? {
           routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`

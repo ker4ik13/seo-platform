@@ -145,6 +145,33 @@ test("writes frequencies and search positions as native XLSX numbers", async () 
   );
 });
 
+test("exports regular and AI result URLs for Yandex and Google as separate columns", async () => {
+  const file = semanticExportFile(
+    keywordWithMetrics(),
+    {
+      format: "CSV",
+      scope: "FULL_CORE",
+      locale: "ru",
+      columns: [
+        "query",
+        "targetUrl",
+        "yandexRelevantUrl",
+        "googleRelevantUrl",
+        "yandexAiRelevantUrl",
+        "googleAiRelevantUrl"
+      ]
+    },
+    {}
+  );
+
+  const csv = new TextDecoder().decode(await collect(file.bytes));
+  assert.equal(
+    csv,
+    "Запрос,Целевой URL,URL из съёма Яндекс,URL из съёма Google,URL ИИ-выдачи Яндекс,URL ИИ-выдачи Google\r\n" +
+      "запрос с метриками,https://example.com/catalog,https://example.com/catalog/,https://example.com/other,https://example.com/catalog,https://example.com/ai-other\r\n"
+  );
+});
+
 test("protects CSV and custom headers from spreadsheet formulas", async () => {
   const customId = "01900000-0000-7000-8000-000000000099";
   const file = semanticExportFile(
@@ -347,6 +374,7 @@ async function* oneKeyword(
 async function* keywordWithMetrics(): AsyncGenerator<SemanticKeywordListItem> {
   yield {
     ...keyword("запрос с метриками"),
+    targetUrl: "https://example.com/catalog",
     frequency: {
       value: "12890",
       regionCode: "225",
@@ -377,13 +405,35 @@ async function* keywordWithMetrics(): AsyncGenerator<SemanticKeywordListItem> {
         searchEngine: "YANDEX",
         found: true,
         position: 7,
+        rankingUrl: "https://example.com/catalog/",
         observedAt: "2026-08-12T10:00:00.000Z"
       },
       {
         searchEngine: "GOOGLE",
         found: true,
         position: 13,
+        rankingUrl: "https://example.com/other",
         observedAt: "2026-08-12T10:00:00.000Z"
+      }
+    ],
+    aiAnswers: [
+      {
+        searchEngine: "YANDEX",
+        answerPresent: true,
+        siteFound: true,
+        position: 2,
+        rankingUrl: "https://example.com/catalog",
+        brandFound: true,
+        observedAt: "2026-08-12T10:05:00.000Z"
+      },
+      {
+        searchEngine: "GOOGLE",
+        answerPresent: true,
+        siteFound: true,
+        position: 4,
+        rankingUrl: "https://example.com/ai-other",
+        brandFound: false,
+        observedAt: "2026-08-12T10:06:00.000Z"
       }
     ]
   };

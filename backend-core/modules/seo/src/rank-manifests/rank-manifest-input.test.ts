@@ -63,6 +63,21 @@ test("accepts a Yandex Top-50 execution without weakening the sealed shape", () 
   assert.equal(input.execution.depth, 50);
 });
 
+test("accepts the explicit competitor position projection policy", () => {
+  const input = internalSealRankManifestInput({
+    ...command(),
+    execution: {
+      ...command().execution,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false,
+      providerMappingVersion: "arsenkin-check-top-google-live@1"
+    }
+  });
+
+  assert.equal(input.execution.purpose, "COMPETITOR_SERP");
+  assert.equal(input.execution.saveProjectPosition, false);
+});
+
 test("accepts only an explicit tenant-safe parent for a continuation manifest", () => {
   const input = internalSealRankManifestInput({
     ...command(),

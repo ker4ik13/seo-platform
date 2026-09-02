@@ -15,6 +15,7 @@ import {
   semanticKeywordBulkResult,
   semanticKeywordCleaningPreview,
   semanticKeywordCleaningResult,
+  semanticGroupColorLegendState,
   semanticKeywordInsights,
   semanticAiAnswerHistoryCollection,
   semanticKeywordPage,
@@ -231,6 +232,34 @@ test("accepts a strictly shaped semantic keyword page", () => {
   assert.deepEqual(result.data[0]?.aiAnswers, validItem.aiAnswers);
   assert.equal(result.data[0]?.hasNote, false);
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
+});
+
+test("validates the project color legend and its unread projection", () => {
+  const legend = semanticGroupColorLegendState({
+    entries: [
+      { color: "#ff0000", note: "Ждёт сбора позиций" },
+      { color: "#334155", note: "Пересобрать семантику" }
+    ],
+    version: 4,
+    unread: true,
+    updatedAt: "2026-09-02T10:00:00.000Z",
+    updatedByUserId: actorId
+  });
+  assert.equal(legend.unread, true);
+  assert.equal(legend.entries[1]?.color, "#334155");
+  assert.throws(() => semanticGroupColorLegendState({
+    ...legend,
+    entries: [{ color: "#ffffff", note: "Не из палитры" }]
+  }));
+  assert.deepEqual(semanticGroupColorLegendState({
+    entries: [],
+    version: 0,
+    unread: false
+  }), {
+    entries: [],
+    version: 0,
+    unread: false
+  });
 });
 
 test("validates safe interactive rank history metadata", () => {
@@ -1106,6 +1135,13 @@ test("validates versioned semantic saved views and rejects DSL drift", () => {
   assert.deepEqual(
     semanticSavedViews([view])[0]?.config.columnOrder,
     ["query", "frequency", "priority"]
+  );
+  assert.equal(
+    semanticSavedViews([{
+      ...view,
+      config: { ...view.config, schemaVersion: 3 }
+    }])[0]?.config.schemaVersion,
+    3
   );
   assert.throws(
     () =>

@@ -1574,7 +1574,7 @@ function mappingTargetLabel(value: SemanticImportTarget): string {
     "keyword.favorite": "Избранное",
     "keyword.intent": "Интент",
     "group.path": "Путь группы",
-    "page.target_url": "Целевая страница",
+    "page.target_url": "Целевой URL",
     "frequency.base": "Яндекс · База",
     "frequency.exact": 'Яндекс · ""',
     "frequency.fixed": 'Яндекс · "!"',

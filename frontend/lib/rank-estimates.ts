@@ -9,6 +9,7 @@ import {
   type RankEstimate,
   type RankEstimateBlockerCode,
   type RankEstimateCredentialFreshness,
+  type RankCollectionPurpose,
   type RankEstimateQuota,
   type RankYandexLiveMode,
   type RankSearchSource,
@@ -144,10 +145,14 @@ export function rankEstimateInput(
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
   searchSource?: RankSearchSource,
-  yandexLiveMode?: RankYandexLiveMode
+  yandexLiveMode?: RankYandexLiveMode,
+  purpose?: RankCollectionPurpose,
+  saveProjectPosition?: boolean
 ): CreateRankEstimateInput {
   return {
     trackingContextId,
+    ...(purpose ? { purpose } : {}),
+    ...(saveProjectPosition === undefined ? {} : { saveProjectPosition }),
     ...(provider ? { provider } : {}),
     ...(credentialId ? { credentialId } : {}),
     ...(searchSource ? { searchSource } : {}),
@@ -160,7 +165,9 @@ export function rankEstimatePayloadSignature(
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
   searchSource?: RankSearchSource,
-  yandexLiveMode?: RankYandexLiveMode
+  yandexLiveMode?: RankYandexLiveMode,
+  purpose?: RankCollectionPurpose,
+  saveProjectPosition?: boolean
 ): string {
   return JSON.stringify(
     rankEstimateInput(
@@ -168,7 +175,9 @@ export function rankEstimatePayloadSignature(
       provider,
       credentialId,
       searchSource,
-      yandexLiveMode
+      yandexLiveMode,
+      purpose,
+      saveProjectPosition
     )
   );
 }
@@ -178,14 +187,18 @@ export function rankEstimateCommandSignature(
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
   searchSource?: RankSearchSource,
-  yandexLiveMode?: RankYandexLiveMode
+  yandexLiveMode?: RankYandexLiveMode,
+  purpose?: RankCollectionPurpose,
+  saveProjectPosition?: boolean
 ): string {
   return `${rankEstimatePayloadSignature(
     context.id,
     provider,
     credentialId,
     searchSource,
-    yandexLiveMode
+    yandexLiveMode,
+    purpose,
+    saveProjectPosition
   )}:${rankEstimateContextSignature(context)}`;
 }
 
@@ -197,7 +210,9 @@ export function rankEstimateIdempotencyCommand(
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
   searchSource?: RankSearchSource,
-  yandexLiveMode?: RankYandexLiveMode
+  yandexLiveMode?: RankYandexLiveMode,
+  purpose?: RankCollectionPurpose,
+  saveProjectPosition?: boolean
 ): IdempotentCommand {
   return stableIdempotencyCommand(
     explicitRecalculation ? undefined : current,
@@ -206,7 +221,9 @@ export function rankEstimateIdempotencyCommand(
       provider,
       credentialId,
       searchSource,
-      yandexLiveMode
+      yandexLiveMode,
+      purpose,
+      saveProjectPosition
     ),
     createKey
   );
@@ -267,6 +284,19 @@ export function parseRankEstimate(
     estimate.provider === "ARSENKIN" || estimate.provider === "XMLSTOCK"
       ? estimate.provider
       : undefined;
+  const purpose =
+    estimate.purpose === undefined
+      ? undefined
+      : estimate.purpose === "POSITION_TRACKING" ||
+          estimate.purpose === "COMPETITOR_SERP"
+        ? estimate.purpose
+        : null;
+  const saveProjectPosition =
+    estimate.saveProjectPosition === undefined
+      ? undefined
+      : typeof estimate.saveProjectPosition === "boolean"
+        ? estimate.saveProjectPosition
+        : null;
   const operation =
     estimate.operation === "POSITIONS" ? estimate.operation : undefined;
   const credentialMode =
@@ -320,6 +350,8 @@ export function parseRankEstimate(
   if (
     !status ||
     !provider ||
+    purpose === null ||
+    saveProjectPosition === null ||
     !operation ||
     !credentialMode ||
     !scope ||
@@ -358,6 +390,8 @@ export function parseRankEstimate(
     trackingContextId,
     status,
     provider,
+    ...(purpose ? { purpose } : {}),
+    ...(saveProjectPosition === undefined ? {} : { saveProjectPosition }),
     operation,
     credentialMode,
     scope,

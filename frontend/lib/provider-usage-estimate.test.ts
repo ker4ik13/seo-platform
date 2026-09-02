@@ -46,6 +46,33 @@ test("estimates XMLStock Google pages by selected depth", () => {
   );
 });
 
+test("estimates one XMLStock Top-10 request per competitor keyword", () => {
+  assert.match(
+    rankProviderUsageEstimate(
+      xmlStock,
+      12,
+      "GOOGLE",
+      100,
+      "LIVE",
+      undefined,
+      "COMPETITOR_SERP"
+    ).usage,
+    /^до 12 запросов XMLStock · Топ-10 · от 0,14\s₽$/u
+  );
+  assert.match(
+    rankProviderUsageEstimate(
+      xmlStock,
+      12,
+      "YANDEX",
+      100,
+      "SEARCH_API",
+      undefined,
+      "COMPETITOR_SERP"
+    ).usage,
+    /^до 12 запросов XMLStock · Топ-10 · от 0,29\s₽$/u
+  );
+});
+
 test("shows the documented Turbo page range and higher tariff", () => {
   const estimate = rankProviderUsageEstimate(
     xmlStock,

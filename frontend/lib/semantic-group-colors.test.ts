@@ -6,7 +6,7 @@ import {
 } from "./semantic-group-colors.ts";
 
 test("shares one stable group palette between the tree and edit dialog", () => {
-  assert.equal(semanticGroupColors.length, 12);
+  assert.equal(semanticGroupColors.length, 16);
   assert.equal(
     new Set(semanticGroupColors.map(({ value }) => value)).size,
     semanticGroupColors.length

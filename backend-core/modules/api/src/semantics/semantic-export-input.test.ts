@@ -158,6 +158,25 @@ test("accepts competitor data as ordinary export columns", () => {
   );
 });
 
+test("accepts Yandex and Google AI result URLs as export columns", () => {
+  const input = createSemanticExportInput({
+    format: "CSV",
+    scope: "CURRENT_FILTER",
+    locale: "ru",
+    columns: [
+      "query",
+      "yandexAiRelevantUrl",
+      "googleAiRelevantUrl"
+    ]
+  });
+
+  assert.deepEqual(input.columns, [
+    "query",
+    "yandexAiRelevantUrl",
+    "googleAiRelevantUrl"
+  ]);
+});
+
 test("requires scope-specific IDs and rejects ambiguous full exports", () => {
   assert.throws(
     () =>

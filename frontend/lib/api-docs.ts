@@ -29,10 +29,17 @@ export const apiDocSections = [
   },
   {
     slug: "positions",
-    title: "Съём позиций",
-    description: "Контекст, оценка, запуск, статус и результат.",
+    title: "Позиции и конкуренты",
+    description: "Контекст, оценка, запуск позиций и сбор обычной выдачи.",
     group: "Сбор данных",
-    keywords: ["tracking context", "rank estimate", "rank run", "serp", "xmlstock", "arsenkin"]
+    keywords: ["tracking context", "rank estimate", "rank run", "serp", "competitors", "конкуренты", "xmlstock", "arsenkin"]
+  },
+  {
+    slug: "ai-answers",
+    title: "ИИ-ответы и ИИ-выдача",
+    description: "Сбор ответов, источников и конкурентов в ИИ-выдаче Arsenkin.",
+    group: "Сбор данных",
+    keywords: ["ai serp", "ai answer", "ии-ответы", "ии-выдача", "конкуренты", "arsenkin"]
   },
   {
     slug: "frequency",
@@ -112,8 +119,8 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("contexts-create", "POST", "/projects/{projectId}/tracking-contexts", "positions:run", "Создать контекст съёма", "positions"),
   endpoint("context-update", "PATCH", "/projects/{projectId}/tracking-contexts/{contextId}", "positions:run", "Изменить контекст", "positions"),
   endpoint("context-keywords", "PUT", "/projects/{projectId}/tracking-contexts/{contextId}/keywords", "positions:run", "Заменить точный набор ключей контекста", "positions"),
-  endpoint("rank-estimate", "POST", "/projects/{projectId}/rank-estimates", "positions:run", "Рассчитать неизменяемую оценку запуска", "positions"),
-  endpoint("rank-runs-list", "GET", "/projects/{projectId}/rank-runs", "positions:read", "История запусков позиций", "positions"),
+  endpoint("rank-estimate", "POST", "/projects/{projectId}/rank-estimates", "positions:run", "Рассчитать неизменяемую оценку позиций или выдачи конкурентов", "positions"),
+  endpoint("rank-runs-list", "GET", "/projects/{projectId}/rank-runs", "positions:read", "История запусков позиций и выдачи конкурентов", "positions"),
   endpoint("rank-run", "POST", "/projects/{projectId}/rank-runs", "positions:run", "Подтвердить оценку и создать задание", "positions"),
   endpoint("rank-job", "GET", "/projects/{projectId}/jobs/{jobId}", "positions:read", "Текущее состояние задания", "positions"),
   endpoint("rank-result", "GET", "/projects/{projectId}/jobs/{jobId}/result", "positions:read", "Постраничный результат позиций", "positions"),
@@ -131,8 +138,11 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("automation-run", "POST", "/projects/{projectId}/automations/{automationId}/runs", "automations:manage", "Запустить расписание сейчас", "automations"),
   endpoint("automation-pause", "POST", "/projects/{projectId}/automations/{automationId}/pause", "automations:manage", "Поставить расписание на паузу", "automations"),
   endpoint("automation-resume", "POST", "/projects/{projectId}/automations/{automationId}/resume", "automations:manage", "Возобновить расписание", "automations"),
-  endpoint("ai-answers", "GET", "/projects/{projectId}/ai-answer-collections", "ai:read", "История съёмов ответов ИИ", "reference"),
-  endpoint("ai-answers-create", "POST", "/projects/{projectId}/ai-answer-collections", "ai:run", "Создать съём ответов ИИ", "reference"),
+  endpoint("ai-answers", "GET", "/projects/{projectId}/ai-answer-collections", "ai:read", "История съёмов ответов и выдачи ИИ", "ai-answers"),
+  endpoint("ai-answers-create", "POST", "/projects/{projectId}/ai-answer-collections", "ai:run", "Создать съём ответов или конкурентов ИИ", "ai-answers"),
+  endpoint("ai-answers-get", "GET", "/projects/{projectId}/ai-answer-collections/{jobId}", "ai:read", "Состояние съёма ИИ", "ai-answers"),
+  endpoint("ai-answers-result", "GET", "/projects/{projectId}/ai-answer-collections/{jobId}/result", "ai:read", "Постраничный результат съёма ИИ", "ai-answers"),
+  endpoint("ai-answers-cancel", "POST", "/projects/{projectId}/ai-answer-collections/{jobId}/cancel", "ai:run", "Отменить съём ИИ", "ai-answers"),
   endpoint("research", "GET", "/projects/{projectId}/keyword-research-runs", "research:read", "История подбора ключей", "reference"),
   endpoint("research-create", "POST", "/projects/{projectId}/keyword-research-runs", "research:run", "Создать подбор ключей", "reference"),
   endpoint("crawls", "GET", "/projects/{projectId}/crawls", "audits:read", "История технических аудитов", "reference"),

@@ -44,6 +44,8 @@ export function internalSealRankManifestInput(
     "retention"
   ]);
   const input = strictRecord(value, [
+    "purpose",
+    "saveProjectPosition",
     "workspaceId",
     "projectId",
     "actorId",
@@ -117,6 +119,8 @@ export function rankExecutionParameters(
   value: unknown
 ): InternalRankExecutionParameters {
   const input = strictRecord(value, [
+    "purpose",
+    "saveProjectPosition",
     "searchEngine",
     "countryCode",
     "regionCode",
@@ -132,6 +136,19 @@ export function rankExecutionParameters(
   ]);
   if (input.searchEngine !== "GOOGLE" && input.searchEngine !== "YANDEX") {
     invalid("execution.searchEngine");
+  }
+  if (
+    input.purpose !== undefined &&
+    input.purpose !== "POSITION_TRACKING" &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) {
+    invalid("execution.purpose");
+  }
+  if (
+    input.saveProjectPosition !== undefined &&
+    typeof input.saveProjectPosition !== "boolean"
+  ) {
+    invalid("execution.saveProjectPosition");
   }
   if (input.device !== "DESKTOP" && input.device !== "MOBILE") {
     invalid("execution.device");
@@ -160,6 +177,10 @@ export function rankExecutionParameters(
     100
   );
   return {
+    ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+    ...(input.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: input.saveProjectPosition }),
     searchEngine: input.searchEngine,
     countryCode: countryCode(input.countryCode),
     ...(regionCode ? { regionCode } : {}),

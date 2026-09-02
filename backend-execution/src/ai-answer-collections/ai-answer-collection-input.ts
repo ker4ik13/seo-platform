@@ -36,7 +36,9 @@ export function internalCreateAiAnswerCollectionInput(
     "device",
     "host",
     "excludeSubdomains",
-    "brands"
+    "brands",
+    "purpose",
+    "saveProjectPosition"
   ]);
   if (
     !Array.isArray(input.items) ||
@@ -59,6 +61,19 @@ export function internalCreateAiAnswerCollectionInput(
   if (new Set(brands.map((brand) => brand.toLocaleLowerCase("ru-RU"))).size !== brands.length) {
     invalid("brands");
   }
+  if (
+    input.purpose !== undefined &&
+    input.purpose !== "POSITION_TRACKING" &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) invalid("purpose");
+  if (
+    input.saveProjectPosition !== undefined &&
+    typeof input.saveProjectPosition !== "boolean"
+  ) invalid("saveProjectPosition");
+  if (
+    input.saveProjectPosition !== undefined &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) invalid("saveProjectPosition");
   const capacity = record(input.jobCapacity, [
     "planCode",
     "planVersion",
@@ -81,7 +96,11 @@ export function internalCreateAiAnswerCollectionInput(
     device: member(input.device, aiAnswerDevices, "device"),
     host: normalizedHost(input.host),
     excludeSubdomains: input.excludeSubdomains,
-    brands
+    brands,
+    ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+    ...(input.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: input.saveProjectPosition })
   };
 }
 

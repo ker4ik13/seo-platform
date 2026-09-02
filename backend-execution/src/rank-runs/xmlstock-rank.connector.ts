@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { SaxesParser } from "saxes";
-import type {
-  InternalNormalizedRankResult,
-  RankManifestHash
+import {
+  rankExecutionPurpose,
+  rankExecutionTracksProjectPosition,
+  type InternalNormalizedRankResult,
+  type RankManifestHash
 } from "@seo-platform/contracts";
 import {
   canonicalJsonSha256,
@@ -48,7 +50,7 @@ export interface XmlStockRankWireRequest {
   readonly countryCode: string;
   readonly language: string;
   readonly device: "DESKTOP" | "MOBILE";
-  readonly depth: 30 | 50 | 100;
+  readonly depth: 10 | 30 | 50 | 100;
   readonly delayed: boolean;
   readonly turbo: boolean;
 }
@@ -264,9 +266,10 @@ export class XmlStockRankConnector {
     if (parsed.requestId && parsed.requestId !== taskId) {
       return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
     }
+    const request = buildXmlStockRankWireRequest(intent);
     return {
       status: "READY",
-      value: wireResult("YANDEX", parsed.documents, intent.execution.depth)
+      value: wireResult("YANDEX", parsed.documents, request.depth)
     };
   }
 
@@ -488,7 +491,10 @@ export function buildXmlStockRankWireRequest(
     countryCode: intent.execution.countryCode,
     language: intent.execution.language,
     device: intent.execution.device,
-    depth: intent.execution.depth,
+    depth:
+      rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP"
+        ? 10
+        : intent.execution.depth,
     delayed:
       intent.execution.searchEngine === "YANDEX" &&
       xmlStockSearchSource(intent.execution.providerMappingVersion) ===
@@ -602,17 +608,19 @@ function normalizeXmlStockRankResult(
       ...(document.snippet ? { snippet: document.snippet } : {})
     };
   });
-  const match = input.documents.find((document) => {
-    try {
-      return matchesProject(
-        new URL(document.url),
-        intent.project.domain,
-        intent.execution.domainMatchRule
-      );
-    } catch {
-      return false;
-    }
-  });
+  const match = rankExecutionTracksProjectPosition(intent.execution)
+    ? input.documents.find((document) => {
+        try {
+          return matchesProject(
+            new URL(document.url),
+            intent.project.domain,
+            intent.execution.domainMatchRule
+          );
+        } catch {
+          return false;
+        }
+      })
+    : undefined;
   if (!match) {
     return [{
       manifestEntryId: keyword.manifestEntryId,

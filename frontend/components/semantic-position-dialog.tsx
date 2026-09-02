@@ -102,6 +102,7 @@ export function SemanticPositionDialog({
   activeGroupId,
   groups,
   initialSelections,
+  mode = "positions",
   onClose,
   onStarted,
   projectSearchCity,
@@ -111,12 +112,14 @@ export function SemanticPositionDialog({
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
+  mode?: "positions" | "competitors";
   onClose: () => void;
   onStarted: (job: RankJobSummary) => void;
   projectSearchCity?: ProjectSearchCity | undefined;
   projectId: string;
   workspaceId: string;
 }>) {
+  const competitorMode = mode === "competitors";
   const formId = useId();
   const [settings, setSettings] = useState<TrackingContextSettings>();
   const [connectorSettings, setConnectorSettings] =
@@ -151,8 +154,11 @@ export function SemanticPositionDialog({
   const [preferredRegionSources, setPreferredRegionSources] = useState<
     SemanticRegionSources
   >({ YANDEX: "DEFAULT", GOOGLE: "DEFAULT" });
-  const [contextDraft, setContextDraft] = useState(defaultContextDraft);
+  const [contextDraft, setContextDraft] = useState(() =>
+    defaultContextDraft(undefined, competitorMode)
+  );
   const [yandexLiveTurbo, setYandexLiveTurbo] = useState(false);
+  const [saveProjectPosition, setSaveProjectPosition] = useState(false);
   const createContextCommand = useRef<IdempotentCommand | undefined>(
     undefined
   );
@@ -197,7 +203,8 @@ export function SemanticPositionDialog({
     contextDraft.searchEngine,
     contextDraft.depth,
     contextDraft.searchSource,
-    yandexLiveTurbo ? "TURBO" : undefined
+    yandexLiveTurbo ? "TURBO" : undefined,
+    competitorMode ? "COMPETITOR_SERP" : "POSITION_TRACKING"
   );
   const platformChargeConfirmation =
     estimate?.status === "READY" &&
@@ -257,7 +264,7 @@ export function SemanticPositionDialog({
       setScopeError(undefined);
       setContextAssignmentError(undefined);
       setContextDraft({
-        ...defaultContextDraft(preferredRegions.YANDEX),
+        ...defaultContextDraft(preferredRegions.YANDEX, competitorMode),
         scopeMode:
           initialSelections.length > 0
             ? "KEYWORDS"
@@ -304,10 +311,17 @@ export function SemanticPositionDialog({
           (source) =>
             (source.provider === "ARSENKIN" || source.provider === "XMLSTOCK")
         );
-        const previousJob = rankRuns.jobs[0];
+        const previousJob = rankRuns.jobs.find(({ purpose }) =>
+          competitorMode
+            ? purpose === "COMPETITOR_SERP"
+            : (purpose ?? "POSITION_TRACKING") === "POSITION_TRACKING"
+        );
         const lastSuccessfulJob = rankRuns.jobs.find(
-          ({ status }) =>
-            status === "COMPLETED" || status === "PARTIALLY_COMPLETED"
+          ({ purpose, status }) =>
+            (status === "COMPLETED" || status === "PARTIALLY_COMPLETED") &&
+            (competitorMode
+              ? purpose === "COMPETITOR_SERP"
+              : (purpose ?? "POSITION_TRACKING") === "POSITION_TRACKING")
         );
         const previousProvider =
           previousJob?.provider === "ARSENKIN" ||
@@ -409,7 +423,8 @@ export function SemanticPositionDialog({
           setContextDraft((current) => ({
             ...contextDraftWithRegion(
               current,
-              nextPreferredRegions[current.searchEngine]
+              nextPreferredRegions[current.searchEngine],
+              competitorMode
             ),
             scopeMode:
               initialSelections.length > 0
@@ -431,7 +446,7 @@ export function SemanticPositionDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [activeGroupId, initialSelections.length, projectId, projectSearchCity, workspaceId]);
+  }, [activeGroupId, competitorMode, initialSelections.length, projectId, projectSearchCity, workspaceId]);
 
   useEffect(() => {
     if (!selectedContextId) {
@@ -482,17 +497,23 @@ export function SemanticPositionDialog({
     try {
       if (!connectorSettings || !selectedSource) {
         throw new Error(
-          "Нет активного подключения XMLStock или Arsenkin для съёма позиций."
+          competitorMode
+            ? "Нет активного подключения XMLStock или Arsenkin для сбора конкурентов."
+            : "Нет активного подключения XMLStock или Arsenkin для съёма позиций."
         );
       }
       if (!contextDraft.regionCode.trim()) {
-        throw new Error("Выберите регион перед запуском съёма позиций.");
+        throw new Error(
+          competitorMode
+            ? "Выберите регион перед запуском сбора конкурентов."
+            : "Выберите регион перед запуском съёма позиций."
+        );
       }
       const draftErrors = validateTrackingContextDraft(contextDraft);
       const firstError = Object.values(draftErrors)[0];
       if (firstError) throw new Error(firstError);
       const contextName =
-        contextDraft.name.trim() || technicalContextName(contextDraft);
+        contextDraft.name.trim() || technicalContextName(contextDraft, competitorMode);
       const launchDraft = {
         ...contextDraft,
         name: contextName
@@ -549,7 +570,11 @@ export function SemanticPositionDialog({
           current ? withTrackingContext(current, createdContext) : current
         );
       } else if (!selectedContext) {
-        throw new Error("Недостаточно прав для подготовки параметров съёма позиций.");
+        throw new Error(
+          competitorMode
+            ? "Недостаточно прав для подготовки параметров сбора конкурентов."
+            : "Недостаточно прав для подготовки параметров съёма позиций."
+        );
       }
       if (!trackingContextMatchesDraft(selectedContext, launchDraft)) {
         createContextCommand.current = undefined;
@@ -599,7 +624,9 @@ export function SemanticPositionDialog({
         provider,
         selectedSource.id,
         contextDraft.searchSource,
-        yandexLiveMode
+        yandexLiveMode,
+        competitorMode ? "COMPETITOR_SERP" : undefined,
+        competitorMode ? saveProjectPosition : undefined
       );
       let reusableRun = pendingRun.current;
       if (
@@ -624,7 +651,9 @@ export function SemanticPositionDialog({
           provider,
           selectedSource.id,
           contextDraft.searchSource,
-          yandexLiveMode
+          yandexLiveMode,
+          competitorMode ? "COMPETITOR_SERP" : undefined,
+          competitorMode ? saveProjectPosition : undefined
         );
         const estimatePayload = await browserApiRequest<unknown>(
           rankEstimatesApiPath(projectId),
@@ -635,7 +664,9 @@ export function SemanticPositionDialog({
               provider,
               selectedSource.id,
               contextDraft.searchSource,
-              yandexLiveMode
+              yandexLiveMode,
+              competitorMode ? "COMPETITOR_SERP" : undefined,
+              competitorMode ? saveProjectPosition : undefined
             ),
             idempotencyKey: estimateCommand.current.key
           }
@@ -791,6 +822,12 @@ export function SemanticPositionDialog({
 
   return (
     <SemanticModal
+      {...(competitorMode
+        ? {
+            description:
+              "Сохраняет Топ-10 обычной выдачи по каждому запросу. Arsenkin использует Check Top, XMLStock — выбранный тип выдачи."
+          }
+        : {})}
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
@@ -826,18 +863,22 @@ export function SemanticPositionDialog({
               {resolvingScope
                 ? "Загружаем запросы…"
                 : running
-                ? "Проверяем и запускаем…"
+                ? competitorMode ? "Готовим сбор…" : "Проверяем и запускаем…"
                 : platformChargeConfirmation
                 ? `Подтвердить списание ${platformChargeConfirmation}`
-                : `Запустить съём (${keywordIds.length})`}
+                : competitorMode
+                  ? `Собрать конкурентов (${keywordIds.length})`
+                  : `Запустить съём (${keywordIds.length})`}
             </button>
           </div>
         </div>
       )}
       onClose={running ? () => undefined : onClose}
-      presenceKey="semantic-modal:positions"
+      presenceKey={competitorMode
+        ? "semantic-modal:competitors"
+        : "semantic-modal:positions"}
       size="large"
-      title="Проверка позиций"
+      title={competitorMode ? "Сбор конкурентов" : "Проверка позиций"}
     >
       <form className="semantic-position-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         {loading ? (
@@ -851,9 +892,11 @@ export function SemanticPositionDialog({
               onSelect={selectContext}
               projectId={projectId}
               selectedContextId={selectedContextId}
+              competitorMode={competitorMode}
             />
             <PositionRunParameters
               draft={contextDraft}
+              competitorMode={competitorMode}
               onChange={setContextDraft}
               credentialId={credentialId}
               lastUsedCredentialId={lastUsedCredentialId}
@@ -899,6 +942,14 @@ export function SemanticPositionDialog({
               }}
               preferredRegions={preferredRegions}
               preferredRegionSources={preferredRegionSources}
+              saveProjectPosition={saveProjectPosition}
+              onSaveProjectPositionChange={(enabled) => {
+                setSaveProjectPosition(enabled);
+                setEstimate(undefined);
+                pendingRun.current = undefined;
+                estimateCommand.current = undefined;
+                runCommand.current = undefined;
+              }}
               scope={selectedContextId &&
               contextDraft.scopeMode === "KEYWORDS" &&
               assignedKeywordSelections === undefined ? (
@@ -965,6 +1016,7 @@ export function SemanticPositionDialog({
 }
 
 function PositionContextSelector({
+  competitorMode,
   contexts,
   draft,
   onDraftChange,
@@ -972,6 +1024,7 @@ function PositionContextSelector({
   projectId,
   selectedContextId
 }: Readonly<{
+  competitorMode: boolean;
   contexts: readonly TrackingContextSummary[];
   draft: TrackingContextDraft;
   onDraftChange: (draft: TrackingContextDraft) => void;
@@ -983,12 +1036,14 @@ function PositionContextSelector({
     <section className="semantic-position-context-bar">
       <div>
         <span className="semantic-position-context-icon">
-          <Icon name="positions" />
+          <Icon name={competitorMode ? "competitors" : "positions"} />
         </span>
         <div>
-          <strong>Контекст съёма</strong>
+          <strong>{competitorMode ? "Контекст выдачи" : "Контекст съёма"}</strong>
           <small>
-            Хранит папки, поисковик, регион, устройство и глубину проверки.
+            {competitorMode
+              ? "Хранит папки, поисковик, регион и устройство для Топ-10."
+              : "Хранит папки, поисковик, регион, устройство и глубину проверки."}
           </small>
         </div>
       </div>
@@ -998,7 +1053,9 @@ function PositionContextSelector({
           onChange={(event) => onSelect(event.target.value)}
           value={selectedContextId}
         >
-          <option value="">Новый контекст</option>
+          <option value="">
+            {competitorMode ? "Новый контекст конкурентов" : "Новый контекст"}
+          </option>
           {contexts
             .filter(({ status }) => status === "ACTIVE")
             .map((context) => (
@@ -1015,7 +1072,9 @@ function PositionContextSelector({
           onChange={(event) =>
             onDraftChange({ ...draft, name: event.target.value })
           }
-          placeholder="Например, Москва · десктоп"
+          placeholder={competitorMode
+            ? "Например, Конкуренты · Москва"
+            : "Например, Москва · десктоп"}
           value={draft.name}
         />
       </label>
@@ -1030,6 +1089,7 @@ function PositionContextSelector({
 }
 
 function PositionRunParameters({
+  competitorMode,
   draft,
   onChange,
   credentialId,
@@ -1042,8 +1102,11 @@ function PositionRunParameters({
   onYandexLiveTurboChange,
   preferredRegions,
   preferredRegionSources,
+  saveProjectPosition,
+  onSaveProjectPositionChange,
   scope
 }: Readonly<{
+  competitorMode: boolean;
   draft: TrackingContextDraft;
   onChange: (draft: TrackingContextDraft) => void;
   credentialId: string;
@@ -1056,6 +1119,8 @@ function PositionRunParameters({
   onYandexLiveTurboChange: (enabled: boolean) => void;
   preferredRegions: SemanticSearchRegions;
   preferredRegionSources: SemanticRegionSources;
+  saveProjectPosition: boolean;
+  onSaveProjectPositionChange: (enabled: boolean) => void;
   scope: ReactNode;
 }>) {
   const selectedSource = sources.find(({ id }) => id === credentialId);
@@ -1087,7 +1152,12 @@ function PositionRunParameters({
       searchEngine,
       regionCode: region.code,
       regionLabel: region.label,
-      name: `${searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${region.label} · ${draft.device === "MOBILE" ? "Мобильное" : "Десктоп"}`
+      name: contextDisplayName(
+        searchEngine,
+        region.label,
+        draft.device,
+        competitorMode
+      )
     });
     onSearchSourceChange("LIVE");
   }
@@ -1098,7 +1168,11 @@ function PositionRunParameters({
         <section className="semantic-workflow-panel semantic-position-source-panel">
           <header>
             <h3>Поисковые системы</h3>
-            <p>Выберите поисковик, тип выдачи и подключение провайдера.</p>
+            <p>
+              {competitorMode
+                ? "Выберите поисковик, тип выдачи и источник Топ-10."
+                : "Выберите поисковик, тип выдачи и подключение провайдера."}
+            </p>
           </header>
           <div aria-label="Поисковая система" className="semantic-engine-cards" role="group">
             {(["YANDEX", "GOOGLE"] as const).map((engine) => (
@@ -1133,7 +1207,8 @@ function PositionRunParameters({
               </option>
             </CustomSelect>
           </label>
-          {draft.searchEngine === "YANDEX" &&
+          {!competitorMode &&
+            draft.searchEngine === "YANDEX" &&
             searchSource === "LIVE" &&
             provider === "XMLSTOCK" && (
               <label className="semantic-toggle-line semantic-position-turbo-toggle">
@@ -1162,7 +1237,9 @@ function PositionRunParameters({
             </div>
           {sources.length ? (
             <div
-              aria-label="Источник съёма позиций"
+              aria-label={competitorMode
+                ? "Источник сбора конкурентов"
+                : "Источник съёма позиций"}
               className="semantic-provider-list"
               role="radiogroup"
             >
@@ -1192,7 +1269,9 @@ function PositionRunParameters({
             </div>
           ) : (
             <div className="inline-alert warning">
-              Нет проверенного подключения для съёма позиций.
+              {competitorMode
+                ? "Нет проверенного подключения для сбора конкурентов."
+                : "Нет проверенного подключения для съёма позиций."}
             </div>
           )}
           </div>
@@ -1200,7 +1279,11 @@ function PositionRunParameters({
         <section className="semantic-workflow-panel semantic-position-geo-panel">
           <header>
             <h3>География и устройство</h3>
-            <p>Эти параметры формируют отдельную историю позиций.</p>
+            <p>
+              {competitorMode
+                ? "Эти параметры формируют отдельный срез выдачи конкурентов."
+                : "Эти параметры формируют отдельную историю позиций."}
+            </p>
           </header>
           <label className="semantic-workflow-field">
             <span>Регион</span>
@@ -1208,7 +1291,12 @@ function PositionRunParameters({
               kind={draft.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
               onChange={({ code, label }) => onChange({
                 ...draft,
-                name: `${draft.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${label} · ${draft.device === "MOBILE" ? "Мобильное" : "Десктоп"}`,
+                name: contextDisplayName(
+                  draft.searchEngine,
+                  label,
+                  draft.device,
+                  competitorMode
+                ),
                 regionCode: code,
                 regionLabel: label
               })}
@@ -1245,21 +1333,33 @@ function PositionRunParameters({
               ))}
             </div>
           </fieldset>
-          <fieldset className="semantic-segmented-field semantic-depth-field">
-            <legend>Глубина проверки</legend>
-            <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина проверки">
-              {depthOptions.map((depth) => (
-                <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
-                  <input
-                    checked={draft.depth === depth}
-                    onChange={() => onChange({ ...draft, depth })}
-                    type="radio"
-                  />
-                  <span>Топ-{depth}</span>
+          {competitorMode ? (
+            <fieldset className="semantic-segmented-field semantic-depth-field">
+              <legend>Глубина сбора</legend>
+              <div className="semantic-segmented-control" aria-label="Глубина сбора" role="group">
+                <label className="selected">
+                  <input checked readOnly type="radio" />
+                  <span>Топ-10</span>
                 </label>
-              ))}
-            </div>
-          </fieldset>
+              </div>
+            </fieldset>
+          ) : (
+            <fieldset className="semantic-segmented-field semantic-depth-field">
+              <legend>Глубина проверки</legend>
+              <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина проверки">
+                {depthOptions.map((depth) => (
+                  <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
+                    <input
+                      checked={draft.depth === depth}
+                      onChange={() => onChange({ ...draft, depth })}
+                      type="radio"
+                    />
+                    <span>Топ-{depth}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="semantic-position-compact-fields">
             <label className="semantic-workflow-field">
               <span>Страна</span>
@@ -1293,7 +1393,7 @@ function PositionRunParameters({
               Выберите регион — без него съём позиций запустить нельзя.
             </div>
           )}
-          {draft.searchEngine === "YANDEX" && provider === "ARSENKIN" && (
+          {!competitorMode && draft.searchEngine === "YANDEX" && provider === "ARSENKIN" && (
             <div className="inline-alert info" role="status">
               Arsenkin для Яндекса выполняет съём с глубиной Топ-30. При
               выборе этого подключения глубина переключается автоматически.
@@ -1309,16 +1409,42 @@ function PositionRunParameters({
               type="checkbox"
             />
             <span>
-              <strong>Снимать позиции по неотслеживаемым запросам</strong>
+              <strong>
+                {competitorMode
+                  ? "Собирать конкурентов по неотслеживаемым запросам"
+                  : "Снимать позиции по неотслеживаемым запросам"}
+              </strong>
               <small>
-                По умолчанию запросы с выключенным отслеживанием пропускаются.
+                {competitorMode
+                  ? "Включено по умолчанию: статус отслеживания не ограничивает исследование конкурентов."
+                  : "По умолчанию запросы с выключенным отслеживанием пропускаются."}
               </small>
             </span>
           </label>
+          {competitorMode && (
+            <label className="semantic-toggle-line semantic-competitor-position-toggle">
+              <input
+                checked={saveProjectPosition}
+                onChange={(event) =>
+                  onSaveProjectPositionChange(event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>
+                <strong>Сохранять позицию сайта из этой выдачи</strong>
+                <small>
+                  Если сайт проекта найден в собранном Топ-10, его позиция
+                  попадёт в текущие позиции и историю без отдельного запроса к
+                  провайдеру. При выключенной галочке сохраняются только
+                  конкуренты.
+                </small>
+              </span>
+            </label>
+          )}
         </section>
         <section className="semantic-workflow-panel semantic-position-scope-panel">
           <header>
-            <h3>Охват проверки</h3>
+            <h3>{competitorMode ? "Охват сбора" : "Охват проверки"}</h3>
             <p>Выберите все запросы, текущее выделение или папки.</p>
           </header>
           {scope}
@@ -1342,7 +1468,8 @@ function regionSourceLabel(source: SemanticRegionSource): string {
 }
 
 function defaultContextDraft(
-  region = defaultSemanticSearchRegions().YANDEX
+  region = defaultSemanticSearchRegions().YANDEX,
+  competitorMode = false
 ): TrackingContextDraft {
   return contextDraftWithRegion({
     ...emptyTrackingContextDraft(),
@@ -1350,19 +1477,24 @@ function defaultContextDraft(
     countryCode: "RU",
     language: "ru",
     device: "DESKTOP",
-    depth: 50
-  }, region);
+    depth: 50,
+    includeUntracked: competitorMode
+  }, region, competitorMode);
 }
 
 function contextDraftWithRegion(
   draft: TrackingContextDraft,
-  region: Readonly<{ code: string; label: string }>
+  region: Readonly<{ code: string; label: string }>,
+  competitorMode = false
 ): TrackingContextDraft {
-  const engine = draft.searchEngine === "YANDEX" ? "Яндекс" : "Google";
-  const device = draft.device === "MOBILE" ? "Мобильное" : "Десктоп";
   return {
     ...draft,
-    name: `${engine} · ${region.label} · ${device}`,
+    name: contextDisplayName(
+      draft.searchEngine,
+      region.label,
+      draft.device,
+      competitorMode
+    ),
     regionCode: region.code,
     regionLabel: region.label
   };
@@ -1379,12 +1511,25 @@ function matchingTechnicalContext(
 }
 
 function technicalContextName(
-  draft: TrackingContextDraft
+  draft: TrackingContextDraft,
+  competitorMode = false
 ): string {
   const engine = draft.searchEngine === "YANDEX" ? "Яндекс" : "Google";
   const region = draft.regionLabel.trim() || draft.regionCode.trim() || draft.countryCode.toUpperCase();
   const device = draft.device === "MOBILE" ? "Мобайл" : "Десктоп";
-  return `Авто · ${engine} · ${region} · ${device}`.slice(0, 160);
+  const prefix = competitorMode ? "Конкуренты" : "Авто";
+  return `${prefix} · ${engine} · ${region} · ${device}`.slice(0, 160);
+}
+
+function contextDisplayName(
+  searchEngine: TrackingContextDraft["searchEngine"],
+  regionLabel: string,
+  device: TrackingContextDraft["device"],
+  competitorMode: boolean
+): string {
+  const engine = searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  const deviceLabel = device === "MOBILE" ? "Мобильное" : "Десктоп";
+  return `${competitorMode ? "Конкуренты · " : ""}${engine} · ${regionLabel} · ${deviceLabel}`;
 }
 
 async function synchronizeContextAssignments(

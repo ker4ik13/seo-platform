@@ -11,6 +11,8 @@ import {
   legacyRankProviderKeywordLimit,
   rankManifestSingleTaskChunkSize,
   rankProviderKeywordLimit,
+  rankExecutionPurpose,
+  rankExecutionTracksProjectPosition,
   xmlStockRankManifestChunkSize,
   rankManifestChunkHashPreimage,
   type InternalIngestRankChunkInput,
@@ -19,6 +21,7 @@ import {
   type InternalRankChunkIngestReceipt,
   type InternalRankManifestChunk,
   type InternalRankManifestEntry,
+  type InternalRankExecutionParameters,
   type RankManifestHash
 } from "@seo-platform/contracts";
 import {
@@ -28,6 +31,7 @@ import {
 import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { rankExecutionParameters } from "../rank-manifests/rank-manifest-input.js";
 
 const INGEST_SCHEMA = "rank-ingest@1";
 const CHUNK_SCHEMA = "rank-manifest-chunk@1";
@@ -88,6 +92,7 @@ interface LockedManifest {
   readonly configurationVersion: number;
   readonly provider: string;
   readonly operation: string;
+  readonly execution: Prisma.JsonValue;
   readonly pairCount: number;
   readonly chunkCount: number;
   readonly chunkSize: number;
@@ -143,6 +148,7 @@ export class RankResultService {
           );
         }
         assertManifest(manifest, input);
+        const execution = storedManifestExecution(manifest.execution);
         const chunk = await lockChunk(transaction, input);
         if (!chunk) {
           throw new NotFoundException("Rank manifest chunk not found");
@@ -237,7 +243,8 @@ export class RankResultService {
               entry,
               result,
               snapshotId,
-              observedAt
+              observedAt,
+              positionTrackingEnabled(execution, result)
             );
           }
         );
@@ -310,10 +317,14 @@ export class RankResultService {
 
         const currentUpdatedCount = await upsertCurrentRanks(
           transaction,
-          snapshots.map((snapshot) => currentProjectionInput(
-            snapshot,
-            manifest.appliedAt
-          ))
+          snapshots
+            .filter(
+              (snapshot) => snapshot.positionTrackingEnabled === true
+            )
+            .map((snapshot) => currentProjectionInput(
+              snapshot,
+              manifest.appliedAt
+            ))
         );
         const persistedCount = snapshots.length;
         const foundCount = canonicalCommand.results.filter(
@@ -403,6 +414,7 @@ async function lockManifest(
       "configuration_version" AS "configurationVersion",
       "provider",
       "operation",
+      "execution",
       "pair_count" AS "pairCount",
       "chunk_count" AS "chunkCount",
       "chunk_size" AS "chunkSize",
@@ -611,7 +623,8 @@ function snapshotCreateData(
   }>,
   result: InternalNormalizedRankResult,
   snapshotId: string,
-  observedAt: Date
+  observedAt: Date,
+  positionTrackingEnabled: boolean
 ): Prisma.RankSnapshotCreateManyInput {
   const common = {
     id: snapshotId,
@@ -627,6 +640,7 @@ function snapshotCreateData(
     jobId: command.jobId,
     jobItemId: command.jobItemId,
     observedAt,
+    positionTrackingEnabled,
     serpFeatures: [],
     dataQualityFlags: [...result.dataQualityFlags],
     provider: command.provider,
@@ -659,6 +673,26 @@ function snapshotCreateData(
       : { snippet: result.snippet }),
     resultType: result.resultType
   };
+}
+
+function storedManifestExecution(
+  value: Prisma.JsonValue
+): InternalRankExecutionParameters {
+  try {
+    return rankExecutionParameters(value);
+  } catch {
+    throw new Error("Stored rank manifest execution is invalid");
+  }
+}
+
+function positionTrackingEnabled(
+  execution: InternalRankExecutionParameters,
+  result: InternalNormalizedRankResult
+): boolean {
+  if (rankExecutionPurpose(execution) === "POSITION_TRACKING") {
+    return rankExecutionTracksProjectPosition(execution);
+  }
+  return rankExecutionTracksProjectPosition(execution) && result.found;
 }
 
 function currentProjectionInput(

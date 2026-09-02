@@ -13,6 +13,7 @@ test("detects committed semantic mutations that require reconciliation", () => {
     ["DELETE", `keywords/${keywordId}`],
     ["POST", "keyword-groups"],
     ["PATCH", `keyword-groups/${keywordId}`],
+    ["PATCH", "semantic-group-color-legend"],
     ["POST", "bulk-commands"],
     ["POST", "negative-keywords/apply"],
     ["POST", "semantic-duplicates/apply"],
@@ -48,7 +49,8 @@ test("does not announce reads, previews or unrelated project commands", () => {
     ["POST", "negative-keywords/preview"],
     ["POST", "clusters/split-preview"],
     ["POST", "frequency-collections"],
-    ["PATCH", "semantic-saved-views/view-id"]
+    ["PATCH", "semantic-saved-views/view-id"],
+    ["POST", "semantic-group-color-legend/seen"]
   ] as const) {
     assert.equal(
       semanticMutationProjectId(

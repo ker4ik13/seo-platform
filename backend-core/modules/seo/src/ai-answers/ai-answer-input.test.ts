@@ -21,7 +21,12 @@ function command(snapshot: Readonly<Record<string, unknown>>) {
     provider: "ARSENKIN",
     host: "nt-g.ru",
     observedAt: "2026-08-19T10:00:00.000Z",
-    items: [{ keywordId, keywordVersion: 2, snapshot }]
+    items: [{
+      keywordId,
+      keywordVersion: 2,
+      positionTrackingEnabled: true,
+      snapshot
+    }]
   };
 }
 
@@ -38,6 +43,28 @@ test("accepts a complete normalized AI answer snapshot", () => {
 
   assert.equal(input.items[0]?.snapshot.position, 2);
   assert.equal(input.items[0]?.snapshot.sources[0]?.url, "https://nt-g.ru/catalog");
+  assert.equal(input.items[0]?.positionTrackingEnabled, true);
+});
+
+test("accepts a competitor snapshot excluded from position projections", () => {
+  const value = command({
+    answerPresent: true,
+    siteFound: true,
+    position: 2,
+    rankingUrl: "https://nt-g.ru/catalog",
+    brandFound: false,
+    sources: [{ url: "https://nt-g.ru/catalog" }]
+  });
+  const input = internalPersistAiAnswerSnapshotBatchInput({
+    ...value,
+    items: value.items.map((item) => ({
+      ...item,
+      positionTrackingEnabled: false
+    }))
+  });
+
+  assert.equal(input.items[0]?.positionTrackingEnabled, false);
+  assert.equal(input.items[0]?.snapshot.position, 2);
 });
 
 test("accepts a provider-confirmed AI answer before optional details are available", () => {

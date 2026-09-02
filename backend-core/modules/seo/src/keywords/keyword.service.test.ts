@@ -449,6 +449,7 @@ test("projects AI position changes across collection contexts", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000018";
   const snapshotId = "01900000-0000-7000-8000-000000000019";
   const rawQueries: Prisma.Sql[] = [];
+  let latestQueryWhere: Readonly<Record<string, unknown>> | undefined;
   const service = new KeywordService(
     {
       $queryRaw: async (
@@ -477,17 +478,22 @@ test("projects AI position changes across collection contexts", async () => {
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: {
-        findMany: async () => [{
-          id: snapshotId,
-          keywordId,
-          searchEngine: "YANDEX",
-          answerPresent: true,
-          siteFound: true,
-          position: 4,
-          rankingUrl: "https://example.com/ai",
-          brandFound: true,
-          observedAt: new Date("2026-08-19T14:00:00.000Z")
-        }]
+        findMany: async ({ where }: {
+          where: Readonly<Record<string, unknown>>;
+        }) => {
+          latestQueryWhere = where;
+          return [{
+            id: snapshotId,
+            keywordId,
+            searchEngine: "YANDEX",
+            answerPresent: true,
+            siteFound: true,
+            position: 4,
+            rankingUrl: "https://example.com/ai",
+            brandFound: true,
+            observedAt: new Date("2026-08-19T14:00:00.000Z")
+          }];
+        }
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -513,9 +519,10 @@ test("projects AI position changes across collection contexts", async () => {
   assert.equal(rawQueries.length, 1);
   assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots snapshot/u);
   assert.match(rawQueries[0]?.sql ?? "", /snapshot\.site_found = TRUE/u);
+  assert.equal(latestQueryWhere?.positionTrackingEnabled, true);
 });
 
-test("projects exact rank collection metadata into keyword history", async () => {
+test("keeps competitor SERP evidence out of position history when projection is disabled", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000012";
   const contextId = "01900000-0000-7000-8000-000000000072";
   const service = new KeywordService(
@@ -532,6 +539,7 @@ test("projects exact rank collection metadata into keyword history", async () =>
           trackingContextId: contextId,
           configurationVersion: 2,
           provider: "XMLSTOCK",
+          positionTrackingEnabled: false,
           found: false,
           position: null,
           observedAt: new Date("2026-08-06T11:45:00.000Z"),
@@ -584,22 +592,7 @@ test("projects exact rank collection metadata into keyword history", async () =>
 
   const result = await service.insights(workspaceId, projectId, keywordId);
 
-  assert.deepEqual(result.positionHistory, [{
-    snapshotId: "01900000-0000-7000-8000-000000000073",
-    trackingContextId: contextId,
-    contextName: "Яндекс · Москва",
-    searchEngine: "YANDEX",
-    searchSource: "LIVE",
-    device: "DESKTOP",
-    regionCode: "213",
-    regionLabel: "Москва",
-    countryCode: "RU",
-    language: "ru",
-    depth: 50,
-    provider: "XMLSTOCK",
-    found: false,
-    observedAt: "2026-08-06T11:45:00.000Z"
-  }]);
+  assert.deepEqual(result.positionHistory, []);
   assert.deepEqual(result.competitorSnapshots, [{
     snapshotId: "01900000-0000-7000-8000-000000000073",
     trackingContextId: contextId,
@@ -637,6 +630,7 @@ test("projects immutable AI history and latest source competitors into insights"
     brandFound: true,
     observedAt
   };
+  const aiQueries: Readonly<Record<string, unknown>>[] = [];
   const service = new KeywordService(
     {
       keyword: { findFirst: async () => ({ id: keywordId, note: null }) },
@@ -644,8 +638,9 @@ test("projects immutable AI history and latest source competitors into insights"
       currentRank: { findMany: async () => [] },
       rankSnapshot: { findMany: async () => [] },
       aiAnswerSnapshot: {
-        findMany: async ({ where }: { where: Readonly<Record<string, unknown>> }) =>
-          "sources" in where
+        findMany: async ({ where }: { where: Readonly<Record<string, unknown>> }) => {
+          aiQueries.push(where);
+          return "sources" in where
             ? [{
                 id: snapshotId,
                 searchEngine: "YANDEX",
@@ -659,7 +654,8 @@ test("projects immutable AI history and latest source competitors into insights"
                   description: "Описание"
                 }]
               }]
-            : [historyRow]
+            : [historyRow];
+        }
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -695,6 +691,8 @@ test("projects immutable AI history and latest source competitors into insights"
       snippet: "Описание"
     }]
   }]);
+  assert.equal(aiQueries[0]?.positionTrackingEnabled, true);
+  assert.equal("positionTrackingEnabled" in (aiQueries[1] ?? {}), false);
 });
 
 test("deletes only one tenant-scoped keyword frequency context", async () => {
@@ -946,6 +944,7 @@ test("projects imported Key Collector positions without poisoning keyword insigh
           trackingContextId: contextId,
           configurationVersion: 1,
           provider: "KEY_COLLECTOR",
+          positionTrackingEnabled: true,
           found: true,
           position: 34,
           observedAt: new Date("2026-08-07T14:00:00.000Z"),

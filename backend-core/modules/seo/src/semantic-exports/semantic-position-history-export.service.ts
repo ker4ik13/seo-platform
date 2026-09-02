@@ -40,6 +40,7 @@ export class SemanticPositionHistoryExportService {
             projectId: context.projectId,
             keywordId: { in: keywordIds },
             sourceMode: "BYOK",
+            positionTrackingEnabled: true,
             observedAt: {
               gte: new Date(options.observedFrom),
               lt: new Date(options.observedBefore)

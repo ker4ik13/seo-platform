@@ -58,6 +58,19 @@ test("normalizes an exact versioned semantic saved view", () => {
     }).config.queryIndicators,
     []
   );
+  assert.equal(
+    createSemanticSavedViewInput({
+      name: "URL выдачи",
+      scope: "PRIVATE",
+      config: { ...config, schemaVersion: 3 }
+    }).config.schemaVersion,
+    3
+  );
+  assert.throws(() => createSemanticSavedViewInput({
+    name: "Будущая схема",
+    scope: "PRIVATE",
+    config: { ...config, schemaVersion: 4 }
+  }));
 });
 
 test("rejects unknown DSL fields, invalid ranges and unsafe columns", () => {

@@ -27,6 +27,7 @@ import { SemanticDuplicateModule } from "./semantic-duplicates/semantic-duplicat
 import { ProjectNoteModule } from "./notes/project-note.module.js";
 import { PlatformAdminReadModule } from "./admin/platform-admin-read.module.js";
 import { SemanticExportReadModule } from "./semantic-exports/semantic-export-read.module.js";
+import { SemanticGroupColorLegendModule } from "./semantic-group-color-legends/semantic-group-color-legend.module.js";
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { SemanticExportReadModule } from "./semantic-exports/semantic-export-rea
     OperationResultModule,
     NegativeKeywordModule,
     SemanticDuplicateModule,
+    SemanticGroupColorLegendModule,
     SemanticExportReadModule,
     ProjectNoteModule,
     PlatformAdminReadModule,

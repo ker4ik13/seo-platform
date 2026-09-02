@@ -1,4 +1,5 @@
 import {
+  semanticSavedViewCurrentSchemaVersion,
   semanticSavedViewQueryIndicators,
   semanticSystemColumnKeys
 } from "@seo-platform/contracts";
@@ -24,13 +25,15 @@ export type SemanticSystemColumn =
   | "frequencyFixed"
   | "wordCount"
   | "yandexPosition"
-  | "googlePosition"
   | "yandexRelevantUrl"
+  | "googlePosition"
   | "googleRelevantUrl"
+  | "yandexAiPosition"
+  | "yandexAiRelevantUrl"
+  | "googleAiPosition"
+  | "googleAiRelevantUrl"
   | "yandexCheckedAt"
   | "googleCheckedAt"
-  | "yandexAiPosition"
-  | "googleAiPosition"
   | "yandexAiCheckedAt"
   | "googleAiCheckedAt"
   | "visibility"
@@ -60,7 +63,7 @@ export interface SemanticViewFilters {
 }
 
 export interface SemanticViewConfig {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: import("@seo-platform/contracts").SemanticSavedViewSchemaVersion;
   readonly filters: SemanticViewFilters;
   readonly sort: SemanticKeywordSort;
   readonly columns: readonly SemanticViewColumn[];
@@ -117,7 +120,7 @@ export function semanticFolderSortFor(
 }
 
 export const defaultSemanticViewConfig: SemanticViewConfig = {
-  schemaVersion: 1,
+  schemaVersion: semanticSavedViewCurrentSchemaVersion,
   filters: {},
   sort: "CREATED_DESC",
   columns: [
@@ -127,9 +130,13 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
     "frequencyFixed",
     "wordCount",
     "yandexPosition",
+    "yandexRelevantUrl",
     "googlePosition",
+    "googleRelevantUrl",
     "yandexAiPosition",
+    "yandexAiRelevantUrl",
     "googleAiPosition",
+    "googleAiRelevantUrl",
     "yandexCheckedAt",
     "googleCheckedAt",
     "yandexAiCheckedAt",
@@ -146,6 +153,78 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
   density: "COMFORTABLE",
   queryIndicators: semanticSavedViewQueryIndicators
 };
+
+export function semanticViewConfigForCurrentSchema(
+  config: SemanticViewConfig
+): SemanticViewConfig {
+  if (config.schemaVersion === semanticSavedViewCurrentSchemaVersion) {
+    return config;
+  }
+  const columns = withAiAnswerRankingUrls(
+    config.schemaVersion === 1
+      ? withCapturedRankingUrls(config.columns)
+      : config.columns
+  );
+  const columnOrder = config.columnOrder === undefined
+    ? undefined
+    : withAiAnswerRankingUrls(
+        config.schemaVersion === 1
+          ? withCapturedRankingUrls(config.columnOrder)
+          : config.columnOrder
+      );
+  return {
+    ...config,
+    schemaVersion: semanticSavedViewCurrentSchemaVersion,
+    columns,
+    ...(columnOrder === undefined ? {} : { columnOrder })
+  };
+}
+
+function withCapturedRankingUrls(
+  columns: readonly SemanticViewColumn[]
+): readonly SemanticViewColumn[] {
+  const pairs = [
+    ["yandexPosition", "yandexRelevantUrl"],
+    ["googlePosition", "googleRelevantUrl"]
+  ] as const satisfies readonly (readonly [
+    SemanticViewColumn,
+    SemanticViewColumn
+  ])[];
+  return pairs.reduce<readonly SemanticViewColumn[]>((current, pair) => {
+    const [positionColumn, urlColumn] = pair;
+    if (current.includes(urlColumn)) return current;
+    const position = current.indexOf(positionColumn);
+    const insertAt = position < 0 ? current.length : position + 1;
+    return [
+      ...current.slice(0, insertAt),
+      urlColumn,
+      ...current.slice(insertAt)
+    ];
+  }, columns);
+}
+
+function withAiAnswerRankingUrls(
+  columns: readonly SemanticViewColumn[]
+): readonly SemanticViewColumn[] {
+  const pairs = [
+    ["yandexAiPosition", "yandexAiRelevantUrl"],
+    ["googleAiPosition", "googleAiRelevantUrl"]
+  ] as const satisfies readonly (readonly [
+    SemanticViewColumn,
+    SemanticViewColumn
+  ])[];
+  return pairs.reduce<readonly SemanticViewColumn[]>((current, pair) => {
+    const [positionColumn, urlColumn] = pair;
+    if (current.includes(urlColumn)) return current;
+    const position = current.indexOf(positionColumn);
+    const insertAt = position < 0 ? current.length : position + 1;
+    return [
+      ...current.slice(0, insertAt),
+      urlColumn,
+      ...current.slice(insertAt)
+    ];
+  }, columns);
+}
 
 export function semanticQueryIndicatorsFor(
   config: Pick<SemanticViewConfig, "queryIndicators">

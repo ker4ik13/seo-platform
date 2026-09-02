@@ -54,6 +54,16 @@ test("accepts exact tenant-scoped saved-view commands", () => {
     internalDeleteSemanticSavedViewInput({ ...scope, ...authority, version: 3 }),
     { ...scope, ...authority, version: 3 }
   );
+  assert.equal(
+    internalCreateSemanticSavedViewInput({
+      ...scope,
+      ...authority,
+      name: "URL ИИ-выдачи",
+      scope: "PRIVATE",
+      config: { ...config, schemaVersion: 3 }
+    }).config.schemaVersion,
+    3
+  );
 });
 
 test("rejects authority drift and malformed versioned config", () => {

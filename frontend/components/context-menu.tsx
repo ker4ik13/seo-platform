@@ -3,6 +3,7 @@
 import {
   useEffect,
   useRef,
+  type RefObject,
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
@@ -21,24 +22,28 @@ export interface ContextMenuItem {
 export function ContextMenu({
   afterItemId,
   children,
+  footer,
   items,
   label,
   onClose,
+  triggerRef,
   x,
   y
 }: Readonly<{
   afterItemId?: string;
   children?: ReactNode;
+  footer?: ReactNode;
   items: readonly ContextMenuItem[];
   label: string;
   onClose: () => void;
+  triggerRef?: RefObject<HTMLElement | null>;
   x: number;
   y: number;
 }>) {
   const menuRef = useRef<HTMLDivElement>(null);
   const viewportWidth = typeof window === "undefined" ? 1920 : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? 1080 : window.innerHeight;
-  const estimatedExtraHeight = children ? 62 : 0;
+  const estimatedExtraHeight = (children ? 62 : 0) + (footer ? 64 : 0);
   const estimatedRows = items.reduce(
     (count, item, index) =>
       item.inlineGroup && items[index - 1]?.inlineGroup === item.inlineGroup
@@ -106,7 +111,13 @@ export function ContextMenu({
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
+      const target = event.target as Node;
+      if (
+        !menuRef.current?.contains(target) &&
+        !triggerRef?.current?.contains(target)
+      ) {
+        onClose();
+      }
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -136,7 +147,7 @@ export function ContextMenu({
         window.removeEventListener("scroll", reposition, true);
       }
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   if (typeof document === "undefined") return null;
 
@@ -159,6 +170,7 @@ export function ContextMenu({
       }}
     >
       {entries}
+      {footer ? <div className="context-menu-footer">{footer}</div> : null}
     </div>,
     document.body
   );

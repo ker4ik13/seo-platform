@@ -140,6 +140,34 @@ test("accepts and preserves safe rank execution presentation", () => {
   assert.equal(mapped.depth, 100);
 });
 
+test("preserves competitor collection policy in every lifecycle", () => {
+  const mapped = scopedRankJobSummary(
+    {
+      ...preparing,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false
+    },
+    workspaceId,
+    projectId,
+    jobId
+  );
+
+  assert.equal(mapped.purpose, "COMPETITOR_SERP");
+  assert.equal(mapped.saveProjectPosition, false);
+  assert.throws(
+    () => scopedRankJobSummary(
+      {
+        ...preparing,
+        purpose: "COMPETITOR_SERP"
+      },
+      workspaceId,
+      projectId,
+      jobId
+    ),
+    invalidDependencyResponse
+  );
+});
+
 test("rejects unsupported rank execution presentation", () => {
   for (const value of [
     { ...preparing, searchEngine: "BING" },

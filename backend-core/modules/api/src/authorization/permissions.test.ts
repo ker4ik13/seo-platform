@@ -77,6 +77,37 @@ test("effective project permission intersects system role and assignment", () =>
   );
 });
 
+test("only SEO lead and higher roles manage the group color legend", () => {
+  for (const role of ["OWNER", "ADMIN", "SEO_LEAD"]) {
+    assert.equal(
+      hasEffectiveProjectPermission(
+        role,
+        "MANAGER",
+        "semantic.manage_group_color_legend"
+      ),
+      true
+    );
+  }
+  for (const role of ["SEO_SPECIALIST", "ANALYST", "VIEWER"]) {
+    assert.equal(
+      hasEffectiveProjectPermission(
+        role,
+        "MANAGER",
+        "semantic.manage_group_color_legend"
+      ),
+      false
+    );
+  }
+  assert.equal(
+    hasEffectiveProjectPermission(
+      "SEO_LEAD",
+      "MEMBER",
+      "semantic.manage_group_color_legend"
+    ),
+    false
+  );
+});
+
 test("read-only mode allows viewing, exporting and balance recovery only", () => {
   assert.equal(isReadOnlySafePermission("semantic.view"), true);
   assert.equal(isReadOnlySafePermission("semantic.export"), true);

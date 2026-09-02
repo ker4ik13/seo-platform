@@ -243,6 +243,16 @@ test("parses every valid public lifecycle state through an allowlist", () => {
   const preparing = parseRankJobSummary(inputs[0], expected);
   assert.equal(preparing.searchSource, "LIVE");
   assert.equal("privateCredentialId" in preparing, false);
+  const competitors = parseRankJobSummary(
+    {
+      ...inputs[0],
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false
+    },
+    expected
+  );
+  assert.equal(competitors.purpose, "COMPETITOR_SERP");
+  assert.equal(competitors.saveProjectPosition, false);
   const partial = parseRankJobSummary(inputs[5], expected);
   assert.equal(
     partial.status === "PARTIALLY_COMPLETED" &&

@@ -452,7 +452,7 @@ export function SemanticBulkEditor({
         </label>
         {single ? (
           <label className="semantic-bulk-url">
-            <span>Целевая URL</span>
+            <span>Целевой URL</span>
             <input
               maxLength={2_048}
               onChange={(event) => {
@@ -467,7 +467,7 @@ export function SemanticBulkEditor({
           </label>
         ) : (
           <label>
-            <span>Целевая URL</span>
+            <span>Целевой URL</span>
             <CustomSelect
               onChange={(event) =>
                 setTargetUrlMode(event.target.value as typeof targetUrlMode)

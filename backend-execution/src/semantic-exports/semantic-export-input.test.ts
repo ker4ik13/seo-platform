@@ -94,6 +94,19 @@ test("accepts competitor data as ordinary export columns", () => {
   );
 });
 
+test("accepts Yandex and Google AI result URLs as export columns", () => {
+  const input = {
+    ...validCreate,
+    format: "CSV",
+    columns: [
+      "query",
+      "yandexAiRelevantUrl",
+      "googleAiRelevantUrl"
+    ]
+  } as const;
+  assert.deepEqual(internalCreateSemanticExportInput(input), input);
+});
+
 test("rejects unknown fields at every internal command boundary", () => {
   assert.throws(
     () => internalCreateSemanticExportInput({ ...validCreate, admin: true }),

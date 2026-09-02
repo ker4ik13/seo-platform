@@ -375,6 +375,72 @@ export interface SemanticKeywordGroup {
   readonly updatedAt: string;
 }
 
+/** Stable project palette shared by group editing and its team legend. */
+export const semanticGroupPaletteColors = [
+  "#ff0000",
+  "#ff8a00",
+  "#f2c94c",
+  "#84cc16",
+  "#22c55e",
+  "#10b981",
+  "#06b6d4",
+  "#2563eb",
+  "#4f46e5",
+  "#6758ef",
+  "#ec4899",
+  "#a8a5b8",
+  "#8b4513",
+  "#9f1239",
+  "#0f766e",
+  "#334155"
+] as const;
+
+export type SemanticGroupPaletteColor =
+  (typeof semanticGroupPaletteColors)[number];
+
+export const semanticGroupColorLegendNoteMaxLength = 240;
+
+export interface SemanticGroupColorLegendEntry {
+  readonly color: SemanticGroupPaletteColor;
+  readonly note: string;
+}
+
+/**
+ * Core SEO projection. Version 0 is a virtual, not-yet-created legend and is
+ * accepted as the first-update precondition and as an empty seen-state no-op.
+ */
+export interface SemanticGroupColorLegendState {
+  readonly entries: readonly SemanticGroupColorLegendEntry[];
+  readonly version: number;
+  readonly unread: boolean;
+  readonly updatedAt?: string;
+  readonly updatedByUserId?: string;
+}
+
+export interface SemanticGroupColorLegend extends SemanticGroupColorLegendState {
+  readonly access: Readonly<{ canManage: boolean }>;
+}
+
+export interface UpdateSemanticGroupColorLegendInput {
+  readonly entries: readonly SemanticGroupColorLegendEntry[];
+}
+
+export interface InternalUpdateSemanticGroupColorLegendInput
+  extends UpdateSemanticGroupColorLegendInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly canManage: boolean;
+  readonly version: number;
+}
+
+export interface InternalMarkSemanticGroupColorLegendSeenInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
 export interface CreateSemanticKeywordGroupInput {
   readonly name: string;
   readonly parentId?: string;

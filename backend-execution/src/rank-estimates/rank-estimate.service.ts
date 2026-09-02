@@ -13,6 +13,7 @@ import {
   currentRankProviderPolicyVersion,
   legacyRankProviderPolicyVersion,
   rankEstimateBlockerCodes,
+  rankExecutionPurpose,
   rankProviderKeywordLimit,
   rankProviderOverflowCount,
   xmlStockRankProviderPolicyVersion,
@@ -262,7 +263,9 @@ export class RankEstimateService {
             scope.configuration,
             provider,
             input.searchSource,
-            input.yandexLiveMode
+            input.yandexLiveMode,
+            input.purpose ?? "POSITION_TRACKING",
+            input.saveProjectPosition
           );
           const blockers = estimateBlockers(
             input,
@@ -453,6 +456,12 @@ export function rankEstimateRequestHash(
       projectId: input.projectId,
       actorId: input.actorId,
       trackingContextId: input.trackingContextId,
+      ...(input.purpose === "COMPETITOR_SERP"
+        ? {
+            purpose: "COMPETITOR_SERP" as const,
+            saveProjectPosition: input.saveProjectPosition ?? false
+          }
+        : {}),
       provider: input.provider ?? null,
       credentialId: input.credentialId ?? null,
       searchSource: input.searchSource ?? null,
@@ -778,7 +787,9 @@ function estimateBlockers(
     scope.configuration,
     provider,
     input.searchSource,
-    input.yandexLiveMode
+    input.yandexLiveMode,
+    input.purpose ?? "POSITION_TRACKING",
+    input.saveProjectPosition
   );
   if (scope.contextStatus === "ARCHIVED") blockers.add("CONTEXT_ARCHIVED");
   if (keywordCount === 0) blockers.add("NO_ASSIGNED_KEYWORDS");
@@ -932,6 +943,11 @@ function publicEstimate(input: {
     trackingContextId: input.input.trackingContextId,
     status: executionAllowed ? "READY" : "BLOCKED",
     provider: input.provider,
+    purpose: input.input.purpose ?? "POSITION_TRACKING",
+    saveProjectPosition:
+      input.input.purpose === "COMPETITOR_SERP"
+        ? input.input.saveProjectPosition ?? false
+        : true,
     ...(input.resolvedRoute
       ? {
           routingScope: input.resolvedRoute.routingScope,
@@ -1343,7 +1359,9 @@ export function providerMinimumRequests(
     get:
       taskCount *
       Math.ceil(
-        (execution?.depth ?? 100) /
+        (execution && rankExecutionPurpose(execution) === "COMPETITOR_SERP"
+          ? 10
+          : execution?.depth ?? 100) /
           (execution?.providerMappingVersion ===
           "xmlstock-yandex-live@3"
             ? 50

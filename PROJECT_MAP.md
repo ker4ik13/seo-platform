@@ -110,8 +110,13 @@ URL допускает не более двух строк. Favicon сначал
 ответа провайдера служит запасным источником, после чего показывается локальная
 заглушка. Визуальная подпись SERP-ссылки
 не содержит `http://`/`https://`, не изменяя полный кликабельный `href`, а
-исходный `http://` обозначается небольшим оранжевым открытым замком. Целевой URL сравнивается с текущим ranking URL после безопасной
-нормализации host/path; несовпадение обозначается отдельно и не меняет сами
+исходный `http://` обозначается небольшим оранжевым открытым замком. URL
+последнего обычного и ИИ-съёма Яндекса и Google находятся в четырёх отдельных
+видимых по умолчанию колонках и включаются в обычный экспорт. ИИ URL берётся из
+latest `aiAnswers[].rankingUrl`, то есть только из найденной страницы домена
+проекта, а не из списка конкурентов. Целевой URL сравнивается с каждым обычным
+и ИИ ranking URL после безопасной нормализации host/path; ячейка явно показывает
+совпадение, несовпадение либо отсутствие назначенной цели и не меняет сами
 данные замера. Если в последнем сохранённом SERP присутствуют несколько URL
 проекта, таблица показывает отдельный индикатор и modal только с этими
 страницами: позиция, favicon, title, description и URL без визуального
@@ -152,7 +157,8 @@ checkbox-выбор для массовых операций; контекстн
 источником фильтра таблицы, а эфемерный WebSocket presence публикует его
 каноническую bounded-проекцию до 50 UUID; повторная публикация одинаковой
 проекции идемпотентна и не запускает render-loop. Контекстное меню после
-экспорта показывает все двенадцать цветов компактной палитрой в две строки и через versioned PATCH
+экспорта показывает все шестнадцать цветов компактной палитрой на всю ширину в
+две строки по восемь и через versioned PATCH
 меняет цвет сразу у всей выборки; изменение только цвета не переотправляет
 позицию. Тот же каталог
 `frontend/lib/semantic-group-colors.ts` используется в диалогах создания и
@@ -174,6 +180,18 @@ checkbox-выбор для массовых операций; контекстн
 Двойной клик заменяет только
 название обычной папки inline-полем той же геометрии; Enter/blur сохраняют, а
 Escape отменяет изменение.
+Кнопка рядом с заголовком дерева открывает
+`frontend/components/semantic-group-color-legend.tsx`: общий проектный справочник
+пояснений ко всем 16 цветам. Core SEO-модуль
+`src/semantic-group-color-legends` хранит CAS-версию в
+`semantic_group_color_legends`, а персональные monotonic read receipts — в
+`semantic_group_color_legend_reads`. `semantic.view` разрешает чтение и отметку
+просмотра; отдельное `semantic.manage_group_color_legend` доступно SEO Lead и
+выше при effective `MANAGER`. Обновление автора сразу прочитано, остальные
+участники видят unread-бейдж до `POST .../seen`; WebSocket переносит только
+data-free invalidation, после которого Web перечитывает HTTP API. Additive
+migration `20260902120000_semantic_group_color_legends` добавляет обе таблицы и
+allowlist переноса проекта.
 На экранах до `920px` скрытое desktop-дерево заменяет доступная из шапки
 выдвижная панель групп; на телефонах контекстное меню и portaled picker папки
 открываются поверх рабочей области как нижние листы, а footer modal остаётся
@@ -236,6 +254,10 @@ cursor pagination как для ASC, так и для DESC.
 Полный `columnOrder` хранится отдельно от набора видимых `columns`: выключенная
 колонка остаётся на прежнем месте в панели, повторно включается без прыжка вниз
 и одинаково восстанавливается из private и project-shared представлений.
+Текущая `schemaVersion: 3` включает отдельные URL последнего обычного и
+ИИ-съёма Яндекса и Google. API временно принимает legacy v1/v2; Web добавляет
+обычные и ИИ URL для v1, только ИИ URL для v2 и переводит конфигурацию в v3,
+тогда как явная видимость уже сохранённого v3 больше не переопределяется.
 Любой участник проекта создаёт и автоматически сохраняет собственное private
 представление; optimistic `If-Match` не позволяет тихо перезаписать изменения
 из другой вкладки. Общие project-shared представления видны всем участникам,
@@ -404,6 +426,9 @@ Browser BFF-клиент обрабатывает истечение корот�
 после чего каждый исходный same-origin запрос повторяется не более одного раза
 с новым CSRF token. Истинно завершённая refresh session остаётся terminal и не
 порождает цикл повторов или ложную ссылку на настройку provider route.
+Страница `/app/login` до показа формы проверяет серверную auth session и при
+действующем access token либо наличии refresh cookie сразу перенаправляет на
+`/app`; истёкший access token затем проходит через общий protected refresh flow.
 
 Общий `app/(protected)/layout` владеет `AppShell`, поэтому sidebar и шапка
 сохраняются при клиентской навигации, а активный раздел вычисляется из текущего
@@ -432,6 +457,11 @@ project-option renderer показывает logo как в открытом с�
 footer явное действие создания, ведущее в тот же onboarding; членство в
 областях других владельцев не скрывает действие. При полностью пустом списке
 switcher остаётся раскрываемым.
+Tenant switcher локально запоминает последний открытый project ID отдельно по
+`userId + workspaceId`. При смене workspace он переносит этот opaque ID в
+обычный server-readable tenant cookie; Core-authoritative список проектов
+повторно подтверждает доступ, а отсутствующий, удалённый или перенесённый
+проект заменяется первым доступным проектом стандартного порядка.
 Общий operation scope picker объединяет выбранные папки в один exact union,
 берёт authoritative count однострочным probe, останавливается сразу при
 превышении provider limit и materialize-ит допустимый набор страницами по 1000
@@ -640,7 +670,7 @@ concurrency, lease fencing и PostgreSQL claim остаются bounded safety �
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users (включая bounded account avatar до 512 KiB), sessions, hashed personal API tokens и project allowlists, workspaces (включая bounded workspace avatar до 512 KiB), projects, их общий `display_order` и bounded project logos до 512 KiB, project transfer requests, RBAC, billing ledger/usage reservations, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая keyword notes, saved views, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes, saved views, проектные легенды цветов и персональные read receipts, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -679,6 +709,22 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
    Raw provider response не сохраняется: Core SEO пакетно создаёт дочерние
    immutable строки rank snapshot, а frontend читает только tenant-scoped
    проекцию.
+
+Тот же pipeline обслуживает отдельный `COMPETITOR_SERP`: Arsenkin вызывает
+официальный `check-top` с Топ-10 и snippets, XMLStock ограничивает существующий
+SERP connector глубиной 10. Оба всегда сохраняют конкурентные
+`rank_serp_results`. Только конкурентная modal показывает
+`saveProjectPosition`: при включении найденная в той же выдаче страница проекта
+может обновить позицию без второго provider request; при выключении либо
+отсутствии сайта immutable snapshot помечается
+`position_tracking_enabled=false` и исключается из `current_ranks`, истории,
+графиков и позиционного экспорта. Migration
+`20260902163000_competitor_position_tracking_policy` добавляет этот gate к rank
+и AI snapshots без изменения старых строк. Migration
+`20260902194500_competitor_rank_estimate_counts` синхронизирует DB-инвариант
+оценок XMLStock: для `COMPETITOR_SERP` стоимость Live-выдачи считается по
+фактически собираемому Топ-10, а обычные position estimates продолжают
+считаться по глубине tracking context.
 
 System XMLStock/Arsenkin credential создаётся только пользователем с
 `integration.use_system_credentials`: Core передаёт provider, а Execution HTTP
@@ -815,6 +861,14 @@ provider route автоматически.
 общую Arsenkin provider-task capacity вместе с rank/Wordstat, поэтому новый
 тип работы не обходит лимит credential.
 
+Конкурентная команда «Собрать ИИ-выдачу» использует тот же `ai-serp` с
+`purpose=COMPETITOR_SERP`, но не показывает поле домена: Web передаёт host
+проекта, обязательный по provider API, и пустые brands. Ответ и sources
+сохраняются всегда. Отдельная только для конкурентных modal галочка разрешает
+использовать найденную страницу проекта как ИИ-позицию из этого же ответа;
+выключенный флаг не запускает второй запрос и оставляет positional projection
+неизменной через `position_tracking_enabled=false`.
+
 Core SEO version-fenced разрешает keyword ID, идемпотентно сохраняет
 append-only `ai_answer_snapshots` и упорядоченные `ai_answer_sources`, а
 передача проекта re-key-ит snapshot в той же allowlisted транзакции. Provider
@@ -825,9 +879,10 @@ HTML не попадает в browser: connector преобразует разр
 найденную позицию canonical keyword/engine по всей append-only истории без
 привязки к region/device, поэтому таблица корректно показывает `Новая`, рост,
 падение, отсутствие изменений и потерю позиции после смены контекста.
-Индикатор-лупа у запроса открывает подробный modal с полным
-ответом, наличием/позицией домена, источниками, регионом, устройством и временем
-конкретного immutable снимка. Цифровые ссылки Arsenkin вида `\[1\]\[6\]`
+AI-кнопка у запроса появляется для любого сохранённого снимка, включая
+`answerPresent=false`, и открывает подробный modal с полным ответом либо честным
+состоянием его отсутствия, наличием/позицией домена, источниками, регионом,
+устройством и временем конкретного immutable снимка. Цифровые ссылки Arsenkin вида `\[1\]\[6\]`
 преобразуются в кликабельные favicon/domain chips сохранённых источников и
 ведут на полные URL страниц. Sidebar показывает обе последние ИИ-позиции,
 график 14 последних снимков и отдельный последний `Топ конкурентов ИИ` для
@@ -844,7 +899,10 @@ execution status/attempt, факт отправки провайдеру, finite
 текста или списка источников; такой оплаченный результат является валидным и
 не маскируется ошибкой отсутствующего keyword.
 
-Видимость лупы ИИ-ответа, индикатора нескольких URL и предупреждения о
+Последние URL домена проекта из ИИ-ответов Яндекса и Google дополнительно
+показываются в колонках `yandexAiRelevantUrl` и `googleAiRelevantUrl`, участвуют
+в проверке целевой страницы и обычном экспорте. Видимость лупы ИИ-ответа,
+индикатора нескольких URL и предупреждения о
 несовпадении целевого URL задаёт `queryIndicators` активного semantic saved
 view. В старых представлениях без поля все три включены; настройки показаны
 вложенными пунктами под закреплённой колонкой `Запрос`, сохраняются одинаково

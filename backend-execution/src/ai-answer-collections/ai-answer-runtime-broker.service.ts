@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { AiAnswerDevice, AiAnswerSearchEngine } from "@seo-platform/contracts";
+import type {
+  AiAnswerCollectionPurpose,
+  AiAnswerDevice,
+  AiAnswerSearchEngine
+} from "@seo-platform/contracts";
 import { arsenkinAiAnswerKeywordLimit } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -26,6 +30,8 @@ export interface AiAnswerClaim {
   readonly host: string;
   readonly excludeSubdomains: boolean;
   readonly brands: readonly string[];
+  readonly purpose: AiAnswerCollectionPurpose;
+  readonly saveProjectPosition: boolean;
   readonly maxAttempts: number;
   readonly jobVersion: number;
   readonly leaseOwner: string;
@@ -213,7 +219,14 @@ function jobItemIds(claim: AiAnswerClaim): Prisma.Sql {
 
 function parseInput(value: unknown): Pick<
   AiAnswerClaim,
-  "searchEngine" | "regionCode" | "device" | "host" | "excludeSubdomains" | "brands"
+  | "searchEngine"
+  | "regionCode"
+  | "device"
+  | "host"
+  | "excludeSubdomains"
+  | "brands"
+  | "purpose"
+  | "saveProjectPosition"
 > {
   const input = object(value);
   if (
@@ -224,7 +237,12 @@ function parseInput(value: unknown): Pick<
     typeof input.host !== "string" ||
     typeof input.excludeSubdomains !== "boolean" ||
     !Array.isArray(input.brands) ||
-    input.brands.some((brand) => typeof brand !== "string")
+    input.brands.some((brand) => typeof brand !== "string") ||
+    (input.purpose !== undefined &&
+      input.purpose !== "POSITION_TRACKING" &&
+      input.purpose !== "COMPETITOR_SERP") ||
+    (input.saveProjectPosition !== undefined &&
+      typeof input.saveProjectPosition !== "boolean")
   ) invalid();
   return {
     searchEngine: input.searchEngine,
@@ -232,7 +250,15 @@ function parseInput(value: unknown): Pick<
     device: input.device,
     host: input.host,
     excludeSubdomains: input.excludeSubdomains,
-    brands: input.brands as string[]
+    brands: input.brands as string[],
+    purpose:
+      input.purpose === "COMPETITOR_SERP"
+        ? "COMPETITOR_SERP"
+        : "POSITION_TRACKING",
+    saveProjectPosition:
+      typeof input.saveProjectPosition === "boolean"
+        ? input.saveProjectPosition
+        : input.purpose !== "COMPETITOR_SERP"
   };
 }
 

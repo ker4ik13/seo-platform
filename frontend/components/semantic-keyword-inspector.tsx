@@ -12,6 +12,7 @@ import type {
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
   latestSemanticRankHistory,
+  normalizeSemanticTargetUrlInput,
   primaryRankContextIds,
   rankChangePresentation,
   rankEngineLabel,
@@ -83,6 +84,10 @@ export function SemanticKeywordInspector({
   const [deletingFrequency, setDeletingFrequency] = useState(false);
   const [frequencyDeleteError, setFrequencyDeleteError] = useState<string>();
   const [targetUrlCopied, setTargetUrlCopied] = useState(false);
+  const [targetUrlEditorOpen, setTargetUrlEditorOpen] = useState(false);
+  const [targetUrlDraft, setTargetUrlDraft] = useState("");
+  const [savingTargetUrl, setSavingTargetUrl] = useState(false);
+  const [targetUrlError, setTargetUrlError] = useState<string>();
   const noteDirtyRef = useRef(false);
   const presenceKeyPrefix = `semantic-keyword-inspector:${item.id}`;
 
@@ -105,6 +110,10 @@ export function SemanticKeywordInspector({
     setDeletingFrequency(false);
     setFrequencyDeleteError(undefined);
     setTargetUrlCopied(false);
+    setTargetUrlEditorOpen(false);
+    setTargetUrlDraft(item.targetUrl ?? "");
+    setSavingTargetUrl(false);
+    setTargetUrlError(undefined);
     const load = () => {
       void browserApiRequest<SemanticKeywordInsights>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
@@ -129,7 +138,7 @@ export function SemanticKeywordInspector({
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item.id, projectId]);
+  }, [item.id, item.targetUrl, projectId]);
 
   const latestFrequencies = useMemo(() => {
     const seen = new Set<string>();
@@ -176,18 +185,32 @@ export function SemanticKeywordInspector({
   const aiCompetitorSnapshots = insights?.aiCompetitorSnapshots ?? [];
   const targetMismatches = useMemo(
     () => item.targetUrl
-      ? [...primaryPositions.values()].flatMap((position) =>
-          position.found &&
-          position.rankingUrl &&
-          !sameSemanticRankingUrl(item.targetUrl!, position.rankingUrl)
-            ? [{
-                engine: position.searchEngine,
-                rankingUrl: position.rankingUrl
-              }]
-            : []
-        )
+      ? [
+          ...[...primaryPositions.values()].flatMap((position) =>
+            position.found &&
+            position.rankingUrl &&
+            !sameSemanticRankingUrl(item.targetUrl!, position.rankingUrl)
+              ? [{
+                  engine: position.searchEngine,
+                  rankingUrl: position.rankingUrl,
+                  source: "SERP" as const
+                }]
+              : []
+          ),
+          ...currentAiAnswers.flatMap((answer) =>
+            answer.siteFound &&
+            answer.rankingUrl &&
+            !sameSemanticRankingUrl(item.targetUrl!, answer.rankingUrl)
+              ? [{
+                  engine: answer.searchEngine,
+                  rankingUrl: answer.rankingUrl,
+                  source: "AI" as const
+                }]
+              : []
+          )
+        ]
       : [],
-    [item.targetUrl, primaryPositions]
+    [currentAiAnswers, item.targetUrl, primaryPositions]
   );
   const hasSavedAiAnswer = currentAiAnswers.length > 0;
 
@@ -280,6 +303,41 @@ export function SemanticKeywordInspector({
     }
   }
 
+  async function saveTargetUrl(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (savingTargetUrl || item.trashed) return;
+    const targetUrl = normalizeSemanticTargetUrlInput(
+      targetUrlDraft,
+      projectDomain
+    );
+    if (!targetUrl) {
+      setTargetUrlError(
+        "Укажите корректный HTTP(S)-адрес, домен или путь внутри проекта."
+      );
+      return;
+    }
+    setTargetUrlDraft(targetUrl);
+    setSavingTargetUrl(true);
+    setTargetUrlError(undefined);
+    try {
+      const updated = await browserApiRequest<SemanticKeywordListItem>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          body: { targetUrl },
+          ifMatch: item.version
+        }
+      );
+      onUpdated(updated);
+      setTargetUrlDraft(updated.targetUrl ?? targetUrl);
+      setTargetUrlEditorOpen(false);
+    } catch (requestError) {
+      setTargetUrlError(targetUrlMutationError(requestError));
+    } finally {
+      setSavingTargetUrl(false);
+    }
+  }
+
   return (
     <aside
       aria-label={`Детали запроса ${item.textOriginal}`}
@@ -343,8 +401,8 @@ export function SemanticKeywordInspector({
         {trackingStatus && <small className="semantic-tracking-status" role="status">{trackingStatus}</small>}
         <div className="semantic-inspector-target-url">
           <div className="semantic-inspector-target-url-heading">
-            <strong>Целевая страница</strong>
-            {item.targetUrl && (
+            <strong>Целевой URL</strong>
+            {item.targetUrl ? (
               <button
                 aria-label={targetUrlCopied ? "URL скопирован" : "Скопировать целевой URL"}
                 className={targetUrlCopied ? "copied" : undefined}
@@ -354,25 +412,38 @@ export function SemanticKeywordInspector({
               >
                 <Icon name={targetUrlCopied ? "checkDouble" : "copy"} />
               </button>
-            )}
+            ) : !item.trashed ? (
+              <button
+                aria-label="Задать целевой URL"
+                onClick={() => {
+                  setTargetUrlDraft("");
+                  setTargetUrlError(undefined);
+                  setTargetUrlEditorOpen(true);
+                }}
+                title="Задать целевой URL"
+                type="button"
+              >
+                <Icon name="plus" />
+              </button>
+            ) : null}
           </div>
           {item.targetUrl ? (
             <a href={item.targetUrl} rel="noopener noreferrer" target="_blank">{item.targetUrl}</a>
           ) : (
-            <span className="semantic-inspector-muted">Не назначена</span>
+            <span className="semantic-inspector-muted">Не задан</span>
           )}
           {targetMismatches.length > 0 && (
             <div className="semantic-target-url-warning" role="status">
               <strong>URL не совпадает с найденной страницей</strong>
-              {targetMismatches.map(({ engine, rankingUrl }) => (
+              {targetMismatches.map(({ engine, rankingUrl, source }) => (
                 <a
                   href={rankingUrl}
-                  key={`${engine}:${rankingUrl}`}
+                  key={`${source}:${engine}:${rankingUrl}`}
                   rel="noopener noreferrer"
                   target="_blank"
                 >
                   <SearchEngineLogo engine={engine} size="compact" />
-                  <span>{rankingUrl}</span>
+                  <span>{source === "AI" ? "ИИ · " : ""}{rankingUrl}</span>
                 </a>
               ))}
             </div>
@@ -674,6 +745,95 @@ export function SemanticKeywordInspector({
           </div>
         </SemanticModal>
       )}
+      {targetUrlEditorOpen && (
+        <SemanticModal
+          description="URL будет использоваться для проверки совпадения с обычной и ИИ-выдачей."
+          onClose={savingTargetUrl
+            ? () => undefined
+            : () => {
+                setTargetUrlEditorOpen(false);
+                setTargetUrlError(undefined);
+              }}
+          size="small"
+          title="Задать целевой URL"
+        >
+          <form
+            className="semantic-confirm-dialog semantic-target-url-editor"
+            onSubmit={(event) => void saveTargetUrl(event)}
+          >
+            <label className="semantic-workflow-field">
+              <span>Целевой URL</span>
+              <div
+                className={`semantic-target-url-input${targetUrlError ? " invalid" : ""}`}
+              >
+                <Icon name="link" />
+                <input
+                  aria-describedby="semantic-target-url-help"
+                  aria-errormessage={targetUrlError
+                    ? "semantic-target-url-error"
+                    : undefined}
+                  aria-invalid={Boolean(targetUrlError)}
+                  autoCapitalize="none"
+                  autoComplete="url"
+                  autoCorrect="off"
+                  autoFocus
+                  disabled={savingTargetUrl}
+                  inputMode="url"
+                  maxLength={2_048}
+                  onBlur={() => {
+                    const normalized = normalizeSemanticTargetUrlInput(
+                      targetUrlDraft,
+                      projectDomain
+                    );
+                    if (normalized) setTargetUrlDraft(normalized);
+                  }}
+                  onChange={(event) => {
+                    setTargetUrlDraft(event.target.value);
+                    setTargetUrlError(undefined);
+                  }}
+                  placeholder="https://example.com/page или /page"
+                  required
+                  spellCheck={false}
+                  type="text"
+                  value={targetUrlDraft}
+                />
+              </div>
+              <small id="semantic-target-url-help">
+                Можно вставить полный URL, домен или путь внутри проекта.
+              </small>
+            </label>
+            {targetUrlError && (
+              <div
+                className="inline-alert danger"
+                id="semantic-target-url-error"
+                role="alert"
+              >
+                {targetUrlError}
+              </div>
+            )}
+            <div className="semantic-modal-actions">
+              <button
+                className="secondary-button"
+                disabled={savingTargetUrl}
+                onClick={() => {
+                  setTargetUrlEditorOpen(false);
+                  setTargetUrlError(undefined);
+                }}
+                type="button"
+              >
+                Отмена
+              </button>
+              <button
+                className="primary-button"
+                disabled={savingTargetUrl || !targetUrlDraft.trim()}
+                type="submit"
+              >
+                {savingTargetUrl ? "Сохраняем…" : "Сохранить"}
+              </button>
+            </div>
+          </form>
+        </SemanticModal>
+      )}
     </aside>
   );
 }
@@ -888,6 +1048,18 @@ function trackingError(error: unknown): string {
   return error instanceof BrowserApiError
     ? error.message
     : "Не удалось изменить отслеживание.";
+}
+
+function targetUrlMutationError(error: unknown): string {
+  if (error instanceof BrowserApiError && error.status === 412) {
+    return "Запрос изменился в другой вкладке. Закройте карточку, откройте её снова и повторите сохранение.";
+  }
+  if (error instanceof BrowserApiError && error.status === 400) {
+    return "Укажите корректный абсолютный URL с http:// или https:// без логина и пароля.";
+  }
+  return error instanceof BrowserApiError
+    ? error.message
+    : "Не удалось сохранить целевой URL.";
 }
 
 function frequencyDeletionError(error: unknown): string {

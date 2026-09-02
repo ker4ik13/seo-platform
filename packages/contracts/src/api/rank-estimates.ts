@@ -21,6 +21,14 @@ export const rankSearchSources = trackingSearchSources;
 
 export type RankSearchSource = TrackingSearchSource;
 
+export const rankCollectionPurposes = [
+  "POSITION_TRACKING",
+  "COMPETITOR_SERP"
+] as const;
+
+export type RankCollectionPurpose =
+  (typeof rankCollectionPurposes)[number];
+
 /**
  * Optional paid execution mode for XMLStock Yandex Live. Absence always
  * means the standard Live mode, so old clients keep their exact behaviour.
@@ -201,6 +209,10 @@ export type RankEstimateEntitlementStatus =
 
 export interface CreateRankEstimateInput {
   readonly trackingContextId: string;
+  /** Omitted by legacy clients and treated as POSITION_TRACKING. */
+  readonly purpose?: RankCollectionPurpose;
+  /** For competitor SERP only: project position may be reused from the same TOP-10. */
+  readonly saveProjectPosition?: boolean;
   /** Explicit execution provider selected for this immutable launch. */
   readonly provider?: RankEstimateProvider;
   /**
@@ -334,6 +346,9 @@ export interface RankEstimate {
   readonly trackingContextId: string;
   readonly status: RankEstimateStatus;
   readonly provider: RankEstimateProvider;
+  /** Present on new estimates; missing legacy values mean POSITION_TRACKING. */
+  readonly purpose?: RankCollectionPurpose;
+  readonly saveProjectPosition?: boolean;
   /** Safe provenance of the effective workspace/project route. */
   readonly routingScope?: ConnectorRoutingScope;
   /** Bounded, secret-free route decisions made before provider submission. */

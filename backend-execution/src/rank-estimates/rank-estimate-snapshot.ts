@@ -19,6 +19,8 @@ const TOP_LEVEL_FIELDS = [
   "trackingContextId",
   "status",
   "provider",
+  "purpose",
+  "saveProjectPosition",
   "routingScope",
   "connectorAttempts",
   "operation",
@@ -44,7 +46,12 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
   const input = exactRecordWithOptional(
     value,
     TOP_LEVEL_FIELDS,
-    ["routingScope", "connectorAttempts"]
+    [
+      "routingScope",
+      "connectorAttempts",
+      "purpose",
+      "saveProjectPosition"
+    ]
   );
   const scope = exactRecord(input.scope, [
     "keywordCount",
@@ -76,6 +83,21 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
   const calculatedAt = timestamp(input.calculatedAt);
   const expiresAt = timestamp(input.expiresAt);
   const provider = rankProvider(input.provider);
+  const purpose = input.purpose === undefined
+    ? "POSITION_TRACKING"
+    : member(
+        input.purpose,
+        ["POSITION_TRACKING", "COMPETITOR_SERP"] as const
+      );
+  if (
+    input.saveProjectPosition !== undefined &&
+    typeof input.saveProjectPosition !== "boolean"
+  ) {
+    invalid();
+  }
+  const saveProjectPosition = input.saveProjectPosition as
+    | boolean
+    | undefined;
   const policy = estimatePolicy(input.policyVersion, provider);
   const keywordCount = boundedDecimal(
     scope.keywordCount,
@@ -147,6 +169,10 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     trackingContextId: uuid(input.trackingContextId),
     status: ready ? "READY" : "BLOCKED",
     provider,
+    purpose,
+    ...(saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition }),
     ...(input.routingScope === undefined
       ? {}
       : {

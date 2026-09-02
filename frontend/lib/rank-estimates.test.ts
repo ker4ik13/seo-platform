@@ -119,6 +119,23 @@ test("parses and narrows a valid public rank estimate", () => {
   assert.equal("ignoredInternalField" in parsed, false);
 });
 
+test("preserves the explicit competitor collection policy", () => {
+  const parsed = parseRankEstimate(
+    {
+      ...estimate,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false
+    },
+    {
+      projectId: "project-1",
+      trackingContextId: "context-1"
+    }
+  );
+
+  assert.equal(parsed.purpose, "COMPETITOR_SERP");
+  assert.equal(parsed.saveProjectPosition, false);
+});
+
 test("requires an explicit positive Core quote for platform-paid estimates", () => {
   const platformEstimate = {
     ...estimate,
@@ -373,6 +390,18 @@ test("uses project-safe paths and context-only request payload", () => {
     ),
     '{"trackingContextId":"context-1","provider":"XMLSTOCK","credentialId":"credential-1","searchSource":"LIVE","yandexLiveMode":"TURBO"}'
   );
+  assert.equal(
+    rankEstimatePayloadSignature(
+      "context-1",
+      "ARSENKIN",
+      "credential-1",
+      "LIVE",
+      undefined,
+      "COMPETITOR_SERP",
+      false
+    ),
+    '{"trackingContextId":"context-1","purpose":"COMPETITOR_SERP","saveProjectPosition":false,"provider":"ARSENKIN","credentialId":"credential-1","searchSource":"LIVE"}'
+  );
 });
 
 test("context signature invalidates estimates after relevant revisions", () => {
@@ -457,6 +486,35 @@ test("reuses ambiguous estimate retries and rotates explicit recalculations", ()
     "TURBO"
   );
   assert.equal(turbo.key, "estimate-key-turbo");
+  const competitors = rankEstimateIdempotencyCommand(
+    turbo,
+    context,
+    false,
+    () => "estimate-key-competitors",
+    "XMLSTOCK",
+    "credential-1",
+    "LIVE",
+    undefined,
+    "COMPETITOR_SERP",
+    false
+  );
+  const competitorsWithPosition = rankEstimateIdempotencyCommand(
+    competitors,
+    context,
+    false,
+    () => "estimate-key-competitors-with-position",
+    "XMLSTOCK",
+    "credential-1",
+    "LIVE",
+    undefined,
+    "COMPETITOR_SERP",
+    true
+  );
+  assert.equal(competitors.key, "estimate-key-competitors");
+  assert.equal(
+    competitorsWithPosition.key,
+    "estimate-key-competitors-with-position"
+  );
 });
 
 test("expiry helpers schedule a bounded transition to expired", () => {

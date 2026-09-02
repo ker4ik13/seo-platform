@@ -38,6 +38,8 @@ export function scopedRankEstimate(
     "trackingContextId",
     "status",
     "provider",
+    "purpose",
+    "saveProjectPosition",
     "routingScope",
     "connectorAttempts",
     "operation",
@@ -65,6 +67,17 @@ export function scopedRankEstimate(
     estimate.provider === "ARSENKIN" || estimate.provider === "XMLSTOCK"
       ? estimate.provider
       : undefined;
+  const purpose = estimate.purpose === undefined
+    ? undefined
+    : member(
+        estimate.purpose,
+        ["POSITION_TRACKING", "COMPETITOR_SERP"] as const
+      );
+  const saveProjectPosition = estimate.saveProjectPosition === undefined
+    ? undefined
+    : typeof estimate.saveProjectPosition === "boolean"
+      ? estimate.saveProjectPosition
+      : null;
   const scope = scopeSummary(estimate.scope);
   if (!provider) throw invalidResponse();
   const workload = providerWorkload(
@@ -89,6 +102,8 @@ export function scopedRankEstimate(
     provider === undefined ||
     estimate.operation !== "POSITIONS" ||
     credentialMode === undefined ||
+    saveProjectPosition === null ||
+    (purpose === undefined) !== (saveProjectPosition === undefined) ||
     exactStatus(estimate.providerLimits) !== "NOT_AVAILABLE" ||
     exactStatus(estimate.expectedDuration) !== "NOT_AVAILABLE" ||
     estimate.platformChargeMicro !== "0" ||
@@ -119,6 +134,9 @@ export function scopedRankEstimate(
     trackingContextId: responseContextId,
     status: estimate.status as RankEstimate["status"],
     provider,
+    ...(purpose === undefined
+      ? {}
+      : { purpose, saveProjectPosition: saveProjectPosition as boolean }),
     ...(estimate.routingScope === undefined
       ? {}
       : {

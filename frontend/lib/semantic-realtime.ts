@@ -31,6 +31,12 @@ export function semanticMutationProjectId(
   if (!UUID_PATTERN.test(projectId)) return undefined;
 
   if (/^keyword-groups(?:\/|$)/u.test(resource)) return projectId;
+  if (
+    method === "PATCH" &&
+    resource === "semantic-group-color-legend"
+  ) {
+    return projectId;
+  }
   if (/^keywords(?:\/|$)/u.test(resource)) {
     if (method === "POST" && /\/(?:search|bulk-preview)$/u.test(resource)) {
       return undefined;

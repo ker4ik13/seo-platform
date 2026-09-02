@@ -1,5 +1,10 @@
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { AuthForm } from "../../../components/auth-form";
 import { safeAppReturnTo } from "../../../lib/app-path";
+import { hasAuthenticatedAppSession } from "../../../lib/platform-api";
+
+export const dynamic = "force-dynamic";
 
 interface LoginPageProps {
   readonly searchParams: Promise<{
@@ -9,6 +14,16 @@ interface LoginPageProps {
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const cookieStore = await cookies();
+  const sessionCookieName =
+    process.env.AUTH_SESSION_COOKIE_NAME ?? "seo_session";
+  const hasRefreshSession = cookieStore.has(sessionCookieName);
+  const hasAccessSession = hasRefreshSession
+    ? false
+    : await hasAuthenticatedAppSession();
+
+  if (hasRefreshSession || hasAccessSession) redirect("/app");
+
   const params = await searchParams;
   return (
     <main className="auth-page">

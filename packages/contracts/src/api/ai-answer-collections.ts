@@ -11,6 +11,13 @@ export type AiAnswerSearchEngine = (typeof aiAnswerSearchEngines)[number];
 export const aiAnswerDevices = ["DESKTOP", "MOBILE"] as const;
 export type AiAnswerDevice = (typeof aiAnswerDevices)[number];
 
+export const aiAnswerCollectionPurposes = [
+  "POSITION_TRACKING",
+  "COMPETITOR_SERP"
+] as const;
+export type AiAnswerCollectionPurpose =
+  (typeof aiAnswerCollectionPurposes)[number];
+
 /** A bounded platform command submitted as one background Arsenkin task. */
 export const arsenkinAiAnswerKeywordLimit = 10_000 as const;
 export const internalAiAnswerResolveBatchLimit = 1_000 as const;
@@ -40,6 +47,10 @@ export interface CreateAiAnswerCollectionInput {
   readonly host: string;
   readonly excludeSubdomains: boolean;
   readonly brands: readonly string[];
+  /** Omitted by legacy clients and treated as POSITION_TRACKING. */
+  readonly purpose?: AiAnswerCollectionPurpose;
+  /** Available only for COMPETITOR_SERP. */
+  readonly saveProjectPosition?: boolean;
 }
 
 export interface InternalCreateAiAnswerCollectionInput
@@ -64,6 +75,8 @@ export interface AiAnswerCollectionSummary {
   readonly projectId: string;
   readonly actorId?: string;
   readonly provider: "ARSENKIN";
+  readonly purpose?: AiAnswerCollectionPurpose;
+  readonly saveProjectPosition?: boolean;
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
   readonly status: AiAnswerCollectionStatus;
@@ -121,6 +134,7 @@ export interface InternalAiAnswerSnapshotValue {
 export interface InternalPersistAiAnswerSnapshotBatchItem {
   readonly keywordId: string;
   readonly keywordVersion: number;
+  readonly positionTrackingEnabled: boolean;
   readonly snapshot: InternalAiAnswerSnapshotValue;
 }
 

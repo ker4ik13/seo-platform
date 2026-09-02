@@ -1,5 +1,7 @@
 import {
   rankProviderKeywordLimit,
+  rankExecutionPurpose,
+  rankExecutionTracksProjectPosition,
   type InternalNormalizedRankResult,
   type InternalNormalizedRankSerpResult,
   type RankManifestHash,
@@ -40,7 +42,7 @@ const MAX_SERP_FAVICON_URL_LENGTH = 4_096;
 const TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
-export interface ArsenkinRankWireRequest {
+export interface ArsenkinPositionWireRequest {
   readonly tools_name: "positions";
   readonly data: {
     readonly queries: readonly string[];
@@ -61,6 +63,24 @@ export interface ArsenkinRankWireRequest {
     readonly format: 0 | 1;
   };
 }
+
+export interface ArsenkinCheckTopWireRequest {
+  readonly tools_name: "check-top";
+  readonly data: {
+    readonly queries: readonly string[];
+    readonly is_snippet: true;
+    readonly noreask: false;
+    readonly se: readonly [{
+      readonly type: 1 | 2 | 3 | 11 | 12;
+      readonly region: number;
+    }];
+    readonly depth: 10;
+  };
+}
+
+export type ArsenkinRankWireRequest =
+  | ArsenkinPositionWireRequest
+  | ArsenkinCheckTopWireRequest;
 
 export type ArsenkinRankSubmitResult =
   | {
@@ -249,6 +269,18 @@ export function buildArsenkinRankWireRequest(
     intent.execution.device,
     intent.execution.providerMappingVersion
   );
+  if (rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP") {
+    return {
+      tools_name: "check-top",
+      data: {
+        queries: intent.keywords.map((keyword) => keyword.keywordText),
+        is_snippet: true,
+        noreask: false,
+        se: [{ type: searchType, region }],
+        depth: 10
+      }
+    };
+  }
   return {
     tools_name: "positions",
     data: {
@@ -276,7 +308,14 @@ export function normalizeArsenkinRankResult(
   const body = record(value);
   if (
     body.code !== "TASK_RESULT" ||
-    taskIdFromUnknown(body.task_id) !== taskId ||
+    taskIdFromUnknown(body.task_id) !== taskId
+  ) {
+    invalidResponse();
+  }
+  if (rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP") {
+    return normalizeArsenkinCheckTopResult(body.result, intent);
+  }
+  if (
     typeof body.created_at !== "string" ||
     typeof body.finished_at !== "string"
   ) {
@@ -378,7 +417,12 @@ export function arsenkinRankWireRequestHash(
   const request = wireRequest(value);
   return {
     algorithm: "SHA_256",
-    value: canonicalJsonSha256("arsenkin-rank-request@2", request)
+    value: canonicalJsonSha256(
+      request.tools_name === "check-top"
+        ? "arsenkin-check-top-request@1"
+        : "arsenkin-rank-request@2",
+      request
+    )
   };
 }
 
@@ -505,6 +549,54 @@ function wireRequest(value: unknown): ArsenkinRankWireRequest {
   const data = record(input.data);
   const queries = array(data.queries);
   const engines = array(data.se);
+  if (input.tools_name === "check-top") {
+    if (
+      Object.keys(input).length !== 2 ||
+      !hasExactKeys(data, [
+        "depth",
+        "is_snippet",
+        "noreask",
+        "queries",
+        "se"
+      ]) ||
+      queries.length < 1 ||
+      queries.length > rankProviderKeywordLimit ||
+      queries.some(
+        (query) =>
+          typeof query !== "string" ||
+          query.length < 1 ||
+          query.length > 2_048
+      ) ||
+      data.depth !== 10 ||
+      data.is_snippet !== true ||
+      data.noreask !== false ||
+      engines.length !== 1
+    ) {
+      throw new TypeError("Invalid Arsenkin check-top wire request");
+    }
+    const engine = record(engines[0]);
+    if (
+      !hasExactKeys(engine, ["region", "type"]) ||
+      ![1, 2, 3, 11, 12].includes(Number(engine.type)) ||
+      !Number.isSafeInteger(engine.region) ||
+      Number(engine.region) <= 0
+    ) {
+      throw new TypeError("Invalid Arsenkin check-top wire request");
+    }
+    return {
+      tools_name: "check-top",
+      data: {
+        queries: queries as readonly string[],
+        is_snippet: true,
+        noreask: false,
+        se: [{
+          type: Number(engine.type) as 1 | 2 | 3 | 11 | 12,
+          region: Number(engine.region)
+        }],
+        depth: 10
+      }
+    };
+  }
   if (
     input.tools_name !== "positions" ||
     Object.keys(input).length !== 2 ||
@@ -646,6 +738,121 @@ function normalizeArsenkinPositionRow(
         : [])
     ]
   };
+}
+
+function normalizeArsenkinCheckTopResult(
+  value: unknown,
+  intent: RankProviderRequestIntentV1
+): readonly InternalNormalizedRankResult[] {
+  const providerResult = record(value);
+  const result = record(providerResult.result);
+  const collect = array(result.collect);
+  if (collect.length !== 1) invalidResponse();
+  const rows = array(collect[0]);
+  if (rows.length !== intent.keywords.length) invalidResponse();
+  const snippets = optionalRecord(result.snippets) ?? {};
+  const saveProjectPosition = rankExecutionTracksProjectPosition(
+    intent.execution
+  );
+  return intent.keywords.map((keyword, queryIndex) => {
+    const urls = array(rows[queryIndex]);
+    if (urls.length > 10) invalidResponse();
+    const serpResults = urls.map((rawUrl, index) => {
+      const rankingUrl = providerUrl(rawUrl);
+      const snippet = arsenkinCheckTopSnippet(
+        snippets[rankingUrl.original]
+      );
+      return {
+        position: index + 1,
+        rankingUrl: rankingUrl.original,
+        normalizedRankingUrl: rankingUrl.normalized,
+        ...(snippet?.title === undefined ? {} : { title: snippet.title }),
+        ...(snippet?.snippet === undefined
+          ? {}
+          : { snippet: snippet.snippet })
+      } satisfies InternalNormalizedRankSerpResult;
+    });
+    const projectResult = saveProjectPosition
+      ? serpResults.find((entry) => {
+          try {
+            return matchesProject(
+              new URL(entry.rankingUrl),
+              intent.project.domain,
+              intent.execution.domainMatchRule
+            );
+          } catch {
+            return false;
+          }
+        })
+      : undefined;
+    if (!projectResult) {
+      return {
+        manifestEntryId: keyword.manifestEntryId,
+        keywordId: keyword.keywordId,
+        found: false,
+        position: null,
+        serpResults,
+        dataQualityFlags: []
+      } satisfies InternalNormalizedRankResult;
+    }
+    return {
+      manifestEntryId: keyword.manifestEntryId,
+      keywordId: keyword.keywordId,
+      found: true,
+      position: projectResult.position,
+      rankingUrl: projectResult.rankingUrl,
+      normalizedRankingUrl: projectResult.normalizedRankingUrl,
+      ...(projectResult.title === undefined
+        ? {}
+        : { title: projectResult.title }),
+      ...(projectResult.snippet === undefined
+        ? {}
+        : { snippet: projectResult.snippet }),
+      resultType: "ORGANIC",
+      serpFeatures: [],
+      serpResults,
+      dataQualityFlags: [
+        "ABSOLUTE_POSITION_UNAVAILABLE",
+        "PIXEL_POSITION_UNAVAILABLE",
+        ...(projectResult.title === undefined
+          ? ["TITLE_UNAVAILABLE"] as const
+          : []),
+        ...(projectResult.snippet === undefined
+          ? ["SNIPPET_UNAVAILABLE"] as const
+          : [])
+      ]
+    } satisfies InternalNormalizedRankResult;
+  });
+}
+
+function arsenkinCheckTopSnippet(value: unknown):
+  | { readonly title?: string; readonly snippet?: string }
+  | undefined {
+  const indexed = optionalRecord(value);
+  const candidates = Array.isArray(value)
+    ? value
+    : indexed
+      ? Object.entries(indexed)
+          .filter(([key]) => /^\d+$/u.test(key))
+          .sort(([left], [right]) => Number(left) - Number(right))
+          .map(([, candidate]) => candidate)
+      : [];
+  for (const candidate of candidates) {
+    const input = optionalRecord(candidate);
+    if (!input) continue;
+    const title = boundedProviderText(input.title, MAX_SERP_TITLE_LENGTH);
+    const snippet = boundedProviderText(
+      input.snippet,
+      MAX_SERP_SNIPPET_LENGTH
+    );
+    if (title !== undefined || snippet !== undefined) {
+      return {
+        ...(title === undefined ? {} : { title }),
+        ...(snippet === undefined ? {} : { snippet })
+      };
+    }
+  }
+  return undefined;
 }
 
 function parseArsenkinTop20(
@@ -928,7 +1135,10 @@ function arsenkinSearchType(
   providerMappingVersion: string
 ): 1 | 2 | 3 | 11 | 12 {
   if (searchEngine === "YANDEX") {
-    if (providerMappingVersion === "arsenkin-yandex-search-api@2") {
+    if (
+      providerMappingVersion === "arsenkin-yandex-search-api@2" ||
+      providerMappingVersion === "arsenkin-check-top-yandex-xml@1"
+    ) {
       return 1;
     }
     return device === "MOBILE" ? 3 : 2;

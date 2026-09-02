@@ -8,6 +8,8 @@ import {
   semanticKeywordSourceModes,
   semanticKeywordPageSizes,
   semanticKeywordGroupSystemKinds,
+  semanticGroupColorLegendNoteMaxLength,
+  semanticGroupPaletteColors,
   semanticKeywordSorts,
   semanticClusterMethods,
   semanticClusterPageSources,
@@ -22,6 +24,7 @@ import {
   semanticSavedViewGroupSidebarWidthMax,
   semanticSavedViewGroupSidebarWidthMin,
   semanticSavedViewQueryIndicators,
+  semanticSavedViewSchemaVersions,
   semanticSavedViewScopes,
   semanticNegativeKeywordMatchModes,
   semanticNegativeKeywordWordLimit,
@@ -39,6 +42,8 @@ import {
   type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordGroupsInput,
+  type InternalMarkSemanticGroupColorLegendSeenInput,
+  type InternalUpdateSemanticGroupColorLegendInput,
   type InternalDuplicateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticClusterInput,
@@ -113,6 +118,8 @@ import {
   type SemanticKeywordCleaningPreview,
   type SemanticKeywordCleaningResult,
   type SemanticKeywordGroup,
+  type SemanticGroupColorLegendEntry,
+  type SemanticGroupColorLegendState,
   type SemanticKeywordListItem,
   type SemanticKeywordInsights,
   type SemanticFrequencyDevice,
@@ -142,6 +149,7 @@ import {
   type UpdateSemanticClusterInput,
   type UpdateProjectPageInput,
   type UpdateSemanticKeywordGroupInput,
+  type UpdateSemanticGroupColorLegendInput,
   type UpdateTrackingContextInput,
   type CreateSemanticNegativeKeywordPresetInput,
   type UpdateSemanticNegativeKeywordPresetInput,
@@ -181,6 +189,7 @@ import {
   type InternalRejectClusteringProposalInput
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
+import { hasEffectiveProjectPermission } from "../authorization/permissions.js";
 import { DomainError } from "../common/domain-error.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -879,6 +888,68 @@ export class SeoDataClient {
       context
     );
     return semanticKeywordGroups(responseData(payload));
+  }
+
+  public async getSemanticGroupColorLegend(
+    context: InternalContext
+  ): Promise<SemanticGroupColorLegendState> {
+    const payload = await this.request(
+      "GET",
+      semanticGroupColorLegendUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticGroupColorLegendState(responseData(payload));
+  }
+
+  public async updateSemanticGroupColorLegend(
+    context: InternalContext,
+    input: UpdateSemanticGroupColorLegendInput,
+    version: number
+  ): Promise<SemanticGroupColorLegendState> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticGroupColorLegendInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      canManage: hasEffectiveProjectPermission(
+        context.tenant.roleCode,
+        context.tenant.projectAccessLevel,
+        "semantic.manage_group_color_legend"
+      ),
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      semanticGroupColorLegendUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticGroupColorLegendState(responseData(payload));
+  }
+
+  public async markSemanticGroupColorLegendSeen(
+    context: InternalContext,
+    version: number
+  ): Promise<SemanticGroupColorLegendState> {
+    const scope = trackingScope(context);
+    const body: InternalMarkSemanticGroupColorLegendSeenInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "POST",
+      semanticGroupColorLegendUrl(
+        context,
+        this.config.services.seoData,
+        "seen"
+      ),
+      context,
+      body
+    );
+    return semanticGroupColorLegendState(responseData(payload));
   }
 
   public async createKeywordGroup(
@@ -3885,6 +3956,84 @@ function keywordGroupUrl(
   );
 }
 
+export function semanticGroupColorLegendState(
+  value: unknown
+): SemanticGroupColorLegendState {
+  const legend = exactRecord(value, [
+    "entries",
+    "version",
+    "unread",
+    "updatedAt",
+    "updatedByUserId"
+  ]);
+  if (
+    !Array.isArray(legend.entries) ||
+    legend.entries.length > semanticGroupPaletteColors.length ||
+    !Number.isSafeInteger(legend.version) ||
+    Number(legend.version) < 0 ||
+    typeof legend.unread !== "boolean"
+  ) {
+    throw invalidResponse();
+  }
+  const entries = legend.entries.map((value) => {
+    const entry = exactRecord(value, ["color", "note"]);
+    if (
+      typeof entry.color !== "string" ||
+      !semanticGroupPaletteColors.some((color) => color === entry.color) ||
+      typeof entry.note !== "string" ||
+      entry.note.length < 1 ||
+      entry.note.length > semanticGroupColorLegendNoteMaxLength ||
+      entry.note.trim() !== entry.note
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      color: entry.color as SemanticGroupColorLegendEntry["color"],
+      note: entry.note
+    };
+  });
+  if (new Set(entries.map(({ color }) => color)).size !== entries.length) {
+    throw invalidResponse();
+  }
+  const version = Number(legend.version);
+  if (
+    (version === 0 &&
+      (entries.length > 0 ||
+        legend.unread ||
+        legend.updatedAt !== undefined ||
+        legend.updatedByUserId !== undefined)) ||
+    (version > 0 &&
+      (!validDate(legend.updatedAt) ||
+        typeof legend.updatedByUserId !== "string" ||
+        !UUID_PATTERN.test(legend.updatedByUserId)))
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    entries,
+    version,
+    unread: legend.unread,
+    ...(typeof legend.updatedAt === "string"
+      ? { updatedAt: legend.updatedAt }
+      : {}),
+    ...(typeof legend.updatedByUserId === "string"
+      ? { updatedByUserId: legend.updatedByUserId }
+      : {})
+  };
+}
+
+function semanticGroupColorLegendUrl(
+  context: InternalContext,
+  baseUrl: string,
+  suffix?: "seen"
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/semantic-group-color-legend`;
+  return new URL(suffix ? `${base}/${suffix}` : base, baseUrl);
+}
+
 export function semanticClusters(value: unknown): readonly SemanticCluster[] {
   if (!Array.isArray(value) || value.length > 2_000) {
     throw invalidResponse();
@@ -4977,7 +5126,9 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
   ]);
   const filterKeys = Object.keys(filters);
   if (
-    config.schemaVersion !== 1 ||
+    !semanticSavedViewSchemaVersions.some(
+      (version) => version === config.schemaVersion
+    ) ||
     typeof config.sort !== "string" ||
     !semanticKeywordSorts.some((sort) => sort === config.sort) ||
     typeof config.density !== "string" ||
@@ -5039,7 +5190,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     throw invalidResponse();
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: config.schemaVersion as SemanticSavedViewConfig["schemaVersion"],
     filters: filters as SemanticSavedViewConfig["filters"],
     sort: config.sort as SemanticSavedViewConfig["sort"],
     columns: config.columns as SemanticSavedViewConfig["columns"],

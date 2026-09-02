@@ -119,6 +119,7 @@ export class RankHistoryService {
         workspaceId: query.workspaceId,
         projectId: query.projectId,
         sourceMode: "BYOK",
+        positionTrackingEnabled: true,
         observedAt: {
           gte: new Date(query.observedFrom),
           lt: new Date(query.observedBefore)

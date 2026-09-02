@@ -15,6 +15,7 @@ import {
   type ProtectedAppBaseContext,
   resolveExplicitProjectAppContext
 } from "./project-app-context";
+import { resolveWorkspaceProjectPreference } from "./app-navigation";
 import { platformApiInternalOrigin } from "./server-runtime-origin";
 
 export class PlatformApiError extends Error {
@@ -25,6 +26,16 @@ export class PlatformApiError extends Error {
   ) {
     super(message);
     this.name = "PlatformApiError";
+  }
+}
+
+export async function hasAuthenticatedAppSession(): Promise<boolean> {
+  try {
+    await platformApiData<unknown>("/api/v1/me");
+    return true;
+  } catch (error) {
+    if (error instanceof PlatformApiError) return false;
+    throw error;
   }
 }
 
@@ -67,8 +78,10 @@ export const loadProtectedAppContext = cache(
     ]);
     const projects = projectsPayload.map(appProject);
     const preferredProjectId = cookieStore.get("seo_project")?.value;
-    const project =
-      projects.find(({ id }) => id === preferredProjectId) ?? projects[0];
+    const project = resolveWorkspaceProjectPreference(
+      projects,
+      preferredProjectId
+    );
 
     return {
       ...base,

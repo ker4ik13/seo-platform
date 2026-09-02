@@ -16,7 +16,7 @@ const HOST_PATTERN =
 export function createAiAnswerCollectionInput(value: unknown): CreateAiAnswerCollectionInput {
   const input = record(value, [
     "items", "searchEngine", "regionCode", "device", "host",
-    "excludeSubdomains", "brands"
+    "excludeSubdomains", "brands", "purpose", "saveProjectPosition"
   ]);
   if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > arsenkinAiAnswerKeywordLimit) {
     invalid("items");
@@ -47,6 +47,19 @@ export function createAiAnswerCollectionInput(value: unknown): CreateAiAnswerCol
     return value.trim();
   });
   if (new Set(brands.map((brand) => brand.toLocaleLowerCase("ru-RU"))).size !== brands.length) invalid("brands");
+  if (
+    input.purpose !== undefined &&
+    input.purpose !== "POSITION_TRACKING" &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) invalid("purpose");
+  if (
+    input.saveProjectPosition !== undefined &&
+    typeof input.saveProjectPosition !== "boolean"
+  ) invalid("saveProjectPosition");
+  if (
+    input.saveProjectPosition !== undefined &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) invalid("saveProjectPosition");
   return {
     items,
     searchEngine: input.searchEngine as CreateAiAnswerCollectionInput["searchEngine"],
@@ -54,7 +67,11 @@ export function createAiAnswerCollectionInput(value: unknown): CreateAiAnswerCol
     device: input.device as CreateAiAnswerCollectionInput["device"],
     host,
     excludeSubdomains: input.excludeSubdomains,
-    brands
+    brands,
+    ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+    ...(input.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: input.saveProjectPosition })
   };
 }
 

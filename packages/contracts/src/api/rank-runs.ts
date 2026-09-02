@@ -1,5 +1,6 @@
 import {
   rankProviderKeywordLimit,
+  type RankCollectionPurpose,
   type RankEstimateEntitlementStatus,
   type RankEstimateQuota,
   type RankSearchSource
@@ -108,21 +109,24 @@ export function rankSearchSourceFromProviderMappingVersion(
 ): RankSearchSource | undefined {
   if (
     searchEngine === "GOOGLE" &&
-    /^(?:arsenkin|xmlstock)-google-live@\d+$/u.test(providerMappingVersion)
+    (/^(?:arsenkin|xmlstock)-google-live@\d+$/u.test(providerMappingVersion) ||
+      /^arsenkin-check-top-google-live@\d+$/u.test(providerMappingVersion))
   ) {
     return "LIVE";
   }
   if (
     searchEngine === "YANDEX" &&
-    /^(?:arsenkin|xmlstock)-yandex-live@\d+$/u.test(providerMappingVersion)
+    (/^(?:arsenkin|xmlstock)-yandex-live@\d+$/u.test(providerMappingVersion) ||
+      /^arsenkin-check-top-yandex-live@\d+$/u.test(providerMappingVersion))
   ) {
     return "LIVE";
   }
   if (
     searchEngine === "YANDEX" &&
-    /^(?:arsenkin|xmlstock)-yandex-search-api@\d+$/u.test(
+    (/^(?:arsenkin|xmlstock)-yandex-search-api@\d+$/u.test(
       providerMappingVersion
-    )
+    ) ||
+      /^arsenkin-check-top-yandex-xml@\d+$/u.test(providerMappingVersion))
   ) {
     return "SEARCH_API";
   }
@@ -308,6 +312,9 @@ interface RankJobSummaryBase {
   readonly trackingContextId: string;
   readonly type: "MANUAL_RANK_CHECK";
   readonly provider: "ARSENKIN" | "XMLSTOCK";
+  /** Present on new runs; missing legacy values mean POSITION_TRACKING. */
+  readonly purpose?: RankCollectionPurpose;
+  readonly saveProjectPosition?: boolean;
   /**
    * Safe presentation fields copied from the immutable execution snapshot.
    * They are optional only for legacy rows created before the projection was
@@ -438,7 +445,12 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
       input.searchSource !== "SEARCH_API" &&
       input.searchSource !== "LIVE") ||
     (input.searchSource !== undefined && input.searchEngine === undefined) ||
-    (input.searchEngine === "GOOGLE" && input.searchSource === "SEARCH_API")
+    (input.searchEngine === "GOOGLE" && input.searchSource === "SEARCH_API") ||
+    (input.purpose !== undefined &&
+      input.purpose !== "POSITION_TRACKING" &&
+      input.purpose !== "COMPETITOR_SERP") ||
+    (input.saveProjectPosition !== undefined &&
+      typeof input.saveProjectPosition !== "boolean")
   ) {
     return invalidRankJobLifecycle();
   }
@@ -451,6 +463,10 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
     trackingContextId: input.trackingContextId,
     type: input.type,
     provider: input.provider,
+    ...(input.purpose ? { purpose: input.purpose } : {}),
+    ...(input.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: input.saveProjectPosition }),
     ...(input.searchEngine ? { searchEngine: input.searchEngine } : {}),
     ...(input.searchSource ? { searchSource: input.searchSource } : {}),
     ...(input.depth ? { depth: input.depth } : {}),
@@ -814,6 +830,10 @@ export interface RankManifestHash {
  * silently drop country, region, language, safe search or domain matching.
  */
 export interface InternalRankExecutionParameters {
+  /** Missing only on immutable legacy executions. */
+  readonly purpose?: RankCollectionPurpose;
+  /** Missing legacy values are true for position runs and false for competitor runs. */
+  readonly saveProjectPosition?: boolean;
   readonly searchEngine: "GOOGLE" | "YANDEX";
   readonly countryCode: string;
   readonly regionCode?: string;
@@ -826,6 +846,23 @@ export interface InternalRankExecutionParameters {
   readonly rawSerp: false;
   readonly fallbackMode: "NONE";
   readonly providerMappingVersion: string;
+}
+
+export function rankExecutionPurpose(
+  execution: Pick<InternalRankExecutionParameters, "purpose">
+): RankCollectionPurpose {
+  return execution.purpose ?? "POSITION_TRACKING";
+}
+
+export function rankExecutionTracksProjectPosition(
+  execution: Pick<
+    InternalRankExecutionParameters,
+    "purpose" | "saveProjectPosition"
+  >
+): boolean {
+  return rankExecutionPurpose(execution) === "POSITION_TRACKING"
+    ? execution.saveProjectPosition !== false
+    : execution.saveProjectPosition === true;
 }
 
 export interface InternalRankManifestEstimateSeal {
@@ -1189,6 +1226,12 @@ function copyRankExecutionParameters(
       : { mode: execution.domainMatchRule.mode };
 
   return {
+    ...(execution.purpose === undefined
+      ? {}
+      : { purpose: execution.purpose }),
+    ...(execution.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: execution.saveProjectPosition }),
     searchEngine: execution.searchEngine,
     countryCode: execution.countryCode,
     ...(execution.regionCode === undefined

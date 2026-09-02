@@ -564,6 +564,42 @@ test("accepts an XMLStock one-key-per-chunk manifest receipt", async () => {
   }
 });
 
+test("preserves competitor collection policy from an exact manifest receipt", async () => {
+  const base = command();
+  const competitor: InternalSealRankManifestInput = {
+    ...base,
+    provider: "XMLSTOCK",
+    execution: {
+      ...base.execution,
+      purpose: "COMPETITOR_SERP",
+      saveProjectPosition: false,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      depth: 50,
+      providerMappingVersion: "xmlstock-yandex-live@2"
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () =>
+      Response.json({
+        data: {
+          ...receipt(competitor),
+          provider: "XMLSTOCK",
+          chunkCount: "2",
+          chunkSize: "1"
+        },
+        meta: { requestId: "seo-rank-competitor" }
+      })) as typeof fetch;
+    const result = await new RankManifestClient(config).seal(competitor);
+    assert.equal(result.execution.purpose, "COMPETITOR_SERP");
+    assert.equal(result.execution.saveProjectPosition, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function chunkCommand(): InternalGetRankManifestChunkInput {
   return {
     workspaceId: ids.workspaceId,

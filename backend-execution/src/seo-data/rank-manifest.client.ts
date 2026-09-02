@@ -739,6 +739,10 @@ function executionParameters(
   value: unknown
 ): InternalRankExecutionParameters | undefined {
   const input = exactRecord(value, [
+    ...(hasField(value, "purpose") ? ["purpose"] : []),
+    ...(hasField(value, "saveProjectPosition")
+      ? ["saveProjectPosition"]
+      : []),
     "searchEngine",
     "countryCode",
     ...(hasField(value, "regionCode") ? ["regionCode"] : []),
@@ -755,6 +759,11 @@ function executionParameters(
   if (
     !input ||
     !["GOOGLE", "YANDEX"].includes(String(input.searchEngine)) ||
+    (input.purpose !== undefined &&
+      input.purpose !== "POSITION_TRACKING" &&
+      input.purpose !== "COMPETITOR_SERP") ||
+    (input.saveProjectPosition !== undefined &&
+      typeof input.saveProjectPosition !== "boolean") ||
     typeof input.countryCode !== "string" ||
     !/^[A-Z]{2}$/u.test(input.countryCode) ||
     ("regionCode" in input &&
@@ -779,6 +788,15 @@ function executionParameters(
   const rule = domainMatchRule(input.domainMatchRule);
   if (!rule) return undefined;
   return {
+    ...(input.purpose === undefined
+      ? {}
+      : {
+          purpose:
+            input.purpose as "POSITION_TRACKING" | "COMPETITOR_SERP"
+        }),
+    ...(input.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: input.saveProjectPosition }),
     searchEngine:
       input.searchEngine as InternalRankExecutionParameters["searchEngine"],
     countryCode: input.countryCode,

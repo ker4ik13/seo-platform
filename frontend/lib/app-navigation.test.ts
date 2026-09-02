@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   appNavigationSection,
   appProjectIdFromPath,
-  shouldShowWorkspaceCreationAction
+  readLastWorkspaceProjectId,
+  resolveWorkspaceProjectPreference,
+  shouldShowWorkspaceCreationAction,
+  writeLastWorkspaceProjectId
 } from "./app-navigation.ts";
 
 const projectId = "019fd395-bc13-74eb-80c5-f3e7872bcc2b";
@@ -58,3 +61,92 @@ test("offers workspace creation until the user owns a workspace", () => {
     false
   );
 });
+
+test("keeps the last project isolated by user and workspace", () => {
+  const storage = new MemoryStorage();
+  const userA = "019fd395-bc13-74eb-80c5-f3e7872bcc20";
+  const userB = "019fd395-bc13-74eb-80c5-f3e7872bcc21";
+  const workspaceA = "019fd395-bc13-74eb-80c5-f3e7872bcc22";
+  const workspaceB = "019fd395-bc13-74eb-80c5-f3e7872bcc23";
+  const projectA = "019fd395-bc13-74eb-80c5-f3e7872bcc24";
+  const projectB = "019fd395-bc13-74eb-80c5-f3e7872bcc25";
+
+  writeLastWorkspaceProjectId(storage, userA, workspaceA, projectA);
+  writeLastWorkspaceProjectId(storage, userA, workspaceB, projectB);
+  writeLastWorkspaceProjectId(storage, userB, workspaceA, projectB);
+
+  assert.equal(
+    readLastWorkspaceProjectId(storage, userA, workspaceA),
+    projectA
+  );
+  assert.equal(
+    readLastWorkspaceProjectId(storage, userA, workspaceB),
+    projectB
+  );
+  assert.equal(
+    readLastWorkspaceProjectId(storage, userB, workspaceA),
+    projectB
+  );
+
+  writeLastWorkspaceProjectId(storage, userA, workspaceA, undefined);
+  assert.equal(
+    readLastWorkspaceProjectId(storage, userA, workspaceA),
+    undefined
+  );
+  assert.equal(
+    readLastWorkspaceProjectId(storage, userA, workspaceB),
+    projectB
+  );
+});
+
+test("rejects malformed last-project preferences", () => {
+  const storage = new MemoryStorage();
+  const userId = "019fd395-bc13-74eb-80c5-f3e7872bcc20";
+  const workspaceId = "019fd395-bc13-74eb-80c5-f3e7872bcc22";
+
+  writeLastWorkspaceProjectId(storage, userId, workspaceId, "not-a-project");
+  assert.equal(
+    readLastWorkspaceProjectId(storage, userId, workspaceId),
+    undefined
+  );
+  assert.equal(
+    readLastWorkspaceProjectId(storage, "not-a-user", workspaceId),
+    undefined
+  );
+});
+
+test("falls back when the remembered workspace project is unavailable", () => {
+  const projects = [
+    { id: "019fd395-bc13-74eb-80c5-f3e7872bcc24", name: "Первый" },
+    { id: "019fd395-bc13-74eb-80c5-f3e7872bcc25", name: "Второй" }
+  ];
+
+  assert.equal(
+    resolveWorkspaceProjectPreference(projects, projects[1]!.id)?.id,
+    projects[1]!.id
+  );
+  assert.equal(
+    resolveWorkspaceProjectPreference(
+      projects,
+      "019fd395-bc13-74eb-80c5-f3e7872bcc26"
+    )?.id,
+    projects[0]!.id
+  );
+  assert.equal(resolveWorkspaceProjectPreference([], projects[1]!.id), undefined);
+});
+
+class MemoryStorage {
+  private readonly values = new Map<string, string>();
+
+  public getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  public removeItem(key: string): void {
+    this.values.delete(key);
+  }
+
+  public setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+}

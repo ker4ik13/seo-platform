@@ -332,6 +332,35 @@ model KeywordGroup {
   @@map("keyword_groups")
 }
 
+model SemanticGroupColorLegend {
+  id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  entries         Json     @default("[]")
+  version         Int      @default(1)
+  updatedByUserId String   @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  reads SemanticGroupColorLegendRead[]
+
+  @@unique([workspaceId, projectId], map: "semantic_group_color_legends_tenant_project_key")
+  @@map("semantic_group_color_legends")
+}
+
+model SemanticGroupColorLegendRead {
+  legendId    String   @map("legend_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  seenVersion Int      @map("seen_version")
+  seenAt      DateTime @updatedAt @map("seen_at") @db.Timestamptz(6)
+
+  legend SemanticGroupColorLegend @relation(fields: [legendId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([legendId, userId])
+  @@index([userId, seenAt(sort: Desc)], map: "semantic_group_color_legend_reads_user_seen_idx")
+  @@map("semantic_group_color_legend_reads")
+}
+
 model KeywordGroupMembership {
   projectId String   @map("project_id") @db.Uuid
   keywordId String   @map("keyword_id") @db.Uuid
@@ -1119,6 +1148,7 @@ model RankSnapshot {
   jobId                String         @map("job_id") @db.Uuid
   jobItemId            String         @map("job_item_id") @db.Uuid
   observedAt           DateTime       @map("observed_at") @db.Timestamptz(6)
+  positionTrackingEnabled Boolean     @default(true) @map("position_tracking_enabled")
   found                Boolean
   position             Int?
   absolutePosition     Int?           @map("absolute_position")
@@ -1231,6 +1261,7 @@ model AiAnswerSnapshot {
   rankingUrl     String?        @map("ranking_url") @db.Text
   brandFound     Boolean        @map("brand_found")
   answerMarkdown String?        @map("answer_markdown") @db.Text
+  positionTrackingEnabled Boolean @default(true) @map("position_tracking_enabled")
   provider       String         @db.VarChar(32)
   sourceMode     DataSourceMode @map("source_mode")
   jobId          String         @map("job_id") @db.Uuid

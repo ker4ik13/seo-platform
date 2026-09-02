@@ -1,5 +1,6 @@
 import type {
   ProjectConnectorCredentialOption,
+  RankCollectionPurpose,
   TrackingSearchEngine
 } from "@seo-platform/contracts";
 
@@ -38,13 +39,23 @@ export function rankProviderUsageEstimate(
   searchEngine: TrackingSearchEngine,
   depth: 30 | 50 | 100,
   searchSource: "SEARCH_API" | "LIVE",
-  yandexLiveMode?: "TURBO"
+  yandexLiveMode?: "TURBO",
+  purpose: RankCollectionPurpose = "POSITION_TRACKING"
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
   if (source.mode === "PLATFORM_PAID") {
     return platformTokenEstimate();
   }
   if (source.provider === "XMLSTOCK") {
+    if (purpose === "COMPETITOR_SERP") {
+      const requestCount = keywordCount;
+      const pricePerThousand =
+        searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 24 : 12;
+      return {
+        usage: `до ${formatInteger(requestCount)} запросов XMLStock · Топ-10 · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB")}`,
+        available: providerQuotaLabel(source)
+      };
+    }
     if (
       yandexLiveMode === "TURBO" &&
       searchEngine === "YANDEX" &&

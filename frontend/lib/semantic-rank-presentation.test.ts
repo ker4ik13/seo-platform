@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  hasSemanticAiAnswerSnapshot,
   latestSemanticRankHistory,
+  normalizeSemanticTargetUrlInput,
   primaryRankContextIds,
   rankChangePresentation,
   rankEngineLabel,
@@ -9,6 +11,7 @@ import {
   rankSearchSystemLabel,
   sameSemanticRankingUrl,
   semanticDisplayUrl,
+  semanticRankingUrlMatch,
   semanticSiteFaviconSources,
   semanticUrlBelongsToProject,
   semanticRankHistoryByEngine
@@ -133,6 +136,84 @@ test("compares target pages and project hosts without www noise", () => {
       "example.com"
     ),
     false
+  );
+});
+
+test("classifies every captured ranking URL against the assigned target", () => {
+  assert.equal(
+    semanticRankingUrlMatch(
+      "https://example.com/catalog/",
+      "https://www.example.com/catalog#result"
+    ),
+    "MATCH"
+  );
+  assert.equal(
+    semanticRankingUrlMatch(
+      "https://example.com/catalog",
+      "https://example.com/other"
+    ),
+    "MISMATCH"
+  );
+  assert.equal(
+    semanticRankingUrlMatch(undefined, "https://example.com/catalog"),
+    "NO_TARGET"
+  );
+});
+
+test("shows the AI result action for every persisted snapshot", () => {
+  assert.equal(
+    hasSemanticAiAnswerSnapshot([
+      { observedAt: "2026-09-02T18:00:00.000Z" }
+    ]),
+    true
+  );
+  assert.equal(hasSemanticAiAnswerSnapshot([]), false);
+  assert.equal(hasSemanticAiAnswerSnapshot(undefined), false);
+});
+
+test("normalizes target URL shorthand against the project", () => {
+  assert.equal(
+    normalizeSemanticTargetUrlInput(
+      "/neuroluv.ru/prompts-menu/collection-chempionat-mira-po-futbol",
+      "neuroluv.ru"
+    ),
+    "https://neuroluv.ru/prompts-menu/collection-chempionat-mira-po-futbol"
+  );
+  assert.equal(
+    normalizeSemanticTargetUrlInput("/catalog/item", "www.example.com"),
+    "https://www.example.com/catalog/item"
+  );
+  assert.equal(
+    normalizeSemanticTargetUrlInput("example.com/catalog", "example.com"),
+    "https://example.com/catalog"
+  );
+  assert.equal(
+    normalizeSemanticTargetUrlInput(
+      "https://EXAMPLE.com:443/catalog?q=1",
+      "example.com"
+    ),
+    "https://example.com/catalog?q=1"
+  );
+});
+
+test("rejects unsafe or unusable target URLs before submit", () => {
+  assert.equal(
+    normalizeSemanticTargetUrlInput("javascript:alert(1)", "example.com"),
+    undefined
+  );
+  assert.equal(
+    normalizeSemanticTargetUrlInput(
+      "https://user:password@example.com/private",
+      "example.com"
+    ),
+    undefined
+  );
+  assert.equal(
+    normalizeSemanticTargetUrlInput(
+      "https://example.com/catalog#private",
+      "example.com"
+    ),
+    undefined
   );
 });
 

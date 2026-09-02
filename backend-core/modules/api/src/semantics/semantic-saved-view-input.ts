@@ -6,6 +6,7 @@ import {
   semanticSavedViewGroupSidebarWidthMax,
   semanticSavedViewGroupSidebarWidthMin,
   semanticSavedViewQueryIndicators,
+  semanticSavedViewSchemaVersions,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
   type CreateSemanticSavedViewInput,
@@ -68,8 +69,10 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     ],
     "config"
   );
-  if (input.schemaVersion !== 1) {
-    invalid("config.schemaVersion", "Only schema version 1 is supported");
+  if (!semanticSavedViewSchemaVersions.some(
+    (version) => version === input.schemaVersion
+  )) {
+    invalid("config.schemaVersion", "Unsupported schema version");
   }
   const columns = requiredColumns(input.columns);
   const columnOrder = optionalColumnOrder(input.columnOrder, columns);
@@ -99,7 +102,7 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     "config.appliedViewId"
   );
   return {
-    schemaVersion: 1,
+    schemaVersion: input.schemaVersion as SemanticSavedViewConfig["schemaVersion"],
     filters: savedViewFilters(input.filters),
     sort: requiredEnum(input.sort, semanticKeywordSorts, "config.sort"),
     columns,

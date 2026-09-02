@@ -476,10 +476,25 @@ export function rankSearchSystemLabel(
 function parseRankExecutionPresentation(
   input: Readonly<Record<string, unknown>>
 ): {
+  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
+  readonly saveProjectPosition?: boolean;
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
   readonly depth?: 30 | 50 | 100;
 } | null {
+  const purpose =
+    input.purpose === undefined
+      ? undefined
+      : input.purpose === "POSITION_TRACKING" ||
+          input.purpose === "COMPETITOR_SERP"
+        ? input.purpose
+        : null;
+  const saveProjectPosition =
+    input.saveProjectPosition === undefined
+      ? undefined
+      : typeof input.saveProjectPosition === "boolean"
+        ? input.saveProjectPosition
+        : null;
   const searchEngine =
     input.searchEngine === undefined
       ? undefined
@@ -499,6 +514,8 @@ function parseRankExecutionPresentation(
         ? input.depth
         : null;
   if (
+    purpose === null ||
+    saveProjectPosition === null ||
     searchEngine === null ||
     searchSource === null ||
     depth === null ||
@@ -508,6 +525,8 @@ function parseRankExecutionPresentation(
     return null;
   }
   return {
+    ...(purpose ? { purpose } : {}),
+    ...(saveProjectPosition === undefined ? {} : { saveProjectPosition }),
     ...(searchEngine ? { searchEngine } : {}),
     ...(searchSource ? { searchSource } : {}),
     ...(depth ? { depth } : {})

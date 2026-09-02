@@ -9,6 +9,37 @@ export function createRankEstimateInput(
 ): CreateRankEstimateInput {
   const input = exactRecord(value);
   if (
+    input.purpose !== undefined &&
+    input.purpose !== "POSITION_TRACKING" &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) {
+    throw validationError(
+      "purpose",
+      "INVALID_ENUM",
+      "Must be POSITION_TRACKING or COMPETITOR_SERP"
+    );
+  }
+  if (
+    input.saveProjectPosition !== undefined &&
+    typeof input.saveProjectPosition !== "boolean"
+  ) {
+    throw validationError(
+      "saveProjectPosition",
+      "INVALID_TYPE",
+      "Must be a boolean"
+    );
+  }
+  if (
+    input.saveProjectPosition !== undefined &&
+    input.purpose !== "COMPETITOR_SERP"
+  ) {
+    throw validationError(
+      "saveProjectPosition",
+      "INVALID_COMBINATION",
+      "Available only for COMPETITOR_SERP"
+    );
+  }
+  if (
     typeof input.trackingContextId !== "string" ||
     !UUID_PATTERN.test(input.trackingContextId)
   ) {
@@ -73,6 +104,10 @@ export function createRankEstimateInput(
   }
   return {
     trackingContextId: input.trackingContextId.toLowerCase(),
+    ...(input.purpose ? { purpose: input.purpose } : {}),
+    ...(typeof input.saveProjectPosition === "boolean"
+      ? { saveProjectPosition: input.saveProjectPosition }
+      : {}),
     ...(input.provider ? { provider: input.provider } : {}),
     ...(typeof input.credentialId === "string"
       ? { credentialId: input.credentialId.toLowerCase() }
@@ -103,6 +138,8 @@ function exactRecord(
     Object.keys(input).some(
       (key) =>
         key !== "trackingContextId" &&
+        key !== "purpose" &&
+        key !== "saveProjectPosition" &&
         key !== "provider" &&
         key !== "credentialId" &&
         key !== "searchSource" &&
@@ -113,7 +150,7 @@ function exactRecord(
     throw validationError(
       "$",
       "UNKNOWN_FIELD",
-      "Only trackingContextId, provider, credentialId, searchSource and yandexLiveMode are allowed"
+      "Only trackingContextId, purpose, saveProjectPosition, provider, credentialId, searchSource and yandexLiveMode are allowed"
     );
   }
   return input;

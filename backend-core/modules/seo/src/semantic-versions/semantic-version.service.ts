@@ -1271,7 +1271,7 @@ const HISTORY_FIELD_LABELS: Readonly<Record<string, string>> = {
   status: "Статус",
   groupId: "Группа",
   clusterId: "Кластер",
-  targetPageId: "Целевая страница",
+  targetPageId: "Целевой URL",
   tagIds: "Теги",
   name: "Название",
   primaryPageId: "Основная страница",

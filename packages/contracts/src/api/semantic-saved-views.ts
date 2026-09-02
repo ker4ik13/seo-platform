@@ -32,6 +32,11 @@ export const semanticSavedViewQueryIndicators = [
 export type SemanticSavedViewQueryIndicator =
   (typeof semanticSavedViewQueryIndicators)[number];
 
+export const semanticSavedViewSchemaVersions = [1, 2, 3] as const;
+export const semanticSavedViewCurrentSchemaVersion = 3 as const;
+export type SemanticSavedViewSchemaVersion =
+  (typeof semanticSavedViewSchemaVersions)[number];
+
 export const semanticSystemColumnKeys = [
   "query",
   "frequency",
@@ -39,13 +44,15 @@ export const semanticSystemColumnKeys = [
   "frequencyFixed",
   "wordCount",
   "yandexPosition",
-  "googlePosition",
   "yandexRelevantUrl",
+  "googlePosition",
   "googleRelevantUrl",
+  "yandexAiPosition",
+  "yandexAiRelevantUrl",
+  "googleAiPosition",
+  "googleAiRelevantUrl",
   "yandexCheckedAt",
   "googleCheckedAt",
-  "yandexAiPosition",
-  "googleAiPosition",
   "yandexAiCheckedAt",
   "googleAiCheckedAt",
   "visibility",
@@ -79,7 +86,7 @@ export interface SemanticSavedViewFilters {
 }
 
 export interface SemanticSavedViewConfig {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: SemanticSavedViewSchemaVersion;
   readonly filters: SemanticSavedViewFilters;
   readonly sort: SemanticKeywordSort;
   /** Visible columns in their table order. */

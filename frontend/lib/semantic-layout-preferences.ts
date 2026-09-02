@@ -39,6 +39,8 @@ const defaultColumnWidths: Readonly<Record<string, number>> = {
   googlePosition: 112,
   yandexRelevantUrl: 220,
   googleRelevantUrl: 220,
+  yandexAiRelevantUrl: 220,
+  googleAiRelevantUrl: 220,
   yandexCheckedAt: 136,
   googleCheckedAt: 136,
   yandexAiPosition: 124,

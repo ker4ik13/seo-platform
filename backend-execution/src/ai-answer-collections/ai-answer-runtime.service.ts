@@ -156,6 +156,9 @@ export class AiAnswerRuntimeService {
             return {
               keywordId: item.keywordId,
               keywordVersion: item.keywordVersion,
+              positionTrackingEnabled:
+                activeClaim.purpose === "POSITION_TRACKING" ||
+                (activeClaim.saveProjectPosition && result.snapshot.siteFound),
               snapshot: result.snapshot
             };
           })

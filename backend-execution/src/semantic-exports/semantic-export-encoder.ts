@@ -44,8 +44,10 @@ const HEADERS: Readonly<
   googlePosition: { en: "Google position", ru: "Позиция Google" },
   yandexAiPosition: { en: "Yandex AI position", ru: "ИИ позиция Яндекс" },
   googleAiPosition: { en: "Google AI position", ru: "ИИ позиция Google" },
-  yandexRelevantUrl: { en: "Yandex relevant URL", ru: "Релевантный URL Яндекс" },
-  googleRelevantUrl: { en: "Google relevant URL", ru: "Релевантный URL Google" },
+  yandexRelevantUrl: { en: "Yandex captured URL", ru: "URL из съёма Яндекс" },
+  googleRelevantUrl: { en: "Google captured URL", ru: "URL из съёма Google" },
+  yandexAiRelevantUrl: { en: "Yandex AI result URL", ru: "URL ИИ-выдачи Яндекс" },
+  googleAiRelevantUrl: { en: "Google AI result URL", ru: "URL ИИ-выдачи Google" },
   yandexCheckedAt: { en: "Yandex checked at", ru: "Дата съёма Яндекс" },
   googleCheckedAt: { en: "Google checked at", ru: "Дата съёма Google" },
   yandexAiCheckedAt: { en: "Yandex AI checked at", ru: "Дата съёма ИИ Яндекс" },
@@ -53,7 +55,7 @@ const HEADERS: Readonly<
   visibility: { en: "Visibility", ru: "Видимость" },
   group: { en: "Group", ru: "Группа" },
   cluster: { en: "Cluster", ru: "Кластер" },
-  targetUrl: { en: "Target URL", ru: "Целевая URL" },
+  targetUrl: { en: "Target URL", ru: "Целевой URL" },
   tags: { en: "Tags", ru: "Теги" },
   intent: { en: "Intent", ru: "Интент" },
   priority: { en: "Priority", ru: "Приоритет" },
@@ -490,7 +492,9 @@ function folderMapColumnWidth(column: SemanticExportColumnKey): number {
   if (
     column === "targetUrl" ||
     column === "yandexRelevantUrl" ||
-    column === "googleRelevantUrl"
+    column === "googleRelevantUrl" ||
+    column === "yandexAiRelevantUrl" ||
+    column === "googleAiRelevantUrl"
   ) return 42;
   if (column === "group" || column === "cluster") return 30;
   if (column === "tags") return 26;
@@ -850,6 +854,8 @@ function systemColumnValue(
     case "googleAiPosition": return aiAnswerPosition(item, "GOOGLE");
     case "yandexRelevantUrl": return searchValue(item, "YANDEX", "rankingUrl");
     case "googleRelevantUrl": return searchValue(item, "GOOGLE", "rankingUrl");
+    case "yandexAiRelevantUrl": return aiAnswerValue(item, "YANDEX", "rankingUrl");
+    case "googleAiRelevantUrl": return aiAnswerValue(item, "GOOGLE", "rankingUrl");
     case "yandexCheckedAt": return searchValue(item, "YANDEX", "observedAt");
     case "googleCheckedAt": return searchValue(item, "GOOGLE", "observedAt");
     case "yandexAiCheckedAt": return aiAnswerCheckedAt(item, "YANDEX");
@@ -909,6 +915,14 @@ function aiAnswerCheckedAt(
   engine: "GOOGLE" | "YANDEX"
 ): string | null {
   return item.aiAnswers?.find(({ searchEngine }) => searchEngine === engine)?.observedAt ?? null;
+}
+
+function aiAnswerValue(
+  item: SemanticKeywordListItem,
+  engine: "GOOGLE" | "YANDEX",
+  field: "rankingUrl"
+): string | null {
+  return item.aiAnswers?.find(({ searchEngine }) => searchEngine === engine)?.[field] ?? null;
 }
 
 function searchPosition(item: SemanticKeywordListItem, engine: "GOOGLE" | "YANDEX"): number | null {

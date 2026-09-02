@@ -17,11 +17,17 @@ export function aiAnswerCollectionSummary(job: Job): AiAnswerCollectionSummary {
   const failedKeywords = summaryCount(job.resultSummary, job.errorSummary);
   const searchEngine = engine(input.searchEngine);
   const deviceValue = device(input.device);
+  const purpose = input.purpose === undefined
+    ? "POSITION_TRACKING"
+    : input.purpose;
   if (
     typeof input.regionCode !== "string" ||
     typeof input.host !== "string" ||
     !searchEngine ||
-    !deviceValue
+    !deviceValue ||
+    (purpose !== "POSITION_TRACKING" && purpose !== "COMPETITOR_SERP") ||
+    (input.saveProjectPosition !== undefined &&
+      typeof input.saveProjectPosition !== "boolean")
   ) invalid();
   const routingScope = connectorRoutingScope(scope.routingScope);
   const attempts = connectorAttempts(scope.connectorAttempts);
@@ -33,6 +39,11 @@ export function aiAnswerCollectionSummary(job: Job): AiAnswerCollectionSummary {
     projectId: job.projectId,
     ...(job.actorId ? { actorId: job.actorId } : {}),
     provider: "ARSENKIN",
+    purpose,
+    saveProjectPosition:
+      typeof input.saveProjectPosition === "boolean"
+        ? input.saveProjectPosition
+        : purpose === "POSITION_TRACKING",
     ...(routingScope ? { routingScope } : {}),
     ...(attempts.length ? { connectorAttempts: attempts } : {}),
     status: status(job.status),

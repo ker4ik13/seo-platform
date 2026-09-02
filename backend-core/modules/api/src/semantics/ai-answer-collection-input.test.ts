@@ -61,3 +61,27 @@ test("canonicalizes an internationalized host and rejects ambiguous input", () =
   );
   assert.throws(() => aiAnswerCancelInput({ force: true }), DomainError);
 });
+
+test("keeps AI competitor collection separate from project position tracking", () => {
+  const command = createAiAnswerCollectionInput({
+    items: [{ id: keywordId, version: 4 }],
+    searchEngine: "GOOGLE",
+    regionCode: "1011969",
+    device: "DESKTOP",
+    host: "example.com",
+    excludeSubdomains: false,
+    brands: [],
+    purpose: "COMPETITOR_SERP",
+    saveProjectPosition: false
+  });
+  assert.equal(command.purpose, "COMPETITOR_SERP");
+  assert.equal(command.saveProjectPosition, false);
+  assert.throws(
+    () => createAiAnswerCollectionInput({
+      ...command,
+      purpose: "POSITION_TRACKING",
+      saveProjectPosition: true
+    }),
+    DomainError
+  );
+});

@@ -17,6 +17,8 @@ export interface SemanticRankChangePresentation {
   readonly tone: SemanticRankChangeTone;
 }
 
+export type SemanticRankingUrlMatch = "MATCH" | "MISMATCH" | "NO_TARGET";
+
 export interface SemanticRankContextPoint {
   readonly trackingContextId: string;
   readonly searchEngine: SemanticRankEngine;
@@ -137,6 +139,93 @@ export function sameSemanticRankingUrl(
   }
 }
 
+export function semanticRankingUrlMatch(
+  targetUrl: string | undefined,
+  rankingUrl: string
+): SemanticRankingUrlMatch {
+  if (!targetUrl?.trim()) return "NO_TARGET";
+  return sameSemanticRankingUrl(targetUrl, rankingUrl) ? "MATCH" : "MISMATCH";
+}
+
+export function hasSemanticAiAnswerSnapshot(
+  snapshots: readonly Readonly<{ observedAt: string }>[] | undefined
+): boolean {
+  return (snapshots?.length ?? 0) > 0;
+}
+
+/**
+ * Accept a full URL, a host without protocol, or a path relative to the
+ * project. The API still receives one canonical absolute HTTP(S) URL.
+ */
+export function normalizeSemanticTargetUrlInput(
+  value: string,
+  projectDomain: string
+): string | undefined {
+  const source = value.normalize("NFKC").trim();
+  if (
+    source.length === 0 ||
+    source.length > 2_048 ||
+    [...source].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    })
+  ) {
+    return undefined;
+  }
+
+  const projectOrigin = semanticProjectOrigin(projectDomain);
+  let candidate = source;
+  if (candidate.startsWith("//")) {
+    candidate = `https:${candidate}`;
+  } else {
+    const scheme = candidate.match(/^([a-z][a-z0-9+.-]*):/iu)?.[1];
+    if (scheme) {
+      if (
+        !["http", "https"].includes(scheme.toLocaleLowerCase("en")) ||
+        !/^https?:\/\//iu.test(candidate)
+      ) {
+        return undefined;
+      }
+    } else {
+      const withoutLeadingSlash = candidate.replace(/^\/+/u, "");
+      const firstSegment = withoutLeadingSlash.split(/[/?#]/u)[0] ?? "";
+      const startsWithSlash = candidate.startsWith("/");
+      const explicitHost = startsWithSlash
+        ? projectOrigin !== undefined &&
+          normalizedSemanticHost(firstSegment) ===
+            normalizedSemanticHost(new URL(projectOrigin).host)
+        : looksLikeHttpHost(firstSegment);
+
+      if (explicitHost) {
+        candidate = `https://${withoutLeadingSlash}`;
+      } else if (projectOrigin) {
+        candidate = new URL(
+          startsWithSlash ? candidate : `/${candidate}`,
+          projectOrigin
+        ).toString();
+      } else {
+        return undefined;
+      }
+    }
+  }
+
+  try {
+    const url = new URL(candidate);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.hash
+    ) {
+      return undefined;
+    }
+    const normalized = url.toString();
+    return normalized.length <= 2_048 ? normalized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function semanticUrlBelongsToProject(
   value: string,
   projectDomain: string
@@ -204,6 +293,34 @@ function normalizedSemanticHost(value: string): string {
     .toLocaleLowerCase("en")
     .replace(/\.$/u, "")
     .replace(/^www\./u, "");
+}
+
+function semanticProjectOrigin(value: string): string | undefined {
+  try {
+    const source = value.normalize("NFKC").trim();
+    const url = new URL(
+      /^https?:\/\//iu.test(source) ? source : `https://${source}`
+    );
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password
+    ) {
+      return undefined;
+    }
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function looksLikeHttpHost(value: string): boolean {
+  return (
+    value === "localhost" ||
+    value.includes(".") ||
+    /^\[[0-9a-f:]+\](?::\d{1,5})?$/iu.test(value) ||
+    /^\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?$/u.test(value)
+  );
 }
 
 function rootFaviconUrl(value: string): string | undefined {

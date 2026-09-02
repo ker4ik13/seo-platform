@@ -256,6 +256,10 @@ function copyExecution(
   value: InternalRankExecutionParameters
 ): InternalRankExecutionParameters {
   return {
+    ...(value.purpose === undefined ? {} : { purpose: value.purpose }),
+    ...(value.saveProjectPosition === undefined
+      ? {}
+      : { saveProjectPosition: value.saveProjectPosition }),
     searchEngine: value.searchEngine,
     countryCode: value.countryCode,
     ...(value.regionCode ? { regionCode: value.regionCode } : {}),
