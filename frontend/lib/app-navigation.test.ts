@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   appNavigationSection,
-  appProjectIdFromPath
+  appProjectIdFromPath,
+  shouldShowWorkspaceCreationAction
 } from "./app-navigation.ts";
 
 const projectId = "019fd395-bc13-74eb-80c5-f3e7872bcc2b";
@@ -33,4 +34,27 @@ test("extracts only a canonical project UUID from an explicit project route", ()
   );
   assert.equal(appProjectIdFromPath("/app/projects/not-a-uuid/settings"), undefined);
   assert.equal(appProjectIdFromPath(`/app/tasks/${projectId}`), undefined);
+});
+
+test("offers workspace creation until the user owns a workspace", () => {
+  const currentUserId = "019fd395-bc13-74eb-80c5-f3e7872bcc20";
+  const foreignWorkspace = {
+    owner: { userId: "019fd395-bc13-74eb-80c5-f3e7872bcc21" }
+  };
+  const ownedWorkspace = {
+    owner: { userId: currentUserId }
+  };
+
+  assert.equal(shouldShowWorkspaceCreationAction(currentUserId, []), true);
+  assert.equal(
+    shouldShowWorkspaceCreationAction(currentUserId, [foreignWorkspace]),
+    true
+  );
+  assert.equal(
+    shouldShowWorkspaceCreationAction(currentUserId, [
+      foreignWorkspace,
+      ownedWorkspace
+    ]),
+    false
+  );
 });

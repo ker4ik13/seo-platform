@@ -13,6 +13,17 @@ export type AppNavigationSection =
 const PROJECT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+export function shouldShowWorkspaceCreationAction(
+  currentUserId: string,
+  workspaces: readonly Readonly<{
+    owner: Readonly<{ userId: string }>;
+  }>[]
+): boolean {
+  return !workspaces.some(
+    (workspace) => workspace.owner.userId === currentUserId
+  );
+}
+
 export function appNavigationSection(
   pathname: string | null | undefined
 ): AppNavigationSection {

@@ -7,6 +7,7 @@ import type {
   AppWorkspace,
   ProtectedAppContext
 } from "../lib/app-types";
+import { shouldShowWorkspaceCreationAction } from "../lib/app-navigation";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { ProjectSelect } from "./project-select";
@@ -30,6 +31,10 @@ export function TenantSwitcher({
   const workspaceId = workspace?.id;
   const projectId = project?.id;
   const projectWorkspaceId = project?.workspaceId;
+  const showWorkspaceCreation = shouldShowWorkspaceCreationAction(
+    currentUserId,
+    workspaces
+  );
 
   useEffect(() => {
     if (!workspaceId) {
@@ -95,8 +100,11 @@ export function TenantSwitcher({
           aria-label="Рабочая область"
           className="tenant-workspace-select"
           onChange={(event) => selectWorkspace(event.target.value)}
-          popoverFooter={workspaces.length === 0 ? (
-            <Link className="tenant-create-workspace-action" href="/app#workspace-onboarding">
+          popoverFooter={showWorkspaceCreation ? (
+            <Link
+              className="tenant-create-workspace-action"
+              href="/app?createWorkspace=1#workspace-onboarding"
+            >
               <span aria-hidden="true"><Icon name="plus" /></span>
               <span>
                 <strong>Создать рабочую область</strong>

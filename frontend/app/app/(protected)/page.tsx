@@ -3,16 +3,26 @@ import {
   ProjectOnboarding,
   WorkspaceOnboarding
 } from "../../../components/tenant-onboarding";
+import { shouldShowWorkspaceCreationAction } from "../../../lib/app-navigation";
 import { requireProtectedAppContext } from "../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams
+}: Readonly<{
+  searchParams: Promise<{ readonly createWorkspace?: string }>;
+}>) {
   const context = await requireProtectedAppContext();
+  const query = await searchParams;
+  const showWorkspaceOnboarding =
+    !context.workspace ||
+    (query.createWorkspace === "1" &&
+      shouldShowWorkspaceCreationAction(context.user.id, context.workspaces));
 
   return (
     <>
-      {!context.workspace ? (
+      {showWorkspaceOnboarding ? (
         <WorkspaceOnboarding />
       ) : !context.project ? (
         <ProjectOnboarding workspace={context.workspace} />
