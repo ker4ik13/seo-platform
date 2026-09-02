@@ -1988,6 +1988,7 @@ function formatRuntimeNextAction(value: string | undefined): string {
 function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.job.status)} />;
   const active = isActiveStatus(result.job.status);
+  const competitorCollection = result.execution.purpose === "COMPETITOR_SERP";
   const failedRows = active
     ? []
     : result.rows.filter(({ state }) => state === "PENDING");
@@ -1999,7 +2000,7 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
       {resultRows.length > 0 && (
         <div className={styles.tableScroll}>
           <table className={styles.table}>
-            <caption>Позиции запросов этого запуска</caption>
+            <caption>{competitorCollection ? "Срезы конкурентов этого запуска" : "Позиции запросов этого запуска"}</caption>
             <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Проверено</th></tr></thead>
             <tbody>{resultRows.map((row) => (
               <tr key={`${row.sequence}:${row.keywordId}`}>
@@ -2019,8 +2020,12 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
         <section className={styles.rankFailures} aria-labelledby="rank-failures-title">
           <header>
             <div>
-              <strong id="rank-failures-title">Не удалось снять позиции</strong>
-              <small>Эти запросы завершены с ошибкой и больше не выполняются в этом запуске.</small>
+              <strong id="rank-failures-title">
+                {competitorCollection ? "Не удалось собрать конкурентов" : "Не удалось снять позиции"}
+              </strong>
+              <small>
+                Эти запросы завершены с ошибкой и больше не выполняются в этом запуске.
+              </small>
             </div>
             <span>{formatInteger(failedRows.length)}</span>
           </header>
@@ -2032,7 +2037,11 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
                 <tr key={`failed:${row.sequence}:${row.keywordId}`}>
                   <td>{row.sequence + 1}</td>
                   <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
-                  <td><span className={`${styles.itemStatus} ${styles.failed}`}>Не снят</span></td>
+                  <td>
+                    <span className={`${styles.itemStatus} ${styles.failed}`}>
+                      {competitorCollection ? "Не собран" : "Не снят"}
+                    </span>
+                  </td>
                   <td className={styles.rankFailureReason} title={row.errorCode}>
                     <strong>{rankFailureReason(row, result.job.provider)}</strong>
                     {row.errorCode && <small>{row.errorCode}</small>}

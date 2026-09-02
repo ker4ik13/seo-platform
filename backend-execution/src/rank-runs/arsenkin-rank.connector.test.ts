@@ -247,7 +247,7 @@ test("submits the current 15,000-key positions scope as exactly one provider tas
   assert.equal(submissions, 1);
 });
 
-test("checks task status before fetching a finished positions result", async () => {
+test("accepts percentage task status before fetching a Check Top result", async () => {
   const responses = [
     json(
       {
@@ -259,9 +259,9 @@ test("checks task status before fetching a finished positions result", async () 
       429,
       { "Retry-After": "15" }
     ),
-    json({ code: "TASK_STATUS", status: "process", progress: 50 }),
-    json({ code: "TASK_STATUS", status: "finish", progress: 100 }),
-    json(resultBody())
+    json({ code: "TASK_STATUS", status: "process", progress: "50%" }),
+    json({ code: "TASK_STATUS", status: "finish", progress: "100%" }),
+    json(checkTopResultBody())
   ];
   const calledUrls: string[] = [];
   let permits = 0;
@@ -305,6 +305,14 @@ test("checks task status before fetching a finished positions result", async () 
     1_000
   );
   assert.equal(ready.status, "READY");
+  if (ready.status !== "READY") assert.fail("Expected a ready Check Top result");
+  const normalized = normalizeArsenkinRankResult(
+    ready.value,
+    "3944",
+    competitorIntent(false)
+  );
+  assert.equal(normalized.length, 2);
+  assert.equal(normalized[0]?.serpResults?.length, 2);
   assert.deepEqual(calledUrls, [
     "https://arsenkin.ru/api/tools/check",
     "https://arsenkin.ru/api/tools/check",
@@ -366,7 +374,8 @@ test("does not fetch a premature TASK_RESULT before check reaches finish/100", a
 test("fails closed on undocumented or inconsistent check states", async () => {
   const responses = [
     json({ code: "TASK_STATUS", status: "finish", progress: 99 }),
-    json({ code: "TASK_STATUS", status: "process", progress: 100 })
+    json({ code: "TASK_STATUS", status: "process", progress: 100 }),
+    json({ code: "TASK_STATUS", status: "finish", progress: "done" })
   ];
   const connector = new ArsenkinRankConnector(allowAll(), async (url) => {
     assert.equal(String(url), "https://arsenkin.ru/api/tools/check");
@@ -375,7 +384,7 @@ test("fails closed on undocumented or inconsistent check states", async () => {
     return response;
   });
 
-  for (let index = 0; index < 2; index += 1) {
+  for (let index = 0; index < 3; index += 1) {
     assert.deepEqual(
       await connector.fetchResult(
         "3944",

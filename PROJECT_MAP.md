@@ -782,6 +782,9 @@ capacity deferral откатывает счётчик, READY на 50-й попы
 `POLL_WAIT`/просроченные `FETCHING` строки выше границы migration завершает без
 provider I/O. Arsenkin batch lifecycle сохраняет отдельную прежнюю границу 720,
 потому что один provider task содержит весь batch, а не один keyword.
+Arsenkin rank/check-top polling принимает progress как число либо числовую
+строку с необязательным `%`, но по-прежнему требует согласованную пару
+`process/<100` или `finish/100`; неизвестные состояния завершаются fail-closed.
 Terminal XMLStock result scope добавляет каждой строке status, pollAttempts и
 allowlisted errorCode; Web отделяет неснятые запросы в блок «Не удалось снять
 позиции», не смешивая их с успешными snapshots.

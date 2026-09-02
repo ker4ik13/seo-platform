@@ -450,21 +450,33 @@ function checkResult(
   const failure = httpFailure(status, value, retryAfterSeconds);
   if (failure) return failure;
   const body = record(value);
+  const progress = taskProgress(body.progress);
   if (
     body.code !== "TASK_STATUS" ||
-    !Number.isSafeInteger(body.progress) ||
-    Number(body.progress) < 0 ||
-    Number(body.progress) > 100
+    progress === undefined
   ) {
     return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
   }
-  if (body.status === "process" && Number(body.progress) < 100) {
+  if (body.status === "process" && progress < 100) {
     return { status: "PENDING" };
   }
-  if (body.status === "finish" && body.progress === 100) {
+  if (body.status === "finish" && progress === 100) {
     return { status: "READY" };
   }
   return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+}
+
+function taskProgress(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 && value <= 100
+      ? value
+      : undefined;
+  }
+  if (typeof value !== "string" || !/^\d{1,3}%?$/u.test(value)) {
+    return undefined;
+  }
+  const progress = Number(value.replace(/%$/u, ""));
+  return progress >= 0 && progress <= 100 ? progress : undefined;
 }
 
 function fetchResult(

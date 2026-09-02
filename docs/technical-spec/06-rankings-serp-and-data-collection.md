@@ -284,7 +284,10 @@ encrypted credential projection. `PUBLIC` execute отозван, а authorize
 `SUBMITTING` до возможных network bytes. Isolated connector-worker затем
 отправляет documented Arsenkin `positions`, durable хранит exact wire
 snapshot/hash и task ID, опрашивает `check` и вызывает `get` только после
-`TASK_STATUS/finish` с progress 100. Финальный `format=0` ответ
+`TASK_STATUS/finish` с progress 100. Provider adapter канонизирует обе
+допустимые формы progress — JSON number и числовую строку
+с необязательным `%`; остальные значения и противоречивые status/progress
+комбинации остаются fail-closed. Финальный `format=0` ответ
 нормализуется из `result.table`: exact query set связывается с sealed manifest,
 `position=[1001]` означает not-found, а найденная позиция обязана находиться
 в диапазоне 1..sealed depth и иметь URL в разрешённом scope проекта.
