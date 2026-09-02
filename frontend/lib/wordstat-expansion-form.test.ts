@@ -6,6 +6,7 @@ import type {
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import {
+  wordstatExpansionSourceOptions,
   wordstatExpansionSources,
   wordstatResultLimit,
   wordstatScopeIsResolving,
@@ -100,5 +101,23 @@ test("Wordstat expansion sees an active workspace route before project materiali
       }))
     }),
     []
+  );
+
+  const unconfigured = wordstatExpansionSourceOptions(project, {
+    ...workspace,
+    bindings: []
+  });
+  assert.equal(unconfigured.requiresProjectBinding, true);
+  assert.deepEqual(unconfigured.sources.map(({ id }) => id), [credential.id]);
+
+  assert.deepEqual(
+    wordstatExpansionSourceOptions(
+      {
+        ...project,
+        access: { ...project.access, canUpdateBindings: false }
+      },
+      { ...workspace, bindings: [] }
+    ),
+    { requiresProjectBinding: false, sources: [] }
   );
 });

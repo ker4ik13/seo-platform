@@ -10,6 +10,7 @@ import {
   type KeywordResearchRowPage,
   type KeywordResearchRunSummary,
   type KeysSoDatabase,
+  type ProjectConnectorBinding,
   type ProjectConnectorSettings,
   type ProjectSearchCity,
   type SemanticImportDuplicatePolicy,
@@ -30,7 +31,17 @@ import {
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import {
-  wordstatExpansionSources,
+  createProjectConnectorBindingInput,
+  type IdempotentCreateCommand,
+  projectConnectorBinding,
+  projectConnectorCreatePayloadSignature,
+  type ProjectConnectorDraft,
+  stableProjectConnectorCreateCommand,
+  updateProjectConnectorBindingInput,
+  withProjectConnectorBinding
+} from "../lib/project-integration-settings";
+import {
+  wordstatExpansionSourceOptions,
   wordstatResultLimit,
   wordstatScopeIsResolving
 } from "../lib/wordstat-expansion-form";
@@ -829,12 +840,14 @@ export function WordstatExpansionDialog({
   const [maxKeywords, setMaxKeywords] = useState("5000");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const sources = useMemo(
+  const bindingCommand = useRef<IdempotentCreateCommand | undefined>(undefined);
+  const sourceOptions = useMemo(
     () => settings && workspaceRouting
-      ? wordstatExpansionSources(settings, workspaceRouting)
-      : [],
+      ? wordstatExpansionSourceOptions(settings, workspaceRouting)
+      : { requiresProjectBinding: false, sources: [] },
     [settings, workspaceRouting]
   );
+  const sources = sourceOptions.sources;
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const provider: "XMLSTOCK" | "ARSENKIN" =
     selectedSource?.provider === "ARSENKIN" ? "ARSENKIN" : "XMLSTOCK";
@@ -860,7 +873,10 @@ export function WordstatExpansionDialog({
     ])
       .then(([result, workspaceResult]) => {
         if (controller.signal.aborted) return;
-        const configured = wordstatExpansionSources(result, workspaceResult);
+        const configured = wordstatExpansionSourceOptions(
+          result,
+          workspaceResult
+        ).sources;
         setSettings(result);
         setWorkspaceRouting(workspaceResult);
         setCredentialId((current) =>
@@ -893,6 +909,9 @@ export function WordstatExpansionDialog({
     setBusy(true);
     setError(undefined);
     try {
+      if (sourceOptions.requiresProjectBinding) {
+        await ensureWordstatExpansionBinding(selectedSource.id);
+      }
       await onSubmit({
         source: provider === "XMLSTOCK" ? "XMLSTOCK_WORDSTAT" : "ARSENKIN_WORDSTAT",
         queries,
@@ -908,6 +927,51 @@ export function WordstatExpansionDialog({
       setError(message(caught, "Не удалось запустить парсинг Wordstat."));
       setBusy(false);
     }
+  }
+
+  async function ensureWordstatExpansionBinding(
+    selectedCredentialId: string
+  ): Promise<void> {
+    if (!settings) return;
+    const capability = "KEYWORD_RESEARCH" as const;
+    const current = projectConnectorBinding(settings, capability);
+    const draft = { credentialId: selectedCredentialId, enabled: true };
+    const updated = current
+      ? await browserApiRequest<ProjectConnectorBinding>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings/${encodeURIComponent(current.id)}`,
+          {
+            method: "PATCH",
+            ifMatch: current.version,
+            body: updateProjectConnectorBindingInput(draft)
+          }
+        )
+      : await createWordstatExpansionBinding(capability, draft);
+    setSettings(withProjectConnectorBinding(settings, updated));
+    bindingCommand.current = undefined;
+  }
+
+  async function createWordstatExpansionBinding(
+    capability: "KEYWORD_RESEARCH",
+    draft: ProjectConnectorDraft
+  ): Promise<ProjectConnectorBinding> {
+    const signature = projectConnectorCreatePayloadSignature(
+      capability,
+      draft
+    );
+    const command = stableProjectConnectorCreateCommand(
+      bindingCommand.current,
+      signature,
+      () => `wordstat-expansion-binding:${globalThis.crypto.randomUUID()}`
+    );
+    bindingCommand.current = command;
+    return browserApiRequest<ProjectConnectorBinding>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
+      {
+        method: "POST",
+        idempotencyKey: command.key,
+        body: createProjectConnectorBindingInput(capability, draft)
+      }
+    );
   }
 
   return (
