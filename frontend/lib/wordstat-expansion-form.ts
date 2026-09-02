@@ -1,3 +1,10 @@
+import type {
+  ProjectConnectorCredentialOption,
+  ProjectConnectorSettings,
+  WorkspaceConnectorRoutingSettings
+} from "@seo-platform/contracts";
+import { effectiveProjectConnectorOptions } from "./project-integration-settings.ts";
+
 export const wordstatStoredResultSafetyLimit = 10_000;
 
 export type WordstatFormProvider = "XMLSTOCK" | "ARSENKIN";
@@ -21,4 +28,17 @@ export function wordstatResultLimit(
     value <= wordstatStoredResultSafetyLimit
     ? value
     : undefined;
+}
+
+export function wordstatExpansionSources(
+  project: ProjectConnectorSettings,
+  workspace: WorkspaceConnectorRoutingSettings
+): readonly ProjectConnectorCredentialOption[] {
+  return effectiveProjectConnectorOptions(
+    project,
+    workspace,
+    "KEYWORD_RESEARCH"
+  ).filter(
+    ({ provider }) => provider === "XMLSTOCK" || provider === "ARSENKIN"
+  );
 }

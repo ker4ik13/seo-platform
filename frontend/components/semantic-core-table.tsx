@@ -4793,6 +4793,7 @@ export function SemanticCoreTable({
           onSubmit={startWordstatExpansion}
           projectId={projectId}
           projectSearchCity={projects.find(({ id }) => id === projectId)?.searchCity}
+          workspaceId={workspaceId}
         />
       )}
       {positionDialogOpen && (

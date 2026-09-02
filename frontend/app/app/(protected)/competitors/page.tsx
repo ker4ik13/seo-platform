@@ -41,6 +41,7 @@ export default async function CompetitorsPage() {
             projectDomain={context.project.domain}
             projectId={context.project.id}
             projectSearchCity={context.project.searchCity}
+            workspaceId={context.workspace.id}
           />
         </>
       )}
