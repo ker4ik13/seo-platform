@@ -122,7 +122,14 @@ test("validates and delegates AI answer result scope", async () => {
       projectId,
       jobId,
       headers,
-      { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] },
+      {
+        workspaceId,
+        projectId,
+        actorId,
+        jobId,
+        keywordIds: [keywordId],
+        includeSources: true
+      },
       request
     ),
     { data: result, meta: { requestId: "request-1" } }
@@ -132,6 +139,7 @@ test("validates and delegates AI answer result scope", async () => {
     projectId,
     actorId,
     jobId,
-    keywordIds: [keywordId]
+    keywordIds: [keywordId],
+    includeSources: true
   });
 });

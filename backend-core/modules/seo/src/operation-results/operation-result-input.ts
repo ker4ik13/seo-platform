@@ -50,14 +50,19 @@ export function internalAiAnswerOperationResultInput(
     "projectId",
     "actorId",
     "jobId",
-    "keywordIds"
+    "keywordIds",
+    "includeSources"
   ]);
+  if (typeof input.includeSources !== "boolean") {
+    invalid("Invalid operation result field");
+  }
   const parsed = {
     workspaceId: internalUuid(string(input.workspaceId), "workspaceId"),
     projectId: internalUuid(string(input.projectId), "projectId"),
     actorId: internalUuid(string(input.actorId), "actorId"),
     jobId: internalUuid(string(input.jobId), "jobId"),
-    keywordIds: uuidList(input.keywordIds, arsenkinAiAnswerKeywordLimit)
+    keywordIds: uuidList(input.keywordIds, arsenkinAiAnswerKeywordLimit),
+    includeSources: input.includeSources
   };
   assertInternalContext(parsed, context);
   if (parsed.jobId !== routeJobId) invalid("Job route does not match command");

@@ -17,6 +17,12 @@ import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { semanticExportFileUrl } from "../lib/app-path";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
+  aiAnswerCollectionTitle,
+  isCompetitorCollection,
+  rankCollectionDepthLabel,
+  rankCollectionTitle
+} from "../lib/operation-collection-purpose";
+import {
   connectorRouteTrail,
   connectorRoutingScopeLabel,
   hasConnectorFallback
@@ -41,7 +47,16 @@ import { ProviderLogo } from "./provider-logo";
 import { ProjectContextSelect } from "./project-context-select";
 import type { AppProject } from "../lib/app-types";
 
-type TaskKind = "FREQUENCY" | "AI_ANSWER" | "CLUSTERING" | "RANK" | "CRAWL" | "RESEARCH" | "EXPORT";
+type TaskKind =
+  | "FREQUENCY"
+  | "AI_ANSWER"
+  | "AI_COMPETITOR_SERP"
+  | "CLUSTERING"
+  | "RANK"
+  | "COMPETITOR_SERP"
+  | "CRAWL"
+  | "RESEARCH"
+  | "EXPORT";
 type TaskColumn = "QUEUED" | "RUNNING" | "ATTENTION" | "COMPLETED";
 type TaskTab = "ALL" | "ACTIVE" | "ERRORS" | "COMPLETED";
 
@@ -231,7 +246,7 @@ export function TaskCenter({
     const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
       if (action === "retry") {
-        if (current.kind === "RANK") {
+        if (isRankTaskKind(current.kind)) {
           await browserApiRequest(
             `${base}/jobs/${encodeURIComponent(current.id)}/retry-missing`,
             {
@@ -251,7 +266,7 @@ export function TaskCenter({
           `${base}/frequency-collections/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
-      } else if (current.kind === "RANK") {
+      } else if (isRankTaskKind(current.kind)) {
         await browserApiRequest(
           `${base}/jobs/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
@@ -261,7 +276,7 @@ export function TaskCenter({
           `${base}/crawls/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {}, ifMatch: current.version }
         );
-      } else if (current.kind === "AI_ANSWER") {
+      } else if (isAiAnswerTaskKind(current.kind)) {
         await browserApiRequest(
           `${base}/ai-answer-collections/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
@@ -327,8 +342,10 @@ export function TaskCenter({
           <option value="ALL">Все операции</option>
           <option value="FREQUENCY">Частотность</option>
           <option value="AI_ANSWER">ИИ-ответы</option>
+          <option value="AI_COMPETITOR_SERP">ИИ-конкуренты</option>
           <option value="CLUSTERING">Кластеризация</option>
           <option value="RANK">Позиции</option>
+          <option value="COMPETITOR_SERP">Выдача конкурентов</option>
           <option value="CRAWL">Аудиты</option>
           <option value="RESEARCH">Сбор конкурентов</option>
           <option value="EXPORT">Экспорт</option>
@@ -486,12 +503,13 @@ function frequencyTask(value: FrequencyCollectionSummary): ProjectTask {
 function aiAnswerTask(value: AiAnswerCollectionSummary): ProjectTask {
   const completed = value.completedKeywords + value.failedKeywords;
   const routeTrail = connectorRouteTrail(value.connectorAttempts);
+  const competitorCollection = isCompetitorCollection(value);
   return {
     id: value.id,
-    kind: "AI_ANSWER",
+    kind: competitorCollection ? "AI_COMPETITOR_SERP" : "AI_ANSWER",
     resultKind: "ai-answer",
     provider: "ARSENKIN",
-    title: "Сбор ИИ-ответов",
+    title: aiAnswerCollectionTitle(value),
     description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${frequencyDeviceLabel(value.device)}`,
     statusLabel: operationStatusLabel(value.status, value.stage),
     column: taskColumn(value.status),
@@ -590,8 +608,10 @@ function rankTask(value: RankJobSummary): ProjectTask {
   const provider = providerLabel(value.provider);
   const searchContext = rankSearchContextLabel(value);
   const routeTrail = connectorRouteTrail(value.connectorAttempts);
+  const competitorCollection = isCompetitorCollection(value);
+  const depthLabel = rankCollectionDepthLabel(value, value.depth);
   return {
-    id: value.id, kind: "RANK", resultKind: "rank", provider: value.provider, title: "Проверка позиций",
+    id: value.id, kind: competitorCollection ? "COMPETITOR_SERP" : "RANK", resultKind: "rank", provider: value.provider, title: rankCollectionTitle(value),
     description: `${provider}${hasConnectorFallback(value.connectorAttempts) ? " · fallback" : ""}${searchContext ? ` · ${searchContext}` : ""}`, statusLabel: operationStatusLabel(value.status, value.stage),
     column: taskColumn(value.status), progressCurrent: Number(value.progress.current), progressTotal: Number(value.progress.total),
     createdAt: value.createdAt,
@@ -604,13 +624,13 @@ function rankTask(value: RankJobSummary): ProjectTask {
       value.status === "PARTIALLY_COMPLETED" &&
       Number(value.result.failedCount) > 0 &&
       Number(value.result.submitOutcomeUnknownCount) === 0,
-    retryLabel: "Дособрать позиции",
+    retryLabel: competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
     inputFacts: [
       { label: "Провайдер", value: provider },
       ...(value.searchEngine
         ? [{ label: "Поисковая система", value: rankSearchSystemLabel(value.searchEngine, value.searchSource) }]
         : []),
-      ...(value.depth ? [{ label: "Глубина", value: `Топ-${value.depth}` }] : []),
+      ...(depthLabel ? [{ label: "Глубина", value: depthLabel }] : []),
       { label: "Профиль съёма", value: value.trackingContextId },
       { label: "Ключей", value: formatInteger(Number(value.progress.total)) },
       { label: "Этап", value: rankStageLabel(value.stage) },
@@ -755,9 +775,15 @@ function rankSearchContextLabel(value: RankJobSummary): string | undefined {
     value.searchEngine
       ? rankSearchSystemLabel(value.searchEngine, value.searchSource)
       : undefined,
-    value.depth ? `Топ-${value.depth}` : undefined
+    rankCollectionDepthLabel(value, value.depth)
   ].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+function isRankTaskKind(kind: TaskKind): boolean {
+  return kind === "RANK" || kind === "COMPETITOR_SERP";
+}
+function isAiAnswerTaskKind(kind: TaskKind): boolean {
+  return kind === "AI_ANSWER" || kind === "AI_COMPETITOR_SERP";
 }
 function frequencyTypeLabel(type: string): string { return ({ BASE: "Запрос", EXACT: '"Запрос"', FIXED: '"!Запрос"' } as Readonly<Record<string, string>>)[type] ?? type; }
 function clusteringFrequencyTypeLabel(type: string): string { return ({ BASE: "базовая", QUOTED: "фразовая", OVERALL: "общая", EXACT: "точная" } as Readonly<Record<string, string>>)[type] ?? type; }

@@ -52,6 +52,40 @@ test("folder move keeps all selected keywords and sends bounded batches", async 
   assert.deepEqual(result.conflictedIds, ["keyword-400"]);
 });
 
+test("bulk commands project rich editor rows to exact id and version selections", async () => {
+  const richSelections = [{
+    id: "keyword-1",
+    version: 7,
+    text: "SEO аудит",
+    language: "ru",
+    isTracked: true,
+    tags: ["Важно"]
+  }];
+
+  await updateSemanticKeywordsInBatches(
+    "project-id",
+    richSelections,
+    { isTracked: false },
+    async (_projectId, input): Promise<SemanticKeywordBulkResult> => {
+      assert.deepEqual(input, {
+        items: [{ id: "keyword-1", version: 7 }],
+        patch: { isTracked: false }
+      });
+      return {
+        selected: 1,
+        changed: 1,
+        skipped: 0,
+        failed: 0,
+        conflicted: 0,
+        updatedItems: [],
+        conflictedIds: [],
+        skippedIds: [],
+        failedIds: []
+      };
+    }
+  );
+});
+
 test("cleaning preview and apply aggregate the complete selection", async () => {
   const previewBatchSizes: number[] = [];
   const preview = await previewSemanticKeywordCleaningInBatches(

@@ -4,7 +4,8 @@ import { DomainError } from "../common/domain-error.js";
 import {
   keywordListQuery,
   keywordMultiSearchInput,
-  keywordTagOptionsQuery
+  keywordTagOptionsQuery,
+  projectPositionHistoryQuery
 } from "./keyword-query.js";
 
 test("parses a bounded semantic keyword query", () => {
@@ -54,6 +55,24 @@ test("parses a bounded semantic keyword query", () => {
   assert.deepEqual(keywordTagOptionsQuery({ search: "  АкЦиЯ  " }), {
     search: "акция"
   });
+});
+
+test("parses the project position history tracking scope", () => {
+  assert.deepEqual(projectPositionHistoryQuery(undefined), {
+    includeUntracked: false
+  });
+  assert.deepEqual(
+    projectPositionHistoryQuery({ includeUntracked: "true" }),
+    { includeUntracked: true }
+  );
+  assert.throws(
+    () => projectPositionHistoryQuery({ includeUntracked: "yes" }),
+    DomainError
+  );
+  assert.throws(
+    () => projectPositionHistoryQuery({ extra: "true" }),
+    DomainError
+  );
 });
 
 test("accepts a multigroup union with more than fifty folders", () => {

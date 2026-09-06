@@ -101,7 +101,8 @@ export class AiAnswerCollectionController {
     const result = await this.seoData.aiAnswerOperationResult(
       context,
       canonicalJobId,
-      scope.items.map(({ keywordId }) => keywordId)
+      scope.items.map(({ keywordId }) => keywordId),
+      collection.purpose === "COMPETITOR_SERP"
     );
     const byKeywordId = new Map(result.rows.map((row) => [row.keywordId, row]));
     return apiResponse(request, {

@@ -196,9 +196,43 @@ export interface SemanticKeywordListSiteResult {
   readonly snippet?: string;
 }
 
-export interface ProjectPositionSummary {
+export const projectPositionTopThresholds = [3, 5, 10, 30, 50] as const;
+export type ProjectPositionTopThreshold =
+  (typeof projectPositionTopThresholds)[number];
+
+export const projectPositionHistoryDefaultSlices = 30 as const;
+export const projectPositionHistoryMaxPoints = 100 as const;
+
+export interface ProjectPositionTopCounts {
+  readonly top3KeywordCount: number;
+  readonly top5KeywordCount: number;
+  readonly top10KeywordCount: number;
+  readonly top30KeywordCount: number;
+  readonly top50KeywordCount: number;
+}
+
+export interface ProjectPositionSummary extends ProjectPositionTopCounts {
   readonly positionedKeywordCount: number;
   readonly averagePosition?: number;
+}
+
+export interface ProjectPositionHistoryPoint extends ProjectPositionTopCounts {
+  /** Opaque identity of the immutable measurement slice. */
+  readonly id: string;
+  readonly observedAt: string;
+  readonly measuredKeywordCount: number;
+  readonly positionedKeywordCount: number;
+}
+
+export interface ProjectPositionHistory {
+  readonly points: readonly ProjectPositionHistoryPoint[];
+  /** More immutable slices exist before the bounded projection. */
+  readonly truncated: boolean;
+}
+
+export interface ProjectPositionHistoryQuery {
+  /** Include active keywords that are currently excluded from rank tracking. */
+  readonly includeUntracked: boolean;
 }
 
 export interface CreateSemanticKeywordInput {

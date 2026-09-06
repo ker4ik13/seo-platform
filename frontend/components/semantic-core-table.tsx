@@ -3486,6 +3486,7 @@ export function SemanticCoreTable({
               ? "Действия сбора позиций"
               : "Действия сбора конкурентов"}
           onClose={() => setCommandMenu(undefined)}
+          presentation="dropdown"
           triggerRef={commandMenuTriggerRef}
           x={commandMenu.x}
           y={commandMenu.y}
@@ -3493,22 +3494,12 @@ export function SemanticCoreTable({
       )}
 
       {mobileGroupTreeOpen && (
-        <>
-          <button
-            aria-label="Закрыть группы"
-            className="semantic-mobile-groups-backdrop"
-            onClick={() => setMobileGroupTreeOpen(false)}
-            type="button"
-          />
-          <button
-            aria-label="Закрыть группы"
-            className="semantic-mobile-groups-close"
-            onClick={() => setMobileGroupTreeOpen(false)}
-            type="button"
-          >
-            <Icon name="close" />
-          </button>
-        </>
+        <button
+          aria-label="Закрыть группы"
+          className="semantic-mobile-groups-backdrop"
+          onClick={() => setMobileGroupTreeOpen(false)}
+          type="button"
+        />
       )}
       <SemanticGroupTree
         {...(viewConfig.filters.groupId
@@ -3540,6 +3531,9 @@ export function SemanticCoreTable({
         onColorChange={(selectedGroups, color) =>
           void changeGroupColors(selectedGroups, color)
         }
+        {...(mobileGroupTreeOpen
+          ? { onClose: () => setMobileGroupTreeOpen(false) }
+          : {})}
         onDropMove={(selectedGroups, target) =>
           void moveGroupsImmediately(selectedGroups, target)
         }

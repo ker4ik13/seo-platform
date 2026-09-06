@@ -105,6 +105,8 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("groups-bulk", "POST", "/projects/{projectId}/keyword-groups/bulk", "semantics:write", "Создать несколько папок", "semantics"),
   endpoint("group-delete", "DELETE", "/projects/{projectId}/keyword-groups/{groupId}", "semantics:write", "Удалить папку с выбранной стратегией для дочерних папок и запросов", "semantics"),
   endpoint("keywords-list", "GET", "/projects/{projectId}/keywords", "semantics:read", "Ключевые слова с фильтрами и курсором", "semantics"),
+  endpoint("position-summary", "GET", "/projects/{projectId}/keywords/position-summary", "semantics:read", "Текущая средняя позиция и число запросов в Топ-3/5/10/30/50", "positions"),
+  endpoint("position-history", "GET", "/projects/{projectId}/keywords/position-history", "semantics:read", "До 100 последних проектных срезов; includeUntracked=true включает активные неотслеживаемые запросы", "positions"),
   endpoint("keywords-create", "POST", "/projects/{projectId}/keywords", "semantics:write", "Создать ключевое слово", "semantics"),
   endpoint("keywords-bulk", "POST", "/projects/{projectId}/keywords/bulk", "semantics:write", "Пакетное создание ключей", "semantics"),
   endpoint("keyword-update", "PATCH", "/projects/{projectId}/keywords/{keywordId}", "semantics:write", "Изменить ключевое слово", "semantics"),

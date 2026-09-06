@@ -86,7 +86,7 @@ function selectionBatches(
   selections: readonly SemanticKeywordBulkSelection[]
 ): readonly SemanticKeywordBulkSelection[][] {
   return semanticBulkSelectionBatches(
-    selections,
+    selections.map(({ id, version }) => ({ id, version })),
     semanticKeywordBulkCommandMaxItems
   );
 }

@@ -1,8 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
+  competitorSerpOperationResultDepth,
   normalizedRankDataQualityFlags,
+  rankExecutionPurpose,
   semanticFrequencyTypes,
   semanticFrequencyQualityFlags,
+  type AiAnswerOperationSourceSummary,
   type CrawlOperationIssue,
   type CrawlOperationResultRow,
   type InternalAiAnswerOperationResult,
@@ -13,6 +16,7 @@ import {
   type InternalRankExecutionParameters,
   type InternalRankOperationResult,
   type NormalizedRankDataQualityFlag,
+  type RankOperationSerpResult,
   type RankOperationResultRow,
   type SemanticFrequencyQualityFlag
 } from "@seo-platform/contracts";
@@ -65,6 +69,7 @@ const rankEntrySelect = {
   keyword: { select: { textOriginal: true } },
   rankSnapshot: {
     select: {
+      id: true,
       found: true,
       position: true,
       absolutePosition: true,
@@ -171,6 +176,7 @@ export class OperationResultService {
           keywordId: { in: [...input.keywordIds] }
         },
         select: {
+          id: true,
           keywordId: true,
           answerPresent: true,
           siteFound: true,
@@ -184,6 +190,42 @@ export class OperationResultService {
     ]);
     if (snapshots.length > input.keywordIds.length) {
       invalidStored("AI answer result is oversized");
+    }
+    const sources = input.includeSources && snapshots.length > 0
+      ? await this.prisma.aiAnswerSource.findMany({
+          where: {
+            snapshotId: { in: snapshots.map(({ id }) => id) },
+            snapshot: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              jobId: input.jobId
+            }
+          },
+          orderBy: [{ snapshotId: "asc" }, { position: "asc" }],
+          select: {
+            snapshotId: true,
+            position: true,
+            url: true,
+            title: true,
+            description: true
+          }
+        })
+      : [];
+    if (sources.length > snapshots.length * 100) {
+      invalidStored("AI answer sources are oversized");
+    }
+    const sourcesBySnapshotId = new Map<string, AiAnswerOperationSourceSummary[]>();
+    for (const source of sources) {
+      const current = sourcesBySnapshotId.get(source.snapshotId) ?? [];
+      current.push({
+        position: source.position,
+        url: source.url,
+        ...(source.title === null ? {} : { title: source.title }),
+        ...(source.description === null
+          ? {}
+          : { description: source.description })
+      });
+      sourcesBySnapshotId.set(source.snapshotId, current);
     }
     const keywordById = new Map(keywords.map((row) => [row.id, row.textOriginal]));
     const snapshotById = new Map(snapshots.map((row) => [row.keywordId, row]));
@@ -209,6 +251,12 @@ export class OperationResultService {
                   ...(snapshot.rankingUrl === null ? {} : { rankingUrl: snapshot.rankingUrl }),
                   brandFound: snapshot.brandFound,
                   sourceCount: snapshot._count.sources,
+                  ...(input.includeSources
+                    ? {
+                        sources:
+                          sourcesBySnapshotId.get(snapshot.id) ?? []
+                      }
+                    : {}),
                   observedAt: snapshot.observedAt.toISOString()
                 }
               }
@@ -252,14 +300,66 @@ export class OperationResultService {
     const pageRows = rows.slice(0, limit);
     const hasNext = rows.length > limit;
     const last = pageRows.at(-1);
+    const execution = rankExecution(manifest.execution);
+    const competitorCollection =
+      rankExecutionPurpose(execution) === "COMPETITOR_SERP";
+    const snapshotIds = competitorCollection
+      ? pageRows.flatMap(({ rankSnapshot }) =>
+          rankSnapshot ? [rankSnapshot.id] : []
+        )
+      : [];
+    const serpResults = snapshotIds.length > 0
+      ? await this.prisma.rankSerpResult.findMany({
+          where: {
+            snapshotId: { in: snapshotIds },
+            position: { lte: competitorSerpOperationResultDepth },
+            snapshot: {
+              workspaceId: context.workspaceId,
+              projectId: context.projectId,
+              jobId
+            }
+          },
+          orderBy: [{ snapshotId: "asc" }, { position: "asc" }],
+          select: {
+            snapshotId: true,
+            position: true,
+            rankingUrl: true,
+            faviconUrl: true,
+            title: true,
+            snippet: true
+          }
+        })
+      : [];
+    if (
+      serpResults.length >
+      snapshotIds.length * competitorSerpOperationResultDepth
+    ) {
+      invalidStored("competitor SERP result is oversized");
+    }
+    const serpResultsBySnapshotId = new Map<string, RankOperationSerpResult[]>();
+    for (const result of serpResults) {
+      const current = serpResultsBySnapshotId.get(result.snapshotId) ?? [];
+      current.push({
+        position: result.position,
+        rankingUrl: result.rankingUrl,
+        ...(result.faviconUrl === null
+          ? {}
+          : { faviconUrl: result.faviconUrl }),
+        ...(result.title === null ? {} : { title: result.title }),
+        ...(result.snippet === null ? {} : { snippet: result.snippet })
+      });
+      serpResultsBySnapshotId.set(result.snapshotId, current);
+    }
     return {
       workspaceId: context.workspaceId,
       projectId: context.projectId,
       jobId,
       trackingContextId: manifest.trackingContextId,
       contextName: manifest.context.name,
-      execution: rankExecution(manifest.execution),
-      rows: pageRows.map(rankRow),
+      execution,
+      rows: pageRows.map((row) =>
+        rankRow(row, competitorCollection, serpResultsBySnapshotId)
+      ),
       page: {
         hasNext,
         ...(hasNext && last ? { nextCursor: String(last.sequence) } : {})
@@ -303,7 +403,12 @@ export class OperationResultService {
 function rankRow(
   row: Prisma.RankExecutionManifestEntryGetPayload<{
     select: typeof rankEntrySelect;
-  }>
+  }>,
+  competitorCollection: boolean,
+  serpResultsBySnapshotId: ReadonlyMap<
+    string,
+    readonly RankOperationSerpResult[]
+  >
 ): RankOperationResultRow {
   const snapshot = row.rankSnapshot;
   if (!snapshot) {
@@ -312,6 +417,7 @@ function rankRow(
       keywordId: row.keywordId,
       keyword: row.keyword.textOriginal,
       state: "PENDING",
+      ...(competitorCollection ? { serpResults: [] } : {}),
       dataQualityFlags: []
     };
   }
@@ -322,6 +428,9 @@ function rankRow(
       keyword: row.keyword.textOriginal,
       state: "NOT_FOUND",
       observedAt: snapshot.observedAt.toISOString(),
+      ...(competitorCollection
+        ? { serpResults: serpResultsBySnapshotId.get(snapshot.id) ?? [] }
+        : {}),
       dataQualityFlags: rankQualityFlags(snapshot.dataQualityFlags)
     };
   }
@@ -344,6 +453,9 @@ function rankRow(
     ...(snapshot.title === null ? {} : { title: snapshot.title }),
     ...(snapshot.snippet === null ? {} : { snippet: snapshot.snippet }),
     observedAt: snapshot.observedAt.toISOString(),
+    ...(competitorCollection
+      ? { serpResults: serpResultsBySnapshotId.get(snapshot.id) ?? [] }
+      : {}),
     dataQualityFlags: rankQualityFlags(snapshot.dataQualityFlags)
   };
 }
@@ -384,7 +496,14 @@ function rankExecution(value: Prisma.JsonValue): InternalRankExecutionParameters
   const input = storedRecord(value);
   const rule = storedRecord(input.domainMatchRule);
   const mode = rule.mode;
+  const purpose = input.purpose;
+  const saveProjectPosition = input.saveProjectPosition;
   if (
+    (purpose !== undefined &&
+      purpose !== "POSITION_TRACKING" &&
+      purpose !== "COMPETITOR_SERP") ||
+    (saveProjectPosition !== undefined &&
+      typeof saveProjectPosition !== "boolean") ||
     (input.searchEngine !== "GOOGLE" && input.searchEngine !== "YANDEX") ||
     typeof input.countryCode !== "string" ||
     typeof input.language !== "string" ||
@@ -412,6 +531,8 @@ function rankExecution(value: Prisma.JsonValue): InternalRankExecutionParameters
     invalidStored("rank execution is invalid");
   }
   return {
+    ...(purpose === undefined ? {} : { purpose }),
+    ...(saveProjectPosition === undefined ? {} : { saveProjectPosition }),
     searchEngine: input.searchEngine,
     countryCode: input.countryCode,
     ...(typeof input.regionCode === "string"

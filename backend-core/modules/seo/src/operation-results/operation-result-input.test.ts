@@ -30,11 +30,25 @@ test("accepts an exact tenant-scoped frequency result request", () => {
 test("accepts an exact tenant-scoped AI answer result request", () => {
   assert.deepEqual(
     internalAiAnswerOperationResultInput(
-      { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] },
+      {
+        workspaceId,
+        projectId,
+        actorId,
+        jobId,
+        keywordIds: [keywordId],
+        includeSources: true
+      },
       context,
       jobId
     ),
-    { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] }
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      jobId,
+      keywordIds: [keywordId],
+      includeSources: true
+    }
   );
 });
 

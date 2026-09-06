@@ -433,14 +433,14 @@ export function SemanticOperationsDrawer({
           ? "Сбор частотности"
           : openedOperation.kind === "AI_ANSWER"
             ? openedOperation.competitorCollection
-              ? "Сбор ИИ-выдачи конкурентов"
+              ? "ИИ-выдача конкурентов"
               : "Сбор ИИ-ответов"
             : openedOperation.kind === "CLUSTERING"
               ? "Кластеризация запросов"
               : openedOperation.kind === "RESEARCH"
                 ? openedOperation.title
             : openedOperation.competitorCollection
-              ? "Сбор конкурентов"
+              ? "Выдача конкурентов · Топ-10"
               : "Проверка позиций"}
       />
     )}
@@ -535,7 +535,7 @@ function rankOperation(value: RankJobSummary): Operation {
     id: value.id,
     kind: "RANK",
     provider: value.provider,
-    title: `${competitorCollection ? "Конкуренты" : "Проверка позиций"} · ${description}`,
+    title: `${competitorCollection ? "Выдача конкурентов" : "Проверка позиций"} · ${description}`,
     description,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${current} из ${total}`,

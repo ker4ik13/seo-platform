@@ -515,6 +515,7 @@ svg { display: block; }
 .metric-card.green { color: var(--green); }
 .metric-card.blue { color: var(--blue); }
 .metric-card.amber { color: var(--amber); }
+.metric-card.rose { color: #c84d8d; }
 .dashboard-live-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .dashboard-rank-section { margin-bottom: 14px; }
 .dashboard-rank-panel-full { width: 100%; }
@@ -4929,7 +4930,7 @@ svg { display: block; }
 }
 .semantic-group-root small { color: var(--muted); font-size: 9px; grid-column: 4; }
 .semantic-group-root > svg { color: var(--muted); height: 16px; width: 16px; }
-.semantic-group-tree-list { min-height: 0; overflow: auto; padding: 0 0 18px; }
+.semantic-group-tree-list { min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 0 18px; }
 .semantic-system-groups {
   background: linear-gradient(180deg, rgba(251, 251, 252, 0), #fbfbfc 12px);
   border-top: 1px solid var(--line);
@@ -7199,6 +7200,9 @@ svg { display: block; }
 .content-overview .dashboard-data-alert > span { min-width: 0; overflow-wrap: anywhere; }
 .content-overview .dashboard-data-alert button { flex: 0 0 auto; min-height: 30px; padding: 0 4px; }
 .content-overview .metric-grid { gap: 10px; margin-bottom: 10px; }
+.content-overview .dashboard-live-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
 .content-overview .metric-card {
   box-shadow: 0 4px 14px rgba(28, 32, 45, .045);
   min-height: 96px;
@@ -7246,80 +7250,343 @@ svg { display: block; }
   padding: 4px 0;
   text-align: right;
 }
-.content-overview .dashboard-rank-panel { min-height: 294px; }
-.content-overview .dashboard-rank-chart { display: grid; gap: 12px; margin-top: 13px; }
-.content-overview .dashboard-rank-summary {
-  align-items: stretch;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(130px, .55fr) minmax(0, 1.45fr);
+.content-overview .dashboard-rank-panel { min-height: 430px; }
+.content-overview .dashboard-position-chart { display: grid; gap: 10px; margin-top: 14px; min-width: 0; }
+.content-overview .dashboard-position-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: space-between;
+  position: relative;
 }
-.content-overview .dashboard-rank-summary > div:first-child {
-  align-content: center;
-  background: #f5f3ff;
-  border: 1px solid #e4e0ff;
-  border-radius: 10px;
-  display: grid;
-  min-width: 0;
-  padding: 10px 12px;
+.content-overview :where(.dashboard-chart-button-group, .dashboard-top-filters) {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
 }
-.content-overview .dashboard-rank-summary > div:first-child > span,
-.content-overview .dashboard-rank-summary > div:first-child > small { color: var(--muted); font-size: 9px; }
-.content-overview .dashboard-rank-summary > div:first-child > strong { font-size: 26px; line-height: 1.1; margin: 3px 0; }
-.content-overview .dashboard-rank-summary dl {
-  background: #fafafd;
+.content-overview :where(.dashboard-chart-button-group, .dashboard-top-filters) > button,
+.content-overview .dashboard-date-range-trigger {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 750;
+  gap: 5px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 9px;
+}
+.content-overview .dashboard-chart-button-group > button.is-active,
+.content-overview .dashboard-date-range-trigger.is-active {
+  background: #f0edff;
+  border-color: #cfc8ff;
+  color: var(--brand);
+}
+.content-overview .dashboard-top-filters > button i {
+  background: var(--series-color);
+  border-radius: 999px;
+  height: 7px;
+  opacity: .35;
+  width: 7px;
+}
+.content-overview .dashboard-top-filters > button.is-active {
+  border-color: color-mix(in srgb, var(--series-color) 35%, #e3e5ec);
+  color: var(--text);
+}
+.content-overview .dashboard-top-filters > button.is-active i { opacity: 1; }
+.content-overview .dashboard-top-filters > .dashboard-untracked-filter {
+  border-color: #dedbe9;
+  gap: 6px;
+  margin-right: 3px;
+}
+.content-overview .dashboard-top-filters > .dashboard-untracked-filter svg {
+  color: #8a8f9d;
+  height: 13px;
+  width: 13px;
+}
+.content-overview .dashboard-top-filters > .dashboard-untracked-filter.is-active {
+  background: #f0edff;
+  border-color: #cfc8ff;
+  color: var(--brand-dark);
+}
+.content-overview .dashboard-top-filters > .dashboard-untracked-filter.is-active svg {
+  color: var(--brand);
+}
+.content-overview .dashboard-top-filters > .dashboard-untracked-filter:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+.content-overview .dashboard-chart-scope-spinner {
+  animation: spin .8s linear infinite;
+  border: 1.5px solid #d6d2e8;
+  border-radius: 50%;
+  border-top-color: var(--brand);
+  flex: 0 0 auto;
+  height: 12px;
+  width: 12px;
+}
+.content-overview :where(.dashboard-chart-button-group, .dashboard-top-filters) > button:focus-visible,
+.content-overview .dashboard-date-range-trigger:focus-visible {
+  box-shadow: 0 0 0 3px rgb(103 88 239 / 14%);
+  outline: 0;
+}
+.content-overview .dashboard-date-range-control { position: static; }
+.content-overview .dashboard-date-range-trigger svg { height: 13px; width: 13px; }
+.content-overview .dashboard-date-range-trigger .dashboard-date-range-chevron {
+  height: 9px;
+  margin-left: 1px;
+  transition: transform 160ms ease;
+  width: 9px;
+}
+.content-overview .dashboard-date-range-trigger[aria-expanded="true"] .dashboard-date-range-chevron { transform: rotate(180deg); }
+.content-overview .dashboard-date-range-backdrop { display: none; }
+.content-overview .dashboard-date-range-popover {
+  background: #fff;
+  border: 1px solid #ddd9f6;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgb(30 28 55 / 22%);
+  color: var(--text);
+  left: 0;
+  overflow: hidden;
+  position: absolute;
+  top: calc(100% + 10px);
+  width: min(640px, 100%);
+  z-index: 50;
+}
+.content-overview .dashboard-date-range-popover button { cursor: pointer; }
+.content-overview .dashboard-date-range-header {
+  align-items: center;
+  background: linear-gradient(135deg, #faf9ff 0%, #fff 72%);
+  border-bottom: 1px solid #ece9fa;
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+}
+.content-overview .dashboard-date-range-header > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.content-overview .dashboard-date-range-header > div:first-child > span {
+  color: var(--brand);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.content-overview .dashboard-date-range-month-label {
+  font-size: 14px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.content-overview .dashboard-date-range-month-label.is-mobile { display: none; }
+.content-overview .dashboard-date-range-navigation { align-items: center; display: flex; gap: 5px; }
+.content-overview .dashboard-date-range-navigation button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  height: 31px;
+  justify-content: center;
+  padding: 0;
+  width: 31px;
+}
+.content-overview .dashboard-date-range-navigation button:first-child svg { transform: rotate(180deg); }
+.content-overview .dashboard-date-range-navigation button:hover:not(:disabled) { border-color: #c7c0f8; color: var(--brand); }
+.content-overview .dashboard-date-range-navigation button:disabled { cursor: not-allowed; opacity: .36; }
+.content-overview .dashboard-date-range-navigation svg { height: 13px; width: 13px; }
+.content-overview .dashboard-date-range-navigation .dashboard-date-range-close { margin-left: 3px; }
+.content-overview .dashboard-date-range-values {
+  align-items: center;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  padding: 13px 16px 0;
+}
+.content-overview .dashboard-date-range-values > span { color: #a19cab; font-size: 12px; }
+.content-overview .dashboard-date-range-values button {
+  background: #fafafe;
   border: 1px solid var(--line);
   border-radius: 10px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 0;
-  min-width: 0;
-  padding: 10px 4px;
+  gap: 2px;
+  min-height: 48px;
+  padding: 7px 10px;
+  text-align: left;
 }
-.content-overview .dashboard-rank-summary dl > div {
-  border-left: 1px solid var(--line);
-  min-width: 0;
-  padding: 2px 9px;
+.content-overview .dashboard-date-range-values button.is-active {
+  background: #f4f1ff;
+  border-color: #bdb3ff;
+  box-shadow: 0 0 0 3px rgb(103 88 239 / 8%);
 }
-.content-overview .dashboard-rank-summary dl > div:first-child { border-left: 0; }
-.content-overview .dashboard-rank-summary dt { color: var(--muted); font-size: 9px; line-height: 1.3; }
-.content-overview .dashboard-rank-summary dd { font-size: 13px; font-weight: 800; margin: 5px 0 0; overflow-wrap: anywhere; }
-.content-overview .dashboard-rank-bars {
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  gap: 7px;
-  min-height: 126px;
-  overflow-x: auto;
-  padding: 0 2px 5px;
-  scrollbar-width: thin;
+.content-overview .dashboard-date-range-values small { color: var(--muted); font-size: 8px; }
+.content-overview .dashboard-date-range-values strong { font-size: 11px; font-weight: 750; }
+.content-overview .dashboard-date-range-guidance {
+  color: var(--muted);
+  font-size: 9px;
+  margin: 8px 16px 0;
 }
-.content-overview .dashboard-rank-bar {
-  align-items: center;
+.content-overview .dashboard-date-range-calendars {
   display: grid;
-  flex: 1 1 56px;
-  gap: 4px;
-  grid-template-rows: 14px 76px 15px;
-  max-width: 116px;
-  min-width: 36px;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px 16px 15px;
+}
+.content-overview .dashboard-calendar-month { min-width: 0; }
+.content-overview .dashboard-calendar-month > strong {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 9px;
   text-align: center;
 }
-.content-overview .dashboard-rank-bar > span { color: var(--text); font-size: 9px; font-weight: 750; }
-.content-overview .dashboard-rank-bar > div {
-  align-items: end;
-  background: linear-gradient(to top, #f1efff, transparent);
-  border-radius: 5px 5px 2px 2px;
+.content-overview :where(.dashboard-calendar-weekdays, .dashboard-calendar-days) {
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.content-overview .dashboard-calendar-weekdays { margin-bottom: 4px; }
+.content-overview .dashboard-calendar-weekdays span {
+  color: #9a9dab;
+  font-size: 8px;
+  font-weight: 750;
+  text-align: center;
+}
+.content-overview .dashboard-calendar-days > span,
+.content-overview .dashboard-calendar-days > button { height: 31px; min-width: 0; }
+.content-overview .dashboard-calendar-days > button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 650;
+  padding: 0;
+  position: relative;
+}
+.content-overview .dashboard-calendar-days > button:hover:not(:disabled) { background: #eeeaff; color: var(--brand); }
+.content-overview .dashboard-calendar-days > button.is-in-range { background: #f2efff; color: #4f3ed1; }
+.content-overview .dashboard-calendar-days > button:is(.is-range-start, .is-range-end) {
+  background: var(--brand);
+  box-shadow: 0 5px 12px rgb(103 88 239 / 22%);
+  color: #fff;
+}
+.content-overview .dashboard-calendar-days > button.is-today:not(.is-range-start, .is-range-end)::after {
+  background: var(--brand);
+  border-radius: 50%;
+  bottom: 3px;
+  content: "";
+  height: 3px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 3px;
+}
+.content-overview .dashboard-calendar-days > button:focus-visible {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgb(103 88 239 / 42%);
+  outline: 0;
+  z-index: 1;
+}
+.content-overview .dashboard-calendar-days > button:disabled { color: #c9cbd4; cursor: not-allowed; text-decoration: line-through; text-decoration-color: #e2e3e9; }
+.content-overview .dashboard-date-range-footer {
+  align-items: center;
+  background: #fbfbfe;
+  border-top: 1px solid #ececf2;
   display: flex;
-  height: 76px;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 11px 16px;
+}
+.content-overview .dashboard-date-range-footer > span { color: var(--muted); font-size: 8px; line-height: 1.35; }
+.content-overview .dashboard-date-range-footer > div { display: flex; flex: 0 0 auto; gap: 7px; }
+.content-overview .dashboard-date-range-footer button {
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 750;
+  min-height: 32px;
+  padding: 0 11px;
+}
+.content-overview .dashboard-date-range-reset { background: #fff; border: 1px solid var(--line); color: var(--muted); }
+.content-overview .dashboard-date-range-apply { background: var(--brand); border: 1px solid var(--brand); color: #fff; }
+.content-overview .dashboard-date-range-apply:disabled { cursor: not-allowed; opacity: .45; }
+.content-overview .dashboard-position-plot {
+  background: linear-gradient(180deg, #fbfbfe 0%, #fff 100%);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 300px;
   overflow: hidden;
+  position: relative;
 }
-.content-overview .dashboard-rank-bar i {
-  background: linear-gradient(180deg, #8879ff, var(--brand));
-  border-radius: 5px 5px 2px 2px;
-  display: block;
-  min-height: 2px;
-  width: 100%;
+.content-overview .dashboard-position-plot svg { display: block; height: 300px; width: 100%; }
+.content-overview .dashboard-chart-scope-error {
+  align-items: center;
+  background: #fff5f6;
+  border: 1px solid #f1c7ce;
+  border-radius: 8px;
+  color: #a73445;
+  display: flex;
+  font-size: 9px;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 7px 9px;
 }
-.content-overview .dashboard-rank-bar > small { color: var(--muted); font-size: 8px; white-space: nowrap; }
+.content-overview .dashboard-chart-scope-error button {
+  background: #fff;
+  border: 1px solid #e5aeb8;
+  border-radius: 6px;
+  color: inherit;
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 750;
+  min-height: 26px;
+  padding: 0 8px;
+}
+.content-overview .dashboard-chart-grid line { stroke: #e6e8ef; stroke-dasharray: 3 4; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.content-overview .dashboard-chart-grid text,
+.content-overview .dashboard-chart-x-label { fill: #858b99; font-size: 9px; }
+.content-overview .dashboard-chart-grid text { text-anchor: start; }
+.content-overview .dashboard-chart-x-label { text-anchor: middle; }
+.content-overview .dashboard-position-line {
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+  vector-effect: non-scaling-stroke;
+}
+.content-overview .dashboard-position-point {
+  pointer-events: none;
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.content-overview .dashboard-position-hit { cursor: crosshair; fill: transparent; outline: none; }
+.content-overview .dashboard-position-hit:focus-visible { fill: rgb(103 88 239 / 5%); }
+.content-overview .dashboard-position-tooltip {
+  background: rgb(30 32 43 / 94%);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(25 27 38 / 18%);
+  color: #fff;
+  display: grid;
+  gap: 4px;
+  max-width: min(340px, 76%);
+  padding: 9px 11px;
+  pointer-events: none;
+  position: absolute;
+  top: 7px;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+.content-overview .dashboard-position-tooltip > strong { font-size: 12px; }
+.content-overview .dashboard-position-tooltip > span { color: #c9cbd4; font-size: 10px; }
+.content-overview .dashboard-position-tooltip > div { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; }
+.content-overview .dashboard-position-tooltip > div > span { align-items: center; display: inline-flex; font-size: 10px; gap: 5px; white-space: nowrap; }
+.content-overview .dashboard-position-tooltip i { border-radius: 50%; height: 7px; width: 7px; }
+.content-overview .dashboard-chart-note { color: var(--muted); display: flex; font-size: 8px; gap: 12px; justify-content: space-between; }
+.content-overview .dashboard-chart-period-empty { align-items: center; background: #fafafd; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); display: flex; flex-direction: column; justify-content: center; min-height: 270px; padding: 24px; text-align: center; }
+.content-overview .dashboard-chart-period-empty strong { color: var(--text); font-size: 12px; }
+.content-overview .dashboard-chart-period-empty span { font-size: 10px; margin-top: 5px; }
 .content-overview .dashboard-audit-panel { min-height: 294px; }
 .content-overview .dashboard-crawl-summary {
   display: grid;
@@ -7744,6 +8011,12 @@ svg { display: block; }
   .tracking-context-catalog-list { max-height: 360px; }
 }
 
+@media (max-width: 1180px) {
+  .content-overview .dashboard-live-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
   .semantic-position-context-bar,
   .tracking-context-settings,
@@ -7755,7 +8028,7 @@ svg { display: block; }
 
 @media (max-width: 980px) {
   .content-overview :where(.dashboard-live-grid, .dashboard-lower-grid) { grid-template-columns: 1fr; }
-  .content-overview .dashboard-rank-panel { min-height: 230px; }
+  .content-overview .dashboard-rank-panel { min-height: 400px; }
   .billing-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -8002,20 +8275,69 @@ svg { display: block; }
 }
 
 @media (max-width: 680px) {
-  .content-overview .dashboard-rank-summary { grid-template-columns: 1fr; }
-  .content-overview .dashboard-rank-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .content-overview .dashboard-rank-summary dl > div:nth-child(3) {
-    border-left: 0;
-    border-top: 1px solid var(--line);
-    margin-top: 7px;
-    padding-top: 8px;
+  .content-overview .dashboard-position-chart {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 100%;
+    width: 100%;
   }
-  .content-overview .dashboard-rank-summary dl > div:nth-child(4) {
-    border-top: 1px solid var(--line);
-    margin-top: 7px;
-    padding-top: 8px;
+  .content-overview .dashboard-position-controls {
+    align-items: stretch;
+    flex-direction: column;
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
   }
-  .content-overview .dashboard-rank-bar { flex-basis: 52px; min-width: 52px; }
+  .content-overview :where(.dashboard-chart-button-group, .dashboard-top-filters) {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    width: 100%;
+  }
+  .content-overview :where(.dashboard-chart-button-group, .dashboard-top-filters)::-webkit-scrollbar { display: none; }
+  .content-overview :where(.dashboard-chart-button-group, .dashboard-top-filters) > button,
+  .content-overview .dashboard-date-range-control { flex: 0 0 auto; }
+  .content-overview :where(.dashboard-position-plot, .dashboard-chart-period-empty, .dashboard-chart-note) {
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+  .content-overview .dashboard-date-range-backdrop {
+    background: rgb(18 19 28 / 46%);
+    display: block;
+    inset: 0;
+    position: fixed;
+    z-index: 129;
+  }
+  .content-overview .dashboard-date-range-popover {
+    border-radius: 18px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: 10px;
+    max-height: calc(100dvh - 20px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    position: fixed;
+    right: 10px;
+    top: auto;
+    width: auto;
+    z-index: 130;
+  }
+  .content-overview .dashboard-date-range-month-label.is-desktop { display: none; }
+  .content-overview .dashboard-date-range-month-label.is-mobile { display: block; }
+  .content-overview .dashboard-date-range-values { padding-inline: 13px; }
+  .content-overview .dashboard-date-range-guidance { margin-inline: 13px; }
+  .content-overview .dashboard-date-range-calendars { grid-template-columns: 1fr; padding: 12px 13px 14px; }
+  .content-overview .dashboard-calendar-month.is-leading { display: none; }
+  .content-overview .dashboard-calendar-days > span,
+  .content-overview .dashboard-calendar-days > button { height: 38px; }
+  .content-overview .dashboard-calendar-days > button { font-size: 11px; }
+  .content-overview .dashboard-date-range-footer { align-items: stretch; flex-direction: column; padding-inline: 13px; }
+  .content-overview .dashboard-date-range-footer > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .content-overview .dashboard-date-range-footer button { min-height: 38px; }
+  .content-overview .dashboard-position-tooltip { max-width: calc(100% - 16px); }
+  .content-overview .dashboard-chart-note { align-items: flex-start; flex-direction: column; gap: 3px; }
   .content-overview .dashboard-crawl-summary { grid-template-columns: 1fr; }
   .content-overview .dashboard-crawl-summary span { min-height: 0; }
   .settings-overview-grid { grid-template-columns: 1fr; }
@@ -11790,7 +12112,6 @@ svg { display: block; }
    surfaces use stable, touch-sized bottom sheets without shifting content. */
 .semantic-header-actions > .semantic-mobile-groups-button,
 .semantic-mobile-groups-backdrop,
-.semantic-mobile-groups-close,
 .semantic-mobile-title,
 .semantic-layout-button-mobile {
   display: none;
@@ -11801,25 +12122,62 @@ svg { display: block; }
   .semantic-core:has(.semantic-keyword-inspector),
   .semantic-core:has(.semantic-operations-drawer),
   .semantic-core:has(.semantic-history-drawer) {
-    grid-template-rows: 52px 34px 86px minmax(0, 1fr) 38px;
+    grid-template-rows: 96px 42px 86px minmax(0, 1fr) 38px;
   }
 
   .semantic-core-header {
+    align-items: center;
     gap: 6px;
-    height: 52px;
-    min-height: 52px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 36px 42px;
+    height: 96px;
+    min-height: 96px;
     padding: 6px 8px;
   }
 
-  .semantic-title-block,
+  .semantic-title-block {
+    display: contents;
+  }
+
   .semantic-title-block h1 {
     min-width: 0;
   }
 
   .semantic-title-block h1 {
     font-size: 15px;
+    grid-column: 1;
+    grid-row: 1;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .semantic-title-block > .custom-select {
+    display: block;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .semantic-title-block > .custom-select .custom-select-trigger {
+    background: #fafafe;
+    font-size: 13px;
+    min-height: 40px;
+    padding-inline: 10px;
+    width: 100%;
+  }
+
+  .semantic-header-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .semantic-commandbar {
+    height: 42px;
+    min-height: 42px;
+  }
+
+  .semantic-commandbar > button {
+    min-height: 40px;
   }
 
   .semantic-header-actions > .semantic-mobile-groups-button {
@@ -11912,28 +12270,6 @@ svg { display: block; }
     z-index: 130;
   }
 
-  .semantic-mobile-groups-close {
-    align-items: center;
-    background: #f4f3f8;
-    border: 0;
-    border-radius: 8px;
-    color: var(--muted);
-    display: flex;
-    height: 32px;
-    justify-content: center;
-    padding: 0;
-    position: fixed;
-    right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
-    top: max(14px, calc(env(safe-area-inset-top, 0px) + 14px));
-    width: 32px;
-    z-index: 150;
-  }
-
-  .semantic-mobile-groups-close > svg {
-    height: 16px;
-    width: 16px;
-  }
-
   .semantic-core.semantic-mobile-groups-open > .semantic-group-tree {
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -11951,7 +12287,25 @@ svg { display: block; }
 
   .semantic-core.semantic-mobile-groups-open > .semantic-group-tree > header {
     min-height: 42px;
-    padding-right: 42px;
+    padding-right: 2px;
+  }
+
+  .semantic-core.semantic-mobile-groups-open .semantic-group-tree-close {
+    align-items: center;
+    background: #f4f3f8;
+    border: 1px solid #e2e1e8;
+    color: var(--muted);
+    display: inline-flex;
+    flex: 0 0 34px;
+    height: 34px;
+    justify-content: center;
+    margin-left: 5px;
+    width: 34px;
+  }
+
+  .semantic-core.semantic-mobile-groups-open .semantic-group-tree-close > svg {
+    height: 17px;
+    width: 17px;
   }
 
   .semantic-core.semantic-mobile-groups-open .semantic-group-search input {
@@ -11966,6 +12320,10 @@ svg { display: block; }
   .semantic-core.semantic-mobile-groups-open .semantic-group-root,
   .semantic-core.semantic-mobile-groups-open .semantic-group-tree-row {
     min-height: 40px;
+  }
+
+  .semantic-core.semantic-mobile-groups-open .semantic-group-tree-row {
+    min-width: 0 !important;
   }
 
   .semantic-core.semantic-mobile-groups-open .semantic-group-toggle {
@@ -11984,6 +12342,13 @@ svg { display: block; }
 }
 
 @media (max-width: 620px) {
+  .semantic-core,
+  .semantic-core:has(.semantic-keyword-inspector),
+  .semantic-core:has(.semantic-operations-drawer),
+  .semantic-core:has(.semantic-history-drawer) {
+    grid-template-rows: 96px 48px 86px minmax(0, 1fr) 38px;
+  }
+
   .semantic-desktop-title,
   .semantic-layout-button-full {
     display: none;
@@ -12017,11 +12382,44 @@ svg { display: block; }
     max-width: min(78px, 22vw);
   }
 
-  .context-menu {
-    bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  .semantic-commandbar {
+    align-items: center;
+    gap: 4px;
+    height: 48px;
+    min-height: 48px;
+    padding: 4px 8px;
+    scroll-padding-inline: 8px;
+    scrollbar-width: none;
+  }
+
+  .semantic-commandbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .semantic-commandbar > button {
+    background: #fff;
+    border: 1px solid #e3e4ea;
+    border-radius: 8px;
+    gap: 6px;
+    min-height: 40px;
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+
+  .semantic-commandbar > button > span {
+    display: inline;
+  }
+
+  .semantic-commandbar > .semantic-command-menu-trigger[aria-expanded="true"] {
+    border-color: #c8c0ff;
+  }
+
+  .context-menu:not(.context-menu-dropdown) {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
     left: auto !important;
-    max-height: min(76dvh, 560px);
+    max-height: min(calc(100dvh - 148px - env(safe-area-inset-bottom, 0px)), 560px);
     min-width: 0;
+    overscroll-behavior: contain;
     overflow-y: auto;
     right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
     top: auto !important;
@@ -12029,9 +12427,20 @@ svg { display: block; }
     z-index: 190;
   }
 
+  .context-menu.context-menu-dropdown {
+    bottom: auto;
+    max-height: min(50dvh, 320px);
+    min-width: min(260px, calc(100vw - 16px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    right: auto;
+    width: min(260px, calc(100vw - 16px));
+    z-index: 190;
+  }
+
   .context-menu button {
     font-size: 13px;
-    min-height: 40px;
+    min-height: 44px;
     padding-inline: 10px;
   }
 

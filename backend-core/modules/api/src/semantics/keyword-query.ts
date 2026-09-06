@@ -6,6 +6,7 @@ import {
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
   type KeywordListQuery,
+  type ProjectPositionHistoryQuery,
   type SemanticKeywordMultiSearchInput
 } from "@seo-platform/contracts";
 import { assertUuid } from "../common/identifier.js";
@@ -78,6 +79,22 @@ export function keywordTagOptionsQuery(
     invalid("search", "Must contain at most 160 characters");
   }
   return search ? { search } : {};
+}
+
+export function projectPositionHistoryQuery(
+  value: unknown
+): ProjectPositionHistoryQuery {
+  const query =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Readonly<Record<string, unknown>>)
+      : {};
+  if (Object.keys(query).some((key) => key !== "includeUntracked")) {
+    invalid("query", "Contains unsupported fields");
+  }
+  return {
+    includeUntracked:
+      optionalBoolean(query.includeUntracked, "includeUntracked") ?? false
+  };
 }
 
 export function keywordListQuery(value: unknown): KeywordListQuery {

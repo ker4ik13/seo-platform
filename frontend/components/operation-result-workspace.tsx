@@ -6,6 +6,8 @@ import {
 } from "@seo-platform/contracts";
 import type {
   AiAnswerOperationResult,
+  AiAnswerOperationResultRow,
+  AiAnswerOperationSourceSummary,
   ClusteringOperationResult,
   ClusteringProposalApplyResult,
   ClusteringProposalClusterSummary,
@@ -47,6 +49,12 @@ import {
   type OperationResultKind
 } from "../lib/operation-result-routes";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
+import {
+  aiAnswerCollectionTitle,
+  isCompetitorCollection,
+  rankCollectionDepthLabel,
+  rankCollectionTitle
+} from "../lib/operation-collection-purpose";
 import { projectPresenceAvatarUrl } from "../lib/project-presence";
 import {
   rankFailureReason,
@@ -1652,6 +1660,9 @@ function ClusteringFolderPopover({
 }
 
 function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>) {
+  if (isCompetitorCollection(result.collection)) {
+    return <AiCompetitorTable result={result} />;
+  }
   if (result.rows.length === 0) {
     return <EmptyRows active={isActiveStatus(result.collection.status)} />;
   }
@@ -1682,6 +1693,64 @@ function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>
             <td className={styles.numberCell}>{formatOptionalNumber(row.snapshot?.position)}</td>
             <td className={styles.numberCell}>{row.snapshot ? formatInteger(row.snapshot.sourceCount) : "—"}</td>
             <td>{formatDateTime(row.snapshot?.observedAt ?? row.updatedAt)}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+interface AiCompetitorSourceRow {
+  readonly operation: AiAnswerOperationResultRow;
+  readonly source?: AiAnswerOperationSourceSummary;
+}
+
+function AiCompetitorTable({
+  result
+}: Readonly<{ result: AiAnswerOperationResult }>) {
+  if (result.rows.length === 0) {
+    return <EmptyRows active={isActiveStatus(result.collection.status)} />;
+  }
+  const sourceRows: readonly AiCompetitorSourceRow[] = result.rows.flatMap(
+    (operation) => {
+      const sources = operation.snapshot?.sources ?? [];
+      return sources.length > 0
+        ? sources.map((source) => ({ operation, source }))
+        : [{ operation }];
+    }
+  );
+  return (
+    <div className={styles.tableScroll}>
+      <table className={`${styles.table} ${styles.competitorTable}`}>
+        <caption>Источники ИИ-выдачи конкурентов этого запуска</caption>
+        <thead>
+          <tr>
+            <th>#</th><th>Запрос</th><th>Статус</th><th>Место</th>
+            <th>URL источника</th><th>Заголовок</th><th>Описание</th>
+            <th>Проверено</th>
+          </tr>
+        </thead>
+        <tbody>{sourceRows.map(({ operation, source }) => (
+          <tr key={`${operation.sequence}:${operation.keywordId}:${source?.position ?? "empty"}`}>
+            <td>{operation.sequence + 1}</td>
+            <td className={styles.primaryCell}><strong>{operation.keyword}</strong></td>
+            <td>
+              <ItemStatus
+                status={operation.status}
+                {...(operation.errorCode ? { errorCode: operation.errorCode } : {})}
+              />
+            </td>
+            <td className={styles.numberCell}>{formatOptionalNumber(source?.position)}</td>
+            <td className={styles.urlCell}>
+              {source
+                ? <ExternalUrl value={source.url} />
+                : operation.snapshot
+                  ? <span className={styles.mutedCell}>Источников нет</span>
+                  : "—"}
+            </td>
+            <td className={styles.longCell} title={source?.title}>{source?.title ?? "—"}</td>
+            <td className={styles.longCell} title={source?.description}>{source?.description ?? "—"}</td>
+            <td>{formatDateTime(operation.snapshot?.observedAt ?? operation.updatedAt)}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -1987,8 +2056,10 @@ function formatRuntimeNextAction(value: string | undefined): string {
 
 function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.job.status)} />;
+  if (isCompetitorCollection(result.execution)) {
+    return <CompetitorRankTable result={result} />;
+  }
   const active = isActiveStatus(result.job.status);
-  const competitorCollection = result.execution.purpose === "COMPETITOR_SERP";
   const failedRows = active
     ? []
     : result.rows.filter(({ state }) => state === "PENDING");
@@ -2000,7 +2071,7 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
       {resultRows.length > 0 && (
         <div className={styles.tableScroll}>
           <table className={styles.table}>
-            <caption>{competitorCollection ? "Срезы конкурентов этого запуска" : "Позиции запросов этого запуска"}</caption>
+            <caption>Позиции запросов этого запуска</caption>
             <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Проверено</th></tr></thead>
             <tbody>{resultRows.map((row) => (
               <tr key={`${row.sequence}:${row.keywordId}`}>
@@ -2016,44 +2087,136 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
           </table>
         </div>
       )}
-      {failedRows.length > 0 && (
-        <section className={styles.rankFailures} aria-labelledby="rank-failures-title">
-          <header>
-            <div>
-              <strong id="rank-failures-title">
-                {competitorCollection ? "Не удалось собрать конкурентов" : "Не удалось снять позиции"}
-              </strong>
-              <small>
-                Эти запросы завершены с ошибкой и больше не выполняются в этом запуске.
-              </small>
-            </div>
-            <span>{formatInteger(failedRows.length)}</span>
-          </header>
-          <div className={styles.tableScroll}>
-            <table className={`${styles.table} ${styles.rankFailureTable}`}>
-              <caption>Запросы без результата после завершения сбора</caption>
-              <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Причина</th><th>Попытки провайдера</th></tr></thead>
-              <tbody>{failedRows.map((row) => (
-                <tr key={`failed:${row.sequence}:${row.keywordId}`}>
-                  <td>{row.sequence + 1}</td>
-                  <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
-                  <td>
-                    <span className={`${styles.itemStatus} ${styles.failed}`}>
-                      {competitorCollection ? "Не собран" : "Не снят"}
-                    </span>
-                  </td>
-                  <td className={styles.rankFailureReason} title={row.errorCode}>
-                    <strong>{rankFailureReason(row, result.job.provider)}</strong>
-                    {row.errorCode && <small>{row.errorCode}</small>}
-                  </td>
-                  <td className={styles.numberCell}>{rankPollAttempts(row)}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        </section>
-      )}
+      <RankFailures
+        competitorCollection={false}
+        provider={result.job.provider}
+        rows={failedRows}
+      />
     </div>
+  );
+}
+
+interface CompetitorRankResultRow {
+  readonly operation: RankOperationResultRow;
+  readonly result?: NonNullable<RankOperationResultRow["serpResults"]>[number];
+}
+
+function CompetitorRankTable({
+  result
+}: Readonly<{ result: RankOperationResult }>) {
+  const active = isActiveStatus(result.job.status);
+  const failedRows = active
+    ? []
+    : result.rows.filter(({ state }) => state === "PENDING");
+  const completedRows = failedRows.length === 0
+    ? result.rows
+    : result.rows.filter(({ state }) => state !== "PENDING");
+  const serpRows: readonly CompetitorRankResultRow[] = completedRows.flatMap(
+    (operation) => {
+      const rows = operation.serpResults ?? [];
+      return rows.length > 0
+        ? rows.map((row) => ({ operation, result: row }))
+        : [{ operation }];
+    }
+  );
+  return (
+    <div className={styles.rankResults}>
+      {serpRows.length > 0 && (
+        <div className={styles.tableScroll}>
+          <table className={`${styles.table} ${styles.competitorTable}`}>
+            <caption>Органическая выдача конкурентов Топ-10 этого запуска</caption>
+            <thead>
+              <tr>
+                <th>#</th><th>Запрос</th><th>Результат</th><th>Место</th>
+                <th>URL конкурента</th><th>Заголовок</th><th>Описание</th>
+                <th>Проверено</th>
+              </tr>
+            </thead>
+            <tbody>{serpRows.map(({ operation, result: serpResult }) => (
+              <tr key={`${operation.sequence}:${operation.keywordId}:${serpResult?.position ?? "empty"}`}>
+                <td>{operation.sequence + 1}</td>
+                <td className={styles.primaryCell}><strong>{operation.keyword}</strong></td>
+                <td>
+                  <span className={`${styles.itemStatus} ${operation.state === "PENDING" ? "" : styles.found}`}>
+                    {operation.state === "PENDING" ? "В работе" : "Собрано"}
+                  </span>
+                </td>
+                <td className={styles.numberCell}>{formatOptionalNumber(serpResult?.position)}</td>
+                <td className={styles.urlCell}>
+                  {serpResult
+                    ? <ExternalUrl value={serpResult.rankingUrl} />
+                    : operation.state === "PENDING"
+                      ? "—"
+                      : <span className={styles.mutedCell}>Выдача пуста</span>}
+                </td>
+                <td className={styles.longCell} title={serpResult?.title}>{serpResult?.title ?? "—"}</td>
+                <td className={styles.longCell} title={serpResult?.snippet}>{serpResult?.snippet ?? "—"}</td>
+                <td>{formatDateTime(operation.observedAt)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      <RankFailures
+        competitorCollection
+        provider={result.job.provider}
+        rows={failedRows}
+      />
+    </div>
+  );
+}
+
+function RankFailures({
+  competitorCollection,
+  provider,
+  rows
+}: Readonly<{
+  competitorCollection: boolean;
+  provider: RankJobSummary["provider"];
+  rows: readonly RankOperationResultRow[];
+}>) {
+  if (rows.length === 0) return null;
+  const titleId = competitorCollection
+    ? "competitor-rank-failures-title"
+    : "rank-failures-title";
+  return (
+    <section className={styles.rankFailures} aria-labelledby={titleId}>
+      <header>
+        <div>
+          <strong id={titleId}>
+            {competitorCollection
+              ? "Не удалось собрать выдачу конкурентов"
+              : "Не удалось снять позиции"}
+          </strong>
+          <small>
+            Эти запросы завершены с ошибкой и больше не выполняются в этом запуске.
+          </small>
+        </div>
+        <span>{formatInteger(rows.length)}</span>
+      </header>
+      <div className={styles.tableScroll}>
+        <table className={`${styles.table} ${styles.rankFailureTable}`}>
+          <caption>Запросы без результата после завершения сбора</caption>
+          <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Причина</th><th>Попытки провайдера</th></tr></thead>
+          <tbody>{rows.map((row) => (
+            <tr key={`failed:${row.sequence}:${row.keywordId}`}>
+              <td>{row.sequence + 1}</td>
+              <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
+              <td>
+                <span className={`${styles.itemStatus} ${styles.failed}`}>
+                  {competitorCollection ? "Не собран" : "Не снят"}
+                </span>
+              </td>
+              <td className={styles.rankFailureReason} title={row.errorCode}>
+                <strong>{rankFailureReason(row, provider)}</strong>
+                {row.errorCode && <small>{row.errorCode}</small>}
+              </td>
+              <td className={styles.numberCell}>{rankPollAttempts(row)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -2306,14 +2469,24 @@ function operationSummary(data: OperationResultData): SummaryView {
   if (data.kind === "ai-answer") {
     const value = data.value.collection;
     const current = value.completedKeywords + value.failedKeywords;
+    const competitorCollection = isCompetitorCollection(value);
+    const loadedSourceCount = data.value.rows.reduce(
+      (total, row) => total + (row.snapshot?.sources?.length ?? 0),
+      0
+    );
     return {
-      title: "Сбор ИИ-ответов",
-      description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${deviceLabel(value.device)}`,
+      title: aiAnswerCollectionTitle(value),
+      description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${deviceLabel(value.device)}${competitorCollection ? " · источники ИИ-выдачи" : ""}`,
       provider: "ARSENKIN",
       ...summaryStatus(value.status, current, value.selectedKeywords, value.stage),
       facts: [
         { label: "Обработано", value: formatInteger(current) },
-        { label: "Успешно", value: formatInteger(value.completedKeywords) },
+        {
+          label: competitorCollection ? "Источников загружено" : "Успешно",
+          value: formatInteger(
+            competitorCollection ? loadedSourceCount : value.completedKeywords
+          )
+        },
         { label: "Ошибок", value: formatInteger(value.failedKeywords) },
         { label: "Регион", value: value.regionCode },
         ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
@@ -2348,6 +2521,7 @@ function operationSummary(data: OperationResultData): SummaryView {
   }
   if (data.kind === "rank") {
     const value = data.value;
+    const competitorCollection = isCompetitorCollection(value.execution);
     const current = Number(value.job.progress.current);
     const total = Number(value.job.progress.total);
     const found = Number(value.job.result?.foundCount ?? value.rows.filter(({ state }) => state === "FOUND").length);
@@ -2362,17 +2536,37 @@ function operationSummary(data: OperationResultData): SummaryView {
       searchSource
     );
     return {
-      title: "Проверка позиций",
-      description: `${searchSystem} · ${deviceLabel(value.execution.device)}`,
+      title: rankCollectionTitle(value.execution),
+      description: `${searchSystem} · ${deviceLabel(value.execution.device)}${competitorCollection ? " · органическая выдача" : ""}`,
       context: value.contextName,
       provider: value.job.provider,
       ...summaryStatus(value.job.status, current, total),
       facts: [
-        { label: "Найдено", value: formatInteger(found) },
-        { label: "Не найдено", value: formatInteger(notFound) },
+        ...(competitorCollection
+          ? [
+              {
+                label: "Срезов",
+                value: formatInteger(
+                  Number(value.job.result?.persistedCount ?? current - failed)
+                )
+              },
+              {
+                label: "Результатов загружено",
+                value: formatInteger(
+                  value.rows.reduce(
+                    (total, row) => total + (row.serpResults?.length ?? 0),
+                    0
+                  )
+                )
+              }
+            ]
+          : [
+              { label: "Найдено", value: formatInteger(found) },
+              { label: "Не найдено", value: formatInteger(notFound) }
+            ]),
         { label: "Ошибок", value: formatInteger(failed) },
         { label: "Регион", value: value.execution.regionCode ?? value.execution.countryCode },
-        { label: "Глубина", value: `Топ-${value.execution.depth}` },
+        { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—" },
         ...("failure" in value.job && value.job.failure
           ? [{ label: "Код ошибки", value: value.job.failure.code }]
           : [])

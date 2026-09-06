@@ -36,7 +36,8 @@ test("returns AI answer rows with per-job snapshot state", async () => {
     projectId,
     actorId,
     jobId,
-    keywordIds: [keywordId]
+    keywordIds: [keywordId],
+    includeSources: false
   });
 
   assert.deepEqual(result.rows, [{
@@ -52,6 +53,66 @@ test("returns AI answer rows with per-job snapshot state", async () => {
       observedAt: "2026-08-19T12:00:00.000Z"
     }
   }]);
+});
+
+test("returns ordered AI sources only for a competitor result", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000010";
+  const snapshotId = "01900000-0000-7000-8000-000000000011";
+  const service = new OperationResultService({
+    keyword: {
+      findMany: async () => [{ id: keywordId, textOriginal: "seo аудит" }]
+    },
+    aiAnswerSnapshot: {
+      findMany: async () => [{
+        id: snapshotId,
+        keywordId,
+        answerPresent: true,
+        siteFound: false,
+        position: null,
+        rankingUrl: null,
+        brandFound: false,
+        observedAt: new Date("2026-09-02T12:00:00.000Z"),
+        _count: { sources: 2 }
+      }]
+    },
+    aiAnswerSource: {
+      findMany: async () => [
+        {
+          snapshotId,
+          position: 1,
+          url: "https://competitor.example/a",
+          title: "Первый конкурент",
+          description: "Описание первого результата"
+        },
+        {
+          snapshotId,
+          position: 2,
+          url: "https://competitor.example/b",
+          title: null,
+          description: null
+        }
+      ]
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.aiAnswer({
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    keywordIds: [keywordId],
+    includeSources: true
+  });
+
+  assert.deepEqual(result.rows[0]?.snapshot?.sources, [
+    {
+      position: 1,
+      url: "https://competitor.example/a",
+      title: "Первый конкурент",
+      description: "Описание первого результата"
+    },
+    { position: 2, url: "https://competitor.example/b" }
+  ]);
 });
 
 test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
@@ -117,6 +178,75 @@ test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
   assert.equal(rows[1]?.position, 7);
   assert.equal(rows[1]?.rankingUrl, "https://example.com/found");
   assert.equal(rows[2]?.observedAt, "2026-08-02T10:01:00.000Z");
+});
+
+test("preserves competitor purpose and returns its exact organic Top-10", async () => {
+  const snapshotId = "01900000-0000-7000-8000-000000000030";
+  const service = new OperationResultService({
+    rankExecutionManifest: {
+      findFirst: async () => ({
+        id: "01900000-0000-7000-8000-000000000007",
+        trackingContextId: "01900000-0000-7000-8000-000000000006",
+        execution: {
+          ...execution(),
+          purpose: "COMPETITOR_SERP",
+          saveProjectPosition: false
+        },
+        context: { name: "Google · Москва · Десктоп" }
+      })
+    },
+    rankExecutionManifestEntry: {
+      findMany: async () => [{
+        ...rankEntry(0, {
+          id: snapshotId,
+          found: false,
+          position: null,
+          absolutePosition: null,
+          pixelPosition: null,
+          rankingUrl: null,
+          title: null,
+          snippet: null,
+          observedAt: new Date("2026-09-02T10:00:00.000Z"),
+          dataQualityFlags: []
+        })
+      }]
+    },
+    rankSerpResult: {
+      findMany: async () => [
+        {
+          snapshotId,
+          position: 1,
+          rankingUrl: "https://first.example/page",
+          faviconUrl: "https://first.example/favicon.ico",
+          title: "Первый результат",
+          snippet: "Описание первого результата"
+        },
+        {
+          snapshotId,
+          position: 10,
+          rankingUrl: "https://tenth.example/page",
+          faviconUrl: null,
+          title: null,
+          snippet: null
+        }
+      ]
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.rank(context, jobId, 200);
+
+  assert.equal(result.execution.purpose, "COMPETITOR_SERP");
+  assert.equal(result.execution.saveProjectPosition, false);
+  assert.deepEqual(result.rows[0]?.serpResults, [
+    {
+      position: 1,
+      rankingUrl: "https://first.example/page",
+      faviconUrl: "https://first.example/favicon.ico",
+      title: "Первый результат",
+      snippet: "Описание первого результата"
+    },
+    { position: 10, rankingUrl: "https://tenth.example/page" }
+  ]);
 });
 
 test("paginates crawl rows by immutable sequence and supports an empty page", async () => {

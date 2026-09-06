@@ -554,6 +554,24 @@ versions; preset mutations требуют `semantic.update` и `If-Match`.
 - `GET .../{contextId}/keywords`;
 - `PUT|DELETE .../{contextId}/keywords/{keywordId}`.
 
+Проектная сводка позиций доступна по двум read-only маршрутам:
+
+- `GET /api/v1/projects/{projectId}/keywords/position-summary` возвращает
+  текущие `positionedKeywordCount`, `averagePosition` и накопительные счётчики
+  Топ-3/5/10/30/50;
+- `GET /api/v1/projects/{projectId}/keywords/position-history` возвращает до
+  100 последних job-срезов в хронологическом порядке с measured/positioned и
+  теми же TOP-счётчиками. Необязательный `includeUntracked=true` включает в
+  каждый срез active keywords, которые сейчас не отслеживаются; без параметра
+  они исключены.
+
+Оба маршрута требуют `semantic.view` или token scope `semantics:read`, а Core
+SEO применяет workspace/project и active keyword scope до агрегации; история
+дополнительно учитывает только запросы, которые сейчас отслеживаются, если
+клиент явно не запросил `includeUntracked=true`.
+Браузер не передаёт keyword IDs и не пересчитывает исторические значения из
+текущей таблицы.
+
 Read требует `ranking.view`; mutations — `ranking.configure`, browser session
 и CSRF. Create требует `Idempotency-Key`; PATCH/archive/restore —
 `If-Match`. GET collection возвращает bounded 200 contexts,

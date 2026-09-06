@@ -139,6 +139,35 @@ test("forwards normalized tag suggestions inside the trusted project scope", asy
   });
 });
 
+test("forwards the validated position history tracking scope", async () => {
+  let observed: unknown;
+  const controller = new KeywordController({
+    positionHistory: async (
+      observedWorkspaceId: string,
+      observedProjectId: string,
+      query: unknown
+    ) => {
+      observed = { observedWorkspaceId, observedProjectId, query };
+      return { points: [], truncated: false };
+    }
+  } as unknown as KeywordService);
+
+  assert.deepEqual(
+    await controller.positionHistory(
+      projectId,
+      { includeUntracked: "true" },
+      headers,
+      request
+    ),
+    { data: { points: [], truncated: false }, meta: { requestId: request.id } }
+  );
+  assert.deepEqual(observed, {
+    observedWorkspaceId: workspaceId,
+    observedProjectId: projectId,
+    query: { includeUntracked: true }
+  });
+});
+
 function command() {
   return {
     workspaceId,

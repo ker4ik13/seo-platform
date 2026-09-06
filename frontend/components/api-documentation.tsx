@@ -697,6 +697,26 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
       />
       <RouteSummary section="positions" />
       <Flow steps={["Контекст", "Оценка", "Запуск", "Результат"]} />
+      <Section title="Сводка позиций проекта">
+        <p>
+          Главный экран читает текущие значения и отдельную append-only
+          историю. История возвращает до 100 последних срезов; клиент может
+          выбрать период и показать не более 30 точек без пересчёта данных.
+        </p>
+        <CodeBlock
+          code={`curl "${baseUrl}/projects/<projectId>/keywords/position-summary" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"
+
+curl "${baseUrl}/projects/<projectId>/keywords/position-history" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"
+
+# Включить в исторические TOP-счётчики активные неотслеживаемые запросы
+curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked=true" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"`}
+          language="bash"
+          title="Текущая сводка и история ТОПов"
+        />
+      </Section>
       <Section title="1. Создать контекст">
         <EndpointHeader method="POST" path="/projects/{projectId}/tracking-contexts" scope="positions:run" />
         <CodeBlock
@@ -870,6 +890,27 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
           конкурентная выдача сохраняется, а позиционная история не меняется.
           Отдельный платный запрос для позиции не выполняется.
         </Callout>
+        <CodeBlock
+          code={`{
+  "data": {
+    "execution": { "purpose": "COMPETITOR_SERP", "depth": 30 },
+    "rows": [{
+      "keyword": "купить холодильник",
+      "state": "NOT_FOUND",
+      "serpResults": [
+        {
+          "position": 1,
+          "rankingUrl": "https://competitor.example/catalog",
+          "title": "Каталог холодильников",
+          "snippet": "Описание результата"
+        }
+      ]
+    }]
+  }
+}`}
+          language="json"
+          title="200 · Отдельный результат выдачи Топ-10"
+        />
       </Section>
     </article>
   );
@@ -945,6 +986,33 @@ curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>/result?limit
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
           title="Polling и постраничный результат"
+        />
+        <p>
+          Для <code>COMPETITOR_SERP</code> каждая сохранённая строка содержит
+          упорядоченный массив <code>snapshot.sources</code> с позицией, URL,
+          title и description. В обычном результате ИИ-ответов этот массив не
+          передаётся.
+        </p>
+        <CodeBlock
+          code={`{
+  "data": {
+    "collection": { "purpose": "COMPETITOR_SERP" },
+    "rows": [{
+      "keyword": "seo аудит",
+      "snapshot": {
+        "sourceCount": 1,
+        "sources": [{
+          "position": 1,
+          "url": "https://competitor.example/audit",
+          "title": "SEO-аудит",
+          "description": "Источник ИИ-ответа"
+        }]
+      }
+    }]
+  }
+}`}
+          language="json"
+          title="200 · Отдельный результат ИИ-конкурентов"
         />
       </Section>
     </article>

@@ -17,6 +17,7 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  ProjectPositionHistory,
   ProjectPositionSummary,
   SemanticKeywordBulkCreatePreviewResult,
   SemanticKeywordBulkCreateResult,
@@ -64,7 +65,8 @@ import { aiAnswerHistoryQuery } from "./ai-answer-history-query.js";
 import {
   keywordListQuery,
   keywordMultiSearchInput,
-  keywordTagOptionsQuery
+  keywordTagOptionsQuery,
+  projectPositionHistoryQuery
 } from "./keyword-query.js";
 
 @Controller("api/v1/projects/:projectId/keywords")
@@ -151,6 +153,24 @@ export class KeywordController {
       request,
       await this.seoData.projectPositionSummary(
         internalProjectContext(request, principal, tenant)
+      )
+    );
+  }
+
+  @Get("position-history")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async positionHistory(
+    @Query() query: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectPositionHistory>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.seoData.projectPositionHistory(
+        internalProjectContext(request, principal, tenant),
+        projectPositionHistoryQuery(query)
       )
     );
   }

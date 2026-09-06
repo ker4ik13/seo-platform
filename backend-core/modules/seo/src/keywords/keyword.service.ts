@@ -7,6 +7,7 @@ import {
   Injectable
 } from "@nestjs/common";
 import {
+  projectPositionHistoryMaxPoints,
   semanticKeywordBulkCreatePreviewMaxGroups,
   type ApiCollectionResponse,
   type InternalCreateSemanticKeywordInput,
@@ -17,7 +18,11 @@ import {
   type InternalSemanticKeywordCleaningInput,
   type InternalUpdateSemanticKeywordInput,
   type KeywordListQuery,
+  type ProjectPositionHistory,
+  type ProjectPositionHistoryPoint,
+  type ProjectPositionHistoryQuery,
   type ProjectPositionSummary,
+  type ProjectPositionTopCounts,
   type SemanticKeywordBulkResult,
   type SemanticKeywordBulkCreateResult,
   type SemanticKeywordBulkCreatePreviewResult,
@@ -159,13 +164,94 @@ export class KeywordService {
         positions.set(rank.keywordId, rank.position);
       }
     }
-    if (positions.size === 0) return { positionedKeywordCount: 0 };
+    const topCounts = positionTopCounts([...positions.values()]);
+    if (positions.size === 0) {
+      return { positionedKeywordCount: 0, ...topCounts };
+    }
     const average =
       [...positions.values()].reduce((sum, position) => sum + position, 0) /
       positions.size;
     return {
       positionedKeywordCount: positions.size,
-      averagePosition: Math.round(average * 10) / 10
+      averagePosition: Math.round(average * 10) / 10,
+      ...topCounts
+    };
+  }
+
+  public async positionHistory(
+    workspaceId: string,
+    projectId: string,
+    query: ProjectPositionHistoryQuery = { includeUntracked: false }
+  ): Promise<ProjectPositionHistory> {
+    const where = {
+      workspaceId,
+      projectId,
+      positionTrackingEnabled: true,
+      keyword: {
+        status: "ACTIVE" as const,
+        ...(query.includeUntracked ? {} : { isTracked: true })
+      }
+    } satisfies Prisma.RankSnapshotWhereInput;
+    const slices = await this.prisma.rankSnapshot.groupBy({
+      by: ["jobId"],
+      where,
+      _max: { observedAt: true },
+      orderBy: { _max: { observedAt: "desc" } },
+      take: projectPositionHistoryMaxPoints + 1
+    });
+    const boundedSlices = slices.slice(0, projectPositionHistoryMaxPoints);
+    if (boundedSlices.length === 0) {
+      return { points: [], truncated: false };
+    }
+    const jobIds = boundedSlices.map(({ jobId }) => jobId);
+    const counts = await this.prisma.rankSnapshot.groupBy({
+      by: ["jobId", "found", "position"],
+      where: { ...where, jobId: { in: jobIds } },
+      _count: { _all: true }
+    });
+    const countsByJob = new Map<string, {
+      measuredKeywordCount: number;
+      positionedKeywordCount: number;
+      topCounts: ProjectPositionTopCounts;
+    }>();
+    for (const row of counts) {
+      const aggregate = countsByJob.get(row.jobId) ?? {
+        measuredKeywordCount: 0,
+        positionedKeywordCount: 0,
+        topCounts: emptyPositionTopCounts()
+      };
+      aggregate.measuredKeywordCount += row._count._all;
+      if (row.found && row.position !== null) {
+        aggregate.positionedKeywordCount += row._count._all;
+        aggregate.topCounts = addPositionTopCount(
+          aggregate.topCounts,
+          row.position,
+          row._count._all
+        );
+      }
+      countsByJob.set(row.jobId, aggregate);
+    }
+    const points = boundedSlices
+      .map((slice): ProjectPositionHistoryPoint => {
+        const observedAt = slice._max.observedAt;
+        if (!observedAt) throw new Error("Position history slice has no timestamp");
+        const aggregate = countsByJob.get(slice.jobId) ?? {
+          measuredKeywordCount: 0,
+          positionedKeywordCount: 0,
+          topCounts: emptyPositionTopCounts()
+        };
+        return {
+          id: slice.jobId,
+          observedAt: observedAt.toISOString(),
+          measuredKeywordCount: aggregate.measuredKeywordCount,
+          positionedKeywordCount: aggregate.positionedKeywordCount,
+          ...aggregate.topCounts
+        };
+      })
+      .reverse();
+    return {
+      points,
+      truncated: slices.length > projectPositionHistoryMaxPoints
     };
   }
 
@@ -3146,15 +3232,17 @@ async function metricSortedKeywordPage(
   const aiCheckedAtSort =
     sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
     sort.startsWith("GOOGLE_AI_CHECKED_AT_");
-  const positionSort = rankPositionSort || aiPositionSort;
   const positionBucket = 1_000_000n;
-  const nullSentinel = positionSort
-    ? ascending
-      ? positionBucket * 2n
-      : 0n
-    : ascending
-      ? 9_223_372_036_854_775_807n
-      : -1n;
+  const absentAiAnswerMetric = ascending ? positionBucket * 3n : -1n;
+  const nullSentinel = aiPositionSort
+    ? absentAiAnswerMetric
+    : rankPositionSort
+      ? ascending
+        ? positionBucket * 2n
+        : 0n
+      : ascending
+        ? 9_223_372_036_854_775_807n
+        : -1n;
   const rankEngine = sort.startsWith("YANDEX_") ? "YANDEX" : "GOOGLE";
   const positionMetric = ascending
     ? Prisma.sql`CASE
@@ -3170,14 +3258,17 @@ async function metricSortedKeywordPage(
           THEN ${positionBucket}::bigint + latest_rank.historical_position::bigint
         ELSE 0::bigint
       END`;
+  // An absent answer stays last even if the site had a historical position.
   const aiPositionMetric = ascending
     ? Prisma.sql`CASE
+        WHEN NOT latest_ai.answer_present THEN ${absentAiAnswerMetric}::bigint
         WHEN latest_ai.site_found THEN latest_ai.position::bigint
         WHEN latest_ai.historical_position IS NOT NULL
           THEN ${positionBucket}::bigint + latest_ai.historical_position::bigint
         ELSE ${positionBucket * 2n}::bigint
       END`
     : Prisma.sql`CASE
+        WHEN NOT latest_ai.answer_present THEN ${absentAiAnswerMetric}::bigint
         WHEN latest_ai.site_found
           THEN ${positionBucket * 2n}::bigint + latest_ai.position::bigint
         WHEN latest_ai.historical_position IS NOT NULL
@@ -3202,6 +3293,7 @@ async function metricSortedKeywordPage(
           SELECT ${aiPositionMetric} AS metric
           FROM (
             SELECT
+              current_ai.answer_present,
               current_ai.site_found,
               current_ai.position,
               (
@@ -3602,6 +3694,42 @@ function rankHistoryProvider(
     value === "KEY_COLLECTOR"
   ) return value;
   throw new Error("Stored rank history provider is unsupported");
+}
+
+function positionTopCounts(
+  positions: readonly number[]
+): ProjectPositionTopCounts {
+  return positions.reduce(
+    (counts, position) => addPositionTopCount(counts, position, 1),
+    emptyPositionTopCounts()
+  );
+}
+
+function emptyPositionTopCounts(): ProjectPositionTopCounts {
+  return {
+    top3KeywordCount: 0,
+    top5KeywordCount: 0,
+    top10KeywordCount: 0,
+    top30KeywordCount: 0,
+    top50KeywordCount: 0
+  };
+}
+
+function addPositionTopCount(
+  counts: ProjectPositionTopCounts,
+  position: number,
+  amount: number
+): ProjectPositionTopCounts {
+  return {
+    top3KeywordCount: counts.top3KeywordCount + (position <= 3 ? amount : 0),
+    top5KeywordCount: counts.top5KeywordCount + (position <= 5 ? amount : 0),
+    top10KeywordCount:
+      counts.top10KeywordCount + (position <= 10 ? amount : 0),
+    top30KeywordCount:
+      counts.top30KeywordCount + (position <= 30 ? amount : 0),
+    top50KeywordCount:
+      counts.top50KeywordCount + (position <= 50 ? amount : 0)
+  };
 }
 
 function competitorSnapshotProvider(

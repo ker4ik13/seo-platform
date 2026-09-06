@@ -80,6 +80,7 @@ export function SemanticGroupTree({
   onDuplicate,
   onExport,
   onColorChange,
+  onClose,
   onDropMove,
   onInlineRename,
   onMoveRequest,
@@ -106,6 +107,7 @@ export function SemanticGroupTree({
     groups: readonly SemanticGroupTreeItem[],
     color: string
   ) => void;
+  onClose?: () => void;
   onDropMove: (
     groups: readonly SemanticGroupTreeItem[],
     target: SemanticGroupTreeDropTarget
@@ -819,6 +821,17 @@ export function SemanticGroupTree({
           >
             +
           </button>
+          {onClose && (
+            <button
+              aria-label="Закрыть группы"
+              className="semantic-group-tree-close"
+              onClick={onClose}
+              title="Закрыть"
+              type="button"
+            >
+              <Icon name="close" />
+            </button>
+          )}
         </div>
       </header>
       <label className="semantic-group-search">

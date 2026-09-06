@@ -7,6 +7,7 @@ import {
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
   type KeywordListQuery,
+  type ProjectPositionHistoryQuery,
   type SemanticKeywordMultiSearchInput
 } from "@seo-platform/contracts";
 
@@ -51,6 +52,22 @@ export function keywordTagOptionsQuery(
     .trim();
   if (search && search.length > 160) invalid("search");
   return search ? { search } : {};
+}
+
+export function projectPositionHistoryQuery(
+  value: unknown
+): ProjectPositionHistoryQuery {
+  const query =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Readonly<Record<string, unknown>>)
+      : {};
+  if (Object.keys(query).some((key) => key !== "includeUntracked")) {
+    invalid("query");
+  }
+  return {
+    includeUntracked:
+      optionalBoolean(query.includeUntracked, "includeUntracked") ?? false
+  };
 }
 
 export function keywordListQuery(value: unknown): KeywordListQuery {

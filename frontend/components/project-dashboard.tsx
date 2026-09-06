@@ -1,14 +1,16 @@
 "use client";
 
 import type {
+  AiAnswerCollectionSummary,
   FrequencyCollectionSummary,
   KeywordResearchCollection,
+  ProjectPositionHistory,
   ProjectPositionSummary,
   RankJobSummary,
   SemanticKeywordListItem,
   TechnicalCrawlSettings
 } from "@seo-platform/contracts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserApiError,
   browserApiCollectionRequest,
@@ -16,8 +18,13 @@ import {
 } from "../lib/browser-api";
 import type { OperationResultKind } from "../lib/operation-result-routes";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
+import {
+  aiAnswerCollectionTitle,
+  rankCollectionTitle
+} from "../lib/operation-collection-purpose";
 import { Icon } from "./icon";
 import { OperationResultModal } from "./operation-result-modal";
+import { ProjectPositionHistoryChart } from "./project-position-history-chart";
 import { ProviderLogo } from "./provider-logo";
 
 interface DashboardJob {
@@ -34,20 +41,12 @@ interface DashboardData {
   readonly keywordCount: number;
   readonly trackedCount: number;
   readonly frequencies: readonly FrequencyCollectionSummary[];
+  readonly aiAnswers: readonly AiAnswerCollectionSummary[];
   readonly ranks: readonly RankJobSummary[];
   readonly crawls: TechnicalCrawlSettings;
   readonly research: KeywordResearchCollection;
   readonly positionSummary: ProjectPositionSummary;
-}
-
-interface RankCoveragePoint {
-  readonly id: string;
-  readonly coverage: number;
-  readonly found: number;
-  readonly notFound: number;
-  readonly failed: number;
-  readonly total: number;
-  readonly createdAt: string;
+  readonly positionHistory: ProjectPositionHistory;
 }
 
 export function ProjectDashboard({
@@ -63,11 +62,21 @@ export function ProjectDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [selectedJob, setSelectedJob] = useState<DashboardJob>();
+  const [includeUntrackedHistory, setIncludeUntrackedHistory] = useState(false);
+  const [untrackedPositionHistory, setUntrackedPositionHistory] =
+    useState<ProjectPositionHistory>();
+  const [positionHistoryScopeLoading, setPositionHistoryScopeLoading] =
+    useState(false);
+  const [positionHistoryScopeError, setPositionHistoryScopeError] =
+    useState<string>();
+  const positionHistoryScopeRequest = useRef<AbortController | undefined>(
+    undefined
+  );
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
-      const [keywords, tracked, frequencies, ranks, crawls, research, positionSummary] =
+      const [keywords, tracked, frequencies, aiAnswers, ranks, crawls, research, positionSummary, positionHistory] =
         await Promise.all([
           browserApiCollectionRequest<SemanticKeywordListItem>(
             `${base}/keywords?limit=1&sort=CREATED_DESC`,
@@ -80,6 +89,9 @@ export function ProjectDashboard({
           browserApiRequest<{
             readonly collections: readonly FrequencyCollectionSummary[];
           }>(`${base}/frequency-collections`, signal ? { signal } : {}),
+          browserApiRequest<{
+            readonly collections: readonly AiAnswerCollectionSummary[];
+          }>(`${base}/ai-answer-collections`, signal ? { signal } : {}),
           browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
             `${base}/rank-runs`,
             signal ? { signal } : {}
@@ -95,6 +107,10 @@ export function ProjectDashboard({
           browserApiRequest<ProjectPositionSummary>(
             `${base}/keywords/position-summary`,
             signal ? { signal } : {}
+          ),
+          browserApiRequest<ProjectPositionHistory>(
+            `${base}/keywords/position-history`,
+            signal ? { signal } : {}
           )
         ]);
       if (signal?.aborted) return;
@@ -102,11 +118,17 @@ export function ProjectDashboard({
         keywordCount: keywords.page.totalApprox ?? keywords.data.length,
         trackedCount: tracked.page.totalApprox ?? tracked.data.length,
         frequencies: frequencies.collections,
+        aiAnswers: aiAnswers.collections,
         ranks: ranks.jobs,
         crawls,
         research,
-        positionSummary
+        positionSummary,
+        positionHistory
       });
+      setIncludeUntrackedHistory(false);
+      setUntrackedPositionHistory(undefined);
+      setPositionHistoryScopeLoading(false);
+      setPositionHistoryScopeError(undefined);
       setError(undefined);
     } catch (requestError) {
       if (!signal?.aborted) setError(dashboardError(requestError));
@@ -118,14 +140,51 @@ export function ProjectDashboard({
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      positionHistoryScopeRequest.current?.abort();
+    };
   }, [load]);
 
+  const changePositionHistoryScope = useCallback(async (
+    includeUntracked: boolean
+  ) => {
+    if (!includeUntracked) {
+      positionHistoryScopeRequest.current?.abort();
+      setIncludeUntrackedHistory(false);
+      setPositionHistoryScopeLoading(false);
+      setPositionHistoryScopeError(undefined);
+      return;
+    }
+    if (untrackedPositionHistory) {
+      setIncludeUntrackedHistory(true);
+      setPositionHistoryScopeError(undefined);
+      return;
+    }
+
+    positionHistoryScopeRequest.current?.abort();
+    const controller = new AbortController();
+    positionHistoryScopeRequest.current = controller;
+    setPositionHistoryScopeLoading(true);
+    setPositionHistoryScopeError(undefined);
+    try {
+      const history = await browserApiRequest<ProjectPositionHistory>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/position-history?includeUntracked=true`,
+        { signal: controller.signal }
+      );
+      if (controller.signal.aborted) return;
+      setUntrackedPositionHistory(history);
+      setIncludeUntrackedHistory(true);
+    } catch (requestError) {
+      if (!controller.signal.aborted) {
+        setPositionHistoryScopeError(dashboardError(requestError));
+      }
+    } finally {
+      if (!controller.signal.aborted) setPositionHistoryScopeLoading(false);
+    }
+  }, [projectId, untrackedPositionHistory]);
+
   const jobs = useMemo(() => data ? dashboardJobs(data) : [], [data]);
-  const rankCoverage = useMemo(
-    () => data ? rankCoveragePoints(data.ranks) : [],
-    [data]
-  );
   const activeCount = jobs.filter(({ status }) => activeStatus(status)).length;
   const completedCount = jobs.filter(({ status }) => completedStatus(status)).length;
   const failedCount = jobs.filter(({ status }) => failureStatus(status)).length;
@@ -176,25 +235,51 @@ export function ProjectDashboard({
           hint={data?.positionSummary.positionedKeywordCount ? `По ${formatInteger(data.positionSummary.positionedKeywordCount)} запросам с позицией` : "Позиций пока нет"}
           tone="green"
         />
+        <DashboardMetric
+          label="В Топ-10"
+          value={data ? formatInteger(data.positionSummary.top10KeywordCount) : loading ? "…" : "0"}
+          hint={data ? `${percentage(data.positionSummary.top10KeywordCount, data.positionSummary.positionedKeywordCount)}% запросов с позицией` : "Текущие позиции"}
+          tone="amber"
+        />
+        <DashboardMetric
+          label="В Топ-30"
+          value={data ? formatInteger(data.positionSummary.top30KeywordCount) : loading ? "…" : "0"}
+          hint={data ? `${percentage(data.positionSummary.top30KeywordCount, data.positionSummary.positionedKeywordCount)}% запросов с позицией` : "Текущие позиции"}
+          tone="rose"
+        />
       </section>
 
       <section className="dashboard-rank-section">
         <article className="panel dashboard-rank-panel dashboard-rank-panel-full">
           <header className="panel-header">
             <div>
-              <h2>Динамика видимости</h2>
-              <p>Доля запросов с найденной позицией в последних завершённых съёмах</p>
+              <h2>Позиции по ТОПам</h2>
+              <p>Динамика запросов в Топ-3, 5, 10, 30 и 50 — до 30 срезов</p>
             </div>
             <a className="text-button" href="/app/semantics">Открыть семантику</a>
           </header>
-          {rankCoverage.length > 0 ? (
-            <RankCoverageChart points={rankCoverage} />
+          {data ? (
+            <ProjectPositionHistoryChart
+              history={
+                includeUntrackedHistory && untrackedPositionHistory
+                  ? untrackedPositionHistory
+                  : data.positionHistory
+              }
+              includeUntracked={includeUntrackedHistory}
+              onIncludeUntrackedChange={(value) => {
+                void changePositionHistoryScope(value);
+              }}
+              scopeLoading={positionHistoryScopeLoading}
+              {...(positionHistoryScopeError
+                ? { scopeError: positionHistoryScopeError }
+                : {})}
+            />
           ) : (
             <div className="panel-empty compact dashboard-panel-empty">
               <span className="state-icon"><Icon name="trend" /></span>
-              <strong>Пока нет завершённых съёмов</strong>
-              <p>Выберите запросы в семантике и запустите проверку позиций.</p>
-              <a className="secondary-button" href="/app/semantics">Запустить съём</a>
+              <strong>{loading ? "Загружаем историю позиций…" : "История позиций недоступна"}</strong>
+              <p>{loading ? "Подготавливаем данные графика." : "Повторите загрузку проектного обзора."}</p>
+              {!loading && <a className="secondary-button" href="/app/semantics">Запустить съём</a>}
             </div>
           )}
         </article>
@@ -276,7 +361,7 @@ function DashboardMetric({
   label: string;
   value: string;
   hint: string;
-  tone: "violet" | "blue" | "green";
+  tone: "violet" | "blue" | "green" | "amber" | "rose";
 }>) {
   return (
     <article className={`metric-card ${tone}`}>
@@ -322,60 +407,6 @@ function QuickAction({
   );
 }
 
-function RankCoverageChart({ points }: Readonly<{ points: readonly RankCoveragePoint[] }>) {
-  const recent = points.slice(-8);
-  const latest = recent.at(-1)!;
-  return (
-    <div className="dashboard-rank-chart">
-      <div className="dashboard-rank-summary">
-        <div>
-          <span>Покрытие</span>
-          <strong>{latest.coverage}%</strong>
-          <small>{formatDateTime(latest.createdAt)}</small>
-        </div>
-        <dl>
-          <div><dt>Найдено</dt><dd>{formatInteger(latest.found)}</dd></div>
-          <div><dt>Не найдено</dt><dd>{formatInteger(latest.notFound)}</dd></div>
-          <div><dt>Ошибки</dt><dd>{formatInteger(latest.failed)}</dd></div>
-          <div><dt>Всего</dt><dd>{formatInteger(latest.total)}</dd></div>
-        </dl>
-      </div>
-      <div
-        aria-label={`Динамика покрытия позиций. Последнее значение ${latest.coverage}%`}
-        className="dashboard-rank-bars"
-        role="img"
-      >
-        {recent.map((point) => (
-          <div className="dashboard-rank-bar" key={point.id} title={`${formatDateTime(point.createdAt)} — ${point.coverage}%`}>
-            <span>{point.coverage}%</span>
-            <div><i style={{ height: `${Math.max(point.coverage, 3)}%` }} /></div>
-            <small>{formatShortDate(point.createdAt)}</small>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function rankCoveragePoints(jobs: readonly RankJobSummary[]): readonly RankCoveragePoint[] {
-  return jobs
-    .filter((job) => (job.status === "COMPLETED" || job.status === "PARTIALLY_COMPLETED") && job.result)
-    .map((job): RankCoveragePoint => {
-      const total = Number(job.result?.pairCount ?? 0);
-      const found = Number(job.result?.foundCount ?? 0);
-      return {
-        id: job.id,
-        coverage: percentage(found, total),
-        found,
-        notFound: Number(job.result?.notFoundCount ?? 0),
-        failed: Number(job.result?.failedCount ?? 0),
-        total,
-        createdAt: job.createdAt
-      };
-    })
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-}
-
 function dashboardJobs(data: DashboardData): readonly DashboardJob[] {
   return [
     ...data.frequencies.map((job): DashboardJob => ({
@@ -387,9 +418,18 @@ function dashboardJobs(data: DashboardData): readonly DashboardJob[] {
       createdAt: job.createdAt,
       resultKind: "frequency"
     })),
+    ...data.aiAnswers.map((job): DashboardJob => ({
+      id: job.id,
+      title: aiAnswerCollectionTitle(job),
+      provider: "ARSENKIN",
+      status: job.status,
+      ...(job.stage ? { stage: job.stage } : {}),
+      createdAt: job.createdAt,
+      resultKind: "ai-answer"
+    })),
     ...data.ranks.map((job): DashboardJob => ({
       id: job.id,
-      title: "Проверка позиций",
+      title: rankCollectionTitle(job),
       provider: job.provider,
       status: job.status,
       createdAt: job.createdAt,
@@ -465,13 +505,6 @@ function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime())
     ? "—"
     : new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date);
-}
-
-function formatShortDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short" }).format(date);
 }
 
 function firstName(value: string): string {

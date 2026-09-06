@@ -35,11 +35,58 @@ test("accepts an AI answer result with optional provider content absent", () => 
     workspaceId,
     projectId,
     jobId,
-    [keywordId]
+    [keywordId],
+    false
   );
 
   assert.equal(result.rows[0]?.snapshot?.answerPresent, true);
   assert.equal(result.rows[0]?.snapshot?.sourceCount, 0);
+});
+
+test("accepts bounded AI competitor sources and rejects them for a regular result", () => {
+  const payload = {
+    workspaceId,
+    projectId,
+    jobId,
+    rows: [{
+      keywordId,
+      keyword: "seo аудит",
+      snapshot: {
+        answerPresent: true,
+        siteFound: false,
+        brandFound: false,
+        sourceCount: 1,
+        sources: [{
+          position: 1,
+          url: "https://competitor.example/page",
+          title: "Конкурент",
+          description: "Источник ИИ-ответа"
+        }],
+        observedAt: "2026-09-02T12:00:00.000Z"
+      }
+    }]
+  };
+  const result = scopedInternalAiAnswerOperationResult(
+    payload,
+    workspaceId,
+    projectId,
+    jobId,
+    [keywordId],
+    true
+  );
+
+  assert.equal(result.rows[0]?.snapshot?.sources?.[0]?.position, 1);
+  assert.throws(
+    () => scopedInternalAiAnswerOperationResult(
+      payload,
+      workspaceId,
+      projectId,
+      jobId,
+      [keywordId],
+      false
+    ),
+    DomainError
+  );
 });
 
 test("accepts exact frequency and crawl result projections", () => {
@@ -140,6 +187,46 @@ test("accepts a rank result page beyond the former 1,000-row boundary", () => {
 
   assert.equal(result.rows[0]?.sequence, 1_000);
   assert.deepEqual(result.page, { hasNext: false });
+});
+
+test("accepts a competitor rank result only with its bounded Top-10 rows", () => {
+  const result = scopedInternalRankOperationResult(
+    {
+      workspaceId,
+      projectId,
+      jobId,
+      trackingContextId: "01900000-0000-7000-8000-000000000006",
+      contextName: "Google · Москва",
+      execution: {
+        ...execution(),
+        purpose: "COMPETITOR_SERP",
+        saveProjectPosition: false
+      },
+      rows: [{
+        sequence: 0,
+        keywordId,
+        keyword: "seo аудит",
+        state: "NOT_FOUND",
+        observedAt: "2026-09-02T12:00:00.000Z",
+        serpResults: [{
+          position: 1,
+          rankingUrl: "https://competitor.example/page",
+          faviconUrl: "https://competitor.example/favicon.ico",
+          title: "Конкурент",
+          snippet: "Описание"
+        }],
+        dataQualityFlags: []
+      }],
+      page: { hasNext: false }
+    },
+    workspaceId,
+    projectId,
+    jobId,
+    200
+  );
+
+  assert.equal(result.execution.purpose, "COMPETITOR_SERP");
+  assert.equal(result.rows[0]?.serpResults?.[0]?.position, 1);
 });
 
 test("rejects forged tenant scope and oversized projections", () => {

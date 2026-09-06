@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
+  projectPositionHistoryMaxPoints,
   semanticKeywordIntents,
   semanticKeywordBulkCreatePreviewMaxGroups,
   semanticKeywordBulkCreatePreviewStates,
@@ -91,6 +92,8 @@ import {
   type ProjectPageCollection,
   type ProjectPageListQuery,
   type ProjectPageSummary,
+  type ProjectPositionHistory,
+  type ProjectPositionHistoryQuery,
   type ProjectPositionSummary,
   type ProjectCrawlAbsentPageCollection,
   type ProjectCrawlDuplicateGroupCollection,
@@ -408,6 +411,26 @@ export class SeoDataClient {
     return projectPositionSummary(responseData(payload));
   }
 
+  public async projectPositionHistory(
+    context: InternalContext,
+    query: ProjectPositionHistoryQuery = { includeUntracked: false }
+  ): Promise<ProjectPositionHistory> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/position-history`,
+      this.config.services.seoData
+    );
+    if (query.includeUntracked) {
+      url.searchParams.set("includeUntracked", "true");
+    }
+    const payload = await this.request(
+      "GET",
+      url,
+      context
+    );
+    return projectPositionHistory(responseData(payload));
+  }
+
   public async keywordInsights(
     context: InternalContext,
     keywordId: string
@@ -518,7 +541,8 @@ export class SeoDataClient {
   public async aiAnswerOperationResult(
     context: InternalContext,
     jobId: string,
-    keywordIds: readonly string[]
+    keywordIds: readonly string[],
+    includeSources: boolean
   ): Promise<InternalAiAnswerOperationResult> {
     const scope = trackingScope(context);
     const body: InternalAiAnswerOperationResultInput = {
@@ -526,7 +550,8 @@ export class SeoDataClient {
       projectId: scope.projectId,
       actorId: context.actorId,
       jobId,
-      keywordIds
+      keywordIds,
+      includeSources
     };
     const payload = await this.request(
       "POST",
@@ -544,7 +569,8 @@ export class SeoDataClient {
       scope.workspaceId,
       scope.projectId,
       jobId,
-      keywordIds
+      keywordIds,
+      includeSources
     );
   }
 
@@ -3023,13 +3049,29 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
   const input = objectValue(value);
   if (!input) throw invalidResponse();
   const keys = Object.keys(input);
+  const countKeys = [
+    "positionedKeywordCount",
+    "top3KeywordCount",
+    "top5KeywordCount",
+    "top10KeywordCount",
+    "top30KeywordCount",
+    "top50KeywordCount"
+  ] as const;
+  const allowedKeys: readonly string[] = [...countKeys, "averagePosition"];
   if (
-    !keys.includes("positionedKeywordCount") ||
-    keys.some(
-      (key) => !["positionedKeywordCount", "averagePosition"].includes(key)
-    ) ||
+    countKeys.some((key) => !keys.includes(key)) ||
+    keys.some((key) => !allowedKeys.includes(key)) ||
     !Number.isSafeInteger(input.positionedKeywordCount) ||
     Number(input.positionedKeywordCount) < 0 ||
+    countKeys.slice(1).some((key) =>
+      !Number.isSafeInteger(input[key]) ||
+      Number(input[key]) < 0 ||
+      Number(input[key]) > Number(input.positionedKeywordCount)
+    ) ||
+    Number(input.top3KeywordCount) > Number(input.top5KeywordCount) ||
+    Number(input.top5KeywordCount) > Number(input.top10KeywordCount) ||
+    Number(input.top10KeywordCount) > Number(input.top30KeywordCount) ||
+    Number(input.top30KeywordCount) > Number(input.top50KeywordCount) ||
     (input.averagePosition !== undefined &&
       (typeof input.averagePosition !== "number" ||
         !Number.isFinite(input.averagePosition) ||
@@ -3042,10 +3084,81 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
   }
   return {
     positionedKeywordCount: Number(input.positionedKeywordCount),
+    top3KeywordCount: Number(input.top3KeywordCount),
+    top5KeywordCount: Number(input.top5KeywordCount),
+    top10KeywordCount: Number(input.top10KeywordCount),
+    top30KeywordCount: Number(input.top30KeywordCount),
+    top50KeywordCount: Number(input.top50KeywordCount),
     ...(typeof input.averagePosition === "number"
       ? { averagePosition: input.averagePosition }
       : {})
   };
+}
+
+export function projectPositionHistory(value: unknown): ProjectPositionHistory {
+  const input = objectValue(value);
+  if (
+    !input ||
+    Object.keys(input).some((key) => !["points", "truncated"].includes(key)) ||
+    !Object.hasOwn(input, "points") ||
+    !Object.hasOwn(input, "truncated") ||
+    !Array.isArray(input.points) ||
+    input.points.length > projectPositionHistoryMaxPoints ||
+    typeof input.truncated !== "boolean"
+  ) {
+    throw invalidResponse();
+  }
+  let previousObservedAt = "";
+  const ids = new Set<string>();
+  const points = input.points.map((value) => {
+    const point = objectValue(value);
+    const required = [
+      "id",
+      "observedAt",
+      "measuredKeywordCount",
+      "positionedKeywordCount",
+      "top3KeywordCount",
+      "top5KeywordCount",
+      "top10KeywordCount",
+      "top30KeywordCount",
+      "top50KeywordCount"
+    ] as const;
+    if (
+      !point ||
+      Object.keys(point).length !== required.length ||
+      required.some((key) => !Object.hasOwn(point, key)) ||
+      !requiredString(point.id) ||
+      ids.has(point.id) ||
+      !requiredString(point.observedAt) ||
+      Number.isNaN(new Date(point.observedAt).getTime()) ||
+      point.observedAt < previousObservedAt ||
+      required.slice(2).some((key) =>
+        !Number.isSafeInteger(point[key]) || Number(point[key]) < 0
+      ) ||
+      Number(point.positionedKeywordCount) > Number(point.measuredKeywordCount) ||
+      Number(point.top3KeywordCount) > Number(point.top5KeywordCount) ||
+      Number(point.top5KeywordCount) > Number(point.top10KeywordCount) ||
+      Number(point.top10KeywordCount) > Number(point.top30KeywordCount) ||
+      Number(point.top30KeywordCount) > Number(point.top50KeywordCount) ||
+      Number(point.top50KeywordCount) > Number(point.positionedKeywordCount)
+    ) {
+      throw invalidResponse();
+    }
+    ids.add(point.id);
+    previousObservedAt = point.observedAt;
+    return {
+      id: point.id,
+      observedAt: point.observedAt,
+      measuredKeywordCount: Number(point.measuredKeywordCount),
+      positionedKeywordCount: Number(point.positionedKeywordCount),
+      top3KeywordCount: Number(point.top3KeywordCount),
+      top5KeywordCount: Number(point.top5KeywordCount),
+      top10KeywordCount: Number(point.top10KeywordCount),
+      top30KeywordCount: Number(point.top30KeywordCount),
+      top50KeywordCount: Number(point.top50KeywordCount)
+    };
+  });
+  return { points, truncated: input.truncated };
 }
 
 export function semanticKeywordItem(

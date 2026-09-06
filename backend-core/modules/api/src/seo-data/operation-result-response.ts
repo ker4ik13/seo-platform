@@ -1,4 +1,5 @@
 import {
+  competitorSerpOperationResultDepth,
   normalizedRankDataQualityFlags,
   operationResultItemStatuses,
   rankProviderKeywordLimit,
@@ -6,12 +7,15 @@ import {
   semanticFrequencyQualityFlags,
   semanticFrequencyTypes,
   technicalCrawlMaxUrlLimit,
+  rankExecutionPurpose,
   type CrawlOperationResultRow,
+  type AiAnswerOperationSourceSummary,
   type InternalAiAnswerOperationResult,
   type InternalCrawlOperationResultPage,
   type InternalFrequencyOperationResult,
   type InternalRankExecutionParameters,
   type InternalRankOperationResult,
+  type RankOperationSerpResult,
   type RankOperationResultRow
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
@@ -24,7 +28,8 @@ export function scopedInternalAiAnswerOperationResult(
   workspaceId: string,
   projectId: string,
   jobId: string,
-  expectedKeywordIds: readonly string[]
+  expectedKeywordIds: readonly string[],
+  includeSources: boolean
 ): InternalAiAnswerOperationResult {
   const input = exact(value, ["workspaceId", "projectId", "jobId", "rows"]);
   if (
@@ -56,7 +61,8 @@ export function scopedInternalAiAnswerOperationResult(
         "siteFound",
         "brandFound",
         "sourceCount",
-        "observedAt"
+        "observedAt",
+        ...(includeSources ? ["sources"] : [])
       ],
       ["position", "rankingUrl"]
     );
@@ -71,6 +77,11 @@ export function scopedInternalAiAnswerOperationResult(
           snapshot.rankingUrl.length > 20_000 ||
           !URL.canParse(snapshot.rankingUrl)))
     ) invalid();
+    const sourceCount = integer(snapshot.sourceCount, 0, 100);
+    const sources = includeSources
+      ? aiAnswerSources(snapshot.sources)
+      : undefined;
+    if (sources && sources.length !== sourceCount) invalid();
     return {
       keywordId,
       keyword: row.keyword,
@@ -80,7 +91,8 @@ export function scopedInternalAiAnswerOperationResult(
         ...(snapshot.position === undefined ? {} : { position: Number(snapshot.position) }),
         ...(snapshot.rankingUrl === undefined ? {} : { rankingUrl: snapshot.rankingUrl }),
         brandFound: snapshot.brandFound,
-        sourceCount: integer(snapshot.sourceCount, 0, 10_000),
+        sourceCount,
+        ...(sources ? { sources } : {}),
         observedAt: timestamp(snapshot.observedAt)
       }
     };
@@ -206,6 +218,9 @@ export function scopedInternalRankOperationResult(
     "page"
   ]);
   const page = exact(input.page, ["hasNext"], ["nextCursor"]);
+  const execution = rankExecution(input.execution);
+  const competitorCollection =
+    rankExecutionPurpose(execution) === "COMPETITOR_SERP";
   if (
     input.workspaceId !== workspaceId ||
     input.projectId !== projectId ||
@@ -233,7 +248,8 @@ export function scopedInternalRankOperationResult(
         "rankingUrl",
         "title",
         "snippet",
-        "observedAt"
+        "observedAt",
+        ...(competitorCollection ? ["serpResults"] : [])
       ]
     );
     const keywordId = uuid(row.keywordId);
@@ -258,6 +274,10 @@ export function scopedInternalRankOperationResult(
       member(flag, normalizedRankDataQualityFlags)
     );
     if (new Set(dataQualityFlags).size !== dataQualityFlags.length) invalid();
+    if (competitorCollection && row.serpResults === undefined) invalid();
+    const serpResults = competitorCollection
+      ? rankOperationSerpResults(row.serpResults)
+      : undefined;
     if (row.state === "FOUND") {
       if (
         typeof row.rankingUrl !== "string" ||
@@ -277,6 +297,7 @@ export function scopedInternalRankOperationResult(
         ...optionalBoundedString(row.title, "title", 10_000),
         ...optionalBoundedString(row.snippet, "snippet", 20_000),
         observedAt: timestamp(row.observedAt),
+        ...(serpResults ? { serpResults } : {}),
         dataQualityFlags
       };
     }
@@ -298,6 +319,7 @@ export function scopedInternalRankOperationResult(
       ...(row.state === "NOT_FOUND"
         ? { observedAt: timestamp(row.observedAt) }
         : {}),
+      ...(serpResults ? { serpResults } : {}),
       dataQualityFlags
     };
   });
@@ -312,7 +334,7 @@ export function scopedInternalRankOperationResult(
     jobId,
     trackingContextId: uuid(input.trackingContextId),
     contextName: input.contextName,
-    execution: rankExecution(input.execution),
+    execution,
     rows,
     page: {
       hasNext: page.hasNext,
@@ -462,10 +484,17 @@ function rankExecution(value: unknown): InternalRankExecutionParameters {
     "rawSerp",
     "fallbackMode",
     "providerMappingVersion"
-  ], ["regionCode"]);
+  ], ["regionCode", "purpose", "saveProjectPosition"]);
   const rule = exact(input.domainMatchRule, ["mode"], ["value"]);
   const mode = String(rule.mode);
+  const purpose = input.purpose;
+  const saveProjectPosition = input.saveProjectPosition;
   if (
+    (purpose !== undefined &&
+      purpose !== "POSITION_TRACKING" &&
+      purpose !== "COMPETITOR_SERP") ||
+    (saveProjectPosition !== undefined &&
+      typeof saveProjectPosition !== "boolean") ||
     !["GOOGLE", "YANDEX"].includes(String(input.searchEngine)) ||
     typeof input.countryCode !== "string" ||
     typeof input.language !== "string" ||
@@ -492,6 +521,8 @@ function rankExecution(value: unknown): InternalRankExecutionParameters {
       rule.value !== undefined)
   ) invalid();
   return {
+    ...(purpose === undefined ? {} : { purpose }),
+    ...(saveProjectPosition === undefined ? {} : { saveProjectPosition }),
     searchEngine: input.searchEngine as "GOOGLE" | "YANDEX",
     countryCode: input.countryCode,
     ...(typeof input.regionCode === "string"
@@ -515,6 +546,73 @@ function rankExecution(value: unknown): InternalRankExecutionParameters {
     fallbackMode: "NONE",
     providerMappingVersion: input.providerMappingVersion
   };
+}
+
+function aiAnswerSources(
+  value: unknown
+): readonly AiAnswerOperationSourceSummary[] {
+  if (!Array.isArray(value) || value.length > 100) invalid();
+  let previousPosition = 0;
+  return value.map((value) => {
+    const source = exact(
+      value,
+      ["position", "url"],
+      ["title", "description"]
+    );
+    const position = integer(source.position, 1, 100);
+    if (position <= previousPosition || typeof source.url !== "string") {
+      invalid();
+    }
+    previousPosition = position;
+    return {
+      position,
+      url: safeHttpUrl(source.url),
+      ...optionalBoundedString(source.title, "title", 10_000),
+      ...optionalBoundedString(source.description, "description", 20_000)
+    };
+  });
+}
+
+function rankOperationSerpResults(
+  value: unknown
+): readonly RankOperationSerpResult[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > competitorSerpOperationResultDepth
+  ) {
+    invalid();
+  }
+  let previousPosition = 0;
+  return value.map((value) => {
+    const result = exact(
+      value,
+      ["position", "rankingUrl"],
+      ["faviconUrl", "title", "snippet"]
+    );
+    const position = integer(
+      result.position,
+      1,
+      competitorSerpOperationResultDepth
+    );
+    if (
+      position <= previousPosition ||
+      typeof result.rankingUrl !== "string" ||
+      (result.faviconUrl !== undefined &&
+        typeof result.faviconUrl !== "string")
+    ) {
+      invalid();
+    }
+    previousPosition = position;
+    return {
+      position,
+      rankingUrl: safeHttpUrl(result.rankingUrl),
+      ...(typeof result.faviconUrl === "string"
+        ? { faviconUrl: safeHttpUrl(result.faviconUrl) }
+        : {}),
+      ...optionalBoundedString(result.title, "title", 10_000),
+      ...optionalBoundedString(result.snippet, "snippet", 20_000)
+    };
+  });
 }
 
 function exact(
@@ -583,6 +681,19 @@ function optionalBoundedString<Key extends string>(
 
 function safeUrl(value: string): string {
   if (!URL.canParse(value)) invalid();
+  return value;
+}
+
+function safeHttpUrl(value: string): string {
+  if (!URL.canParse(value)) invalid();
+  const parsed = new URL(value);
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password
+  ) {
+    invalid();
+  }
   return value;
 }
 

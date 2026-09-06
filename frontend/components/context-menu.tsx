@@ -26,6 +26,7 @@ export function ContextMenu({
   items,
   label,
   onClose,
+  presentation = "context",
   triggerRef,
   x,
   y
@@ -36,6 +37,7 @@ export function ContextMenu({
   items: readonly ContextMenuItem[];
   label: string;
   onClose: () => void;
+  presentation?: "context" | "dropdown";
   triggerRef?: RefObject<HTMLElement | null>;
   x: number;
   y: number;
@@ -43,6 +45,12 @@ export function ContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const viewportWidth = typeof window === "undefined" ? 1920 : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? 1080 : window.innerHeight;
+  const isMobileDropdown =
+    presentation === "dropdown" && viewportWidth <= 620;
+  const estimatedWidth = isMobileDropdown
+    ? Math.min(260, viewportWidth - 16)
+    : 204;
+  const estimatedRowHeight = isMobileDropdown ? 44 : 34;
   const estimatedExtraHeight = (children ? 62 : 0) + (footer ? 64 : 0);
   const estimatedRows = items.reduce(
     (count, item, index) =>
@@ -134,7 +142,9 @@ export function ContextMenu({
     document.addEventListener("keydown", escape);
     window.addEventListener("blur", onClose);
     window.addEventListener("resize", reposition);
-    const shouldCloseOnScroll = !window.matchMedia("(max-width: 620px)").matches;
+    const shouldCloseOnScroll =
+      presentation === "dropdown" ||
+      !window.matchMedia("(max-width: 620px)").matches;
     if (shouldCloseOnScroll) {
       window.addEventListener("scroll", reposition, true);
     }
@@ -147,24 +157,30 @@ export function ContextMenu({
         window.removeEventListener("scroll", reposition, true);
       }
     };
-  }, [onClose, triggerRef]);
+  }, [onClose, presentation, triggerRef]);
 
   if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
       aria-label={label}
-      className="context-menu"
+      className={`context-menu context-menu-${presentation}`}
       onContextMenu={(event) => event.preventDefault()}
       ref={menuRef}
       role="menu"
       style={{
-        left: Math.min(x, Math.max(8, viewportWidth - 212)),
+        left: Math.min(
+          Math.max(8, x),
+          Math.max(8, viewportWidth - estimatedWidth - 8)
+        ),
         top: Math.min(
           y,
           Math.max(
             8,
-            viewportHeight - estimatedRows * 34 - estimatedExtraHeight - 18
+            viewportHeight -
+              estimatedRows * estimatedRowHeight -
+              estimatedExtraHeight -
+              18
           )
         )
       }}

@@ -14,6 +14,9 @@ import type {
   RankJobSummary
 } from "./rank-runs.js";
 
+/** Product depth of one immutable competitor SERP shown in operation results. */
+export const competitorSerpOperationResultDepth = 10 as const;
+
 export const operationResultItemStatuses = [
   "PENDING",
   "QUEUED",
@@ -114,6 +117,8 @@ export interface InternalAiAnswerOperationResultInput {
   readonly actorId: string;
   readonly jobId: string;
   readonly keywordIds: readonly string[];
+  /** Safe source rows are requested only by the competitor result view. */
+  readonly includeSources: boolean;
 }
 
 export interface AiAnswerOperationSnapshotSummary {
@@ -123,7 +128,16 @@ export interface AiAnswerOperationSnapshotSummary {
   readonly rankingUrl?: string;
   readonly brandFound: boolean;
   readonly sourceCount: number;
+  /** Included only for a competitor SERP result view. */
+  readonly sources?: readonly AiAnswerOperationSourceSummary[];
   readonly observedAt: string;
+}
+
+export interface AiAnswerOperationSourceSummary {
+  readonly position: number;
+  readonly url: string;
+  readonly title?: string;
+  readonly description?: string;
 }
 
 export interface InternalAiAnswerOperationResultRow {
@@ -183,7 +197,17 @@ export interface RankOperationResultRow {
   readonly title?: string;
   readonly snippet?: string;
   readonly observedAt?: string;
+  /** Included only for COMPETITOR_SERP; one bounded organic Top-10. */
+  readonly serpResults?: readonly RankOperationSerpResult[];
   readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
+}
+
+export interface RankOperationSerpResult {
+  readonly position: number;
+  readonly rankingUrl: string;
+  readonly faviconUrl?: string;
+  readonly title?: string;
+  readonly snippet?: string;
 }
 
 export interface InternalRankOperationResult {

@@ -175,6 +175,14 @@
 .table { border-collapse: separate; border-spacing: 0; min-width: 900px; table-layout: fixed; width: 100%; }
 .wideTable { min-width: 1420px; }
 .httpTable { min-width: 1120px; }
+.competitorTable { min-width: 1480px; }
+.competitorTable th:nth-child(2) { width: 240px; }
+.competitorTable th:nth-child(3) { width: 120px; }
+.competitorTable th:nth-child(4) { width: 80px; }
+.competitorTable th:nth-child(5) { width: 330px; }
+.competitorTable th:nth-child(6) { width: 240px; }
+.competitorTable th:nth-child(7) { width: 320px; }
+.competitorTable th:nth-child(8) { width: 150px; }
 .httpTable th:nth-child(2) { width: 330px; }
 .httpTable th:nth-child(4) { width: 240px; }
 .table caption { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0 0 0 0); }
@@ -199,6 +207,7 @@
 .urlCell a { color: #5b46ed; text-decoration: none; }
 .urlCell a:hover { text-decoration: underline; }
 .longCell { max-width: 280px; }
+.mutedCell { color: #858b99; font-size: 10px; }
 .itemStatus,
 .httpStatus { background: #f0f1f4; border-radius: 999px; color: #626977; display: inline-flex; font-size: 9px; font-weight: 750; max-width: 100%; padding: 4px 7px; }
 .found,

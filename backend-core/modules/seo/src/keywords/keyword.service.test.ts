@@ -139,8 +139,108 @@ test("averages the latest found position once per active keyword", async () => {
 
   assert.deepEqual(await service.positionSummary(workspaceId, projectId), {
     positionedKeywordCount: 2,
-    averagePosition: 15
+    averagePosition: 15,
+    top3KeywordCount: 0,
+    top5KeywordCount: 0,
+    top10KeywordCount: 1,
+    top30KeywordCount: 2,
+    top50KeywordCount: 2
   });
+});
+
+test("returns the latest bounded project position slices with TOP counts", async () => {
+  const firstJobId = "01900000-0000-7000-8000-000000000020";
+  const secondJobId = "01900000-0000-7000-8000-000000000021";
+  const groupByCalls: unknown[] = [];
+  const service = new KeywordService(
+    {
+      rankSnapshot: {
+        groupBy: async (input: unknown) => {
+          groupByCalls.push(input);
+          return groupByCalls.length === 1
+            ? [
+                {
+                  jobId: secondJobId,
+                  _max: { observedAt: new Date("2026-09-02T10:00:00.000Z") }
+                },
+                {
+                  jobId: firstJobId,
+                  _max: { observedAt: new Date("2026-09-01T10:00:00.000Z") }
+                }
+              ]
+            : [
+                { jobId: firstJobId, found: true, position: 2, _count: { _all: 1 } },
+                { jobId: firstJobId, found: true, position: 8, _count: { _all: 2 } },
+                { jobId: firstJobId, found: false, position: null, _count: { _all: 1 } },
+                { jobId: secondJobId, found: true, position: 4, _count: { _all: 2 } },
+                { jobId: secondJobId, found: true, position: 25, _count: { _all: 1 } }
+              ];
+        }
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  assert.deepEqual(await service.positionHistory(workspaceId, projectId), {
+    points: [
+      {
+        id: firstJobId,
+        observedAt: "2026-09-01T10:00:00.000Z",
+        measuredKeywordCount: 4,
+        positionedKeywordCount: 3,
+        top3KeywordCount: 1,
+        top5KeywordCount: 1,
+        top10KeywordCount: 3,
+        top30KeywordCount: 3,
+        top50KeywordCount: 3
+      },
+      {
+        id: secondJobId,
+        observedAt: "2026-09-02T10:00:00.000Z",
+        measuredKeywordCount: 3,
+        positionedKeywordCount: 3,
+        top3KeywordCount: 0,
+        top5KeywordCount: 2,
+        top10KeywordCount: 2,
+        top30KeywordCount: 3,
+        top50KeywordCount: 3
+      }
+    ],
+    truncated: false
+  });
+  assert.equal(groupByCalls.length, 2);
+  assert.deepEqual(
+    (groupByCalls[0] as {
+      readonly where: { readonly keyword: unknown };
+    }).where.keyword,
+    { status: "ACTIVE", isTracked: true }
+  );
+});
+
+test("can include active untracked keywords in project position history", async () => {
+  let observedWhere: Readonly<Record<string, unknown>> | undefined;
+  const service = new KeywordService(
+    {
+      rankSnapshot: {
+        groupBy: async ({ where }: {
+          readonly where: Readonly<Record<string, unknown>>;
+        }) => {
+          observedWhere = where;
+          return [];
+        }
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  assert.deepEqual(
+    await service.positionHistory(workspaceId, projectId, {
+      includeUntracked: true
+    }),
+    { points: [], truncated: false }
+  );
+  assert.deepEqual(observedWhere?.keyword, { status: "ACTIVE" });
+  assert.equal(observedWhere?.positionTrackingEnabled, true);
 });
 
 test("returns a scoped cursor page with groups, tags and target URLs", async () => {
@@ -1275,7 +1375,7 @@ test("sorts by the latest engine result and keeps missing positions last", async
   ]);
 });
 
-test("sorts current AI positions before historical positions and then missing values", async () => {
+test("sorts current and historical AI positions before absent answers", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000014";
   const rawQueries: Prisma.Sql[] = [];
   const service = new KeywordService(
@@ -1324,6 +1424,13 @@ test("sorts current AI positions before historical positions and then missing va
 
   assert.equal(rawQueries.length, 3);
   assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots current_ai/u);
+  assert.match(rawQueries[0]?.sql ?? "", /current_ai\.answer_present/u);
+  for (const query of rawQueries.slice(0, 2)) {
+    assert.match(
+      query.sql,
+      /WHEN NOT latest_ai\.answer_present[\s\S]*WHEN latest_ai\.site_found/u
+    );
+  }
   assert.match(rawQueries[0]?.sql ?? "", /latest_ai\.site_found/u);
   assert.match(rawQueries[0]?.sql ?? "", /historical_position/u);
   assert.match(rawQueries[0]?.sql ?? "", /previous\.site_found = TRUE/u);
@@ -1334,10 +1441,11 @@ test("sorts current AI positions before historical positions and then missing va
   assert.match(rawQueries[0]?.sql ?? "", /ORDER BY ranked\.sort_value ASC/u);
   assert.ok(rawQueries[0]?.values.includes("YANDEX"));
   assert.ok(rawQueries[0]?.values.includes(2_000_000n));
+  assert.ok(rawQueries[0]?.values.includes(3_000_000n));
   assert.match(rawQueries[1]?.sql ?? "", /historical_position/u);
   assert.match(rawQueries[1]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
   assert.ok(rawQueries[1]?.values.includes("GOOGLE"));
-  assert.ok(rawQueries[1]?.values.includes(0n));
+  assert.ok(rawQueries[1]?.values.includes(-1n));
   assert.match(rawQueries[2]?.sql ?? "", /extract\(epoch from latest_ai\.observed_at\)/u);
   assert.match(rawQueries[2]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
   assert.ok(rawQueries[2]?.values.includes("GOOGLE"));

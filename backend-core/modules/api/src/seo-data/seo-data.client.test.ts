@@ -17,6 +17,7 @@ import {
   semanticKeywordCleaningResult,
   semanticGroupColorLegendState,
   semanticKeywordInsights,
+  projectPositionHistory,
   semanticAiAnswerHistoryCollection,
   semanticKeywordPage,
   semanticClusterPageBulkPreview,
@@ -34,6 +35,43 @@ import {
   semanticSavedViews,
   SeoDataClient
 } from "./seo-data.client.js";
+
+test("validates ordered bounded project TOP history", () => {
+  const first = {
+    id: "01900000-0000-7000-8000-000000000041",
+    observedAt: "2026-09-01T10:00:00.000Z",
+    measuredKeywordCount: 20,
+    positionedKeywordCount: 16,
+    top3KeywordCount: 2,
+    top5KeywordCount: 4,
+    top10KeywordCount: 8,
+    top30KeywordCount: 14,
+    top50KeywordCount: 16
+  };
+  const second = {
+    ...first,
+    id: "01900000-0000-7000-8000-000000000042",
+    observedAt: "2026-09-02T10:00:00.000Z",
+    top3KeywordCount: 3
+  };
+
+  assert.equal(
+    projectPositionHistory({ points: [first, second], truncated: false })
+      .points[1]?.top3KeywordCount,
+    3
+  );
+  assert.throws(
+    () => projectPositionHistory({ points: [second, first], truncated: false }),
+    DomainError
+  );
+  assert.throws(
+    () => projectPositionHistory({
+      points: [{ ...first, top10KeywordCount: 17 }],
+      truncated: false
+    }),
+    DomainError
+  );
+});
 
 const validItem = {
   id: "01900000-0000-7000-8000-000000000010",
@@ -1486,6 +1524,35 @@ test("forwards normalized tag suggestions through the trusted project route", as
     assert.equal(capturedUrl?.searchParams.get("search"), "бренд");
     assert.equal(capturedHeaders?.get("x-workspace-id"), workspaceId);
     assert.equal(capturedHeaders?.get("x-project-id"), projectId);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("forwards the optional untracked scope for project position history", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    return jsonResponse({ data: { points: [], truncated: false } });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(
+      await client().projectPositionHistory(internalContext(), {
+        includeUntracked: true
+      }),
+      { points: [], truncated: false }
+    );
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/projects/${projectId}/keywords/position-history`
+    );
+    assert.equal(capturedUrl?.searchParams.get("includeUntracked"), "true");
   } finally {
     globalThis.fetch = originalFetch;
   }

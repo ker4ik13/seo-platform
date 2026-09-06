@@ -30,6 +30,7 @@ import type {
   SemanticKeywordCleaningResult,
   SemanticKeywordListItem,
   SemanticKeywordInsights,
+  ProjectPositionHistory,
   ProjectPositionSummary
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -51,7 +52,8 @@ import {
 import {
   keywordListQuery,
   keywordMultiSearchInput,
-  keywordTagOptionsQuery
+  keywordTagOptionsQuery,
+  projectPositionHistoryQuery
 } from "./keyword-query.js";
 import { KeywordService } from "./keyword.service.js";
 
@@ -143,6 +145,29 @@ export class KeywordController {
       data: await this.keywords.positionSummary(
         context.workspaceId,
         context.projectId
+      ),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get("position-history")
+  public async positionHistory(
+    @Param("projectId") projectId: string,
+    @Query() query: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<ProjectPositionHistory>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return {
+      data: await this.keywords.positionHistory(
+        context.workspaceId,
+        context.projectId,
+        projectPositionHistoryQuery(query)
       ),
       meta: { requestId: request.id }
     };

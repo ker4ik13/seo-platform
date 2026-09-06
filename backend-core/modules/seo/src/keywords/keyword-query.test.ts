@@ -4,7 +4,8 @@ import { BadRequestException } from "@nestjs/common";
 import {
   keywordListQuery,
   keywordMultiSearchInput,
-  keywordTagOptionsQuery
+  keywordTagOptionsQuery,
+  projectPositionHistoryQuery
 } from "./keyword-query.js";
 
 test("parses bounded keyword list query", () => {
@@ -59,6 +60,24 @@ test("parses bounded keyword list query", () => {
       "01900000-0000-7000-8000-000000000011",
       "01900000-0000-7000-8000-000000000012"
     ]
+  );
+});
+
+test("parses the internal project position history tracking scope", () => {
+  assert.deepEqual(projectPositionHistoryQuery({}), {
+    includeUntracked: false
+  });
+  assert.deepEqual(
+    projectPositionHistoryQuery({ includeUntracked: "true" }),
+    { includeUntracked: true }
+  );
+  assert.throws(
+    () => projectPositionHistoryQuery({ includeUntracked: ["true"] }),
+    BadRequestException
+  );
+  assert.throws(
+    () => projectPositionHistoryQuery({ unknown: "true" }),
+    BadRequestException
   );
 });
 
