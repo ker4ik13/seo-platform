@@ -32,7 +32,7 @@ test("estimates XMLStock Wordstat calls and shows current account capacity", () 
 test("estimates XMLStock Google pages by selected depth", () => {
   assert.match(
     rankProviderUsageEstimate(xmlStock, 12, "GOOGLE", 30, "LIVE").usage,
-    /^до 36 запросов XMLStock · от 0,43\s₽$/u
+    /^до 36 запросов XMLStock · от 0,90\s₽$/u
   );
   assert.match(
     rankProviderUsageEstimate(
@@ -42,7 +42,7 @@ test("estimates XMLStock Google pages by selected depth", () => {
       30,
       "SEARCH_API"
     ).usage,
-    /^до 12 запросов XMLStock · от 0,29\s₽$/u
+    /^до 12 запросов XMLStock · от 0,34\s₽$/u
   );
 });
 
@@ -57,7 +57,7 @@ test("estimates one XMLStock Top-10 request per competitor keyword", () => {
       undefined,
       "COMPETITOR_SERP"
     ).usage,
-    /^до 12 запросов XMLStock · Топ-10 · от 0,14\s₽$/u
+    /^до 12 запросов XMLStock · Топ-10 · от 0,30\s₽$/u
   );
   assert.match(
     rankProviderUsageEstimate(
@@ -69,7 +69,7 @@ test("estimates one XMLStock Top-10 request per competitor keyword", () => {
       undefined,
       "COMPETITOR_SERP"
     ).usage,
-    /^до 12 запросов XMLStock · Топ-10 · от 0,29\s₽$/u
+    /^до 12 запросов XMLStock · Топ-10 · от 0,34\s₽$/u
   );
 });
 
@@ -97,11 +97,11 @@ test("platform credentials never expose the shared provider account quota", () =
     rankProviderUsageEstimate(platform, 12, "YANDEX", 30, "LIVE"),
     {
       usage: "Точная стоимость после расчёта",
-      available: "Внутренние токены workspace"
+      available: "Баланс данных рабочей области"
     }
   );
   assert.deepEqual(frequencyProviderUsageEstimate(platform, 12, 3), {
     usage: "Точная стоимость после расчёта",
-    available: "Внутренние токены workspace"
+    available: "Баланс данных рабочей области"
   });
 });

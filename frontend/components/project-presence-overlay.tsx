@@ -12,6 +12,8 @@ import {
   type ActiveProjectParticipant
 } from "../lib/project-presence";
 import { useProjectPresence } from "./project-presence-provider";
+import { UiText } from "./ui-locale";
+
 
 interface CursorVisual {
   readonly key: string;
@@ -120,7 +122,7 @@ export function ProjectPresenceOverlay() {
           </svg>
           <b>
             {cursor.name}
-            {cursor.editing ? " · редактирует" : ""}
+            {cursor.editing ? <UiText text="· редактирует" before=" " /> : ""}
           </b>
         </span>
       ))}

@@ -12,6 +12,8 @@ import {
 import { createPortal } from "react-dom";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import { Icon, type IconName } from "./icon";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 interface GroupPickerRow {
   readonly group: SemanticGroupTreeItem;
@@ -53,6 +55,8 @@ export function SemanticGroupPickerField({
   specialOptions?: readonly SemanticGroupPickerSpecialOption[];
   value: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -151,7 +155,7 @@ export function SemanticGroupPickerField({
   return (
     <>
       <button
-        aria-label={`${dialogTitle}: ${selectedLabel}${selected ? `. Запросов в группе: ${formatInteger(selected.keywordCount)}` : ""}`}
+        aria-label={`${dialogTitle}: ${selectedLabel}${selected ? `. Запросов в группе: ${formatInteger(selected.keywordCount, uiLocale)}` : ""}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         className={`semantic-group-picker-trigger${className ? ` ${className}` : ""}`}
@@ -181,9 +185,9 @@ export function SemanticGroupPickerField({
         {selected && (
           <b
             className="semantic-group-picker-trigger-count"
-            title={`Запросов в группе: ${formatInteger(selected.keywordCount)}`}
+            title={uiText("Запросов в группе: {0}", [String(formatInteger(selected.keywordCount, uiLocale))])}
           >
-            {formatInteger(selected.keywordCount)}
+            {formatInteger(selected.keywordCount, uiLocale)}
           </b>
         )}
         <Icon className={open ? "expanded" : undefined} name="chevronRight" />
@@ -191,7 +195,7 @@ export function SemanticGroupPickerField({
       {open && popoverStyle && portalTarget &&
         createPortal(
           <div
-            aria-label={`Выбор: ${dialogTitle}`}
+            aria-label={uiText("Выбор: {0}", [String(dialogTitle)])}
             className="semantic-group-picker-popover"
             data-exclusive-dropdown-layer
             onMouseDown={(event) => event.stopPropagation()}
@@ -205,7 +209,7 @@ export function SemanticGroupPickerField({
                 <small title={selectedLabel}>{selectedLabel}</small>
               </span>
               <button
-                aria-label={`Закрыть: ${dialogTitle}`}
+                aria-label={uiText("Закрыть: {0}", [String(dialogTitle)])}
                 onClick={() => setOpen(false)}
                 type="button"
               >
@@ -299,6 +303,8 @@ export function SemanticGroupPicker({
   specialOptions?: readonly SemanticGroupPickerSpecialOption[];
   value: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const availableGroups = useMemo(
     () => groups.filter(({ systemKind }) => !systemKind),
     [groups]
@@ -324,7 +330,7 @@ export function SemanticGroupPicker({
   return (
     <div className={`semantic-group-picker${className ? ` ${className}` : ""}`}>
       <label className="semantic-move-search">
-        <span className="visually-hidden">Поиск группы</span>
+        <span className="visually-hidden"><UiText text="Поиск группы" /></span>
         <Icon name="search" />
         <input
           autoFocus={autoFocus}
@@ -335,16 +341,16 @@ export function SemanticGroupPicker({
         />
         {search && (
           <button
-            aria-label="Очистить поиск папки"
+            aria-label={uiText("Очистить поиск папки")}
             onClick={() => setSearch("")}
-            title="Очистить"
+            title={uiText("Очистить")}
             type="button"
           >
             <Icon name="close" />
           </button>
         )}
       </label>
-      <div aria-label="Дерево групп" className="semantic-move-tree" role="tree">
+      <div aria-label={uiText("Дерево групп")} className="semantic-move-tree" role="tree">
         {specialOptions.map((option) => (
           <button
             aria-selected={value === option.value}
@@ -385,11 +391,7 @@ export function SemanticGroupPicker({
               style={{ "--move-group-depth": depth } as CSSProperties}
             >
               <button
-                aria-label={hasChildren
-                  ? expanded
-                    ? `Свернуть ${group.name}`
-                    : `Развернуть ${group.name}`
-                  : undefined}
+                aria-label={hasChildren ? expanded ? uiText("Свернуть {0}", [String(group.name)]) : uiText("Развернуть {0}", [String(group.name)]) : undefined}
                 className="semantic-move-tree-toggle"
                 disabled={!hasChildren || Boolean(search.trim())}
                 onClick={() => toggleExpanded(group.id)}
@@ -416,14 +418,14 @@ export function SemanticGroupPicker({
                   <strong>{group.name}</strong>
                   {depth > 0 && <small>{group.path}</small>}
                 </span>
-                <b>{formatInteger(group.keywordCount)}</b>
+                <b>{formatInteger(group.keywordCount, uiLocale)}</b>
                 {selected && <Icon name="checkDouble" />}
               </button>
             </div>
           );
         })}
         {rows.length === 0 && search.trim() && (
-          <div className="semantic-move-tree-empty">Группы не найдены</div>
+          <div className="semantic-move-tree-empty"><UiText text="Группы не найдены" /></div>
         )}
       </div>
     </div>
@@ -497,6 +499,6 @@ function groupPickerRows(
   return rows;
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }

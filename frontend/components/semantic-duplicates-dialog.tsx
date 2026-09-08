@@ -35,6 +35,8 @@ import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 type ScopeKind = SemanticDuplicateScope["kind"];
 const DUPLICATE_PREVIEW_PAGE_SIZE = 100;
@@ -60,6 +62,8 @@ export function SemanticDuplicatesDialog({
     SemanticKeywordBulkSelection & { label: string }
   >[];
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const initialScopeKind: ScopeKind = selections.length > 0
     ? "SELECTION"
     : activeGroup
@@ -113,7 +117,7 @@ export function SemanticDuplicatesDialog({
   const scopeSummary = duplicateScopeSummary(
     scopeKind,
     selectedGroupIds.size,
-    selections.length
+    selections.length, uiLocale
   );
   const dirty =
     analysisMode !== "WORD_FORM_PRECISE" ||
@@ -164,7 +168,7 @@ export function SemanticDuplicatesDialog({
     setError(undefined);
   }
 
-  async function requestPreview(page = 1, append = false): Promise<void> {
+  async function requestPreview(page = 1, append = false, uiLocale: string = "ru-RU"): Promise<void> {
     if (previewRequestInFlight.current || applying) return;
     const command = duplicateCommand(
       analysisMode,
@@ -181,7 +185,7 @@ export function SemanticDuplicatesDialog({
         ignoredWords,
         scopeKind,
         resolvedGroupIds,
-        selections
+        selections, uiLocale
       ));
       return;
     }
@@ -231,7 +235,7 @@ export function SemanticDuplicatesDialog({
   }
 
   function loadNextPreviewPage(
-    event: UIEvent<HTMLDivElement>
+    event: UIEvent<HTMLDivElement>, uiLocale: string = "ru-RU"
   ): void {
     if (
       !preview ||
@@ -245,11 +249,11 @@ export function SemanticDuplicatesDialog({
     const list = event.currentTarget;
     const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
     if (remaining <= 180) {
-      void requestPreview(preview.page + 1, true);
+      void requestPreview(preview.page + 1, true, uiLocale);
     }
   }
 
-  async function applyPreview(): Promise<void> {
+  async function applyPreview(uiLocale: string = "ru-RU"): Promise<void> {
     const initialCommand = duplicateCommand(
       analysisMode,
       caseSensitive,
@@ -313,13 +317,13 @@ export function SemanticDuplicatesDialog({
       }
       onCompleted(
         deleted > 0
-          ? `${formatInteger(deleted)} неявных дублей перемещено в корзину. Действие можно отменить в истории.${hasMore ? " В проекте остались непросмотренные или пропущенные группы." : ""}`
+          ? `${formatInteger(deleted, uiLocale)} неявных дублей перемещено в корзину. Действие можно отменить в истории.${hasMore ? " В проекте остались непросмотренные или пропущенные группы." : ""}`
           : "Неявных дублей для удаления больше нет."
       );
     } catch (requestError) {
       setError(
         deleted > 0
-          ? `${formatInteger(deleted)} дублей уже перемещено. Остальной пакет не обработан: ${duplicateError(requestError)}`
+          ? `${formatInteger(deleted, uiLocale)} дублей уже перемещено. Остальной пакет не обработан: ${duplicateError(requestError)}`
           : duplicateError(requestError)
       );
       setPreview(undefined);
@@ -332,33 +336,33 @@ export function SemanticDuplicatesDialog({
   return (
     <>
     <SemanticModal
-      description="Сравнение фраз без учёта порядка слов"
+      description={uiText("Сравнение фраз без учёта порядка слов")}
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate semantic-duplicate-estimate">
             <div>
               <Icon name="projects" />
-              <div><dt>Область</dt><dd>{scopeSummary}</dd></div>
+              <div><dt><UiText text="Область" /></dt><dd>{scopeSummary}</dd></div>
             </div>
             <div>
               <Icon name="checkDouble" />
               <div>
-                <dt>Групп к обработке</dt>
+                <dt><UiText text="Групп к обработке" /></dt>
                 <dd>
                   {preview
-                    ? formatInteger(decisionSummary.groupCount)
-                    : "Не рассчитано"}
+                    ? formatInteger(decisionSummary.groupCount, uiLocale)
+                    : <UiText text="Не рассчитано" />}
                 </dd>
               </div>
             </div>
             <div>
               <Icon name="trash" />
               <div>
-                <dt>В корзину</dt>
+                <dt><UiText text="В корзину" /></dt>
                 <dd>
                   {preview
-                    ? formatInteger(decisionSummary.deletionCount)
-                    : "Не рассчитано"}
+                    ? formatInteger(decisionSummary.deletionCount, uiLocale)
+                    : <UiText text="Не рассчитано" />}
                 </dd>
               </div>
             </div>
@@ -366,7 +370,7 @@ export function SemanticDuplicatesDialog({
           <div className="semantic-modal-actions semantic-duplicate-actions">
             {applying && (
               <span aria-live="polite">
-                Перемещено: {formatInteger(deletedProgress)}
+                <UiText text="Перемещено:" after=" " />{formatInteger(deletedProgress, uiLocale)}
               </span>
             )}
             <button
@@ -375,8 +379,7 @@ export function SemanticDuplicatesDialog({
               onClick={requestClose}
               type="button"
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
             <button
               className="danger-button"
               disabled={
@@ -386,12 +389,12 @@ export function SemanticDuplicatesDialog({
                 previewing ||
                 loadingMore
               }
-              onClick={() => void applyPreview()}
+              onClick={() => void applyPreview(uiLocale)}
               type="button"
             >
               {applying
-                ? "Перемещаем…"
-                : `В корзину${preview ? ` (${formatInteger(decisionSummary.deletionCount)})` : ""}`}
+                ? <UiText text="Перемещаем…" />
+                : <UiText text="В корзину{0}" values={[String(preview ? ` (${formatInteger(decisionSummary.deletionCount, uiLocale)})` : "")]} />}
             </button>
           </div>
         </div>
@@ -399,21 +402,19 @@ export function SemanticDuplicatesDialog({
       onClose={requestClose}
       presenceKey="semantic-modal:duplicates"
       size="large"
-      title="Неявные дубли"
+      title={uiText("Неявные дубли")}
     >
       <div className="semantic-duplicate-dialog semantic-workflow-dialog">
         <div className="semantic-workflow-grid semantic-duplicate-workflow-grid">
           <section className="semantic-workflow-panel semantic-duplicate-settings">
             <header>
-              <h3>Правила сравнения</h3>
+              <h3><UiText text="Правила сравнения" /></h3>
               <p>
-                Фразы считаются дублями, когда состоят из одинакового набора
-                слов, даже если слова стоят в другом порядке.
-              </p>
+                <UiText text="Фразы считаются дублями, когда состоят из одинакового набора слов, даже если слова стоят в другом порядке." /></p>
             </header>
 
             <label className="semantic-workflow-field">
-              <span>Режим анализа</span>
+              <span><UiText text="Режим анализа" /></span>
               <CustomSelect
                 disabled={applying}
                 onChange={(event) => {
@@ -425,19 +426,18 @@ export function SemanticDuplicatesDialog({
                 value={analysisMode}
               >
                 <option value="WORD_FORM_PRECISE">
-                  Углублённый · без учёта словоформ
-                </option>
-                <option value="EXACT">Точный · словоформы различаются</option>
+                  <UiText text="Углублённый · без учёта словоформ" /></option>
+                <option value="EXACT"><UiText text="Точный · словоформы различаются" /></option>
               </CustomSelect>
               <small>
                 {analysisMode === "WORD_FORM_PRECISE"
-                  ? "«машина» и «машины» сравниваются по русской словоформе."
-                  : "Совпадут только одинаковые формы слов."}
+                  ? <UiText text="«машина» и «машины» сравниваются по русской словоформе." />
+                  : <UiText text="Совпадут только одинаковые формы слов." />}
               </small>
             </label>
 
             <fieldset className="semantic-duplicate-options">
-              <legend>Нормализация</legend>
+              <legend><UiText text="Нормализация" /></legend>
               <label className="semantic-toggle-line">
                 <input
                   checked={caseSensitive}
@@ -449,8 +449,8 @@ export function SemanticDuplicatesDialog({
                   type="checkbox"
                 />
                 <span>
-                  <strong>Учитывать регистр</strong>
-                  <small>«SEO» и «seo» будут разными.</small>
+                  <strong><UiText text="Учитывать регистр" /></strong>
+                  <small><UiText text="«SEO» и «seo» будут разными." /></small>
                 </span>
               </label>
               <label className="semantic-toggle-line">
@@ -464,44 +464,41 @@ export function SemanticDuplicatesDialog({
                   type="checkbox"
                 />
                 <span>
-                  <strong>Игнорировать знаки и спецсимволы</strong>
-                  <small>Дефисы, кавычки и запятые не влияют на группу.</small>
+                  <strong><UiText text="Игнорировать знаки и спецсимволы" /></strong>
+                  <small><UiText text="Дефисы, кавычки и запятые не влияют на группу." /></small>
                 </span>
               </label>
             </fieldset>
 
             <label className="semantic-workflow-field semantic-duplicate-ignored">
-              <span>Слова-исключения</span>
+              <span><UiText text="Слова-исключения" /></span>
               <textarea
                 disabled={applying}
                 onChange={(event) => {
                   setIgnoredWordsText(event.target.value);
                   invalidatePreview();
                 }}
-                placeholder={"в\nна\nдля"}
+                placeholder={uiText("в на для")}
                 rows={4}
                 value={ignoredWordsText}
               />
               <small>
-                По одному на строку · {ignoredWords.length} из 100
-              </small>
+                <UiText text="По одному на строку ·" after=" " />{ignoredWords.length} <UiText text="из 100" before=" " /></small>
             </label>
           </section>
 
           <section className="semantic-workflow-panel semantic-duplicate-scope">
             <header>
-              <h3>Область и умная отметка</h3>
+              <h3><UiText text="Область и умная отметка" /></h3>
               <p>
-                Для каждой группы будет оставлена одна лучшая фраза, остальные
-                попадут в корзину только после подтверждения.
-              </p>
+                <UiText text="Для каждой группы будет оставлена одна лучшая фраза, остальные попадут в корзину только после подтверждения." /></p>
             </header>
 
             <div className="semantic-negative-scope-cards semantic-duplicate-scope-cards">
               <ScopeCard
                 checked={scopeKind === "PROJECT"}
                 disabled={applying}
-                label="Все запросы проекта"
+                label={uiText("Все запросы проекта")}
                 onSelect={() => {
                   setScopeKind("PROJECT");
                   invalidatePreview();
@@ -512,7 +509,7 @@ export function SemanticDuplicatesDialog({
                   checked={scopeKind === "SELECTION"}
                   count={selections.length}
                   disabled={applying}
-                  label="Выбранные запросы"
+                  label={uiText("Выбранные запросы")}
                   onSelect={() => {
                     setScopeKind("SELECTION");
                     invalidatePreview();
@@ -524,7 +521,7 @@ export function SemanticDuplicatesDialog({
                   checked={scopeKind === "GROUP"}
                   count={selectedGroupIds.size}
                   disabled={applying}
-                  label="Конкретные папки"
+                  label={uiText("Конкретные папки")}
                   onSelect={() => {
                     setScopeKind("GROUP");
                     invalidatePreview();
@@ -537,7 +534,7 @@ export function SemanticDuplicatesDialog({
               <div className="semantic-duplicate-folder-scope">
                 <div className="semantic-duplicate-folder-toolbar">
                   <span>
-                    Выбрано папок: {formatInteger(selectedGroupIds.size)}
+                    <UiText text="Выбрано папок:" after=" " />{formatInteger(selectedGroupIds.size, uiLocale)}
                   </span>
                   <div>
                     {activeGroup && (
@@ -552,8 +549,7 @@ export function SemanticDuplicatesDialog({
                         }}
                         type="button"
                       >
-                        Только текущая
-                      </button>
+                        <UiText text="Только текущая" /></button>
                     )}
                     <button
                       disabled={applying || selectedGroupIds.size === 0}
@@ -563,12 +559,11 @@ export function SemanticDuplicatesDialog({
                       }}
                       type="button"
                     >
-                      Очистить
-                    </button>
+                      <UiText text="Очистить" /></button>
                   </div>
                 </div>
                 <div
-                  aria-label="Папки для поиска дублей"
+                  aria-label={uiText("Папки для поиска дублей")}
                   className="semantic-operation-folder-list semantic-duplicate-folder-list"
                 >
                   {visibleGroups.map(({ group, depth, hasChildren }) => (
@@ -581,11 +576,7 @@ export function SemanticDuplicatesDialog({
                       {hasChildren ? (
                         <button
                           aria-expanded={expandedGroupIds.has(group.id)}
-                          aria-label={
-                            expandedGroupIds.has(group.id)
-                              ? "Свернуть папку"
-                              : "Развернуть папку"
-                          }
+                          aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
                           className="semantic-operation-folder-toggle"
                           disabled={applying}
                           onClick={() => toggleExpanded(group.id)}
@@ -609,20 +600,18 @@ export function SemanticDuplicatesDialog({
                           style={{ background: group.color ?? "#a8a5b8" }}
                         />
                         <span>{group.name}</span>
-                        <b>{formatInteger(group.keywordCount)}</b>
+                        <b>{formatInteger(group.keywordCount, uiLocale)}</b>
                       </label>
                     </div>
                   ))}
                 </div>
                 <small>
-                  Родительская папка включает все вложенные. Запросы, которые
-                  находятся сразу в нескольких папках, проверяются один раз.
-                </small>
+                  <UiText text="Родительская папка включает все вложенные. Запросы, которые находятся сразу в нескольких папках, проверяются один раз." /></small>
               </div>
             )}
 
             <label className="semantic-workflow-field">
-              <span>Какую фразу оставить</span>
+              <span><UiText text="Какую фразу оставить" /></span>
               <CustomSelect
                 disabled={applying}
                 onChange={(event) => {
@@ -634,12 +623,10 @@ export function SemanticDuplicatesDialog({
                 value={keeperStrategy}
               >
                 <option value="HIGHEST_FREQUENCY">
-                  С максимальной базовой частотностью
-                </option>
+                  <UiText text="С максимальной базовой частотностью" /></option>
                 <option value="HIGHEST_PRIORITY">
-                  С максимальным приоритетом
-                </option>
-                <option value="OLDEST">Добавленную раньше остальных</option>
+                  <UiText text="С максимальным приоритетом" /></option>
+                <option value="OLDEST"><UiText text="Добавленную раньше остальных" /></option>
               </CustomSelect>
               <small>{keeperStrategyHint(keeperStrategy)}</small>
             </label>
@@ -647,26 +634,24 @@ export function SemanticDuplicatesDialog({
             <div className="semantic-duplicate-safety-note">
               <Icon name="checkDouble" />
               <span>
-                <strong>Без безвозвратного удаления</strong>
+                <strong><UiText text="Без безвозвратного удаления" /></strong>
                 <small>
-                  Удаляемые варианты переходят в системную корзину. Операцию
-                  можно отменить через историю семантики.
-                </small>
+                  <UiText text="Удаляемые варианты переходят в системную корзину. Операцию можно отменить через историю семантики." /></small>
               </span>
             </div>
 
             <button
               className="primary-button semantic-duplicate-preview-button"
               disabled={previewing || loadingMore || applying}
-              onClick={() => void requestPreview()}
+              onClick={() => void requestPreview(undefined, undefined, uiLocale)}
               type="button"
             >
               <Icon name="search" />
               {previewing
-                ? "Анализируем…"
+                ? <UiText text="Анализируем…" />
                 : preview
-                  ? "Пересчитать дубли"
-                  : "Найти неявные дубли"}
+                  ? <UiText text="Пересчитать дубли" />
+                  : <UiText text="Найти неявные дубли" />}
             </button>
           </section>
         </div>
@@ -674,29 +659,27 @@ export function SemanticDuplicatesDialog({
         <section className="semantic-duplicate-results">
           <header>
             <div>
-              <h3>Предпросмотр групп</h3>
+              <h3><UiText text="Предпросмотр групп" /></h3>
               <p>
-                Выберите группу и укажите запрос, который нужно оставить.
-                Остальные отмеченные строки будут перемещены в корзину.
-              </p>
+                <UiText text="Выберите группу и укажите запрос, который нужно оставить. Остальные отмеченные строки будут перемещены в корзину." /></p>
             </div>
             {preview && (
               <dl>
                 <div>
-                  <dt>Проверено</dt>
-                  <dd>{formatInteger(preview.scannedCount)}</dd>
+                  <dt><UiText text="Проверено" /></dt>
+                  <dd>{formatInteger(preview.scannedCount, uiLocale)}</dd>
                 </div>
                 <div>
-                  <dt>Групп</dt>
-                  <dd>{formatInteger(preview.duplicateGroupCount)}</dd>
+                  <dt><UiText text="Групп" /></dt>
+                  <dd>{formatInteger(preview.duplicateGroupCount, uiLocale)}</dd>
                 </div>
                 <div>
-                  <dt>Выбрано групп</dt>
-                  <dd>{formatInteger(decisionSummary.groupCount)}</dd>
+                  <dt><UiText text="Выбрано групп" /></dt>
+                  <dd>{formatInteger(decisionSummary.groupCount, uiLocale)}</dd>
                 </div>
                 <div>
-                  <dt>Будет удалено</dt>
-                  <dd>{formatInteger(decisionSummary.deletionCount)}</dd>
+                  <dt><UiText text="Будет удалено" /></dt>
+                  <dd>{formatInteger(decisionSummary.deletionCount, uiLocale)}</dd>
                 </div>
               </dl>
             )}
@@ -705,33 +688,31 @@ export function SemanticDuplicatesDialog({
           {!preview && !previewing && (
             <div className="semantic-duplicate-empty">
               <Icon name="checkDouble" />
-              <strong>Результаты появятся после анализа</strong>
+              <strong><UiText text="Результаты появятся после анализа" /></strong>
               <span>
-                Настройте правила, область и способ выбора основной фразы.
-              </span>
+                <UiText text="Настройте правила, область и способ выбора основной фразы." /></span>
             </div>
           )}
           {previewing && (
             <div className="semantic-duplicate-empty" role="status">
               <span className="spinner" />
-              <strong>Сравниваем состав фраз…</strong>
-              <span>Для большого ядра это может занять несколько секунд.</span>
+              <strong><UiText text="Сравниваем состав фраз…" /></strong>
+              <span><UiText text="Для большого ядра это может занять несколько секунд." /></span>
             </div>
           )}
           {preview && preview.groups.length === 0 && (
             <div className="semantic-duplicate-empty success">
               <Icon name="checkDouble" />
-              <strong>Неявных дублей не найдено</strong>
-              <span>Выбранная область уже чистая.</span>
+              <strong><UiText text="Неявных дублей не найдено" /></strong>
+              <span><UiText text="Выбранная область уже чистая." /></span>
             </div>
           )}
           {preview && preview.groups.length > 0 && (
             <div className="semantic-duplicate-review">
               <div className="semantic-duplicate-review-toolbar">
                 <span>
-                  Выбрано {formatInteger(decisionSummary.groupCount)} из{" "}
-                  {formatInteger(preview.groups.length)} загруженных групп
-                </span>
+                  <UiText text="Выбрано" after=" " />{formatInteger(decisionSummary.groupCount, uiLocale)} <UiText text="из" before=" " />{" "}
+                  {formatInteger(preview.groups.length, uiLocale)} <UiText text="загруженных групп" before=" " /></span>
                 <div>
                   <button
                     disabled={applying}
@@ -740,8 +721,7 @@ export function SemanticDuplicatesDialog({
                     )}
                     type="button"
                   >
-                    Обработать все
-                  </button>
+                    <UiText text="Обработать все" /></button>
                   <button
                     disabled={applying}
                     onClick={() => setChoices((current) =>
@@ -749,8 +729,7 @@ export function SemanticDuplicatesDialog({
                     )}
                     type="button"
                   >
-                    Снять выбор
-                  </button>
+                    <UiText text="Снять выбор" /></button>
                 </div>
               </div>
               <div
@@ -784,12 +763,11 @@ export function SemanticDuplicatesDialog({
                             }))}
                             type="checkbox"
                           />
-                          <strong>Группа {groupIndex + 1}</strong>
+                          <strong><UiText text="Группа" after=" " />{groupIndex + 1}</strong>
                         </label>
                         <span>
                           {group.items.length}
-                          {group.itemsTruncated ? "+" : ""} фраз
-                        </span>
+                          {group.itemsTruncated ? "+" : ""} <UiText text="фраз" before=" " /></span>
                       </header>
                       <div className="semantic-duplicate-card-body">
                         {group.items.map((item) => {
@@ -822,38 +800,38 @@ export function SemanticDuplicatesDialog({
                               />
                               <span className="semantic-duplicate-decision">
                                 {!choice.enabled
-                                  ? "Пропустить"
+                                  ? <UiText text="Пропустить" />
                                   : keep
-                                    ? "Оставить"
-                                    : "В корзину"}
+                                    ? <UiText text="Оставить" />
+                                    : <UiText text="В корзину" />}
                               </span>
                               <span className="semantic-duplicate-query">
                                 <strong>{item.text}</strong>
                                 <span className="semantic-duplicate-metrics">
                                   <DuplicateFrequency
-                                    label="База"
-                                    title="Яндекс · базовая частотность"
+                                    label={uiText("База")}
+                                    title={uiText("Яндекс · базовая частотность")}
                                     value={item.baseFrequency}
                                   />
                                   <DuplicateFrequency
                                     label={'""'}
-                                    title="Яндекс · фразовая частотность"
+                                    title={uiText("Яндекс · фразовая частотность")}
                                     value={item.exactFrequency}
                                   />
                                   <DuplicateFrequency
                                     label={'"!"'}
-                                    title="Яндекс · точная частотность"
+                                    title={uiText("Яндекс · точная частотность")}
                                     value={item.fixedFrequency}
                                   />
                                   <span className="semantic-duplicate-priority">
-                                    Приоритет {item.priority}
+                                    <UiText text="Приоритет" after=" " />{item.priority}
                                   </span>
                                 </span>
                                 <span className="semantic-duplicate-folders">
                                   <b>
                                     {item.groupPaths.length > 1
-                                      ? "Папки:"
-                                      : "Папка:"}
+                                      ? <UiText text="Папки:" />
+                                      : <UiText text="Папка:" />}
                                   </b>
                                   {(item.groupPaths.length > 0
                                     ? item.groupPaths
@@ -869,9 +847,7 @@ export function SemanticDuplicatesDialog({
                       </div>
                       {group.itemsTruncated && (
                         <p>
-                          Показан безопасный пакет этой группы. Оставшиеся
-                          фразы появятся при следующем анализе.
-                        </p>
+                          <UiText text="Показан безопасный пакет этой группы. Оставшиеся фразы появятся при следующем анализе." /></p>
                       )}
                     </section>
                   );
@@ -883,15 +859,14 @@ export function SemanticDuplicatesDialog({
                   className="semantic-duplicate-scroll-status"
                 >
                   <span>
-                    Загружено {formatInteger(preview.groups.length)} из{" "}
-                    {formatInteger(preview.duplicateGroupCount)} групп
-                  </span>
+                    <UiText text="Загружено" after=" " />{formatInteger(preview.groups.length, uiLocale)} <UiText text="из" before=" " />{" "}
+                    {formatInteger(preview.duplicateGroupCount, uiLocale)} <UiText text="групп" before=" " /></span>
                   {preview.page < preview.pageCount && (
                     <span>
                       {loadingMore && <span className="spinner" />}
                       {loadingMore
-                        ? "Загружаем ещё…"
-                        : "Прокрутите вниз — следующие 100 групп загрузятся автоматически"}
+                        ? <UiText text="Загружаем ещё…" />
+                        : <UiText text="Прокрутите вниз — следующие 100 групп загрузятся автоматически" />}
                     </span>
                   )}
                 </div>
@@ -902,7 +877,7 @@ export function SemanticDuplicatesDialog({
 
         {error && (
           <div className="semantic-workflow-feedback">
-            <div className="inline-alert danger" role="alert">{error}</div>
+            <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>
           </div>
         )}
 
@@ -931,6 +906,7 @@ function ScopeCard({
   label: string;
   onSelect: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
   return (
     <label className={checked ? "selected" : undefined}>
       <input
@@ -941,7 +917,7 @@ function ScopeCard({
       />
       <span>
         <strong>{label}</strong>
-        {count !== undefined && <small>{formatInteger(count)} шт.</small>}
+        {count !== undefined && <small>{formatInteger(count, uiLocale)} <UiText text="шт." before=" " /></small>}
       </span>
     </label>
   );
@@ -956,11 +932,12 @@ function DuplicateFrequency({
   title: string;
   value: string | undefined;
 }>) {
+  const uiLocale = useUiLocale().locale;
   return (
     <span className="semantic-duplicate-frequency" title={title}>
       <SearchEngineLogo engine="YANDEX" size="compact" />
       <b>{label}</b>
-      <strong>{value === undefined ? "—" : formatFrequency(value)}</strong>
+      <strong>{value === undefined ? "—" : formatFrequency(value, uiLocale)}</strong>
     </span>
   );
 }
@@ -1162,7 +1139,7 @@ function duplicateValidationMessage(
   ignoredWords: readonly string[],
   scopeKind: ScopeKind,
   groupIds: readonly string[],
-  selections: readonly SemanticKeywordBulkSelection[]
+  selections: readonly SemanticKeywordBulkSelection[], uiLocale: string = "ru-RU"
 ): string {
   if (ignoredWords.length > 100) {
     return "Можно указать не больше 100 слов-исключений.";
@@ -1180,7 +1157,7 @@ function duplicateValidationMessage(
     scopeKind === "GROUP" &&
     groupIds.length > semanticDuplicateGroupScopeLimit
   ) {
-    return `За один раз можно выбрать не больше ${formatInteger(semanticDuplicateGroupScopeLimit)} папок.`;
+    return `За один раз можно выбрать не больше ${formatInteger(semanticDuplicateGroupScopeLimit, uiLocale)} папок.`;
   }
   if (scopeKind === "SELECTION" && selections.length === 0) {
     return "Выберите хотя бы два запроса.";
@@ -1194,14 +1171,14 @@ function duplicateValidationMessage(
 function duplicateScopeSummary(
   kind: ScopeKind,
   selectedGroupCount: number,
-  selectedKeywordCount: number
+  selectedKeywordCount: number, uiLocale: string = "ru-RU"
 ): string {
   if (kind === "PROJECT") return "Все запросы проекта";
   if (kind === "SELECTION") {
-    return `${formatInteger(selectedKeywordCount)} выбранных`;
+    return `${formatInteger(selectedKeywordCount, uiLocale)} выбранных`;
   }
   return selectedGroupCount > 0
-    ? `${formatInteger(selectedGroupCount)} папок`
+    ? `${formatInteger(selectedGroupCount, uiLocale)} папок`
     : "Папки не выбраны";
 }
 
@@ -1244,14 +1221,14 @@ function duplicateError(error: unknown): string {
   return error.message;
 }
 
-function formatFrequency(value: string): string {
+function formatFrequency(value: string, uiLocale: string = "ru-RU"): string {
   try {
-    return new Intl.NumberFormat("ru-RU").format(BigInt(value));
+    return new Intl.NumberFormat(uiLocale).format(BigInt(value));
   } catch {
     return value;
   }
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }

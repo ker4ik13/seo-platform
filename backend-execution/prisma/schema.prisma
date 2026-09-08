@@ -169,6 +169,9 @@ enum KeywordResearchStatus {
 }
 
 model Job {
+  billingQuoteId String? @map("billing_quote_id") @db.Uuid
+  billingCommandHash Bytes? @map("billing_command_hash")
+  billingMaximumUnitsMilli BigInt? @map("billing_maximum_units_milli")
   id                   String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId          String         @map("workspace_id") @db.Uuid
   projectId            String?        @map("project_id") @db.Uuid
@@ -231,6 +234,54 @@ model Job {
   @@index([type, status, leaseExpiresAt, createdAt])
   @@index([type, status, retryAt, priority, createdAt])
   @@map("jobs")
+}
+
+model ProviderUsageTicket {
+  resolution String? @db.VarChar(16)
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy String? @map("resolved_by") @db.Uuid
+  resolutionReason String? @map("resolution_reason") @db.VarChar(500)
+  providerReference String? @map("provider_reference") @db.VarChar(128)
+  resolutionKey String? @map("resolution_key") @db.VarChar(180)
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  jobId String @map("job_id") @db.Uuid
+  unitKey String @map("unit_key") @db.VarChar(100)
+  part String @db.VarChar(32)
+  itemIds String[] @map("item_ids") @db.Uuid
+  unitsMilli BigInt @map("units_milli")
+  state String @default("PREPARED") @db.VarChar(16)
+  ticketToken String @default(dbgenerated("uuidv7()")) @map("ticket_token") @db.Uuid
+  leaseOwner String @map("lease_owner") @db.VarChar(100)
+  jobVersion Int @map("job_version")
+  leaseExpiresAt DateTime @map("lease_expires_at") @db.Timestamptz(6)
+  authorizedAt DateTime? @map("authorized_at") @db.Timestamptz(6)
+  result Json?
+  startedAt DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@unique([jobId, unitKey], map: "provider_usage_tickets_unit_key")
+  @@index([jobId, state], map: "provider_usage_tickets_job_state_idx")
+  @@map("provider_usage_tickets")
+}
+
+model PlatformProviderAccount {
+  id String @id @db.Uuid
+  provider String @db.VarChar(16)
+  slot Int
+  credentialId String? @map("credential_id") @db.Uuid
+  enabled Boolean @default(true)
+  remaining Decimal? @db.Decimal(24, 6)
+  checkedAt DateTime? @map("checked_at") @db.Timestamptz(6)
+  errorCode String? @map("error_code") @db.VarChar(64)
+  nextProbeAt DateTime @default(now()) @map("next_probe_at") @db.Timestamptz(6)
+  leaseOwner String? @map("lease_owner") @db.VarChar(100)
+  leaseToken String? @map("lease_token") @db.Uuid
+  leaseExpiresAt DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@index([enabled, nextProbeAt, id], map: "platform_provider_accounts_due_idx")
+  @@map("platform_provider_accounts")
 }
 
 model TechnicalCrawl {

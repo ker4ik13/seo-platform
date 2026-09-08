@@ -7,6 +7,13 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const contextId = "01900000-0000-7000-8000-000000000003";
 
+test("Core verifies the complete new 50k workload against its exact policy", () => {
+  const value = { ...blockedEstimate, policyVersion: "manual-arsenkin-positions@3.0.0", scope: { ...blockedEstimate.scope, keywordCount: "50000", pairCount: "50000" }, workload: { ...blockedEstimate.workload, keywordLimitPerTask: "5000", keywordLimitPerCommand: "300000", taskCount: "10", minimumRequestCount: "30" } };
+  assert.equal(scopedRankEstimate(value, workspaceId, projectId, contextId).workload.taskCount, "10");
+  assert.throws(() => scopedRankEstimate({ ...value, policyVersion: "manual-arsenkin-positions@2.0.0" }, workspaceId, projectId, contextId));
+  assert.throws(() => scopedRankEstimate({ ...value, workload: { ...value.workload, taskCount: "1" } }, workspaceId, projectId, contextId));
+});
+
 const blockedEstimate = {
   id: "01900000-0000-7000-8000-000000000004",
   workspaceId,
@@ -54,7 +61,7 @@ const blockedEstimate = {
     { code: "PROVIDER_EXECUTION_DISABLED" }
   ],
   executionAllowed: false,
-  policyVersion: "arsenkin-positions@1",
+  policyVersion: "manual-arsenkin-positions@1.0.0",
   calculatedAt: "2026-07-29T12:00:00.000Z",
   expiresAt: "2026-07-29T12:05:00.000Z"
 } as const;
@@ -186,6 +193,7 @@ test("accepts the bounded overflow sentinel only with unavailable hash", () => {
 test("accepts one 15,000-keyword provider task and rejects a wider scope", () => {
   const current = {
     ...blockedEstimate,
+    policyVersion: "manual-arsenkin-positions@2.0.0",
     scope: {
       ...blockedEstimate.scope,
       keywordCount: "15000",

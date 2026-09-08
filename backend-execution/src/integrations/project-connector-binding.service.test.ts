@@ -544,12 +544,12 @@ test("rejects cross-workspace, pending and capability-mismatched credentials", a
     },
     {
       credential: credentialRecord({
-        mode: "PLATFORM_PAID",
+        mode: "BYOK_OAUTH",
         capabilities: ["KEYWORD_RESEARCH"]
       }),
       input: {
         ...createInput,
-        idempotencyKey: "binding-create-platform-non-rank",
+        idempotencyKey: "binding-create-unsupported-oauth",
         capability: "KEYWORD_RESEARCH" as const
       }
     }

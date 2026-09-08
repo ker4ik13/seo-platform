@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { paidOperationJobFields } from "../paid-operations/paid-operation-admission.js";
 import {
   ConflictException,
   HttpException,
@@ -80,7 +81,8 @@ export class KeywordResearchService {
       input.projectId,
       capability,
       input.actorId,
-      expectedProvider
+      expectedProvider,
+      input.billing?.credentialId
     );
     if (route.provider !== expectedProvider) {
       throw new HttpException(
@@ -106,6 +108,7 @@ export class KeywordResearchService {
         const inputSnapshot = researchInputSnapshot(input);
         const job = await transaction.job.create({
           data: {
+            ...paidOperationJobFields("KEYWORD_RESEARCH", input, route),
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             type: "KEYWORD_RESEARCH",

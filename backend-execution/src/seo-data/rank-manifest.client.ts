@@ -1,10 +1,11 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
   rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
-  xmlStockRankManifestChunkSize,
+  rankCommandKeywordLimit,
+  batchedArsenkinRankChunkSize,
+  rankPolicyMatchesManifest,
+  rankManifestShapeIsSupported,
   rankManifestChunkHashPreimage,
   type InternalFinalizeRankCheckInput,
   type InternalGetRankManifestChunkInput,
@@ -28,7 +29,7 @@ import { APP_CONFIG } from "../config/config.module.js";
 
 const RESPONSE_MAX_BYTES = 64 * 1_024;
 const CHUNK_RESPONSE_MAX_BYTES = 64 * 1_024 * 1_024;
-const MAX_MANIFEST_CHUNK_INDEX = rankProviderKeywordLimit - 1;
+const MAX_MANIFEST_CHUNK_INDEX = rankCommandKeywordLimit - 1;
 const MAX_KEYWORD_CODE_POINTS = 500;
 const MAX_KEYWORD_CODE_UNITS = MAX_KEYWORD_CODE_POINTS * 2;
 const MAX_KEYWORD_UTF8_BYTES = 2_000;
@@ -303,7 +304,7 @@ function rankManifestChunk(
     input.entries.length >
       (input.chunkIndex === 0
         ? rankManifestSingleTaskChunkSize
-        : legacyRankManifestChunkSize)
+        : batchedArsenkinRankChunkSize)
   ) {
     return undefined;
   }
@@ -322,12 +323,14 @@ function rankManifestChunk(
     "keywordTextHash",
     "language"
   ])?.sequence;
-  const sequenceBase =
-    input.entries.length === 1 && firstSequence === input.chunkIndex
-      ? input.chunkIndex
-      : input.chunkIndex === 0
-        ? 0
-        : input.chunkIndex * legacyRankManifestChunkSize;
+  const stride = input.chunkIndex === 0 ? rankManifestSingleTaskChunkSize : Number(firstSequence) / Number(input.chunkIndex);
+  if (input.chunkIndex !== 0 && (
+    ![1, legacyRankManifestChunkSize, batchedArsenkinRankChunkSize].includes(stride) ||
+    input.entries.length > stride ||
+    (stride === legacyRankManifestChunkSize && Number(input.chunkIndex) > 3) ||
+    (stride === batchedArsenkinRankChunkSize && Number(input.chunkIndex) >= rankCommandKeywordLimit / batchedArsenkinRankChunkSize)
+  )) return undefined;
+  const sequenceBase = Number(input.chunkIndex) * stride;
   for (let offset = 0; offset < input.entries.length; offset += 1) {
     const entry = rankManifestEntry(
       input.entries[offset],
@@ -439,19 +442,19 @@ function rankFinalizationReceipt(
   ]);
   const requestHash = input ? manifestHash(input.requestHash) : undefined;
   const pairCount = input
-    ? decimal(input.pairCount, rankProviderKeywordLimit)
+    ? decimal(input.pairCount, rankCommandKeywordLimit)
     : undefined;
   const persistedCount = input
-    ? decimalAllowZero(input.persistedCount, rankProviderKeywordLimit)
+    ? decimalAllowZero(input.persistedCount, rankCommandKeywordLimit)
     : undefined;
   const foundCount = input
-    ? decimalAllowZero(input.foundCount, rankProviderKeywordLimit)
+    ? decimalAllowZero(input.foundCount, rankCommandKeywordLimit)
     : undefined;
   const notFoundCount = input
-    ? decimalAllowZero(input.notFoundCount, rankProviderKeywordLimit)
+    ? decimalAllowZero(input.notFoundCount, rankCommandKeywordLimit)
     : undefined;
   const missingCount = input
-    ? decimalAllowZero(input.missingCount, rankProviderKeywordLimit)
+    ? decimalAllowZero(input.missingCount, rankCommandKeywordLimit)
     : undefined;
   const expectedHash = canonicalJsonSha256("rank-finalize@1", {
     schemaVersion: command.schemaVersion,
@@ -551,29 +554,7 @@ function validManifestShape(
   chunkCount: number,
   chunkSize: unknown
 ): boolean {
-  if (chunkSize === String(legacyRankManifestChunkSize)) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= legacyRankProviderKeywordLimit &&
-      chunkCount ===
-        Math.ceil(pairCount / legacyRankManifestChunkSize)
-    );
-  }
-  if (provider === "XMLSTOCK") {
-    return (
-      chunkSize === String(xmlStockRankManifestChunkSize) &&
-      pairCount >= 1 &&
-      pairCount <= rankProviderKeywordLimit &&
-      chunkCount === pairCount
-    );
-  }
-  return (
-    provider === "ARSENKIN" &&
-    chunkSize === String(rankManifestSingleTaskChunkSize) &&
-    pairCount >= 1 &&
-    pairCount <= rankProviderKeywordLimit &&
-    chunkCount === 1
-  );
+  return (provider === "ARSENKIN" || provider === "XMLSTOCK") && rankManifestShapeIsSupported(provider, pairCount, chunkCount, Number(chunkSize));
 }
 
 function rankManifestSeal(
@@ -620,8 +601,8 @@ function rankManifestSeal(
     "normalizedRankHistory",
     "rawSerp"
   ]);
-  const pairCount = decimal(input.pairCount, rankProviderKeywordLimit);
-  const chunkCount = decimal(input.chunkCount, rankProviderKeywordLimit);
+  const pairCount = decimal(input.pairCount, rankCommandKeywordLimit);
+  const chunkCount = decimal(input.chunkCount, rankCommandKeywordLimit);
   const validShape =
     pairCount !== undefined &&
     chunkCount !== undefined &&
@@ -657,6 +638,7 @@ function rankManifestSeal(
     chunkCount === undefined ||
     pairCount !== command.estimate.pairCount ||
     !validShape ||
+    (command.providerPolicyVersion !== undefined && !rankPolicyMatchesManifest(command.providerPolicyVersion, command.provider, Number(pairCount), Number(chunkCount), Number(input.chunkSize))) ||
     !execution ||
     canonicalizeJson(execution) !== canonicalizeJson(command.execution) ||
     !retention ||
@@ -692,7 +674,7 @@ function rankManifestSeal(
     deduplicationHash,
     pairCount,
     chunkCount,
-    chunkSize: input.chunkSize as "1" | "250" | "15000",
+    chunkSize: input.chunkSize as InternalRankManifestSeal["chunkSize"],
     execution,
     retention: {
       normalizedRankHistory: "LONG_TERM",

@@ -20,7 +20,7 @@ export interface InternalAuthEmailReadyMaterialDecisionV1 {
   readonly eventId: string;
   readonly eventType: Exclude<
     TransactionalEmailEventTypeV1,
-    typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+    typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested | typeof transactionalEmailEventTypesV1.billingNoticeRequested
   >;
   readonly recipient: string;
   readonly locale: string;
@@ -55,9 +55,26 @@ export interface InternalAuthEmailReadyReceiptDecisionV1 {
 }
 
 export type InternalAuthEmailMaterialDecisionV1 =
+  | InternalBillingNoticeMaterialDecision
   | InternalAuthEmailReadyMaterialDecisionV1
   | InternalAuthEmailReadyReceiptDecisionV1
   | InternalAuthEmailSkippedMaterialDecisionV1;
+
+export const billingNoticeKinds = ["PAYMENT_SUCCEEDED", "REFUND_REQUESTED", "REFUND_APPROVED", "REFUND_REJECTED", "REFUND_SUCCEEDED", "REFUND_FAILED", "SUBSCRIPTION_ENDING_3D", "SUBSCRIPTION_ENDING_1D", "SUBSCRIPTION_EXPIRED"] as const;
+export type BillingNoticeKind = (typeof billingNoticeKinds)[number];
+export interface InternalBillingNoticeMaterialDecision {
+  readonly schemaVersion: typeof AUTH_EMAIL_MATERIAL_DECISION_SCHEMA;
+  readonly decision: "READY_NOTICE";
+  readonly eventId: string;
+  readonly eventType: typeof transactionalEmailEventTypesV1.billingNoticeRequested;
+  readonly recipient: string;
+  readonly locale: string;
+  readonly kind: BillingNoticeKind;
+  readonly workspaceName: string;
+  readonly amountMinor?: number;
+  readonly periodEnd?: string;
+  readonly billingUrl: string;
+}
 
 export interface InternalAuthEmailCompletionV1 {
   readonly schemaVersion: typeof AUTH_EMAIL_COMPLETION_SCHEMA;
@@ -91,6 +108,16 @@ export function internalAuthEmailMaterialDecision(
   const base = exactRecord(value, "material decision");
   const decision = base.decision;
   const eventId = uuidV7(base.eventId, "eventId");
+
+  if (decision === "READY_NOTICE") {
+    const allowed = ["schemaVersion", "decision", "eventId", "eventType", "recipient", "locale", "kind", "workspaceName", "billingUrl", "amountMinor", "periodEnd"];
+    if (Object.keys(base).some(key => !allowed.includes(key)) || base.schemaVersion !== AUTH_EMAIL_MATERIAL_DECISION_SCHEMA || base.eventType !== transactionalEmailEventTypesV1.billingNoticeRequested || !billingNoticeKinds.includes(base.kind as BillingNoticeKind) || typeof base.workspaceName !== "string" || base.workspaceName.length > 160 || !base.workspaceName.length) return invalid("billing notice");
+    if (base.amountMinor !== undefined && (typeof base.amountMinor !== "number" || !Number.isSafeInteger(base.amountMinor) || base.amountMinor < 0)) return invalid("billing notice amount");
+    if (base.periodEnd !== undefined) isoDate(base.periodEnd, "periodEnd");
+    let url: URL; try { url = new URL(String(base.billingUrl)); } catch { return invalid("billing URL"); }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search || url.pathname !== "/app/settings/billing") return invalid("billing URL");
+    return Object.freeze({ schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA, decision, eventId, eventType: transactionalEmailEventTypesV1.billingNoticeRequested, recipient: recipient(base.recipient), locale: locale(base.locale), kind: base.kind as BillingNoticeKind, workspaceName: base.workspaceName, billingUrl: url.toString(), ...(base.amountMinor === undefined ? {} : { amountMinor: base.amountMinor as number }), ...(base.periodEnd === undefined ? {} : { periodEnd: base.periodEnd as string }) });
+  }
 
   if (decision === "SKIPPED") {
     exactKeys(base, [
@@ -190,7 +217,7 @@ export function internalAuthEmailMaterialDecision(
     eventId,
     eventType: base.eventType as Exclude<
       TransactionalEmailEventTypeV1,
-      typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+      typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested | typeof transactionalEmailEventTypesV1.billingNoticeRequested
     >,
     recipient: recipient(base.recipient),
     locale: locale(base.locale),

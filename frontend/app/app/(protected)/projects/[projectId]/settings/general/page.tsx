@@ -3,6 +3,8 @@ import { ProjectSettings } from "../../../../../../../components/project-setting
 import { ProjectTransferSettings } from "../../../../../../../components/project-transfer-settings";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
+import { UiText } from "../../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +29,9 @@ export default async function ProjectSettingsPage({
     <>
       <section className="page-heading project-settings-heading">
         <div>
-          <h1>Основные настройки проекта</h1>
+          <h1><UiText text="Основные настройки проекта" /></h1>
           <p>
-            Изменяйте домен и региональные параметры, архивируйте или
-            восстанавливайте проект без удаления данных.
-          </p>
+            <UiText text="Изменяйте домен и региональные параметры, архивируйте или восстанавливайте проект без удаления данных." /></p>
         </div>
       </section>
       <SettingsTabs

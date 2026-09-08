@@ -560,10 +560,11 @@ versions; preset mutations требуют `semantic.update` и `If-Match`.
   текущие `positionedKeywordCount`, `averagePosition` и накопительные счётчики
   Топ-3/5/10/30/50;
 - `GET /api/v1/projects/{projectId}/keywords/position-history` возвращает до
-  100 последних job-срезов в хронологическом порядке с measured/positioned и
-  теми же TOP-счётчиками. Необязательный `includeUntracked=true` включает в
-  каждый срез active keywords, которые сейчас не отслеживаются; без параметра
-  они исключены.
+  100 последних UTC-дней в хронологическом порядке с `date`, временем
+  последнего включённого наблюдения, measured/positioned и теми же
+  TOP-счётчиками. Внутри дня выбирается последний snapshot каждого keyword.
+  Необязательный `includeUntracked=true` включает active keywords, которые
+  сейчас не отслеживаются; без параметра они исключены.
 
 Оба маршрута требуют `semantic.view` или token scope `semantics:read`, а Core
 SEO применяет workspace/project и active keyword scope до агрегации; история

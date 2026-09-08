@@ -5,6 +5,8 @@ import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import { UiText } from "./ui-locale";
+
 
 interface MfaOverview {
   readonly totp?: {
@@ -125,7 +127,7 @@ export function MfaSettings() {
     return (
       <section className="panel security-card" aria-busy="true">
         <span className="spinner" />
-        <p>Загружаем настройки безопасности…</p>
+        <p><UiText text="Загружаем настройки безопасности…" /></p>
       </section>
     );
   }
@@ -134,19 +136,18 @@ export function MfaSettings() {
     <section className="panel security-card">
       <header className="security-card-header">
         <div>
-          <h2>Приложение-аутентификатор</h2>
+          <h2><UiText text="Приложение-аутентификатор" /></h2>
           <p>
-            TOTP-код защищает вход, даже если пароль оказался скомпрометирован.
-          </p>
+            <UiText text="TOTP-код защищает вход, даже если пароль оказался скомпрометирован." /></p>
         </div>
         <span className={overview?.totp ? "security-status on" : "security-status"}>
-          {overview?.totp ? "Включено" : "Выключено"}
+          {overview?.totp ? <UiText text="Включено" /> : <UiText text="Выключено" />}
         </span>
       </header>
 
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
 
@@ -155,23 +156,17 @@ export function MfaSettings() {
       ) : setup ? (
         <form className="security-flow" onSubmit={confirm}>
           <div className="inline-alert warning">
-            Не закрывайте страницу до сохранения резервных кодов на следующем
-            шаге.
-          </div>
+            <UiText text="Не закрывайте страницу до сохранения резервных кодов на следующем шаге." /></div>
           <div>
-            <strong>1. Добавьте аккаунт в аутентификатор</strong>
+            <strong><UiText text="1. Добавьте аккаунт в аутентификатор" /></strong>
             <p>
-              Откройте ссылку на устройстве с приложением или введите ключ
-              вручную. QR-код появится после подключения согласованного
-              локального генератора.
-            </p>
+              <UiText text="Откройте ссылку на устройстве с приложением или введите ключ вручную. QR-код появится после подключения согласованного локального генератора." /></p>
           </div>
           <a className="secondary-button setup-link" href={setup.otpauthUri}>
-            Открыть в аутентификаторе
-          </a>
+            <UiText text="Открыть в аутентификаторе" /></a>
           <code className="secret-value">{setup.secret}</code>
           <label className="form-field">
-            <span>2. Введите код из приложения</span>
+            <span><UiText text="2. Введите код из приложения" /></span>
             <input
               autoComplete="one-time-code"
               inputMode="numeric"
@@ -184,7 +179,7 @@ export function MfaSettings() {
           </label>
           <div className="security-actions">
             <button className="primary-button" disabled={busy} type="submit">
-              {busy ? "Проверяем…" : "Подтвердить и включить"}
+              {busy ? <UiText text="Проверяем…" /> : <UiText text="Подтвердить и включить" />}
             </button>
             <button
               className="secondary-button"
@@ -192,29 +187,27 @@ export function MfaSettings() {
               onClick={() => setSetup(undefined)}
               type="button"
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
           </div>
         </form>
       ) : overview?.totp ? (
         <div className="security-flow">
           <div className="security-facts">
             <span>
-              Подключено{" "}
+              <UiText text="Подключено" />{" "}
               <strong>{formatDate(overview.totp.confirmedAt)}</strong>
             </span>
             <span>
-              Резервных кодов осталось{" "}
+              <UiText text="Резервных кодов осталось" />{" "}
               <strong>{overview.remainingRecoveryCodes}</strong>
             </span>
           </div>
           {disabling ? (
             <form className="security-flow" onSubmit={disable}>
               <div className="inline-alert warning">
-                Отключение 2FA завершит все другие сессии аккаунта.
-              </div>
+                <UiText text="Отключение 2FA завершит все другие сессии аккаунта." /></div>
               <label className="form-field">
-                <span>Текущий пароль</span>
+                <span><UiText text="Текущий пароль" /></span>
                 <input
                   autoComplete="current-password"
                   name="password"
@@ -223,7 +216,7 @@ export function MfaSettings() {
                 />
               </label>
               <label className="form-field">
-                <span>Код TOTP или резервный код</span>
+                <span><UiText text="Код TOTP или резервный код" /></span>
                 <input
                   autoComplete="one-time-code"
                   name="code"
@@ -232,7 +225,7 @@ export function MfaSettings() {
               </label>
               <div className="security-actions">
                 <button className="danger-button" disabled={busy} type="submit">
-                  {busy ? "Отключаем…" : "Отключить 2FA"}
+                  {busy ? <UiText text="Отключаем…" /> : <UiText text="Отключить 2FA" />}
                 </button>
                 <button
                   className="secondary-button"
@@ -240,8 +233,7 @@ export function MfaSettings() {
                   onClick={() => setDisabling(false)}
                   type="button"
                 >
-                  Отмена
-                </button>
+                  <UiText text="Отмена" /></button>
               </div>
             </form>
           ) : (
@@ -250,23 +242,20 @@ export function MfaSettings() {
               onClick={() => setDisabling(true)}
               type="button"
             >
-              Отключить
-            </button>
+              <UiText text="Отключить" /></button>
           )}
         </div>
       ) : (
         <div className="security-flow">
           <p>
-            При каждом новом входе после пароля потребуется одноразовый код.
-            Будут созданы десять резервных кодов для аварийного доступа.
-          </p>
+            <UiText text="При каждом новом входе после пароля потребуется одноразовый код. Будут созданы десять резервных кодов для аварийного доступа." /></p>
           <button
             className="primary-button"
             disabled={busy}
             onClick={startSetup}
             type="button"
           >
-            {busy ? "Подготавливаем…" : "Настроить 2FA"}
+            {busy ? <UiText text="Подготавливаем…" /> : <UiText text="Настроить 2FA" />}
           </button>
         </div>
       )}
@@ -285,11 +274,10 @@ function RecoveryCodes({
   return (
     <div className="security-flow">
       <div className="inline-alert success" role="status">
-        Двухфакторная защита включена. Каждый резервный код работает один раз.
-      </div>
+        <UiText text="Двухфакторная защита включена. Каждый резервный код работает один раз." /></div>
       <div>
-        <strong>Сохраните резервные коды сейчас</strong>
-        <p>После ухода с этой страницы они больше не будут показаны.</p>
+        <strong><UiText text="Сохраните резервные коды сейчас" /></strong>
+        <p><UiText text="После ухода с этой страницы они больше не будут показаны." /></p>
       </div>
       <div className="recovery-code-grid">
         {codes.map((code) => (
@@ -302,18 +290,15 @@ function RecoveryCodes({
           onClick={() => void navigator.clipboard.writeText(text)}
           type="button"
         >
-          Скопировать
-        </button>
+          <UiText text="Скопировать" /></button>
         <button
           className="secondary-button"
           onClick={() => downloadCodes(text)}
           type="button"
         >
-          Скачать
-        </button>
+          <UiText text="Скачать" /></button>
         <button className="primary-button" onClick={onDone} type="button">
-          Я сохранил коды
-        </button>
+          <UiText text="Я сохранил коды" /></button>
       </div>
     </div>
   );

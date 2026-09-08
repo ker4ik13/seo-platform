@@ -24,6 +24,8 @@ import {
 import { workspaceTeamListPath } from "../lib/team-management";
 import { Icon, type IconName } from "./icon";
 import { ProviderLogo } from "./provider-logo";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface OverviewLiveData {
   readonly balance?: BillingBalanceSummary;
@@ -51,6 +53,8 @@ const ATTENTION_CREDENTIAL_STATUSES = new Set([
 export function SettingsOverview({
   context
 }: Readonly<{ context: ProtectedAppContext }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const workspace = context.workspace;
   const workspaceId = workspace?.id;
   const project = context.project;
@@ -114,20 +118,18 @@ export function SettingsOverview({
         <div className="settings-overview-degraded" role="status">
           <Icon name="warning" />
           <div>
-            <strong>Часть показателей временно недоступна</strong>
+            <strong><UiText text="Часть показателей временно недоступна" /></strong>
             <span>
-              Доступные данные показаны без подстановки демонстрационных
-              значений. Откройте нужный раздел, чтобы повторить загрузку.
-            </span>
+              <UiText text="Доступные данные показаны без подстановки демонстрационных значений. Откройте нужный раздел, чтобы повторить загрузку." /></span>
           </div>
         </div>
       )}
 
-      <section className="settings-overview-health-grid" aria-label="Состояние настроек">
+      <section className="settings-overview-health-grid" aria-label={uiText("Состояние настроек")}>
         <OverviewHealthCard
           href="/app/settings/security"
           icon="settings"
-          title="Безопасность"
+          title={uiText("Безопасность")}
           tone={live.mfa?.totp && context.user.emailVerified ? "success" : "warning"}
         >
           <div className="settings-security-score">
@@ -135,15 +137,15 @@ export function SettingsOverview({
             <div>
               <strong>
                 {loading
-                  ? "Проверяем защиту…"
+                  ? <UiText text="Проверяем защиту…" />
                   : live.mfa?.totp && context.user.emailVerified
-                    ? "Хорошая защита"
-                    : "Требует внимания"}
+                    ? <UiText text="Хорошая защита" />
+                    : <UiText text="Требует внимания" />}
               </strong>
               <small>
                 {live.mfa?.totp
-                  ? `2FA включена · ${live.mfa.remainingRecoveryCodes} резервных кодов`
-                  : "Включите двухфакторную аутентификацию"}
+                  ? <UiText text="2FA включена · {0} резервных кодов" values={[String(live.mfa.remainingRecoveryCodes)]} />
+                  : <UiText text="Включите двухфакторную аутентификацию" />}
               </small>
             </div>
           </div>
@@ -157,24 +159,24 @@ export function SettingsOverview({
           <OverviewHealthCard
             href="/app/settings/billing"
             icon="tasks"
-            title="Тариф и использование"
+            title={uiText("Тариф и использование")}
             tone={live.balance && live.balance.availableMinor > 0 ? "success" : "warning"}
           >
             <div className="settings-plan-summary">
               <span className="settings-plan-mark">
-                {live.subscription?.planName?.slice(0, 2) ?? "—"}
+                {(live.subscription?.planName ? uiText(live.subscription.planName).slice(0, 2) : undefined) ?? "—"}
               </span>
               <div>
-                <small>Текущий тариф</small>
-                <strong>{loading ? "Загрузка…" : live.subscription?.planName ?? "Нет подписки"}</strong>
+                <small><UiText text="Текущий тариф" /></small>
+                <strong>{loading ? <UiText text="Загрузка…" /> : <UiText text={live.subscription?.planName ?? "Нет подписки"} />}</strong>
               </div>
             </div>
             <OverviewFact
-              label="Доступно кредитов"
-              value={live.balance ? money(live.balance.availableMinor) : "—"}
+              label={uiText("Доступно кредитов")}
+              value={live.balance ? money(live.balance.availableMinor, uiLocale) : "—"}
             />
             <OverviewLimit
-              label="Проекты"
+              label={uiText("Проекты")}
               {...(currentPlan ? { limit: currentPlan.features.projects } : {})}
               value={activeProjects}
             />
@@ -183,31 +185,31 @@ export function SettingsOverview({
           <OverviewHealthCard
             href="/app/settings/workspace"
             icon="dashboard"
-            title="Рабочая область"
+            title={uiText("Рабочая область")}
           >
-            <OverviewFact label="Статус" value={workspace ? workspaceStatusLabel(workspace.status) : "Не создана"} />
-            <OverviewFact label="Роль" value={roleLabel(workspace?.roleCode)} />
-            <OverviewFact label="Проекты" value={String(activeProjects)} />
+            <OverviewFact label={uiText("Статус")} value={workspace ? workspaceStatusLabel(workspace.status) : "Не создана"} />
+            <OverviewFact label={uiText("Роль")} value={roleLabel(workspace?.roleCode)} />
+            <OverviewFact label={uiText("Проекты")} value={String(activeProjects)} />
           </OverviewHealthCard>
         )}
 
         <OverviewHealthCard
           href="/app/settings/team"
           icon="competitors"
-          title="Команда"
+          title={uiText("Команда")}
         >
           <div className="settings-team-counts">
-            <div><strong>{loading || !canViewTeam ? "—" : boundedCount(live.members?.length ?? 0, live.membersTruncated)}</strong><small>Участников</small></div>
-            <div><strong>{loading || !canViewTeam ? "—" : boundedCount(live.invites?.length ?? 0, live.invitesTruncated)}</strong><small>Приглашений</small></div>
+            <div><strong>{loading || !canViewTeam ? "—" : boundedCount(live.members?.length ?? 0, live.membersTruncated)}</strong><small><UiText text="Участников" /></small></div>
+            <div><strong>{loading || !canViewTeam ? "—" : boundedCount(live.invites?.length ?? 0, live.invitesTruncated)}</strong><small><UiText text="Приглашений" /></small></div>
           </div>
-          <OverviewFact label="Ваша роль" value={roleLabel(workspace?.roleCode)} />
-          {!canViewTeam && <small className="settings-card-note">Счётчики скрыты вашими правами</small>}
+          <OverviewFact label={uiText("Ваша роль")} value={roleLabel(workspace?.roleCode)} />
+          {!canViewTeam && <small className="settings-card-note"><UiText text="Счётчики скрыты вашими правами" /></small>}
         </OverviewHealthCard>
 
         <OverviewHealthCard
           href="/app/settings/integrations"
           icon="tools"
-          title="Интеграции"
+          title={uiText("Интеграции")}
           tone={attentionCredentials > 0 ? "warning" : activeCredentials > 0 ? "success" : "neutral"}
         >
           {canViewIntegrations ? (
@@ -219,35 +221,35 @@ export function SettingsOverview({
                     <span>
                       <strong>{credential.label}</strong>
                       <small>
-                        {credentialStatusLabel(credential.status)} · {credentialQuotaCompact(credential)}
+                        {<UiText text={credentialStatusLabel(credential.status) ?? ""} />} · {credentialQuotaCompact(credential, uiLocale)}
                       </small>
                     </span>
                     <b className={ATTENTION_CREDENTIAL_STATUSES.has(credential.status) ? "warning" : "success"} />
                   </div>
                 ))}
                 {!loading && (live.credentials?.length ?? 0) === 0 && (
-                  <p className="settings-card-empty">Подключений пока нет</p>
+                  <p className="settings-card-empty"><UiText text="Подключений пока нет" /></p>
                 )}
               </div>
-              <OverviewFact label="Активны" value={String(activeCredentials)} />
-              <OverviewFact label="Требуют внимания" value={String(attentionCredentials)} />
+              <OverviewFact label={uiText("Активны")} value={String(activeCredentials)} />
+              <OverviewFact label={uiText("Требуют внимания")} value={String(attentionCredentials)} />
             </>
           ) : (
-            <p className="settings-card-empty">Доступ к подключениям ограничен вашей ролью.</p>
+            <p className="settings-card-empty"><UiText text="Доступ к подключениям ограничен вашей ролью." /></p>
           )}
         </OverviewHealthCard>
 
         <OverviewHealthCard
           href="/app/settings/notifications"
           icon="bell"
-          title="Уведомления"
+          title={uiText("Уведомления")}
           tone={live.notifications?.channels.inApp ? "success" : "warning"}
         >
-          <OverviewChannel label="Внутри приложения" value={live.notifications?.channels.inApp} />
-          <OverviewChannel label="По электронной почте" value={live.notifications?.channels.email} />
-          <OverviewChannel label="В браузере" value={live.notifications?.channels.webPush} />
+          <OverviewChannel label={uiText("Внутри приложения")} value={live.notifications?.channels.inApp} />
+          <OverviewChannel label={uiText("По электронной почте")} value={live.notifications?.channels.email} />
+          <OverviewChannel label={uiText("В браузере")} value={live.notifications?.channels.webPush} />
           <OverviewFact
-            label="Тихие часы"
+            label={uiText("Тихие часы")}
             value={live.notifications?.quietHours
               ? `${live.notifications.quietHours.start}–${live.notifications.quietHours.end}`
               : "Не настроены"}
@@ -257,49 +259,49 @@ export function SettingsOverview({
         <OverviewHealthCard
           href={project ? `/app/projects/${encodeURIComponent(project.id)}/settings/general` : "/app/settings/projects"}
           icon="projects"
-          title={project ? `Текущий проект — ${project.name}` : "Текущий проект"}
+          title={project ? uiText("Текущий проект — {0}", [String(project.name)]) : uiText("Текущий проект")}
         >
           {project ? (
             <>
-              <OverviewFact label="Домен" value={project.domain} />
-              <OverviewFact label="Часовой пояс" value={project.timezone} />
-              <OverviewFact label="Статус" value={projectStatusLabel(project.status)} />
+              <OverviewFact label={uiText("Домен")} value={project.domain} />
+              <OverviewFact label={uiText("Часовой пояс")} value={project.timezone} />
+              <OverviewFact label={uiText("Статус")} value={projectStatusLabel(project.status)} />
             </>
           ) : (
-            <p className="settings-card-empty">Выберите или создайте проект.</p>
+            <p className="settings-card-empty"><UiText text="Выберите или создайте проект." /></p>
           )}
         </OverviewHealthCard>
       </section>
 
       <section className="settings-attention-panel">
         <header>
-          <h2>Требует внимания</h2>
+          <h2><UiText text="Требует внимания" /></h2>
           <span>{attentionCount(context, live)}</span>
         </header>
         <div>
           {!context.user.emailVerified && (
             <SettingsAttentionRow
-              description="Без подтверждения email недоступно восстановление части настроек безопасности."
+              description={uiText("Без подтверждения email недоступно восстановление части настроек безопасности.")}
               href="/app/settings/security"
-              label="Email не подтверждён"
+              label={uiText("Email не подтверждён")}
             />
           )}
           {attentionCredentials > 0 && (
             <SettingsAttentionRow
-              description={`${attentionCredentials} подключений имеют ошибку, ограничение или низкий баланс.`}
+              description={uiText("{0} подключений имеют ошибку, ограничение или низкий баланс.", [String(attentionCredentials)])}
               href="/app/settings/integrations"
-              label="Проверьте подключения API"
+              label={uiText("Проверьте подключения API")}
             />
           )}
           {live.balance && live.balance.availableMinor <= 0 && (
             <SettingsAttentionRow
-              description="Платные системные задания будут заблокированы до пополнения или обновления тарифа."
+              description={uiText("Платные системные задания будут заблокированы до пополнения или обновления тарифа.")}
               href="/app/settings/billing"
-              label="Кредиты закончились"
+              label={uiText("Кредиты закончились")}
             />
           )}
           {attentionCount(context, live) === 0 && (
-            <p className="settings-card-empty">Критичных действий сейчас нет.</p>
+            <p className="settings-card-empty"><UiText text="Критичных действий сейчас нет." /></p>
           )}
         </div>
       </section>
@@ -314,10 +316,11 @@ function OverviewHealthCard({ children, href, icon, title, tone = "neutral" }: R
   title: string;
   tone?: "neutral" | "success" | "warning";
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={`settings-health-card ${tone}`}>
       <header>
-        <a aria-label={`Открыть: ${title}`} href={href}>
+        <a aria-label={uiText("Открыть: {0}", [String(title)])} href={href}>
           <span><Icon name={icon} /></span>
           <h2>{title}</h2>
           <b aria-hidden="true">›</b>
@@ -329,7 +332,7 @@ function OverviewHealthCard({ children, href, icon, title, tone = "neutral" }: R
 }
 
 function OverviewFact({ label, value }: Readonly<{ label: string; value: string }>) {
-  return <div className="settings-overview-fact"><span>{label}</span><strong>{value}</strong></div>;
+  return <div className="settings-overview-fact"><span>{label}</span><strong><UiText text={value} /></strong></div>;
 }
 
 function OverviewChannel({ label, value }: Readonly<{ label: string; value: boolean | undefined }>) {
@@ -337,17 +340,18 @@ function OverviewChannel({ label, value }: Readonly<{ label: string; value: bool
 }
 
 function OverviewLimit({ label, limit, value }: Readonly<{ label: string; limit?: number; value: number }>) {
+  const { t: uiText } = useUiLocale();
   const ratio = limit && limit > 0 ? Math.min(100, Math.round(value / limit * 100)) : 0;
   return (
     <div className="settings-overview-limit">
       <OverviewFact label={label} value={limit === undefined ? `${value} · лимит не загружен` : `${value} / ${limit}`} />
-      <div aria-label={`${ratio}% лимита`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={ratio}><i style={{ width: `${ratio}%` }} /></div>
+      <div aria-label={uiText("{0}% лимита", [String(ratio)])} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={ratio}><i style={{ width: `${ratio}%` }} /></div>
     </div>
   );
 }
 
 function SettingsAttentionRow({ description, href, label }: Readonly<{ description: string; href: string; label: string }>) {
-  return <a className="settings-attention-row" href={href}><Icon name="warning" /><span><strong>{label}</strong><small>{description}</small></span><b>Перейти</b><i>›</i></a>;
+  return <a className="settings-attention-row" href={href}><Icon name="warning" /><span><strong>{label}</strong><small>{description}</small></span><b><UiText text="Перейти" /></b><i>›</i></a>;
 }
 
 async function loadOverviewData(input: Readonly<{
@@ -442,7 +446,7 @@ function credentialStatusLabel(status: IntegrationCredentialSummary["status"]): 
 }
 
 function credentialQuotaCompact(
-  credential: IntegrationCredentialSummary
+  credential: IntegrationCredentialSummary, uiLocale: string = "ru-RU"
 ): string {
   if (credential.quota.status === "NOT_AVAILABLE") {
     return credential.verifiedAt ? "квота не раскрыта" : "нужна проверка";
@@ -450,16 +454,16 @@ function credentialQuotaCompact(
   if (credential.quota.unit === "XMLSTOCK_REQUESTS") {
     const balance = credential.quota.balance;
     return balance
-      ? `${new Intl.NumberFormat("ru-RU", {
+      ? `${new Intl.NumberFormat(uiLocale, {
           style: "currency",
           currency: balance.currency,
           maximumFractionDigits: 2
-        }).format(Number(balance.amount))} · ${number(credential.quota.remaining)} запросов`
-      : `${number(credential.quota.remaining)} запросов`;
+        }).format(Number(balance.amount))} · ${number(credential.quota.remaining, uiLocale)} запросов`
+      : `${number(credential.quota.remaining, uiLocale)} запросов`;
   }
   return credential.quota.unit === "ARSENKIN_LIMITS"
-    ? `${number(credential.quota.remaining)} лимитов`
-    : `${number(credential.quota.remaining)} API-запросов`;
+    ? `${number(credential.quota.remaining, uiLocale)} лимитов`
+    : `${number(credential.quota.remaining, uiLocale)} API-запросов`;
 }
 
 function roleLabel(roleCode: string | undefined): string {
@@ -483,12 +487,12 @@ function projectStatusLabel(status: "DRAFT" | "ACTIVE" | "ARCHIVED"): string {
   return "Черновик";
 }
 
-function money(minor: number): string {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(minor / 100);
+function money(minor: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(minor / 100);
 }
 
-function number(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function number(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
 function boundedCount(value: number, truncated: boolean | undefined): string {

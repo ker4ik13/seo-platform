@@ -41,6 +41,8 @@ import {
   webPushDeviceNeedsReconciliation
 } from "../lib/push-notifications";
 import { settlePushRegistrationReconciliation } from "../lib/push-registration-reconciliation";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 const PUSH_SUBSCRIPTIONS_PATH = "/app/api/me/push-subscriptions";
 const INITIAL_FEATURE_SUPPORT: WebPushFeatureSupport = {
@@ -69,6 +71,8 @@ export function BrowserPushSettings({
   userId: string;
   webPushEnabled: boolean;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [state, setState] = useState<WebPushSubscriptionsState>();
   const [installation, setInstallation] =
     useState<PushInstallationRecord>();
@@ -463,7 +467,7 @@ export function BrowserPushSettings({
     return (
       <section className="browser-push-card" aria-busy="true">
         <span className="spinner" aria-hidden="true" />
-        <p>Проверяем браузерные устройства…</p>
+        <p><UiText text="Проверяем браузерные устройства…" /></p>
       </section>
     );
   }
@@ -472,8 +476,8 @@ export function BrowserPushSettings({
       <section className="browser-push-card" aria-labelledby="browser-push-title">
         <header className="browser-push-heading">
           <div>
-            <h3 id="browser-push-title">Браузерные устройства</h3>
-            <p>Список устройств временно недоступен.</p>
+            <h3 id="browser-push-title"><UiText text="Браузерные устройства" /></h3>
+            <p><UiText text="Список устройств временно недоступен." /></p>
           </div>
         </header>
         <PushErrorAlert
@@ -500,11 +504,9 @@ export function BrowserPushSettings({
     <section className="browser-push-card" aria-labelledby="browser-push-title">
       <header className="browser-push-heading">
         <div>
-          <h3 id="browser-push-title">Браузерные устройства</h3>
+          <h3 id="browser-push-title"><UiText text="Браузерные устройства" /></h3>
           <p>
-            Подписка относится к аккаунту и конкретному профилю браузера.
-            Секреты устройства в интерфейсе не отображаются.
-          </p>
+            <UiText text="Подписка относится к аккаунту и конкретному профилю браузера. Секреты устройства в интерфейсе не отображаются." /></p>
         </div>
         <span className="browser-push-limit">
           {activeDevices} / {state.registration.maxActiveDevices}
@@ -513,15 +515,11 @@ export function BrowserPushSettings({
 
       {!webPushEnabled && (
         <div className="inline-alert warning compact">
-          Глобальный Browser Push выключен. Устройства сохранятся, но канал
-          останется приостановлен.
-        </div>
+          <UiText text="Глобальный Browser Push выключен. Устройства сохранятся, но канал останется приостановлен." /></div>
       )}
       {!online && (
         <div className="inline-alert warning compact" role="status">
-          Нет сети. Список сохранён на экране, новые операции станут доступны
-          после восстановления соединения.
-        </div>
+          <UiText text="Нет сети. Список сохранён на экране, новые операции станут доступны после восстановления соединения." /></div>
       )}
       {error && (
         <PushErrorAlert
@@ -568,16 +566,16 @@ export function BrowserPushSettings({
                 <div className="browser-device-copy">
                   <div>
                     <strong>{device.label}</strong>
-                    {current && <span className="current-device-badge">Текущий</span>}
+                    {current && <span className="current-device-badge"><UiText text="Текущий" /></span>}
                     <DeviceStatus status={device.status} />
                   </div>
                   <small>
-                    {browserLabel(device.browser)} ·{" "}
-                    {platformLabel(device.platform)} ·{" "}
-                    {deliveryDescription(device)}
+                    {<UiText text={browserLabel(device.browser) ?? ""} />} ·{" "}
+                    {<UiText text={platformLabel(device.platform) ?? ""} />} ·{" "}
+                    {deliveryDescription(device, uiLocale)}
                   </small>
                   {device.statusReason && (
-                    <small>{statusReasonLabel(device.statusReason)}</small>
+                    <small>{<UiText text={statusReasonLabel(device.statusReason) ?? ""} />}</small>
                   )}
                 </div>
                 {editingId === device.installationId ? (
@@ -589,7 +587,7 @@ export function BrowserPushSettings({
                     }}
                   >
                     <label>
-                      <span className="visually-hidden">Название устройства</span>
+                      <span className="visually-hidden"><UiText text="Название устройства" /></span>
                       <input
                         autoFocus
                         disabled={Boolean(operation)}
@@ -603,7 +601,7 @@ export function BrowserPushSettings({
                       disabled={Boolean(operation)}
                       type="submit"
                     >
-                      {deviceBusy ? "Сохраняем…" : "Сохранить"}
+                      {deviceBusy ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
                     </button>
                     <button
                       className="text-button"
@@ -614,8 +612,7 @@ export function BrowserPushSettings({
                       }}
                       type="button"
                     >
-                      Отмена
-                    </button>
+                      <UiText text="Отмена" /></button>
                   </form>
                 ) : (
                   <div className="browser-device-actions">
@@ -630,15 +627,14 @@ export function BrowserPushSettings({
                           }}
                           type="button"
                         >
-                          Переименовать
-                        </button>
+                          <UiText text="Переименовать" /></button>
                         <button
                           className="text-button danger-text"
                           disabled={Boolean(operation) || !online}
                           onClick={() => void revokeDevice(device)}
                           type="button"
                         >
-                          {deviceBusy ? "Отзываем…" : "Отозвать"}
+                          {deviceBusy ? <UiText text="Отзываем…" /> : <UiText text="Отозвать" />}
                         </button>
                       </>
                     )}
@@ -650,10 +646,9 @@ export function BrowserPushSettings({
         </ul>
       ) : (
         <div className="browser-device-empty">
-          <strong>Нет зарегистрированных браузеров</strong>
+          <strong><UiText text="Нет зарегистрированных браузеров" /></strong>
           <p>
-            Подключение начинается только после явного нажатия кнопки выше.
-          </p>
+            <UiText text="Подключение начинается только после явного нажатия кнопки выше." /></p>
         </div>
       )}
 
@@ -661,15 +656,14 @@ export function BrowserPushSettings({
         <button
           className="secondary-button"
           disabled
-          title="Тестовая отправка будет подключена отдельной защищённой командой"
+          title={uiText("Тестовая отправка будет подключена отдельной защищённой командой")}
           type="button"
         >
-          Отправить тест
-        </button>
+          <UiText text="Отправить тест" /></button>
         <small>
           {state.registration.deliveryAvailable
-            ? "Рабочая доставка включена. Отдельная тестовая команда пока недоступна."
-            : "Тестовая и рабочая доставка пока не включены на сервере. Регистрация устройства только безопасно подготавливает канал."}
+            ? <UiText text="Рабочая доставка включена. Отдельная тестовая команда пока недоступна." />
+            : <UiText text="Тестовая и рабочая доставка пока не включены на сервере. Регистрация устройства только безопасно подготавливает канал." />}
         </small>
       </div>
     </section>
@@ -690,7 +684,7 @@ function PushErrorAlert({
       className={`browser-push-error inline-alert danger${compact ? " compact" : ""}`}
       role="alert"
     >
-      <span>{error.message}</span>
+      <span>{<UiText text={error.message ?? ""} />}</span>
       {error.action ? (
         <a className="inline-alert-action" href={error.action.href}>
           {error.action.label}
@@ -701,8 +695,7 @@ function PushErrorAlert({
           onClick={onRetry}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       )}
     </div>
   );
@@ -718,12 +711,9 @@ function BrowserPushStorageRecovery({
   return (
     <div className="browser-push-current conflict">
       <div>
-        <strong>Локальная регистрация требует сброса</strong>
+        <strong><UiText text="Локальная регистрация требует сброса" /></strong>
         <p>
-          Браузерное состояние повреждено или создано более новой версией
-          приложения. После подтверждения мы удалим локальную подписку и
-          заменим только запись этого устройства новым идентификатором.
-        </p>
+          <UiText text="Браузерное состояние повреждено или создано более новой версией приложения. После подтверждения мы удалим локальную подписку и заменим только запись этого устройства новым идентификатором." /></p>
       </div>
       <button
         className="secondary-button"
@@ -731,7 +721,7 @@ function BrowserPushStorageRecovery({
         onClick={onReset}
         type="button"
       >
-        {busy ? "Сбрасываем…" : "Сбросить локальную регистрацию"}
+        {busy ? <UiText text="Сбрасываем…" /> : <UiText text="Сбросить локальную регистрацию" />}
       </button>
     </div>
   );
@@ -758,16 +748,14 @@ function BrowserPushCurrentState({
     return (
       <div className="browser-push-current" aria-busy="true">
         <span className="spinner" />
-        <span>Проверяем текущее устройство…</span>
+        <span><UiText text="Проверяем текущее устройство…" /></span>
       </div>
     );
   }
   if (viewState === "SERVER_DISABLED") {
     return (
       <div className="inline-alert warning">
-        Регистрация Web Push отключена на сервере: VAPID и защищённое хранилище
-        ещё не настроены.
-      </div>
+        <UiText text="Регистрация Web Push отключена на сервере: VAPID и защищённое хранилище ещё не настроены." /></div>
     );
   }
   if (viewState === "UNSUPPORTED") {
@@ -785,11 +773,9 @@ function BrowserPushCurrentState({
     return (
       <div className="browser-push-current conflict">
         <div>
-          <strong>Этот браузер привязан к другому аккаунту</strong>
+          <strong><UiText text="Этот браузер привязан к другому аккаунту" /></strong>
           <p>
-            Мы не переносим endpoint между аккаунтами автоматически. Сначала
-            удалите локальную подписку прежнего аккаунта.
-          </p>
+            <UiText text="Мы не переносим endpoint между аккаунтами автоматически. Сначала удалите локальную подписку прежнего аккаунта." /></p>
         </div>
         <button
           className="secondary-button"
@@ -798,8 +784,8 @@ function BrowserPushCurrentState({
           type="button"
         >
           {operation?.kind === "resetting"
-            ? "Подготавливаем…"
-            : "Использовать текущий аккаунт"}
+            ? <UiText text="Подготавливаем…" />
+            : <UiText text="Использовать текущий аккаунт" />}
         </button>
       </div>
     );
@@ -808,11 +794,9 @@ function BrowserPushCurrentState({
     return (
       <div className="browser-push-current conflict">
         <div>
-          <strong>Уведомления запрещены в браузере</strong>
+          <strong><UiText text="Уведомления запрещены в браузере" /></strong>
           <p>
-            Разрешите их для этого сайта вручную. Повторный системный prompt
-            приложение не вызывает.
-          </p>
+            <UiText text="Разрешите их для этого сайта вручную. Повторный системный prompt приложение не вызывает." /></p>
         </div>
         <button
           className="secondary-button"
@@ -820,8 +804,7 @@ function BrowserPushCurrentState({
           onClick={onRefresh}
           type="button"
         >
-          Проверить снова
-        </button>
+          <UiText text="Проверить снова" /></button>
       </div>
     );
   }
@@ -829,11 +812,11 @@ function BrowserPushCurrentState({
     return (
       <div className="browser-push-current active">
         <div>
-          <strong>Текущий браузер зарегистрирован</strong>
+          <strong><UiText text="Текущий браузер зарегистрирован" /></strong>
           <p>
             {reconcileRequired
-              ? "Service Worker сообщил об изменении подписки — нужна безопасная синхронизация."
-              : "Локальная подписка совпадает с активным серверным устройством."}
+              ? <UiText text="Service Worker сообщил об изменении подписки — нужна безопасная синхронизация." />
+              : <UiText text="Локальная подписка совпадает с активным серверным устройством." />}
           </p>
         </div>
         {reconcileRequired && (
@@ -844,8 +827,8 @@ function BrowserPushCurrentState({
             type="button"
           >
             {operation?.kind === "registering"
-              ? "Синхронизируем…"
-              : "Синхронизировать"}
+              ? <UiText text="Синхронизируем…" />
+              : <UiText text="Синхронизировать" />}
           </button>
         )}
       </div>
@@ -868,8 +851,8 @@ function BrowserPushCurrentState({
       >
         {registering
           ? reconcileRequired
-            ? "Синхронизируем…"
-            : "Подключаем…"
+            ? <UiText text="Синхронизируем…" />
+            : <UiText text="Подключаем…" />
           : copy.action}
       </button>
     </div>
@@ -938,10 +921,10 @@ function DeviceStatus({
   return (
     <span className={`browser-device-status ${status.toLowerCase()}`}>
       {status === "ACTIVE"
-        ? "Активно"
+        ? <UiText text="Активно" />
         : status === "EXPIRED"
-          ? "Истекло"
-          : "Отозвано"}
+          ? <UiText text="Истекло" />
+          : <UiText text="Отозвано" />}
     </span>
   );
 }
@@ -961,24 +944,24 @@ function withPushDevice(
   };
 }
 
-function deliveryDescription(device: WebPushDeviceSummary): string {
+function deliveryDescription(device: WebPushDeviceSummary, uiLocale: string = "ru-RU"): string {
   if (device.status === "EXPIRED" && device.expiredAt) {
-    return `истекло ${formatTimestamp(device.expiredAt)}`;
+    return `истекло ${formatTimestamp(device.expiredAt, uiLocale)}`;
   }
   if (device.status === "REVOKED" && device.revokedAt) {
-    return `отозвано ${formatTimestamp(device.revokedAt)}`;
+    return `отозвано ${formatTimestamp(device.revokedAt, uiLocale)}`;
   }
   if (device.lastDeliveryStatus === "DELIVERED" && device.lastDeliveryAt) {
-    return `доставлено ${formatTimestamp(device.lastDeliveryAt)}`;
+    return `доставлено ${formatTimestamp(device.lastDeliveryAt, uiLocale)}`;
   }
   if (device.lastDeliveryStatus === "FAILED" && device.lastDeliveryAt) {
-    return `ошибка ${formatTimestamp(device.lastDeliveryAt)}`;
+    return `ошибка ${formatTimestamp(device.lastDeliveryAt, uiLocale)}`;
   }
-  return `добавлено ${formatTimestamp(device.createdAt)}`;
+  return `добавлено ${formatTimestamp(device.createdAt, uiLocale)}`;
 }
 
-function formatTimestamp(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatTimestamp(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

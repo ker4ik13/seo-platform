@@ -7,12 +7,15 @@ import {
   type CSSProperties,
   type ReactNode
 } from "react";
+import { useUiLocale } from "./ui-locale";
+
 
 export function SemanticModal({
   bodyClassName,
   children,
   className,
   closeDisabled = false,
+  closeLabel = "Закрыть окно",
   description,
   footer,
   headerActions,
@@ -26,6 +29,7 @@ export function SemanticModal({
   children: ReactNode;
   className?: string;
   closeDisabled?: boolean;
+  closeLabel?: string;
   description?: string;
   footer?: ReactNode;
   headerActions?: ReactNode;
@@ -35,6 +39,7 @@ export function SemanticModal({
   style?: CSSProperties;
   title: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const descriptionId = useId();
@@ -78,21 +83,17 @@ export function SemanticModal({
     >
       <header className="semantic-modal-header">
         <div>
-          <h2 id={titleId}>{title}</h2>
-          {description && <p id={descriptionId}>{description}</p>}
+          <h2 id={titleId}>{uiText(title)}</h2>
+          {description && <p id={descriptionId}>{uiText(description)}</p>}
         </div>
         <div className="semantic-modal-header-actions">
           {headerActions}
           <button
-            aria-label="Закрыть окно"
+            aria-label={uiText(closeLabel)}
             className="semantic-modal-close"
             disabled={closeDisabled}
             onClick={onClose}
-            title={
-              closeDisabled
-                ? "Сначала выполните обязательное действие"
-                : undefined
-            }
+            title={closeDisabled ? uiText("Сначала выполните обязательное действие") : undefined}
             type="button"
           >
             ×

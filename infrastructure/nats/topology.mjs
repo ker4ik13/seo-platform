@@ -5,7 +5,8 @@ const AUTH_EMAIL_EVENT_SUFFIXES = Object.freeze([
   "identity.email-verification.requested.v1",
   "identity.password-reset.requested.v1",
   "workspace.invite.requested.v1",
-  "billing.npd-receipt.delivery-requested.v1"
+  "billing.npd-receipt.delivery-requested.v1",
+  "billing.notice.requested.v1"
 ]);
 const AUTH_EMAIL_FILTER_SUFFIX = "email.>";
 const AUTH_EMAIL_DLQ_SUFFIX = "dlq.jobs.transactional-email.v1";
@@ -335,6 +336,11 @@ async function ensureConsumer(consumers, streamName, desired) {
 function assertSafeStreamIdentity(current, desired) {
   const subjectsAreSafe =
     sameStringArray(current?.subjects, desired.subjects) ||
+    // Only the known four-event -> five-event billing notice upgrade is safe.
+    // Keep the existing stream and consumer state; never recreate or purge it.
+    (desired.name === AUTH_EMAIL_STREAM_NAME && desired.subjects.length === 5 &&
+      desired.subjects[4].endsWith(".email.billing.notice.requested.v1") &&
+      sameStringArray(current?.subjects, desired.subjects.slice(0, 4))) ||
     (desired.name === DLQ_STREAM_NAME &&
       sameStringArray(current?.subjects, [desired.subjects[0]]));
   const unsafe =

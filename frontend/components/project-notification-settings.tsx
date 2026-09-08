@@ -14,6 +14,8 @@ import {
   type NotificationEventType,
   type NotificationRule
 } from "./notification-settings";
+import { UiText } from "./ui-locale";
+
 
 interface EffectiveNotificationRule extends NotificationRule {
   readonly source: "PROFILE" | "PROJECT" | "PAUSE";
@@ -172,22 +174,21 @@ export function ProjectNotificationSettings({
     return (
       <section className="panel notification-settings-loading" aria-busy="true">
         <span className="spinner" />
-        <p>Загружаем подписку проекта…</p>
+        <p><UiText text="Загружаем подписку проекта…" /></p>
       </section>
     );
   }
   if (!draft) {
     return (
       <section className="panel panel-empty compact">
-        <strong>Подписка проекта недоступна</strong>
-        <p>{error ?? "Проверьте доступ к проекту и повторите."}</p>
+        <strong><UiText text="Подписка проекта недоступна" /></strong>
+        <p>{error ?? <UiText text="Проверьте доступ к проекту и повторите." />}</p>
         <button
           className="secondary-button"
           onClick={() => setRetryVersion((value) => value + 1)}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -200,25 +201,24 @@ export function ProjectNotificationSettings({
     <div className="notification-settings-stack">
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       {saved && (
         <div className="inline-alert success" role="status">
-          Подписка проекта сохранена
-        </div>
+          <UiText text="Подписка проекта сохранена" /></div>
       )}
 
       <section className="panel notification-card">
         <header className="security-card-header">
           <div>
-            <h2>Режим подписки</h2>
+            <h2><UiText text="Режим подписки" /></h2>
             <p>
-              Настройка относится только к вам и проекту «{projectName}».
+              <UiText text="Настройка относится только к вам и проекту «" />{projectName}».
             </p>
           </div>
           <span className="security-status on">
-            Доступ v{draft.membershipVersion}
+            <UiText text="Доступ v" />{draft.membershipVersion}
           </span>
         </header>
         <div className="project-notification-mode">
@@ -230,8 +230,8 @@ export function ProjectNotificationSettings({
               type="radio"
             />
             <span>
-              <strong>Наследовать профиль</strong>
-              <small>Использовать глобальные каналы и категории.</small>
+              <strong><UiText text="Наследовать профиль" /></strong>
+              <small><UiText text="Использовать глобальные каналы и категории." /></small>
             </span>
           </label>
           <label>
@@ -242,8 +242,8 @@ export function ProjectNotificationSettings({
               type="radio"
             />
             <span>
-              <strong>Переопределить</strong>
-              <small>Настроить работы этого проекта отдельно.</small>
+              <strong><UiText text="Переопределить" /></strong>
+              <small><UiText text="Настроить работы этого проекта отдельно." /></small>
             </span>
           </label>
           <label>
@@ -254,14 +254,14 @@ export function ProjectNotificationSettings({
               type="radio"
             />
             <span>
-              <strong>Пауза</strong>
-              <small>Временно остановить проектные доставки.</small>
+              <strong><UiText text="Пауза" /></strong>
+              <small><UiText text="Временно остановить проектные доставки." /></small>
             </span>
           </label>
         </div>
         {draft.mode === "PAUSED" && (
           <label className="form-field project-pause-field">
-            <span>Приостановить до</span>
+            <span><UiText text="Приостановить до" /></span>
             <input
               max={localDateTime(
                 new Date(Date.now() + 366 * 24 * 60 * 60 * 1_000)
@@ -288,11 +288,9 @@ export function ProjectNotificationSettings({
         )}
         <label className="notification-toggle-row">
           <span>
-            <strong>Мои фоновые задания</strong>
+            <strong><UiText text="Мои фоновые задания" /></strong>
             <small>
-              Сообщать о завершении, частичном результате, отмене и ошибке
-              созданных вами работ.
-            </small>
+              <UiText text="Сообщать о завершении, частичном результате, отмене и ошибке созданных вами работ." /></small>
           </span>
           <input
             checked={draft.notifyOwnJobs}
@@ -311,30 +309,27 @@ export function ProjectNotificationSettings({
       <section className="panel notification-card">
         <header className="security-card-header">
           <div>
-            <h2>Работы проекта</h2>
+            <h2><UiText text="Работы проекта" /></h2>
             <p>
-              Заблокированные профильным master-switch каналы нельзя включить
-              здесь.
-            </p>
+              <UiText text="Заблокированные профильным master-switch каналы нельзя включить здесь." /></p>
           </div>
           <span className="security-status">
-            {enabledCount} эффективных правил
-          </span>
+            {enabledCount} <UiText text="эффективных правил" before=" " /></span>
         </header>
         <div className="notification-matrix-wrap" tabIndex={0}>
           <table className="notification-matrix">
             <thead>
               <tr>
-                <th>Тип работы</th>
+                <th><UiText text="Тип работы" /></th>
                 {NOTIFICATION_CHANNELS.map((channel) => (
-                  <th key={channel}>{channelLabel(channel)}</th>
+                  <th key={channel}>{<UiText text={channelLabel(channel) ?? ""} />}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {events.map((eventType) => (
                 <tr key={eventType}>
-                  <th>{eventLabel(eventType)}</th>
+                  <th>{<UiText text={eventLabel(eventType) ?? ""} />}</th>
                   {NOTIFICATION_CHANNELS.map((channel) => {
                     const effective = findEffective(
                       previewRules,
@@ -366,12 +361,12 @@ export function ProjectNotificationSettings({
                           />
                           <span>
                             {effective.blockedByProfile
-                              ? "Выключено в профиле"
+                              ? <UiText text="Выключено в профиле" />
                               : effective.source === "PROJECT"
-                                ? "Проект"
+                                ? <UiText text="Проект" />
                                 : effective.source === "PAUSE"
-                                  ? "Пауза"
-                                  : "Профиль"}
+                                  ? <UiText text="Пауза" />
+                                  : <UiText text="Профиль" />}
                           </span>
                         </label>
                         <RuleSelectors
@@ -400,8 +395,8 @@ export function ProjectNotificationSettings({
       <div className="notification-savebar">
         <span>
           {dirty
-            ? "Есть несохранённые изменения"
-            : `Сохранено · версия ${draft.version}`}
+            ? <UiText text="Есть несохранённые изменения" />
+            : <UiText text="Сохранено · версия {0}" values={[String(draft.version)]} />}
         </span>
         <button
           className="secondary-button"
@@ -409,15 +404,14 @@ export function ProjectNotificationSettings({
           onClick={() => changeMode("INHERIT")}
           type="button"
         >
-          Сбросить к профилю
-        </button>
+          <UiText text="Сбросить к профилю" /></button>
         <button
           className="primary-button"
           disabled={!dirty || saving}
           onClick={() => void save()}
           type="button"
         >
-          {saving ? "Сохраняем…" : "Сохранить"}
+          {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
         </button>
       </div>
     </div>

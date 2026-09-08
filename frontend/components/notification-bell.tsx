@@ -34,6 +34,8 @@ import {
   type OperationResultKind
 } from "../lib/operation-result-routes";
 import { OperationResultModal } from "./operation-result-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 const NOTIFICATION_UPDATE_EVENT = "notification-center-updated";
 const POLL_INTERVAL_MS = 20_000;
@@ -65,6 +67,8 @@ interface NotificationOperation {
 }
 
 export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [unreadCount, setUnreadCount] = useState<number>();
   const [items, setItems] = useState<readonly HeaderNotification[]>([]);
   const [invites, setInvites] = useState<readonly PendingWorkspaceInviteSummary[]>([]);
@@ -247,7 +251,7 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
     }
   }
 
-  async function openItem(item: HeaderNotification): Promise<void> {
+  async function openItem(item: HeaderNotification, uiLocale: string = "ru-RU"): Promise<void> {
     if (!item.readAt) await markRead(item);
     if (!item.deepLink) return;
     const operation = parseOperationResultHref(item.deepLink);
@@ -258,7 +262,7 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
         ...operation,
         projectId: operationProjectId,
         title: operationTitle(operation.kind, item.title),
-        description: `${item.title} · ${formatTime(item.createdAt)}`
+        description: `${item.title} · ${formatTime(item.createdAt, uiLocale)}`
       });
       return;
     }
@@ -356,40 +360,40 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
 
         {open && (
           <section
-            aria-label="Последние уведомления"
+            aria-label={uiText("Последние уведомления")}
             className="notification-popover"
             data-exclusive-dropdown-layer
           >
             <header>
-              <h2>Уведомления</h2>
+              <h2><UiText text="Уведомления" /></h2>
               <div className="notification-popover-actions">
                 <button
-                  aria-label="Прочитать все"
+                  aria-label={uiText("Прочитать все")}
                   disabled={markingAll || (unreadCount ?? 0) === 0}
                   onClick={() => void markAllRead()}
-                  title="Прочитать все"
+                  title={uiText("Прочитать все")}
                   type="button"
                 >
                   <Icon name="checkDouble" />
                 </button>
                 <a
-                  aria-label="Настроить уведомления"
+                  aria-label={uiText("Настроить уведомления")}
                   href="/app/settings/notifications"
-                  title="Настроить уведомления"
+                  title={uiText("Настроить уведомления")}
                 >
                   <Icon name="settings" />
                 </a>
               </div>
             </header>
-            {error && <div className="notification-popover-error" role="alert">{error}</div>}
+            {error && <div className="notification-popover-error" role="alert">{<UiText text={error ?? ""} />}</div>}
             {loading && items.length === 0 && invites.length === 0 && transfers.length === 0 ? (
               <div className="notification-popover-loading" aria-busy="true">
                 <i /><i /><i />
               </div>
             ) : items.length === 0 && invites.length === 0 && transfers.length === 0 ? (
               <div className="notification-popover-empty">
-                <strong>Уведомлений пока нет</strong>
-                <p>Результаты операций и системные сообщения появятся здесь.</p>
+                <strong><UiText text="Уведомлений пока нет" /></strong>
+                <p><UiText text="Результаты операций и системные сообщения появятся здесь." /></p>
               </div>
             ) : (
               <div className="notification-popover-scroll">
@@ -416,14 +420,14 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
                 {unread.length > 0 && (
                   <NotificationGroup
                     items={unread}
-                    label="Новые"
+                    label={uiText("Новые")}
                     onOpen={openItem}
                   />
                 )}
                 {read.length > 0 && (
                   <NotificationGroup
                     items={read}
-                    label="Ранее"
+                    label={uiText("Ранее")}
                     onOpen={openItem}
                   />
                 )}
@@ -431,8 +435,7 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
             )}
             <footer>
               <Link href="/app/notifications" onClick={() => setOpen(false)}>
-                Показать все уведомления
-              </Link>
+                <UiText text="Показать все уведомления" /></Link>
             </footer>
           </section>
         )}
@@ -443,20 +446,19 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
           {toasts.slice(0, 1).map((toast) => (
             <article className={`notification-toast severity-${toast.severity.toLowerCase()}`} key={toast.toastId}>
               <button
-                aria-label="Закрыть уведомление"
+                aria-label={uiText("Закрыть уведомление")}
                 className="notification-toast-close"
                 onClick={() => setToasts((current) => current.filter(({ toastId }) => toastId !== toast.toastId))}
                 type="button"
               >
                 ×
               </button>
-              <span>{eventLabel(toast.eventType)}</span>
+              <span>{<UiText text={eventLabel(toast.eventType) ?? ""} />}</span>
               <strong>{toast.title}</strong>
               {toast.body && <p>{toast.body}</p>}
               {toast.deepLink && (
-                <button className="text-button" onClick={() => void openItem(toast)} type="button">
-                  Открыть результат
-                </button>
+                <button className="text-button" onClick={() => void openItem(toast, uiLocale)} type="button">
+                  <UiText text="Открыть результат" /></button>
               )}
             </article>
           ))}
@@ -503,6 +505,8 @@ function NotificationGroup({
   label: string;
   onOpen: (item: HeaderNotification) => Promise<void>;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   return (
     <section className="notification-popover-group">
       <h3>{label}</h3>
@@ -515,11 +519,11 @@ function NotificationGroup({
         >
           <span className={`notification-popover-severity severity-${item.severity.toLowerCase()}`} />
           <span>
-            <small>{eventLabel(item.eventType)} · {formatTime(item.createdAt)}</small>
+            <small>{<UiText text={eventLabel(item.eventType) ?? ""} />} · {formatTime(item.createdAt, uiLocale)}</small>
             <strong>{item.title}</strong>
             {item.body && <em>{item.body}</em>}
           </span>
-          {!item.readAt && <i aria-label="Не прочитано" />}
+          {!item.readAt && <i aria-label={uiText("Не прочитано")} />}
         </button>
       ))}
     </section>
@@ -589,8 +593,8 @@ function eventLabel(eventType: string): string {
   return labels[eventType] ?? "Системное событие";
 }
 
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatTime(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
     hour: "2-digit",

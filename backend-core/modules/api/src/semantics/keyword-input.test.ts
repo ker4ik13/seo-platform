@@ -358,3 +358,14 @@ test("accepts only explicit non-empty keyword cleaning rules", () => {
     DomainError
   );
 });
+test("tag deltas are exact and bulk additions cannot implicitly remove other tags", () => {
+  const id = "01900000-0000-7000-8000-000000000001";
+  assert.deepEqual(updateSemanticKeywordInput({ addTagNames: ["  Новый  ", "новый"], removeTagNames: ["Старый, особый"] }), { addTagNames: ["новый"], removeTagNames: ["Старый, особый"] });
+  assert.deepEqual(semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: { addTagNames: ["Спрос, бренд"] } }).patch, { addTagNames: ["Спрос, бренд"] });
+  for (const patch of [{ tagNames: [], addTagNames: ["A"] }, { addTagNames: ["A"], removeTagNames: ["a"] }]) assert.throws(() => updateSemanticKeywordInput(patch));
+  assert.throws(() => semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: { tagNames: [], addTagNames: ["A"] } }));
+  assert.deepEqual(semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: { addTagNames: ["Новый"], removeTagNames: [" A ", "a"] } }).patch, { addTagNames: ["Новый"], removeTagNames: ["a"] });
+  assert.throws(() => semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: { addTagNames: ["A"], removeTagNames: ["a"] } }));
+  assert.throws(() => semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: { tagNames: [], removeTagNames: ["A"] } }));
+  assert.throws(() => updateSemanticKeywordInput({ addTagNames: ["a".repeat(161)] }));
+});

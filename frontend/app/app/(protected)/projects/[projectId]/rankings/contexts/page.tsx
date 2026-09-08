@@ -3,6 +3,8 @@ import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { TrackingContextSettingsPanel } from "../../../../../../../components/tracking-context-settings";
 import { RankAutomationPanel } from "../../../../../../../components/rank-automation-panel";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
+import { UiText } from "../../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +29,9 @@ export default async function TrackingContextsPage({
     <>
       <section className="page-heading">
         <div>
-          <h1>Съём позиций</h1>
+          <h1><UiText text="Съём позиций" /></h1>
           <p>
-            Настраивайте профили запуска, запускайте съём позже или создавайте
-            регулярные проверки по расписанию.
-          </p>
+            <UiText text="Настраивайте профили запуска, запускайте съём позже или создавайте регулярные проверки по расписанию." /></p>
         </div>
       </section>
       <SettingsTabs

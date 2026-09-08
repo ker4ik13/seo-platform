@@ -93,7 +93,8 @@ test("does not prepare or issue after terminal local intent drift", async () => 
     deniedDecision(),
     new RankProviderRequestIntentError(
       "LOCAL_STATE_INVALID",
-      false
+      false,
+      "manifest_policy_mismatch"
     )
   );
   await assert.rejects(
@@ -101,7 +102,8 @@ test("does not prepare or issue after terminal local intent drift", async () => 
     (error: unknown) =>
       error instanceof RankExecutionGrantAttemptError &&
       error.code === "LOCAL_STATE_INVALID" &&
-      !error.retryable
+      !error.retryable &&
+      error.detail === "manifest_policy_mismatch"
   );
   assert.deepEqual(fixture.events, ["intent"]);
 });

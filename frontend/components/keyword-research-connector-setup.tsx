@@ -23,6 +23,8 @@ import {
   integrationProviderLabel
 } from "../lib/integration-presentation";
 import { ProviderLogo } from "./provider-logo";
+import { UiText } from "./ui-locale";
+
 
 const CAPABILITY = "COMPETITOR_RESEARCH";
 
@@ -203,7 +205,7 @@ export function KeywordResearchConnectorSetup({
     return (
       <section className="panel connector-setup-state" aria-busy="true">
         <span className="spinner" aria-hidden="true" />
-        <span>Проверяем источник Keys.so…</span>
+        <span><UiText text="Проверяем источник Keys.so…" /></span>
       </section>
     );
   }
@@ -211,10 +213,9 @@ export function KeywordResearchConnectorSetup({
   if (!settings) {
     return (
       <section className="panel connector-setup-state">
-        <span>{error ?? "Источник Keys.so недоступен."}</span>
+        <span>{error ?? <UiText text="Источник Keys.so недоступен." />}</span>
         <button className="secondary-button" onClick={() => void load()} type="button">
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -229,22 +230,22 @@ export function KeywordResearchConnectorSetup({
           </span>
         </span>
         <span>
-          <strong>Источник данных · Keys.so</strong>
+          <strong><UiText text="Источник данных · Keys.so" /></strong>
           <small>
             {ready
-              ? `${selected?.label ?? "API-ключ"} готов к сбору и импорту`
-              : "Выберите проверенный ключ для этого проекта"}
+              ? <UiText text="{0} готов к сбору и импорту" values={[String(selected?.label ?? "API-ключ")]} />
+              : <UiText text="Выберите проверенный ключ для этого проекта" />}
           </small>
         </span>
         <span className="connector-summary-action">
-          {ready ? "Изменить" : "Настроить"}
+          {ready ? <UiText text="Изменить" /> : <UiText text="Настроить" />}
         </span>
       </summary>
       <form className="competitor-connector-body" onSubmit={save}>
-        {error && <div className="inline-error" role="alert">{error}</div>}
-        {notice && <div className="inline-success" role="status">{notice}</div>}
+        {error && <div className="inline-error" role="alert">{<UiText text={error ?? ""} />}</div>}
+        {notice && <div className="inline-success" role="status">{<UiText text={notice ?? ""} />}</div>}
         <label className="form-field">
-          <span>Подключение Keys.so</span>
+          <span><UiText text="Подключение Keys.so" /></span>
           <CustomSelect
             disabled={saving || settings.access.canUpdateBindings !== true}
             onChange={(event) => {
@@ -254,25 +255,23 @@ export function KeywordResearchConnectorSetup({
             }}
             value={credentialId}
           >
-            {!credentialId && <option value="">Выберите активный API-ключ</option>}
+            {!credentialId && <option value=""><UiText text="Выберите активный API-ключ" /></option>}
             {credentialId &&
               !eligible.some(({ id }) => id === credentialId) && (
                 <option disabled value={credentialId}>
                   {selected
                     ? `${selected.label} — ${integrationCredentialStatusPresentation(selected.status).label}`
-                    : "Подключение недоступно"}
+                    : <UiText text="Подключение недоступно" />}
                 </option>
               )}
             {eligible.map((credential) => (
               <option key={credential.id} value={credential.id}>
-                {credential.label} · {integrationProviderLabel(credential.provider)}
+                {credential.label} · {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />}
               </option>
             ))}
           </CustomSelect>
           <small>
-            Используется только для сбора запросов конкурентов; импорт всегда
-            подтверждается вручную.
-          </small>
+            <UiText text="Используется только для сбора запросов конкурентов; импорт всегда подтверждается вручную." /></small>
         </label>
         {current && (
           <label className="connector-enabled-toggle">
@@ -282,25 +281,21 @@ export function KeywordResearchConnectorSetup({
               onChange={(event) => setEnabled(event.target.checked)}
               type="checkbox"
             />
-            Использовать в новых сборах
-          </label>
+            <UiText text="Использовать в новых сборах" /></label>
         )}
         {eligible.length === 0 && (
           <p className="inline-note">
-            Сначала добавьте и проверьте API-ключ Keys.so в workspace.
-          </p>
+            <UiText text="Сначала добавьте и проверьте API-ключ Keys.so в workspace." /></p>
         )}
         {settings.access.mutationRestriction !== "NONE" && (
           <p className="inline-note">
-            Изменение ограничено текущей ролью или состоянием workspace.
-          </p>
+            <UiText text="Изменение ограничено текущей ролью или состоянием workspace." /></p>
         )}
         <div className="button-row">
           <a className="secondary-button" href="/app/settings/integrations">
-            Управление API-ключами
-          </a>
+            <UiText text="Управление API-ключами" /></a>
           <button className="primary-button" disabled={!canSubmit || saving} type="submit">
-            {saving ? "Сохраняем…" : "Сохранить источник"}
+            {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить источник" />}
           </button>
         </div>
       </form>

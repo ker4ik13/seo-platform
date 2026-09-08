@@ -21,7 +21,7 @@ if tmux has-session -t "$runtime_session" 2>/dev/null; then
   done < <(
     tmux list-panes \
       -t "$runtime_session" \
-      -a \
+      -s \
       -F '#{pane_pid}'
   )
 fi

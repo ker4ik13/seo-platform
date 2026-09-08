@@ -3,6 +3,9 @@ import {
   type RankRunConflictDetails
 } from "@seo-platform/contracts";
 import { announceSemanticMutationForRequest } from "./semantic-realtime.ts";
+import type { OperationEstimate } from "@seo-platform/contracts";
+import { confirmPaidOperation, hasOperationConfirmation, quotedOperationRoute } from "./operation-confirmation.ts";
+import type { OperationAttempt } from "./operation-attempt.ts";
 
 export interface BrowserFieldError {
   readonly path: string;
@@ -63,6 +66,8 @@ interface BrowserApiOptions {
   readonly ifMatch?: number;
   readonly idempotencyKey?: string;
   readonly signal?: AbortSignal;
+  readonly operationEstimateId?: string;
+  readonly operationAttempt?: OperationAttempt;
 }
 
 let sessionRefreshPromise: Promise<boolean> | undefined;
@@ -71,7 +76,33 @@ export async function browserApiRequest<Data>(
   path: string,
   options: BrowserApiOptions = {}
 ): Promise<Data> {
-  const { response, payload } = await browserApiPayload(path, options);
+  const attempt = options.operationAttempt;
+  if (attempt) options = { ...options, idempotencyKey: attempt.key, ...(attempt.quoteId ? { operationEstimateId: attempt.quoteId } : {}) };
+  const route = options.method === "POST" && !options.operationEstimateId && hasOperationConfirmation() ? quotedOperationRoute(path) : undefined;
+  if (route) {
+    const command = structuredClone(options.body);
+    const refresh = async (): Promise<OperationEstimate> => {
+      const quote = await browserApiRequest<OperationEstimate>(`/app/api/projects/${route.projectId}/operation-estimates`, { method: "POST", body: { kind: route.kind, command }, ...(options.signal ? { signal: options.signal } : {}) });
+      if (quote.projectId !== route.projectId || quote.kind !== route.kind || !Number.isSafeInteger(quote.maximumChargeMinor) || quote.maximumChargeMinor < 0 || quote.currency !== "RUB" || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(quote.credentialMode)) throw invalidResponse();
+      return quote;
+    };
+    const quote = await refresh();
+    if (quote.credentialMode === "PLATFORM_PAID") {
+      const confirmed = await confirmPaidOperation({ quote, refresh, signal: options.signal });
+      if (!confirmed?.id) throw new BrowserApiError(409, "OPERATION_CANCELLED", "Операция отменена.", [], undefined, false);
+      if (attempt) attempt.quoteId = confirmed.id;
+      options = { ...options, body: command, operationEstimateId: confirmed.id };
+    } else options = { ...options, body: command };
+  }
+  let result: Awaited<ReturnType<typeof browserApiPayload>>;
+  try { result = await browserApiPayload(path, options); }
+  catch (error) {
+    // A lost HTTP response may hide a committed job. Keep its exact approved
+    // quote/key for replay instead of reserving and paying for a second job.
+    if (attempt && error instanceof BrowserApiError && error.code === "ESTIMATE_STALE") attempt.invalidated = true;
+    throw error;
+  }
+  const { response, payload } = result;
   if (response.status === 204) return undefined as Data;
   if (
     typeof payload !== "object" ||
@@ -151,6 +182,7 @@ async function browserApiPayload(
   if (options.idempotencyKey) {
     headers.set("Idempotency-Key", options.idempotencyKey);
   }
+  if (options.operationEstimateId) headers.set("X-Operation-Estimate-Id", options.operationEstimateId);
   if (method !== "GET") {
     const csrf = browserCookie(
       process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME ?? "seo_csrf"
@@ -177,6 +209,9 @@ async function browserApiPayload(
     );
   }
   announceSemanticMutationForRequest(path, method);
+  if (method !== "GET" && typeof window !== "undefined") {
+    window.dispatchEvent(new Event("workspace-usage:refresh"));
+  }
   return { response, payload };
 }
 

@@ -37,6 +37,8 @@ import {
 import { ProjectFavicon } from "./project-favicon";
 import { CustomSelect } from "./custom-select";
 import { russianSearchCities } from "../lib/seo-regions";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 const PROJECT_LOGO_MAX_BYTES = 512 * 1_024;
 
@@ -60,6 +62,7 @@ export function ProjectSettings({
   workspaceRoleCode: string;
   workspaceStatus: AppWorkspace["status"];
 }>) {
+  const { t: uiText } = useUiLocale();
   const router = useRouter();
   const [server, setServer] = useState(project);
   const [draft, setDraft] = useState(() => projectSettingsDraft(project));
@@ -585,19 +588,15 @@ export function ProjectSettings({
     <div className="settings-stack project-settings-stack">
       {!online && (
         <aside className="inline-alert warning" role="status">
-          Нет подключения к сети. Черновик сохранён в форме; сохранение и
-          изменение статуса временно недоступны.
-        </aside>
+          <UiText text="Нет подключения к сети. Черновик сохранён в форме; сохранение и изменение статуса временно недоступны." /></aside>
       )}
       {server.status === "ARCHIVED" && (
         <aside className="status-banner" role="status">
           <span className="status-dot" aria-hidden="true" />
           <div>
-            <strong>Проект в архиве</strong>
+            <strong><UiText text="Проект в архиве" /></strong>
             <p>
-              Данные доступны для просмотра и экспорта. Основные настройки
-              заблокированы до восстановления.
-            </p>
+              <UiText text="Данные доступны для просмотра и экспорта. Основные настройки заблокированы до восстановления." /></p>
           </div>
         </aside>
       )}
@@ -605,7 +604,7 @@ export function ProjectSettings({
         <aside className="status-banner" role="status">
           <span className="status-dot" aria-hidden="true" />
           <div>
-            <strong>Редактирование недоступно</strong>
+            <strong><UiText text="Редактирование недоступно" /></strong>
             <p>{editRestriction}</p>
           </div>
         </aside>
@@ -620,7 +619,7 @@ export function ProjectSettings({
           {failure?.message ?? success}
           {failure?.requestId && (
             <small className="error-reference">
-              Код запроса: {failure.requestId}
+              <UiText text="Код запроса:" after=" " />{failure.requestId}
             </small>
           )}
           {conflict && (
@@ -631,7 +630,7 @@ export function ProjectSettings({
                 onClick={() => void reloadConflict(false)}
                 type="button"
               >
-                {busy === "reload" ? "Загружаем…" : "Загрузить серверную версию"}
+                {busy === "reload" ? <UiText text="Загружаем…" /> : <UiText text="Загрузить серверную версию" />}
               </button>
               <button
                 className="secondary-button"
@@ -639,7 +638,7 @@ export function ProjectSettings({
                 onClick={() => void reloadConflict(true)}
                 type="button"
               >
-                {busy === "retry" ? "Повторяем…" : "Повторить моё действие"}
+                {busy === "retry" ? <UiText text="Повторяем…" /> : <UiText text="Повторить моё действие" />}
               </button>
             </div>
           )}
@@ -654,16 +653,14 @@ export function ProjectSettings({
                 }}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
               <button
                 className="primary-button"
                 disabled={!online || Boolean(busy)}
                 onClick={() => void saveProject(server.version, true, "save")}
                 type="button"
               >
-                Сохранить дублирующийся домен
-              </button>
+                <UiText text="Сохранить дублирующийся домен" /></button>
             </div>
           )}
         </div>
@@ -675,12 +672,9 @@ export function ProjectSettings({
       >
         <header className="security-card-header">
           <div>
-            <h2>Логотип проекта</h2>
+            <h2><UiText text="Логотип проекта" /></h2>
             <p>
-              SVG, PNG, JPEG, WebP, ICO, GIF или AVIF до 512 КБ.
-              Пользовательский файл имеет приоритет; иначе платформа безопасно
-              находит лучшую иконку на сайте.
-            </p>
+              <UiText text="SVG, PNG, JPEG, WebP, ICO, GIF или AVIF до 512 КБ. Пользовательский файл имеет приоритет; иначе платформа безопасно находит лучшую иконку на сайте." /></p>
           </div>
           <span aria-hidden="true" className="project-settings-logo-preview">
             <ProjectFavicon
@@ -693,10 +687,10 @@ export function ProjectSettings({
         <div className="workspace-avatar-actions">
           <label className={`secondary-button${editAllowed ? "" : " disabled"}`}>
             {busy === "logo-upload"
-              ? "Загружаем…"
+              ? <UiText text="Загружаем…" />
               : server.logoSource === "CUSTOM"
-                ? "Заменить логотип"
-                : "Загрузить логотип"}
+                ? <UiText text="Заменить логотип" />
+                : <UiText text="Загрузить логотип" />}
             <input
               accept=".svg,.png,.jpg,.jpeg,.webp,.ico,.gif,.avif,image/svg+xml,image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/gif,image/avif"
               disabled={!editAllowed || Boolean(busy)}
@@ -716,10 +710,10 @@ export function ProjectSettings({
               type="button"
             >
               {busy === "logo-delete"
-                ? "Обновляем…"
+                ? <UiText text="Обновляем…" />
                 : server.logoSource === "CUSTOM"
-                  ? "Использовать иконку сайта"
-                  : "Обновить с сайта"}
+                  ? <UiText text="Использовать иконку сайта" />
+                  : <UiText text="Обновить с сайта" />}
             </button>
           )}
         </div>
@@ -728,22 +722,20 @@ export function ProjectSettings({
       <section className="panel security-card" aria-busy={Boolean(busy)}>
         <header className="security-card-header">
           <div>
-            <h2>Основные данные</h2>
+            <h2><UiText text="Основные данные" /></h2>
             <p>
-              Изменение домена не удаляет историю. Проверки дублирования
-              выполняются только внутри текущей рабочей области.
-            </p>
+              <UiText text="Изменение домена не удаляет историю. Проверки дублирования выполняются только внутри текущей рабочей области." /></p>
           </div>
           <span className="security-status">
-            {projectStatusLabel(server.status)}
+            {<UiText text={projectStatusLabel(server.status) ?? ""} />}
           </span>
         </header>
-        <div className="security-facts" aria-label="Состояние проекта">
+        <div className="security-facts" aria-label={uiText("Состояние проекта")}>
           <span>
             Slug <strong>{server.slug}</strong>
           </span>
           <span>
-            Версия <strong>v{server.version}</strong>
+            <UiText text="Версия" after=" " /><strong>v{server.version}</strong>
           </span>
           <span>
             Workspace <strong>{server.workspaceId}</strong>
@@ -753,7 +745,7 @@ export function ProjectSettings({
         <form className="security-flow" id="project-settings-form" onSubmit={submitSettings}>
           <div className="form-row">
             <label className="form-field">
-              <span>Название</span>
+              <span><UiText text="Название" /></span>
               <input
                 aria-describedby={fieldErrors.name ? "project-name-error" : undefined}
                 aria-invalid={Boolean(fieldErrors.name)}
@@ -772,7 +764,7 @@ export function ProjectSettings({
               )}
             </label>
             <label className="form-field">
-              <span>Домен</span>
+              <span><UiText text="Домен" /></span>
               <input
                 aria-describedby={fieldErrors.domain ? "project-domain-error" : "project-domain-hint"}
                 aria-invalid={Boolean(fieldErrors.domain)}
@@ -792,21 +784,21 @@ export function ProjectSettings({
                   {fieldErrors.domain}
                 </small>
               ) : (
-                <small id="project-domain-hint">Без пути, параметров и номера порта</small>
+                <small id="project-domain-hint"><UiText text="Без пути, параметров и номера порта" /></small>
               )}
             </label>
           </div>
           <div className="form-row">
             <label className="form-field">
-              <span>Город для съёма позиций</span>
+              <span><UiText text="Город для съёма позиций" /></span>
               <CustomSelect
                 disabled={!editAllowed || Boolean(busy) || Boolean(confirmAction)}
                 onChange={(event) => updateSearchCity(event.target.value)}
                 searchable
-                searchPlaceholder="Найти город"
+                searchPlaceholder={uiText("Найти город")}
                 value={draft.searchCity?.yandexRegionCode ?? ""}
               >
-                <option value="">Не выбрано</option>
+                <option value=""><UiText text="Не выбрано" /></option>
                 {russianSearchCities.map((city) => (
                   <option key={city.yandexRegionCode} value={city.yandexRegionCode}>
                     {city.name}
@@ -814,14 +806,12 @@ export function ProjectSettings({
                 ))}
               </CustomSelect>
               <small>
-                Используется для новых проверок в Яндексе и Google. Регион
-                последнего съёма имеет приоритет.
-              </small>
+                <UiText text="Используется для новых проверок в Яндексе и Google. Регион последнего съёма имеет приоритет." /></small>
             </label>
           </div>
           <div className="form-row">
             <label className="form-field">
-              <span>Локаль</span>
+              <span><UiText text="Локаль" /></span>
               <input
                 aria-describedby={fieldErrors.locale ? "project-locale-error" : "project-locale-hint"}
                 aria-invalid={Boolean(fieldErrors.locale)}
@@ -839,11 +829,11 @@ export function ProjectSettings({
                   {fieldErrors.locale}
                 </small>
               ) : (
-                <small id="project-locale-hint">BCP 47: ru, en или en-US</small>
+                <small id="project-locale-hint"><UiText text="BCP 47: ru, en или en-US" /></small>
               )}
             </label>
             <label className="form-field">
-              <span>Часовой пояс</span>
+              <span><UiText text="Часовой пояс" /></span>
               <input
                 aria-describedby={fieldErrors.timezone ? "project-timezone-error" : "project-timezone-hint"}
                 aria-invalid={Boolean(fieldErrors.timezone)}
@@ -861,13 +851,13 @@ export function ProjectSettings({
                   {fieldErrors.timezone}
                 </small>
               ) : (
-                <small id="project-timezone-hint">IANA: Europe/Moscow или UTC</small>
+                <small id="project-timezone-hint"><UiText text="IANA: Europe/Moscow или UTC" /></small>
               )}
             </label>
           </div>
           <div className="settings-savebar">
             <span>
-              {dirty ? "Есть несохранённые изменения" : "Все изменения сохранены"}
+              {dirty ? <UiText text="Есть несохранённые изменения" /> : <UiText text="Все изменения сохранены" />}
             </span>
             <button
               className="secondary-button"
@@ -875,14 +865,13 @@ export function ProjectSettings({
               onClick={discardDraft}
               type="button"
             >
-              Отменить изменения
-            </button>
+              <UiText text="Отменить изменения" /></button>
             <button
               className="primary-button"
               disabled={!canSubmitEdit || !dirty || Boolean(conflict)}
               type="submit"
             >
-              {busy === "save" ? "Сохраняем…" : "Сохранить"}
+              {busy === "save" ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
             </button>
           </div>
         </form>
@@ -893,28 +882,23 @@ export function ProjectSettings({
       <section className="panel security-card">
         <header className="security-card-header">
           <div>
-            <h2>Жизненный цикл проекта</h2>
+            <h2><UiText text="Жизненный цикл проекта" /></h2>
             <p>
-              Архивирование сохраняет данные и останавливает автоматизации.
-              Восстановить проект можно без потери данных.
-            </p>
+              <UiText text="Архивирование сохраняет данные и останавливает автоматизации. Восстановить проект можно без потери данных." /></p>
           </div>
         </header>
         {!lifecyclePermission || runtimeRestriction === "MISSING_PERMISSION" ? (
           <div className="inline-alert info" role="status">
-            Для этого статуса у вашей роли нет разрешения{" "}
+            <UiText text="Для этого статуса у вашей роли нет разрешения" />{" "}
             <code>
               {server.status === "ARCHIVED"
                 ? "project.restore"
                 : "project.archive"}
             </code>
-            . Обратитесь к владельцу рабочей области.
-          </div>
+            <UiText text=". Обратитесь к владельцу рабочей области." /></div>
         ) : !workspaceMutable ? (
           <div className="inline-alert warning" role="status">
-            Рабочая область доступна только для чтения или приостановлена.
-            Изменение статуса проекта заблокировано.
-          </div>
+            <UiText text="Рабочая область доступна только для чтения или приостановлена. Изменение статуса проекта заблокировано." /></div>
         ) : confirmAction ? (
           <form
             aria-labelledby="project-lifecycle-confirm-title"
@@ -924,15 +908,15 @@ export function ProjectSettings({
             <div className="inline-alert warning">
               <strong id="project-lifecycle-confirm-title">
                 {confirmAction === "archive"
-                  ? "Подтвердите архивирование"
-                  : "Подтвердите восстановление"}
+                  ? <UiText text="Подтвердите архивирование" />
+                  : <UiText text="Подтвердите восстановление" />}
               </strong>
               <p>
-                Введите точное название проекта: <strong>{server.name}</strong>
+                <UiText text="Введите точное название проекта:" after=" " /><strong>{server.name}</strong>
               </p>
             </div>
             <label className="form-field">
-              <span>Название проекта для подтверждения</span>
+              <span><UiText text="Название проекта для подтверждения" /></span>
               <input
                 aria-describedby="project-lifecycle-confirm-hint"
                 autoComplete="off"
@@ -945,8 +929,8 @@ export function ProjectSettings({
               />
               <small id="project-lifecycle-confirm-hint" role="status">
                 {confirmationText && confirmationText !== server.name
-                  ? "Название пока не совпадает. Регистр и пробелы учитываются."
-                  : "Подтверждение чувствительно к регистру и пробелам."}
+                  ? <UiText text="Название пока не совпадает. Регистр и пробелы учитываются." />
+                  : <UiText text="Подтверждение чувствительно к регистру и пробелам." />}
               </small>
             </label>
             <div className="security-actions">
@@ -965,10 +949,10 @@ export function ProjectSettings({
                 type="submit"
               >
                 {busy === confirmAction
-                  ? "Выполняем…"
+                  ? <UiText text="Выполняем…" />
                   : confirmAction === "archive"
-                    ? "Архивировать проект"
-                    : "Восстановить проект"}
+                    ? <UiText text="Архивировать проект" />
+                    : <UiText text="Восстановить проект" />}
               </button>
               <button
                 className="secondary-button"
@@ -979,16 +963,15 @@ export function ProjectSettings({
                 }}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
             </div>
           </form>
         ) : (
           <div className="security-flow">
             <p>
               {server.status === "ARCHIVED"
-                ? "Восстановление возвращает проект в активный статус, но не запускает расписания автоматически."
-                : "После архивирования проект останется доступным для просмотра и экспорта."}
+                ? <UiText text="Восстановление возвращает проект в активный статус, но не запускает расписания автоматически." />
+                : <UiText text="После архивирования проект останется доступным для просмотра и экспорта." />}
             </p>
             <div className="security-actions">
               <button
@@ -1016,8 +999,8 @@ export function ProjectSettings({
                 type="button"
               >
                 {server.status === "ARCHIVED"
-                  ? "Восстановить проект"
-                  : "Архивировать проект"}
+                  ? <UiText text="Восстановить проект" />
+                  : <UiText text="Архивировать проект" />}
               </button>
             </div>
           </div>
@@ -1027,34 +1010,28 @@ export function ProjectSettings({
       <section className="panel security-card danger-zone-card">
         <header className="security-card-header">
           <div>
-            <h2>Удаление проекта</h2>
+            <h2><UiText text="Удаление проекта" /></h2>
             <p>
-              Проект сразу исчезнет из рабочей области и станет недоступен
-              участникам. Это действие нельзя отменить в интерфейсе.
-            </p>
+              <UiText text="Проект сразу исчезнет из рабочей области и станет недоступен участникам. Это действие нельзя отменить в интерфейсе." /></p>
           </div>
         </header>
         {!canDeleteProject(workspaceRoleCode, server.projectAccessLevel) ||
         runtimeRestriction === "MISSING_PERMISSION" ? (
           <div className="inline-alert info" role="status">
-            Для удаления требуется разрешение <code>project.delete</code> и
-            полный доступ к проекту.
-          </div>
+            <UiText text="Для удаления требуется разрешение" after=" " /><code>project.delete</code> <UiText text="и полный доступ к проекту." before=" " /></div>
         ) : !workspaceMutable ? (
           <div className="inline-alert warning" role="status">
-            Рабочая область доступна только для чтения или приостановлена.
-            Удаление заблокировано.
-          </div>
+            <UiText text="Рабочая область доступна только для чтения или приостановлена. Удаление заблокировано." /></div>
         ) : deleteConfirmationOpen ? (
           <form className="security-flow" onSubmit={submitDeleteProject}>
             <div className="inline-alert danger">
-              <strong>Подтвердите удаление</strong>
+              <strong><UiText text="Подтвердите удаление" /></strong>
               <p>
-                Введите точное название проекта: <strong>{server.name}</strong>
+                <UiText text="Введите точное название проекта:" after=" " /><strong>{server.name}</strong>
               </p>
             </div>
             <label className="form-field">
-              <span>Название проекта для подтверждения</span>
+              <span><UiText text="Название проекта для подтверждения" /></span>
               <input
                 autoComplete="off"
                 onChange={(event) =>
@@ -1069,8 +1046,8 @@ export function ProjectSettings({
               <small role="status">
                 {deleteConfirmationText &&
                 deleteConfirmationText !== server.name
-                  ? "Название пока не совпадает. Регистр и пробелы учитываются."
-                  : "Перед удалением сервис проверит недавнюю авторизацию."}
+                  ? <UiText text="Название пока не совпадает. Регистр и пробелы учитываются." />
+                  : <UiText text="Перед удалением сервис проверит недавнюю авторизацию." />}
               </small>
             </label>
             <div className="security-actions">
@@ -1083,7 +1060,7 @@ export function ProjectSettings({
                 }
                 type="submit"
               >
-                {busy === "delete" ? "Удаляем…" : "Удалить проект"}
+                {busy === "delete" ? <UiText text="Удаляем…" /> : <UiText text="Удалить проект" />}
               </button>
               <button
                 className="secondary-button"
@@ -1094,16 +1071,13 @@ export function ProjectSettings({
                 }}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
             </div>
           </form>
         ) : (
           <div className="security-flow">
             <p>
-              Сначала остановите важные фоновые операции и экспортируйте
-              данные, которые могут понадобиться вне платформы.
-            </p>
+              <UiText text="Сначала остановите важные фоновые операции и экспортируйте данные, которые могут понадобиться вне платформы." /></p>
             <div className="security-actions">
               <button
                 className="danger-button"
@@ -1111,8 +1085,7 @@ export function ProjectSettings({
                 onClick={openDeleteConfirmation}
                 type="button"
               >
-                Удалить проект
-              </button>
+                <UiText text="Удалить проект" /></button>
             </div>
           </div>
         )}

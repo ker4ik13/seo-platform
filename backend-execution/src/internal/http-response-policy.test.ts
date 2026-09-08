@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Fastify from "fastify";
-import { installPrivateHttpResponsePolicy } from "./http-response-policy.js";
+import { installPrivateHttpResponsePolicy, serializeRequestForLog } from "./http-response-policy.js";
+import { Writable } from "node:stream";
+
+test("Jobs access logging excludes private URL values, search text and credentials", async t => {
+  const lines: string[] = [];
+  const stream = new Writable({ write(chunk, _encoding, done) { lines.push(String(chunk)); done(); } });
+  const app = Fastify({ logger: { stream, serializers: { req: serializeRequestForLog } } });
+  app.get("/internal/v1/results/:reference", async () => ({ ok: true }));
+  t.after(async () => app.close());
+  await app.inject({ method: "GET", url: "/internal/v1/results/private-reference-canary?search=private-keyword-canary", headers: { authorization: "Bearer private-auth-canary", cookie: "secret=private-cookie-canary" } });
+  const log = lines.join("");
+  assert.ok(log.includes("/internal/v1/results/:reference"));
+  for (const privateValue of ["private-reference-canary", "private-keyword-canary", "private-auth-canary", "private-cookie-canary"]) assert.equal(log.includes(privateValue), false);
+});
 
 test("keeps success, error and unknown Jobs responses private", async (t) => {
   const app = Fastify({ logger: false });

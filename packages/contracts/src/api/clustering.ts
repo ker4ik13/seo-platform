@@ -56,6 +56,7 @@ export interface CreateClusteringRunInput {
 
 export interface InternalCreateClusteringRunInput
   extends CreateClusteringRunInput {
+  readonly billing?: import("./paid-operations.js").InternalPaidOperationAdmission;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

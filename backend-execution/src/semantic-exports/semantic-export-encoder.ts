@@ -1,4 +1,5 @@
 import { Zip, ZipDeflate } from "fflate";
+import { parseSemanticRankColumnKey, type SemanticRankComparisonItem } from "@seo-platform/contracts";
 import type {
   CreateSemanticExportInput,
   SemanticCompetitorExportItem,
@@ -20,7 +21,8 @@ const XLSX_NUMERIC_COLUMNS = new Set<SemanticExportColumnKey>([
   "yandexAiPosition",
   "googleAiPosition",
   "visibility",
-  "priority"
+  "priority",
+  "competitorPosition"
 ]);
 const XLSX_WRAPPED_COLUMNS = new Set<SemanticExportColumnKey>([
   "serpCompetitorUrls",
@@ -31,7 +33,7 @@ const XLSX_WRAPPED_COLUMNS = new Set<SemanticExportColumnKey>([
 
 const HEADERS: Readonly<
   Record<
-    Exclude<SemanticExportColumnKey, `custom:${string}`>,
+    Exclude<SemanticExportColumnKey, `custom:${string}` | `rank:${string}`>,
     Readonly<Record<"en" | "ru", string>>
   >
 > = {
@@ -64,12 +66,20 @@ const HEADERS: Readonly<
   serpCompetitorUrls: { en: "SERP competitors", ru: "Конкуренты" },
   serpCompetitorSerp: { en: "Competitor SERP", ru: "SERP конкурентов" },
   aiCompetitorUrls: { en: "AI competitors", ru: "ИИ-конкуренты" },
-  aiCompetitorSerp: { en: "AI competitor SERP", ru: "SERP ИИ-конкурентов" }
+  aiCompetitorSerp: { en: "AI competitor SERP", ru: "SERP ИИ-конкурентов" },
+  competitorEngine: { en: "Search engine", ru: "Поисковик" },
+  competitorRegion: { en: "City", ru: "Город" }, competitorRegionCode: { en: "Region code", ru: "Код региона" },
+  competitorDevice: { en: "Device", ru: "Устройство" }, competitorPosition: { en: "SERP position", ru: "Позиция в выдаче" },
+  competitorUrl: { en: "Result URL", ru: "URL результата" }, competitorTitle: { en: "Title", ru: "Заголовок" },
+  competitorDescription: { en: "Description", ru: "Описание" }, competitorObservedAt: { en: "Checked at", ru: "Дата съёма" },
+  competitorProvider: { en: "Provider", ru: "Провайдер" }
 };
 
 export interface SemanticExportKeywordRow extends SemanticKeywordListItem {
   /** Internal export-only enrichment; it is never part of the keyword API. */
   readonly exportCompetitors?: readonly SemanticCompetitorExportItem[];
+  readonly exportRankComparisons?: readonly SemanticRankComparisonItem[];
+  readonly exportCompetitor?: SemanticCompetitorExportItem;
 }
 
 export interface SemanticExportFile {
@@ -463,7 +473,7 @@ function folderMapDataRow(
   const wrapped = columns.some((column) => XLSX_WRAPPED_COLUMNS.has(column));
   return `<row r="${row}"${wrapped ? ' ht="42" customHeight="1"' : ""}>${values.map((value, index) => {
     const column = columns[index]!;
-    const numeric = XLSX_NUMERIC_COLUMNS.has(column);
+    const numeric = isNumericColumn(column);
     return xlsxCell(
       row,
       index + 1,
@@ -498,7 +508,7 @@ function folderMapColumnWidth(column: SemanticExportColumnKey): number {
   ) return 42;
   if (column === "group" || column === "cluster") return 30;
   if (column === "tags") return 26;
-  if (XLSX_NUMERIC_COLUMNS.has(column)) return 14;
+  if (isNumericColumn(column)) return 14;
   return 22;
 }
 
@@ -601,24 +611,25 @@ async function* positionHistoryXlsxDocument(
       { level: 6 }
     );
     zip.add(stream);
-    const lastColumn = excelColumn(3 + sheet.dates.length);
+    const lastColumn = excelColumn(9 + sheet.dates.length);
     stream.push(
       encoder.encode(
         positionHistoryWorksheetStart(lastColumn) +
           positionHistoryHeaderRows(sheet)
       )
     );
-    return { ...sheet, stream, lastColumn };
+    return { ...sheet, stream, lastColumn, rowCount: 0 };
   });
   yield* drain();
 
-  let rowCount = 0;
   for await (const row of rows) {
-    rowCount += 1;
     for (const sheet of streams) {
+      if (row.dimension && row.dimension.searchEngine !== sheet.searchEngine) continue;
+      sheet.rowCount += 1;
+      if (sheet.rowCount > 1_048_572) throw new TypeError("Position history exceeds Excel sheet row capacity; reduce the period or selection");
       sheet.stream.push(
         encoder.encode(
-          positionHistoryDataRow(4 + rowCount, row, sheet.searchEngine, sheet.dates)
+          positionHistoryDataRow(4 + sheet.rowCount, row, sheet.searchEngine, sheet.dates)
         )
       );
     }
@@ -627,7 +638,7 @@ async function* positionHistoryXlsxDocument(
   for (const sheet of streams) {
     sheet.stream.push(
       encoder.encode(
-        `</sheetData><autoFilter ref="A1:${sheet.lastColumn}${Math.max(5, 4 + rowCount)}"/><pageMargins left="0.35" right="0.35" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`
+        `</sheetData><autoFilter ref="A1:${sheet.lastColumn}${Math.max(5, 4 + sheet.rowCount)}"/><pageMargins left="0.35" right="0.35" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`
       ),
       true
     );
@@ -679,7 +690,7 @@ function positionHistoryHeaderRows(
     dates: readonly string[];
   }>
 ): string {
-  const header = ["Фраза", "Добавлен", "Поисковик", ...sheet.dates.map(displayDate)];
+  const header = ["Фраза", "Добавлен", "Поисковик", "Город", "Код региона", "Устройство", "Страна", "Язык", "Язык запроса", ...sheet.dates.map(displayDate)];
   const headerRow = `<row r="1" ht="25" customHeight="1">${header.map((value, index) =>
     styledInlineCell(1, index + 1, value, 1)
   ).join("")}</row>`;
@@ -694,11 +705,12 @@ function positionHistoryHeaderRows(
         sheet.searchEngine === "YANDEX" ? "Яндекс" : "Google",
         2
       ),
+      ...[4, 5, 6, 7, 8, 9].map(column => emptyStyledCell(row, column, 2)),
       ...sheet.dates.map((_, dateIndex) => {
-        const column = excelColumn(dateIndex + 4);
+        const column = excelColumn(dateIndex + 10);
         return formulaCell(
           row,
-          dateIndex + 4,
+          dateIndex + 10,
           `COUNTIFS(${column}$5:INDEX(${column}:${column},MAX(5,COUNTA($A:$A))),">=1",${column}$5:INDEX(${column}:${column},MAX(5,COUNTA($A:$A))),"<=${threshold}")`,
           3
         );
@@ -719,6 +731,8 @@ function positionHistoryDataRow(
     !row.text ||
     row.text.length > 2_000 ||
     Number.isNaN(Date.parse(row.createdAt)) ||
+    !row.keywordLanguage ||
+    row.keywordLanguage.length > 16 ||
     row.snapshots.length > 2_200
   ) {
     throw new TypeError("Position history report row is invalid");
@@ -743,16 +757,25 @@ function positionHistoryDataRow(
     styledInlineCell(rowIndex, 1, row.text, 4),
     styledInlineCell(rowIndex, 2, displayDate(row.createdAt.slice(0, 10)), 5),
     styledInlineCell(rowIndex, 3, searchEngine === "YANDEX" ? "Яндекс" : "Google", 5),
+    styledInlineCell(rowIndex, 4, row.dimension?.regionLabel ?? row.dimension?.regionCode ?? "—", 5),
+    styledInlineCell(rowIndex, 5, row.dimension?.regionCode ?? "—", 5),
+    styledInlineCell(rowIndex, 6, row.dimension ? row.dimension.device === "DESKTOP" ? "ПК" : "Телефон" : "—", 5),
+    styledInlineCell(rowIndex, 7, row.dimension?.countryCode ?? "—", 5),
+    styledInlineCell(rowIndex, 8, row.dimension?.language ?? "—", 5),
+    styledInlineCell(rowIndex, 9, row.keywordLanguage, 5),
     ...dates.map((date, index) => {
       const current = snapshots.get(date);
       const style = positionHistoryCellStyle(current, olderByDate.get(date));
-      if (!current?.found) {
-        return styledInlineCell(rowIndex, index + 4, "—", style);
+      if (!current) {
+        return emptyStyledCell(rowIndex, index + 10, style);
+      }
+      if (!current.found) {
+        return styledInlineCell(rowIndex, index + 10, "—", style);
       }
       if (!Number.isSafeInteger(current.position) || current.position === undefined) {
         throw new TypeError("Position history report position is invalid");
       }
-      return styledNumberCell(rowIndex, index + 4, current.position, style);
+      return styledNumberCell(rowIndex, index + 10, current.position, style);
     })
   ];
   return `<row r="${rowIndex}" ht="21" customHeight="1">${cells.join("")}</row>`;
@@ -842,7 +865,23 @@ function systemColumnValue(
   item: SemanticExportKeywordRow,
   column: Exclude<SemanticExportColumnKey, `custom:${string}`>
 ): unknown {
+  const rank = parseSemanticRankColumnKey(column);
+  if (rank) {
+    const value = item.exportRankComparisons?.find(value => value.dimensionKey === rank.dimension.key);
+    if (!value) return null;
+    return rank.metric === "position" ? value.found ? value.position ?? null : null : rank.metric === "url" ? value.rankingUrl ?? null : value.observedAt;
+  }
   switch (column) {
+    case "competitorEngine": return item.exportCompetitor?.searchEngine ?? null;
+    case "competitorRegion": return item.exportCompetitor?.regionLabel ?? item.exportCompetitor?.regionCode ?? null;
+    case "competitorRegionCode": return item.exportCompetitor?.regionCode ?? null;
+    case "competitorDevice": return item.exportCompetitor?.device ?? null;
+    case "competitorPosition": return item.exportCompetitor?.position ?? null;
+    case "competitorUrl": return item.exportCompetitor?.url ?? null;
+    case "competitorTitle": return item.exportCompetitor?.title ?? null;
+    case "competitorDescription": return item.exportCompetitor?.description ?? null;
+    case "competitorObservedAt": return item.exportCompetitor?.observedAt ?? null;
+    case "competitorProvider": return item.exportCompetitor?.provider ?? null;
     case "query": return item.textOriginal;
     case "frequency": return item.frequency?.value ?? null;
     case "frequencyExact": return item.frequencies?.find(({ type }) => type === "EXACT")?.value ?? null;
@@ -882,7 +921,7 @@ function competitorUrls(
 ): string {
   return (item.exportCompetitors ?? [])
     .filter((competitor) => competitor.source === source)
-    .map(({ url }) => url)
+    .map(competitor => `${competitorContext(competitor)}${competitor.url}`)
     .join("\n");
 }
 
@@ -893,7 +932,7 @@ function competitorSerp(
   return (item.exportCompetitors ?? [])
     .filter((competitor) => competitor.source === source)
     .map((competitor) =>
-      `Title: ${singleLine(competitor.title)}\nDescription: ${singleLine(competitor.description)}`
+      `${competitorContext(competitor)}${competitor.url}\nTitle: ${singleLine(competitor.title)}\nDescription: ${singleLine(competitor.description)}`
     )
     .join("\n\n");
 }
@@ -950,6 +989,8 @@ function columnHeader(
   locale: "en" | "ru",
   customColumnNames: Readonly<Record<string, string>>
 ): string {
+  const rank = parseSemanticRankColumnKey(column);
+  if (rank) return customColumnNames[column] ?? `${rank.dimension.searchEngine} · ${rank.dimension.regionCode} · ${rank.dimension.device} · ${rank.metric}`;
   const id = customColumnId(column);
   return id ? customColumnNames[id]! : HEADERS[column as keyof typeof HEADERS][locale];
 }
@@ -1013,7 +1054,7 @@ function xlsxRow(
       column + 1,
       value,
       columns?.[column] !== undefined &&
-        XLSX_NUMERIC_COLUMNS.has(columns[column]!),
+        isNumericColumn(columns[column]!),
       columns?.[column] !== undefined &&
         XLSX_WRAPPED_COLUMNS.has(columns[column]!)
         ? 1
@@ -1179,4 +1220,11 @@ function positionHistoryStylesXml(): string {
       '<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
     '</cellXfs>' +
     '</styleSheet>';
+}
+
+function isNumericColumn(column: SemanticExportColumnKey): boolean { return XLSX_NUMERIC_COLUMNS.has(column) || parseSemanticRankColumnKey(column)?.metric === "position"; }
+
+function competitorContext(item: SemanticCompetitorExportItem): string {
+  if (!item.searchEngine) return "";
+  return `[${item.searchEngine} · ${item.regionLabel || item.regionCode || ""} · ${item.device || ""}${item.position ? ` · #${item.position}` : ""}${item.observedAt ? ` · ${item.observedAt}` : ""}]\n`;
 }

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException
 } from "@nestjs/common";
 import type {
@@ -26,6 +27,7 @@ import {
   toValidationSummary
 } from "./integration-credential-validation-job.js";
 import { integrationProviderMetadata } from "./integration-provider-catalog.js";
+import { PlatformAccountRegistryService } from "./platform-account-registry.service.js";
 
 type IntegrationCredentialSummaryRecord = Pick<
   IntegrationCredential,
@@ -72,7 +74,8 @@ const CREDENTIAL_SUMMARY_SELECT = {
 export class IntegrationCredentialService {
   public constructor(
     private readonly prisma: PrismaService,
-    private readonly crypto: IntegrationCredentialCryptoService
+    private readonly crypto: IntegrationCredentialCryptoService,
+    @Optional() private readonly accounts?: PlatformAccountRegistryService
   ) {}
 
   public async list(
@@ -196,7 +199,10 @@ export class IntegrationCredentialService {
     material: readonly PlatformCredentialMaterial[]
   ): Promise<IntegrationCredentialSummary> {
     const existing = await this.findPlatformIdempotent(input, material);
-    if (existing) return toSummary(existing);
+    if (existing) {
+      await this.accounts?.register(input.provider, this.crypto.platformCredentialPoolSecret(input.provider, material), existing.id);
+      return toSummary(existing);
+    }
     if (await this.findActivePlatform(input)) {
       throw platformAlreadyEnabled();
     }
@@ -235,15 +241,17 @@ export class IntegrationCredentialService {
           updatedBy: input.actorId,
           ...encryptedForDatabase(encrypted),
           displayHint: "Системный",
-          capabilities: ["SERP_RANK_TRACKING"],
+          capabilities: [...integrationProviderMetadata(input.provider).capabilities],
           providerMeta: {
             accountIdentifierConfigured: material.every((entry) =>
               Boolean(entry.accountIdentifier)
             ),
-            platformPoolSize: material.length
+            platformPoolSize: material.length,
+            ...(secret.platformPool ? { platformAccountIds: secret.platformPool.map(entry => entry.id) } : {})
           }
         }
       });
+      await this.accounts?.register(input.provider, secret, credential.id);
       return toSummary(credential);
     } catch (error) {
       if (isUniqueConstraintError(error)) {

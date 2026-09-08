@@ -10,7 +10,7 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const jobId = "01900000-0000-7000-8000-000000000003";
 
-test("accepts a public 10,000-keyword frequency summary and rejects overflow", () => {
+test("accepts a public 50,000-keyword frequency summary and rejects overflow", () => {
   const summary = {
     id: jobId,
     workspaceId,
@@ -18,8 +18,8 @@ test("accepts a public 10,000-keyword frequency summary and rejects overflow", (
     provider: "ARSENKIN",
     status: "RUNNING",
     stage: "WAITING_PROVIDER",
-    selectedKeywords: 10_000,
-    completedKeywords: 9_999,
+    selectedKeywords: 50_000,
+    completedKeywords: 49_999,
     failedKeywords: 1,
     types: ["BASE", "EXACT", "FIXED"],
     regionCode: "213",
@@ -33,12 +33,12 @@ test("accepts a public 10,000-keyword frequency summary and rejects overflow", (
   assert.equal(
     scopedFrequencyCollection(summary, workspaceId, projectId, jobId)
       .selectedKeywords,
-    10_000
+    50_000
   );
   assert.throws(
     () =>
       scopedFrequencyCollection(
-        { ...summary, selectedKeywords: 10_001 },
+        { ...summary, selectedKeywords: 300_001 },
         workspaceId,
         projectId,
         jobId

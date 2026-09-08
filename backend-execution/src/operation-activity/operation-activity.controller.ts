@@ -9,6 +9,7 @@ import {
   UseGuards
 } from "@nestjs/common";
 import type {
+  InternalWorkspaceExecutionUsage,
   InternalAdminOperationSearchResult,
   ApiResponse,
   ProjectOperationActivitySummary
@@ -28,6 +29,19 @@ type HeadersRecord = Readonly<Record<string, string | string[] | undefined>>;
 @UseGuards(PlatformApiGuard)
 export class OperationActivityController {
   public constructor(private readonly activity: OperationActivityService) {}
+
+  @Get("usage")
+  public async usage(
+    @Param("workspaceId") workspaceId: string,
+    @Headers() headers: HeadersRecord,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalWorkspaceExecutionUsage>> {
+    const context = internalWorkspaceCommandContext(headers);
+    if (internalUuid(workspaceId, "workspaceId") !== context.workspaceId) {
+      throw new BadRequestException("Workspace context mismatch");
+    }
+    return { data: await this.activity.workspaceUsage(context.workspaceId), meta: { requestId: request.id } };
+  }
 
   @Get()
   public async list(
@@ -54,6 +68,12 @@ export class OperationActivityController {
 @UseGuards(PlatformApiGuard)
 export class PlatformAdminOperationController {
   public constructor(private readonly activity: OperationActivityService) {}
+
+  @Get("overview")
+  public async overview(@Headers() headers: HeadersRecord, @Req() request: FastifyRequest) {
+    internalUuid(String(headers["x-actor-id"]), "actorId");
+    return { data: await this.activity.overview(), meta: { requestId: request.id } };
+  }
 
   @Get()
   public async list(

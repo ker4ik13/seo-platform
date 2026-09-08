@@ -1,6 +1,6 @@
 import {
   operationResultItemStatuses,
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   type InternalRankOperationScope,
   type InternalRankOperationScopeItem
 } from "@seo-platform/contracts";
@@ -40,7 +40,7 @@ export function scopedRankOperationScope(
       ["sequence", "status", "pollAttempts"],
       ["errorCode"]
     );
-    const sequence = integer(item.sequence, 0, rankProviderKeywordLimit - 1);
+    const sequence = integer(item.sequence, 0, rankCommandKeywordLimit - 1);
     const pollAttempts = integer(item.pollAttempts, 0, Number.MAX_SAFE_INTEGER);
     if (
       sequences.has(sequence) ||

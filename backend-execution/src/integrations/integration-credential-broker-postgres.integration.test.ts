@@ -231,6 +231,7 @@ test(
         `${suffix}-arsenkin-meta`
       );
 
+      await setup.query(`GRANT TEMPORARY ON DATABASE jobs_db TO "${restrictedRole}"`);
       await asRole(first, restrictedRole, async () => {
         await first.query("CREATE TEMP TABLE jobs (trap text)");
         await first.query(

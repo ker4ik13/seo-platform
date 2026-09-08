@@ -1,3 +1,4 @@
+import { trackingContextKeywordReplacementLimit } from "@seo-platform/contracts";
 import { Buffer } from "node:buffer";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -46,9 +47,9 @@ import {
 import { normalizeKeywordText } from "../keywords/keyword-normalization.js";
 
 const CONTEXT_LIMIT = 200;
-const USER_TRACKING_CONTEXT_FILTER = {
-  rankManifests: { none: { provider: "KEY_COLLECTOR" } }
-} as const;
+const USER_TRACKING_CONTEXT_FILTER: Prisma.TrackingContextWhereInput = {
+  rankManifests: { none: { provider: { in: ["KEY_COLLECTOR", "MANUAL_IMPORT"] } } }
+};
 // Six scalar columns are inserted per assignment. Keeping a batch at 5,000
 // leaves ample headroom below PostgreSQL's 65,535 bind-parameter limit.
 const ASSIGNMENT_CREATE_BATCH_SIZE = 5_000;
@@ -442,15 +443,13 @@ export class TrackingContextService {
         assertVersion(context.version, input.version);
         assertActive(context.status);
 
-        const keywords = await transaction.keyword.findMany({
-          where: {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            status: "ACTIVE",
-            id: { in: [...input.keywordIds] }
-          },
-          select: { id: true }
-        });
+        const keywords: { id: string }[] = [];
+        for (let offset = 0; offset < input.keywordIds.length; offset += ASSIGNMENT_CREATE_BATCH_SIZE) {
+          keywords.push(...await transaction.keyword.findMany({ where: {
+            workspaceId: input.workspaceId, projectId: input.projectId,
+            status: "ACTIVE", id: { in: input.keywordIds.slice(offset, offset + ASSIGNMENT_CREATE_BATCH_SIZE) }
+          }, select: { id: true } }));
+        }
         if (keywords.length !== input.keywordIds.length) {
           internalError(
             HttpStatus.NOT_FOUND,
@@ -468,8 +467,12 @@ export class TrackingContextService {
               removedAt: null,
               keyword: { status: "ACTIVE" }
             },
+            take: trackingContextKeywordReplacementLimit + 1,
             select: { id: true, keywordId: true }
           });
+        if (currentAssignments.length > trackingContextKeywordReplacementLimit) {
+          internalError(HttpStatus.UNPROCESSABLE_ENTITY, "CONTEXT_TOO_LARGE", "Use a new tracking context for this selection");
+        }
         const desired = new Set(input.keywordIds);
         const currentByKeywordId = new Map(
           currentAssignments.map((assignment) => [
@@ -514,10 +517,10 @@ export class TrackingContextService {
         }
 
         const now = new Date();
-        if (removedAssignmentIds.length > 0) {
+        for (let offset = 0; offset < removedAssignmentIds.length; offset += ASSIGNMENT_CREATE_BATCH_SIZE) {
           await transaction.trackingContextKeywordAssignment.updateMany({
             where: {
-              id: { in: removedAssignmentIds },
+              id: { in: removedAssignmentIds.slice(offset, offset + ASSIGNMENT_CREATE_BATCH_SIZE) },
               workspaceId: input.workspaceId,
               projectId: input.projectId,
               contextId: input.contextId,
@@ -602,7 +605,7 @@ export class TrackingContextService {
           );
         }
         return result;
-      });
+      }, { timeout: 60_000 });
     } catch (error) {
       if (!isUniqueConstraintError(error)) throw error;
       const winner = await this.findKeywordReplaceReceipt(input);

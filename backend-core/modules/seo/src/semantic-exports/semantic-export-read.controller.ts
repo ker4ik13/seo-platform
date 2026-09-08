@@ -1,9 +1,12 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Headers,
+  HttpCode,
   Param,
+  Post,
   Query,
   Req,
   UseGuards
@@ -21,6 +24,7 @@ import type {
 } from "@seo-platform/contracts";
 import {
   semanticCompetitorExportSources,
+  parseSemanticRankDimensionKey,
   semanticPositionHistorySearchEngines
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -31,6 +35,7 @@ import {
 import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import { KeywordGroupService } from "../keyword-groups/keyword-group.service.js";
 import { keywordListQuery } from "../keywords/keyword-query.js";
+import { keywordBodyListInput } from "../keywords/keyword-query.js";
 import { KeywordService } from "../keywords/keyword.service.js";
 import { SemanticCustomColumnService } from "../semantic-custom-columns/semantic-custom-column.service.js";
 import { SemanticCompetitorExportService } from "./semantic-competitor-export.service.js";
@@ -124,6 +129,48 @@ export class SemanticExportReadController {
       await this.columns.list(context.workspaceId, context.projectId)
     );
   }
+
+  @Post("keyword-query")
+  @HttpCode(200)
+  public async queryKeywords(@Param("projectId") projectId: string, @Body() body: unknown, @Headers() headers: InternalHeaders, @Req() request: FastifyRequest) {
+    const context = routeContext(projectId, headers), input = exportBody(body, context);
+    return response(request, await this.keywords.list(context.workspaceId, context.projectId, keywordBodyListInput({ query: input.query }), request.id));
+  }
+
+  @Post("competitor-query")
+  @HttpCode(200)
+  public async queryCompetitors(@Param("projectId") projectId: string, @Body() body: unknown, @Headers() headers: InternalHeaders, @Req() request: FastifyRequest) {
+    const context = routeContext(projectId, headers), input = exportBody(body, context);
+    return response(request, await this.competitors.list(context, keywordBodyListInput({ query: input.query }), competitorOptionsBody(input.options), request.id));
+  }
+
+  @Post("position-history-query")
+  @HttpCode(200)
+  public async queryPositionHistory(@Param("projectId") projectId: string, @Body() body: unknown, @Headers() headers: InternalHeaders, @Req() request: FastifyRequest) {
+    const context = routeContext(projectId, headers), input = exportBody(body, context);
+    return response(request, await this.positionHistory.list(context, keywordBodyListInput({ query: input.query }), positionHistoryOptionsBody(input.options), request.id));
+  }
+}
+
+function exportBody(value: unknown, context: ReturnType<typeof routeContext>): Readonly<{ query: unknown; options?: unknown }> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new BadRequestException("Invalid export query body");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !["workspaceId", "projectId", "actorId", "query", "options"].includes(key)) || input.workspaceId !== context.workspaceId || input.projectId !== context.projectId || input.actorId !== context.actorId || !input.query) throw new BadRequestException("Export query context mismatch");
+  return { query: input.query, ...(input.options === undefined ? {} : { options: input.options }) };
+}
+
+function competitorOptionsBody(value: unknown): SemanticCompetitorExportOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new BadRequestException("Invalid competitor options");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !["sources", "dimensionKeys"].includes(key)) || !Array.isArray(input.sources) || input.sources.some(source => typeof source !== "string") || (input.dimensionKeys !== undefined && (!Array.isArray(input.dimensionKeys) || input.dimensionKeys.some(key => typeof key !== "string")))) throw new BadRequestException("Invalid competitor options");
+  return competitorOptions({ sources: input.sources.join(","), ...(Array.isArray(input.dimensionKeys) ? { dimensionKeys: input.dimensionKeys.join(",") } : {}) });
+}
+
+function positionHistoryOptionsBody(value: unknown): SemanticPositionHistoryExportOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new BadRequestException("Invalid history options");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some(key => !["observedFrom", "observedBefore", "searchEngines", "dimensionKeys", "storedBefore"].includes(key)) || !Array.isArray(input.searchEngines) || input.searchEngines.some(engine => typeof engine !== "string") || (input.dimensionKeys !== undefined && (!Array.isArray(input.dimensionKeys) || input.dimensionKeys.some(key => typeof key !== "string")))) throw new BadRequestException("Invalid history options");
+  return positionHistoryOptions({ observedFrom: input.observedFrom, observedBefore: input.observedBefore, searchEngines: input.searchEngines.join(","), ...(Array.isArray(input.dimensionKeys) ? { dimensionKeys: input.dimensionKeys.join(",") } : {}), ...(input.storedBefore === undefined ? {} : { storedBefore: input.storedBefore }) });
 }
 
 function positionHistoryOptions(
@@ -155,8 +202,17 @@ function positionHistoryOptions(
   return {
     observedFrom,
     observedBefore,
-    searchEngines: searchEngines as SemanticPositionHistoryExportOptions["searchEngines"]
+    searchEngines: searchEngines as SemanticPositionHistoryExportOptions["searchEngines"],
+    ...(query.dimensionKeys === undefined ? {} : { dimensionKeys: historyDimensionKeys(query.dimensionKeys) }),
+    ...(query.storedBefore === undefined ? {} : { storedBefore: canonicalInstant(query.storedBefore, "storedBefore") })
   };
+}
+
+function historyDimensionKeys(value: unknown): readonly string[] {
+  if (typeof value !== "string") throw new BadRequestException("Invalid history dimensions");
+  const keys = value.split(",");
+  if (keys.length < 1 || keys.length > 4 || new Set(keys).size !== keys.length || keys.some(key => !parseSemanticRankDimensionKey(key))) throw new BadRequestException("Invalid history dimensions");
+  return keys;
 }
 
 function competitorOptions(value: unknown): SemanticCompetitorExportOptions {
@@ -178,7 +234,8 @@ function competitorOptions(value: unknown): SemanticCompetitorExportOptions {
     throw new BadRequestException("Invalid competitor export sources");
   }
   return {
-    sources: sources as SemanticCompetitorExportOptions["sources"]
+    sources: sources as SemanticCompetitorExportOptions["sources"],
+    ...(query.dimensionKeys === undefined ? {} : { dimensionKeys: historyDimensionKeys(query.dimensionKeys) })
   };
 }
 

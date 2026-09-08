@@ -1,3 +1,4 @@
+import { rankCommandKeywordLimit, rankExecutionPolicyShape } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import type {
   InternalGetRankManifestChunkInput,
@@ -12,7 +13,7 @@ import { internalUuid } from "../internal/internal-command-context.js";
 
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
 const DECIMAL_PAIR_COUNT_PATTERN =
-  /^(?:[1-9]|[1-9][0-9]{1,3}|1[0-4][0-9]{3}|15000)$/u;
+  /^[1-9][0-9]{0,5}$/u;
 const VERSION_PATTERN = /^[A-Za-z0-9@._:-]{1,100}$/u;
 const SIMPLE_DOMAIN_MATCH_MODES = new Set<string>([
   "EXACT_HOST",
@@ -30,6 +31,7 @@ export function internalSealRankManifestInput(
   value: unknown
 ): InternalSealRankManifestInput {
   const raw = strictRecord(value, [
+    "providerPolicyVersion",
     "workspaceId",
     "projectId",
     "actorId",
@@ -44,6 +46,7 @@ export function internalSealRankManifestInput(
     "retention"
   ]);
   const input = strictRecord(value, [
+    ...(Object.hasOwn(raw, "providerPolicyVersion") ? ["providerPolicyVersion"] : []),
     "purpose",
     "saveProjectPosition",
     "workspaceId",
@@ -70,6 +73,10 @@ export function internalSealRankManifestInput(
     invalid("provider");
   }
   if (input.operation !== "POSITIONS") invalid("operation");
+  if (input.providerPolicyVersion !== undefined) {
+    const policy = rankExecutionPolicyShape(input.providerPolicyVersion, input.provider);
+    if (!policy || Number(estimate.pairCount) > policy.commandLimit) invalid("providerPolicyVersion");
+  } else if (Number(estimate.pairCount) > 15000) invalid("estimate.pairCount");
   return {
     workspaceId,
     projectId,
@@ -79,6 +86,7 @@ export function internalSealRankManifestInput(
     ...(input.retryOfJobId === undefined
       ? {}
       : { retryOfJobId: uuid(input.retryOfJobId, "retryOfJobId") }),
+    ...(input.providerPolicyVersion === undefined ? {} : { providerPolicyVersion: String(input.providerPolicyVersion) }),
     provider: input.provider,
     operation: "POSITIONS",
     project,
@@ -244,7 +252,7 @@ function rankManifestEstimate(
     "expiresAt"
   ]);
   const pairCount = requiredString(input.pairCount, "estimate.pairCount");
-  if (!DECIMAL_PAIR_COUNT_PATTERN.test(pairCount)) {
+  if (!DECIMAL_PAIR_COUNT_PATTERN.test(pairCount) || Number(pairCount) > rankCommandKeywordLimit) {
     invalid("estimate.pairCount");
   }
   return {
@@ -434,7 +442,7 @@ function chunkIndex(value: unknown): number {
   if (
     !Number.isSafeInteger(parsed) ||
     parsed < 0 ||
-    parsed > 14_999
+    parsed > rankCommandKeywordLimit - 1
   ) {
     invalid("chunkIndex");
   }

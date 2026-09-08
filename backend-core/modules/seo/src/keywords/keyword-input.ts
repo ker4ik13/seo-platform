@@ -181,9 +181,7 @@ export function internalUpdateSemanticKeywordInput(
     ...optionalClusterId(input.clusterId, true),
     ...optionalTargetUrl(input.targetUrl, true),
     ...optionalNote(input.note, true),
-    ...(input.tagNames === undefined
-      ? {}
-      : { tagNames: tagNames(input.tagNames) })
+    ...tagChanges(input)
   };
 }
 
@@ -217,7 +215,9 @@ export function internalSemanticKeywordBulkInput(
     "groupId",
     "clusterId",
     "targetUrl",
-    "tagNames"
+    "tagNames",
+    "addTagNames",
+    "removeTagNames"
   ]);
   if (Object.keys(patch).length === 0) invalid("patch");
   return {
@@ -247,9 +247,7 @@ export function internalSemanticKeywordBulkInput(
       ...optionalGroupId(patch.groupId, true),
       ...optionalClusterId(patch.clusterId, true),
       ...optionalTargetUrl(patch.targetUrl, true),
-      ...(patch.tagNames === undefined
-        ? {}
-        : { tagNames: tagNames(patch.tagNames) })
+      ...tagChanges(patch)
     }
   };
 }
@@ -383,7 +381,7 @@ function editableFields(): readonly string[] {
 }
 
 function updateEditableFields(): readonly string[] {
-  return [...editableFields(), "showAiAnswerButton"];
+  return ["addTagNames", "removeTagNames", ...editableFields(), "showAiAnswerButton"];
 }
 
 function optionalNote(value: unknown, nullable: false): Readonly<{ note?: string }>;
@@ -556,4 +554,17 @@ function exactRecord(
 
 function invalid(field: string): never {
   throw new BadRequestException(`Invalid semantic keyword field: ${field}`);
+}
+
+function tagChanges(input: Readonly<Record<string, unknown>>) {
+  if (input.tagNames !== undefined && (input.addTagNames !== undefined || input.removeTagNames !== undefined)) invalid("tagNames");
+  const add = input.addTagNames === undefined ? undefined : tagNames(input.addTagNames);
+  const remove = input.removeTagNames === undefined ? undefined : tagNames(input.removeTagNames);
+  const removed = new Set(remove?.map(name => name.toLowerCase()));
+  if (add?.some(name => removed.has(name.toLowerCase()))) invalid("addTagNames");
+  return {
+    ...(input.tagNames === undefined ? {} : { tagNames: tagNames(input.tagNames) }),
+    ...(add === undefined ? {} : { addTagNames: add }),
+    ...(remove === undefined ? {} : { removeTagNames: remove })
+  };
 }

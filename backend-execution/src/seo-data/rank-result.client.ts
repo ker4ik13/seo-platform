@@ -223,7 +223,7 @@ function sameHash(left: unknown, right: unknown): boolean {
 function decimal(value: unknown): number {
   if (
     typeof value !== "string" ||
-    !/^(?:0|[1-9]\d{0,4})$/u.test(value)
+    !/^(?:0|[1-9]\d{0,5})$/u.test(value)
   ) {
     throw new RankResultClientError("UNAVAILABLE", true);
   }

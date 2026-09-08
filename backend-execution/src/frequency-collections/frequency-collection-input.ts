@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
+import { paidOperationAdmissionInput } from "../paid-operations/paid-operation-admission.js";
 import {
-  arsenkinWordstatKeywordLimit,
+  frequencyCollectionKeywordLimit,
   operationResultDefaultPageSize,
   operationResultPageSizes,
   semanticFrequencyDevices,
@@ -35,11 +36,11 @@ export function frequencyResultPageLimit(
 
 export function frequencyResultCursor(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,3})$/u.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,5})$/u.test(value)) {
     invalid("result cursor");
   }
   const parsed = Number(value);
-  if (parsed >= arsenkinWordstatKeywordLimit) invalid("result cursor");
+  if (parsed >= frequencyCollectionKeywordLimit) invalid("result cursor");
   return parsed;
 }
 
@@ -48,6 +49,7 @@ export function internalCreateFrequencyCollectionInput(
 ): InternalCreateFrequencyCollectionInput {
   const input = record(value, [
     "workspaceId",
+    "billing",
     "projectId",
     "actorId",
     "idempotencyKey",
@@ -61,7 +63,7 @@ export function internalCreateFrequencyCollectionInput(
   if (
     !Array.isArray(input.items) ||
     input.items.length < 1 ||
-    input.items.length > arsenkinWordstatKeywordLimit
+    input.items.length > frequencyCollectionKeywordLimit
   ) {
     invalid("items");
   }
@@ -80,6 +82,7 @@ export function internalCreateFrequencyCollectionInput(
   if (new Set(types).size !== types.length) invalid("types");
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
+    ...paidOperationAdmissionInput(input.billing),
     projectId: uuid(input.projectId, "projectId"),
     actorId: uuid(input.actorId, "actorId"),
     idempotencyKey: pattern(input.idempotencyKey, "idempotencyKey", KEY_PATTERN),

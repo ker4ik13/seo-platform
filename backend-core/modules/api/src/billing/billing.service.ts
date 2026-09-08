@@ -1,5 +1,8 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { CryptoPayClient, CryptoPayProviderError } from "./crypto-pay.client.js";
 import {
+  type BillingPaymentProvider,
+  type BillingProviderAvailability,
   type BillingBalanceSummary,
   type BillingLedgerTransactionSummary,
   type BillingOrderSummary,
@@ -28,6 +31,7 @@ import type {
 } from "../generated/prisma/client.js";
 import type { RequestContext } from "../identity/identity.types.js";
 import { BillingLedgerService } from "./billing-ledger.service.js";
+import { subscriptionPaymentEnd, subscriptionValueAt, unusedSubscriptionValue } from "./subscription-value.js";
 import { billingPlanFeatures } from "./billing-plan-features.js";
 import { BillingPiiService } from "./billing-pii.service.js";
 import type { YookassaWebhookInput } from "./billing-input.js";
@@ -54,8 +58,16 @@ export class BillingService {
     private readonly pii: BillingPiiService,
     private readonly yookassa: YookassaClient,
     private readonly audit: AuditService,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional() private readonly cryptoPay?: CryptoPayClient
   ) {}
+
+  public providers(): readonly BillingProviderAvailability[] {
+    return [
+      { provider: "YOOKASSA", available: this.yookassa.isEnabled(), recurring: true, automaticRefunds: true, mode: this.config.billing.yookassa.secretKey?.startsWith("test_") ? "TEST" : "LIVE" },
+      { provider: "CRYPTO_PAY", available: this.cryptoPay?.isEnabled() === true, recurring: false, automaticRefunds: false, mode: this.config.billing.cryptoPay?.apiBaseUrl.includes("testnet-") ? "TEST" : "LIVE" }
+    ];
+  }
 
   public async plans(now = new Date()): Promise<readonly BillingPlanSummary[]> {
     const versions = await this.prisma.billingPlanVersion.findMany({
@@ -89,11 +101,11 @@ export class BillingService {
       await this.prisma.billingSubscription.findUnique({
         where: { workspaceId },
         include: {
-          planVersion: { include: { plan: true } },
+          planVersion: { include: { plan: true, prices: true } },
           defaultPaymentMethod: { select: { status: true } }
         }
       });
-    return subscription ? billingSubscriptionSummary(subscription) : null;
+    return subscription ? { ...billingSubscriptionSummary(subscription), plan: planSummary(subscription.planVersion) } : null;
   }
 
   public async cancelSubscription(
@@ -296,11 +308,9 @@ export class BillingService {
     input: CreateBillingCheckoutInput,
     context: RequestContext
   ): Promise<BillingOrderSummary> {
-    this.assertProviderEnabled();
-    const planVersion = await this.currentPlanVersion(
-      input.planCode,
-      input.period
-    );
+    this.assertProviderEnabled(input.provider);
+    if (input.provider === "CRYPTO_PAY" && input.savePaymentMethod) throw new DomainError({ statusCode: 400, code: "VALIDATION_FAILED", message: "Crypto Pay does not support automatic renewal" });
+    const planVersion = await this.checkoutPlanVersion(workspaceId, input);
     const price = planVersion.prices.find(
       (candidate) =>
         candidate.period === input.period &&
@@ -332,7 +342,8 @@ export class BillingService {
     input: CreateBillingTopUpInput,
     context: RequestContext
   ): Promise<BillingOrderSummary> {
-    this.assertProviderEnabled();
+    this.assertProviderEnabled(input.provider);
+    if (input.provider === "CRYPTO_PAY" && input.savePaymentMethod) throw new DomainError({ statusCode: 400, code: "VALIDATION_FAILED", message: "Crypto Pay does not support automatic renewal" });
     return this.createOrderAndPayment({
       workspaceId,
       actorId,
@@ -498,10 +509,12 @@ export class BillingService {
     actorId: string,
     idempotencyKey: string,
     input: CreateBillingRefundInput,
-    context: RequestContext
+    context: RequestContext,
+    refundRequestId?: string
   ): Promise<BillingRefundSummary> {
     this.assertProviderEnabled();
-    const requestHash = hashRequest("billing-refund@1", input);
+    if (!refundRequestId) throw new DomainError({ statusCode: 403, code: "FORBIDDEN", message: "Возврат требует решения администратора по заявке." });
+    const requestHash = hashRequest("billing-refund@2", { ...input, paymentId, refundRequestId, actorId });
     const replay = await this.prisma.billingRefund.findUnique({
       where: {
         workspaceId_requestIdempotencyKey: {
@@ -530,6 +543,9 @@ export class BillingService {
     let refund;
     try {
       refund = await this.serializable(async (transaction) => {
+        await transaction.$queryRaw`SELECT id FROM workspaces WHERE id = ${workspaceId}::uuid FOR UPDATE`;
+        const approval = await transaction.billingRefundRequest.findUnique({ where: { id: refundRequestId } });
+        if (!approval || approval.workspaceId !== workspaceId || approval.paymentId !== paymentId || approval.decidedBy !== actorId || approval.approvedAmountMinor !== amountMinor || approval.holdReleasedAt || !["APPROVED", "PROCESSING"].includes(approval.status)) throw new DomainError({ statusCode: 409, code: "RESOURCE_STATE_CONFLICT", message: "Решение по возврату не соответствует операции." });
         const payment = await transaction.billingPayment.findFirst({
           where: { id: paymentId, workspaceId },
           include: { order: true }
@@ -545,6 +561,8 @@ export class BillingService {
             message: "Only a succeeded payment can be refunded"
           });
         }
+        if (payment.isTest) throw new DomainError({ statusCode: 409, code: "RESOURCE_STATE_CONFLICT", message: "Test payments do not represent refundable funds" });
+        if (payment.provider !== "YOOKASSA") throw new DomainError({ statusCode: 409, code: "FEATURE_NOT_AVAILABLE", message: "This payment requires a refund decision by support" });
         const outstanding =
           await transaction.billingRefund.aggregate({
             where: {
@@ -568,38 +586,8 @@ export class BillingService {
             details: { remainingMinor: safeMinor(remaining) }
           });
         }
-        if (payment.order.kind === "TOP_UP") {
-          const workspaceOutstanding =
-            await transaction.billingRefund.aggregate({
-              where: {
-                workspaceId,
-                status: {
-                  in: ["CREATING", "PENDING", "FAILED_RETRYABLE"]
-                },
-                payment: { order: { kind: "TOP_UP" } }
-              },
-              _sum: { amountMinor: true }
-            });
-          const workspaceReservedMinor =
-            workspaceOutstanding._sum.amountMinor ?? 0n;
-          const available = await this.ledger.balance(
-            transaction,
-            workspaceId
-          );
-          const refundable =
-            available.prepaidMinor - workspaceReservedMinor;
-          if (amountMinor > refundable) {
-            throw new DomainError({
-              statusCode: 409,
-              code: "RESOURCE_STATE_CONFLICT",
-              message: "Only unused prepaid balance can be refunded",
-              details: {
-                refundableMinor: safeMinor(
-                  refundable > 0n ? refundable : 0n
-                )
-              }
-            });
-          }
+        if (payment.order.kind === "TOP_UP" && approval.heldPrepaidMinor !== amountMinor) {
+          throw new DomainError({ statusCode: 409, code: "RESOURCE_STATE_CONFLICT", message: "Средства для возврата не зарезервированы." });
         }
         const created = await transaction.billingRefund.create({
           data: {
@@ -610,11 +598,13 @@ export class BillingService {
             providerIdempotencyKey: refundId,
             requestIdempotencyKey: idempotencyKey,
             requestHash,
+            refundRequestId,
             amountMinor,
             currency: CURRENCY,
             reason: input.reason
           }
         });
+        await transaction.billingRefundRequest.update({ where: { id: refundRequestId }, data: { status: "PROCESSING", version: { increment: 1 } } });
         await this.audit.record(
           {
             actorId,
@@ -661,9 +651,12 @@ export class BillingService {
 
   public async processWebhook(
     input: YookassaWebhookInput,
-    sourceIp: string
+    sourceIp: string,
+    deferred = false
   ): Promise<void> {
+    const provider = input.provider ?? "YOOKASSA";
     if (
+      provider === "YOOKASSA" &&
       this.config.billing.yookassa.validateWebhookSourceIp &&
       !isYookassaWebhookIp(sourceIp)
     ) {
@@ -676,7 +669,7 @@ export class BillingService {
     let inbox = await this.prisma.billingWebhookInbox.findUnique({
       where: {
         provider_eventFingerprint: {
-          provider: "YOOKASSA",
+          provider,
           eventFingerprint: input.fingerprint
         }
       }
@@ -685,7 +678,7 @@ export class BillingService {
       try {
         inbox = await this.prisma.billingWebhookInbox.create({
           data: {
-            provider: "YOOKASSA",
+            provider,
             eventFingerprint: input.fingerprint,
             eventType: input.event,
             objectType: input.objectType,
@@ -699,7 +692,7 @@ export class BillingService {
         inbox = await this.prisma.billingWebhookInbox.findUnique({
           where: {
             provider_eventFingerprint: {
-              provider: "YOOKASSA",
+              provider,
               eventFingerprint: input.fingerprint
             }
           }
@@ -718,7 +711,7 @@ export class BillingService {
         message: "Webhook replay payload differs"
       });
     }
-    if (inbox.status === "PROCESSED") return;
+    if (inbox.status === "PROCESSED" || deferred) return;
     const claimed = await this.prisma.billingWebhookInbox.updateMany({
       where: {
         id: inbox.id,
@@ -737,8 +730,8 @@ export class BillingService {
     }
     try {
       if (input.objectType === "payment") {
-        const payment = await this.yookassa.getPayment(input.objectId);
-        await this.applyPayment(payment);
+        const payment = await (provider === "CRYPTO_PAY" ? this.cryptoPay! : this.yookassa).getPayment(input.objectId);
+        await this.applyPayment(payment, undefined, provider);
       } else {
         const refund = await this.yookassa.getRefund(input.objectId);
         await this.applyRefund(refund);
@@ -753,7 +746,7 @@ export class BillingService {
       });
     } catch (error) {
       const retryable =
-        error instanceof YookassaProviderError
+        (error instanceof YookassaProviderError || error instanceof CryptoPayProviderError)
           ? error.retryable
           : error instanceof DomainError
             ? error.retryable
@@ -770,9 +763,26 @@ export class BillingService {
   }
 
   public async reconcilePending(batchSize: number): Promise<number> {
-    if (!this.yookassa.isEnabled()) return 0;
+    const enabledProviders: BillingPaymentProvider[] = [
+      ...(this.yookassa.isEnabled() ? ["YOOKASSA" as const] : []),
+      ...(this.cryptoPay?.isEnabled() ? ["CRYPTO_PAY" as const] : [])
+    ];
+    if (enabledProviders.length === 0) return 0;
+    const inboxes = await this.prisma.billingWebhookInbox.findMany({
+      where: { provider: { in: enabledProviders }, OR: [
+        { status: { in: ["RECEIVED", "FAILED_RETRYABLE"] } },
+        { status: "PROCESSING", updatedAt: { lt: new Date(Date.now() - 120_000) } }
+      ] }, orderBy: { updatedAt: "asc" }, take: Math.min(batchSize, 10)
+    });
+    for (const inbox of inboxes) {
+      if (inbox.status === "PROCESSING") await this.prisma.billingWebhookInbox.updateMany({ where: { id: inbox.id, status: "PROCESSING", updatedAt: inbox.updatedAt }, data: { status: "FAILED_RETRYABLE" } });
+      try {
+        await this.processWebhook({ provider: inbox.provider, event: inbox.eventType, objectType: inbox.objectType as "payment" | "refund", objectId: inbox.objectId, objectStatus: "succeeded", fingerprint: inbox.eventFingerprint, payloadHash: new Uint8Array(inbox.payloadHash) }, inbox.sourceIp ?? "");
+      } catch { /* durable receipt remains retryable or explicitly terminal */ }
+    }
     const payments = await this.prisma.billingPayment.findMany({
       where: {
+        provider: { in: enabledProviders },
         status: {
           in: ["CREATING", "PENDING", "FAILED_RETRYABLE"]
         }
@@ -783,6 +793,7 @@ export class BillingService {
     });
     const refunds = await this.prisma.billingRefund.findMany({
       where: {
+        payment: { provider: "YOOKASSA" },
         status: {
           in: ["CREATING", "PENDING", "FAILED_RETRYABLE"]
         }
@@ -986,7 +997,7 @@ export class BillingService {
             id: paymentId,
             workspaceId: input.workspaceId,
             orderId,
-            provider: "YOOKASSA",
+            provider: input.input.provider ?? "YOOKASSA",
             providerIdempotencyKey: paymentId,
             amountMinor: input.amountMinor,
             currency: CURRENCY
@@ -1190,40 +1201,43 @@ export class BillingService {
 
   private async resumePayment(paymentId: string): Promise<void> {
     const payment = await this.prisma.billingPayment.findUnique({
-      where: { id: paymentId },
-      include: { order: true, paymentMethod: true }
+      where: { id: paymentId }, include: { order: true, paymentMethod: true }
     });
     if (!payment || terminalPaymentStatus(payment.status)) return;
+    this.assertProviderEnabled(payment.provider);
     try {
-      if (
-        payment.paymentMethodRecordId &&
-        payment.paymentMethod?.status !== "ACTIVE"
-      ) {
-        throw new YookassaProviderError(
-          "PAYMENT_METHOD_DISABLED",
-          false
-        );
+      if (payment.paymentMethodRecordId && payment.paymentMethod?.status !== "ACTIVE") {
+        throw new YookassaProviderError("PAYMENT_METHOD_DISABLED", false);
       }
-      const providerPayment = payment.externalId
-        ? await this.yookassa.getPayment(payment.externalId)
-        : await this.yookassa.createPayment({
-            idempotencyKey: payment.providerIdempotencyKey,
-            amountMinor: safeMinor(payment.amountMinor),
-            description: payment.order.serviceDescriptionSnapshot.slice(
-              0,
-              128
-            ),
-            ...(payment.paymentMethod
-              ? {
-                  paymentMethodId:
-                    payment.paymentMethod.externalId
-                }
-              : { returnUrl: requiredReturnUrl(this.config) }),
-            orderId: payment.orderId,
-            workspaceId: payment.workspaceId,
-            savePaymentMethod: payment.order.savePaymentMethod
+      const gateway = payment.provider === "CRYPTO_PAY" ? this.cryptoPay! : this.yookassa;
+      let providerPayment: YookassaPayment;
+      if (payment.externalId) {
+        providerPayment = await gateway.getPayment(payment.externalId);
+      } else if (payment.provider === "CRYPTO_PAY" && payment.creationStartedAt) {
+        const recovered = await this.cryptoPay!.findPayment(payment.orderId, payment.workspaceId);
+        if (!recovered) throw new CryptoPayProviderError("INVOICE_CREATION_UNCONFIRMED", true);
+        providerPayment = recovered;
+      } else {
+        if (payment.provider === "YOOKASSA" && Date.now() - (payment.creationStartedAt ?? payment.createdAt).getTime() >= 20 * 3_600_000) throw new YookassaProviderError("PAYMENT_RECONCILIATION_REQUIRED", true);
+        if (!payment.creationStartedAt) {
+          const marked = await this.prisma.billingPayment.updateMany({
+            where: { id: payment.id, externalId: null, creationStartedAt: null },
+            data: { creationStartedAt: new Date() }
           });
-      await this.applyPayment(providerPayment, payment.id);
+          if (marked.count !== 1) return;
+        }
+        providerPayment = await gateway.createPayment({
+          idempotencyKey: payment.providerIdempotencyKey,
+          amountMinor: safeMinor(payment.amountMinor),
+          description: payment.order.serviceDescriptionSnapshot.slice(0, 128),
+          ...(payment.paymentMethod && payment.provider === "YOOKASSA"
+            ? { paymentMethodId: payment.paymentMethod.externalId }
+            : { returnUrl: requiredReturnUrl(this.config, payment.provider) }),
+          orderId: payment.orderId, workspaceId: payment.workspaceId,
+          savePaymentMethod: payment.provider === "YOOKASSA" && payment.order.savePaymentMethod
+        });
+      }
+      await this.applyPayment(providerPayment, payment.id, payment.provider);
     } catch (error) {
       await this.paymentProviderFailure(payment.id, payment.orderId, error);
       throw mapProviderError(error);
@@ -1232,7 +1246,8 @@ export class BillingService {
 
   private async applyPayment(
     providerPayment: YookassaPayment,
-    expectedPaymentId?: string
+    expectedPaymentId?: string,
+    provider: BillingPaymentProvider = "YOOKASSA"
   ): Promise<void> {
     const orderId = providerPayment.metadata.order_id;
     const workspaceId = providerPayment.metadata.workspace_id;
@@ -1251,6 +1266,7 @@ export class BillingService {
         })
       : await this.prisma.billingPayment.findFirst({
           where: {
+            provider,
             OR: [
               { externalId: providerPayment.id },
               { orderId }
@@ -1262,6 +1278,7 @@ export class BillingService {
         });
     if (
       !payment ||
+      payment.provider !== provider ||
       payment.orderId !== orderId ||
       payment.workspaceId !== workspaceId ||
       (payment.externalId && payment.externalId !== providerPayment.id) ||
@@ -1299,13 +1316,13 @@ export class BillingService {
           false
         );
       }
-      const paymentMethodId = await this.savePaymentMethod(
+      const paymentMethodId = provider === "YOOKASSA" && !providerPayment.test ? await this.savePaymentMethod(
         transaction,
         current.workspaceId,
         current.order.savePaymentMethod,
         current.order.termsAcceptedAt,
         providerPayment
-      );
+      ) : undefined;
       const succeededAt =
         status === "SUCCEEDED"
           ? new Date(
@@ -1324,6 +1341,7 @@ export class BillingService {
             ? { paymentMethodRecordId: paymentMethodId }
             : {}),
           providerObjectHash: providerPayment.objectHash,
+          isTest: providerPayment.test,
           providerCreatedAt: new Date(providerPayment.createdAt),
           verifiedAt: now,
           ...(succeededAt ? { succeededAt } : {}),
@@ -1336,7 +1354,10 @@ export class BillingService {
         }
       });
       if (status === "SUCCEEDED" && succeededAt) {
-        await this.settleSucceededPayment(
+        if (providerPayment.test) {
+          await transaction.billingOrder.update({ where: { id: current.orderId }, data: { status: "SUCCEEDED", completedAt: succeededAt, version: { increment: 1 } } });
+          await this.audit.record({ actorId: current.order.createdBy, workspaceId: current.workspaceId, action: "billing.test_payment.succeeded", resourceType: "billing_payment", resourceId: current.id, requestId: `billing-payment-${current.id}` }, transaction);
+        } else await this.settleSucceededPayment(
           transaction,
           current,
           providerPayment.id,
@@ -1374,12 +1395,12 @@ export class BillingService {
     await this.ledger.post(transaction, {
       type:
         order.kind === "TOP_UP" ? "TOP_UP" : "SUBSCRIPTION_PAYMENT",
-      businessReference: `yookassa:payment:${externalId}`,
+      businessReference: `${payment.provider === "CRYPTO_PAY" ? "crypto-pay" : "yookassa"}:payment:${externalId}`,
       description: order.serviceDescriptionSnapshot,
       occurredAt: succeededAt,
       createdBy: order.createdBy,
       metadata: {
-        provider: "YOOKASSA",
+        provider: payment.provider,
         paymentId: payment.id,
         orderId: order.id,
         workspaceId: order.workspaceId
@@ -1414,7 +1435,13 @@ export class BillingService {
     });
     if (order.kind === "SUBSCRIPTION" && order.planVersion) {
       const period = order.period ?? "MONTHLY";
-      const periodEnd = addPeriod(succeededAt, period);
+      await transaction.$queryRaw`SELECT id FROM workspaces WHERE id = ${order.workspaceId}::uuid FOR UPDATE`;
+      const previous = await transaction.billingSubscription.findUnique({ where: { workspaceId: order.workspaceId }, include: { planVersion: true } });
+      const effectiveAt = new Date(Math.max(succeededAt.getTime(), Date.now(), previous?.serviceValueAt?.getTime() ?? 0));
+      const carried = await subscriptionValueAt(transaction, previous, effectiveAt);
+      const periodEnd = subscriptionPaymentEnd({ at: effectiveAt, period, paidMinor: payment.amountMinor, samePlan: previous?.planVersion.planId === order.planVersion.planId, ...(previous ? { previousEnd: previous.currentPeriodEnd } : {}), carriedMinor: carried.remainingMinor });
+      const refundableFrom = carried.remainingMinor > 0n && carried.refundableFrom && carried.refundableFrom < succeededAt ? carried.refundableFrom : succeededAt;
+      const value = { serviceValueMinor: payment.amountMinor + carried.remainingMinor, serviceValueAt: effectiveAt, refundableFrom };
       await this.expirePromotionalCredits(
         transaction,
         order.workspaceId,
@@ -1426,32 +1453,32 @@ export class BillingService {
         where: { workspaceId: order.workspaceId },
         create: {
           workspaceId: order.workspaceId,
+          ...value,
           planVersionId: order.planVersion.id,
           status: "ACTIVE",
           period,
           currency: CURRENCY,
-          startedAt: succeededAt,
-          currentPeriodStart: succeededAt,
+          startedAt: effectiveAt,
+          currentPeriodStart: effectiveAt,
           currentPeriodEnd: periodEnd,
-          provider: "YOOKASSA",
+          provider: payment.provider,
           ...(paymentMethodId
             ? { defaultPaymentMethodId: paymentMethodId }
             : {})
         },
         update: {
           planVersionId: order.planVersion.id,
+          ...value,
           status: "ACTIVE",
           period,
           currency: CURRENCY,
-          currentPeriodStart: succeededAt,
+          currentPeriodStart: effectiveAt,
           currentPeriodEnd: periodEnd,
           trialEnd: null,
           graceEnd: null,
           cancelAtPeriodEnd: false,
-          provider: "YOOKASSA",
-          ...(paymentMethodId
-            ? { defaultPaymentMethodId: paymentMethodId }
-            : {}),
+          provider: payment.provider,
+          defaultPaymentMethodId: paymentMethodId ?? null,
           version: { increment: 1 }
         }
       });
@@ -1487,6 +1514,7 @@ export class BillingService {
         });
       }
     }
+    if (payment.provider === "YOOKASSA") {
     await transaction.npdReceiptObligation.upsert({
       where: {
         paymentId_sequence: {
@@ -1515,6 +1543,7 @@ export class BillingService {
       },
       update: {}
     });
+    }
     await transaction.billingOrder.update({
       where: { id: order.id },
       data: {
@@ -1582,7 +1611,7 @@ export class BillingService {
     orderId: string,
     error: unknown
   ): Promise<void> {
-    if (!(error instanceof YookassaProviderError)) return;
+    if (!(error instanceof YookassaProviderError) && !(error instanceof CryptoPayProviderError)) return;
     await this.prisma.$transaction([
       this.prisma.billingPayment.update({
         where: { id: paymentId },
@@ -1617,6 +1646,9 @@ export class BillingService {
       throw new Error("Refund payment does not have a provider ID");
     }
     try {
+      // YooKassa retains an idempotency key for 24 hours. Stop well before
+      // that boundary if no provider ID was durably received.
+      if (!refund.externalId && Date.now() - refund.createdAt.getTime() >= 20 * 3_600_000) throw new YookassaProviderError("REFUND_RECONCILIATION_REQUIRED", true);
       const providerRefund = refund.externalId
         ? await this.yookassa.getRefund(refund.externalId)
         : await this.yookassa.createRefund({
@@ -1641,6 +1673,13 @@ export class BillingService {
       }
       throw mapProviderError(error);
     }
+  }
+
+  public async verifyRefundReference(refundId: string, externalRefundId: string): Promise<void> {
+    const refund = await this.prisma.billingRefund.findUnique({ where: { id: refundId }, include: { payment: true } });
+    if (!refund?.refundRequestId || refund.payment.provider !== "YOOKASSA") throw notFound();
+    const providerRefund = await this.yookassa.getRefund(externalRefundId);
+    await this.applyRefund(providerRefund, refundId);
   }
 
   private async applyRefund(
@@ -1679,7 +1718,7 @@ export class BillingService {
     await this.serializable(async (transaction) => {
       const current = await transaction.billingRefund.findUnique({
         where: { id: refund.id },
-        include: { payment: { include: { order: true } } }
+        include: { payment: { include: { order: true } }, refundRequest: true }
       });
       if (!current) throw notFound();
       if (current.status === "SUCCEEDED" && status === "SUCCEEDED") return;
@@ -1734,7 +1773,7 @@ export class BillingService {
             ? [
                 {
                   workspaceId: current.workspaceId,
-                  accountType: "CUSTOMER_PREPAID_LIABILITY",
+                  accountType: current.refundRequest?.heldPrepaidMinor === current.amountMinor && !current.refundRequest.holdReleasedAt ? "RESERVATION" : "CUSTOMER_PREPAID_LIABILITY",
                   direction: "DEBIT",
                   amountMinor: current.amountMinor
                 },
@@ -1956,6 +1995,15 @@ export class BillingService {
     return version;
   }
 
+  private async checkoutPlanVersion(workspaceId: string, input: Pick<CreateBillingCheckoutInput, "planCode" | "planVersion" | "period">) {
+    const current = await this.prisma.billingSubscription.findUnique({ where: { workspaceId }, include: { planVersion: { include: { plan: true, prices: true } } } });
+    const retained = current?.planVersion;
+    if (retained?.plan.code === input.planCode && (input.planVersion === undefined || input.planVersion === retained.version) && retained.prices.some(price => price.period === input.period && price.currency === CURRENCY)) return retained;
+    const published = await this.currentPlanVersion(input.planCode, input.period);
+    if (input.planVersion !== undefined && published.version !== input.planVersion) throw new DomainError({ statusCode: 409, code: "RESOURCE_STATE_CONFLICT", message: "Тариф изменился. Обновите каталог перед оплатой." });
+    return published;
+  }
+
   private async orderRecord(workspaceId: string, orderId: string) {
     const order = await this.prisma.billingOrder.findFirst({
       where: { id: orderId, workspaceId },
@@ -1983,13 +2031,13 @@ export class BillingService {
     throw new Error("Serializable billing transaction retry exhausted");
   }
 
-  private assertProviderEnabled(): void {
-    if (!this.yookassa.isEnabled()) {
+  private assertProviderEnabled(provider: BillingPaymentProvider = "YOOKASSA"): void {
+    if (provider === "MANUAL" || (provider === "CRYPTO_PAY" ? !this.cryptoPay?.isEnabled() : !this.yookassa.isEnabled())) {
       throw new DomainError({
         statusCode: 503,
         code: "FEATURE_NOT_AVAILABLE",
         message: "Online payment is not configured",
-        details: { provider: "YOOKASSA" }
+        details: { provider }
       });
     }
   }
@@ -2004,7 +2052,9 @@ function planSummary(
     code: version.plan.code,
     version: version.version,
     name: version.plan.nameRu,
+    ...(version.plan.nameEn ? { nameEn: version.plan.nameEn } : {}),
     description: version.plan.descriptionRu,
+    ...(version.plan.descriptionEn ? { descriptionEn: version.plan.descriptionEn } : {}),
     trialDays: version.trialDays,
     includedDataCreditsMinor: safeMinor(
       version.includedDataCreditsMinor
@@ -2031,6 +2081,7 @@ export function billingSubscriptionSummary(
   }>
 ): BillingSubscriptionSummary {
   return {
+    ...(subscription.serviceValueMinor !== null && subscription.serviceValueMinor !== undefined && subscription.serviceValueAt ? { unusedServiceValueMinor: safeMinor(unusedSubscriptionValue(subscription.serviceValueMinor, subscription.serviceValueAt, subscription.currentPeriodEnd, new Date())) } : {}),
     id: subscription.id,
     workspaceId: subscription.workspaceId,
     planCode: subscription.planVersion.plan.code,
@@ -2080,7 +2131,8 @@ function orderSummary(
     payment: {
       id: payment.id,
       orderId: payment.orderId,
-      provider: "YOOKASSA",
+      provider: payment.provider,
+      test: payment.isTest,
       status: payment.status,
       amountMinor: safeMinor(payment.amountMinor),
       currency: CURRENCY,
@@ -2159,7 +2211,7 @@ function receiptSummary(receipt: {
   readonly grossAmountMinor: bigint;
   readonly paidAt: Date;
   readonly serviceDescriptionSnapshot: string;
-  readonly registrationMode: "MANUAL_MY_TAX";
+  readonly registrationMode: "MANUAL_MY_TAX" | "API_MY_TAX";
   readonly status: NpdReceiptObligationSummary["status"];
   readonly officialReceiptId: string | null;
   readonly officialReceiptUrl: string | null;
@@ -2264,19 +2316,6 @@ function addDays(value: Date, days: number): Date {
   return new Date(value.getTime() + days * 86_400_000);
 }
 
-function addPeriod(
-  value: Date,
-  period: "MONTHLY" | "ANNUAL"
-): Date {
-  const result = new Date(value);
-  if (period === "MONTHLY") {
-    result.setUTCMonth(result.getUTCMonth() + 1);
-  } else {
-    result.setUTCFullYear(result.getUTCFullYear() + 1);
-  }
-  return result;
-}
-
 function planOrder(code: string): number {
   const order = [
     "TRIAL",
@@ -2290,8 +2329,10 @@ function planOrder(code: string): number {
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 }
 
-function requiredReturnUrl(config: AppConfig): string {
-  const returnUrl = config.billing.yookassa.returnUrl;
+function requiredReturnUrl(config: AppConfig, provider: BillingPaymentProvider = "YOOKASSA"): string {
+  const returnUrl = provider === "CRYPTO_PAY" && config.webPublicUrl
+    ? new URL("/app/settings/billing?checkout=return", config.webPublicUrl).toString()
+    : config.billing.yookassa.returnUrl;
   if (!returnUrl) {
     throw new Error("YooKassa return URL is missing");
   }
@@ -2300,7 +2341,7 @@ function requiredReturnUrl(config: AppConfig): string {
 
 function mapProviderError(error: unknown): Error {
   if (error instanceof DomainError) return error;
-  if (error instanceof YookassaProviderError) {
+  if (error instanceof YookassaProviderError || error instanceof CryptoPayProviderError) {
     return new DomainError({
       statusCode: error.retryable ? 503 : 502,
       code: "PROVIDER_UNAVAILABLE",
@@ -2308,7 +2349,7 @@ function mapProviderError(error: unknown): Error {
         ? "Payment provider is temporarily unavailable"
         : "Payment provider rejected the operation",
       retryable: error.retryable,
-      details: { provider: "YOOKASSA", providerCode: error.code }
+      details: { provider: error instanceof CryptoPayProviderError ? "CRYPTO_PAY" : "YOOKASSA", providerCode: error.code }
     });
   }
   return error instanceof Error ? error : new Error("Billing operation failed");
@@ -2325,7 +2366,7 @@ function providerUnavailable(reason: string): DomainError {
 }
 
 function publicFailureCode(error: unknown): string {
-  if (error instanceof YookassaProviderError) return error.code.slice(0, 100);
+  if (error instanceof YookassaProviderError || error instanceof CryptoPayProviderError) return error.code.slice(0, 100);
   if (error instanceof DomainError) return error.code;
   return "INTERNAL_ERROR";
 }

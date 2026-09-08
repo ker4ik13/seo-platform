@@ -1,3 +1,4 @@
+import { installCryptoPayRawBody } from "./billing/crypto-pay-raw-body.js";
 import fastifyCookie from "@fastify/cookie";
 import { NestFactory } from "@nestjs/core";
 import {
@@ -9,7 +10,8 @@ import { AppModule } from "./app.module.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import {
   installHttpResponsePolicy,
-  TRUSTED_PROXY_HOPS
+  serializeRequestForLog,
+  TRUSTED_PROXY_ADDRESSES
 } from "./common/http-response-policy.js";
 import { loadAppConfig } from "./config/app-config.js";
 import { installClusteringRunBodyLimit } from "./semantics/clustering-run-body-limit.js";
@@ -20,11 +22,14 @@ export async function createPlatformApiApplication(
 ): Promise<NestFastifyApplication> {
   const config = loadAppConfig();
   const adapter = new FastifyAdapter({
-    logger: config.nodeEnv !== "test",
-    trustProxy: TRUSTED_PROXY_HOPS,
+    logger: config.nodeEnv !== "test"
+      ? { serializers: { req: serializeRequestForLog } }
+      : false,
+    trustProxy: TRUSTED_PROXY_ADDRESSES,
     requestIdHeader: "x-request-id"
   });
   installClusteringRunBodyLimit(adapter.getInstance());
+  installCryptoPayRawBody(adapter.getInstance());
   installKeywordBulkBodyLimit(adapter.getInstance());
   const app = await NestFactory.create<NestFastifyApplication>(
     rootModule,

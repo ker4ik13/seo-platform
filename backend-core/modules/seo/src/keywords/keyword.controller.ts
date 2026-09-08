@@ -18,6 +18,7 @@ import {
   semanticFrequencyDevices,
   semanticFrequencyTypes
 } from "@seo-platform/contracts";
+import { parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import type {
   SemanticFrequencyDevice,
   SemanticFrequencyType,
@@ -51,6 +52,7 @@ import {
 } from "./keyword-input.js";
 import {
   keywordListQuery,
+  keywordBodyListInput,
   keywordMultiSearchInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
@@ -103,6 +105,14 @@ export class KeywordController {
       keywordMultiSearchInput(body),
       request.id
     );
+  }
+
+  @Post("list")
+  @HttpCode(HttpStatus.OK)
+  public async bodyList(@Param("projectId") projectId: string, @Body() body: unknown, @Headers() headers: Readonly<Record<string, string | string[] | undefined>>, @Req() request: FastifyRequest): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) throw new BadRequestException("Route project identifier does not match trusted context");
+    return this.keywords.list(context.workspaceId, context.projectId, keywordBodyListInput(body), request.id);
   }
 
   @Get("tag-options")
@@ -266,7 +276,8 @@ export class KeywordController {
     @Param("projectId") projectId: string,
     @Param("keywordId") keywordId: string,
     @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
+    @Query("dimensionKey") dimensionKey?: unknown
   ): Promise<ApiResponse<SemanticKeywordInsights>> {
     const context = internalCommandContext(headers);
     if (internalUuid(projectId, "projectId") !== context.projectId) {
@@ -274,11 +285,13 @@ export class KeywordController {
         "Route project identifier does not match trusted context"
       );
     }
+    if (dimensionKey !== undefined && !parseSemanticRankDimensionKey(dimensionKey)) throw new BadRequestException("Invalid rank dimension");
     return {
       data: await this.keywords.insights(
         context.workspaceId,
         context.projectId,
-        internalUuid(keywordId, "keywordId")
+        internalUuid(keywordId, "keywordId"),
+        dimensionKey as string | undefined
       ),
       meta: { requestId: request.id }
     };

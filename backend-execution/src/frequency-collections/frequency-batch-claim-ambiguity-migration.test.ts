@@ -17,7 +17,10 @@ test("the newest frequency batch claim definition qualifies the attempt column",
     if (sql.includes("claim_frequency_collection_batch")) relevant.push(name);
   }
 
-  assert.equal(relevant.at(-1), leaseMigrationName);
+  assert.equal(relevant.at(-1), "20260906214000_paid_operation_claims");
+  const paidSql = await readFile(new URL("20260906214000_paid_operation_claims/migration.sql", migrationsRoot), "utf8");
+  assert.match(paidSql, /job_row\.billing_quote_id IS NOT NULL/u);
+  assert.doesNotMatch(paidSql, /attempt\s*=/u, "The billing patch must preserve the qualified attempt update");
   const sql = await readFile(
     new URL(`${migrationName}/migration.sql`, migrationsRoot),
     "utf8"

@@ -16,6 +16,8 @@ import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { ProjectSelect } from "./project-select";
 import { WorkspaceAvatar } from "./workspace-avatar";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function TenantSwitcher({
   currentUserId,
@@ -32,6 +34,7 @@ export function TenantSwitcher({
   project: AppProject | undefined;
   projectCapabilities: ProtectedAppContext["projectCapabilities"];
 }>) {
+  const { t: uiText } = useUiLocale();
   const workspaceId = workspace?.id;
   const projectId = project?.id;
   const projectWorkspaceId = project?.workspaceId;
@@ -93,8 +96,8 @@ export function TenantSwitcher({
           >
             <span aria-hidden="true"><Icon name="plus" /></span>
             <span>
-              <strong>Создать проект</strong>
-              <small>{creation.used} из {creation.limit} проектов занято</small>
+              <strong><UiText text="Создать проект" /></strong>
+              <small>{creation.used} <UiText text="из" before=" " after=" " />{creation.limit} <UiText text="проектов занято" before=" " /></small>
             </span>
           </Link>
         )
@@ -107,10 +110,10 @@ export function TenantSwitcher({
             <span>
               <strong>
                 {creation.reason === "LIMIT_REACHED"
-                  ? "Лимит проектов исчерпан"
-                  : "Создание временно недоступно"}
+                  ? <UiText text="Лимит проектов исчерпан" />
+                  : <UiText text="Создание временно недоступно" />}
               </strong>
-              <small>{creation.used} из {creation.limit} проектов занято</small>
+              <small>{creation.used} <UiText text="из" before=" " after=" " />{creation.limit} <UiText text="проектов занято" before=" " /></small>
             </span>
           </span>
         )
@@ -119,9 +122,9 @@ export function TenantSwitcher({
   return (
     <div className="tenant-switcher">
       <label>
-        <span>Рабочая область</span>
+        <span><UiText text="Рабочая область" /></span>
         <CustomSelect
-          aria-label="Рабочая область"
+          aria-label={uiText("Рабочая область")}
           className="tenant-workspace-select"
           onChange={(event) => selectWorkspace(event.target.value)}
           popoverFooter={showWorkspaceCreation ? (
@@ -131,15 +134,15 @@ export function TenantSwitcher({
             >
               <span aria-hidden="true"><Icon name="plus" /></span>
               <span>
-                <strong>Создать рабочую область</strong>
-                <small>Проекты, команда и интеграции будут храниться здесь</small>
+                <strong><UiText text="Создать рабочую область" /></strong>
+                <small><UiText text="Проекты, команда и интеграции будут храниться здесь" /></small>
               </span>
             </Link>
           ) : undefined}
           showSelectedCheck={false}
           value={workspace?.id ?? ""}
         >
-          {workspaces.length === 0 && <option disabled value="">Нет области</option>}
+          {workspaces.length === 0 && <option disabled value=""><UiText text="Нет области" /></option>}
           {workspaces.map((item) => (
             <option key={item.id} value={item.id}>
               <WorkspaceOption
@@ -151,9 +154,9 @@ export function TenantSwitcher({
         </CustomSelect>
       </label>
       <label>
-        <span>Проект</span>
+        <span><UiText text="Проект" /></span>
         <ProjectSelect
-          ariaLabel="Проект"
+          ariaLabel={uiText("Проект")}
           canReorder={projectCapabilities?.canReorder ?? false}
           className="tenant-project-select"
           disabled={!workspace || (projects.length === 0 && !projectFooter)}
@@ -187,7 +190,7 @@ function WorkspaceOption({
         <strong>{workspace.name}</strong>
         <small>
           {isPersonal
-            ? "Личный"
+            ? <UiText text="Личный" />
             : `${workspace.owner.email} · ${workspace.owner.displayName}`}
         </small>
       </span>

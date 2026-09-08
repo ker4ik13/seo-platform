@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
+import { PaidOperationRuntimeService, PaidOperationReviewError, PaidOperationUnavailableError, type PaidOperationClaimScope } from "../paid-operations/paid-operation-runtime.service.js";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -30,7 +32,8 @@ export class KeywordResearchRuntimeService {
     private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
-    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
+    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
+    @Optional() private readonly billing?: PaidOperationRuntimeService
   ) {}
 
   public async processOne(leaseOwner: string): Promise<string> {
@@ -53,12 +56,12 @@ export class KeywordResearchRuntimeService {
       ) {
         throw new KeywordResearchLeaseLostError();
       }
-      const secret = this.crypto.decrypt(
+      const secret = selectIntegrationCredentialSecret(this.crypto.decrypt(
         claim.workspaceId,
         claim.provider,
         claim.credentialId,
         claim.encryptedCredential
-      );
+      ), claim.jobId, claim.credentialId);
       if (claim.source === "KEYS_SO") {
         return await this.processKeysSo(claim, secret);
       }
@@ -67,6 +70,13 @@ export class KeywordResearchRuntimeService {
       }
       return await this.processWordstat(claim, secret, leaseSeconds);
     } catch (error) {
+      if (error instanceof PaidOperationReviewError || error instanceof PaidOperationUnavailableError) {
+        const review = error instanceof PaidOperationReviewError;
+        const code = review ? "PAID_OPERATION_REQUIRES_REVIEW" : "PAID_OPERATION_UNAVAILABLE";
+        if (claim.source === "ARSENKIN_WORDSTAT") await this.broker.transitionWordstat(claim, { action: "FAIL", code, ...(review ? {} : { retryAfterSeconds: 30 }) }).catch(() => {});
+        else await this.broker.fail(claim, { code, retryable: !review, ...(review ? {} : { retryAfterSeconds: 30 }) }).catch(() => {});
+        return review ? "ACTION_REQUIRED" : "RETRY_SCHEDULED";
+      }
       if (error instanceof KeywordResearchLeaseLostError) return "LEASE_LOST";
       await (claim.source === "KEYS_SO" || claim.source === "XMLSTOCK_WORDSTAT"
         ? this.broker.fail(claim, {
@@ -96,6 +106,10 @@ export class KeywordResearchRuntimeService {
     }
   }
 
+  private async runPaid<T extends object>(claim: PaidOperationClaimScope, part: string, network: () => Promise<T>, normalize?: (result: T) => T): Promise<T> {
+    return this.billing ? this.billing.execute(claim, part, [], network, normalize) : network();
+  }
+
   private async processXmlStockWordstat(
     claim: Extract<Awaited<ReturnType<KeywordResearchRuntimeBrokerService["claim"]>>, { readonly source: "XMLSTOCK_WORDSTAT" }>,
     secret: Parameters<XmlStockWordstatConnector["expand"]>[1]
@@ -112,7 +126,7 @@ export class KeywordResearchRuntimeService {
     const remaining = claim.maxKeywords - claim.collectedKeywords;
     const timeoutMs = this.config.integrationCredentialValidation.timeoutMs;
     const acquired = await this.xmlStockQuota.tryAcquire({
-      credentialId: claim.credentialId,
+      credentialId: secret.rateLimitScopeId ?? claim.credentialId,
       product: "WORDSTAT",
       leaseMs: timeoutMs + 5_000
     });
@@ -125,7 +139,7 @@ export class KeywordResearchRuntimeService {
       return "RETRY_SCHEDULED";
     }
     try {
-      const result = await this.xmlStockWordstat.expand(
+      const result = await this.runPaid(claim, `SEED:${claim.page}`, () => this.xmlStockWordstat.expand(
         {
           query,
           regionCode: claim.input.regionCode,
@@ -138,11 +152,11 @@ export class KeywordResearchRuntimeService {
         },
         secret,
         timeoutMs
-      );
+      ), result => result.ok ? { ...result, raw: { rows: result.rows } } : result);
       if (!result.ok) {
         if (result.code === "PROVIDER_RATE_LIMITED") {
           await this.xmlStockQuota.penalize({
-            credentialId: claim.credentialId,
+            credentialId: secret.rateLimitScopeId ?? claim.credentialId,
             product: "WORDSTAT",
             ...(result.retryAfterSeconds === undefined
               ? {}
@@ -153,7 +167,7 @@ export class KeywordResearchRuntimeService {
         return result.retryable ? "RETRY_SCHEDULED" : "FAILED";
       }
       await this.xmlStockQuota.recordSuccess({
-        credentialId: claim.credentialId,
+        credentialId: secret.rateLimitScopeId ?? claim.credentialId,
         product: "WORDSTAT"
       });
       await this.broker.completeXmlStockSeed(claim, {
@@ -230,17 +244,19 @@ export class KeywordResearchRuntimeService {
   ): Promise<string> {
     if (!claim) throw new KeywordResearchLeaseLostError();
     if (claim.providerTaskId?.startsWith("submitting:")) {
+      const acceptedTaskId = await this.billing?.acceptedTaskId(claim, []);
+      if (acceptedTaskId) { await this.broker.transitionWordstat(claim, { action: "DEFER", taskId: acceptedTaskId, retryAfterSeconds: 5 }); return "RETRY_SCHEDULED"; }
       await this.broker.transitionWordstat(claim, { action: "QUARANTINE" });
       return "ACTION_REQUIRED";
     }
     if (!claim.providerTaskId) {
       const marker = `submitting:${randomUUID()}`;
-      const result = await this.wordstat.submit(
+      const result = await this.runPaid(claim, "TASK", () => this.wordstat.submit(
         claim.input,
         secret,
         this.config.integrationCredentialValidation.timeoutMs,
         () => this.broker.markSubmitting(claim, marker, leaseSeconds)
-      );
+      ));
       if (result.status === "ACCEPTED") {
         await this.broker.transitionWordstat(claim, {
           action: "DEFER",

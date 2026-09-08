@@ -6,6 +6,8 @@ import {
   BrowserApiError
 } from "../lib/browser-api";
 import { safeAppReturnTo } from "../lib/app-path";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface AuthenticationResult {
   readonly emailVerificationRequired: boolean;
@@ -14,6 +16,7 @@ interface AuthenticationResult {
 export function MfaChallengeForm({
   returnTo
 }: Readonly<{ returnTo: string }>) {
+  const { t: uiText } = useUiLocale();
   const [challengeToken, setChallengeToken] = useState("");
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -69,35 +72,32 @@ export function MfaChallengeForm({
     <form className="auth-form" noValidate onSubmit={submit}>
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       <label className="form-field">
-        <span>Код подтверждения</span>
+        <span><UiText text="Код подтверждения" /></span>
         <input
           autoComplete="one-time-code"
           disabled={!ready || !challengeToken}
           inputMode="numeric"
           name="code"
-          placeholder="6 цифр или резервный код"
+          placeholder={uiText("6 цифр или резервный код")}
           required
         />
         <small>
-          Введите код из приложения-аутентификатора или один из сохранённых
-          резервных кодов.
-        </small>
+          <UiText text="Введите код из приложения-аутентификатора или один из сохранённых резервных кодов." /></small>
       </label>
       <button
         className="primary-button auth-submit"
         disabled={busy || !ready || !challengeToken}
         type="submit"
       >
-        {busy ? "Проверяем…" : "Продолжить"}
+        {busy ? <UiText text="Проверяем…" /> : <UiText text="Продолжить" />}
       </button>
       <p className="auth-switch">
         <a href="/app/login" onClick={clearChallenge}>
-          Вернуться ко входу
-        </a>
+          <UiText text="Вернуться ко входу" /></a>
       </p>
     </form>
   );

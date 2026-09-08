@@ -9,6 +9,8 @@ import type {
 import { useEffect, useMemo, useState } from "react";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import { SemanticModal } from "./semantic-modal";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface SemanticHistoryGroup {
   readonly id: string;
@@ -39,6 +41,8 @@ export function SemanticVersionHistory({
   projectId: string;
   refreshVersion: number;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [versions, setVersions] = useState<readonly SemanticVersionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -92,41 +96,39 @@ export function SemanticVersionHistory({
       {!drawer && (
         <header className="panel-header">
           <div>
-            <h2>История семантики</h2>
-            <p>Кто, когда и какие запросы или группы изменил</p>
+            <h2><UiText text="История семантики" /></h2>
+            <p><UiText text="Кто, когда и какие запросы или группы изменил" /></p>
           </div>
         </header>
       )}
       {error && (
         <div className="inline-alert danger" role="alert">
-          <span>{error}</span>
+          <span>{<UiText text={error ?? ""} />}</span>
           <button
             className="text-button"
             onClick={() => setReloadVersion((value) => value + 1)}
             type="button"
           >
-            Повторить
-          </button>
+            <UiText text="Повторить" /></button>
         </div>
       )}
       {detailError && (
-        <div className="inline-alert danger" role="alert">{detailError}</div>
+        <div className="inline-alert danger" role="alert">{<UiText text={detailError ?? ""} />}</div>
       )}
       {loading ? (
-        <p className="muted-copy">Загружаем историю…</p>
+        <p className="muted-copy"><UiText text="Загружаем историю…" /></p>
       ) : groups.length === 0 ? (
         <div className="semantic-version-empty">
-          История появится после первого добавления, изменения, переноса или импорта.
-        </div>
+          <UiText text="История появится после первого добавления, изменения, переноса или импорта." /></div>
       ) : (
         <div className="semantic-version-list">
           {groups.map((group) => (
             <article key={group.id}>
               <div>
-                <strong>{reasonLabel(group.reason)}</strong>
+                <strong>{<UiText text={reasonLabel(group.reason) ?? ""} />}</strong>
                 <span>{groupSummary(group)}</span>
                 <small>
-                  {formatDate(group.createdAt)} · {actorLabel(group)} · {formatAffected(group.affectedCount)}
+                  {formatDate(group.createdAt, uiLocale)} · {<UiText text={actorLabel(group) ?? ""} />} · {formatAffected(group.affectedCount)}
                 </small>
               </div>
               <button
@@ -135,7 +137,7 @@ export function SemanticVersionHistory({
                 onClick={() => void loadDetail(group)}
                 type="button"
               >
-                {detailLoadingId === group.id ? "Загружаем…" : "Подробнее"}
+                {detailLoadingId === group.id ? <UiText text="Загружаем…" /> : <UiText text="Подробнее" />}
               </button>
             </article>
           ))}
@@ -148,17 +150,17 @@ export function SemanticVersionHistory({
     <>
       {drawer ? (
         <aside
-          aria-label="История семантического ядра"
+          aria-label={uiText("История семантического ядра")}
           className="semantic-history-drawer"
           data-presence-cursor-anchor="true"
           data-presence-key="semantic-history-drawer"
         >
           <header className="semantic-sidebar-header">
             <div>
-              <span>Изменения проекта</span>
-              <h2>История семантики</h2>
+              <span><UiText text="Изменения проекта" /></span>
+              <h2><UiText text="История семантики" /></h2>
             </div>
-            <button aria-label="Закрыть историю" onClick={onClose} type="button">×</button>
+            <button aria-label={uiText("Закрыть историю")} onClick={onClose} type="button">×</button>
           </header>
           <div className="semantic-history-body semantic-versions">{content}</div>
         </aside>
@@ -182,48 +184,49 @@ function SemanticHistoryDetail({
   detail: SemanticHistoryGroupDetail;
   onClose: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const changes = detail.details.flatMap((item) => item.changes);
   const versions = detail.group.versions;
   return (
     <SemanticModal
-      description={`${formatDate(detail.group.createdAt)} · ${actorLabel(detail.group)} · ${formatAffected(detail.group.affectedCount)}`}
+      description={`${formatDate(detail.group.createdAt, uiLocale)} · ${actorLabel(detail.group)} · ${formatAffected(detail.group.affectedCount)}`}
       onClose={onClose}
       size="large"
       title={reasonLabel(detail.group.reason)}
     >
       <div className="semantic-history-detail">
         <section className="semantic-history-summary">
-          <div><span>Описание</span><strong>{groupSummary(detail.group)}</strong></div>
-          <div><span>Операций в пачке</span><strong>{versions.length}</strong></div>
-          <div><span>Затронуто</span><strong>{detail.group.affectedCount}</strong></div>
+          <div><span><UiText text="Описание" /></span><strong>{groupSummary(detail.group)}</strong></div>
+          <div><span><UiText text="Операций в пачке" /></span><strong>{versions.length}</strong></div>
+          <div><span><UiText text="Затронуто" /></span><strong>{detail.group.affectedCount}</strong></div>
         </section>
         <section>
-          <h3>Запросы и изменения</h3>
+          <h3><UiText text="Запросы и изменения" /></h3>
           {changes.length === 0 ? (
             <div className="semantic-version-empty">
-              Для этого старого действия построчная детализация не сохранялась.
-            </div>
+              <UiText text="Для этого старого действия построчная детализация не сохранялась." /></div>
           ) : (
-            <div className="semantic-history-change-table semantic-history-compact-table" role="table" aria-label="Затронутые запросы и группы">
+            <div className="semantic-history-change-table semantic-history-compact-table" role="table" aria-label={uiText("Затронутые запросы и группы")}>
               <div className="semantic-history-change-head" role="row">
-                <span>Действие</span><span>Запрос или объект</span><span>Группа</span><span>Изменения</span>
+                <span><UiText text="Действие" /></span><span><UiText text="Запрос или объект" /></span><span><UiText text="Группа" /></span><span><UiText text="Изменения" /></span>
               </div>
               {changes.map((change, index) => (
                 <div className="semantic-history-change-row" key={`${change.entityType}:${change.entityId}:${index}`} role="row">
                   <span className={`semantic-history-operation ${change.operation.toLowerCase()}`}>
-                    {operationLabel(change.operation)}
+                    {<UiText text={operationLabel(change.operation) ?? ""} />}
                   </span>
                   <div>
                     <strong>{change.after.title}</strong>
                   </div>
                   <span className="semantic-history-group-cell">{historyGroup(change)}</span>
-                  <span className="semantic-history-fields-cell">{changedFieldsLabel(change)}</span>
+                  <span className="semantic-history-fields-cell">{<UiText text={changedFieldsLabel(change) ?? ""} />}</span>
                 </div>
               ))}
             </div>
           )}
           {detail.details.some(({ changesTruncated }) => changesTruncated) && (
-            <p className="muted-copy">Для крупных операций показаны первые 500 строк каждой сохранённой части.</p>
+            <p className="muted-copy"><UiText text="Для крупных операций показаны первые 500 строк каждой сохранённой части." /></p>
           )}
         </section>
       </div>
@@ -330,8 +333,8 @@ function formatAffected(value: number): string {
   return `${value} ${noun}`;
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+function formatDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 }
 
 function versionError(error: unknown): string {

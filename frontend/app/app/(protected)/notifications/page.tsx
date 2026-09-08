@@ -1,5 +1,7 @@
 import { NotificationCenter } from "../../../../components/notification-center";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
+import { UiText } from "../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +11,9 @@ export default async function NotificationsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Центр уведомлений</h1>
+          <h1><UiText text="Центр уведомлений" /></h1>
           <p>
-            Результаты работ, упоминания, предупреждения, отчёты и системные
-            события в одном месте.
-          </p>
+            <UiText text="Результаты работ, упоминания, предупреждения, отчёты и системные события в одном месте." /></p>
         </div>
       </section>
       <NotificationCenter {...(context.project ? { projectId: context.project.id } : {})} />

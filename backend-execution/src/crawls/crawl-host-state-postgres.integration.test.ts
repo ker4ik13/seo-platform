@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { AppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -15,52 +16,53 @@ test(
       databasePoolMax: 2
     } as AppConfig);
     const service = new CrawlHostStateService(prisma);
+    const host = `${randomUUID()}.example.invalid`;
     try {
-      const first = await service.recordFailure("radar.example.com", {
+      const first = await service.recordFailure(host, {
         code: "HOST_RATE_LIMIT",
         statusCode: 429,
         retryAfterMs: 20_000
       });
-      const state = await service.currentBackoff("radar.example.com");
+      const state = await service.currentBackoff(host);
       assert.ok(state);
       assert.equal(state.code, "HOST_RATE_LIMIT");
       assert.equal(state.until.getTime(), first.getTime());
 
-      const second = await service.recordFailure("radar.example.com", {
+      const second = await service.recordFailure(host, {
         code: "HOST_UNAVAILABLE",
         statusCode: 503
       });
       assert.ok(second >= first);
       const stored = await prisma.crawlHostState.findUniqueOrThrow({
-        where: { host: "radar.example.com" }
+        where: { host: host }
       });
       assert.equal(stored.consecutiveFailures, 2);
       assert.equal(stored.lastStatusCode, 503);
 
       assert.equal(
-        await service.recordResponse("radar.example.com", 100),
+        await service.recordResponse(host, 100),
         undefined
       );
       assert.equal(
-        await service.currentBackoff("radar.example.com"),
+        await service.currentBackoff(host),
         undefined
       );
 
       const latencyBackoff =
-        await service.recordResponse("radar.example.com", 4_000);
+        await service.recordResponse(host, 4_000);
       assert.ok(latencyBackoff);
       assert.equal(
-        (await service.currentBackoff("radar.example.com"))?.code,
+        (await service.currentBackoff(host))?.code,
         "LATENCY_SPIKE"
       );
       for (let attempt = 2; attempt <= 6; attempt += 1) {
-        await service.recordFailure("radar.example.com", {
+        await service.recordFailure(host, {
           code: "HOST_UNAVAILABLE",
           statusCode: 503
         });
       }
       const sitePause =
-        await service.currentBackoff("radar.example.com");
+        await service.currentBackoff(host);
       assert.equal(sitePause?.code, "SITE_PAUSED");
       assert.ok(
         sitePause!.until.getTime() >=
@@ -69,12 +71,13 @@ test(
       assert.equal(
         (
           await prisma.crawlHostState.findUniqueOrThrow({
-            where: { host: "radar.example.com" }
+            where: { host: host }
           })
         ).consecutiveFailures,
         6
       );
     } finally {
+      await prisma.crawlHostState.deleteMany({ where: { host } });
       await prisma.$disconnect();
     }
   }

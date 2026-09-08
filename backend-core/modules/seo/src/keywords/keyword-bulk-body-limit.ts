@@ -14,6 +14,9 @@ export function applyKeywordBulkBodyLimit(
   const methods = Array.isArray(options.method)
     ? options.method
     : [options.method];
+  if (methods.some(method => String(method).toUpperCase() === "PUT") && /^\/internal\/v1\/projects\/[^/]+\/tracking-contexts\/[^/]+\/keywords\/?$/u.test(options.url)) {
+    options.bodyLimit = 16 * 1024 * 1024;
+  }
   if (
     methods.some((method) => String(method).toUpperCase() === "POST") &&
     /^\/internal\/v1\/projects\/[^/]+\/keywords\/bulk-create\/?$/u.test(

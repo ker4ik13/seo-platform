@@ -1,5 +1,5 @@
 import {
-  arsenkinWordstatKeywordLimit,
+  frequencyCollectionKeywordLimit,
   frequencyCollectionStatuses,
   frequencyCollectionProviders,
   connectorRoutingScopes,
@@ -43,6 +43,7 @@ export function scopedFrequencyCollection(
   const types = input.types.map((value) => member(value, semanticFrequencyTypes));
   const hasRoutingScope = input.routingScope !== undefined;
   const hasConnectorAttempts = input.connectorAttempts !== undefined;
+  if (input.requiresUsageReview !== undefined && typeof input.requiresUsageReview !== "boolean") invalid();
   if (hasRoutingScope !== hasConnectorAttempts) invalid();
   return {
     id,
@@ -50,6 +51,8 @@ export function scopedFrequencyCollection(
     projectId,
     ...(input.actorId === undefined ? {} : { actorId: uuid(input.actorId) }),
     provider: member(input.provider, frequencyCollectionProviders),
+    ...(input.credentialMode === undefined ? {} : { credentialMode: member(input.credentialMode, ["BYOK_API_KEY", "PLATFORM_PAID"] as const) }),
+    ...(input.requiresUsageReview === undefined ? {} : { requiresUsageReview: input.requiresUsageReview as boolean }),
     ...(!hasRoutingScope
       ? {}
       : { routingScope: member(input.routingScope, connectorRoutingScopes) }),
@@ -61,17 +64,17 @@ export function scopedFrequencyCollection(
     selectedKeywords: integer(
       input.selectedKeywords,
       1,
-      arsenkinWordstatKeywordLimit
+      frequencyCollectionKeywordLimit
     ),
     completedKeywords: integer(
       input.completedKeywords,
       0,
-      arsenkinWordstatKeywordLimit
+      frequencyCollectionKeywordLimit
     ),
     failedKeywords: integer(
       input.failedKeywords,
       0,
-      arsenkinWordstatKeywordLimit
+      frequencyCollectionKeywordLimit
     ),
     types,
     regionCode: string(input.regionCode, 100),
@@ -140,7 +143,7 @@ export function scopedFrequencyOperationScope(
     const sequence = integer(
       item.sequence,
       0,
-      arsenkinWordstatKeywordLimit - 1
+      frequencyCollectionKeywordLimit - 1
     );
     if (
       keywordIds.has(keywordId) ||

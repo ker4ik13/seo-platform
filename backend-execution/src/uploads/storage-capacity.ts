@@ -6,6 +6,10 @@ import {
 import type { StorageCapacityEntitlement } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
 
+export const STORAGE_RESERVING_UPLOAD_STATUSES = [
+  "INITIATED", "UPLOADING", "UPLOADED", "SCANNING", "READY"
+] as const;
+
 const PLAN_CODE_PATTERN = /^[A-Z][A-Z0-9_-]{0,63}$/u;
 
 export function storageCapacityEntitlement(

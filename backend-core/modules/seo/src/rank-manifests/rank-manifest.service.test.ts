@@ -728,12 +728,14 @@ function manifestHarness(
         assert.match(sql, /pg_advisory_xact_lock\([\s\S]*\) IS NULL/u);
         return [{ snapshotAt: allocatedSealedAt }];
       }
+      if (sql.includes("rank_scope_plan")) return [{ assignmentCount: Math.min(5000, assignments.length), nestedLoops: "on", jit: "on", statementTimeout: "0" }];
+      if (sql.includes("set_config")) return [];
       if (sql.includes("bounded_rank_scope")) {
         assert.match(
           sql,
           /CASE[\s\S]*octet_length[\s\S]*THEN[\s\S]*ELSE char_length/u
         );
-        const bounded = assignments.slice(0, 15_001);
+        const bounded = assignments.slice(0, 300_001);
         const characterCounts = bounded.map(
           ({ keyword }) => [...keyword.textOriginal].length
         );
@@ -817,8 +819,9 @@ function manifestHarness(
             .reverse();
         }
         assert.deepEqual(orderBy, { keywordId: "asc" });
-        assert.equal(take, 15_001);
-        return [...assignments];
+        assert.equal(take, 5_000);
+        const cursor = (where.keywordId as { gt?: string } | undefined)?.gt;
+        return [...assignments].filter(row => !cursor || row.keywordId > cursor).sort((a, b) => a.keywordId.localeCompare(b.keywordId)).slice(0, take);
       }
     },
     rankExecutionManifestChunk: {

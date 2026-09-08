@@ -21,6 +21,8 @@ import {
 } from "../lib/semantic-operation-tree";
 import { semanticOperationScopeQuery } from "../lib/semantic-operation-scope-query";
 import { Icon } from "./icon";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export interface SemanticOperationSelection {
   readonly id: string;
@@ -83,6 +85,7 @@ export function SemanticOperationScope({
   onScopeChange?: (scope: SemanticOperationScopeState) => void;
   projectId: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const initialMode: TrackingContextScopeMode = initialScope?.mode ?? (
     initialSelections.length > 0
       ? "KEYWORDS"
@@ -403,10 +406,10 @@ export function SemanticOperationScope({
   return (
     <section className="semantic-operation-scope" aria-labelledby="semantic-operation-scope-title">
       <header>
-        <strong id="semantic-operation-scope-title">Что обработать</strong>
-        <span>Состав фиксируется перед запуском и не меняется вместе с таблицей.</span>
+        <strong id="semantic-operation-scope-title"><UiText text="Что обработать" /></strong>
+        <span><UiText text="Состав фиксируется перед запуском и не меняется вместе с таблицей." /></span>
       </header>
-      <div className="semantic-operation-scope-tabs" role="radiogroup" aria-label="Охват операции">
+      <div className="semantic-operation-scope-tabs" role="radiogroup" aria-label={uiText("Охват операции")}>
         <label>
           <input
             checked={mode === "ALL"}
@@ -414,8 +417,8 @@ export function SemanticOperationScope({
             onChange={() => setMode("ALL")}
             type="radio"
           />
-          <span>Все запросы проекта</span>
-          <b>Все</b>
+          <span><UiText text="Все запросы проекта" /></span>
+          <b><UiText text="Все" /></b>
         </label>
         <label>
           <input
@@ -424,7 +427,7 @@ export function SemanticOperationScope({
             onChange={() => setMode("KEYWORDS")}
             type="radio"
           />
-          <span>Конкретные запросы</span>
+          <span><UiText text="Конкретные запросы" /></span>
           <b>{querySelections.size}</b>
         </label>
         <label>
@@ -434,41 +437,39 @@ export function SemanticOperationScope({
             onChange={() => setMode("GROUPS")}
             type="radio"
           />
-          <span>Папки</span>
+          <span><UiText text="Папки" /></span>
           <b>{selectedGroupIds.size}</b>
         </label>
       </div>
       {mode === "ALL" ? (
         <div className="semantic-operation-all-scope">
-          <strong>Будут обработаны все активные запросы</strong>
-          <span>Состав загружается с сервера и фиксируется до запуска операции.</span>
+          <strong><UiText text="Будут обработаны все активные запросы" /></strong>
+          <span><UiText text="Состав загружается с сервера и фиксируется до запуска операции." /></span>
         </div>
       ) : mode === "KEYWORDS" ? (
         <div className="semantic-operation-query-picker">
           <div className="semantic-operation-query-search">
             <label>
-              <span className="sr-only">Поиск конкретных запросов</span>
+              <span className="sr-only"><UiText text="Поиск конкретных запросов" /></span>
               <input
                 onChange={(event) => setQuerySearch(event.target.value)}
-                placeholder="Найдите запрос по тексту"
+                placeholder={uiText("Найдите запрос по тексту")}
                 type="search"
                 value={querySearch}
               />
             </label>
             <button onClick={selectVisibleQueries} type="button">
-              Выбрать загруженные
-            </button>
+              <UiText text="Выбрать загруженные" /></button>
             <button
               disabled={querySelections.size === 0}
               onClick={() => setQuerySelections(new Map())}
               type="button"
             >
-              Очистить
-            </button>
+              <UiText text="Очистить" /></button>
           </div>
           <div
             aria-busy={queryLoading || queryLoadingMore}
-            aria-label="Конкретные запросы"
+            aria-label={uiText("Конкретные запросы")}
             className="semantic-operation-query-list"
             onScroll={loadMoreOnScroll}
             ref={queryListRef}
@@ -482,44 +483,43 @@ export function SemanticOperationScope({
                 />
                 <span>
                   <strong>{option.textOriginal}</strong>
-                  <small>{option.groupPath ?? "Без группы"}</small>
+                  <small>{option.groupPath ?? <UiText text="Без группы" />}</small>
                 </span>
               </label>
             ))}
             {!queryLoading && !queryLoadError && visibleQueryOptions.length === 0 && (
-              <p>По этому поиску запросов нет.</p>
+              <p><UiText text="По этому поиску запросов нет." /></p>
             )}
             {queryLoading && queryOptions.length === 0 && (
-              <p role="status">Загружаем запросы…</p>
+              <p role="status"><UiText text="Загружаем запросы…" /></p>
             )}
             {queryLoadError && (
               <div className="semantic-operation-query-load-error" role="alert">
-                <span>{queryLoadError}</span>
+                <span>{<UiText text={queryLoadError ?? ""} />}</span>
                 <button onClick={() => setQueryReloadToken((value) => value + 1)} type="button">
-                  Повторить
-                </button>
+                  <UiText text="Повторить" /></button>
               </div>
             )}
             {queryHasNext && !queryLoadError && (
               <div
-                aria-label={queryLoadingMore ? "Загружаем ещё запросы" : "Загрузить следующую страницу"}
+                aria-label={queryLoadingMore ? uiText("Загружаем ещё запросы") : uiText("Загрузить следующую страницу")}
                 className="semantic-operation-query-sentinel"
                 ref={querySentinelRef}
                 role="status"
               >
-                {queryLoadingMore ? <><i aria-hidden="true" />Загружаем ещё…</> : "Прокрутите ниже"}
+                {queryLoadingMore ? <><i aria-hidden="true" /><UiText text="Загружаем ещё…" /></> : <UiText text="Прокрутите ниже" />}
               </div>
             )}
             {!queryLoading && !queryHasNext && queryOptions.length > 0 && (
               <p className="semantic-operation-query-page-status" role="status">
-                Загружено {queryOptions.length}{queryTotalApprox !== undefined ? ` из ${queryTotalApprox}` : ""}
+                <UiText text="Загружено" after=" " />{queryOptions.length}{queryTotalApprox !== undefined ? <UiText text="из {0}" values={[String(queryTotalApprox)]} before=" " /> : ""}
               </p>
             )}
           </div>
-          {queryError && <div className="inline-alert warning" role="alert">{queryError}</div>}
+          {queryError && <div className="inline-alert warning" role="alert">{<UiText text={queryError ?? ""} />}</div>}
         </div>
       ) : (
-        <div className="semantic-operation-folder-list" aria-label="Папки запросов">
+        <div className="semantic-operation-folder-list" aria-label={uiText("Папки запросов")}>
           {visibleGroups.map(({ group, depth, hasChildren }) => (
             <div
               className="semantic-operation-folder-row"
@@ -529,7 +529,7 @@ export function SemanticOperationScope({
             >
               {hasChildren ? (
                 <button
-                  aria-label={expandedGroupIds.has(group.id) ? "Свернуть папку" : "Развернуть папку"}
+                  aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
                   aria-expanded={expandedGroupIds.has(group.id)}
                   className="semantic-operation-folder-toggle"
                   onClick={() => toggleExpanded(group.id)}
@@ -558,7 +558,7 @@ export function SemanticOperationScope({
           ))}
         </div>
       )}
-      <small>Текущее выделение таблицы переносится в список конкретных запросов. Родительская папка включает вложенные. Лимит одной операции: {maxItems}.</small>
+      <small><UiText text="Текущее выделение таблицы переносится в список конкретных запросов. Родительская папка включает вложенные. Лимит одной операции:" after=" " />{maxItems}.</small>
     </section>
   );
 }

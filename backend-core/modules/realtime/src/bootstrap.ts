@@ -7,7 +7,7 @@ import {
 import { AppModule } from "./app.module.js";
 import {
   installHttpResponsePolicy,
-  TRUSTED_PROXY_HOPS
+  TRUSTED_PROXY_ADDRESSES
 } from "./common/http-response-policy.js";
 import { safeRequestId } from "./common/request-id.js";
 import type { AppConfig } from "./config/app-config.js";
@@ -18,7 +18,7 @@ export async function startRealtime(): Promise<void> {
   const adapter = new FastifyAdapter({
     requestIdHeader: false,
     genReqId: safeRequestId,
-    trustProxy: TRUSTED_PROXY_HOPS
+    trustProxy: TRUSTED_PROXY_ADDRESSES
   });
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,

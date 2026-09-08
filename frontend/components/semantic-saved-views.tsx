@@ -14,6 +14,8 @@ import type {
   SemanticViewConfig
 } from "./semantic-view-types";
 import { isInternalSemanticViewName } from "./semantic-view-types";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface SemanticSavedViewsProps {
   readonly activeView: SemanticSavedView | undefined;
@@ -38,6 +40,7 @@ export function SemanticSavedViews({
   onApply,
   onActiveViewChange
 }: SemanticSavedViewsProps) {
+  const { t: uiText } = useUiLocale();
   const [views, setViews] = useState<readonly SemanticSavedView[]>([]);
   const [name, setName] = useState("");
   const [scope, setScope] = useState<"PRIVATE" | "PROJECT_SHARED">(
@@ -159,18 +162,18 @@ export function SemanticSavedViews({
   const body = (
     <div className="semantic-saved-views-body">
         {visibleViews.length === 0 && !loading ? (
-          <p>Сохранённых представлений пока нет.</p>
+          <p><UiText text="Сохранённых представлений пока нет." /></p>
         ) : (
           <ul>
             {visibleViews.map((view) => (
               <li key={view.id}>
                 <button
-                  aria-label={`Применить представление «${view.name}»`}
+                  aria-label={uiText("Применить представление «{0}»", [String(view.name)])}
                   aria-pressed={activeView?.id === view.id}
                   className="semantic-view-apply"
                   disabled={saving}
                   onClick={() => onApply(view)}
-                  title={activeView?.id === view.id ? "Представление применено" : "Применить представление"}
+                  title={activeView?.id === view.id ? uiText("Представление применено") : uiText("Применить представление")}
                   type="button"
                 >
                   <Icon name="checkDouble" />
@@ -182,10 +185,10 @@ export function SemanticSavedViews({
                 >
                   <strong>{view.name}</strong>
                   <small>
-                    {view.scope === "PRIVATE" ? "Личное" : "Общее"}
+                    {view.scope === "PRIVATE" ? <UiText text="Личное" /> : <UiText text="Общее" />}
                   </small>
                   {activeView?.id === view.id && isActiveViewDirty && (
-                    <small className="semantic-view-dirty">Изменения не сохранены</small>
+                    <small className="semantic-view-dirty"><UiText text="Изменения не сохранены" /></small>
                   )}
                 </button>
                 {((view.scope === "PRIVATE" && view.ownerId === currentUserId) ||
@@ -195,19 +198,17 @@ export function SemanticSavedViews({
                       className="text-button"
                       disabled={saving}
                       onClick={() => void replaceView(view)}
-                      title="Заменить настройки представления текущими"
+                      title={uiText("Заменить настройки представления текущими")}
                       type="button"
                     >
-                      Обновить
-                    </button>
+                      <UiText text="Обновить" /></button>
                     <button
                       className="text-button danger-text"
                       disabled={saving}
                       onClick={() => void deleteView(view)}
                       type="button"
                     >
-                      Удалить
-                    </button>
+                      <UiText text="Удалить" /></button>
                   </>
                 )}
               </li>
@@ -216,36 +217,36 @@ export function SemanticSavedViews({
         )}
         <form onSubmit={(event) => void createView(event)}>
           <label>
-            <span className="visually-hidden">Название представления</span>
+            <span className="visually-hidden"><UiText text="Название представления" /></span>
             <input
               maxLength={160}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Название представления"
+              placeholder={uiText("Название представления")}
               required
               value={name}
             />
           </label>
           {canManageShared ? (
             <CustomSelect
-              aria-label="Доступ к представлению"
+              aria-label={uiText("Доступ к представлению")}
               onChange={(event) =>
                 setScope(event.target.value as typeof scope)
               }
               value={scope}
             >
-              <option value="PRIVATE">Личное</option>
-              <option value="PROJECT_SHARED">Общее для проекта</option>
+              <option value="PRIVATE"><UiText text="Личное" /></option>
+              <option value="PROJECT_SHARED"><UiText text="Общее для проекта" /></option>
             </CustomSelect>
           ) : (
-            <span className="semantic-view-private-scope">Личное</span>
+            <span className="semantic-view-private-scope"><UiText text="Личное" /></span>
           )}
           <button className="secondary-button" disabled={saving} type="submit">
-            {saving ? "Сохраняем…" : "Сохранить вид"}
+            {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить вид" />}
           </button>
         </form>
         {error && (
           <div className="inline-alert danger" role="alert">
-            {error}
+            {<UiText text={error ?? ""} />}
           </div>
         )}
     </div>
@@ -253,14 +254,14 @@ export function SemanticSavedViews({
   if (embedded) {
     return (
       <section className="semantic-saved-views embedded">
-        <header><strong>Сохранённые представления</strong><span>{loading ? "…" : visibleViews.length}</span></header>
+        <header><strong><UiText text="Сохранённые представления" /></strong><span>{loading ? "…" : visibleViews.length}</span></header>
         {body}
       </section>
     );
   }
   return (
     <details className="semantic-saved-views" data-exclusive-dropdown>
-      <summary>Представления<span>{loading ? "…" : visibleViews.length}</span></summary>
+      <summary><UiText text="Представления" /><span>{loading ? "…" : visibleViews.length}</span></summary>
       {body}
     </details>
   );

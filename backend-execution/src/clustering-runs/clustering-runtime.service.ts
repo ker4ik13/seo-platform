@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
+import { PaidOperationRuntimeService, PaidOperationReviewError, PaidOperationUnavailableError } from "../paid-operations/paid-operation-runtime.service.js";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   internalClusteringResolveBatchLimit,
@@ -37,7 +39,8 @@ export class ClusteringRuntimeService {
     private readonly arsenkin: ArsenkinClusteringConnector,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
-    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
+    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
+    @Optional() private readonly billing?: PaidOperationRuntimeService
   ) {}
 
   public async processBatch(
@@ -71,15 +74,17 @@ export class ClusteringRuntimeService {
       this.assertLease(activeClaim, timeoutMs * 2 + PERSISTENCE_MARGIN_MS);
       const currentRequestId = sharedProviderRequestId(activeClaim.items);
       if (currentRequestId?.startsWith("submitting:")) {
+        const acceptedTaskId = await this.billing?.acceptedTaskId(activeClaim, activeClaim.items.map(item => item.jobItemId));
+        if (acceptedTaskId) { await this.broker.defer(activeClaim, acceptedTaskId, 5); return "RETRY_SCHEDULED"; }
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
       }
-      const secret = this.crypto.decrypt(
+      const secret = selectIntegrationCredentialSecret(this.crypto.decrypt(
         activeClaim.workspaceId,
         "ARSENKIN",
         activeClaim.credentialId,
         activeClaim.encryptedCredential
-      );
+      ), activeClaim.jobId, activeClaim.credentialId);
       let keywords: readonly InternalClusteringKeyword[] | undefined;
       const resolve = async (): Promise<readonly string[]> => {
         const resolved = await this.resolveKeywords(activeClaim, leaseSeconds);
@@ -106,7 +111,7 @@ export class ClusteringRuntimeService {
             secret,
             timeoutMs
           )
-        : await this.arsenkin.submit(
+        : await this.runPaid(activeClaim, () => this.arsenkin.submit(
             { ...providerInput, keywords: (keywords ?? []).map(({ text }) => text) },
             secret,
             timeoutMs,
@@ -121,7 +126,7 @@ export class ClusteringRuntimeService {
               activeClaim = marked;
               return true;
             }
-          );
+          ));
       if (
         sharedProviderRequestId(activeClaim.items)?.startsWith("submitting:") &&
         (outcome.status === "OUTCOME_UNKNOWN" || outcome.status === "RETRYABLE_FAILURE")
@@ -185,6 +190,8 @@ export class ClusteringRuntimeService {
       });
       return "COMPLETED";
     } catch (error) {
+      if (error instanceof PaidOperationReviewError) { await this.broker.fail(activeClaim, { code: "PAID_OPERATION_REQUIRES_REVIEW", retryable: false }).catch(() => {}); return "ACTION_REQUIRED"; }
+      if (error instanceof PaidOperationUnavailableError) { await this.broker.fail(activeClaim, { code: "PAID_OPERATION_UNAVAILABLE", retryable: true, retryAfterSeconds: 30 }).catch(() => {}); return "RETRY_SCHEDULED"; }
       if (error instanceof ClusteringLeaseLostError) return "LEASE_LOST";
       if (error instanceof SeoDataClientError && !error.retryable) {
         await this.broker.fail(activeClaim, {
@@ -215,6 +222,10 @@ export class ClusteringRuntimeService {
         ?.scheduleAfterProviderOperation(activeClaim.credentialId)
         .catch(() => undefined);
     }
+  }
+
+  private async runPaid<T extends object>(claim: ClusteringClaim, network: () => Promise<T>): Promise<T> {
+    return this.billing ? this.billing.execute(claim, "TASK", claim.items.map(item => item.jobItemId), network) : network();
   }
 
   private async resolveKeywords(

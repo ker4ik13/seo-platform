@@ -275,6 +275,7 @@ export function rankHistoryProviderLabel(
   provider: SemanticKeywordPositionHistoryProvider
 ): string {
   if (provider === "KEY_COLLECTOR") return "Key Collector · импорт";
+  if (provider === "MANUAL_IMPORT") return "Ручной импорт";
   return provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools";
 }
 

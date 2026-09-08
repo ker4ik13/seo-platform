@@ -21,6 +21,8 @@ import {
 import { CustomSelect } from "./custom-select";
 import { IntegrationStatusBadge } from "./integration-status-badge";
 import { ProviderLogo } from "./provider-logo";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type RouteDraft = {
   readonly enabled: boolean;
@@ -167,7 +169,7 @@ export function WorkspaceIntegrationRouting({
     return (
       <section className="panel integration-routing-panel" aria-busy="true">
         <span className="spinner" />
-        <p>Загружаем маршруты операций…</p>
+        <p><UiText text="Загружаем маршруты операций…" /></p>
       </section>
     );
   }
@@ -175,11 +177,10 @@ export function WorkspaceIntegrationRouting({
   if (!settings) {
     return (
       <section className="panel panel-empty compact">
-        <strong>Маршрутизация временно недоступна</strong>
-        <p>{error ?? "Не удалось загрузить настройки."}</p>
+        <strong><UiText text="Маршрутизация временно недоступна" /></strong>
+        <p>{error ?? <UiText text="Не удалось загрузить настройки." />}</p>
         <button className="secondary-button" onClick={() => void load()} type="button">
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -188,15 +189,13 @@ export function WorkspaceIntegrationRouting({
     <section className="panel integration-routing-panel">
       <header className="security-card-header integration-routing-header">
         <div>
-          <h2>Маршрутизация операций</h2>
+          <h2><UiText text="Маршрутизация операций" /></h2>
           <p>
-            Первый источник — основной. Следующие используются по порядку при
-            недоступности, нехватке баланса, ограничении запросов или временной ошибке.
-          </p>
+            <UiText text="Первый источник — основной. Следующие используются по порядку при недоступности, нехватке баланса, ограничении запросов или временной ошибке." /></p>
         </div>
-        <span className="security-status">Настройка рабочей области</span>
+        <span className="security-status"><UiText text="Настройка рабочей области" /></span>
       </header>
-      {error && <div className="inline-alert danger" role="alert">{error}</div>}
+      {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
       <div className="integration-routing-list">
         {integrationCapabilities.map((capability) => (
           <CapabilityRoutingRow
@@ -215,8 +214,7 @@ export function WorkspaceIntegrationRouting({
       </div>
       {settings.credentialOptionsTruncated && (
         <div className="inline-alert warning">
-          Показаны первые 500 подключений. Уточните список или отключите неиспользуемые.
-        </div>
+          <UiText text="Показаны первые 500 подключений. Уточните список или отключите неиспользуемые." /></div>
       )}
     </section>
   );
@@ -243,6 +241,7 @@ function CapabilityRoutingRow({
   saving: boolean;
   success: boolean;
 }>) {
+  const { t: uiText } = useUiLocale();
   const selected = draft.credentialIds
     .map((id) => options.find((option) => option.id === id))
     .filter((option): option is ProjectConnectorCredentialOption => Boolean(option));
@@ -254,8 +253,8 @@ function CapabilityRoutingRow({
     <article className="integration-routing-row">
       <div className="integration-routing-title">
         <div>
-          <strong>{integrationCapabilityLabel(capability)}</strong>
-          <span>{capabilityDescription(capability)}</span>
+          <strong>{<UiText text={integrationCapabilityLabel(capability) ?? ""} />}</strong>
+          <span><UiText text={capabilityDescription(capability)} /></span>
         </div>
         <label className="integration-routing-switch">
           <input
@@ -266,7 +265,7 @@ function CapabilityRoutingRow({
             }
             type="checkbox"
           />
-          <span>{draft.enabled ? "Включено" : "Выключено"}</span>
+          <span>{draft.enabled ? <UiText text="Включено" /> : <UiText text="Выключено" />}</span>
         </label>
       </div>
       <div className="integration-route-chain">
@@ -277,13 +276,13 @@ function CapabilityRoutingRow({
             <div className="integration-route-copy">
               <strong>{credential.label}</strong>
               <span>
-                {integrationProviderLabel(credential.provider)} · {index === 0 ? "основной" : "резерв"}
+                {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} · {index === 0 ? <UiText text="основной" /> : <UiText text="резерв" />}
               </span>
             </div>
             <IntegrationStatusBadge status={credential.status} />
             {canUpdate && (
               <button
-                aria-label={`Убрать подключение ${credential.label}`}
+                aria-label={uiText("Убрать подключение {0}", [String(credential.label)])}
                 className="icon-button"
                 disabled={saving}
                 onClick={() =>
@@ -303,13 +302,12 @@ function CapabilityRoutingRow({
         ))}
         {selected.length === 0 && (
           <div className="integration-route-empty">
-            Подключение для этой операции не назначено.
-          </div>
+            <UiText text="Подключение для этой операции не назначено." /></div>
         )}
       </div>
       {canUpdate && available.length > 0 && (
         <label className="form-field integration-route-add">
-          <span>{selected.length === 0 ? "Основное подключение" : "Добавить резерв"}</span>
+          <span>{selected.length === 0 ? <UiText text="Основное подключение" /> : <UiText text="Добавить резерв" />}</span>
           <CustomSelect
             disabled={saving || (selected.length > 0 && !canManageFallback)}
             onChange={(event) =>
@@ -325,15 +323,15 @@ function CapabilityRoutingRow({
             searchable
             value=""
           >
-            <option value="">Выберите подключение</option>
+            <option value=""><UiText text="Выберите подключение" /></option>
             {available.map((credential) => (
               <option
                 disabled={credential.status !== "ACTIVE"}
                 key={credential.id}
                 value={credential.id}
               >
-                {integrationProviderLabel(credential.provider)} · {credential.label}
-                {credential.status === "ACTIVE" ? "" : " · недоступно"}
+                {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} · {credential.label}
+                {credential.status === "ACTIVE" ? "" : <UiText text="· недоступно" before=" " />}
               </option>
             ))}
           </CustomSelect>
@@ -341,7 +339,7 @@ function CapabilityRoutingRow({
       )}
       {draft.credentialIds.length > 1 && (
         <fieldset className="integration-fallback-reasons" disabled={!canManageFallback || saving}>
-          <legend>Переключать на следующий источник, если</legend>
+          <legend><UiText text="Переключать на следующий источник, если" /></legend>
           {connectorFallbackReasons.map((reason) => (
             <label key={reason}>
               <input
@@ -363,7 +361,7 @@ function CapabilityRoutingRow({
       )}
       <div className="integration-routing-actions">
         <span className={success ? "integration-save-success" : ""}>
-          {success ? "Сохранено" : `${selected.length} источников в цепочке`}
+          {success ? <UiText text="Сохранено" /> : <UiText text="{0} источников в цепочке" values={[String(selected.length)]} />}
         </span>
         {canUpdate && (
           <button
@@ -372,7 +370,7 @@ function CapabilityRoutingRow({
             onClick={onSave}
             type="button"
           >
-            {saving ? "Сохраняем…" : "Сохранить маршрут"}
+            {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить маршрут" />}
           </button>
         )}
       </div>

@@ -63,7 +63,13 @@ const expectedFunctions = [
   "public.claim_clustering_run(TEXT, INTEGER)",
   "public.renew_clustering_run_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)",
   "public.mark_clustering_run_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
-  "public.transition_clustering_run(UUID, UUID[], TEXT, INTEGER, TEXT, TEXT, INTEGER, TEXT, JSONB)"
+  "public.transition_clustering_run(UUID, UUID[], TEXT, INTEGER, TEXT, TEXT, INTEGER, TEXT, JSONB)",
+  "public.prepare_provider_usage_ticket(uuid,uuid,uuid,text,integer,text,uuid[])",
+  "public.start_provider_usage_ticket(uuid,uuid)",
+  "public.finish_provider_usage_ticket(uuid,uuid,text,jsonb)",
+  "public.read_provider_operation_mode(uuid,uuid,uuid,text,integer)",
+  "public.claim_platform_provider_account_probe(text)",
+  "public.finish_platform_provider_account_probe(uuid,text,uuid,text,text)"
 ];
 
 function compactSql(sql) {
@@ -335,7 +341,7 @@ test("generated pg_hba allows connector only into jobs_db before general rules",
   );
   assert.match(
     compose,
-    /command:\s*\[\s*"postgres",\s*"-c",\s*"hba_file=\/tmp\/seo-platform-pg_hba\.conf",\s*"-c",\s*"timezone=UTC"\s*\]/u
+    /command:\s*\[\s*"postgres",\s*"-c",\s*"hba_file=\/tmp\/seo-platform-pg_hba\.conf",\s*"-c",\s*"timezone=UTC"(?:\s*,\s*"[^"\n]*")*\s*\]/u
   );
   assert.match(
     compose,

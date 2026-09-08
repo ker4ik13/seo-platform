@@ -23,9 +23,13 @@ import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
 import { SemanticKeywordPositionHistoryModal } from "./semantic-keyword-position-history-modal";
+import { SemanticKeywordRegionalRanks } from "./semantic-keyword-regional-ranks";
+import { SemanticKeywordSerpHistory } from "./semantic-keyword-serp-history";
 import { SemanticKeywordAiPositionHistoryModal } from "./semantic-keyword-ai-position-history-modal";
 import { SemanticModal } from "./semantic-modal";
 import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export interface SemanticKeywordInspectorItem {
   readonly id: string;
@@ -68,6 +72,8 @@ export function SemanticKeywordInspector({
   projectDomain: string;
   projectId: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [insights, setInsights] = useState<SemanticKeywordInsights>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -78,6 +84,8 @@ export function SemanticKeywordInspector({
   const [trackingBusy, setTrackingBusy] = useState(false);
   const [trackingStatus, setTrackingStatus] = useState<string>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [rankDimensionKey, setRankDimensionKey] = useState("");
+  const [serpHistoryOpen, setSerpHistoryOpen] = useState(false);
   const [aiHistoryOpen, setAiHistoryOpen] = useState(false);
   const [frequencyToDelete, setFrequencyToDelete] =
     useState<FrequencySnapshotSummary>();
@@ -89,11 +97,16 @@ export function SemanticKeywordInspector({
   const [savingTargetUrl, setSavingTargetUrl] = useState(false);
   const [targetUrlError, setTargetUrlError] = useState<string>();
   const noteDirtyRef = useRef(false);
+  const rankDimensionRef = useRef(rankDimensionKey);
+  rankDimensionRef.current = rankDimensionKey;
+  const priorRankDimension = useRef(rankDimensionKey);
+  const reloadInsights = useRef<(() => void) | undefined>(undefined);
   const presenceKeyPrefix = `semantic-keyword-inspector:${item.id}`;
 
   useEffect(() => {
     noteDirtyRef.current = noteDirty;
   }, [noteDirty]);
+  useEffect(() => { setRankDimensionKey(""); setSerpHistoryOpen(false); }, [item.id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -115,23 +128,25 @@ export function SemanticKeywordInspector({
     setSavingTargetUrl(false);
     setTargetUrlError(undefined);
     const load = () => {
+      const requestedDimension = rankDimensionRef.current;
       void browserApiRequest<SemanticKeywordInsights>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights${requestedDimension ? `?dimensionKey=${encodeURIComponent(requestedDimension)}` : ""}`,
         { signal: controller.signal }
       )
         .then((result) => {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || requestedDimension !== rankDimensionRef.current) return;
           setInsights(result);
           if (!noteDirtyRef.current) setNote(result.note ?? "");
           setError(undefined);
         })
         .catch((requestError) => {
-          if (!controller.signal.aborted) setError(insightError(requestError));
+          if (!controller.signal.aborted && requestedDimension === rankDimensionRef.current) setError(insightError(requestError));
         })
         .finally(() => {
-          if (!controller.signal.aborted) setLoading(false);
+          if (!controller.signal.aborted && requestedDimension === rankDimensionRef.current) setLoading(false);
         });
     };
+    reloadInsights.current = load;
     load();
     const timer = window.setInterval(load, 5_000);
     return () => {
@@ -139,6 +154,12 @@ export function SemanticKeywordInspector({
       window.clearInterval(timer);
     };
   }, [item.id, item.targetUrl, projectId]);
+  useEffect(() => {
+    if (priorRankDimension.current === rankDimensionKey) return;
+    priorRankDimension.current = rankDimensionKey;
+    setLoading(true);
+    reloadInsights.current?.();
+  }, [rankDimensionKey]);
 
   const latestFrequencies = useMemo(() => {
     const seen = new Set<string>();
@@ -161,8 +182,8 @@ export function SemanticKeywordInspector({
     );
   }, [insights]);
   const visibleHistory = useMemo(
-    () => latestSemanticRankHistory(insights?.positionHistory ?? []),
-    [insights]
+    () => latestSemanticRankHistory((insights?.positionHistory ?? []).filter(point => !rankDimensionKey || point.dimensionKey === rankDimensionKey)),
+    [insights, rankDimensionKey]
   );
   const aiChartHistory = useMemo(
     () => latestSemanticRankHistory(
@@ -340,7 +361,7 @@ export function SemanticKeywordInspector({
 
   return (
     <aside
-      aria-label={`Детали запроса ${item.textOriginal}`}
+      aria-label={uiText("Детали запроса {0}", [String(item.textOriginal)])}
       className="semantic-keyword-inspector"
     >
       <header
@@ -348,19 +369,19 @@ export function SemanticKeywordInspector({
         data-presence-key={`${presenceKeyPrefix}:header`}
       >
         <div>
-          <span>Запрос</span>
+          <span><UiText text="Запрос" /></span>
           <strong>{item.textOriginal}</strong>
           <small>ID: {item.id.slice(0, 8)}</small>
         </div>
         <div className="semantic-sidebar-actions">
           {!item.trashed && (
             <button
-              aria-label={item.isTracked ? "Отключить отслеживание" : "Включить отслеживание"}
+              aria-label={item.isTracked ? uiText("Отключить отслеживание") : uiText("Включить отслеживание")}
               aria-pressed={item.isTracked}
               className={`semantic-sidebar-tracking${item.isTracked ? " active" : ""}`}
               disabled={trackingBusy}
               onClick={() => void toggleTracking()}
-              title={item.isTracked ? "Отключить отслеживание" : "Включить отслеживание"}
+              title={item.isTracked ? uiText("Отключить отслеживание") : uiText("Включить отслеживание")}
               type="button"
             >
               <Icon name={item.isTracked ? "eye" : "eyeOff"} />
@@ -368,10 +389,9 @@ export function SemanticKeywordInspector({
           )}
           {!item.trashed && (
             <button className="semantic-sidebar-edit" onClick={onEdit} type="button">
-              Изменить
-            </button>
+              <UiText text="Изменить" /></button>
           )}
-          <button aria-label="Закрыть детали" onClick={onClose} type="button">×</button>
+          <button aria-label={uiText("Закрыть детали")} onClick={onClose} type="button">×</button>
         </div>
       </header>
 
@@ -380,20 +400,20 @@ export function SemanticKeywordInspector({
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:overview`}
       >
-        <h3>Обзор</h3>
+        <h3><UiText text="Обзор" /></h3>
         <dl>
-          <div><dt>Интент</dt><dd><span className="semantic-intent-chip">{intentLabel(item.intent)}</span></dd></div>
-          <div><dt>Группа</dt><dd>{visibleGroupPath(item.groupPath)}</dd></div>
-          <div><dt>Кластер</dt><dd>{item.clusterName ?? "Не назначен"}</dd></div>
-          <div><dt>Язык</dt><dd>{item.language.toUpperCase()}</dd></div>
-          <div><dt>Отслеживание</dt><dd>{item.isTracked ? "Включено" : "Выключено"}</dd></div>
+          <div><dt><UiText text="Интент" /></dt><dd><span className="semantic-intent-chip">{<UiText text={intentLabel(item.intent) ?? ""} />}</span></dd></div>
+          <div><dt><UiText text="Группа" /></dt><dd>{visibleGroupPath(item.groupPath)}</dd></div>
+          <div><dt><UiText text="Кластер" /></dt><dd>{item.clusterName ?? <UiText text="Не назначен" />}</dd></div>
+          <div><dt><UiText text="Язык" /></dt><dd>{item.language.toUpperCase()}</dd></div>
+          <div><dt><UiText text="Отслеживание" /></dt><dd>{item.isTracked ? <UiText text="Включено" /> : <UiText text="Выключено" />}</dd></div>
           <div className="semantic-inspector-overview-tags">
-            <dt>Теги</dt>
+            <dt><UiText text="Теги" /></dt>
             <dd>
               <span className="semantic-inspector-tags">
                 {item.tags.length > 0
                   ? item.tags.map((tag) => <span key={tag}>{tag}</span>)
-                  : <span>Нет тегов</span>}
+                  : <span><UiText text="Нет тегов" /></span>}
               </span>
             </dd>
           </div>
@@ -401,26 +421,26 @@ export function SemanticKeywordInspector({
         {trackingStatus && <small className="semantic-tracking-status" role="status">{trackingStatus}</small>}
         <div className="semantic-inspector-target-url">
           <div className="semantic-inspector-target-url-heading">
-            <strong>Целевой URL</strong>
+            <strong><UiText text="Целевой URL" /></strong>
             {item.targetUrl ? (
               <button
-                aria-label={targetUrlCopied ? "URL скопирован" : "Скопировать целевой URL"}
+                aria-label={targetUrlCopied ? uiText("URL скопирован") : uiText("Скопировать целевой URL")}
                 className={targetUrlCopied ? "copied" : undefined}
                 onClick={() => void copyTargetUrl()}
-                title={targetUrlCopied ? "URL скопирован" : "Скопировать URL"}
+                title={targetUrlCopied ? uiText("URL скопирован") : uiText("Скопировать URL")}
                 type="button"
               >
                 <Icon name={targetUrlCopied ? "checkDouble" : "copy"} />
               </button>
             ) : !item.trashed ? (
               <button
-                aria-label="Задать целевой URL"
+                aria-label={uiText("Задать целевой URL")}
                 onClick={() => {
                   setTargetUrlDraft("");
                   setTargetUrlError(undefined);
                   setTargetUrlEditorOpen(true);
                 }}
-                title="Задать целевой URL"
+                title={uiText("Задать целевой URL")}
                 type="button"
               >
                 <Icon name="plus" />
@@ -430,11 +450,11 @@ export function SemanticKeywordInspector({
           {item.targetUrl ? (
             <a href={item.targetUrl} rel="noopener noreferrer" target="_blank">{item.targetUrl}</a>
           ) : (
-            <span className="semantic-inspector-muted">Не задан</span>
+            <span className="semantic-inspector-muted"><UiText text="Не задан" /></span>
           )}
           {targetMismatches.length > 0 && (
             <div className="semantic-target-url-warning" role="status">
-              <strong>URL не совпадает с найденной страницей</strong>
+              <strong><UiText text="URL не совпадает с найденной страницей" /></strong>
               {targetMismatches.map(({ engine, rankingUrl, source }) => (
                 <a
                   href={rankingUrl}
@@ -443,7 +463,7 @@ export function SemanticKeywordInspector({
                   target="_blank"
                 >
                   <SearchEngineLogo engine={engine} size="compact" />
-                  <span>{source === "AI" ? "ИИ · " : ""}{rankingUrl}</span>
+                  <span>{source === "AI" ? <UiText text="ИИ ·" after=" " /> : ""}{rankingUrl}</span>
                 </a>
               ))}
             </div>
@@ -456,77 +476,34 @@ export function SemanticKeywordInspector({
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:ranks`}
       >
-        <header className="semantic-inspector-section-heading">
-          <h3>Позиции</h3>
-          <button onClick={() => setHistoryOpen(true)} type="button">
-            <Icon name="history" />
-            История
-          </button>
-        </header>
-        {!loading ? (
-          <div className="semantic-current-ranks">
-            {(["YANDEX", "GOOGLE"] as const).map((engine) => {
-              const position = primaryPositions.get(engine);
-              const change = position?.position === undefined
-                ? undefined
-                : rankChangePresentation(
-                    position.position,
-                    position.previousPosition
-                  );
-              const lostDescription = position && !position.found
-                ? position.previousPosition === undefined
-                  ? "Позиция не найдена"
-                  : `Позиция не найдена. Была ${position.previousPosition}`
-                : undefined;
-              return (
-                <div key={engine}>
-                  <span>
-                    <SearchEngineLogo engine={engine} size="compact" />
-                    <span>{rankEngineLabel(engine)}</span>
-                  </span>
-                  <strong aria-label={change?.ariaLabel ?? lostDescription} className={!position?.found && position ? "lost" : undefined} title={change?.title ?? lostDescription}>
-                    {position ? (position.found ? position.position ?? "—" : "×") : "—"}
-                  </strong>
-                  {change ? (
-                    <small className={change.tone} title={change.title}>{change.label}</small>
-                  ) : position?.previousPosition !== undefined ? (
-                    <small className="declined" title={`Предыдущая позиция: ${position.previousPosition}`}>←{position.previousPosition}</small>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <span className="semantic-inspector-muted">Загружаем позиции…</span>
-        )}
+        <SemanticKeywordRegionalRanks projectId={projectId} keywordId={item.id} dimensionKey={rankDimensionKey} onDimensionChange={setRankDimensionKey} onHistory={() => setHistoryOpen(true)} onSerpHistory={() => setSerpHistoryOpen(true)} revision={(insights?.positions ?? []).map(position => position.observedAt).join(":")} />
+        {rankDimensionKey && !loading && <>
         <div className="semantic-normal-rank-chart">
           <SemanticRankHistoryChart points={visibleHistory} />
         </div>
         {positionChanges.length > 0 && (
           <div className="semantic-rank-change-history">
             <header>
-              <strong>Изменения позиций</strong>
+              <strong><UiText text="Изменения позиций" /></strong>
             </header>
             <RankChangeRows rows={positionChanges.slice(0, 5)} />
           </div>
         )}
+        </>}
         <div className="semantic-inspector-ai-ranks">
           <header>
             <span>
               <Icon name="ai" />
-              ИИ-позиции
-            </span>
+              <UiText text="ИИ-позиции" /></span>
             <div>
               {hasSavedAiAnswer && (
                 <button onClick={onOpenAiAnswer} type="button">
-                  Открыть ответ
-                </button>
+                  <UiText text="Открыть ответ" /></button>
               )}
               {(insights?.aiPositionHistory?.length ?? 0) > 0 && (
                 <button onClick={() => setAiHistoryOpen(true)} type="button">
                   <Icon name="history" />
-                  История
-                </button>
+                  <UiText text="История" /></button>
               )}
             </div>
           </header>
@@ -545,7 +522,7 @@ export function SemanticKeywordInspector({
                 <div key={engine}>
                   <span>
                     <SearchEngineLogo engine={engine} size="compact" />
-                    <span>{rankEngineLabel(engine)}</span>
+                    <span>{<UiText text={rankEngineLabel(engine) ?? ""} />}</span>
                   </span>
                   <strong
                     className={aiAnswerValueTone(answer)}
@@ -555,7 +532,7 @@ export function SemanticKeywordInspector({
                   </strong>
                   <small
                     className={change?.tone ?? (lost ? "declined" : undefined)}
-                    title={answer ? `${aiAnswerDescription(answer)} · ${formatDateTime(answer.observedAt)}` : "ИИ-позиции ещё не проверялись"}
+                    title={answer ? `${aiAnswerDescription(answer)} · ${formatDateTime(answer.observedAt, uiLocale)}` : uiText("ИИ-позиции ещё не проверялись")}
                   >
                     {change?.label ?? (answer?.previousPosition !== undefined
                       ? `←${answer.previousPosition}`
@@ -573,7 +550,7 @@ export function SemanticKeywordInspector({
         </div>
       </section>
 
-      {error && <div className="inline-alert danger" role="alert">{error}</div>}
+      {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
 
       <SemanticCompetitorSnapshots
         presenceKeyPrefix={`${presenceKeyPrefix}:competitors`}
@@ -595,32 +572,32 @@ export function SemanticKeywordInspector({
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:frequency`}
       >
-        <h3>Частотность</h3>
+        <h3><UiText text="Частотность" /></h3>
         {loading ? (
-          <span className="semantic-inspector-muted">Загружаем срезы…</span>
+          <span className="semantic-inspector-muted"><UiText text="Загружаем срезы…" /></span>
         ) : latestFrequencies.length > 0 ? (
           <div className="semantic-frequency-list">
             {latestFrequencies.map((frequency) => (
               <div className="semantic-frequency-row" key={`${frequency.type}:${frequency.regionCode}:${frequency.device}`}>
                 <div className="semantic-frequency-context">
                   <SearchEngineLogo engine="YANDEX" size="compact" />
-                  <span>{frequencyTypeLabel(frequency.type)}</span>
-                  <small>{frequency.regionCode} · {frequencyDeviceLabel(frequency.device)}</small>
+                  <span>{<UiText text={frequencyTypeLabel(frequency.type) ?? ""} />}</span>
+                  <small>{frequency.regionCode} · {<UiText text={frequencyDeviceLabel(frequency.device) ?? ""} />}</small>
                 </div>
                 <div className="semantic-frequency-value">
-                  <strong>{frequency.value ? formatInteger(frequency.value) : "—"}</strong>
-                  <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt)}</small>
+                  <strong>{frequency.value ? formatInteger(frequency.value, uiLocale) : "—"}</strong>
+                  <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt, uiLocale)}</small>
                 </div>
                 {!item.trashed && (
                   <button
-                    aria-label={`Удалить частотность «${frequencyTypeLabel(frequency.type)}»`}
+                    aria-label={uiText("Удалить частотность «{0}»", [String(frequencyTypeLabel(frequency.type))])}
                     className="semantic-frequency-delete"
                     disabled={deletingFrequency}
                     onClick={() => {
                       setFrequencyDeleteError(undefined);
                       setFrequencyToDelete(frequency);
                     }}
-                    title="Удалить частотность"
+                    title={uiText("Удалить частотность")}
                     type="button"
                   >
                     <Icon name="trash" />
@@ -630,7 +607,7 @@ export function SemanticKeywordInspector({
             ))}
           </div>
         ) : (
-          <InspectorEmpty title="Нет актуального среза" text="Запустите сбор частотности по этому запросу." />
+          <InspectorEmpty title={uiText("Нет актуального среза")} text="Запустите сбор частотности по этому запросу." />
         )}
       </section>
 
@@ -639,7 +616,7 @@ export function SemanticKeywordInspector({
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:note`}
       >
-        <h3>Заметка</h3>
+        <h3><UiText text="Заметка" /></h3>
         <form onSubmit={(event) => void saveNote(event)}>
           <textarea
             disabled={item.trashed || savingNote}
@@ -649,15 +626,15 @@ export function SemanticKeywordInspector({
               setNoteDirty(true);
               setNoteStatus(undefined);
             }}
-            placeholder="Добавьте контекст, гипотезу или задачу по запросу…"
+            placeholder={uiText("Добавьте контекст, гипотезу или задачу по запросу…")}
             rows={5}
             value={note}
           />
           <div>
-            <small>{note.length.toLocaleString("ru-RU")} / 4 000</small>
+            <small>{note.length.toLocaleString(uiLocale)} / 4 000</small>
             {!item.trashed && (
               <button className="secondary-button" disabled={!noteDirty || savingNote} type="submit">
-                {savingNote ? "Сохраняем…" : "Сохранить"}
+                {savingNote ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
               </button>
             )}
           </div>
@@ -670,12 +647,14 @@ export function SemanticKeywordInspector({
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:dates`}
       >
-        <small>Создан: {formatDateTime(item.createdAt)}</small>
-        <small>Обновлён: {formatDateTime(item.updatedAt)}</small>
-        <small>Источник: {sourceLabel(item.sourceMode)}</small>
+        <small><UiText text="Создан:" after=" " />{formatDateTime(item.createdAt, uiLocale)}</small>
+        <small><UiText text="Обновлён:" after=" " />{formatDateTime(item.updatedAt, uiLocale)}</small>
+        <small><UiText text="Источник:" after=" " />{<UiText text={sourceLabel(item.sourceMode) ?? ""} />}</small>
       </section>
+      {serpHistoryOpen && <SemanticKeywordSerpHistory projectId={projectId} keywordId={item.id} keywordText={item.textOriginal} createdAt={item.createdAt} projectDomain={projectDomain} dimensionKey={rankDimensionKey || undefined} onClose={() => setSerpHistoryOpen(false)} />}
       {historyOpen && (
         <SemanticKeywordPositionHistoryModal
+          dimensionKey={rankDimensionKey || undefined}
           contextPoints={insights?.positionHistory ?? []}
           createdAt={item.createdAt}
           keywordId={item.id}
@@ -695,7 +674,7 @@ export function SemanticKeywordInspector({
       )}
       {frequencyToDelete && (
         <SemanticModal
-          description="Удаление применяется только к выбранному запросу."
+          description={uiText("Удаление применяется только к выбранному запросу.")}
           onClose={deletingFrequency
             ? () => undefined
             : () => {
@@ -703,22 +682,19 @@ export function SemanticKeywordInspector({
                 setFrequencyDeleteError(undefined);
               }}
           size="small"
-          title="Удалить частотность?"
+          title={uiText("Удалить частотность?")}
         >
           <div className="semantic-confirm-dialog semantic-frequency-delete-dialog">
             <div className="inline-alert danger" role="alert">
-              Все сохранённые срезы «{frequencyTypeLabel(frequencyToDelete.type)}»
-              для региона {frequencyToDelete.regionCode} и устройства «{frequencyDeviceLabel(frequencyToDelete.device)}»
-              будут удалены без возможности восстановления.
-            </div>
+              <UiText text="Все сохранённые срезы «" />{<UiText text={frequencyTypeLabel(frequencyToDelete.type) ?? ""} />}<UiText text="» для региона" after=" " />{frequencyToDelete.regionCode} <UiText text="и устройства «" before=" " />{<UiText text={frequencyDeviceLabel(frequencyToDelete.device) ?? ""} />}<UiText text="» будут удалены без возможности восстановления." /></div>
             <div className="semantic-frequency-delete-summary">
-              <span>{frequencyTypeLabel(frequencyToDelete.type)}</span>
-              <strong>{frequencyToDelete.value ? formatInteger(frequencyToDelete.value) : "—"}</strong>
-              <small>{formatDateTime(frequencyToDelete.observedAt)}</small>
+              <span>{<UiText text={frequencyTypeLabel(frequencyToDelete.type) ?? ""} />}</span>
+              <strong>{frequencyToDelete.value ? formatInteger(frequencyToDelete.value, uiLocale) : "—"}</strong>
+              <small>{formatDateTime(frequencyToDelete.observedAt, uiLocale)}</small>
             </div>
             {frequencyDeleteError && (
               <div className="inline-alert danger" role="alert">
-                {frequencyDeleteError}
+                {<UiText text={frequencyDeleteError ?? ""} />}
               </div>
             )}
             <div className="semantic-modal-actions">
@@ -731,15 +707,14 @@ export function SemanticKeywordInspector({
                 }}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
               <button
                 className="danger-button"
                 disabled={deletingFrequency}
                 onClick={() => void deleteFrequencyContext()}
                 type="button"
               >
-                {deletingFrequency ? "Удаляем…" : "Удалить"}
+                {deletingFrequency ? <UiText text="Удаляем…" /> : <UiText text="Удалить" />}
               </button>
             </div>
           </div>
@@ -747,7 +722,7 @@ export function SemanticKeywordInspector({
       )}
       {targetUrlEditorOpen && (
         <SemanticModal
-          description="URL будет использоваться для проверки совпадения с обычной и ИИ-выдачей."
+          description={uiText("URL будет использоваться для проверки совпадения с обычной и ИИ-выдачей.")}
           onClose={savingTargetUrl
             ? () => undefined
             : () => {
@@ -755,14 +730,14 @@ export function SemanticKeywordInspector({
                 setTargetUrlError(undefined);
               }}
           size="small"
-          title="Задать целевой URL"
+          title={uiText("Задать целевой URL")}
         >
           <form
             className="semantic-confirm-dialog semantic-target-url-editor"
             onSubmit={(event) => void saveTargetUrl(event)}
           >
             <label className="semantic-workflow-field">
-              <span>Целевой URL</span>
+              <span><UiText text="Целевой URL" /></span>
               <div
                 className={`semantic-target-url-input${targetUrlError ? " invalid" : ""}`}
               >
@@ -791,7 +766,7 @@ export function SemanticKeywordInspector({
                     setTargetUrlDraft(event.target.value);
                     setTargetUrlError(undefined);
                   }}
-                  placeholder="https://example.com/page или /page"
+                  placeholder={uiText("https://example.com/page или /page")}
                   required
                   spellCheck={false}
                   type="text"
@@ -799,8 +774,7 @@ export function SemanticKeywordInspector({
                 />
               </div>
               <small id="semantic-target-url-help">
-                Можно вставить полный URL, домен или путь внутри проекта.
-              </small>
+                <UiText text="Можно вставить полный URL, домен или путь внутри проекта." /></small>
             </label>
             {targetUrlError && (
               <div
@@ -808,7 +782,7 @@ export function SemanticKeywordInspector({
                 id="semantic-target-url-error"
                 role="alert"
               >
-                {targetUrlError}
+                {<UiText text={targetUrlError ?? ""} />}
               </div>
             )}
             <div className="semantic-modal-actions">
@@ -821,14 +795,13 @@ export function SemanticKeywordInspector({
                 }}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
               <button
                 className="primary-button"
                 disabled={savingTargetUrl || !targetUrlDraft.trim()}
                 type="submit"
               >
-                {savingTargetUrl ? "Сохраняем…" : "Сохранить"}
+                {savingTargetUrl ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
               </button>
             </div>
           </form>
@@ -929,18 +902,20 @@ interface RankHistoryDateRow {
 }
 
 function RankChangeRows({ rows }: Readonly<{ rows: readonly RankHistoryDateRow[] }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   return (
     <div className="semantic-rank-change-rows">
       {rows.map((row) => (
         <div key={row.date}>
-          <time dateTime={row.observedAt}>{formatDate(row.observedAt)}</time>
+          <time dateTime={row.observedAt}>{formatDate(row.observedAt, uiLocale)}</time>
           {(["YANDEX", "GOOGLE"] as const).map((engine) => {
             const point = row.positions.get(engine);
             return (
               <span
                 className={!point ? "empty" : point.found ? undefined : "lost"}
                 key={engine}
-                title={point ? historyPointTitle(point) : "В этот день замера не было"}
+                title={point ? historyPointTitle(point, uiLocale) : uiText("В этот день замера не было")}
               >
                 <SearchEngineLogo engine={engine} size="compact" />
                 <b>{point ? (point.found ? point.position ?? "—" : "×") : "—"}</b>
@@ -986,11 +961,11 @@ function dateKey(value: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function historyPointTitle(point: SemanticKeywordPositionHistoryPoint): string {
+function historyPointTitle(point: SemanticKeywordPositionHistoryPoint, uiLocale: string = "ru-RU"): string {
   const status = point.found && point.position !== undefined
     ? `Позиция ${point.position}`
     : "Позиция не найдена";
-  return `${status} · ${point.contextName} · ${formatDateTime(point.observedAt)}`;
+  return `${status} · ${point.contextName} · ${formatDateTime(point.observedAt, uiLocale)}`;
 }
 
 function InspectorEmpty({ title, text }: Readonly<{ title: string; text: string }>) {
@@ -1025,9 +1000,9 @@ function sameFrequencyContext(
     left.device === right.device;
 }
 
-function formatInteger(value: string): string {
+function formatInteger(value: string, uiLocale: string = "ru-RU"): string {
   const number = Number(value);
-  return Number.isSafeInteger(number) ? new Intl.NumberFormat("ru-RU").format(number) : value;
+  return Number.isSafeInteger(number) ? new Intl.NumberFormat(uiLocale).format(number) : value;
 }
 
 function insightError(error: unknown): string {
@@ -1109,18 +1084,18 @@ function aiAnswerDescription(answer: AiAnswerSummary | undefined): string {
     : "Сайт найден в источниках ИИ-ответа";
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+    : new Intl.DateTimeFormat(uiLocale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         day: "2-digit",
         month: "2-digit",
         year: "numeric"

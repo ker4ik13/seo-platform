@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { paidOperationJobFields } from "../paid-operations/paid-operation-admission.js";
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type {
   ClusteringRunSummary,
@@ -39,7 +40,8 @@ export class ClusteringRunService {
       input.projectId,
       "CLUSTERING",
       input.actorId,
-      "ARSENKIN"
+      "ARSENKIN",
+      input.billing?.credentialId
     );
     if (route.provider !== "ARSENKIN") throw new Error("Clustering requires an Arsenkin route");
     try {
@@ -47,6 +49,7 @@ export class ClusteringRunService {
         await assertJobCapacity(transaction, input.workspaceId, input.jobCapacity);
         const job = await transaction.job.create({
           data: {
+            ...paidOperationJobFields("CLUSTERING_RUN", input, route),
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             type: "CLUSTERING_RUN",

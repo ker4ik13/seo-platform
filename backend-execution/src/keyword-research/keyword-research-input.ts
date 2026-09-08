@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { paidOperationAdmissionInput } from "../paid-operations/paid-operation-admission.js";
 import {
   arsenkinWordstatExpansionResultLimit,
   arsenkinWordstatExpansionSeedLimit,
@@ -44,6 +45,7 @@ export function internalCreateKeywordResearchRunInput(
   value: unknown
 ): InternalCreateKeywordResearchRunInput {
   const commonFields = [
+    "billing",
     "workspaceId",
     "projectId",
     "actorId",
@@ -75,6 +77,7 @@ export function internalCreateKeywordResearchRunInput(
       ];
   const input = record(value, fields);
   const common = {
+    ...paidOperationAdmissionInput(input.billing),
     workspaceId: uuid(input.workspaceId, "workspaceId"),
     projectId: uuid(input.projectId, "projectId"),
     actorId: uuid(input.actorId, "actorId"),

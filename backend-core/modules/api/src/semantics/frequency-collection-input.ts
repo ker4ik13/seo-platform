@@ -1,5 +1,5 @@
 import {
-  arsenkinWordstatKeywordLimit,
+  frequencyCollectionKeywordLimit,
   semanticFrequencyDevices,
   semanticFrequencyTypes,
   type CreateFrequencyCollectionInput,
@@ -26,7 +26,7 @@ export function createFrequencyCollectionInput(
   if (
     !Array.isArray(input.items) ||
     input.items.length < 1 ||
-    input.items.length > arsenkinWordstatKeywordLimit
+    input.items.length > frequencyCollectionKeywordLimit
   ) {
     invalid("items");
   }

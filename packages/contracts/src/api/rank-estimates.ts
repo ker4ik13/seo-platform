@@ -8,6 +8,7 @@ import type {
   ConnectorOperationAttemptSummary,
   ConnectorRoutingScope
 } from "./integrations.js";
+import { batchedArsenkinRankPolicyVersion, largeXmlStockRankPolicyVersion } from "./rank-policy.js";
 
 export const rankEstimateStatuses = ["READY", "BLOCKED"] as const;
 
@@ -80,7 +81,9 @@ export const xmlStockRankManifestChunkSize = 1 as const;
 export const supportedRankProviderPolicyVersions = [
   legacyRankProviderPolicyVersion,
   currentRankProviderPolicyVersion,
-  xmlStockRankProviderPolicyVersion
+  xmlStockRankProviderPolicyVersion,
+  batchedArsenkinRankPolicyVersion,
+  largeXmlStockRankPolicyVersion
 ] as const;
 
 export type RankProviderPolicyVersion =
@@ -259,6 +262,22 @@ export interface InternalCreateRankEstimateInput
   readonly quota: RankEstimateQuota;
 }
 
+/** Trusted, immutable workload for Core pricing; contains no credential material. */
+export interface InternalRankEstimatePricingScope {
+  readonly estimateId: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly provider: RankEstimateProvider;
+  readonly credentialMode: RankEstimateCredentialMode;
+  readonly keywordCount: number;
+  readonly execution: {
+    readonly purpose: RankCollectionPurpose;
+    readonly depth: number;
+    readonly source: "GOOGLE_LIVE" | "YANDEX_LIVE" | "YANDEX_TURBO" | "YANDEX_SEARCH_API";
+  } | null;
+}
+
 export interface InternalRankEstimateScopeQuery {
   readonly workspaceId: string;
   readonly projectId: string;
@@ -314,9 +333,9 @@ export interface RankEstimateProviderWorkload {
     | readonly ["SUBMIT", "POLL"]
     | readonly ["GET"];
   /** New estimates use 15000; 250 remains representable for stored v1 runs. */
-  readonly keywordLimitPerTask: "1" | "250" | "15000";
+  readonly keywordLimitPerTask: "1" | "250" | "5000" | "15000";
   /** New estimates use 15000; 1000 remains representable for stored v1 runs. */
-  readonly keywordLimitPerCommand: "1000" | "15000";
+  readonly keywordLimitPerCommand: "1000" | "15000" | "300000";
   readonly format: "SIMPLE";
   readonly rawSerp: false;
   readonly fallbackMode: "NONE";

@@ -195,8 +195,8 @@ export interface TrackingContextKeywordAssignmentState {
   readonly changedAt?: string;
 }
 
-/** Maximum exact desired set accepted by one Arsenkin positions launch. */
-export const trackingContextKeywordReplacementLimit = 15_000 as const;
+/** Maximum exact desired keyword set for a platform rank operation. */
+export const trackingContextKeywordReplacementLimit = 300_000 as const;
 
 export interface ReplaceTrackingContextKeywordsInput {
   readonly keywordIds: readonly string[];

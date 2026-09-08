@@ -130,7 +130,7 @@ test("derives an executable XMLStock Google workload from the bound route", asyn
   assert.deepEqual(estimate.workload.requestStages, ["GET"]);
   assert.equal(estimate.workload.keywordLimitPerTask, "1");
   assert.equal(harness.createdData?.providerPolicyVersion,
-    "manual-xmlstock-serp@1.0.0");
+    "manual-xmlstock-serp@2.0.0");
   assert.equal(harness.createdData?.minimumSubmitRequestCount, 0);
   assert.equal(harness.createdData?.minimumCheckRequestCount, 0);
   assert.equal(harness.createdData?.minimumGetRequestCount, 9);
@@ -559,10 +559,25 @@ test("projects lifecycle, permission, entitlement and quota as deterministic blo
   assert.equal(new Set(codes).size, codes.length);
 });
 
-test("uses a bounded 15001 sentinel without fabricating a partial hash", async () => {
+test("new batching policy treats 1001 and 15001 as normal counts and splits 50k into ten tasks", async () => {
+  for (const [count, tasks] of [[1001, 1], [15001, 4], [50000, 10]] as const) {
+    const harness = estimateHarness({ scope: scope({ keywordCount: String(count) }) });
+    const estimate = await harness.service.create(input, `rank-batched-${count}`);
+    assert.equal(estimate.scope.keywordCount, String(count));
+    assert.equal(estimate.scope.scopeHash.availability, "AVAILABLE");
+    assert.equal(estimate.workload.taskCount, String(tasks));
+    assert.equal(estimate.workload.minimumRequestCount, String(tasks * 3));
+    assert.equal(estimate.workload.keywordLimitPerTask, "5000");
+    assert.equal(estimate.workload.keywordLimitPerCommand, "300000");
+    assert.equal(estimate.policyVersion, "manual-arsenkin-positions@3.0.0");
+    assert.ok(!estimate.blockers.some(blocker => blocker.code === "KEYWORD_LIMIT_EXCEEDED"));
+  }
+});
+
+test("uses a bounded 300001 sentinel without fabricating a partial hash", async () => {
   const harness = estimateHarness({
     scope: scope({
-      keywordCount: "15001",
+      keywordCount: "300001",
       semanticScopeHash: { availability: "UNAVAILABLE" }
     })
   });
@@ -571,7 +586,7 @@ test("uses a bounded 15001 sentinel without fabricating a partial hash", async (
     "rank-estimate-limit"
   );
 
-  assert.equal(estimate.scope.keywordCount, "15001");
+  assert.equal(estimate.scope.keywordCount, "300001");
   assert.deepEqual(estimate.scope.scopeHash, {
     availability: "UNAVAILABLE"
   });

@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { AuthForm } from "../../../components/auth-form";
 import { safeAppReturnTo } from "../../../lib/app-path";
 import { hasAuthenticatedAppSession } from "../../../lib/platform-api";
+import { UiText } from "../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -29,12 +31,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <main className="auth-page">
       <a className="auth-brand" href="/">
         <img alt="" aria-hidden="true" className="brand-mark" height={29} src="/brand/seonorita-mark.svg" width={29} />
-        <span>SEOньорита</span>
+        <span><UiText text="SEOньорита" /></span>
       </a>
       <section className="auth-card">
         <header>
-          <h1>Вход в приложение</h1>
-          <p>Откройте проекты, историю запусков и командное пространство.</p>
+          <h1><UiText text="Вход в приложение" /></h1>
+          <p><UiText text="Откройте проекты, историю запусков и командное пространство." /></p>
         </header>
         <AuthForm
           mode="login"

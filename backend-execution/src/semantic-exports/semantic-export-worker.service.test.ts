@@ -121,6 +121,7 @@ test("background worker builds the position history report in two bounded passes
     {
       keywordId: "01900000-0000-7000-8000-000000000011",
       text: "первый запрос",
+      keywordLanguage: "ru",
       createdAt: "2026-07-01T00:00:00.000Z",
       snapshots: [
         { searchEngine: "YANDEX", observedDate: "2026-08-18", found: true, position: 4 }
@@ -129,6 +130,7 @@ test("background worker builds the position history report in two bounded passes
     {
       keywordId: "01900000-0000-7000-8000-000000000012",
       text: "второй запрос",
+      keywordLanguage: "ru",
       createdAt: "2026-07-02T00:00:00.000Z",
       snapshots: [
         { searchEngine: "YANDEX", observedDate: "2026-08-18", found: false }
@@ -136,6 +138,7 @@ test("background worker builds the position history report in two bounded passes
     }
   ];
   const seoData = {
+    listExportRankDimensions: async () => ({ dimensions: [], truncated: false }),
     listExportCustomColumns: async () => {
       throw new Error("Position report must not load custom columns");
     },
@@ -192,6 +195,7 @@ test("background worker enriches each keyword row with competitor columns", asyn
   );
   const keywordRows = [keyword(11), keyword(12)];
   const seoData = {
+    listExportRankDimensions: async () => ({ dimensions: [], truncated: false }),
     listExportCustomColumns: async () => [],
     listExportKeywords: async () => ({
       data: keywordRows,
@@ -203,20 +207,22 @@ test("background worker enriches each keyword row with competitor columns", asyn
       query: { readonly limit: number },
       options: { readonly sources: readonly string[] }
     ) => {
-      assert.equal(query.limit, 100);
-      assert.deepEqual(options.sources, ["SERP", "AI"]);
+      assert.equal(query.limit, 12);
+      assert.equal(options.sources.length, 1);
+      const serp = options.sources[0] === "SERP";
       return {
       data: [
         {
           keywordId: keywordRows[0]!.id,
-          competitors: [
+          competitors: serp ? [
             {
               source: "SERP",
               url: "https://competitor.example/shared",
               normalizedUrl: "https://competitor.example/shared",
               title: "Первый",
               description: "Описание"
-            },
+            }
+          ] : [
             {
               source: "AI",
               url: "https://ai.example/source",
@@ -226,12 +232,12 @@ test("background worker enriches each keyword row with competitor columns", asyn
         },
         {
           keywordId: keywordRows[1]!.id,
-          competitors: [{
+          competitors: serp ? [{
             source: "SERP",
             url: "https://competitor.example/shared",
             normalizedUrl: "https://competitor.example/shared",
             title: "Второй"
-          }]
+          }] : []
         }
       ],
       page: { hasNext: false, totalApprox: 2 },
@@ -250,7 +256,7 @@ test("background worker enriches each keyword row with competitor columns", asyn
     assert.equal(result.rowCount, 2);
     const csv = new TextDecoder().decode(storage.artifact());
     assert.match(csv, /^Запрос,Конкуренты,SERP конкурентов,ИИ-конкуренты\r\n/u);
-    assert.equal(csv.match(/https:\/\/competitor\.example\/shared/gu)?.length, 2);
+    assert.equal(csv.match(/https:\/\/competitor\.example\/shared/gu)?.length, 4);
     assert.equal(csv.match(/https:\/\/ai\.example\/source/gu)?.length, 1);
     assert.match(csv, /Title: Первый\nDescription: Описание/u);
   } finally {
@@ -340,6 +346,7 @@ test("background worker expands selected folder roots and exports direct members
 function queuedJob(): Job {
   const now = new Date("2026-08-12T10:00:00.000Z");
   return {
+    billingQuoteId: null, billingCommandHash: null, billingMaximumUnitsMilli: null,
     id: "01900000-0000-7000-8000-000000000010",
     workspaceId: "01900000-0000-7000-8000-000000000001",
     projectId: "01900000-0000-7000-8000-000000000002",

@@ -26,6 +26,8 @@ import { copyText } from "../lib/clipboard";
 import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
 import styles from "./api-token-settings.module.css";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface ScopeGroup {
   readonly title: string;
@@ -80,6 +82,8 @@ export function ApiTokenSettings({
   workspaceId: string;
   projects: readonly AppProject[];
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [collection, setCollection] = useState<ApiTokenCollection>();
   const [editingId, setEditingId] = useState<string>();
   const [draft, setDraft] = useState<Draft>(() => newDraft(projects));
@@ -304,7 +308,7 @@ export function ApiTokenSettings({
     <div className={styles.stack}>
       {error && (
         <div className={`inline-alert danger ${styles.pageAlert}`} role="alert">
-          <span>{error}</span>
+          <span>{<UiText text={error ?? ""} />}</span>
           {!collection && !loading && (
             <button
               className="text-button"
@@ -315,14 +319,13 @@ export function ApiTokenSettings({
               }}
               type="button"
             >
-              Повторить
-            </button>
+              <UiText text="Повторить" /></button>
           )}
         </div>
       )}
       {notice && (
         <div className={`inline-alert success ${styles.pageAlert}`} role="status">
-          {notice}
+          {<UiText text={notice ?? ""} />}
         </div>
       )}
 
@@ -330,13 +333,13 @@ export function ApiTokenSettings({
         <SemanticModal
           className={styles.secretModal ?? ""}
           closeDisabled={!issuedCopied}
-          description="Секрет показывается только один раз"
+          description={uiText("Секрет показывается только один раз")}
           footer={
             <div className={styles.secretModalFooter}>
               <span aria-live="polite">
                 {issuedCopied
-                  ? "Ключ скопирован — окно можно закрыть."
-                  : "Скопируйте ключ, чтобы закрыть окно."}
+                  ? <UiText text="Ключ скопирован — окно можно закрыть." />
+                  : <UiText text="Скопируйте ключ, чтобы закрыть окно." />}
               </span>
               <button
                 className="primary-button"
@@ -344,18 +347,15 @@ export function ApiTokenSettings({
                 onClick={closeIssuedToken}
                 type="button"
               >
-                Готово
-              </button>
+                <UiText text="Готово" /></button>
             </div>
           }
           onClose={closeIssuedToken}
-          title="Сохраните новый API-ключ"
+          title={uiText("Сохраните новый API-ключ")}
         >
           <div className={styles.secretModalBody}>
             <div className={styles.secretWarning}>
-              После закрытия восстановить секрет нельзя — ключ придётся
-              перевыпустить. Не отправляйте его в сообщения или промпты.
-            </div>
+              <UiText text="После закрытия восстановить секрет нельзя — ключ придётся перевыпустить. Не отправляйте его в сообщения или промпты." /></div>
             <code
               aria-label="Секрет API-ключа"
               className={styles.secretValue}
@@ -366,7 +366,7 @@ export function ApiTokenSettings({
             </code>
             {issuedCopyError && (
               <div className="inline-alert danger" role="alert">
-                {issuedCopyError}
+                {<UiText text={issuedCopyError ?? ""} />}
               </div>
             )}
             <button
@@ -375,7 +375,7 @@ export function ApiTokenSettings({
               type="button"
             >
               <Icon name={issuedCopied ? "checkDouble" : "copy"} />
-              {issuedCopied ? "Скопировано" : "Копировать ключ"}
+              {issuedCopied ? <UiText text="Скопировано" /> : <UiText text="Копировать ключ" />}
             </button>
           </div>
         </SemanticModal>
@@ -384,13 +384,10 @@ export function ApiTokenSettings({
       <section className={`${styles.identifiersCard} panel`}>
         <header className="security-card-header">
           <div>
-            <span className={styles.sectionKicker}>Идентификаторы API</span>
-            <h2>Рабочая область и проекты</h2>
+            <span className={styles.sectionKicker}><UiText text="Идентификаторы API" /></span>
+            <h2><UiText text="Рабочая область и проекты" /></h2>
             <p>
-              Для ручной настройки UUID можно скопировать здесь. ИИ-агент
-              может получить эти же данные самостоятельно через GET /access;
-              доступ всё равно ограничивается правами ключа.
-            </p>
+              <UiText text="Для ручной настройки UUID можно скопировать здесь. ИИ-агент может получить эти же данные самостоятельно через GET /access; доступ всё равно ограничивается правами ключа." /></p>
           </div>
         </header>
         <div className={styles.identifierList}>
@@ -417,13 +414,11 @@ export function ApiTokenSettings({
         <header className="security-card-header">
           <div>
             <span className={styles.sectionKicker}>
-              {editing ? "Редактирование" : "Новый ключ"}
+              {editing ? <UiText text="Редактирование" /> : <UiText text="Новый ключ" />}
             </span>
-            <h2>{editing ? editing.name : "Создать API-ключ"}</h2>
+            <h2>{editing ? editing.name : <UiText text="Создать API-ключ" />}</h2>
             <p>
-              Назначьте только необходимые операции и ограничьте доступ
-              конкретными проектами.
-            </p>
+              <UiText text="Назначьте только необходимые операции и ограничьте доступ конкретными проектами." /></p>
           </div>
           {editing && (
             <button
@@ -431,29 +426,28 @@ export function ApiTokenSettings({
               onClick={resetEditor}
               type="button"
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
           )}
         </header>
 
         <form className={styles.editorForm} onSubmit={submit}>
           <div className={styles.basicFields}>
             <label className="form-field">
-              <span>Название ключа</span>
+              <span><UiText text="Название ключа" /></span>
               <input
                 autoComplete="off"
                 maxLength={100}
                 onChange={(event) =>
                   setDraft({ ...draft, name: event.target.value })
                 }
-                placeholder="Например, SEO-агент"
+                placeholder={uiText("Например, SEO-агент")}
                 required
                 value={draft.name}
               />
-              <small>Будет видно только вам в списке подключений.</small>
+              <small><UiText text="Будет видно только вам в списке подключений." /></small>
             </label>
             <label className="form-field">
-              <span>Срок действия</span>
+              <span><UiText text="Срок действия" /></span>
               <input
                 min={minimumLocalDate()}
                 onChange={(event) =>
@@ -462,15 +456,15 @@ export function ApiTokenSettings({
                 type="datetime-local"
                 value={draft.expiresAt}
               />
-              <small>Оставьте пустым, если ключ не должен истекать.</small>
+              <small><UiText text="Оставьте пустым, если ключ не должен истекать." /></small>
             </label>
           </div>
 
           <fieldset className={styles.scopeFieldset}>
             <div className={styles.fieldsetHeading}>
               <div>
-                <legend>Права API</legend>
-                <p>Выдавайте только те операции, которые нужны интеграции.</p>
+                <legend><UiText text="Права API" /></legend>
+                <p><UiText text="Выдавайте только те операции, которые нужны интеграции." /></p>
               </div>
               <div className={styles.quickActions}>
                 <button
@@ -478,8 +472,7 @@ export function ApiTokenSettings({
                   onClick={setReadOnlyScopes}
                   type="button"
                 >
-                  Только просмотр
-                </button>
+                  <UiText text="Только просмотр" /></button>
                 <button
                   className="text-button"
                   onClick={() =>
@@ -487,23 +480,21 @@ export function ApiTokenSettings({
                   }
                   type="button"
                 >
-                  Выбрать все
-                </button>
+                  <UiText text="Выбрать все" /></button>
                 <button
                   className="text-button"
                   onClick={() => setDraft({ ...draft, scopes: [] })}
                   type="button"
                 >
-                  Снять выбор
-                </button>
+                  <UiText text="Снять выбор" /></button>
               </div>
             </div>
             <div className={styles.scopeGrid}>
               {scopeGroups.map((scopeGroup) => (
                 <article className={styles.scopeCard} key={scopeGroup.title}>
                   <div className={styles.scopeCopy}>
-                    <strong>{scopeGroup.title}</strong>
-                    <small>{scopeGroup.description}</small>
+                    <strong><UiText text={scopeGroup.title} /></strong>
+                    <small><UiText text={scopeGroup.description} /></small>
                   </div>
                   <div className={styles.scopeChecks}>
                     {scopeGroup.scopes.map((scope) => (
@@ -518,7 +509,7 @@ export function ApiTokenSettings({
                           }
                           type="checkbox"
                         />
-                        <span>{scope.label}</span>
+                        <span><UiText text={scope.label} /></span>
                       </label>
                     ))}
                   </div>
@@ -530,13 +521,13 @@ export function ApiTokenSettings({
           <fieldset className={styles.projectFieldset}>
             <div className={styles.fieldsetHeading}>
               <div>
-                <legend>Доступ к проектам</legend>
-                <p>Ключ не увидит проекты, которые вы не выбрали.</p>
+                <legend><UiText text="Доступ к проектам" /></legend>
+                <p><UiText text="Ключ не увидит проекты, которые вы не выбрали." /></p>
               </div>
               <span className={styles.selectionCount}>
                 {draft.allProjects
-                  ? "Все проекты"
-                  : `${draft.projectIds.length} из ${projects.length}`}
+                  ? <UiText text="Все проекты" />
+                  : <UiText text="{0} из {1}" values={[String(draft.projectIds.length), String(projects.length)]} />}
               </span>
             </div>
             <label className={styles.allProjects}>
@@ -556,8 +547,8 @@ export function ApiTokenSettings({
                 type="checkbox"
               />
               <span>
-                <strong>Все доступные проекты</strong>
-                <small>Включая проекты, которые появятся позже</small>
+                <strong><UiText text="Все доступные проекты" /></strong>
+                <small><UiText text="Включая проекты, которые появятся позже" /></small>
               </span>
             </label>
             {!draft.allProjects && projects.length > 0 && (
@@ -584,19 +575,17 @@ export function ApiTokenSettings({
             )}
             {!draft.allProjects && projects.length === 0 && (
               <div className={styles.emptyProjects} role="status">
-                В рабочей области пока нет проектов. Выберите «Все доступные
-                проекты», чтобы ключ автоматически получил доступ к будущим.
-              </div>
+                <UiText text="В рабочей области пока нет проектов. Выберите «Все доступные проекты», чтобы ключ автоматически получил доступ к будущим." /></div>
             )}
           </fieldset>
 
           <div className="settings-savebar">
             <span>
               {draft.scopes.length === 0
-                ? "Выберите хотя бы одно право"
+                ? <UiText text="Выберите хотя бы одно право" />
                 : draft.allProjects
-                  ? `${draft.scopes.length} прав · все проекты`
-                  : `${draft.scopes.length} прав · ${draft.projectIds.length} проектов`}
+                  ? <UiText text="{0} прав · все проекты" values={[String(draft.scopes.length)]} />
+                  : <UiText text="{0} прав · {1} проектов" values={[String(draft.scopes.length), String(draft.projectIds.length)]} />}
             </span>
             <button
               className="secondary-button"
@@ -604,7 +593,7 @@ export function ApiTokenSettings({
               onClick={resetEditor}
               type="button"
             >
-              {editing ? "Отменить" : "Очистить"}
+              {editing ? <UiText text="Отменить" /> : <UiText text="Очистить" />}
             </button>
             <button
               className="primary-button"
@@ -612,10 +601,10 @@ export function ApiTokenSettings({
               type="submit"
             >
               {busy
-                ? "Сохраняем…"
+                ? <UiText text="Сохраняем…" />
                 : editing
-                  ? "Сохранить права"
-                  : "Создать ключ"}
+                  ? <UiText text="Сохранить права" />
+                  : <UiText text="Создать ключ" />}
             </button>
           </div>
         </form>
@@ -624,15 +613,15 @@ export function ApiTokenSettings({
       <section className={`${styles.listCard} panel`}>
         <header className="security-card-header">
           <div>
-            <span className={styles.sectionKicker}>Активные подключения</span>
-            <h2>Ваши API-ключи</h2>
-            <p>Секрет не хранится в открытом виде и после выпуска не показывается.</p>
+            <span className={styles.sectionKicker}><UiText text="Активные подключения" /></span>
+            <h2><UiText text="Ваши API-ключи" /></h2>
+            <p><UiText text="Секрет не хранится в открытом виде и после выпуска не показывается." /></p>
           </div>
         </header>
         {loading && !collection ? (
           <div className={styles.loadingState} aria-busy="true">
             <span className="spinner" />
-            <span>Загружаем API-ключи…</span>
+            <span><UiText text="Загружаем API-ключи…" /></span>
           </div>
         ) : collection?.tokens.length ? (
           <div className={styles.tokenList}>
@@ -644,14 +633,14 @@ export function ApiTokenSettings({
                     <code>{token.prefix}…</code>
                   </div>
                   <span className={styles[token.status.toLowerCase()]}>
-                    {statusLabel(token.status)}
+                    {<UiText text={statusLabel(token.status) ?? ""} />}
                   </span>
                 </div>
                 <p>
-                  {token.scopes.length} прав · {projectLabel(token, projects)}
+                  {token.scopes.length} <UiText text="прав ·" before=" " after=" " />{projectLabel(token, projects)}
                   {token.lastUsedAt
-                    ? ` · использован ${dateLabel(token.lastUsedAt)}`
-                    : " · ещё не использован"}
+                    ? <UiText text="· использован {0}" values={[String(dateLabel(token.lastUsedAt, uiLocale))]} before=" " />
+                    : <UiText text="· ещё не использован" before=" " />}
                 </p>
                 <div className={styles.actions}>
                   <button
@@ -660,44 +649,39 @@ export function ApiTokenSettings({
                     onClick={() => edit(token)}
                     type="button"
                   >
-                    Изменить права
-                  </button>
+                    <UiText text="Изменить права" /></button>
                   <button
                     className={`secondary-button ${styles.tokenAction}`}
                     disabled={busy || token.status !== "ACTIVE"}
                     onClick={() => void action(token, "rotate")}
                     type="button"
                   >
-                    Перевыпустить
-                  </button>
+                    <UiText text="Перевыпустить" /></button>
                   <button
                     className={`danger-button ${styles.tokenAction}`}
                     disabled={busy || token.status === "REVOKED"}
                     onClick={() => void action(token, "revoke")}
                     type="button"
                   >
-                    Отозвать
-                  </button>
+                    <UiText text="Отозвать" /></button>
                 </div>
               </article>
             ))}
           </div>
         ) : (
           <div className={styles.emptyState} role="status">
-            <strong>API-ключей пока нет</strong>
-            <span>Создайте первый ключ для агента или внешнего сервиса.</span>
+            <strong><UiText text="API-ключей пока нет" /></strong>
+            <span><UiText text="Создайте первый ключ для агента или внешнего сервиса." /></span>
           </div>
         )}
       </section>
 
       <section className={`${styles.docsCard} panel`}>
         <div>
-          <span className={styles.sectionKicker}>Документация</span>
-          <h2>Подключение API и ИИ-агентов</h2>
+          <span className={styles.sectionKicker}><UiText text="Документация" /></span>
+          <h2><UiText text="Подключение API и ИИ-агентов" /></h2>
           <p>
-            Полный справочник содержит авторизацию, права, примеры запросов,
-            идемпотентность, запуск задач и чтение результатов.
-          </p>
+            <UiText text="Полный справочник содержит авторизацию, права, примеры запросов, идемпотентность, запуск задач и чтение результатов." /></p>
         </div>
         <Link
           className="primary-button"
@@ -706,8 +690,7 @@ export function ApiTokenSettings({
           target="_blank"
         >
           <Icon name="link" />
-          Открыть API-документацию
-        </Link>
+          <UiText text="Открыть API-документацию" /></Link>
       </section>
     </div>
   );
@@ -726,6 +709,7 @@ function IdentifierRow({
   secondary?: string;
   value: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <div>
       <span>
@@ -734,13 +718,13 @@ function IdentifierRow({
       </span>
       <code>{value}</code>
       <button
-        aria-label={`Скопировать ${label}`}
+        aria-label={uiText("Скопировать {0}", [String(label)])}
         className={`secondary-button ${styles.copyButton}`}
         onClick={onCopy}
         type="button"
       >
         <Icon name="copy" />
-        {copied ? "Скопировано" : "Копировать"}
+        {copied ? <UiText text="Скопировано" /> : <UiText text="Копировать" />}
       </button>
     </div>
   );
@@ -825,8 +809,8 @@ function projectLabel(
     : `${names.slice(0, 2).join(", ")} и ещё ${names.length - 2}`;
 }
 
-function dateLabel(value: string): string {
-  return new Date(value).toLocaleString("ru-RU", {
+function dateLabel(value: string, uiLocale: string = "ru-RU"): string {
+  return new Date(value).toLocaleString(uiLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric",

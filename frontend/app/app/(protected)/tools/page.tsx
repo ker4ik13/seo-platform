@@ -6,6 +6,8 @@ import {
   toolProjectHref,
   type ToolCapability
 } from "../../../../lib/tool-capabilities";
+import { UiText } from "../../../../components/ui-locale";
+
 
 export default async function ProjectToolsPage() {
   const context = await requireProtectedAppContext();
@@ -16,15 +18,12 @@ export default async function ProjectToolsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Инструменты</h1>
+          <h1><UiText text="Инструменты" /></h1>
           <p>
-            Запускайте проектные проверки в фоне и возвращайтесь к результатам
-            в истории операций.
-          </p>
+            <UiText text="Запускайте проектные проверки в фоне и возвращайтесь к результатам в истории операций." /></p>
         </div>
         <a className="secondary-button tools-history-button" href="/app/tasks">
-          История операций
-        </a>
+          <UiText text="История операций" /></a>
       </section>
 
       <div className="tools-workspace">
@@ -67,8 +66,8 @@ function ToolSection({
     <section className="tools-catalog-section">
       <header className="tools-section-heading">
         <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
+          <h2><UiText text={title} /></h2>
+          <p><UiText text={description} /></p>
         </div>
       </header>
       <div className="project-tool-grid">{children}</div>
@@ -91,12 +90,12 @@ function ToolCard({
         <span className="tool-workflow-icon">
           <Icon name={toolIcon(tool.code)} />
         </span>
-        <span>Техническое SEO</span>
+        <span><UiText text="Техническое SEO" /></span>
       </div>
-      <h2>{tool.title}</h2>
-      <p>{tool.description}</p>
+      <h2><UiText text={tool.title} /></h2>
+      <p><UiText text={tool.description} /></p>
       <span className="project-tool-card-action">
-        {note ?? "Открыть проверку"}
+        <UiText text={note ?? "Открыть проверку"} />
         <span aria-hidden="true">→</span>
       </span>
     </a>

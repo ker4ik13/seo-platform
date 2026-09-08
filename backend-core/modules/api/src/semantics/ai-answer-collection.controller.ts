@@ -17,7 +17,7 @@ import type {
   AiAnswerOperationResult,
   ApiResponse
 } from "@seo-platform/contracts";
-import { arsenkinAiAnswerKeywordLimit } from "@seo-platform/contracts";
+import { aiAnswerCollectionKeywordLimit } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
@@ -28,6 +28,7 @@ import {
   requiredProjectTenant
 } from "../authorization/project-tenant.js";
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
+import { OperationBillingService } from "../billing/operation-billing.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { assertUuid } from "../common/identifier.js";
@@ -52,7 +53,8 @@ export class AiAnswerCollectionController {
     private readonly jobs: JobsClient,
     private readonly billing: BillingEntitlementService,
     private readonly audit: AuditService,
-    private readonly seoData?: SeoDataClient
+    private readonly seoData?: SeoDataClient,
+    private readonly operations?: OperationBillingService
   ) {}
 
   @Get()
@@ -86,7 +88,7 @@ export class AiAnswerCollectionController {
     const page = operationResultPageQuery(
       limitValue,
       cursorValue,
-      arsenkinAiAnswerKeywordLimit - 1
+      aiAnswerCollectionKeywordLimit - 1
     );
     const [collection, scope] = await Promise.all([
       this.jobs.getAiAnswerCollection(context, canonicalJobId),
@@ -142,11 +144,13 @@ export class AiAnswerCollectionController {
       outcome: "REQUESTED",
       requestId: context.requestId
     });
+    const input = createAiAnswerCollectionInput(body);
     const result = await this.jobs.createAiAnswerCollection(
       internalProjectContext(request, principal, tenant),
-      createAiAnswerCollectionInput(body),
+      input,
       canonicalIdempotencyKey,
-      jobCapacity
+      jobCapacity,
+      await this.operations?.admit(internalProjectContext(request, principal, tenant), { kind: "AI_ANSWER_COLLECTION", command: input }, canonicalIdempotencyKey, request.headers["x-operation-estimate-id"])
     );
     await committed(
       this.audit,

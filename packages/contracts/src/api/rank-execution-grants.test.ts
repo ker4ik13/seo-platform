@@ -110,7 +110,7 @@ test("pins the versioned grant vocabularies and independent hash domains", () =>
 });
 
 test("strictly parses hold/capture requests and finite settlement results", () => {
-  for (const action of ["HOLD", "CAPTURE"] as const) {
+  for (const action of ["HOLD", "CAPTURE", "RELEASE"] as const) {
     assert.deepEqual(
       internalSettleRankExecutionGrantInput({
         schemaVersion: "rank-execution-grant-settlement-request@1",
@@ -125,6 +125,7 @@ test("strictly parses hold/capture requests and finite settlement results", () =
   for (const status of [
     "RESERVED",
     "CAPTURED",
+    "RELEASED",
     "NOT_APPLICABLE"
   ] as const) {
     assert.deepEqual(
@@ -143,7 +144,7 @@ test("strictly parses hold/capture requests and finite settlement results", () =
   for (const candidate of [
     {
       schemaVersion: "rank-execution-grant-settlement-request@1",
-      action: "RELEASE"
+      action: "OTHER"
     },
     {
       schemaVersion: "rank-execution-grant-settlement-request@1",
@@ -161,7 +162,7 @@ test("strictly parses hold/capture requests and finite settlement results", () =
       internalRankExecutionGrantSettlementResult({
         schemaVersion: "rank-execution-grant-settlement-result@1",
         grantId,
-        status: "RELEASED"
+        status: "OTHER"
       }),
     TypeError
   );
@@ -250,7 +251,7 @@ test("request parser rejects malformed IDs, hashes, bounds and literals", () => 
     { ...valid, capability: "SERP_COLLECTION" },
     { ...valid, credentialMode: "PLATFORM_INCLUDED" },
     { ...valid, manifest: { ...valid.manifest, chunkIndex: -1 } },
-    { ...valid, manifest: { ...valid.manifest, chunkIndex: 15_000 } },
+    { ...valid, manifest: { ...valid.manifest, chunkIndex: 300_000 } },
     {
       ...valid,
       executionEvidenceHash: { algorithm: "SHA_256", value: "A".repeat(64) }

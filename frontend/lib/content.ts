@@ -114,6 +114,7 @@ const marketingPages: Record<Locale, MarketingPage> = {
     ],
     navigation: [
       { href: "#capabilities", label: "Возможности" },
+      { href: "/ru/pricing", label: "Тарифы" },
       { href: "#workflow", label: "Как работает" },
       { href: "#integrations", label: "Интеграции" },
       { href: "#for-whom", label: "Для кого" },
@@ -306,6 +307,11 @@ const marketingPages: Record<Locale, MarketingPage> = {
     finalCtaLabel: "Создать SEO-проект",
     footerText: "SEOньорита — единое рабочее пространство для семантики, позиций и SEO-работ.",
     footerLinks: [
+      { href: "/ru/pricing", label: "Тарифы" },
+      { href: "/ru/help", label: "Помощь" },
+      { href: "/ru/terms", label: "Условия" },
+      { href: "/ru/privacy", label: "Конфиденциальность" },
+      { href: "https://t.me/ker4ik13", label: "Поддержка" },
       { href: "/tools", label: "Инструменты" },
       { href: "/docs/api", label: "API" },
       { href: "#faq", label: "FAQ" }
@@ -326,6 +332,7 @@ const marketingPages: Record<Locale, MarketingPage> = {
       "SEO project management"
     ],
     navigation: [
+      { href: "/en/pricing", label: "Pricing" },
       { href: "#capabilities", label: "Features" },
       { href: "#workflow", label: "Workflow" },
       { href: "#integrations", label: "Integrations" },
@@ -440,6 +447,11 @@ const marketingPages: Record<Locale, MarketingPage> = {
     finalCtaLabel: "Create an SEO project",
     footerText: "SEOnorita is one workspace for keywords, rankings and SEO operations.",
     footerLinks: [
+      { href: "/en/pricing", label: "Pricing" },
+      { href: "/en/help", label: "Help" },
+      { href: "/en/terms", label: "Terms" },
+      { href: "/en/privacy", label: "Privacy" },
+      { href: "https://t.me/ker4ik13", label: "Support" },
       { href: "/tools", label: "Tools" },
       { href: "/docs/api", label: "API" },
       { href: "#faq", label: "FAQ" }

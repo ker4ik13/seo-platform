@@ -2,8 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   adminUpstreamPath,
+  proxyAdminApi,
   responseCookies
 } from "./admin-api-proxy.ts";
+import { NextRequest } from "next/server.js";
+
+test("admin proxy bounds a streamed body even when Content-Length is absent", async () => {
+  process.env.WEB_PUBLIC_URL = "https://app.example.test";
+  process.env.PLATFORM_API_INTERNAL_URL = "http://backend-core:4000";
+  const original = globalThis.fetch;
+  let requests = 0, cancelled = false, pulls = 0;
+  globalThis.fetch = async () => { requests++; return Response.json({ data: {} }); };
+  try {
+    const stream = new ReadableStream({ pull(controller) { pulls++; controller.enqueue(new Uint8Array(16 * 1024)); }, cancel() { cancelled = true; } });
+    const request = new NextRequest("https://app.example.test/admin/api/auth/login", { method: "POST", body: stream, duplex: "half", headers: { Origin: "https://app.example.test" } } as ConstructorParameters<typeof NextRequest>[1]);
+    const response = await proxyAdminApi(request, ["auth", "login"]);
+    assert.equal(response.status, 413); assert.equal(requests, 0); assert.equal(cancelled, true);
+    assert.ok(pulls < 10, "The proxy must stop consuming before buffering an unlimited upload");
+  } finally { globalThis.fetch = original; }
+});
 
 test("admin proxy exposes only explicit authentication and admin routes", () => {
   assert.equal(

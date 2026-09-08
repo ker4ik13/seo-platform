@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
+import { SystemConnectorBootstrapService } from "./system-connector-bootstrap.service.js";
 import type {
   ApiResponse,
   ProjectConnectorBinding,
@@ -35,7 +36,8 @@ import { ProjectConnectorBindingService } from "./project-connector-binding.serv
 @UseGuards(IntegrationCredentialApiGuard)
 export class ProjectConnectorBindingController {
   public constructor(
-    private readonly bindings: ProjectConnectorBindingService
+    private readonly bindings: ProjectConnectorBindingService,
+    private readonly systemConnectors?: SystemConnectorBootstrapService
   ) {}
 
   @Get()
@@ -50,6 +52,13 @@ export class ProjectConnectorBindingController {
       request,
       await this.bindings.aggregate(context.workspaceId, context.projectId)
     );
+  }
+
+  @Post("prepare-system")
+  public async prepareSystem(@Param("workspaceId") workspaceId: string, @Param("projectId") projectId: string, @Headers() headers: Readonly<Record<string, string | string[] | undefined>>, @Req() request: FastifyRequest) {
+    const context = projectContext(workspaceId, projectId, headers);
+    if (!this.systemConnectors) throw new Error("System connector bootstrap is unavailable");
+    return response(request, await this.systemConnectors.prepare(context.workspaceId, context.projectId, context.actorId, request.id));
   }
 
   @Post()

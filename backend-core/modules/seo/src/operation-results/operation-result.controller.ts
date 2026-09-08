@@ -17,7 +17,7 @@ import type {
   InternalRankOperationResult
 } from "@seo-platform/contracts";
 import {
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   technicalCrawlMaxUrlLimit
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -97,7 +97,7 @@ export class OperationResultController {
         context,
         internalUuid(jobId, "jobId"),
         operationResultPageLimit(limit),
-        operationResultCursor(cursor, rankProviderKeywordLimit - 1)
+        operationResultCursor(cursor, rankCommandKeywordLimit - 1)
       )
     );
   }

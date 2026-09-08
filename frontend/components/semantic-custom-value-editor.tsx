@@ -8,6 +8,8 @@ import {
   browserApiRequest
 } from "../lib/browser-api";
 import type { SemanticCustomColumn } from "./semantic-custom-column-types";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type CustomValueData = string | number | boolean | readonly string[];
 
@@ -107,7 +109,7 @@ export function SemanticCustomValueEditor({
       />
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       <div className="semantic-editor-actions">
@@ -118,8 +120,7 @@ export function SemanticCustomValueEditor({
             onClick={() => void clear()}
             type="button"
           >
-            Очистить
-          </button>
+            <UiText text="Очистить" /></button>
         )}
         <button
           className="secondary-button"
@@ -127,10 +128,9 @@ export function SemanticCustomValueEditor({
           onClick={onCancel}
           type="button"
         >
-          Отмена
-        </button>
+          <UiText text="Отмена" /></button>
         <button className="primary-button" disabled={saving} type="submit">
-          {saving ? "Сохраняем…" : "Сохранить значение"}
+          {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить значение" />}
         </button>
       </div>
     </form>
@@ -146,16 +146,17 @@ function CustomValueControl({
   onChange: (value: string | boolean | readonly string[]) => void;
   value: string | boolean | readonly string[];
 }>) {
+  const { t: uiText } = useUiLocale();
   if (column.type === "BOOLEAN") {
     return (
       <label>
-        <span>Значение</span>
+        <span><UiText text="Значение" /></span>
         <CustomSelect
           onChange={(event) => onChange(event.target.value === "true")}
           value={String(value)}
         >
-          <option value="true">Да</option>
-          <option value="false">Нет</option>
+          <option value="true"><UiText text="Да" /></option>
+          <option value="false"><UiText text="Нет" /></option>
         </CustomSelect>
       </label>
     );
@@ -163,7 +164,7 @@ function CustomValueControl({
   if (column.type === "SELECT" || column.type === "STATUS") {
     return (
       <label>
-        <span>Значение</span>
+        <span><UiText text="Значение" /></span>
         <CustomSelect
           onChange={(event) => onChange(event.target.value)}
           required
@@ -182,7 +183,7 @@ function CustomValueControl({
     const selected = new Set(Array.isArray(value) ? value : []);
     return (
       <fieldset>
-        <legend>Значения</legend>
+        <legend><UiText text="Значения" /></legend>
         {column.config.options?.map((option) => (
           <label key={option.id}>
             <input
@@ -204,7 +205,7 @@ function CustomValueControl({
   if (column.type === "LONG_TEXT") {
     return (
       <label>
-        <span>Значение</span>
+        <span><UiText text="Значение" /></span>
         <textarea
           maxLength={1_000_000}
           onChange={(event) => onChange(event.target.value)}
@@ -217,11 +218,11 @@ function CustomValueControl({
   }
   return (
     <label>
-      <span>Значение</span>
+      <span><UiText text="Значение" /></span>
       <input
         maxLength={column.type === "TEXT" ? 1_000 : undefined}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={column.type === "USER" ? "UUID пользователя" : undefined}
+        placeholder={column.type === "USER" ? uiText("UUID пользователя") : undefined}
         required
         step={column.type === "INTEGER" ? "1" : undefined}
         type={inputType(column)}

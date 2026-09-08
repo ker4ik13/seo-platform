@@ -3,6 +3,10 @@ import {
   pendingInviteAccessLabel,
   pendingInviteRoleLabel
 } from "../lib/workspace-invitations";
+import { UiText, UiElement } from "./ui-locale";
+import { useUiLocale } from "./ui-locale";
+
+
 
 export function WorkspaceInviteNotificationList({
   invites,
@@ -17,16 +21,17 @@ export function WorkspaceInviteNotificationList({
   onAccept: (invite: PendingWorkspaceInviteSummary) => void;
   onDecline: (invite: PendingWorkspaceInviteSummary) => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
   if (invites.length === 0) return null;
   return (
-    <section
-      aria-label="Приглашения в рабочие области"
+    <UiElement tag="section" uiLabels={{"aria-label": "Приглашения в рабочие области"}}
+
       className={compact ? "workspace-invites compact" : "panel workspace-invites"}
     >
       <header>
         <div>
-          <span>Требуют решения</span>
-          <h2>Приглашения в команду</h2>
+          <span><UiText text="Требуют решения" /></span>
+          <h2><UiText text="Приглашения в команду" /></h2>
         </div>
         <strong>{invites.length}</strong>
       </header>
@@ -39,16 +44,16 @@ export function WorkspaceInviteNotificationList({
                 {invite.workspaceName.trim().slice(0, 1).toLocaleUpperCase("ru-RU") || "S"}
               </div>
               <div className="workspace-invite-copy">
-                <span>Вас приглашают в рабочую область</span>
+                <span><UiText text="Вас приглашают в рабочую область" /></span>
                 <h3>{invite.workspaceName}</h3>
                 <p>
-                  {pendingInviteRoleLabel(invite)} · {pendingInviteAccessLabel(invite)}
+                  {<UiText text={pendingInviteRoleLabel(invite) ?? ""} />} · {<UiText text={pendingInviteAccessLabel(invite) ?? ""} />}
                 </p>
-                {invite.message && <blockquote>{invite.message}</blockquote>}
+                {invite.message && <blockquote>{<UiText text={invite.message ?? ""} />}</blockquote>}
                 <small>
-                  Действует до{" "}
+                  <UiText text="Действует до" />{" "}
                   <time dateTime={invite.expiresAt}>
-                    {formatInviteDate(invite.expiresAt)}
+                    {formatInviteDate(invite.expiresAt, uiLocale)}
                   </time>
                 </small>
                 <div className="workspace-invite-actions">
@@ -58,7 +63,7 @@ export function WorkspaceInviteNotificationList({
                     onClick={() => onAccept(invite)}
                     type="button"
                   >
-                    {busy ? "Сохраняем…" : "Принять"}
+                    {busy ? <UiText text="Сохраняем…" /> : <UiText text="Принять" />}
                   </button>
                   <button
                     className="secondary-button"
@@ -66,20 +71,19 @@ export function WorkspaceInviteNotificationList({
                     onClick={() => onDecline(invite)}
                     type="button"
                   >
-                    Отклонить
-                  </button>
+                    <UiText text="Отклонить" /></button>
                 </div>
               </div>
             </article>
           );
         })}
       </div>
-    </section>
+    </UiElement>
   );
 }
 
-function formatInviteDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatInviteDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric",

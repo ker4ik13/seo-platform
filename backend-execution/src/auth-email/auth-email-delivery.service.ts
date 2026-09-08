@@ -555,6 +555,7 @@ function eventType(value: string): TransactionalEmailEventTypeV1 {
     value !== transactionalEmailEventTypesV1.emailVerificationRequested &&
     value !== transactionalEmailEventTypesV1.passwordResetRequested &&
     value !== transactionalEmailEventTypesV1.workspaceInviteRequested &&
+    value !== transactionalEmailEventTypesV1.billingNoticeRequested &&
     value !==
       transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
   ) {

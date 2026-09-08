@@ -22,6 +22,19 @@ test("normalizes a markdown note and its visibility", () => {
   );
 });
 
+test("accepts project notes longer than the former 100 000 character limit", () => {
+  const markdown = `# Большая заметка\n\n${"данные ".repeat(15_000)}`;
+  assert.ok(markdown.length > 100_000);
+  assert.equal(
+    createProjectNoteInput({
+      title: "Большая заметка",
+      markdown,
+      visibility: "PROJECT_MEMBERS"
+    }).markdown,
+    markdown.trim()
+  );
+});
+
 test("rejects empty note patches and unknown fields", () => {
   assert.throws(() => updateProjectNoteInput({}), DomainError);
   assert.throws(

@@ -143,7 +143,7 @@ test("only ACTIVE credentials with a mode supporting the capability are eligible
       },
       "KEYWORD_RESEARCH"
     ),
-    false
+    true
   );
 });
 

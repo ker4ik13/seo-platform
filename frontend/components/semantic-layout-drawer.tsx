@@ -19,6 +19,8 @@ import {
   semanticQueryIndicatorsFor
 } from "./semantic-view-types";
 import { Icon } from "./icon";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 type LayoutTab = "COLUMNS" | "PRESENTATION";
 
@@ -26,6 +28,9 @@ export function SemanticLayoutDrawer({
   activeView,
   config,
   customColumns,
+  rankColumns = [],
+  rankError,
+  onRefreshRanks,
   onApply,
   onApplySavedView,
   onClose,
@@ -45,6 +50,9 @@ export function SemanticLayoutDrawer({
   activeView: SemanticSavedView | undefined;
   config: SemanticViewConfig;
   customColumns: readonly SemanticCustomColumn[];
+  rankColumns?: readonly Readonly<{ key: SemanticViewColumn; label: string }>[];
+  rankError?: string | undefined;
+  onRefreshRanks?: () => void;
   onApply: () => void;
   onApplySavedView: (view: SemanticSavedView) => void;
   onClose: () => void;
@@ -61,16 +69,18 @@ export function SemanticLayoutDrawer({
   isActiveViewDirty: boolean;
   onActiveViewChange: (view?: SemanticSavedView) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [tab, setTab] = useState<LayoutTab>("COLUMNS");
   const [search, setSearch] = useState("");
   const [dragged, setDragged] = useState<SemanticViewColumn>();
   const columns = useMemo(() => [
     ...systemColumns,
+    ...rankColumns,
     ...customColumns.map((column) => ({
       key: `custom:${column.id}` as SemanticViewColumn,
       label: column.name
     }))
-  ], [customColumns]);
+  ], [customColumns, rankColumns]);
   const normalizedSearch = search.trim().toLocaleLowerCase("ru-RU");
   const orderedColumns = semanticColumnOrderFor(
     config,
@@ -90,31 +100,34 @@ export function SemanticLayoutDrawer({
 
   return (
     <aside
-      aria-label="Колонки и представления"
+      aria-label={uiText("Колонки и представления")}
       className="semantic-layout-drawer"
       data-presence-cursor-anchor="true"
       data-presence-key="semantic-layout-drawer"
     >
       <header>
-        <div><span>Таблица</span><h2>Колонки и представления</h2></div>
-        <button aria-label="Закрыть настройки таблицы" onClick={onClose} type="button">×</button>
+        <div><span><UiText text="Таблица" /></span><h2><UiText text="Колонки и представления" /></h2></div>
+        <button aria-label={uiText("Закрыть настройки таблицы")} onClick={onClose} type="button">×</button>
       </header>
       <div className="semantic-layout-tabs" role="tablist">
         {(["COLUMNS", "PRESENTATION"] as const).map((value) => (
           <button aria-selected={tab === value} key={value} onClick={() => setTab(value)} role="tab" type="button">
-            {layoutTabLabel(value)}
+            {<UiText text={layoutTabLabel(value) ?? ""} />}
           </button>
         ))}
       </div>
 
       {tab === "COLUMNS" && (
         <div className="semantic-layout-body">
+          <p className="semantic-layout-rank-help"><UiText text="Для сравнения городов включите их позиции, URL и даты съёма. Названия колонок содержат город и устройство." /></p>
+          <p className="semantic-layout-rank-help"><UiText text="Включено колонок: {0} из 128." values={[String(config.columns.length)]} /></p>
+          {rankError && <div className="inline-alert warning"><UiText text={rankError} /><button type="button" onClick={onRefreshRanks}><UiText text="Повторить" /></button></div>}
           <label className="semantic-layout-search">
             <Icon name="search" />
-            <input onChange={(event) => setSearch(event.target.value)} placeholder="Найти колонку" value={search} />
-            {search && <button aria-label="Очистить поиск колонок" onClick={() => setSearch("")} type="button"><Icon name="close" /></button>}
+            <input onChange={(event) => setSearch(event.target.value)} placeholder={uiText("Найти колонку")} value={search} />
+            {search && <button aria-label={uiText("Очистить поиск колонок")} onClick={() => setSearch("")} type="button"><Icon name="close" /></button>}
           </label>
-          {pinned.length > 0 && <ColumnGroup title="Закреплённые">
+          {pinned.length > 0 && <ColumnGroup title={uiText("Закреплённые")}>
             {pinned.map((column) => (
               <div className="semantic-layout-pinned-column" key={column.key}>
                 <ColumnRow
@@ -142,11 +155,12 @@ export function SemanticLayoutDrawer({
               </div>
             ))}
           </ColumnGroup>}
-          <ColumnGroup title="В таблице">
+          <ColumnGroup title={uiText("В таблице")}>
             {tableColumns.map((column) => (
               <ColumnRow
                 checked={config.columns.includes(column.key)}
                 column={column}
+                disabled={!config.columns.includes(column.key) && config.columns.length >= 128}
                 draggable={column.key !== "query"}
                 key={column.key}
                 onDragEnd={() => setDragged(undefined)}
@@ -162,11 +176,10 @@ export function SemanticLayoutDrawer({
             ))}
           </ColumnGroup>
           {visible.length === 0 && (
-            <p className="semantic-layout-empty">Колонки не найдены.</p>
+            <p className="semantic-layout-empty"><UiText text="Колонки не найдены." /></p>
           )}
           <button className="text-button semantic-custom-columns-link" onClick={onOpenCustomColumns} type="button">
-            <Icon name="plus" /> Пользовательские колонки
-          </button>
+            <Icon name="plus" /> <UiText text="Пользовательские колонки" before=" " /></button>
         </div>
       )}
 
@@ -175,16 +188,16 @@ export function SemanticLayoutDrawer({
           <section className="semantic-layout-density-section">
             <header>
               <div>
-                <strong>Плотность таблицы</strong>
-                <small>Настройте высоту строк под текущую задачу.</small>
+                <strong><UiText text="Плотность таблицы" /></strong>
+                <small><UiText text="Настройте высоту строк под текущую задачу." /></small>
               </div>
             </header>
             <div className="semantic-density-options">
               <button className={config.density === "COMFORTABLE" ? "selected" : undefined} onClick={() => onDensityChange("COMFORTABLE")} type="button">
-                <Icon name="list" /><span><strong>Обычная</strong><small>Компактные строки с тегами под запросом.</small></span>
+                <Icon name="list" /><span><strong><UiText text="Обычная" /></strong><small><UiText text="Компактные строки с тегами под запросом." /></small></span>
               </button>
               <button className={config.density === "COMPACT" ? "selected" : undefined} onClick={() => onDensityChange("COMPACT")} type="button">
-                <Icon name="semantic" /><span><strong>Компактная</strong><small>Минимальная высота, одна строка без тегов.</small></span>
+                <Icon name="semantic" /><span><strong><UiText text="Компактная" /></strong><small><UiText text="Минимальная высота, одна строка без тегов." /></small></span>
               </button>
             </div>
           </section>
@@ -203,9 +216,9 @@ export function SemanticLayoutDrawer({
       )}
 
       <footer>
-        <button className="secondary-button" disabled={saving} onClick={onReset} type="button">Сбросить</button>
+        <button className="secondary-button" disabled={saving} onClick={onReset} type="button"><UiText text="Сбросить" /></button>
         <button className="primary-button" disabled={saving} onClick={onApply} type="button">
-          {saving ? "Сохраняем…" : "Применить"}
+          {saving ? <UiText text="Сохраняем…" /> : <UiText text="Применить" />}
         </button>
       </footer>
     </aside>
@@ -219,17 +232,19 @@ function ColumnGroup({ children, title }: Readonly<{ children: ReactNode; title:
 function ColumnRow({
   checked,
   column,
+  disabled = false,
   onToggle,
   ...dragProps
 }: Readonly<{
   checked: boolean;
   column: Readonly<{ key: SemanticViewColumn; label: string }>;
+  disabled?: boolean;
   onToggle: () => void;
 }> & HTMLAttributes<HTMLLabelElement>) {
   return (
     <label className="semantic-layout-column-row" {...dragProps}>
       <span aria-hidden="true" className="semantic-column-grip">⋮⋮</span>
-      <input checked={checked} disabled={column.key === "query"} onChange={onToggle} type="checkbox" />
+      <input checked={checked} disabled={disabled || column.key === "query"} onChange={onToggle} type="checkbox" />
       <span>{column.label}</span>
       <Icon name={checked ? "eye" : "eyeOff"} />
     </label>

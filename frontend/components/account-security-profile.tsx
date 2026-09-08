@@ -6,6 +6,8 @@ import type { AppUser } from "../lib/app-types";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import { Icon } from "./icon";
 import { UserAvatar } from "./user-avatar";
+import { UiText } from "./ui-locale";
+
 
 const AVATAR_MAX_BYTES = 512 * 1_024;
 const AVATAR_SOURCE_MAX_BYTES = 10 * 1_024 * 1_024;
@@ -76,7 +78,7 @@ export function AccountSecurityProfile({
         }
       );
       setPasswordNotice(
-        `Ссылка для смены пароля отправлена на ${currentUser.email}.`
+        `Запрос принят. Проверьте почту ${currentUser.email}, в том числе папку «Спам».`
       );
     } catch (error) {
       setPasswordError(
@@ -92,12 +94,10 @@ export function AccountSecurityProfile({
       <section className="panel security-card account-avatar-card">
         <header className="security-card-header account-profile-heading">
           <div>
-            <span className="settings-card-eyebrow">Профиль</span>
-            <h2>Фото аккаунта</h2>
+            <span className="settings-card-eyebrow"><UiText text="Профиль" /></span>
+            <h2><UiText text="Фото аккаунта" /></h2>
             <p>
-              PNG, JPEG или WebP. Большие изображения уменьшаются в браузере
-              перед отправкой.
-            </p>
+              <UiText text="PNG, JPEG или WebP. Фото поможет коллегам узнавать вас." /></p>
           </div>
           <UserAvatar
             className="account-settings-avatar"
@@ -111,12 +111,12 @@ export function AccountSecurityProfile({
         </div>
         {avatarError && (
           <div className="inline-alert danger compact" role="alert">
-            {avatarError}
+            {<UiText text={avatarError ?? ""} />}
           </div>
         )}
         {avatarNotice && (
           <div className="inline-alert success compact" role="status">
-            {avatarNotice}
+            {<UiText text={avatarNotice ?? ""} />}
           </div>
         )}
         <div className="account-profile-actions">
@@ -124,10 +124,10 @@ export function AccountSecurityProfile({
             className={`secondary-button${operation ? " disabled" : ""}`}
           >
             {operation === "avatar-upload"
-              ? "Загружаем…"
+              ? <UiText text="Загружаем…" />
               : currentUser.avatarUpdatedAt
-                ? "Заменить фото"
-                : "Загрузить фото"}
+                ? <UiText text="Заменить фото" />
+                : <UiText text="Загрузить фото" />}
             <input
               accept="image/png,image/jpeg,image/webp"
               disabled={Boolean(operation)}
@@ -146,7 +146,7 @@ export function AccountSecurityProfile({
               onClick={() => void deleteAvatar()}
               type="button"
             >
-              {operation === "avatar-delete" ? "Удаляем…" : "Удалить"}
+              {operation === "avatar-delete" ? <UiText text="Удаляем…" /> : <UiText text="Удалить" />}
             </button>
           )}
         </div>
@@ -155,33 +155,29 @@ export function AccountSecurityProfile({
       <section className="panel security-card account-password-card">
         <header className="security-card-header">
           <div>
-            <span className="settings-card-eyebrow">Пароль</span>
-            <h2>Смена через email</h2>
+            <span className="settings-card-eyebrow"><UiText text="Пароль" /></span>
+            <h2><UiText text="Изменить пароль" /></h2>
             <p>
-              Мы отправим одноразовую ссылку на подтверждённую почту. Пароль
-              не запрашивается внутри открытой сессии.
-            </p>
+              <UiText text="Запросите одноразовую ссылку на вашу почту, чтобы задать новый пароль." /></p>
           </div>
           <span aria-hidden="true" className="account-password-mark">
             <Icon height={22} name="mail" width={22} />
           </span>
         </header>
         <div className="account-password-details">
-          <span>Письмо придёт на</span>
+          <span><UiText text="Письмо придёт на" /></span>
           <strong>{currentUser.email}</strong>
           <small>
-            Ссылка действует 30 минут. После смены пароля остальные сессии
-            будут завершены.
-          </small>
+            <UiText text="Ссылка действует 30 минут. После смены пароля остальные сессии будут завершены." /></small>
         </div>
         {passwordError && (
           <div className="inline-alert danger compact" role="alert">
-            {passwordError}
+            {<UiText text={passwordError ?? ""} />}
           </div>
         )}
         {passwordNotice && (
           <div className="inline-alert success compact" role="status">
-            {passwordNotice}
+            {<UiText text={passwordNotice ?? ""} />}
           </div>
         )}
         <button
@@ -191,8 +187,8 @@ export function AccountSecurityProfile({
           type="button"
         >
           {operation === "password"
-            ? "Отправляем…"
-            : "Отправить ссылку для смены пароля"}
+            ? <UiText text="Отправляем…" />
+            : <UiText text="Отправить ссылку для смены пароля" />}
         </button>
       </section>
     </div>

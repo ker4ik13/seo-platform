@@ -208,3 +208,34 @@ root credential.
 
 Эти значения должны храниться только в локальном `runtime.env` или внешнем
 secret manager. Их нельзя добавлять в repository, URL, логи или queue payload.
+
+## Ежедневная очистка и проверка диска
+
+`install-maintenance.sh` ставит одно ежедневное задание в пользовательский
+crontab на 04:17 по времени сервера, сохраняя остальные задания.
+`maintain-runtime.sh --dry-run` показывает план; без флага выполняет его.
+Команда использует `flock`, не читает `runtime.env` и не получает DB/S3 secrets.
+
+Supervisor постоянно пишет через `bounded-log.mjs`: текущие 10 MiB и один
+предыдущий сегмент до 10 MiB. Большие legacy-журналы сокращаются до хвоста.
+Обслуживание удаляет архивы старше 14 дней и только управляемые каталоги
+`runtime/tmp/{smoke-runtime,smoke-public-api,e2e}.*` старше 7 дней; живой PID и
+symlink пропускаются. Рабочие БД, S3, пользовательские данные и backup исключены.
+Вывод сохраняется в `logs/maintenance.log`. `status-runtime.sh` отдельно
+проверяет свободное место и публичный HTTPS: readiness MinIO не гарантирует,
+что диск принимает запись.
+
+Новые повторяемые проверки:
+
+```bash
+SEO_PLATFORM_E2E_CONFIRM=CREATE_TEST_DATA infrastructure/vps/test-browser.sh
+SEO_PLATFORM_POSTGRES_TEST_CONFIRM=CREATE_ISOLATED_CLUSTER infrastructure/vps/test-postgres.sh
+```
+
+Browser runner использует установленный dev-only Playwright и Chromium.
+При необходимости `SEO_PLATFORM_BROWSER_LIBRARIES` задаёт путь к системным
+библиотекам. PostgreSQL runner создаёт отдельный кластер на свободном loopback
+порту, применяет все миграции и запускает ACL/concurrency/regression tests;
+рабочая конфигурация БД ему не передаётся. Оба runner сохраняют результаты в
+управляемом `runtime/tmp/e2e.*`. Полный порядок работы —
+[`../../docs/WORKING_GUIDE.md`](../../docs/WORKING_GUIDE.md).

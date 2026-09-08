@@ -15,9 +15,12 @@ script_dir=$(
 
 load_runtime_environment
 
-smoke_root=$(mktemp -d)
+mkdir -p "$runtime_root/tmp"
+chmod 700 "$runtime_root/tmp"
+smoke_root=$(mktemp -d "$runtime_root/tmp/smoke-runtime.XXXXXXXX")
+printf '%s\n' "$$" > "$smoke_root/owner.pid"
 case "$smoke_root" in
-  /tmp/tmp.*) ;;
+  "$runtime_root"/tmp/smoke-runtime.*) ;;
   *) runtime_fail "mktemp returned an unexpected path" ;;
 esac
 trap 'rm -rf -- "$smoke_root"' EXIT INT TERM

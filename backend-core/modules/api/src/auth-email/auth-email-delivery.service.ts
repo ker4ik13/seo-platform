@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { BillingNoticeService } from "../billing/billing-notice.service.js";
 import {
   AUTH_EMAIL_COMPLETION_RECEIPT_SCHEMA,
   AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
@@ -36,7 +37,8 @@ export class AuthEmailDeliveryService {
     private readonly prisma: PrismaService,
     private readonly crypto: AuthCryptoService,
     private readonly pii: BillingPiiService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    @Optional() private readonly notices?: BillingNoticeService
   ) {}
 
   public async material(
@@ -47,6 +49,10 @@ export class AuthEmailDeliveryService {
       if (!row) return skipped(eventId);
       const envelope = transactionalEmailEnvelopeFromOutbox(row);
       const now = canonicalDatabaseClock(row.database_now);
+
+      if (envelope.eventType === transactionalEmailEventTypesV1.billingNoticeRequested) {
+        return this.notices ? this.notices.material(transaction, envelope.data.noticeId, envelope.workspaceId, envelope.eventId, now) : skipped(envelope.eventId);
+      }
 
       if (
         envelope.eventType ===

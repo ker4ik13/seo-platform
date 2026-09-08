@@ -1,6 +1,8 @@
 import { ProjectNotificationSettings } from "../../../../../../../components/project-notification-settings";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
+import { UiText } from "../../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +20,9 @@ export default async function ProjectNotificationSettingsPage({
     <>
       <section className="page-heading">
         <div>
-          <h1>Уведомления проекта</h1>
+          <h1><UiText text="Уведомления проекта" /></h1>
           <p>
-            Переопределите профиль только для нужных типов работ или временно
-            приостановите проектную подписку.
-          </p>
+            <UiText text="Переопределите профиль только для нужных типов работ или временно приостановите проектную подписку." /></p>
         </div>
       </section>
       <SettingsTabs

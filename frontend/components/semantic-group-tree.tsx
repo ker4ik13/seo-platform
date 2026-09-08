@@ -27,6 +27,8 @@ import {
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import { Icon } from "./icon";
 import { SemanticGroupColorLegendControl } from "./semantic-group-color-legend";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export interface SemanticGroupTreeItem {
   readonly id: string;
@@ -128,6 +130,8 @@ export function SemanticGroupTree({
   remotePresence?: readonly SemanticGroupRemotePresence[];
   total?: number;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set()
   );
@@ -554,7 +558,7 @@ export function SemanticGroupTree({
     depth,
     group,
     hasChildren
-  }: FlatGroup, flatIndex?: number) {
+  }: FlatGroup, flatIndex?: number, uiLocale: string = "ru-RU") {
     const selected = effectiveSelectedIds.has(group.id);
     const groupPresence = remotePresenceByGroupId.get(group.id) ?? [];
     const primaryPresence = groupPresence[0];
@@ -648,13 +652,7 @@ export function SemanticGroupTree({
           />
         )}
         <button
-          aria-label={
-            hasChildren
-              ? effectiveExpandedIds.has(group.id)
-                ? `Свернуть ${group.name}`
-                : `Развернуть ${group.name}`
-              : undefined
-          }
+          aria-label={hasChildren ? effectiveExpandedIds.has(group.id) ? uiText("Свернуть {0}", [String(group.name)]) : uiText("Развернуть {0}", [String(group.name)]) : undefined}
           className="semantic-group-toggle"
           disabled={!hasChildren}
           onClick={() =>
@@ -676,7 +674,7 @@ export function SemanticGroupTree({
           <div className="semantic-group-name semantic-group-name-editing">
             <i style={{ background: group.color ?? "#a8a5b8" }} />
             <input
-              aria-label={`Новое название папки ${group.name}`}
+              aria-label={uiText("Новое название папки {0}", [String(group.name)])}
               aria-invalid={inlineRename.error ? "true" : undefined}
               autoFocus
               disabled={inlineRename.saving}
@@ -723,9 +721,7 @@ export function SemanticGroupTree({
             onDoubleClick={group.systemKind
               ? undefined
               : (event) => startInlineRename(event, group)}
-            title={group.systemKind
-              ? group.path
-              : `${group.path}. Двойной клик — переименовать; Ctrl/Cmd+клик — множественный выбор`}
+            title={group.systemKind ? group.path : uiText("{0}. Двойной клик — переименовать; Ctrl/Cmd+клик — множественный выбор", [String(group.path)])}
             type="button"
           >
             <i style={{ background: group.color ?? "#a8a5b8" }} />
@@ -738,9 +734,9 @@ export function SemanticGroupTree({
           </button>
         )}
         <RemotePresenceDots participants={groupPresence} />
-        <small>{formatInteger(group.keywordCount)}</small>
+        <small>{formatInteger(group.keywordCount, uiLocale)}</small>
         <button
-          aria-label={`Действия с группой ${group.name}`}
+          aria-label={uiText("Действия с группой {0}", [String(group.name)])}
           className="semantic-group-more"
           onClick={(event) =>
             setContextMenu({
@@ -759,7 +755,7 @@ export function SemanticGroupTree({
 
   return (
     <nav
-      aria-label="Группы семантического ядра"
+      aria-label={uiText("Группы семантического ядра")}
       className="semantic-group-tree"
       data-presence-cursor-anchor="true"
       data-presence-key="semantic-groups"
@@ -767,7 +763,7 @@ export function SemanticGroupTree({
     >
       <header>
         <div className="semantic-group-tree-heading">
-          <strong>Группы</strong>
+          <strong><UiText text="Группы" /></strong>
           <SemanticGroupColorLegendControl
             onLegendChange={setColorLegend}
             projectId={projectId}
@@ -777,7 +773,7 @@ export function SemanticGroupTree({
         <div>
           {selectedGroups.length > 0 && <span>{selectedGroups.length}</span>}
           <button
-            aria-label="Выбрать вложенные группы"
+            aria-label={uiText("Выбрать вложенные группы")}
             className="semantic-group-descendants"
             disabled={selectedGroups.length === 0}
             onClick={() => {
@@ -788,45 +784,37 @@ export function SemanticGroupTree({
               setSelectedIds(new Set(ids));
               selectionAnchorIdRef.current ??= ids[0];
             }}
-            title={
-              selectedGroups.length === 0
-                ? "Сначала выберите группу"
-                : "Добавить к выбору все вложенные группы"
-            }
+            title={selectedGroups.length === 0 ? uiText("Сначала выберите группу") : uiText("Добавить к выбору все вложенные группы")}
             type="button"
           >
             <Icon name="checkDouble" />
           </button>
           <button
-            aria-label="Открыть выбранные группы вместе"
+            aria-label={uiText("Открыть выбранные группы вместе")}
             className="semantic-group-multi-open"
             disabled={selectedGroups.length < 2}
             onClick={() =>
               onOpenSelection(selectedGroups.map(({ id }) => id).sort())
             }
-            title={
-              selectedGroups.length < 2
-                ? "Выберите минимум две группы с Ctrl/Cmd или Shift"
-                : `Открыть вместе: ${selectedGroups.length}`
-            }
+            title={selectedGroups.length < 2 ? uiText("Выберите минимум две группы с Ctrl/Cmd или Shift") : uiText("Открыть вместе: {0}", [String(selectedGroups.length)])}
             type="button"
           >
             <Icon name="multiGroup" />
           </button>
           <button
-            aria-label="Создать корневую группу"
+            aria-label={uiText("Создать корневую группу")}
             onClick={() => onCreate()}
-            title="Создать группу"
+            title={uiText("Создать группу")}
             type="button"
           >
             +
           </button>
           {onClose && (
             <button
-              aria-label="Закрыть группы"
+              aria-label={uiText("Закрыть группы")}
               className="semantic-group-tree-close"
               onClick={onClose}
-              title="Закрыть"
+              title={uiText("Закрыть")}
               type="button"
             >
               <Icon name="close" />
@@ -835,18 +823,18 @@ export function SemanticGroupTree({
         </div>
       </header>
       <label className="semantic-group-search">
-        <span className="visually-hidden">Поиск по группам</span>
+        <span className="visually-hidden"><UiText text="Поиск по группам" /></span>
         <input
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Поиск по группам"
+          placeholder={uiText("Поиск по группам")}
           type="search"
           value={search}
         />
         {search && (
           <button
-            aria-label="Очистить поиск по группам"
+            aria-label={uiText("Очистить поиск по группам")}
             onClick={() => setSearch("")}
-            title="Очистить"
+            title={uiText("Очистить")}
             type="button"
           >
             <Icon name="close" />
@@ -890,11 +878,11 @@ export function SemanticGroupTree({
         type="button"
       >
         <Icon aria-hidden="true" name="list" />
-        <strong>Все запросы</strong>
+        <strong><UiText text="Все запросы" /></strong>
         <RemotePresenceDots
           participants={remotePresenceByGroupId.get(ROOT_PRESENCE_KEY) ?? []}
         />
-        <small>{total === undefined ? "—" : formatInteger(total)}</small>
+        <small>{total === undefined ? "—" : formatInteger(total, uiLocale)}</small>
       </button>
       <div
         className={`semantic-group-tree-list${dragTarget?.placement === "root" ? " root-drop-target" : ""}`}
@@ -918,12 +906,12 @@ export function SemanticGroupTree({
           drop({ placement: "root" });
         }}
       >
-        {flatGroups.map(renderGroupRow)}
+        {flatGroups.map((value, index) => renderGroupRow(value, index, uiLocale))}
       </div>
       {systemGroups.length > 0 && (
         <div className="semantic-system-groups">
           {systemGroups.map((group) =>
-            renderGroupRow({ group, depth: 0, hasChildren: false })
+            renderGroupRow({ group, depth: 0, hasChildren: false }, undefined, uiLocale)
           )}
         </div>
       )}
@@ -948,24 +936,20 @@ export function SemanticGroupTree({
             <div className="semantic-group-context-note">
               <Icon name="info" />
               <span>
-                <strong>Примечание к цвету</strong>
+                <strong><UiText text="Примечание к цвету" /></strong>
                 {contextColorNote}
               </span>
             </div>
           ) : undefined}
           items={contextItems}
-          label={`Действия с группой ${contextMenu.group.name}`}
+          label={uiText("Действия с группой {0}", [String(contextMenu.group.name)])}
           onClose={() => setContextMenu(undefined)}
           x={contextMenu.x}
           y={contextMenu.y}
         >
           {!contextMenu.group.systemKind && (
             <div
-              aria-label={
-                contextGroups.length > 1
-                  ? `Цвет выбранных групп: ${contextGroups.length}`
-                  : "Цвет группы"
-              }
+              aria-label={contextGroups.length > 1 ? uiText("Цвет выбранных групп: {0}", [String(contextGroups.length)]) : uiText("Цвет группы")}
               className="semantic-group-color-palette"
               role="group"
             >
@@ -998,13 +982,14 @@ function RemotePresenceDots({
 }: Readonly<{
   participants: readonly SemanticGroupRemotePresence[];
 }>) {
+  const { t: uiText } = useUiLocale();
   if (participants.length === 0) return null;
   const names = participants.map(({ displayName }) => displayName).join(", ");
   return (
     <span
-      aria-label={`Сейчас здесь: ${names}`}
+      aria-label={uiText("Сейчас здесь: {0}", [String(names)])}
       className="semantic-group-remote-presence"
-      title={`Сейчас здесь: ${names}`}
+      title={uiText("Сейчас здесь: {0}", [String(names)])}
     >
       {participants.slice(0, 3).map((participant) => (
         <i
@@ -1076,8 +1061,8 @@ function toggleId(
   return next;
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
 function draggedKeywordIds(event: DragEvent): readonly string[] {

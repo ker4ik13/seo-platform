@@ -30,6 +30,8 @@ import {
   withoutOtherSessions,
   withoutRevokedSession
 } from "../lib/session-management";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type RevokeIntent =
   | {
@@ -44,6 +46,7 @@ type RevokeIntent =
 const SESSION_PAGE_SIZE = 10;
 
 export function SessionSettings() {
+  const { t: uiText } = useUiLocale();
   const [sessions, setSessions] =
     useState<readonly UserSessionSummary[]>();
   const sessionsRef = useRef<readonly UserSessionSummary[] | undefined>(
@@ -272,16 +275,14 @@ export function SessionSettings() {
     >
       <header className="security-card-header session-card-heading">
         <div>
-          <h2 id="active-sessions-heading">Активные сессии</h2>
+          <h2 id="active-sessions-heading"><UiText text="Активные сессии" /></h2>
           <p>
-            Проверьте устройства, с которых выполнен вход, и завершите
-            незнакомые сессии.
-          </p>
+            <UiText text="Проверьте устройства, с которых выполнен вход, и завершите незнакомые сессии." /></p>
         </div>
         <div className="session-heading-actions">
           {loading && sessions !== undefined && (
             <span
-              aria-label="Обновляем список"
+              aria-label={uiText("Обновляем список")}
               className="spinner compact"
               role="status"
             />
@@ -303,66 +304,58 @@ export function SessionSettings() {
             }
             type="button"
           >
-            Завершить другие
-          </button>
+            <UiText text="Завершить другие" /></button>
         </div>
       </header>
 
       {!online && (
         <div className="inline-alert warning session-alert" role="status">
           <span>
-            Нет подключения. Список может быть устаревшим, а завершение сессий
-            временно недоступно.
-          </span>
+            <UiText text="Нет подключения. Список может быть устаревшим, а завершение сессий временно недоступно." /></span>
           <button
             className="inline-alert-action"
             disabled
             type="button"
           >
-            Повторить после подключения
-          </button>
+            <UiText text="Повторить после подключения" /></button>
         </div>
       )}
 
       {degraded && loadError && online && (
         <div className="inline-alert warning session-alert" role="status">
           <span>
-            {loadError} Показаны последние полученные данные.
-          </span>
+            {<UiText text={loadError ?? ""} />} <UiText text="Показаны последние полученные данные." before=" " /></span>
           <button
             className="inline-alert-action"
             disabled={loading}
             onClick={retry}
             type="button"
           >
-            {loading ? "Обновляем…" : "Повторить"}
+            {loading ? <UiText text="Обновляем…" /> : <UiText text="Повторить" />}
           </button>
         </div>
       )}
 
       {sessionHealth === "CURRENT_SESSION_MISSING" && (
         <div className="inline-alert warning" role="status">
-          Текущая сессия не отмечена в ответе сервера. Не выполняйте массовое
-          завершение, пока список не обновится.
-        </div>
+          <UiText text="Текущая сессия не отмечена в ответе сервера. Не выполняйте массовое завершение, пока список не обновится." /></div>
       )}
 
       {operationError && !confirmation && (
         <div className="inline-alert danger session-alert" role="alert">
-          <span>{operationError}</span>
+          <span>{<UiText text={operationError ?? ""} />}</span>
           <button
             className="inline-alert-action"
             onClick={() => setOperationError(undefined)}
             type="button"
           >
-            Закрыть
-          </button>
+            <UiText text="Закрыть" /></button>
         </div>
       )}
 
       {notice && (
         <div className="inline-alert success" role="status">
-          {notice}
+          {<UiText text={notice ?? ""} />}
         </div>
       )}
 
@@ -370,8 +363,8 @@ export function SessionSettings() {
         <div className="session-loading" role="status">
           <span className="spinner" />
           <div>
-            <strong>Загружаем активные сессии…</strong>
-            <p>Проверяем устройства и время последней активности.</p>
+            <strong><UiText text="Загружаем активные сессии…" /></strong>
+            <p><UiText text="Проверяем устройства и время последней активности." /></p>
           </div>
         </div>
       ) : sessions === undefined ? (
@@ -381,12 +374,12 @@ export function SessionSettings() {
           </span>
           <strong>
             {online
-              ? "Не удалось загрузить сессии"
-              : "Список недоступен без сети"}
+              ? <UiText text="Не удалось загрузить сессии" />
+              : <UiText text="Список недоступен без сети" />}
           </strong>
           <p>
             {loadError ??
-              "Обновите список. Данные входа не сохранены в браузере."}
+              <UiText text="Обновите список. Данные входа не сохранены в браузере." />}
           </p>
           <button
             className="primary-button"
@@ -394,7 +387,7 @@ export function SessionSettings() {
             onClick={retry}
             type="button"
           >
-            {loading ? "Загружаем…" : "Повторить"}
+            {loading ? <UiText text="Загружаем…" /> : <UiText text="Повторить" />}
           </button>
         </div>
       ) : sessions.length === 0 ? (
@@ -402,19 +395,16 @@ export function SessionSettings() {
           <span aria-hidden="true" className="state-icon">
             0
           </span>
-          <strong>Активные сессии не найдены</strong>
+          <strong><UiText text="Активные сессии не найдены" /></strong>
           <p>
-            Это нетипично для открытой защищённой страницы. Обновите список
-            или войдите в аккаунт заново.
-          </p>
+            <UiText text="Это нетипично для открытой защищённой страницы. Обновите список или войдите в аккаунт заново." /></p>
           <button
             className="secondary-button"
             disabled={!online || loading}
             onClick={retry}
             type="button"
           >
-            Обновить
-          </button>
+            <UiText text="Обновить" /></button>
         </div>
       ) : (
         <ul className="session-list">
@@ -434,14 +424,14 @@ export function SessionSettings() {
       )}
 
       {sessions && sessions.length > 0 && (
-        <nav className="session-pagination" aria-label="Страницы сессий">
+        <nav className="session-pagination" aria-label={uiText("Страницы сессий")}>
           <span>
             {Math.min((page - 1) * SESSION_PAGE_SIZE + 1, sessions.length)}–
-            {Math.min(page * SESSION_PAGE_SIZE, sessions.length)} из {sessions.length}
+            {Math.min(page * SESSION_PAGE_SIZE, sessions.length)} <UiText text="из" before=" " after=" " />{sessions.length}
           </span>
           <div>
             <button
-              aria-label="Предыдущая страница сессий"
+              aria-label={uiText("Предыдущая страница сессий")}
               className="secondary-button"
               disabled={page <= 1}
               onClick={() => setPage((value) => Math.max(1, value - 1))}
@@ -451,7 +441,7 @@ export function SessionSettings() {
             </button>
             <strong>{page} / {pageCount}</strong>
             <button
-              aria-label="Следующая страница сессий"
+              aria-label={uiText("Следующая страница сессий")}
               className="secondary-button"
               disabled={page >= pageCount}
               onClick={() =>
@@ -466,13 +456,9 @@ export function SessionSettings() {
       )}
 
       <footer className="session-privacy-note">
-        <strong>О данных устройства</strong>
+        <strong><UiText text="О данных устройства" /></strong>
         <p>
-          IP и описание браузера приходят только из защищённого Platform API.
-          Cookie сессии остаётся HttpOnly; браузер отправляет команды через
-          same-origin BFF с CSRF-защитой. Геопозиция не угадывается без
-          доверенного серверного источника.
-        </p>
+          <UiText text="Здесь показаны устройства, с которых выполнен вход в ваш аккаунт. Если вы не узнаёте устройство, завершите его сессию и измените пароль. IP-адрес может отличаться при использовании VPN." /></p>
       </footer>
 
       {confirmation && (
@@ -502,6 +488,8 @@ function SessionRow({
   session: UserSessionSummary;
   onRevoke: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const device = sessionDevicePresentation(session.userAgent);
   return (
     <li className={session.current ? "session-row current" : "session-row"}>
@@ -513,54 +501,54 @@ function SessionRow({
       </span>
       <div className="session-row-copy">
         <div className="session-row-title">
-          <strong>{device.title}</strong>
+          <strong>{device.title.split(" · ").map(part => uiText(part)).join(" · ")}</strong>
           {session.current && (
-            <span className="security-status on">Текущая</span>
+            <span className="security-status on"><UiText text="Текущая" /></span>
           )}
         </div>
         <dl className="session-metadata">
           <div>
-            <dt>Активность</dt>
+            <dt><UiText text="Активность" /></dt>
             <dd>
               <time dateTime={session.lastUsedAt}>
-                {formatSessionActivity(session.lastUsedAt)}
+                <UiText text={formatSessionActivity(session.lastUsedAt, undefined, uiLocale)} />
               </time>
             </dd>
           </div>
           <div>
-            <dt>Вход</dt>
+            <dt><UiText text="Вход" /></dt>
             <dd>
               <time dateTime={session.authenticatedAt}>
-                {formatSessionDate(session.authenticatedAt)}
+                {formatSessionDate(session.authenticatedAt, uiLocale)}
               </time>
             </dd>
           </div>
           <div>
-            <dt>Сессия действует до</dt>
+            <dt><UiText text="Сессия действует до" /></dt>
             <dd>
               <time dateTime={session.expiresAt}>
-                {formatSessionDate(session.expiresAt)}
+                {formatSessionDate(session.expiresAt, uiLocale)}
               </time>
             </dd>
           </div>
         </dl>
         <div className="session-network-metadata">
-          <span>{sessionIpLabel(session.ipAddress)}</span>
-          <span>{sessionLocationLabel()}</span>
+          <span>{<UiText text={sessionIpLabel(session.ipAddress) ?? ""} />}</span>
+          <span>{<UiText text={sessionLocationLabel() ?? ""} />}</span>
         </div>
       </div>
       <button
-        aria-label={`Завершить сессию: ${device.title}${session.current ? ", текущая" : ""}`}
+        aria-label={uiText("Завершить сессию: {0}{1}", [String(device.title), String(session.current ? ", текущая" : "")])}
         className={session.current ? "danger-button" : "secondary-button"}
         disabled={!online || disabled}
         onClick={onRevoke}
         type="button"
       >
         {busy
-          ? "Завершаем…"
+          ? <UiText text="Завершаем…" />
           : session.current
-            ? "Выйти здесь"
-            : "Завершить"}
+            ? <UiText text="Выйти здесь" />
+            : <UiText text="Завершить" />}
       </button>
     </li>
   );
@@ -643,19 +631,17 @@ function SessionConfirmation({
           !
         </span>
         <div>
-          <h3 id="session-confirmation-title">{title}</h3>
-          <p id="session-confirmation-description">{description}</p>
+          <h3 id="session-confirmation-title"><UiText text={title} /></h3>
+          <p id="session-confirmation-description"><UiText text={description} /></p>
         </div>
         {error && (
           <div className="inline-alert danger session-dialog-error" role="alert">
-            {error}
+            {<UiText text={error ?? ""} />}
           </div>
         )}
         {!error && offline && (
           <div className="inline-alert warning session-dialog-error" role="status">
-            Нет подключения. Отмените действие или повторите его после
-            восстановления сети.
-          </div>
+            <UiText text="Нет подключения. Отмените действие или повторите его после восстановления сети." /></div>
         )}
         <div className="session-dialog-actions">
           <button
@@ -665,15 +651,14 @@ function SessionConfirmation({
             ref={cancelButton}
             type="button"
           >
-            Отмена
-          </button>
+            <UiText text="Отмена" /></button>
           <button
             className="danger-button"
             disabled={busy || offline}
             onClick={onConfirm}
             type="button"
           >
-            {busy ? "Завершаем…" : current ? "Выйти" : "Завершить"}
+            {busy ? <UiText text="Завершаем…" /> : current ? <UiText text="Выйти" /> : <UiText text="Завершить" />}
           </button>
         </div>
       </div>

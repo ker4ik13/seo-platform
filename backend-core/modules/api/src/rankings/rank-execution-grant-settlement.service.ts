@@ -42,9 +42,13 @@ export class RankExecutionGrantSettlementService {
     return this.settle(scope, "HOLD");
   }
 
+  public release(scope: RankExecutionGrantSettlementScope): Promise<InternalRankExecutionGrantSettlementResultV1> {
+    return this.settle(scope, "RELEASE");
+  }
+
   private settle(
     scope: RankExecutionGrantSettlementScope,
-    action: "HOLD" | "CAPTURE"
+    action: "HOLD" | "CAPTURE" | "RELEASE"
   ): Promise<InternalRankExecutionGrantSettlementResultV1> {
     return this.prisma.$transaction(async (transaction) => {
       const receipt =
@@ -115,7 +119,7 @@ export class RankExecutionGrantSettlementService {
       ) {
         throw new Error("Stored billing usage reservation is invalid");
       }
-      if (reservation.status === "RELEASED") {
+      if (reservation.status === "RELEASED" && action !== "RELEASE") {
         throw new ConflictException(
           "Rank billing reservation has expired"
         );
@@ -124,6 +128,7 @@ export class RankExecutionGrantSettlementService {
       try {
         settled = action === "HOLD"
           ? await this.usage.hold(transaction, reservation.id)
+          : action === "RELEASE" ? await this.usage.release(transaction, reservation.id)
           : await this.usage.capture(transaction, reservation.id);
       } catch (error) {
         if (error instanceof BillingUsageReservationExpiredError) {
@@ -137,6 +142,7 @@ export class RankExecutionGrantSettlementService {
         settled.id !== reservation.id ||
         (action === "CAPTURE"
           ? settled.status !== "CAPTURED"
+          : action === "RELEASE" ? settled.status !== "RELEASED"
           : settled.status !== "RESERVED" &&
             settled.status !== "CAPTURED") ||
         settled.amountMinor !== reservation.amountMinor ||
@@ -149,7 +155,7 @@ export class RankExecutionGrantSettlementService {
       return {
         schemaVersion: rankExecutionGrantSettlementResultSchemaVersion,
         grantId: receipt.id,
-        status: action === "CAPTURE" || settled.status === "CAPTURED"
+        status: action === "RELEASE" ? "RELEASED" : action === "CAPTURE" || settled.status === "CAPTURED"
           ? "CAPTURED"
           : "RESERVED"
       };

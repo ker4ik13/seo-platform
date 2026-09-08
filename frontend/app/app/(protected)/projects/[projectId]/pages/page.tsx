@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { ProjectPageMap } from "../../../../../../components/project-page-map";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
 import { ProjectContextSelect } from "../../../../../../components/project-context-select";
+import { UiText } from "../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ export default async function ProjectPagesPage({
       <section className="page-heading page-map-heading">
         <div>
           <div className="project-page-title-row">
-            <h1>Карта страниц</h1>
+            <h1><UiText text="Карта страниц" /></h1>
             <ProjectContextSelect
               canReorder={context.projectCapabilities?.canReorder ?? false}
               destination="pages"
@@ -40,9 +42,7 @@ export default async function ProjectPagesPage({
             />
           </div>
           <p>
-            URL проекта, их состояние, семантика и результаты технических
-            проверок — в одном рабочем экране.
-          </p>
+            <UiText text="URL проекта, их состояние, семантика и результаты технических проверок — в одном рабочем экране." /></p>
         </div>
       </section>
       <ProjectPageMap

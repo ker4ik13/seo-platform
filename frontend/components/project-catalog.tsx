@@ -7,6 +7,8 @@ import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import { projectCreationErrorMessage } from "../lib/project-creation-error";
 import { Icon } from "./icon";
 import { ProjectFavicon } from "./project-favicon";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function ProjectCatalog({
   activeProjectId,
@@ -21,6 +23,7 @@ export function ProjectCatalog({
   projects: readonly AppProject[];
   workspace: AppWorkspace;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [query, setQuery] = useState("");
   const canCreate = capabilities?.creation.allowed ?? false;
   const [createOpen, setCreateOpen] = useState(
@@ -96,14 +99,14 @@ export function ProjectCatalog({
         <label className="project-catalog-search">
           <Icon name="search" />
           <input
-            aria-label="Поиск проектов"
+            aria-label={uiText("Поиск проектов")}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Название или домен"
+            placeholder={uiText("Название или домен")}
             type="search"
             value={query}
           />
         </label>
-        <span>{visibleProjects.length} из {projects.length}</span>
+        <span>{visibleProjects.length} <UiText text="из" before=" " after=" " />{projects.length}</span>
         <button
           className="primary-button"
           disabled={!canCreate}
@@ -111,18 +114,17 @@ export function ProjectCatalog({
           title={projectCreationAvailabilityLabel(capabilities)}
           type="button"
         >
-          <Icon name="plus" /> Новый проект
-        </button>
+          <Icon name="plus" /> <UiText text="Новый проект" before=" " /></button>
       </div>
 
       {visibleProjects.length === 0 ? (
         <section className="panel panel-empty compact">
           <span aria-hidden="true" className="state-icon">0</span>
-          <strong>{projects.length === 0 ? "Проектов пока нет" : "Ничего не найдено"}</strong>
+          <strong>{projects.length === 0 ? <UiText text="Проектов пока нет" /> : <UiText text="Ничего не найдено" />}</strong>
           <p>
             {projects.length === 0
-              ? "Создайте первый проект и подключите семантику, позиции и технический аудит."
-              : "Измените поисковый запрос или очистите поле."}
+              ? <UiText text="Создайте первый проект и подключите семантику, позиции и технический аудит." />
+              : <UiText text="Измените поисковый запрос или очистите поле." />}
           </p>
           {projects.length === 0 && (
             <button
@@ -132,12 +134,11 @@ export function ProjectCatalog({
               title={projectCreationAvailabilityLabel(capabilities)}
               type="button"
             >
-              <Icon name="plus" /> Создать проект
-            </button>
+              <Icon name="plus" /> <UiText text="Создать проект" before=" " /></button>
           )}
         </section>
       ) : (
-        <section className="project-catalog-grid" aria-label="Проекты workspace">
+        <section className="project-catalog-grid" aria-label={uiText("Проекты workspace")}>
           {visibleProjects.map((project) => {
             const active = project.id === activeProjectId;
             return (
@@ -157,13 +158,13 @@ export function ProjectCatalog({
                     </a>
                   </div>
                   <span className={`project-status is-${project.status.toLocaleLowerCase()}`}>
-                    {projectStatusLabel(project.status)}
+                    {<UiText text={projectStatusLabel(project.status) ?? ""} />}
                   </span>
                 </header>
                 <dl>
-                  <div><dt>Доступ</dt><dd>{projectAccessLabel(project.projectAccessLevel)}</dd></div>
-                  <div><dt>Локаль</dt><dd>{project.locale}</dd></div>
-                  <div><dt>Версия</dt><dd>v{project.version}</dd></div>
+                  <div><dt><UiText text="Доступ" /></dt><dd>{<UiText text={projectAccessLabel(project.projectAccessLevel) ?? ""} />}</dd></div>
+                  <div><dt><UiText text="Локаль" /></dt><dd>{project.locale}</dd></div>
+                  <div><dt><UiText text="Версия" /></dt><dd>v{project.version}</dd></div>
                 </dl>
                 <footer>
                   <button
@@ -171,10 +172,10 @@ export function ProjectCatalog({
                     onClick={() => selectProject(project.id)}
                     type="button"
                   >
-                    {active ? "Открыть обзор" : "Открыть проект"}
+                    {active ? <UiText text="Открыть обзор" /> : <UiText text="Открыть проект" />}
                   </button>
                   <button
-                    aria-label={`Настройки проекта ${project.name}`}
+                    aria-label={uiText("Настройки проекта {0}", [String(project.name)])}
                     className="secondary-button"
                     onClick={() =>
                       selectProject(
@@ -184,8 +185,7 @@ export function ProjectCatalog({
                     }
                     type="button"
                   >
-                    Настройки
-                  </button>
+                    <UiText text="Настройки" /></button>
                 </footer>
               </article>
             );
@@ -204,19 +204,19 @@ export function ProjectCatalog({
           <section aria-labelledby="create-project-title" aria-modal="true" className="project-dialog" role="dialog">
             <header>
               <div>
-                <h2 id="create-project-title">Новый проект</h2>
-                <p>Домен, семантика и история операций будут изолированы внутри проекта.</p>
+                <h2 id="create-project-title"><UiText text="Новый проект" /></h2>
+                <p><UiText text="Домен, семантика и история операций будут изолированы внутри проекта." /></p>
               </div>
-              <button aria-label="Закрыть" onClick={() => setCreateOpen(false)} type="button">×</button>
+              <button aria-label={uiText("Закрыть")} onClick={() => setCreateOpen(false)} type="button">×</button>
             </header>
             <form className="onboarding-form" onSubmit={createProject}>
-              {error && <div className="inline-alert danger" role="alert">{error}</div>}
+              {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
               <label className="form-field">
-                <span>Название проекта</span>
-                <input autoFocus maxLength={160} name="name" placeholder="Например, Основной сайт" required />
+                <span><UiText text="Название проекта" /></span>
+                <input autoFocus maxLength={160} name="name" placeholder={uiText("Например, Основной сайт")} required />
               </label>
               <label className="form-field">
-                <span>Домен</span>
+                <span><UiText text="Домен" /></span>
                 <input
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -228,17 +228,17 @@ export function ProjectCatalog({
                   placeholder="example.com"
                   required
                 />
-                <small>Без протокола, пути, параметров и порта</small>
+                <small><UiText text="Без протокола, пути, параметров и порта" /></small>
               </label>
               {duplicateConfirmation && (
                 <label className="checkbox-field">
                   <input name="confirmDuplicateDomain" required type="checkbox" />
-                  <span>Да, это отдельный проект с тем же доменом</span>
+                  <span><UiText text="Да, это отдельный проект с тем же доменом" /></span>
                 </label>
               )}
               <footer>
-                <button className="secondary-button" onClick={() => setCreateOpen(false)} type="button">Отмена</button>
-                <button className="primary-button" disabled={busy} type="submit">{busy ? "Создаём…" : "Создать проект"}</button>
+                <button className="secondary-button" onClick={() => setCreateOpen(false)} type="button"><UiText text="Отмена" /></button>
+                <button className="primary-button" disabled={busy} type="submit">{busy ? <UiText text="Создаём…" /> : <UiText text="Создать проект" />}</button>
               </footer>
             </form>
           </section>

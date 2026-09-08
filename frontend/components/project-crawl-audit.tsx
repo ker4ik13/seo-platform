@@ -26,6 +26,8 @@ import {
   browserApiRequest
 } from "../lib/browser-api";
 import { CrawlAutomationPanel } from "./crawl-automation-panel";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 const ACTIVE = new Set<TechnicalCrawlStatus>([
   "QUEUED",
@@ -42,6 +44,8 @@ export function ProjectCrawlAudit({
   projectId: string;
   projectDomain: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [crawls, setCrawls] = useState<TechnicalCrawlSettings>();
   const [issues, setIssues] = useState<ProjectCrawlIssueCollection>();
   const [changes, setChanges] =
@@ -223,7 +227,7 @@ export function ProjectCrawlAudit({
     return (
       <section className="panel crawl-audit-state" aria-busy="true">
         <span className="spinner" aria-hidden="true" />
-        <p>Загружаем технические аудиты…</p>
+        <p><UiText text="Загружаем технические аудиты…" /></p>
       </section>
     );
   }
@@ -232,32 +236,32 @@ export function ProjectCrawlAudit({
     <section className="panel crawl-audit">
       <header className="crawl-audit-header">
         <div>
-          <h2>Технический аудит</h2>
-          <p>Проверки, изменения страниц и автоматический Radar.</p>
+          <h2><UiText text="Технический аудит" /></h2>
+          <p><UiText text="Проверки, изменения страниц и автоматический Radar." /></p>
         </div>
-        <div className="crawl-audit-summary" aria-label="Сводка аудита">
-          <span><strong>{crawls?.crawls[0]?.processedUrls ?? 0}</strong> проверено</span>
-          <span><strong>{issues?.issues.length ?? 0}</strong> проблем</span>
-          <span><strong>{changes?.changes.length ?? 0}</strong> изменений</span>
-          {hasActive && <span className="status-badge">Выполняется</span>}
+        <div className="crawl-audit-summary" aria-label={uiText("Сводка аудита")}>
+          <span><strong>{crawls?.crawls[0]?.processedUrls ?? 0}</strong> <UiText text="проверено" before=" " /></span>
+          <span><strong>{issues?.issues.length ?? 0}</strong> <UiText text="проблем" before=" " /></span>
+          <span><strong>{changes?.changes.length ?? 0}</strong> <UiText text="изменений" before=" " /></span>
+          {hasActive && <span className="status-badge"><UiText text="Выполняется" /></span>}
         </div>
       </header>
 
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {notice && <div className="inline-success" role="status">{notice}</div>}
+      {error && <div className="inline-error" role="alert">{<UiText text={error ?? ""} />}</div>}
+      {notice && <div className="inline-success" role="status">{<UiText text={notice ?? ""} />}</div>}
 
       <div className="crawl-audit-controls">
       <details className="crawl-disclosure" open={!crawls?.crawls.length}>
         <summary>
           <span>
-            <strong>Запустить аудит</strong>
-            <small>Scope, sitemap и лимиты обхода</small>
+            <strong><UiText text="Запустить аудит" /></strong>
+            <small><UiText text="Scope, sitemap и лимиты обхода" /></small>
           </span>
-          <span aria-hidden="true">Настроить</span>
+          <span aria-hidden="true"><UiText text="Настроить" /></span>
         </summary>
         <form className="crawl-audit-form" onSubmit={start}>
         <label className="form-field crawl-audit-url">
-          <span>Стартовый URL</span>
+          <span><UiText text="Стартовый URL" /></span>
           <input
             onChange={(event) => setStartUrl(event.target.value)}
             required
@@ -265,18 +269,18 @@ export function ProjectCrawlAudit({
             value={startUrl}
           />
         </label>
-        <NumberField label="Лимит URL" max={5000} min={1} set={setMaxUrls} value={maxUrls} />
-        <NumberField label="Глубина" max={10} min={0} set={setMaxDepth} value={maxDepth} />
+        <NumberField label={uiText("Лимит URL")} max={5000} min={1} set={setMaxUrls} value={maxUrls} />
+        <NumberField label={uiText("Глубина")} max={10} min={0} set={setMaxDepth} value={maxDepth} />
         <NumberField
-          label="Макс. время, мин"
+          label={uiText("Макс. время, мин")}
           max={360}
           min={1}
           set={setMaxRuntimeMinutes}
           value={maxRuntimeMinutes}
         />
-        <NumberField label="Запросов/мин" max={60} min={1} set={setRpm} value={rpm} />
+        <NumberField label={uiText("Запросов/мин")} max={60} min={1} set={setRpm} value={rpm} />
         <label className="form-field crawl-audit-scope">
-          <span>Sitemap URL, до 10 (необязательно)</span>
+          <span><UiText text="Sitemap URL, до 10 (необязательно)" /></span>
           <textarea
             onChange={(event) => setSitemapUrls(event.target.value)}
             placeholder={"https://example.com/sitemap.xml\nhttps://example.com/products.xml.gz"}
@@ -285,7 +289,7 @@ export function ProjectCrawlAudit({
           />
         </label>
         <label className="form-field crawl-audit-scope">
-          <span>Включить пути</span>
+          <span><UiText text="Включить пути" /></span>
           <textarea
             onChange={(event) => setIncludePatterns(event.target.value)}
             placeholder={"/catalog/**\n/services/**"}
@@ -294,7 +298,7 @@ export function ProjectCrawlAudit({
           />
         </label>
         <label className="form-field crawl-audit-scope">
-          <span>Исключить пути</span>
+          <span><UiText text="Исключить пути" /></span>
           <textarea
             onChange={(event) => setExcludePatterns(event.target.value)}
             placeholder={"/admin/**\n/cart/**"}
@@ -303,7 +307,7 @@ export function ProjectCrawlAudit({
           />
         </label>
         <label className="form-field">
-          <span>Query-параметры</span>
+          <span><UiText text="Query-параметры" /></span>
           <CustomSelect
             onChange={(event) =>
               setQueryPolicy(
@@ -312,9 +316,9 @@ export function ProjectCrawlAudit({
             }
             value={queryPolicy}
           >
-            <option value="DROP_TRACKING">Убирать tracking</option>
-            <option value="DROP_ALL">Убирать все</option>
-            <option value="PRESERVE">Сохранять</option>
+            <option value="DROP_TRACKING"><UiText text="Убирать tracking" /></option>
+            <option value="DROP_ALL"><UiText text="Убирать все" /></option>
+            <option value="PRESERVE"><UiText text="Сохранять" /></option>
           </CustomSelect>
         </label>
         <button
@@ -326,7 +330,7 @@ export function ProjectCrawlAudit({
           }
           type="submit"
         >
-          {busy ? "Подождите…" : hasActive ? "Аудит уже идёт" : "Запустить аудит"}
+          {busy ? <UiText text="Подождите…" /> : hasActive ? <UiText text="Аудит уже идёт" /> : <UiText text="Запустить аудит" />}
         </button>
         </form>
       </details>
@@ -339,22 +343,22 @@ export function ProjectCrawlAudit({
 
       {crawls && crawls.access.mutationRestriction !== "NONE" && (
         <p className="inline-note">
-          Запуск недоступен: {restriction(crawls.access.mutationRestriction)}.
+          <UiText text="Запуск недоступен:" after=" " />{restriction(crawls.access.mutationRestriction)}.
         </p>
       )}
 
-      <div aria-label="Разделы технического аудита" className="crawl-audit-tabs" role="toolbar">
-        <AuditTab active={activeView === "ISSUES"} count={issues?.issues.length ?? 0} label="Проблемы" onClick={() => setActiveView("ISSUES")} />
-        <AuditTab active={activeView === "RUNS"} count={crawls?.crawls.length ?? 0} label="Запуски" onClick={() => setActiveView("RUNS")} />
+      <div aria-label={uiText("Разделы технического аудита")} className="crawl-audit-tabs" role="toolbar">
+        <AuditTab active={activeView === "ISSUES"} count={issues?.issues.length ?? 0} label={uiText("Проблемы")} onClick={() => setActiveView("ISSUES")} />
+        <AuditTab active={activeView === "RUNS"} count={crawls?.crawls.length ?? 0} label={uiText("Запуски")} onClick={() => setActiveView("RUNS")} />
         <AuditTab active={activeView === "CHANGES"} count={changes?.changes.length ?? 0} label="Radar" onClick={() => setActiveView("CHANGES")} />
-        <AuditTab active={activeView === "DUPLICATES"} count={duplicates.groups.length} label="Дубли" onClick={() => setActiveView("DUPLICATES")} />
-        <AuditTab active={activeView === "ABSENCES"} count={absences?.pages.length ?? 0} label="Исчезли" onClick={() => setActiveView("ABSENCES")} />
+        <AuditTab active={activeView === "DUPLICATES"} count={duplicates.groups.length} label={uiText("Дубли")} onClick={() => setActiveView("DUPLICATES")} />
+        <AuditTab active={activeView === "ABSENCES"} count={absences?.pages.length ?? 0} label={uiText("Исчезли")} onClick={() => setActiveView("ABSENCES")} />
       </div>
 
       <div className="crawl-audit-results">
         <details className="crawl-stack-section" hidden={activeView !== "RUNS"} open>
           <summary className="crawl-stack-summary">
-            <span>Последние запуски</span>
+            <span><UiText text="Последние запуски" /></span>
             <strong>{crawls?.crawls.length ?? 0}</strong>
           </summary>
           {crawls?.crawls.length ? (
@@ -362,18 +366,17 @@ export function ProjectCrawlAudit({
               {crawls.crawls.slice(0, 8).map((crawl) => (
                 <article className="crawl-run" key={crawl.id}>
                   <div>
-                    <strong>{statusLabel(crawl.status)}</strong>
-                    <span>{new Date(crawl.createdAt).toLocaleString("ru-RU")}</span>
+                    <strong>{<UiText text={statusLabel(crawl.status) ?? ""} />}</strong>
+                    <span>{new Date(crawl.createdAt).toLocaleString(uiLocale)}</span>
                   </div>
                   <p>
                     {crawl.processedUrls}/{crawl.config.maxUrls} URL ·{" "}
-                    {crawl.successfulUrls} успешно · {crawl.failedUrls} ошибок ·{" "}
-                    {crawl.issueCount} проблем
-                  </p>
+                    {crawl.successfulUrls} <UiText text="успешно ·" before=" " after=" " />{crawl.failedUrls} <UiText text="ошибок ·" before=" " />{" "}
+                    {crawl.issueCount} <UiText text="проблем" before=" " /></p>
                   {crawl.backoffCode && crawl.backoffUntil && (
                     <p className="inline-note" role="status">
-                      {backoffLabel(crawl.backoffCode)} Повтор после{" "}
-                      {new Date(crawl.backoffUntil).toLocaleString("ru-RU")}.
+                      {<UiText text={backoffLabel(crawl.backoffCode) ?? ""} />} <UiText text="Повтор после" before=" " />{" "}
+                      {new Date(crawl.backoffUntil).toLocaleString(uiLocale)}.
                     </p>
                   )}
                   {ACTIVE.has(crawl.status) && crawls.access.canRun && (
@@ -383,19 +386,18 @@ export function ProjectCrawlAudit({
                       onClick={() => void cancel(crawl)}
                       type="button"
                     >
-                      Остановить
-                    </button>
+                      <UiText text="Остановить" /></button>
                   )}
                 </article>
               ))}
             </div>
           ) : (
-            <p className="muted-copy">Аудиты ещё не запускались.</p>
+            <p className="muted-copy"><UiText text="Аудиты ещё не запускались." /></p>
           )}
         </details>
         <details className="crawl-stack-section" hidden={activeView !== "ISSUES"} open>
           <summary className="crawl-stack-summary">
-            <span>Открытые проблемы</span>
+            <span><UiText text="Открытые проблемы" /></span>
             <strong>{issues?.issues.length ?? 0}</strong>
           </summary>
           {issues?.issues.length ? (
@@ -403,40 +405,37 @@ export function ProjectCrawlAudit({
               {issues.issues.slice(0, 12).map((issue) => (
                 <article className="crawl-issue" key={issue.id}>
                   <span className={`issue-severity issue-${issue.severity.toLowerCase()}`}>
-                    {severityLabel(issue.severity)}
+                    {<UiText text={severityLabel(issue.severity) ?? ""} />}
                   </span>
                   <div>
                     <strong>{issue.title}</strong>
                     <a href={issue.url} rel="noreferrer" target="_blank">
                       {issue.url}
                     </a>
-                    <small>{issue.code} · обнаружено {issue.occurrences}</small>
+                    <small>{issue.code} <UiText text="· обнаружено" before=" " after=" " />{issue.occurrences}</small>
                   </div>
                 </article>
               ))}
             </div>
           ) : (
             <p className="muted-copy">
-              Открытых проблем нет. Запустите аудит для актуальной проверки.
-            </p>
+              <UiText text="Открытых проблем нет. Запустите аудит для актуальной проверки." /></p>
           )}
         </details>
       <details className="crawl-duplicate-history crawl-stack-section" hidden={activeView !== "DUPLICATES"} open>
         <summary className="crawl-stack-summary">
-          <span>Дубли страниц</span>
+          <span><UiText text="Дубли страниц" /></span>
           <strong>{duplicates.groups.length}</strong>
         </summary>
         <div className="crawl-duplicate-heading">
           <div>
             <p className="eyebrow">Duplicate groups</p>
-            <h3>Дубли страниц</h3>
+            <h3><UiText text="Дубли страниц" /></h3>
             <p className="muted-copy">
-              Группы строятся по нормализованным Title, Description, H1 и
-              хешу видимого текста последнего завершённого обхода.
-            </p>
+              <UiText text="Группы строятся по нормализованным Title, Description, H1 и хешу видимого текста последнего завершённого обхода." /></p>
           </div>
           <label className="form-field crawl-duplicate-filter">
-            <span>Тип дубля</span>
+            <span><UiText text="Тип дубля" /></span>
             <CustomSelect
               onChange={(event) =>
                 setDuplicateKind(
@@ -445,8 +444,8 @@ export function ProjectCrawlAudit({
               }
               value={duplicateKind}
             >
-              <option value="ALL">Все ({duplicates.groups.length})</option>
-              <option value="CONTENT">Контент</option>
+              <option value="ALL"><UiText text="Все (" />{duplicates.groups.length})</option>
+              <option value="CONTENT"><UiText text="Контент" /></option>
               <option value="TITLE">Title</option>
               <option value="DESCRIPTION">Description</option>
               <option value="H1">H1</option>
@@ -459,8 +458,8 @@ export function ProjectCrawlAudit({
               {visibleDuplicates.map((group) => (
                 <details className="crawl-duplicate-group" key={group.id}>
                   <summary>
-                    <strong>{duplicateKindLabel(group.kind)}</strong>
-                    <span>{group.memberCount} страниц</span>
+                    <strong>{<UiText text={duplicateKindLabel(group.kind) ?? ""} />}</strong>
+                    <span>{group.memberCount} <UiText text="страниц" before=" " /></span>
                   </summary>
                   <div className="crawl-duplicate-members">
                     {group.members.map((member) => (
@@ -487,10 +486,9 @@ export function ProjectCrawlAudit({
                   }
                   type="button"
                 >
-                  Назад
-                </button>
+                  <UiText text="Назад" /></button>
                 <span>
-                  {duplicatePage + 1} из {duplicatePageCount}
+                  {duplicatePage + 1} <UiText text="из" before=" " after=" " />{duplicatePageCount}
                 </span>
                 <button
                   className="secondary-button"
@@ -502,32 +500,29 @@ export function ProjectCrawlAudit({
                   }
                   type="button"
                 >
-                  Далее
-                </button>
+                  <UiText text="Далее" /></button>
               </div>
             )}
           </>
         ) : (
           <p className="muted-copy">
             {duplicates.groups.length
-              ? "Для выбранного типа дублей нет."
-              : "В последнем завершённом обходе группы дублей не найдены."}
+              ? <UiText text="Для выбранного типа дублей нет." />
+              : <UiText text="В последнем завершённом обходе группы дублей не найдены." />}
           </p>
         )}
       </details>
 
       <details className="crawl-absence-history crawl-stack-section" hidden={activeView !== "ABSENCES"} open>
         <summary className="crawl-stack-summary">
-          <span>Исчезнувшие страницы</span>
+          <span><UiText text="Исчезнувшие страницы" /></span>
           <strong>{absences?.pages.length ?? 0}</strong>
         </summary>
         <div>
           <p className="eyebrow">Crawl membership</p>
-          <h3>Исчезнувшие страницы</h3>
+          <h3><UiText text="Исчезнувшие страницы" /></h3>
           <p className="muted-copy">
-            URL, найденные в предыдущем полном обходе с тем же scope, но
-            отсутствующие в последнем полном обходе.
-          </p>
+            <UiText text="URL, найденные в предыдущем полном обходе с тем же scope, но отсутствующие в последнем полном обходе." /></p>
         </div>
         {absences?.pages.length ? (
           <div className="crawl-absence-list">
@@ -537,32 +532,28 @@ export function ProjectCrawlAudit({
                   {page.url}
                 </a>
                 <span>
-                  Последний раз: {new Date(page.lastSeenAt).toLocaleString()}
-                  {page.wasInSitemap ? " · была в sitemap" : ""}
+                  <UiText text="Последний раз:" after=" " />{new Date(page.lastSeenAt).toLocaleString()}
+                  {page.wasInSitemap ? <UiText text="· была в sitemap" before=" " /> : ""}
                 </span>
               </article>
             ))}
           </div>
         ) : (
           <p className="muted-copy">
-            В последнем сопоставимом полном обходе исчезнувших URL нет.
-          </p>
+            <UiText text="В последнем сопоставимом полном обходе исчезнувших URL нет." /></p>
         )}
       </details>
 
       <details className="crawl-change-history crawl-stack-section" hidden={activeView !== "CHANGES"} open>
         <summary className="crawl-stack-summary">
-          <span>Изменения Radar</span>
+          <span><UiText text="Изменения Radar" /></span>
           <strong>{changes?.changes.length ?? 0}</strong>
         </summary>
         <div>
           <p className="eyebrow">Radar</p>
-          <h3>Изменения между обходами</h3>
+          <h3><UiText text="Изменения между обходами" /></h3>
           <p className="muted-copy">
-            Система сравнивает неизменяемые снимки и показывает только
-            значимые изменения, отбрасывая шум небольших колебаний скорости
-            и размера.
-          </p>
+            <UiText text="Система сравнивает неизменяемые снимки и показывает только значимые изменения, отбрасывая шум небольших колебаний скорости и размера." /></p>
         </div>
         {changes?.changes.length ? (
           <div className="crawl-change-list">
@@ -571,7 +562,7 @@ export function ProjectCrawlAudit({
                 <span
                   className={`issue-severity issue-${change.severity.toLowerCase()}`}
                 >
-                  {severityLabel(change.severity)}
+                  {<UiText text={severityLabel(change.severity) ?? ""} />}
                 </span>
                 <div>
                   <a href={change.url} rel="noreferrer" target="_blank">
@@ -581,9 +572,9 @@ export function ProjectCrawlAudit({
                     {change.changedFields.map(changeFieldLabel).join(", ")}
                   </p>
                   <small>
-                    {new Date(change.previousCrawledAt).toLocaleString("ru-RU")}
+                    {new Date(change.previousCrawledAt).toLocaleString(uiLocale)}
                     {" → "}
-                    {new Date(change.currentCrawledAt).toLocaleString("ru-RU")}
+                    {new Date(change.currentCrawledAt).toLocaleString(uiLocale)}
                   </small>
                 </div>
               </article>
@@ -591,9 +582,7 @@ export function ProjectCrawlAudit({
           </div>
         ) : (
           <p className="muted-copy">
-            История появится после повторного обхода, если страница
-            действительно изменилась.
-          </p>
+            <UiText text="История появится после повторного обхода, если страница действительно изменилась." /></p>
         )}
       </details>
       </div>

@@ -10,14 +10,16 @@ import {
   ServiceUnavailableException
 } from "@nestjs/common";
 import {
-  currentRankProviderPolicyVersion,
-  legacyRankProviderPolicyVersion,
+  batchedArsenkinRankPolicyVersion,
+  largeXmlStockRankPolicyVersion,
+  rankCommandKeywordLimit,
+  rankExecutionPolicyShape,
+  rankPolicyTaskCount,
   rankEstimateBlockerCodes,
   rankExecutionPurpose,
-  rankProviderKeywordLimit,
-  rankProviderOverflowCount,
-  xmlStockRankProviderPolicyVersion,
+  rankSearchSourceFromProviderMappingVersion,
   type InternalCreateRankEstimateInput,
+  type InternalRankEstimatePricingScope,
   type InternalRankExecutionParameters,
   type InternalRankEstimateScope,
   type IntegrationProvider,
@@ -62,9 +64,9 @@ import {
 } from "./rank-estimate-snapshot.js";
 
 export const RANK_ESTIMATE_POLICY_VERSION =
-  currentRankProviderPolicyVersion;
+  batchedArsenkinRankPolicyVersion;
 export const RANK_ESTIMATE_TTL_MILLISECONDS = 5 * 60 * 1_000;
-export const RANK_ESTIMATE_KEYWORD_LIMIT = rankProviderKeywordLimit;
+export const RANK_ESTIMATE_KEYWORD_LIMIT = rankCommandKeywordLimit;
 export const RANK_ESTIMATE_VALIDATION_FRESHNESS_MILLISECONDS =
   24 * 60 * 60 * 1_000;
 
@@ -281,14 +283,8 @@ export class RankEstimateService {
             calculatedAt
           );
           const keywordCount = Number(scope.keywordCount);
-          const providerTaskCount =
-            keywordCount > RANK_ESTIMATE_KEYWORD_LIMIT
-              ? 0
-              : keywordCount === 0
-                ? 0
-                : provider === "XMLSTOCK"
-                  ? keywordCount
-                  : 1;
+          const policyShape = rankExecutionPolicyShape(rankProviderPolicyVersion(provider), provider)!;
+          const providerTaskCount = rankPolicyTaskCount(policyShape, keywordCount);
           const estimate = publicEstimate({
             id: databaseClock.id,
             input,
@@ -393,6 +389,23 @@ export class RankEstimateService {
       if (winner) return winner;
       throw error;
     }
+  }
+
+  public async pricingScope(workspaceId: string, projectId: string, actorId: string, estimateId: string): Promise<InternalRankEstimatePricingScope> {
+    const stored = await this.prisma.rankEstimate.findFirst({ where: { id: estimateId, workspaceId, projectId, actorId } });
+    if (!stored) throw new NotFoundException("Rank estimate not found");
+    const { summary, execution } = verifiedRankEstimate(stored);
+    const source = execution ? rankSearchSourceFromProviderMappingVersion(execution.searchEngine, execution.providerMappingVersion) : undefined;
+    return {
+      estimateId: stored.id, workspaceId, projectId, actorId, provider: summary.provider,
+      credentialMode: summary.credentialMode, keywordCount: stored.keywordCount,
+      execution: execution && source ? {
+        purpose: execution.purpose ?? "POSITION_TRACKING", depth: execution.depth,
+        source: execution.searchEngine === "GOOGLE" ? "GOOGLE_LIVE"
+          : source === "SEARCH_API" ? "YANDEX_SEARCH_API"
+            : execution.providerMappingVersion === "xmlstock-yandex-live@3" ? "YANDEX_TURBO" : "YANDEX_LIVE"
+      } : null
+    };
   }
 
   private async findIdempotent(
@@ -981,8 +994,8 @@ function publicEstimate(input: {
               !input.execution.providerMappingVersion.includes("-live@")
             ? ["SUBMIT", "POLL"]
             : ["GET"],
-      keywordLimitPerTask: input.provider === "XMLSTOCK" ? "1" : "15000",
-      keywordLimitPerCommand: "15000",
+      keywordLimitPerTask: input.provider === "XMLSTOCK" ? "1" : "5000",
+      keywordLimitPerCommand: "300000",
       format: "SIMPLE",
       rawSerp: false,
       fallbackMode: "NONE"
@@ -1082,20 +1095,8 @@ export function verifiedRankEstimate(
 function storedExecutionScopeHash(
   stored: StoredRankEstimate
 ): RankEstimateScopeHash {
-  const policyBounds =
-    stored.providerPolicyVersion === legacyRankProviderPolicyVersion
-      ? { keywordLimit: 1_000, overflowCount: 1_001 }
-      : stored.providerPolicyVersion === currentRankProviderPolicyVersion
-        ? {
-            keywordLimit: RANK_ESTIMATE_KEYWORD_LIMIT,
-            overflowCount: rankProviderOverflowCount
-          }
-        : stored.providerPolicyVersion === xmlStockRankProviderPolicyVersion
-          ? {
-              keywordLimit: RANK_ESTIMATE_KEYWORD_LIMIT,
-              overflowCount: rankProviderOverflowCount
-            }
-          : undefined;
+  const shape = rankExecutionPolicyShape(stored.providerPolicyVersion);
+  const policyBounds = shape ? { keywordLimit: shape.commandLimit, overflowCount: shape.commandLimit + 1 } : undefined;
   if (
     policyBounds === undefined ||
     !Number.isInteger(stored.keywordCount) ||
@@ -1325,7 +1326,7 @@ export function rankProviderPolicyVersion(
   provider: "ARSENKIN" | "XMLSTOCK"
 ): string {
   return provider === "XMLSTOCK"
-    ? xmlStockRankProviderPolicyVersion
+    ? largeXmlStockRankPolicyVersion
     : RANK_ESTIMATE_POLICY_VERSION;
 }
 

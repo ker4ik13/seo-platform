@@ -173,6 +173,7 @@ test("returns rank and crawl results without internal tenant envelope fields", a
           trackingContextId: firstKeywordId,
           contextName: "Google · Москва",
           execution: {},
+          counts: { foundCount: 0, notFoundCount: 0 },
           rows: [],
           page: { hasNext: false }
         };
@@ -292,6 +293,7 @@ test("joins XMLStock rank rows with per-key attempts and final errors", async ()
         trackingContextId: firstKeywordId,
         contextName: "Яндекс · Москва",
         execution: {},
+        counts: { foundCount: 0, notFoundCount: 1 },
         rows: [
           {
             sequence: 0,

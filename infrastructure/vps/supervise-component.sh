@@ -126,7 +126,8 @@ while [ ! -e "$stop_marker" ]; do
     "$component" >> "$log_file"
 
   set +e
-  "$script_dir/run-component.sh" "$component" >> "$log_file" 2>&1 &
+  "$script_dir/run-component.sh" "$component" \
+    > >(env -i PATH="$PATH" "$node_bin" "$script_dir/bounded-log.mjs" "$log_file") 2>&1 &
   child_pid=$!
   wait "$child_pid"
   component_exit_code=$?

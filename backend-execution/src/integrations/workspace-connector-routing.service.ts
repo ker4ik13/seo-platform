@@ -1,3 +1,4 @@
+import { credentialModeSupportsCapability } from "@seo-platform/contracts";
 import {
   ConflictException,
   Injectable,
@@ -531,11 +532,7 @@ function routeAvailability(
   if (credential.status === "PENDING_VERIFICATION") return "CREDENTIAL_PENDING";
   if (
     credential.status !== "ACTIVE" ||
-    (credential.mode !== "BYOK_API_KEY" &&
-      !(
-        credential.mode === "PLATFORM_PAID" &&
-        capabilityValue === "SERP_RANK_TRACKING"
-      ))
+    !credentialModeSupportsCapability(credential.mode, capabilityValue, credential.provider)
   ) {
     return "CREDENTIAL_UNAVAILABLE";
   }

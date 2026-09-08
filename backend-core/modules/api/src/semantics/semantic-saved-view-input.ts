@@ -1,3 +1,4 @@
+import { parseSemanticRankColumnKey, parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import {
   semanticKeywordIntents,
   semanticKeywordPageSizes,
@@ -95,7 +96,7 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
   const selectedGroupIds = optionalUuidArray(
     input.selectedGroupIds,
     "config.selectedGroupIds",
-    100
+    2_000
   );
   const appliedViewId = optionalUuid(
     input.appliedViewId,
@@ -157,7 +158,10 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
       "isFavorite",
       "isTracked",
       "priorityMin",
-      "priorityMax"
+      "priorityMax",
+      "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+      "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
     ],
     "config.filters"
   );
@@ -190,6 +194,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     input.priorityMax,
     "config.filters.priorityMax"
   );
+  const advanced = advancedFilters(input);
   if (
     priorityMin !== undefined &&
     priorityMax !== undefined &&
@@ -209,8 +214,30 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
-    ...(priorityMax === undefined ? {} : { priorityMax })
+    ...(priorityMax === undefined ? {} : { priorityMax }),
+    ...advanced
   };
+}
+
+function advancedFilters(input: Readonly<Record<string, unknown>>): Omit<SemanticSavedViewFilters, "search" | "tag" | "intent" | "groupId" | "clusterId" | "isFavorite" | "isTracked" | "priorityMin" | "priorityMax"> {
+  const bad = (name: string): never => invalid(`config.filters.${name}`, "Invalid advanced filter value");
+  const decimal = (name: string): string | undefined => { const value = input[name]; if (value === undefined) return undefined; if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,18})$/u.test(value) || BigInt(value) > 9_223_372_036_854_775_807n) bad(name); return value as string; };
+  const integer = (name: string, max: number): number | undefined => { const value = input[name]; if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > max) bad(name); return Number(value); };
+  const baseMin = decimal("frequencyBaseMin"), baseMax = decimal("frequencyBaseMax"), exactMin = decimal("frequencyExactMin"), exactMax = decimal("frequencyExactMax"), fixedMin = decimal("frequencyFixedMin"), fixedMax = decimal("frequencyFixedMax");
+  for (const [min, max, name] of [[baseMin, baseMax, "frequencyBaseMin"], [exactMin, exactMax, "frequencyExactMin"], [fixedMin, fixedMax, "frequencyFixedMin"]] as const) if (min && max && BigInt(min) > BigInt(max)) bad(name);
+  const wordCountMin = integer("wordCountMin", 10_000), wordCountMax = integer("wordCountMax", 10_000), rankPositionMin = integer("rankPositionMin", 100), rankPositionMax = integer("rankPositionMax", 100);
+  if (wordCountMin && wordCountMax && wordCountMin > wordCountMax) bad("wordCountMin");
+  if (rankPositionMin && rankPositionMax && rankPositionMin > rankPositionMax) bad("rankPositionMin");
+  const targetUrlState = input.targetUrlState === undefined ? undefined : requiredEnum(input.targetUrlState, ["SET", "EMPTY"] as const, "config.filters.targetUrlState");
+  const rankState = input.rankState === undefined ? undefined : requiredEnum(input.rankState, ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const, "config.filters.rankState");
+  const rankDimensionKey = input.rankDimensionKey;
+  if (rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(rankDimensionKey)) bad("rankDimensionKey");
+  const instant = (name: string): string | undefined => { const value = input[name]; if (value === undefined) return undefined; if (typeof value !== "string" || value.length !== 24 || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) bad(name); return value as string; };
+  const rankCheckedFrom = instant("rankCheckedFrom"), rankCheckedBefore = instant("rankCheckedBefore");
+  if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) bad("rankCheckedFrom");
+  if (!rankDimensionKey && (rankState || rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) bad("rankDimensionKey");
+  if ((rankState === "NOT_CHECKED" && (rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) || (rankState === "NOT_FOUND" && (rankPositionMin || rankPositionMax))) bad("rankState");
+  return { ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}), ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}), ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}), ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}), ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}), ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {}) };
 }
 
 function requiredColumns(
@@ -229,7 +256,7 @@ function requiredColumns(
       typeof column !== "string" ||
       (!semanticSystemColumnKeys.includes(
         column as (typeof semanticSystemColumnKeys)[number]
-      ) &&
+      ) && !parseSemanticRankColumnKey(column) &&
         !/^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
           column
         ))

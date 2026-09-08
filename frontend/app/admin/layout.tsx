@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { cookies } from "next/headers";
+import { UiLocaleProvider, LanguageSwitcher } from "../../components/ui-locale";
+import { uiLocaleCookie } from "../../lib/ui-i18n";
 import "./admin.css";
 
 export const metadata: Metadata = {
@@ -12,8 +15,9 @@ export const metadata: Metadata = {
   }
 };
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children
 }: Readonly<{ children: ReactNode }>) {
-  return <div className="admin-root">{children}</div>;
+  const store = await cookies();
+  return <UiLocaleProvider initialLocale={store.get(uiLocaleCookie)?.value ?? "ru"}><div className="admin-root"><div className="admin-language-switcher"><LanguageSwitcher /></div>{children}</div></UiLocaleProvider>;
 }

@@ -1,9 +1,16 @@
 "use client";
+import { legalDocumentVersion } from "../lib/legal-versions";
 
+import { useWorkspaceUsage } from "./workspace-usage-provider";
 import { CustomSelect } from "./custom-select";
+import { SemanticModal } from "./semantic-modal";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BillingProviderAvailability,
+  BillingRefundEligibility,
+  BillingRefundRequestSummary,
+  OnlineBillingPaymentProvider,
   BillingBalanceSummary,
   BillingLedgerTransactionSummary,
   BillingOrderSummary,
@@ -24,8 +31,12 @@ import {
   type BillingBuyerFormType
 } from "../lib/billing-form";
 import { browserIdempotencyKey } from "../lib/idempotency";
+import { isPermanentFreeSubscription } from "../lib/billing-subscription-period";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface BillingSnapshot {
+  readonly providers: readonly BillingProviderAvailability[];
   readonly plans: readonly BillingPlanSummary[];
   readonly subscription: BillingSubscriptionSummary | null;
   readonly balance: BillingBalanceSummary;
@@ -33,9 +44,14 @@ interface BillingSnapshot {
   readonly ledger: readonly BillingLedgerTransactionSummary[];
   readonly methods: readonly BillingPaymentMethodSummary[];
   readonly receipts: readonly NpdReceiptObligationSummary[];
+  readonly refundRequests: readonly BillingRefundRequestSummary[];
 }
 
-const TERMS_VERSION = "terms-2026-07-01";
+const TERMS_VERSION = process.env.NEXT_PUBLIC_TERMS_VERSION ?? legalDocumentVersion;
+
+function refundRequestLabel(status: BillingRefundRequestSummary["status"]): string {
+  return { REQUESTED: "На рассмотрении", APPROVED: "Одобрено", PROCESSING: "Возврат обрабатывается", MANUAL_REQUIRED: "Владелец выполняет возврат", SUCCEEDED: "Возврат завершён", REJECTED: "Не одобрено", FAILED: "Возврат не выполнен, остаток восстановлен" }[status];
+}
 
 export function BillingSettings({
   workspaceId,
@@ -43,7 +59,7 @@ export function BillingSettings({
   canManagePlan,
   canTopUp,
   canManagePaymentMethods,
-  projectCount,
+  projectCount: _projectCount,
   readOnly
 }: Readonly<{
   workspaceId: string;
@@ -54,22 +70,31 @@ export function BillingSettings({
   projectCount: number;
   readOnly: boolean;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
+  const usage = useWorkspaceUsage();
   const [snapshot, setSnapshot] = useState<BillingSnapshot>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [period, setPeriod] = useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [selectedPlan, setSelectedPlan] = useState<string>();
+  const [selectedVersion, setSelectedVersion] = useState<number>();
   const [buyerType, setBuyerType] =
     useState<BillingBuyerFormType>("INDIVIDUAL");
   const [buyerName, setBuyerName] = useState("");
   const [buyerInn, setBuyerInn] = useState("");
   const [deliveryEmail, setDeliveryEmail] = useState(defaultEmail);
-  const [savePaymentMethod, setSavePaymentMethod] = useState(true);
+  const [paymentProvider, setPaymentProvider] = useState<OnlineBillingPaymentProvider>("YOOKASSA");
+  const [savePaymentMethod, setSavePaymentMethod] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [topUpRubles, setTopUpRubles] = useState("1000");
   const [refundTarget, setRefundTarget] = useState<BillingOrderSummary>();
   const [refundRubles, setRefundRubles] = useState("");
   const [refundReason, setRefundReason] = useState("");
+  const [refundEligibility, setRefundEligibility] = useState<BillingRefundEligibility>();
+  const [refundNotice, setRefundNotice] = useState<string>();
+  const refundLoad = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => refundLoad.current?.abort(), []);
   const basePath = `/app/api/workspaces/${encodeURIComponent(
     workspaceId
   )}/billing`;
@@ -84,7 +109,9 @@ export function BillingSettings({
         orders,
         ledger,
         methods,
-        receipts
+        receipts,
+        providers,
+        refundRequests
       ] = await Promise.all([
         browserApiCollectionRequest<BillingPlanSummary>(
           "/app/api/billing/plans"
@@ -106,9 +133,13 @@ export function BillingSettings({
           : Promise.resolve({ data: [], page: { hasNext: false } }),
         browserApiCollectionRequest<NpdReceiptObligationSummary>(
           `${basePath}/receipts`
-        )
+        ),
+        browserApiRequest<readonly BillingProviderAvailability[]>("/app/api/billing/providers"),
+        browserApiRequest<readonly BillingRefundRequestSummary[]>(`${basePath}/refund-requests`)
       ]);
       const next: BillingSnapshot = {
+        providers,
+        refundRequests,
         plans: plans.data,
         subscription,
         balance,
@@ -118,6 +149,7 @@ export function BillingSettings({
         receipts: receipts.data
       };
       setSnapshot(next);
+      setPaymentProvider(current => providers.some(provider => provider.provider === current && provider.available) ? current : providers.find(provider => provider.available)?.provider ?? current);
       return next;
     } catch (cause) {
       setError(errorMessage(cause));
@@ -155,8 +187,13 @@ export function BillingSettings({
   }, [basePath, load]);
 
   const selected = useMemo(
-    () => snapshot?.plans.find((plan) => plan.code === selectedPlan),
-    [selectedPlan, snapshot?.plans]
+    () => {
+      const retained = snapshot?.subscription?.plan;
+      return retained && retained.code === selectedPlan && retained.version === selectedVersion
+        ? retained
+        : snapshot?.plans.find((plan) => plan.code === selectedPlan && (selectedVersion === undefined || plan.version === selectedVersion));
+    },
+    [selectedPlan, selectedVersion, snapshot?.plans, snapshot?.subscription]
   );
   const selectedPrice = selected?.prices.find(
     (price) => price.period === period
@@ -217,7 +254,8 @@ export function BillingSettings({
       buyerType,
       ...business.value,
       deliveryEmail: email.value,
-      savePaymentMethod,
+      savePaymentMethod: paymentProvider === "YOOKASSA" && savePaymentMethod,
+      provider: paymentProvider,
       termsAccepted,
       termsVersion: TERMS_VERSION
     };
@@ -240,6 +278,7 @@ export function BillingSettings({
             body: {
               ...buyerPayload(),
               planCode: selected.code,
+              planVersion: selected.version,
               period
             }
           }
@@ -282,10 +321,22 @@ export function BillingSettings({
     });
   }
 
+  async function openRefund(order: BillingOrderSummary) {
+    refundLoad.current?.abort();
+    const controller = new AbortController(); refundLoad.current = controller;
+    setRefundTarget(order); setRefundEligibility(undefined); setRefundRubles(""); setRefundReason(""); setRefundNotice(undefined);
+    try {
+      const eligible = await browserApiRequest<BillingRefundEligibility>(`${basePath}/payments/${encodeURIComponent(order.payment.id)}/refund-eligibility`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setRefundEligibility(eligible); setRefundRubles(String(eligible.maximumAmountMinor / 100));
+    } catch (cause) { if (!controller.signal.aborted) setError(errorMessage(cause)); }
+  }
+  function closeRefund() { refundLoad.current?.abort(); setRefundTarget(undefined); }
+
   async function refund() {
     if (!refundTarget) return;
-    const amountMinor = billingRublesToMinor(refundRubles, 100);
-    if (amountMinor === undefined || refundReason.trim().length < 3) {
+    const amountMinor = billingRublesToMinor(refundRubles, 1);
+    if (amountMinor === undefined || !refundEligibility || amountMinor > refundEligibility.maximumAmountMinor || refundReason.trim().length < 3) {
       setError("Укажите корректную сумму и причину возврата.");
       return;
     }
@@ -301,6 +352,7 @@ export function BillingSettings({
         }
       );
       setRefundTarget(undefined);
+      setRefundNotice("Заявка отправлена владельцу сервиса. Решение появится в разделе возвратов.");
       setRefundReason("");
       setRefundRubles("");
     });
@@ -311,8 +363,8 @@ export function BillingSettings({
       <section className="panel billing-loading" aria-live="polite">
         <span className="billing-spinner" />
         <div>
-          <strong>Загружаем биллинг</strong>
-          <p>Проверяем тариф, баланс и последние платежи.</p>
+          <strong><UiText text="Загружаем биллинг" /></strong>
+          <p><UiText text="Проверяем тариф, баланс и последние платежи." /></p>
         </div>
       </section>
     );
@@ -321,22 +373,21 @@ export function BillingSettings({
   if (!snapshot) {
     return (
       <section className="panel panel-empty compact" role="alert">
-        <strong>Биллинг временно недоступен</strong>
-        <p>{error}</p>
+        <strong><UiText text="Биллинг временно недоступен" /></strong>
+        <p>{<UiText text={error ?? ""} />}</p>
         <button className="secondary-button" onClick={() => void load()}>
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
 
-  const currentPlan = snapshot.subscription
+  const currentPlan = usage.data?.plan ?? (snapshot.subscription
     ? snapshot.plans.find(
         ({ code, version }) =>
           code === snapshot.subscription?.planCode &&
           version === snapshot.subscription.planVersion
       )
-    : undefined;
+    : undefined);
   const loadedLedgerSpend = snapshot.ledger.reduce(
     (sum, transaction) =>
       sum +
@@ -361,11 +412,11 @@ export function BillingSettings({
       {error && (
         <div className="billing-alert" role="alert">
           <div>
-            <strong>Операция не выполнена</strong>
-            <span>{error}</span>
+            <strong><UiText text="Операция не выполнена" /></strong>
+            <span>{<UiText text={error ?? ""} />}</span>
           </div>
           <button
-            aria-label="Закрыть ошибку"
+            aria-label={uiText("Закрыть ошибку")}
             onClick={() => setError(undefined)}
           >
             ×
@@ -376,35 +427,38 @@ export function BillingSettings({
         <div className="status-banner">
           <span className="status-dot" />
           <div>
-            <strong>Workspace работает в режиме только для чтения</strong>
+            <strong><UiText text="Workspace работает в режиме только для чтения" /></strong>
             <p>
-              Просмотр данных доступен. Оплата тарифа или пополнение баланса
-              восстановят платные операции.
-            </p>
+              <UiText text="Просмотр данных доступен. Оплата тарифа или пополнение баланса восстановят платные операции." /></p>
           </div>
         </div>
       )}
 
       <section className="billing-overview">
         <article className="panel billing-current-plan">
-          <span className="billing-label">Текущий тариф</span>
+          <span className="billing-label"><UiText text="Текущий тариф" /></span>
           {snapshot.subscription ? (
             <>
-              <h2>{snapshot.subscription.planName}</h2>
+              <h2>{uiLocale === "en" ? snapshot.subscription.plan?.nameEn ?? uiText(snapshot.subscription.planName) : snapshot.subscription.planName}</h2>
               <span
                 className={`billing-status ${snapshot.subscription.status.toLowerCase()}`}
               >
-                {subscriptionStatus(snapshot.subscription.status)}
+                {<UiText text={subscriptionStatus(snapshot.subscription.status) ?? ""} />}
               </span>
               <p>
-                До {dateLabel(snapshot.subscription.currentPeriodEnd)}
+                {isPermanentFreeSubscription(snapshot.subscription)
+                  ? <UiText text="Без ограничения срока" />
+                  : <UiText text="До {0}" values={[String(dateLabel(snapshot.subscription.currentPeriodEnd, uiLocale))]} />}
                 {snapshot.subscription.cancelAtPeriodEnd
-                  ? " · продление отключено"
+                  ? <UiText text="· продление отключено" before=" " />
                   : snapshot.subscription.autopayEnabled
-                  ? " · автоплатёж включён"
-                  : " · без автоплатежа"}
+                  ? <UiText text="· автоплатёж включён" before=" " />
+                  : <UiText text="· без автоплатежа" before=" " />}
               </p>
+              {snapshot.subscription.plan && snapshot.subscription.planCode !== "TRIAL" && canManagePlan && <button className="secondary-button" type="button" onClick={() => { setSelectedPlan(snapshot.subscription!.planCode); setSelectedVersion(snapshot.subscription!.planVersion); setPeriod(snapshot.subscription!.period); }}><UiText text="Продлить на моих условиях" /></button>}
+              {snapshot.subscription.unusedServiceValueMinor !== undefined && snapshot.subscription.unusedServiceValueMinor > 0 && <p><UiText text="Неиспользованная стоимость:" after=" " />{money(snapshot.subscription.unusedServiceValueMinor, uiLocale)}<UiText text=". При смене тарифа она переносится в дополнительные дни." /></p>}
               {canManagePlan &&
+                !isPermanentFreeSubscription(snapshot.subscription) &&
                 !snapshot.subscription.cancelAtPeriodEnd &&
                 ["TRIALING", "ACTIVE", "PAST_DUE", "GRACE"].includes(
                   snapshot.subscription.status
@@ -415,63 +469,60 @@ export function BillingSettings({
                     onClick={() => void cancelSubscription()}
                   >
                     {busy === "cancel-subscription"
-                      ? "Отключаем продление…"
-                      : "Отключить продление"}
+                      ? <UiText text="Отключаем продление…" />
+                      : <UiText text="Отключить продление" />}
                   </button>
                 )}
             </>
           ) : (
             <>
-              <h2>Подписки нет</h2>
-              <p>Выберите платный тариф или активируйте бесплатный без карты.</p>
+              <h2><UiText text="Подписки нет" /></h2>
+              <p><UiText text="Выберите платный тариф или активируйте бесплатный без карты." /></p>
               {canManagePlan && (
                 <button
                   className="secondary-button"
                   disabled={Boolean(busy)}
                   onClick={() => void startTrial()}
                 >
-                  {busy === "trial" ? "Активируем…" : "Активировать бесплатно"}
+                  {busy === "trial" ? <UiText text="Активируем…" /> : <UiText text="Активировать бесплатно" />}
                 </button>
               )}
             </>
           )}
         </article>
         <article className="panel billing-balance-card">
-          <span className="billing-label">Внутренние токены</span>
-          <h2>{money(snapshot.balance.availableMinor)}</h2>
+          <span className="billing-label"><UiText text="Внутренние токены" /></span>
+          <h2>{money(snapshot.balance.availableMinor, uiLocale)}</h2>
           <p>
-            {money(snapshot.balance.includedCreditsMinor)} включено ·{" "}
-            {money(snapshot.balance.prepaidMinor)} пополнено
-          </p>
+            {money(snapshot.balance.includedCreditsMinor, uiLocale)} <UiText text="включено ·" before=" " />{" "}
+            {money(snapshot.balance.prepaidMinor, uiLocale)} <UiText text="пополнено" before=" " /></p>
           <span className="billing-balance-note">
-            Системные проверки списывают токены по подтверждённой цене. BYOK
-            не расходует внутренний баланс платформы.
-          </span>
+            <UiText text="Системные проверки списывают токены по подтверждённой цене. BYOK не расходует внутренний баланс платформы." /></span>
         </article>
         <article className="panel billing-payment-card">
-          <span className="billing-label">Способ оплаты</span>
+          <span className="billing-label"><UiText text="Способ оплаты" /></span>
           <h2>
             {canManagePaymentMethods
-              ? activePaymentMethod?.title ?? "Не привязан"
-              : "Скрыт правами"}
+              ? activePaymentMethod?.title ?? <UiText text="Не привязан" />
+              : <UiText text="Скрыт правами" />}
           </h2>
           <p>
             {!canManagePaymentMethods
-              ? "Способ оплаты доступен владельцу и участникам с правом управления биллингом."
+              ? <UiText text="Способ оплаты доступен владельцу и участникам с правом управления биллингом." />
               : activePaymentMethod
-              ? "Используется только для подтверждённых автоплатежей."
-              : "Карта сохраняется YooKassa только после вашего согласия."}
+              ? <UiText text="Используется только для подтверждённых автоплатежей." />
+              : <UiText text="Карта сохраняется YooKassa только после вашего согласия." />}
           </p>
           {canManagePaymentMethods ? (
             <a className="secondary-button" href="#billing-checkout">
-              {activePaymentMethod ? "Управлять" : "Добавить при оплате"}
+              {activePaymentMethod ? <UiText text="Управлять" /> : <UiText text="Добавить при оплате" />}
             </a>
           ) : (
-            <span className="billing-balance-note">Без раскрытия платёжных реквизитов</span>
+            <span className="billing-balance-note"><UiText text="Без раскрытия платёжных реквизитов" /></span>
           )}
         </article>
         <article className="panel billing-action-card">
-          <span className="billing-label">Действия</span>
+          <span className="billing-label"><UiText text="Действия" /></span>
           <button
             className="primary-button"
             disabled={!canManagePlan}
@@ -481,8 +532,7 @@ export function BillingSettings({
                 ?.scrollIntoView({ behavior: "smooth", block: "start" })
             }
           >
-            Изменить тариф
-          </button>
+            <UiText text="Изменить тариф" /></button>
           <button
             className="secondary-button"
             disabled={!canTopUp}
@@ -493,86 +543,84 @@ export function BillingSettings({
                 ?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
           >
-            Пополнить баланс
-          </button>
+            <UiText text="Пополнить баланс" /></button>
         </article>
       </section>
 
       <section className="panel billing-usage-panel">
         <div className="billing-section-heading">
           <div>
-            <span className="billing-label">Использование</span>
-            <h2>Лимиты текущего периода</h2>
+            <span className="billing-label"><UiText text="Использование" /></span>
+            <h2><UiText text="Лимиты текущего периода" /></h2>
           </div>
           <small>
             {snapshot.subscription
-              ? `${dateLabel(snapshot.subscription.currentPeriodStart)} — ${dateLabel(snapshot.subscription.currentPeriodEnd)}`
-              : "Подписка не активна"}
+              ? isPermanentFreeSubscription(snapshot.subscription)
+                ? <UiText text="Бесплатный тариф без ограничения срока" />
+                : `${dateLabel(snapshot.subscription.currentPeriodStart, uiLocale)} — ${dateLabel(snapshot.subscription.currentPeriodEnd, uiLocale)}`
+              : <UiText text="Подписка не активна" />}
           </small>
         </div>
         <div className="billing-usage-grid">
           <BillingUsageMeter
-            label="Активные проекты"
+            label={uiText("Активные проекты")}
             {...(currentPlan
               ? { limit: currentPlan.features.projects }
               : {})}
             unit="проектов"
-            value={projectCount}
+            {...(usage.data?.resources.projects.used != null ? { value: usage.data.resources.projects.used } : {})}
           />
           <BillingUsageMeter
-            label="Доступные токены"
+            label={uiText("Доступные токены")}
             unit="₽"
             value={snapshot.balance.availableMinor / 100}
           />
           <BillingUsageMeter
-            label="Списания в загруженном журнале"
+            label={uiText("Списания в загруженном журнале")}
             unit="₽"
             value={loadedLedgerSpend / 100}
           />
           <BillingUsageMeter
-            label="Хранимые запросы"
+            label={uiText("Хранимые запросы")}
             {...(currentPlan && currentPlan.features.storedKeywords > 0
               ? { limit: currentPlan.features.storedKeywords }
               : {})}
             unit="запросов"
+            {...(usage.data?.resources.keywords.used != null ? { value: usage.data.resources.keywords.used } : {})}
           />
           <BillingUsageMeter
-            label="Поисковые контексты"
-            {...(currentPlan && currentPlan.features.trackedContextPairs > 0
-              ? { limit: currentPlan.features.trackedContextPairs }
-              : {})}
-            unit="пар"
+            label={uiText("Активные операции")}
+            {...(currentPlan ? { limit: currentPlan.features.concurrentJobs } : {})}
+            unit="задач"
+            {...(usage.data?.resources.concurrentJobs.used != null ? { value: usage.data.resources.concurrentJobs.used } : {})}
           />
           <BillingUsageMeter
-            label="Автоматизации"
+            label={uiText("Автоматизации")}
             {...(currentPlan
               ? { limit: currentPlan.features.scheduledAutomations }
               : {})}
             unit="правил"
+            {...(usage.data?.resources.automations.used != null ? { value: usage.data.resources.automations.used } : {})}
           />
           <BillingUsageMeter
-            label="Участники"
+            label={uiText("Участники")}
             {...(currentPlan
               ? { limit: currentPlan.features.seats }
               : {})}
             unit="мест"
+            {...(usage.data?.resources.seats.used != null ? { value: usage.data.resources.seats.used } : {})}
           />
           <BillingUsageMeter
-            label="Хранилище"
+            label={uiText("Хранилище")}
             {...(currentPlan
-              ? { limit: currentPlan.features.storageBytes }
+              ? { limit: currentPlan.features.storageBytes / (1024 ** 3) }
               : {})}
-            unit="байт"
+            unit="ГБ"
+            {...(usage.data?.resources.storageBytes.used != null ? { value: Math.round(usage.data.resources.storageBytes.used / (1024 ** 3) * 100) / 100 } : {})}
           />
         </div>
         <p className="billing-usage-note">
-          Тариф принадлежит рабочей области, а не отдельному пользователю.
-          Все приглашённые участники получают возможности тарифа только в
-          рамках этой рабочей области. Лимиты применяются сервером атомарно
-          при создании проекта, приглашении участника, импорте
-          запросов и запуске фоновой задачи. Значение «—» означает, что
-          сервис-владелец ещё не отдал агрегированный расход; лимит при этом
-          всё равно проверяется.
+          <UiText text="Лимиты общие для всех участников рабочей области. Приглашения резервируют места до принятия или истечения срока. Баланс данных расходуется только на системные проверки; со своим ключом вы платите провайдеру напрямую. Сохранённые данные остаются доступны при снижении тарифа." />{usage.unavailable || usage.data?.degraded ? <UiText text="Часть показателей временно недоступна — повторите обновление позже." before=" " /> : ""}
         </p>
       </section>
 
@@ -580,27 +628,27 @@ export function BillingSettings({
         <section className="panel billing-entitlements-panel">
           <div className="billing-section-heading">
             <div>
-              <span className="billing-label">Возможности плана</span>
-              <h2>Что доступно на {currentPlan.name}</h2>
+              <span className="billing-label"><UiText text="Возможности плана" /></span>
+              <h2><UiText text="Что доступно на" after=" " /><UiText text={currentPlan.name} /></h2>
             </div>
-            <span className="billing-server-check">Проверяется сервером</span>
+            <span className="billing-server-check"><UiText text="Проверяется сервером" /></span>
           </div>
           <div className="billing-entitlements-grid">
             <BillingEntitlement
-              label="Запросов в проекте"
+              label={uiText("Запросов в проекте")}
               value={currentPlan.features.keywordsPerProject === 0
                 ? "Без ограничений"
-                : number(currentPlan.features.keywordsPerProject)}
+                : number(currentPlan.features.keywordsPerProject, uiLocale)}
             />
-            <BillingEntitlement label="Одновременных задач" value={number(currentPlan.features.concurrentJobs)} />
-            <BillingEntitlement label="Участников рабочей области" value={number(currentPlan.features.seats)} />
-            <BillingEntitlement label="Хранение SERP" value={`${number(currentPlan.features.rawSerpRetentionDays)} дней`} />
-            <BillingEntitlement label="Гостевые отчёты" value={number(currentPlan.features.guestReports)} />
-            <BillingEntitlement label="API-доступ" value={currentPlan.features.publicApi === "BASIC" ? "Базовый" : "Песочница"} />
-            <BillingEntitlement label="Собственные API-ключи" value={currentPlan.features.byok ? "Доступны" : "Недоступны"} />
-            <BillingEntitlement label="Клиентская роль" value={currentPlan.features.clientRole ? "Доступна" : "Недоступна"} />
+            <BillingEntitlement label={uiText("Одновременных задач")} value={number(currentPlan.features.concurrentJobs, uiLocale)} />
+            <BillingEntitlement label={uiText("Участников рабочей области")} value={number(currentPlan.features.seats, uiLocale)} />
+            <BillingEntitlement label={uiText("Хранение SERP")} value={`${number(currentPlan.features.rawSerpRetentionDays, uiLocale)} дней`} />
+            <BillingEntitlement label={uiText("Гостевые отчёты")} value={number(currentPlan.features.guestReports, uiLocale)} />
+            <BillingEntitlement label={uiText("API-доступ")} value={currentPlan.features.publicApi === "BASIC" ? "Базовый" : "Песочница"} />
+            <BillingEntitlement label={uiText("Собственные API-ключи")} value={currentPlan.features.byok ? "Доступны" : "Недоступны"} />
+            <BillingEntitlement label={uiText("Клиентская роль")} value={currentPlan.features.clientRole ? "Доступна" : "Недоступна"} />
             <BillingEntitlement label="White label" value={currentPlan.features.whiteLabel ? "Доступен" : "Недоступен"} />
-            <BillingEntitlement label="Приоритет очереди" value={queuePriorityLabel(currentPlan.features.queuePriority)} />
+            <BillingEntitlement label={uiText("Приоритет очереди")} value={queuePriorityLabel(currentPlan.features.queuePriority)} />
           </div>
         </section>
       )}
@@ -608,27 +656,25 @@ export function BillingSettings({
       <section className="panel" id="billing-plans">
         <div className="billing-section-heading">
           <div>
-            <span className="billing-label">Подписка</span>
-            <h2>Выберите тариф</h2>
+            <span className="billing-label"><UiText text="Подписка" /></span>
+            <h2><UiText text="Выберите тариф" /></h2>
           </div>
           {hasAnnualPlans && (
             <div
               className="billing-period"
               role="group"
-              aria-label="Период оплаты"
+              aria-label={uiText("Период оплаты")}
             >
               <button
                 className={period === "MONTHLY" ? "active" : undefined}
                 onClick={() => setPeriod("MONTHLY")}
               >
-                Месяц
-              </button>
+                <UiText text="Месяц" /></button>
               <button
                 className={period === "ANNUAL" ? "active" : undefined}
                 onClick={() => setPeriod("ANNUAL")}
               >
-                Год
-              </button>
+                <UiText text="Год" /></button>
             </div>
           )}
         </div>
@@ -636,7 +682,7 @@ export function BillingSettings({
           {snapshot.plans.map((plan) => (
               <PlanCard
                 canManage={canManagePlan}
-                current={snapshot.subscription?.planCode === plan.code}
+                current={snapshot.subscription?.planCode === plan.code && (plan.code === "TRIAL" || snapshot.subscription.planVersion === plan.version)}
                 key={plan.code}
                 onSelect={() => {
                   if (plan.code === "TRIAL") {
@@ -644,10 +690,11 @@ export function BillingSettings({
                     return;
                   }
                   setSelectedPlan(plan.code);
+                  setSelectedVersion(plan.version);
                 }}
                 period={period}
                 plan={plan}
-                selected={selectedPlan === plan.code}
+                selected={selectedPlan === plan.code && (selectedVersion === undefined || selectedVersion === plan.version)}
               />
             ))}
         </div>
@@ -656,34 +703,37 @@ export function BillingSettings({
       {(selected || canTopUp) && (
         <section className="panel billing-checkout" id="billing-checkout">
           <div>
-            <span className="billing-label">Hosted checkout YooKassa</span>
+            <span className="billing-label"><UiText text="Защищённая оплата" /></span>
             <h2>
               {selected
-                ? `Оплата тарифа ${selected.name}`
-                : "Пополнение внутренних токенов"}
+                ? <UiText text="Оплата тарифа {0}" values={[String(selected.name)]} />
+                : <UiText text="Пополнение баланса данных" />}
             </h2>
             <p>
-              Реквизиты карты вводятся только на защищённой странице
-              YooKassa. Платформа не получает карточные данные.
-            </p>
+              <UiText text="Оплата проходит на защищённой странице выбранного сервиса. Платформа не получает реквизиты карты или ключи криптокошелька." /></p>
           </div>
+          <div className="billing-provider-options" aria-label={uiText("Способ оплаты")}>
+            {snapshot.providers.map(provider => <label key={provider.provider} className={paymentProvider === provider.provider ? "selected" : undefined}>
+              <input type="radio" name="payment-provider" value={provider.provider} checked={paymentProvider === provider.provider} disabled={!provider.available || Boolean(busy)} onChange={() => setPaymentProvider(provider.provider)} />
+              <span><strong>{provider.provider === "YOOKASSA" ? <UiText text="Карта или СБП" /> : "Crypto Pay"}</strong><small>{!provider.available ? <UiText text="Скоро" /> : provider.mode === "TEST" ? <UiText text="Тестовый режим" /> : provider.recurring ? <UiText text="Доступно автопродление" /> : <UiText text="Разовая оплата без автосписания" />}</small></span>
+            </label>)}
+          </div>
+          {snapshot.providers.find(provider => provider.provider === paymentProvider)?.mode === "TEST" && <div className="inline-alert info"><UiText text="Тестовая оплата проверяет подключение. Она не пополняет баланс и не активирует платную подписку." /></div>}
           <div className="billing-form-grid">
             <label>
-              Тип плательщика
-              <CustomSelect
+              <UiText text="Тип плательщика" /><CustomSelect
                 value={buyerType}
                 onChange={(event) =>
                   setBuyerType(event.target.value as BillingBuyerFormType)
                 }
               >
-                <option value="INDIVIDUAL">Физическое лицо</option>
-                <option value="INDIVIDUAL_ENTREPRENEUR">ИП</option>
-                <option value="LEGAL_ENTITY">Юридическое лицо</option>
+                <option value="INDIVIDUAL"><UiText text="Физическое лицо" /></option>
+                <option value="INDIVIDUAL_ENTREPRENEUR"><UiText text="ИП" /></option>
+                <option value="LEGAL_ENTITY"><UiText text="Юридическое лицо" /></option>
               </CustomSelect>
             </label>
             <label>
-              Email для чека
-              <input
+              <UiText text="Email для чека" /><input
                 autoComplete="email"
                 onChange={(event) => setDeliveryEmail(event.target.value)}
                 type="email"
@@ -693,15 +743,13 @@ export function BillingSettings({
             {buyerType !== "INDIVIDUAL" && (
               <>
                 <label>
-                  Наименование плательщика
-                  <input
+                  <UiText text="Наименование плательщика" /><input
                     onChange={(event) => setBuyerName(event.target.value)}
                     value={buyerName}
                   />
                 </label>
                 <label>
-                  ИНН
-                  <input
+                  <UiText text="ИНН" /><input
                     inputMode="numeric"
                     onChange={(event) => setBuyerInn(event.target.value)}
                     value={buyerInn}
@@ -711,8 +759,7 @@ export function BillingSettings({
             )}
             {!selected && canTopUp && (
               <label>
-                Сумма пополнения, ₽
-                <input
+                <UiText text="Сумма пополнения, ₽" /><input
                   inputMode="decimal"
                   min="100"
                   onChange={(event) => setTopUpRubles(event.target.value)}
@@ -723,7 +770,7 @@ export function BillingSettings({
               </label>
             )}
           </div>
-          <label className="billing-checkbox">
+          {paymentProvider === "YOOKASSA" && <label className="billing-checkbox">
             <input
               checked={savePaymentMethod}
               onChange={(event) =>
@@ -731,48 +778,46 @@ export function BillingSettings({
               }
               type="checkbox"
             />
-            Сохранить способ оплаты для будущих автоплатежей
-          </label>
+            {selected ? <UiText text="Сохранить способ оплаты и включить автопродление подписки" /> : <UiText text="Сохранить способ оплаты для следующих платежей" />}
+          </label>}
           <label className="billing-checkbox">
             <input
               checked={termsAccepted}
               onChange={(event) => setTermsAccepted(event.target.checked)}
               type="checkbox"
             />
-            Принимаю условия сервиса и подтверждаю параметры заказа
-          </label>
+            <UiText text="Принимаю условия сервиса и подтверждаю параметры заказа" /></label>
           <div className="billing-checkout-actions">
             {selected ? (
               <>
                 <button
                   className="primary-button"
                   disabled={
-                    Boolean(busy) || !termsAccepted || !selectedPrice
+                    Boolean(busy) || !termsAccepted || !selectedPrice || !snapshot.providers.some(provider => provider.provider === paymentProvider && provider.available)
                   }
                   onClick={() => void checkout()}
                 >
                   {!selectedPrice
-                    ? "Период недоступен"
+                    ? <UiText text="Период недоступен" />
                     : busy?.startsWith("plan-")
-                    ? "Создаём платёж…"
-                    : `Перейти к оплате · ${money(
-                        selectedPrice.amountMinor
-                      )}`}
+                    ? <UiText text="Создаём платёж…" />
+                    : <UiText text="Перейти к оплате · {0}" values={[String(money(
+                        selectedPrice.amountMinor, uiLocale
+                      ))]} />}
                 </button>
                 <button
                   className="secondary-button"
                   onClick={() => setSelectedPlan(undefined)}
                 >
-                  Пополнить баланс вместо подписки
-                </button>
+                  <UiText text="Пополнить баланс вместо подписки" /></button>
               </>
             ) : (
               <button
                 className="primary-button"
-                disabled={Boolean(busy) || !termsAccepted}
+                disabled={Boolean(busy) || !termsAccepted || !snapshot.providers.some(provider => provider.provider === paymentProvider && provider.available)}
                 onClick={() => void topUp()}
               >
-                {busy === "top-up" ? "Создаём платёж…" : "Пополнить баланс"}
+                {busy === "top-up" ? <UiText text="Создаём платёж…" /> : <UiText text="Пополнить баланс" />}
               </button>
             )}
           </div>
@@ -781,12 +826,11 @@ export function BillingSettings({
 
       <section className="billing-history-grid">
         <article className="panel">
-          <span className="billing-label">История</span>
-          <h2>Платежи</h2>
+          <span className="billing-label"><UiText text="История" /></span>
+          <h2><UiText text="Платежи" /></h2>
           {snapshot.orders.length === 0 ? (
             <div className="billing-empty">
-              Платежей пока нет. Созданные заказы появятся здесь.
-            </div>
+              <UiText text="Платежей пока нет. Созданные заказы появятся здесь." /></div>
           ) : (
             <div className="billing-rows">
               {snapshot.orders.map((order) => (
@@ -794,30 +838,21 @@ export function BillingSettings({
                   <div>
                     <strong>{order.description}</strong>
                     <span>
-                      {dateLabel(order.createdAt)} ·{" "}
-                      {paymentStatus(order.status)}
+                      {dateLabel(order.createdAt, uiLocale)} ·{" "}
+                      {order.payment.test ? <UiText text="Тестовый платёж" /> : paymentStatus(order.status)}
                     </span>
                   </div>
                   <div>
-                    <strong>{money(order.amountMinor)}</strong>
+                    <strong>{money(order.amountMinor, uiLocale)}</strong>
                     {canManagePlan &&
+                      !order.payment.test &&
                       ["SUCCEEDED", "PARTIALLY_REFUNDED"].includes(
                         order.status
                       ) && (
                         <button
-                          onClick={() => {
-                            setRefundTarget(order);
-                            setRefundRubles(
-                              String(
-                                (order.amountMinor -
-                                  order.payment.refundedAmountMinor) /
-                                  100
-                              )
-                            );
-                          }}
+                          onClick={() => void openRefund(order)}
                         >
-                          Возврат
-                        </button>
+                          <UiText text="Запросить возврат" /></button>
                       )}
                   </div>
                 </div>
@@ -826,13 +861,11 @@ export function BillingSettings({
           )}
         </article>
         <article className="panel">
-          <span className="billing-label">Документы</span>
-          <h2>Чеки НПД</h2>
+          <span className="billing-label"><UiText text="Документы" /></span>
+          <h2><UiText text="Чеки НПД" /></h2>
           {snapshot.receipts.length === 0 ? (
             <div className="billing-empty">
-              После подтверждённой оплаты здесь появится обязательство по
-              чеку.
-            </div>
+              <UiText text="После оплаты здесь появится чек или статус его подготовки." /></div>
           ) : (
             <div className="billing-rows">
               {snapshot.receipts.map((receipt) => (
@@ -840,11 +873,11 @@ export function BillingSettings({
                   <div>
                     <strong>{receipt.serviceDescription}</strong>
                     <span>
-                      {dateLabel(receipt.paidAt)} ·{" "}
-                      {receiptStatus(receipt.status)}
+                      {dateLabel(receipt.paidAt, uiLocale)} ·{" "}
+                      {<UiText text={receiptStatus(receipt.status) ?? ""} />}
                     </span>
                   </div>
-                  <strong>{money(receipt.grossAmountMinor)}</strong>
+                  <strong>{money(receipt.grossAmountMinor, uiLocale)}</strong>
                 </div>
               ))}
             </div>
@@ -853,19 +886,18 @@ export function BillingSettings({
       </section>
 
       {refundTarget && (
-        <section className="panel billing-refund">
+        <SemanticModal title={uiText("Заявка на возврат")} size="small" onClose={closeRefund}><div className="billing-refund">
           <div>
-            <span className="billing-label">Возврат YooKassa</span>
+            <span className="billing-label"><UiText text="Заявка на возврат" /></span>
             <h2>{refundTarget.description}</h2>
             <p>
-              Возврат идёт на исходный способ оплаты. Для пополнения можно
-              вернуть только неиспользованный prepaid balance.
-            </p>
+              <UiText text="Владелец сервиса рассматривает возврат неиспользованного баланса данных и оплаченных дней. Одобренный возврат подписки сокращает оплаченный период и отключает автопродление." /></p>
+            <p>{refundEligibility ? <UiText text="Сейчас доступно к возврату: {0}" values={[String(money(refundEligibility.maximumAmountMinor, uiLocale))]} /> : <UiText text="Рассчитываем неиспользованный остаток…" />}</p>
           </div>
           <label>
-            Сумма, ₽
-            <input
-              min="1"
+            <UiText text="Сумма, ₽" /><input
+              min="0.01"
+              max={refundEligibility ? refundEligibility.maximumAmountMinor / 100 : undefined}
               onChange={(event) => setRefundRubles(event.target.value)}
               step="0.01"
               type="number"
@@ -873,8 +905,7 @@ export function BillingSettings({
             />
           </label>
           <label>
-            Причина
-            <input
+            <UiText text="Причина" /><input
               onChange={(event) => setRefundReason(event.target.value)}
               value={refundReason}
             />
@@ -882,36 +913,35 @@ export function BillingSettings({
           <div className="billing-checkout-actions">
             <button
               className="primary-button"
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || !refundEligibility || refundEligibility.maximumAmountMinor < 1}
               onClick={() => void refund()}
             >
               {busy?.startsWith("refund-")
-                ? "Отправляем…"
-                : "Подтвердить возврат"}
+                ? <UiText text="Отправляем…" />
+                : <UiText text="Отправить заявку" />}
             </button>
             <button
               className="secondary-button"
-              onClick={() => setRefundTarget(undefined)}
+              onClick={closeRefund}
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
           </div>
-        </section>
+        </div></SemanticModal>
       )}
+
+      {refundNotice && <p className="success-message" role="status">{<UiText text={refundNotice ?? ""} />}</p>}
+      {snapshot.refundRequests.length > 0 && <section className="panel"><span className="billing-label"><UiText text="Обращения" /></span><h2><UiText text="Возвраты" /></h2><div className="billing-rows">{snapshot.refundRequests.map(request => <div className="billing-row" key={request.id}><div><strong>{<UiText text={refundRequestLabel(request.status) ?? ""} />}</strong><span>{dateLabel(request.createdAt, uiLocale)} · {request.reason}</span>{request.decisionReason && <span>{request.decisionReason}</span>}</div><strong>{money(request.approvedAmountMinor ?? request.requestedAmountMinor, uiLocale)}</strong></div>)}</div><button className="secondary-button" type="button" onClick={() => void load()}><UiText text="Обновить статусы" /></button></section>}
 
       <section className="billing-history-grid">
         <article className="panel">
-          <span className="billing-label">Автоплатёж</span>
-          <h2>Способы оплаты</h2>
+          <span className="billing-label"><UiText text="Автоплатёж" /></span>
+          <h2><UiText text="Способы оплаты" /></h2>
           {!canManagePaymentMethods ? (
             <div className="billing-empty">
-              Управление доступно владельцу workspace.
-            </div>
+              <UiText text="Управление доступно владельцу workspace." /></div>
           ) : snapshot.methods.length === 0 ? (
             <div className="billing-empty">
-              Сохранённых способов нет. Для привязки включите согласие при
-              следующей оплате.
-            </div>
+              <UiText text="Сохранённых способов нет. Для привязки включите согласие при следующей оплате." /></div>
           ) : (
             <div className="billing-rows">
               {snapshot.methods.map((method) => (
@@ -919,7 +949,7 @@ export function BillingSettings({
                   <div>
                     <strong>{method.title ?? method.type}</strong>
                     <span>
-                      {method.status === "ACTIVE" ? "Активен" : "Отключён"}
+                      {method.status === "ACTIVE" ? <UiText text="Активен" /> : <UiText text="Отключён" />}
                     </span>
                   </div>
                   {method.status === "ACTIVE" && (
@@ -927,8 +957,7 @@ export function BillingSettings({
                       disabled={Boolean(busy)}
                       onClick={() => void disableMethod(method)}
                     >
-                      Отключить
-                    </button>
+                      <UiText text="Отключить" /></button>
                   )}
                 </div>
               ))}
@@ -936,10 +965,10 @@ export function BillingSettings({
           )}
         </article>
         <article className="panel">
-          <span className="billing-label">Double-entry ledger</span>
-          <h2>Последние операции</h2>
+          <span className="billing-label"><UiText text="История баланса" /></span>
+          <h2><UiText text="Последние операции" /></h2>
           {snapshot.ledger.length === 0 ? (
-            <div className="billing-empty">Финансовых проводок пока нет.</div>
+            <div className="billing-empty"><UiText text="Операций по балансу пока нет." /></div>
           ) : (
             <div className="billing-rows">
               {snapshot.ledger.slice(0, 12).map((transaction) => (
@@ -947,7 +976,7 @@ export function BillingSettings({
                   <div>
                     <strong>{transaction.description}</strong>
                     <span>
-                      {dateLabel(transaction.occurredAt)} ·{" "}
+                      {dateLabel(transaction.occurredAt, uiLocale)} ·{" "}
                       {transaction.type}
                     </span>
                   </div>
@@ -955,7 +984,7 @@ export function BillingSettings({
                     {money(
                       transaction.entries.find(
                         (entry) => entry.direction === "DEBIT"
-                      )?.amountMinor ?? 0
+                      )?.amountMinor ?? 0, uiLocale
                     )}
                   </strong>
                 </div>
@@ -983,28 +1012,29 @@ function PlanCard({
   canManage: boolean;
   onSelect: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
   const price = plan.prices.find((item) => item.period === period);
   return (
     <article className={selected ? "billing-plan selected" : "billing-plan"}>
       <div>
-        <strong>{plan.name}</strong>
-        <p>{plan.description}</p>
+        <strong>{uiLocale === "en" ? plan.nameEn ?? plan.name : plan.name}</strong>
+        <p>{uiLocale === "en" ? plan.descriptionEn ?? plan.description : plan.description}</p>
       </div>
       <h3>
-        {price ? money(price.amountMinor) : "По запросу"}
-        <small>/{period === "MONTHLY" ? "мес." : "год"}</small>
+        {price ? money(price.amountMinor, uiLocale) : <UiText text="По запросу" />}
+        <small>/{period === "MONTHLY" ? <UiText text="мес." /> : <UiText text="год" />}</small>
       </h3>
       <ul>
-        <li>{number(plan.features.seats)} пользователей</li>
-        <li>{number(plan.features.projects)} проектов</li>
+        <li>{number(plan.features.seats, uiLocale)} <UiText text="пользователей" before=" " /></li>
+        <li>{number(plan.features.projects, uiLocale)} <UiText text="проектов" before=" " /></li>
         <li>
           {plan.features.keywordsPerProject === 0
-            ? "Без лимита ключей"
-            : `${number(plan.features.keywordsPerProject)} ключей на проект`}
+            ? <UiText text="Без лимита ключей" />
+            : <UiText text="{0} ключей на проект" values={[String(number(plan.features.keywordsPerProject, uiLocale))]} />}
         </li>
-        <li>{number(plan.features.concurrentJobs)} одновременных задач</li>
+        <li>{number(plan.features.concurrentJobs, uiLocale)} <UiText text="одновременных задач" before=" " /></li>
         {plan.includedDataCreditsMinor > 0 && (
-          <li>{money(plan.includedDataCreditsMinor)} внутренних токенов</li>
+          <li>{money(plan.includedDataCreditsMinor, uiLocale)} <UiText text="внутренних токенов" before=" " /></li>
         )}
       </ul>
       {canManage && price && (
@@ -1015,11 +1045,11 @@ function PlanCard({
         >
           {current
             ? price.amountMinor === 0
-              ? "Текущий тариф"
-              : "Продлить"
+              ? <UiText text="Текущий тариф" />
+              : <UiText text="Продлить" />
             : price.amountMinor === 0
-            ? "Активировать"
-            : "Выбрать"}
+            ? <UiText text="Активировать" />
+            : <UiText text="Выбрать" />}
         </button>
       )}
     </article>
@@ -1035,7 +1065,7 @@ function BillingEntitlement({
       <span aria-hidden="true">✓</span>
       <div>
         <small>{label}</small>
-        <strong>{value}</strong>
+        <strong><UiText text={value} /></strong>
       </div>
     </div>
   );
@@ -1052,6 +1082,7 @@ function BillingUsageMeter({
   unit: string;
   value?: number;
 }>) {
+  const { t: uiText, locale: uiLocale } = useUiLocale();
   const ratio =
     value !== undefined && limit !== undefined && limit > 0
       ? Math.min(100, Math.round((value / limit) * 100))
@@ -1060,18 +1091,18 @@ function BillingUsageMeter({
     <article className="billing-usage-meter">
       <span>{label}</span>
       <strong>
-        {value === undefined ? "—" : number(value)}
-        {limit === undefined ? ` ${unit}` : ` из ${number(limit)} ${unit}`}
+        {value === undefined ? "—" : number(value, uiLocale)}
+        {limit === undefined || limit === 0 ? ` ${uiText(unit)}` : <UiText text="из {0} {1}" values={[String(number(limit, uiLocale)), String(uiText(unit))]} before=" " />}
       </strong>
-      <div aria-hidden="true">
-        <i style={{ width: `${ratio ?? (value === undefined ? 0 : 100)}%` }} />
-      </div>
+      {ratio !== undefined && (
+        <div aria-hidden="true"><i style={{ width: `${ratio}%` }} /></div>
+      )}
       <small>
         {ratio === undefined
           ? value === undefined
-            ? "Метрика появится после подключения агрегатора использования"
-            : "Текущее значение"
-          : `${ratio}% лимита`}
+            ? <UiText text="Данные об использовании пока недоступны" />
+            : limit === 0 ? <UiText text="Без лимита" /> : <UiText text="Текущее значение" />
+          : <UiText text="{0}% лимита" values={[String(ratio)]} />}
       </small>
     </article>
   );
@@ -1082,7 +1113,7 @@ function goToConfirmation(order: BillingOrderSummary): boolean {
   if (!target) {
     if (order.status === "SUCCEEDED") return false;
     throw new Error(
-      "YooKassa не вернула ссылку на оплату"
+      "Платёжный сервис ещё не вернул ссылку на оплату"
     );
   }
   const url = new URL(target);
@@ -1093,8 +1124,8 @@ function goToConfirmation(order: BillingOrderSummary): boolean {
   return true;
 }
 
-function money(minor: number): string {
-  return new Intl.NumberFormat("ru-RU", {
+function money(minor: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, {
     style: "currency",
     currency: "RUB",
     maximumFractionDigits: minor % 100 === 0 ? 0 : 2
@@ -1116,12 +1147,12 @@ function queuePriorityLabel(
   return labels[priority];
 }
 
-function number(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function number(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
-function dateLabel(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function dateLabel(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "numeric",
     month: "short",
     year: "numeric"

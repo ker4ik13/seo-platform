@@ -3,6 +3,8 @@ import { ApiTokenSettings } from "../../../../../components/api-token-settings";
 import styles from "../../../../../components/api-token-settings.module.css";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +18,9 @@ export default async function ApiSettingsPage() {
     <>
       <section className={`page-heading ${styles.pageHeading}`}>
         <div>
-          <h1>API-ключи</h1>
+          <h1><UiText text="API-ключи" /></h1>
           <p>
-            Подключайте ИИ-агентов и внешние сервисы с отдельными правами и
-            доступом только к выбранным проектам.
-          </p>
+            <UiText text="Подключайте ИИ-агентов и внешние сервисы с отдельными правами и доступом только к выбранным проектам." /></p>
         </div>
       </section>
       <SettingsTabs
@@ -40,8 +40,7 @@ export default async function ApiSettingsPage() {
         />
       ) : (
         <section className="panel">
-          Сначала создайте или выберите рабочую область.
-        </section>
+          <UiText text="Сначала создайте или выберите рабочую область." /></section>
       )}
     </>
   );

@@ -11,19 +11,22 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.redirect(canonicalRedirect, 308);
   }
 
-  if (!request.nextUrl.pathname.startsWith("/app")) {
-    return NextResponse.next();
-  }
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set(
-    "x-app-path",
-    `${request.nextUrl.pathname}${request.nextUrl.search}`
-  );
-  return NextResponse.next({
+  const pathLocale = /^\/(ru|en)(?:\/|$)/u.exec(request.nextUrl.pathname)?.[1];
+  const requestedLocale = /^\/app\/(?:login|register)(?:\/|$)/u.test(request.nextUrl.pathname) ? request.nextUrl.searchParams.get("locale") : null;
+  const explicitLocale = pathLocale ?? (requestedLocale === "ru" || requestedLocale === "en" ? requestedLocale : undefined);
+  const savedLocale = request.cookies.get("seo_ui_locale")?.value;
+  const uiLocale = explicitLocale ?? (savedLocale === "en" ? "en" : "ru");
+  requestHeaders.set("x-ui-locale", uiLocale);
+  requestHeaders.delete("x-app-path");
+  if (request.nextUrl.pathname.startsWith("/app")) requestHeaders.set("x-app-path", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+  const response = NextResponse.next({
     request: {
       headers: requestHeaders
     }
   });
+  if (explicitLocale) response.cookies.set("seo_ui_locale", explicitLocale, { path: "/", maxAge: 31536000, sameSite: "lax", secure: true });
+  return response;
 }
 
 export const config = {

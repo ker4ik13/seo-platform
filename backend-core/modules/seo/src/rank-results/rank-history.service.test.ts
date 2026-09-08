@@ -35,6 +35,7 @@ test("returns tenant-scoped history and authenticates its keyset cursor", async 
   assert.equal(first.items[0]?.position, 100);
   assert.equal(first.items[0]?.contextName, "Москва · десктоп");
   assert.equal(first.items[0]?.searchEngine, "YANDEX");
+  assert.equal(first.items[0]?.dimensionKey, "YANDEX|RU|213|ru|DESKTOP");
   assert.equal(first.items[0]?.searchSource, "LIVE");
   assert.deepEqual(first.items[0]?.siteResults, [
     {
@@ -49,7 +50,8 @@ test("returns tenant-scoped history and authenticates its keyset cursor", async 
   assert.equal(harness.calls, 1);
   assert.equal(harness.wheres[0]?.workspaceId, workspaceId);
   assert.equal(harness.wheres[0]?.projectId, projectId);
-  assert.equal(harness.wheres[0]?.sourceMode, "BYOK");
+  assert.deepEqual(harness.wheres[0]?.sourceMode, { in: ["BYOK", "PLATFORM", "IMPORT"] });
+  assert.deepEqual(harness.wheres[0]?.provider, { in: ["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"] });
 
   const second = await service.list({
     ...query(),
@@ -97,6 +99,42 @@ test("rejects cross-tenant, filter-drift and tampered cursors before a query", a
     );
   }
   assert.equal(harness.calls, 1);
+});
+
+test("returns an imported manual position without inventing a result URL", async () => {
+  const row = {
+    ...foundRow(),
+    id: "2c64b96f-0747-5cc4-8477-43bade090d31",
+    trackingContextId: "c53bcb2b-c890-5ed0-97cb-c8ba4bb975e3",
+    jobId: "4223aa99-a200-5efa-a377-0dca071ebd5c",
+    provider: "MANUAL_IMPORT",
+    sourceMode: "IMPORT",
+    rankingUrl: null,
+    normalizedRankingUrl: null,
+    resultType: "ORGANIC",
+    dataQualityFlags: ["IMPORTED_MANUAL_HISTORY"],
+    serpResults: [],
+    manifest: {
+      ...foundRow().manifest,
+      execution: { source: "MANUAL_HISTORY", searchEngine: "YANDEX" },
+      context: { name: "Ручной импорт · Москва · ПК" }
+    }
+  };
+  const service = new RankHistoryService({
+    rankSnapshot: { findMany: async () => [row] }
+  } as unknown as PrismaService, config());
+
+  const result = await service.list({ ...query(), limit: 10 });
+
+  assert.deepEqual(
+    {
+      provider: result.items[0]?.provider,
+      found: result.items[0]?.found,
+      position: result.items[0]?.position,
+      hasUrl: "rankingUrl" in (result.items[0] ?? {})
+    },
+    { provider: "MANUAL_IMPORT", found: true, position: 100, hasUrl: false }
+  );
 });
 
 function query(): InternalRankHistoryQuery {
@@ -189,7 +227,12 @@ function foundRow() {
       context: { name: "Москва · десктоп" },
       configuration: {
         searchEngine: "YANDEX",
-        regionLabel: "Москва"
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP",
+        depth: 100
       }
     },
     serpResults: [
@@ -251,7 +294,12 @@ function notFoundRow() {
       context: { name: "Москва · десктоп" },
       configuration: {
         searchEngine: "YANDEX",
-        regionLabel: "Москва"
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP",
+        depth: 100
       }
     },
     serpResults: []

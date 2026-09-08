@@ -56,6 +56,14 @@ export function createWebHttpHeaderRules(
       ]
     },
     {
+      source: "/notes/:path*",
+      headers: [
+        { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+        { key: "Cache-Control", value: "private, no-store" },
+        { key: "Referrer-Policy", value: "no-referrer" }
+      ]
+    },
+    {
       source: "/app/:path*",
       headers: [
         {

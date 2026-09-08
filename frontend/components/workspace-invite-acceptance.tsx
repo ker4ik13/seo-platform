@@ -14,6 +14,8 @@ import {
   workspaceInviteFailurePhase,
   type WorkspaceInviteFailurePhase
 } from "../lib/team-management";
+import { UiText } from "./ui-locale";
+
 
 type AcceptancePhase =
   | "loading"
@@ -86,8 +88,7 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form" aria-busy="true">
         <div className="inline-alert" role="status">
-          Проверяем приглашение…
-        </div>
+          <UiText text="Проверяем приглашение…" /></div>
       </div>
     );
   }
@@ -96,11 +97,9 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form">
         <div className="inline-alert success" role="status">
-          Приглашение принято. Рабочая область уже доступна в приложении.
-        </div>
+          <UiText text="Приглашение принято. Рабочая область уже доступна в приложении." /></div>
         <a className="primary-button auth-submit" href="/app">
-          Открыть рабочую область
-        </a>
+          <UiText text="Открыть рабочую область" /></a>
       </div>
     );
   }
@@ -110,21 +109,17 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form">
         <div className="inline-alert warning" role="status">
-          Войдите или создайте аккаунт с адресом, на который пришло
-          приглашение. Ссылка сохранена только в этой вкладке.
-        </div>
+          <UiText text="Войдите или создайте аккаунт с адресом, на который пришло приглашение. Ссылка сохранена только в этой вкладке." /></div>
         <a
           className="primary-button auth-submit"
           href={`/app/login?returnTo=${encodedReturnTo}`}
         >
-          Войти
-        </a>
+          <UiText text="Войти" /></a>
         <a
           className="secondary-button auth-submit"
           href={`/app/register?returnTo=${encodedReturnTo}`}
         >
-          Создать аккаунт
-        </a>
+          <UiText text="Создать аккаунт" /></a>
       </div>
     );
   }
@@ -133,14 +128,12 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form">
         <div className="inline-alert warning" role="status">
-          Сначала подтвердите email аккаунта, затем вернитесь к приглашению.
-        </div>
+          <UiText text="Сначала подтвердите email аккаунта, затем вернитесь к приглашению." /></div>
         <a
           className="primary-button auth-submit"
           href={`/app/verify-email?returnTo=${encodeURIComponent(RETURN_TO)}`}
         >
-          Подтвердить email
-        </a>
+          <UiText text="Подтвердить email" /></a>
       </div>
     );
   }
@@ -149,13 +142,9 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form">
         <div className="inline-alert warning" role="status">
-          Приглашение отправлено на другой подтверждённый email. Проверьте
-          текущий аккаунт или выйдите и войдите под нужным адресом. Ссылка
-          сохранена только в этой вкладке.
-        </div>
+          <UiText text="Приглашение отправлено на другой подтверждённый email. Проверьте текущий аккаунт или выйдите и войдите под нужным адресом. Ссылка сохранена только в этой вкладке." /></div>
         <a className="primary-button auth-submit" href="/app/settings/security">
-          Проверить аккаунт
-        </a>
+          <UiText text="Проверить аккаунт" /></a>
       </div>
     );
   }
@@ -164,9 +153,7 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form">
         <div className="inline-alert warning" role="status">
-          Рабочая область сейчас не принимает приглашения. Обратитесь к
-          администратору или повторите позже.
-        </div>
+          <UiText text="Рабочая область сейчас не принимает приглашения. Обратитесь к администратору или повторите позже." /></div>
         <button
           className="primary-button auth-submit"
           onClick={() => {
@@ -176,8 +163,7 @@ export function WorkspaceInviteAcceptance() {
           }}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </div>
     );
   }
@@ -186,12 +172,9 @@ export function WorkspaceInviteAcceptance() {
     return (
       <div className="auth-form">
         <div className="inline-alert danger" role="alert">
-          Приглашение недействительно, отозвано, уже использовано или
-          просрочено. Попросите администратора отправить новое.
-        </div>
+          <UiText text="Приглашение недействительно, отозвано, уже использовано или просрочено. Попросите администратора отправить новое." /></div>
         <a className="secondary-button auth-submit" href="/app">
-          Перейти в приложение
-        </a>
+          <UiText text="Перейти в приложение" /></a>
       </div>
     );
   }
@@ -199,8 +182,7 @@ export function WorkspaceInviteAcceptance() {
   return (
     <div className="auth-form">
       <div className="inline-alert danger" role="alert">
-        Не удалось проверить приглашение. Проверьте соединение и повторите.
-      </div>
+        <UiText text="Не удалось проверить приглашение. Проверьте соединение и повторите." /></div>
       <button
         className="primary-button auth-submit"
         onClick={() => {
@@ -210,8 +192,7 @@ export function WorkspaceInviteAcceptance() {
         }}
         type="button"
       >
-        Повторить
-      </button>
+        <UiText text="Повторить" /></button>
     </div>
   );
 }

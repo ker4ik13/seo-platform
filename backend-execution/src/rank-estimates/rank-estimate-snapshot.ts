@@ -1,4 +1,8 @@
 import {
+  batchedArsenkinRankPolicyVersion,
+  largeXmlStockRankPolicyVersion,
+  rankExecutionPolicyShape,
+  rankPolicyTaskCount,
   connectorRoutingScopes,
   currentRankProviderPolicyVersion,
   legacyRankProviderPolicyVersion,
@@ -253,15 +257,12 @@ export function rankEstimateSnapshotJson(
 }
 
 interface EstimatePolicy {
-  readonly version:
-    | typeof legacyRankProviderPolicyVersion
-    | typeof currentRankProviderPolicyVersion
-    | typeof xmlStockRankProviderPolicyVersion;
-  readonly overflowCount: 1_001 | 15_001;
-  readonly maximumTaskCount: 1 | 4 | 15_000;
+  readonly version: string;
+  readonly overflowCount: number;
+  readonly maximumTaskCount: number;
   readonly maximumRequestCount: number;
-  readonly keywordLimitPerTask: "1" | "250" | "15000";
-  readonly keywordLimitPerCommand: "1000" | "15000";
+  readonly keywordLimitPerTask: RankEstimate["workload"]["keywordLimitPerTask"];
+  readonly keywordLimitPerCommand: RankEstimate["workload"]["keywordLimitPerCommand"];
   readonly taskCount: (keywordCount: number) => number;
   readonly validRequestStages: (value: unknown) => value is RankEstimate["workload"]["requestStages"];
   readonly validMinimumRequestCount: (
@@ -275,6 +276,20 @@ function estimatePolicy(
   value: unknown,
   provider: "ARSENKIN" | "XMLSTOCK"
 ): EstimatePolicy {
+  if (value === batchedArsenkinRankPolicyVersion || value === largeXmlStockRankPolicyVersion) {
+    const shape = rankExecutionPolicyShape(value, provider);
+    if (!shape) invalid();
+    return {
+      version: value, overflowCount: shape.commandLimit + 1,
+      maximumTaskCount: Math.ceil(shape.commandLimit / shape.chunkSize),
+      maximumRequestCount: provider === "ARSENKIN" ? Math.ceil(shape.commandLimit / shape.chunkSize) * 3 : shape.commandLimit * 10,
+      keywordLimitPerTask: String(shape.chunkSize) as RankEstimate["workload"]["keywordLimitPerTask"],
+      keywordLimitPerCommand: "300000",
+      taskCount: keywordCount => rankPolicyTaskCount(shape, keywordCount),
+      validRequestStages: provider === "ARSENKIN" ? isArsenkinStages : isXmlStockStages,
+      validMinimumRequestCount: (tasks, requests, stages) => provider === "ARSENKIN" ? requests === tasks * 3 : isYandexXmlStockStages(stages) ? requests === tasks * 2 : isGoogleXmlStockStages(stages) && requests >= tasks && requests <= tasks * 10
+    };
+  }
   if (provider === "ARSENKIN" && value === legacyRankProviderPolicyVersion) {
     return {
       version: legacyRankProviderPolicyVersion,

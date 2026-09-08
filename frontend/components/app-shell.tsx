@@ -1,5 +1,9 @@
 "use client";
+import { OperationConfirmationHost } from "./operation-confirmation-host";
 
+import { WorkspaceUsageProvider } from "./workspace-usage-provider";
+import { SidebarUsage } from "./sidebar-usage";
+import { canViewWorkspaceBilling } from "../lib/app-permissions";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -16,6 +20,8 @@ import { ProjectOperationActivityProvider } from "./project-operation-activity-p
 import { ProjectPresenceAvatars } from "./project-presence-avatars";
 import { ProjectPresenceOverlay } from "./project-presence-overlay";
 import { ProjectPresenceProvider } from "./project-presence-provider";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 const navigation: readonly {
   readonly label: string;
@@ -88,6 +94,7 @@ export function AppShell({
   context: ProtectedAppContext;
   initiallyCollapsed: boolean;
 }>) {
+  const { t: uiText } = useUiLocale();
   const activeSection = appNavigationSection(usePathname());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initiallyCollapsed);
   const hasProject = Boolean(context.project);
@@ -110,6 +117,8 @@ export function AppShell({
         : `/app/projects/${encodeURIComponent(context.project.id)}/${item.section}`
       : item.href;
   return (
+    <WorkspaceUsageProvider workspace={context.workspace}>
+    <OperationConfirmationHost workspaceId={context.workspace?.id} locale={context.user.locale} />
     <ProjectOperationActivityProvider
       projects={context.projects}
       {...(context.workspace ? { workspaceId: context.workspace.id } : {})}
@@ -126,7 +135,7 @@ export function AppShell({
         data-presence-key="app-sidebar"
       >
         <div className="sidebar-heading">
-          <Link className="app-brand" href="/app" aria-label="SEOньорита">
+          <Link className="app-brand" href="/app" aria-label={uiText("SEOньорита")}>
             <img
               alt=""
               aria-hidden="true"
@@ -135,7 +144,7 @@ export function AppShell({
               src="/brand/seonorita-mark.svg"
               width={29}
             />
-            <span>SEOньорита</span>
+            <span><UiText text="SEOньорита" /></span>
           </Link>
           <SidebarCollapseButton
             collapsed={sidebarCollapsed}
@@ -152,7 +161,7 @@ export function AppShell({
           workspaces={context.workspaces}
         />
 
-        <nav aria-label="Навигация проекта">
+        <nav aria-label={uiText("Навигация проекта")}>
           {navigation.map((item) =>
             isNavigationAvailable(item) ? (
               <Link
@@ -168,26 +177,20 @@ export function AppShell({
                 data-presence-cursor-anchor="true"
                 href={navigationHref(item)}
                 key={item.label}
-                title={item.label}
+                title={uiText(item.label)}
               >
                 <Icon name={item.icon} />
-                <span>{item.label}</span>
+                <span><UiText text={item.label} /></span>
               </Link>
             ) : (
               <span
                 aria-disabled="true"
                 className="nav-item disabled"
                 key={item.label}
-                title={
-                  !item.available
-                    ? "Раздел временно недоступен"
-                    : hasProject
-                      ? "Раздел появится в следующем функциональном срезе"
-                      : "Сначала создайте проект"
-                }
+                title={!item.available ? uiText("Раздел временно недоступен") : hasProject ? uiText("Раздел появится в следующем функциональном срезе") : uiText("Сначала создайте проект")}
               >
                 <Icon name={item.icon} />
-                <span>{item.label}</span>
+                <span><UiText text={item.label} /></span>
               </span>
             )
           )}
@@ -202,17 +205,12 @@ export function AppShell({
           data-presence-key="nav:settings"
           data-presence-cursor-anchor="true"
           href="/app/settings/workspace"
-          title="Настройки"
+          title={uiText("Настройки")}
         >
           <Icon name="settings" />
-          <span>Настройки</span>
+          <span><UiText text="Настройки" /></span>
         </Link>
-        <div className="workspace-usage">
-          <Link href="/app/settings/billing">
-            <strong>Тариф и баланс</strong>
-          </Link>
-          <small>Тариф, платежи, чеки и расходы workspace</small>
-        </div>
+        <SidebarUsage canView={canViewWorkspaceBilling(context.workspace?.roleCode)} locale={context.user.locale} />
       </aside>
 
       <div
@@ -236,14 +234,14 @@ export function AppShell({
               src="/brand/seonorita-mark.svg"
               width={27}
             />
-            <strong>SEOньорита</strong>
+            <strong><UiText text="SEOньорита" /></strong>
           </div>
           <label className="global-search">
             <Icon name="search" />
             <input
-              aria-label="Глобальный поиск"
+              aria-label={uiText("Глобальный поиск")}
               disabled
-              placeholder="Поиск будет доступен после индексации данных"
+              placeholder={uiText("Поиск будет доступен после индексации данных")}
               type="search"
             />
             <kbd>⌘ K</kbd>
@@ -270,7 +268,7 @@ export function AppShell({
           {children}
         </main>
 
-        <nav className="mobile-nav" aria-label="Мобильная навигация">
+        <nav className="mobile-nav" aria-label={uiText("Мобильная навигация")}>
           {navigation
             .filter((item) => mobileNavigationSections.has(item.section))
             .map((item) =>
@@ -286,12 +284,12 @@ export function AppShell({
                   key={item.label}
                 >
                   <Icon name={item.icon} />
-                  <span>{item.label}</span>
+                  <span><UiText text={item.label} /></span>
                 </Link>
               ) : (
                 <span aria-disabled="true" key={item.label}>
                   <Icon name={item.icon} />
-                  <span>{item.label}</span>
+                  <span><UiText text={item.label} /></span>
                 </span>
               )
             )}
@@ -301,5 +299,6 @@ export function AppShell({
     </div>
     </ProjectPresenceProvider>
     </ProjectOperationActivityProvider>
+    </WorkspaceUsageProvider>
   );
 }

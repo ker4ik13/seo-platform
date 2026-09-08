@@ -196,6 +196,7 @@ export type CreateKeywordResearchRunInput =
 
 export type InternalCreateKeywordResearchRunInput =
   CreateKeywordResearchRunInput & {
+  readonly billing?: import("./paid-operations.js").InternalPaidOperationAdmission;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

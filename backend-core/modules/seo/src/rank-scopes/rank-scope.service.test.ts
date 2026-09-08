@@ -57,7 +57,7 @@ test("reads an empty scope atomically at RepeatableRead", async () => {
     "safeSearch",
     "searchEngine"
   ]);
-  assert.deepEqual(observed[0], { isolationLevel: "RepeatableRead" });
+  assert.deepEqual(observed[0], { isolationLevel: "RepeatableRead", timeout: 30_000 });
   assert.deepEqual(observed[1], {
     id: trackingContextId,
     workspaceId,
@@ -196,14 +196,14 @@ test("returns an unavailable hash for a bounded over-limit scope", async () => {
   const sentinelKeywordId =
     "01900000-0000-7000-8000-000000009999";
   const sentinelText = "SENTINEL_PRIVATE_KEYWORD_TEXT";
-  const rows = Array.from({ length: 15_001 }, (_, index) =>
+  const rows = Array.from({ length: 300_001 }, (_, index) =>
     assignment(index + 1)
   );
-  rows[15_000] = {
-    ...rows[15_000]!,
+  rows[300_000] = {
+    ...rows[300_000]!,
     keywordId: sentinelKeywordId,
     keyword: {
-      ...rows[15_000]!.keyword,
+      ...rows[300_000]!.keyword,
       id: sentinelKeywordId,
       textOriginal: sentinelText
     }
@@ -212,8 +212,8 @@ test("returns an unavailable hash for a bounded over-limit scope", async () => {
   const result = await scopeService(context(), rows).calculate(command);
   const serialized = JSON.stringify(result);
 
-  assert.equal(result.keywordCount, "15001");
-  assert.equal(result.pairCount, "15001");
+  assert.equal(result.keywordCount, "300001");
+  assert.equal(result.pairCount, "300001");
   assert.deepEqual(result.semanticScopeHash, {
     availability: "UNAVAILABLE"
   });
@@ -249,7 +249,7 @@ test("foreign tenant and context stay indistinguishable as not found", async () 
       work: (transaction: unknown) => Promise<unknown>,
       options: unknown
     ) => {
-      assert.deepEqual(options, { isolationLevel: "RepeatableRead" });
+      assert.deepEqual(options, { isolationLevel: "RepeatableRead", timeout: 30_000 });
       return work({
         trackingContext: {
           findFirst: async ({ where }: { where: unknown }) => {
@@ -296,11 +296,13 @@ function scopeService(
       observed.push(options);
       return work({
         $queryRaw: async (strings: TemplateStringsArray) => {
+          if (strings.join("").includes("rank_scope_plan")) return [{ assignmentCount: Math.min(5000, assignments.length), nestedLoops: "on", jit: "on", statementTimeout: "0" }];
+          if (strings.join("").includes("set_config")) return [];
           assert.match(
             strings.join(""),
             /CASE[\s\S]*octet_length[\s\S]*THEN[\s\S]*ELSE char_length/u
           );
-          const bounded = assignments.slice(0, 15_001);
+          const bounded = assignments.slice(0, 300_001);
           const characterCounts = bounded.map(
             ({ keyword }) => [...keyword.textOriginal].length
           );
@@ -310,8 +312,8 @@ function scopeService(
           return [
             {
               assignmentCount: bounded.length,
-              maxKeywordCharacters: Math.max(0, ...characterCounts),
-              maxKeywordBytes: String(Math.max(0, ...byteCounts)),
+              maxKeywordCharacters: characterCounts.reduce((max, count) => Math.max(max, count), 0),
+              maxKeywordBytes: String(byteCounts.reduce((max, count) => Math.max(max, count), 0)),
               totalKeywordBytes: String(
                 byteCounts.reduce((total, value) => total + value, 0)
               )
@@ -340,14 +342,15 @@ function scopeService(
           }) => {
             observed.push(where);
             assert.deepEqual(orderBy, { keywordId: "asc" });
-            assert.equal(take, 15_001);
-            return [...assignments].sort((left, right) =>
+            assert.equal(take, 5_000);
+            const cursor = (where.keywordId as { gt?: string } | undefined)?.gt;
+            return [...assignments].filter(row => !cursor || row.keywordId > cursor).sort((left, right) =>
               left.keywordId < right.keywordId
                 ? -1
                 : left.keywordId > right.keywordId
                   ? 1
                   : 0
-            );
+            ).slice(0, take);
           }
         }
       });

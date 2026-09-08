@@ -12,7 +12,7 @@ import {
   type InternalRankHistoryCollection,
   type InternalRankHistoryCursorV1,
   type InternalRankHistoryQuery,
-  type NormalizedRankDataQualityFlag,
+  type RankHistoryDataQualityFlag,
   type RankHistoryItem,
   type RankManifestHash
 } from "@seo-platform/contracts";
@@ -24,6 +24,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { rankDimensionConfigurationWhere, rankDimensionMetadata } from "./rank-dimension.js";
 import {
   projectSiteResults,
   rankHistorySearchSource
@@ -32,10 +33,14 @@ import {
 const CURSOR_DOMAIN = "seo-platform.rank-history-cursor@1\0";
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
-const QUALITY_FLAGS = new Set<NormalizedRankDataQualityFlag>(
-  normalizedRankDataQualityFlags
-);
+const QUALITY_FLAGS = new Set<RankHistoryDataQualityFlag>([
+  ...normalizedRankDataQualityFlags,
+  "IMPORTED_KC4",
+  "IMPORTED_MANUAL_HISTORY"
+]);
 
 const HISTORY_SELECT = {
   id: true,
@@ -69,7 +74,12 @@ const HISTORY_SELECT = {
       configuration: {
         select: {
           searchEngine: true,
-          regionLabel: true
+          regionLabel: true,
+          countryCode: true,
+          regionCode: true,
+          language: true,
+          device: true,
+          depth: true
         }
       }
     }
@@ -118,8 +128,10 @@ export class RankHistoryService {
       where: {
         workspaceId: query.workspaceId,
         projectId: query.projectId,
-        sourceMode: "BYOK",
-        positionTrackingEnabled: true,
+        sourceMode: { in: ["BYOK", "PLATFORM", "IMPORT"] },
+        provider: { in: ["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"] },
+        ...(query.mode === "SERP" ? { serpResults: { some: {} } } : { positionTrackingEnabled: true }),
+        ...(query.dimensionKey ? { manifest: { configuration: rankDimensionConfigurationWhere(query.dimensionKey) } } : {}),
         observedAt: {
           gte: new Date(query.observedFrom),
           lt: new Date(query.observedBefore)
@@ -218,7 +230,7 @@ export class RankHistoryService {
       projectId: uuid(payload.projectId),
       filterHash: hash,
       observedAt: isoInstant(payload.observedAt),
-      snapshotId: uuid(payload.snapshotId)
+      snapshotId: snapshotUuid(payload.snapshotId)
     };
     if (
       typeof envelope.mac !== "string" ||
@@ -257,15 +269,19 @@ function storedHistoryItem(
   record: RankHistoryRecord,
   query: InternalRankHistoryQuery
 ): RankHistoryItem {
+  const technicalIdPattern = record.provider === "MANUAL_IMPORT"
+    ? UUID_PATTERN
+    : UUID_V7_PATTERN;
   if (
     record.workspaceId !== query.workspaceId ||
     record.projectId !== query.projectId ||
-    (record.provider !== "ARSENKIN" && record.provider !== "XMLSTOCK") ||
-    record.sourceMode !== "BYOK" ||
-    !UUID_V7_PATTERN.test(record.id) ||
+    !["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"].includes(record.provider) ||
+    !["BYOK", "PLATFORM", "IMPORT"].includes(record.sourceMode) ||
+    (record.sourceMode === "IMPORT" && record.provider !== "MANUAL_IMPORT") ||
+    !technicalIdPattern.test(record.id) ||
     !UUID_V7_PATTERN.test(record.keywordId) ||
-    !UUID_V7_PATTERN.test(record.trackingContextId) ||
-    !UUID_V7_PATTERN.test(record.jobId) ||
+    !technicalIdPattern.test(record.trackingContextId) ||
+    !technicalIdPattern.test(record.jobId) ||
     !Number.isSafeInteger(record.configurationVersion) ||
     record.configurationVersion < 1 ||
     !(record.observedAt instanceof Date) ||
@@ -285,11 +301,13 @@ function storedHistoryItem(
     searchEngine
   );
   const common = {
+    ...rankDimensionMetadata(record.manifest.configuration),
+    depth: record.manifest.configuration.depth,
     snapshotId: record.id,
     keywordId: record.keywordId,
     trackingContextId: record.trackingContextId,
     configurationVersion: record.configurationVersion,
-    provider: record.provider as "ARSENKIN" | "XMLSTOCK",
+    provider: record.provider as "ARSENKIN" | "XMLSTOCK" | "MANUAL_IMPORT",
     connectorVersion: record.connectorVersion,
     contextName: record.manifest.context.name,
     searchEngine,
@@ -301,7 +319,13 @@ function storedHistoryItem(
     storedAt: record.createdAt.toISOString(),
     jobId: record.jobId,
     dataQualityFlags: storedQualityFlags(record.dataQualityFlags),
-    ...(siteResults.length === 0 ? {} : { siteResults })
+    ...(siteResults.length === 0 ? {} : { siteResults }),
+    ...(query.mode === "SERP" && record.serpResults.length > 0 ? { serpResults: record.serpResults.map(result => ({
+      position: result.position, rankingUrl: result.rankingUrl,
+      ...(result.faviconUrl ? { faviconUrl: result.faviconUrl } : {}),
+      ...(result.title ? { title: result.title } : {}),
+      ...(result.snippet ? { snippet: result.snippet } : {})
+    })) } : {})
   };
   if (!record.found) {
     if (
@@ -323,6 +347,30 @@ function storedHistoryItem(
       position: null
     });
   }
+  if (record.provider === "MANUAL_IMPORT") {
+    if (
+      record.position === null ||
+      record.position < 1 ||
+      record.position > 100 ||
+      record.absolutePosition !== null ||
+      record.pixelPosition !== null ||
+      record.rankingUrl !== null ||
+      record.normalizedRankingUrl !== null ||
+      record.title !== null ||
+      record.snippet !== null ||
+      record.resultType !== "ORGANIC" ||
+      !emptyJsonArray(record.serpFeatures) ||
+      record.serpResults.length !== 0
+    ) {
+      throw new Error("Stored manual rank history row is invalid");
+    }
+    return redactRankHistoryItem({
+      ...common,
+      provider: "MANUAL_IMPORT",
+      found: true,
+      position: record.position
+    });
+  }
   if (
     record.position === null ||
     record.position < 1 ||
@@ -336,6 +384,7 @@ function storedHistoryItem(
   }
   return redactRankHistoryItem({
     ...common,
+    provider: record.provider as "ARSENKIN" | "XMLSTOCK",
     found: true,
     position: record.position,
     ...(record.absolutePosition === null
@@ -355,22 +404,22 @@ function storedHistoryItem(
 
 function storedQualityFlags(
   value: Prisma.JsonValue
-): readonly NormalizedRankDataQualityFlag[] {
+): readonly RankHistoryDataQualityFlag[] {
   if (!Array.isArray(value) || value.length > QUALITY_FLAGS.size) {
     throw new Error("Stored rank data-quality flags are invalid");
   }
-  const result: NormalizedRankDataQualityFlag[] = [];
+  const result: RankHistoryDataQualityFlag[] = [];
   const seen = new Set<string>();
   for (const flag of value) {
     if (
       typeof flag !== "string" ||
-      !QUALITY_FLAGS.has(flag as NormalizedRankDataQualityFlag) ||
+      !QUALITY_FLAGS.has(flag as RankHistoryDataQualityFlag) ||
       seen.has(flag)
     ) {
       throw new Error("Stored rank data-quality flags are invalid");
     }
     seen.add(flag);
-    result.push(flag as NormalizedRankDataQualityFlag);
+    result.push(flag as RankHistoryDataQualityFlag);
   }
   return result;
 }
@@ -440,6 +489,13 @@ function hashesEqual(
 
 function uuid(value: unknown): string {
   if (typeof value !== "string" || !UUID_V7_PATTERN.test(value)) {
+    invalidCursor();
+  }
+  return value;
+}
+
+function snapshotUuid(value: unknown): string {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
     invalidCursor();
   }
   return value;

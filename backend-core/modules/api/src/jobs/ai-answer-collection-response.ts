@@ -2,7 +2,7 @@ import {
   aiAnswerCollectionStatuses,
   aiAnswerDevices,
   aiAnswerSearchEngines,
-  arsenkinAiAnswerKeywordLimit,
+  aiAnswerCollectionKeywordLimit,
   connectorRoutingScopes,
   type AiAnswerCollectionSummary,
   type ConnectorOperationAttemptSummary,
@@ -53,9 +53,9 @@ export function scopedAiAnswerCollection(
     ...(hasAttempts ? { connectorAttempts: attempts(input.connectorAttempts) } : {}),
     status: member(input.status, aiAnswerCollectionStatuses),
     ...(typeof input.stage === "string" ? { stage: bounded(input.stage, 64) } : {}),
-    selectedKeywords: integer(input.selectedKeywords, 1, arsenkinAiAnswerKeywordLimit),
-    completedKeywords: integer(input.completedKeywords, 0, arsenkinAiAnswerKeywordLimit),
-    failedKeywords: integer(input.failedKeywords, 0, arsenkinAiAnswerKeywordLimit),
+    selectedKeywords: integer(input.selectedKeywords, 1, aiAnswerCollectionKeywordLimit),
+    completedKeywords: integer(input.completedKeywords, 0, aiAnswerCollectionKeywordLimit),
+    failedKeywords: integer(input.failedKeywords, 0, aiAnswerCollectionKeywordLimit),
     searchEngine: member(input.searchEngine, aiAnswerSearchEngines),
     regionCode: bounded(input.regionCode, 100),
     device: member(input.device, aiAnswerDevices),
@@ -99,7 +99,7 @@ export function scopedAiAnswerOperationScope(
   const items = input.items.map((value): InternalAiAnswerOperationScopeItem => {
     const item = record(value);
     const keywordId = uuid(item.keywordId);
-    const sequence = integer(item.sequence, 0, arsenkinAiAnswerKeywordLimit - 1);
+    const sequence = integer(item.sequence, 0, aiAnswerCollectionKeywordLimit - 1);
     if (
       keywordIds.has(keywordId) ||
       sequences.has(sequence) ||

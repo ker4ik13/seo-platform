@@ -119,7 +119,10 @@ test(
     assert.ok(databaseUrl);
     const prisma = grantPrisma(databaseUrl, 6);
     const monitor = new Client({ connectionString: databaseUrl });
-    const fixture = await createGrantFixture(prisma);
+    const fixture = await createGrantFixture(prisma, {
+      provider: "XMLSTOCK",
+      policyVersion: "manual-xmlstock-serp@2.0.0"
+    });
     const service = new RankExecutionGrantService(
       prisma,
       grantingPolicy()
@@ -298,7 +301,11 @@ interface GrantFixture {
 }
 
 async function createGrantFixture(
-  prisma: PrismaService
+  prisma: PrismaService,
+  options: Readonly<{
+    provider?: "ARSENKIN" | "XMLSTOCK";
+    policyVersion?: string;
+  }> = {}
 ): Promise<GrantFixture> {
   const workspaceId = uuidV7();
   const projectId = uuidV7();
@@ -375,7 +382,7 @@ async function createGrantFixture(
       jobVersion: 1,
       executionAttempt: 1,
       purpose: "PROVIDER_SUBMIT",
-      provider: "ARSENKIN",
+      provider: options.provider ?? "ARSENKIN",
       operation: "POSITIONS",
       capability: "SERP_RANK_TRACKING",
       credentialMode: "BYOK_API_KEY",
@@ -385,7 +392,8 @@ async function createGrantFixture(
         chunkIndex: 0
       },
       executionEvidenceHash: hash("c"),
-      policyVersion: "manual-arsenkin-positions@1.0.0",
+      policyVersion:
+        options.policyVersion ?? "manual-arsenkin-positions@1.0.0",
       usageIntent: { meter: "RANK_PROVIDER_TASK", quantity: "1" }
     }
   };

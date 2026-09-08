@@ -1,3 +1,9 @@
+x-runtime-logging: &runtime-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 # Generate a copy-paste-ready Dokploy environment before the first deploy:
 #   pnpm dokploy:env:generate
 # The command writes `.env.dokploy.generated` with a different value for every
@@ -43,6 +49,7 @@ x-clamav-runtime-build: &clamav-runtime-build
 
 x-backend-defaults: &backend-defaults
   restart: unless-stopped
+  logging: *runtime-logging
   init: true
   networks:
     - internal
@@ -138,6 +145,7 @@ x-integration-credential-execution-env: &integration-credential-execution-env
 x-redis-defaults: &redis-defaults
   build: *redis-runtime-build
   restart: unless-stopped
+  logging: *runtime-logging
   init: true
   read_only: true
   security_opt: ["no-new-privileges:true"]
@@ -178,6 +186,7 @@ services:
   postgres:
     build: *postgres-runtime-build
     restart: unless-stopped
+    logging: *runtime-logging
     shm_size: 256mb
     entrypoint:
       ["/bin/sh", "/postgres-config/start-postgres.sh"]
@@ -187,7 +196,13 @@ services:
         "-c",
         "hba_file=/tmp/seo-platform-pg_hba.conf",
         "-c",
-        "timezone=UTC"
+        "timezone=UTC",
+        "-c", "log_timezone=UTC",
+        "-c", "log_statement=none",
+        "-c", "log_min_error_statement=panic",
+        "-c", "log_error_verbosity=terse",
+        "-c", "log_parameter_max_length=0",
+        "-c", "log_parameter_max_length_on_error=0"
       ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
@@ -302,6 +317,7 @@ services:
       PLATFORM_XMLSTOCK_ACCOUNT_ID: ${PLATFORM_XMLSTOCK_ACCOUNT_ID:-}
       PLATFORM_XMLSTOCK_ACCOUNT_IDS: ${PLATFORM_XMLSTOCK_ACCOUNT_IDS:-}
       PLATFORM_ARSENKIN_ENABLED: ${PLATFORM_ARSENKIN_ENABLED:-false}
+      PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT: ${PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT:-30000}
       PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: ${PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR:-}
       PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: ${PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR:-}
       PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: ${PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR:-}
@@ -348,6 +364,7 @@ services:
   nats:
     build: *nats-runtime-build
     restart: unless-stopped
+    logging: *runtime-logging
     entrypoint: ["/bin/sh", "/etc/nats/start-nats.sh"]
     environment:
       NATS_RUNTIME_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
@@ -422,6 +439,7 @@ services:
     profiles:
       - inspection
     restart: unless-stopped
+    logging: *runtime-logging
     init: true
     volumes:
       - clamav_data:/var/lib/clamav
@@ -676,6 +694,20 @@ services:
       TELEGRAM_ALERT_ENVIRONMENT: ${TELEGRAM_ALERT_ENVIRONMENT:-production}
       CORS_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+      TELEGRAM_LOGIN_ENABLED: ${TELEGRAM_LOGIN_ENABLED:-false}
+      TELEGRAM_LOGIN_BOT_TOKEN: ${TELEGRAM_LOGIN_BOT_TOKEN:-}
+      TELEGRAM_LOGIN_BOT_USERNAME: ${TELEGRAM_LOGIN_BOT_USERNAME:-}
+      TELEGRAM_LOGIN_WEBHOOK_SECRET: ${TELEGRAM_LOGIN_WEBHOOK_SECRET:-}
+      TELEGRAM_LOGIN_WEBHOOK_URL: ${TELEGRAM_LOGIN_WEBHOOK_URL:-}
+      NPD_RECEIPTS_ENABLED: ${NPD_RECEIPTS_ENABLED:-false}
+      NPD_PROCESSOR_API_TOKEN: ${NPD_PROCESSOR_API_TOKEN:-}
+      NPD_INN: ${NPD_INN:-}
+      NPD_PASSWORD: ${NPD_PASSWORD:-}
+      NPD_DEVICE_ID: ${NPD_DEVICE_ID:-}
+      CRYPTO_PAY_ENABLED: ${CRYPTO_PAY_ENABLED:-false}
+      CRYPTO_PAY_API_TOKEN: ${CRYPTO_PAY_API_TOKEN:-}
+      CRYPTO_PAY_API_BASE_URL: ${CRYPTO_PAY_API_BASE_URL:-https://pay.crypt.bot/api}
+      CRYPTO_PAY_REQUEST_TIMEOUT_MS: ${CRYPTO_PAY_REQUEST_TIMEOUT_MS:-10000}
       YOOKASSA_ENABLED: ${YOOKASSA_ENABLED:-false}
       YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
       YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
@@ -691,6 +723,7 @@ services:
       PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: ${PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR:-}
       PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: ${PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR:-}
       PLATFORM_ARSENKIN_ENABLED: ${PLATFORM_ARSENKIN_ENABLED:-false}
+      PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT: ${PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT:-30000}
       PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: ${PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR:-}
       PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: ${PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR:-}
       PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR: ${PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR:-}
@@ -860,6 +893,7 @@ services:
       PLATFORM_XMLSTOCK_ACCOUNT_ID: ${PLATFORM_XMLSTOCK_ACCOUNT_ID:-}
       PLATFORM_XMLSTOCK_ACCOUNT_IDS: ${PLATFORM_XMLSTOCK_ACCOUNT_IDS:-}
       PLATFORM_ARSENKIN_ENABLED: ${PLATFORM_ARSENKIN_ENABLED:-false}
+      PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT: ${PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT:-30000}
       PLATFORM_ARSENKIN_API_KEY: ${PLATFORM_ARSENKIN_API_KEY:-}
       PLATFORM_ARSENKIN_API_KEYS: ${PLATFORM_ARSENKIN_API_KEYS:-}
       CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS: ${CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS:-1000}
@@ -932,6 +966,7 @@ services:
 
   frontend:
     restart: unless-stopped
+    logging: *runtime-logging
     init: true
     build:
       context: ..
@@ -959,6 +994,10 @@ services:
       AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}
       AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
+      LEGAL_DOCUMENTS_PUBLISHED: ${LEGAL_DOCUMENTS_PUBLISHED:-false}
+      LEGAL_SELLER_NAME: ${LEGAL_SELLER_NAME:-}
+      LEGAL_SELLER_INN: ${LEGAL_SELLER_INN:-}
+      LEGAL_CONTACT_ADDRESS: ${LEGAL_CONTACT_ADDRESS:-}
       TELEGRAM_ALERTS_ENABLED: ${TELEGRAM_ALERTS_ENABLED:-false}
       OPERATIONAL_ALERT_TOKEN: ${OPERATIONAL_ALERT_TOKEN:?OPERATIONAL_ALERT_TOKEN is required}
       OPERATIONAL_ALERTS_INTERNAL_URL: http://backend-core:4004

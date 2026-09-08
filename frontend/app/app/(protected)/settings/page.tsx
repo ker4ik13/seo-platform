@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { SettingsOverview } from "../../../../components/settings-overview";
 import { SettingsTabs } from "../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
+import { UiText } from "../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +18,9 @@ export default async function SettingsOverviewPage() {
     <>
       <section className="page-heading settings-overview-heading">
         <div>
-          <h1>Настройки</h1>
+          <h1><UiText text="Настройки" /></h1>
           <p>
-            Управляйте аккаунтом, рабочей областью и текущим проектом в одном
-            месте.
-          </p>
+            <UiText text="Управляйте аккаунтом, рабочей областью и текущим проектом в одном месте." /></p>
         </div>
       </section>
       <SettingsTabs

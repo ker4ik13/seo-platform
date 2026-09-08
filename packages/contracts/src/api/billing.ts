@@ -1,3 +1,7 @@
+export const billingPaymentProviders = ["YOOKASSA", "CRYPTO_PAY"] as const;
+export type OnlineBillingPaymentProvider = (typeof billingPaymentProviders)[number];
+export type BillingPaymentProvider = OnlineBillingPaymentProvider | "MANUAL";
+
 export const billingPeriods = ["MONTHLY", "ANNUAL"] as const;
 export type BillingPeriod = (typeof billingPeriods)[number];
 
@@ -119,6 +123,8 @@ export interface BillingPlanPrice {
 }
 
 export interface BillingPlanSummary {
+  readonly nameEn?: string;
+  readonly descriptionEn?: string;
   readonly code: string;
   readonly version: number;
   readonly name: string;
@@ -132,6 +138,9 @@ export interface BillingPlanSummary {
 }
 
 export interface BillingSubscriptionSummary {
+  readonly plan?: BillingPlanSummary;
+  /** Current unused paid service value; omitted for a legacy/manual period. */
+  readonly unusedServiceValueMinor?: number;
   readonly id: string;
   readonly workspaceId: string;
   readonly planCode: string;
@@ -159,9 +168,10 @@ export interface BillingBalanceSummary {
 }
 
 export interface BillingPaymentSummary {
+  readonly test?: boolean;
   readonly id: string;
   readonly orderId: string;
-  readonly provider: "YOOKASSA";
+  readonly provider: BillingPaymentProvider;
   readonly status: BillingPaymentStatus;
   readonly amountMinor: number;
   readonly currency: "RUB";
@@ -224,7 +234,7 @@ export interface NpdReceiptObligationSummary {
   readonly currency: "RUB";
   readonly paidAt: string;
   readonly serviceDescription: string;
-  readonly registrationMode: "MANUAL_MY_TAX";
+  readonly registrationMode: "MANUAL_MY_TAX" | "API_MY_TAX";
   readonly status:
     | "PENDING"
     | "AWAITING_MANUAL_REGISTRATION"
@@ -245,7 +255,10 @@ export interface NpdReceiptObligationSummary {
 }
 
 export interface CreateBillingCheckoutInput {
+  readonly provider?: OnlineBillingPaymentProvider;
   readonly planCode: string;
+  /** Explicit catalog version; an existing legacy subscription may be renewed. */
+  readonly planVersion?: number;
   readonly period: BillingPeriod;
   readonly buyerType: BillingBuyerType;
   readonly buyerName?: string;
@@ -257,6 +270,7 @@ export interface CreateBillingCheckoutInput {
 }
 
 export interface CreateBillingTopUpInput {
+  readonly provider?: OnlineBillingPaymentProvider;
   readonly amountMinor: number;
   readonly buyerType: BillingBuyerType;
   readonly buyerName?: string;
@@ -287,4 +301,12 @@ export interface BillingRefundSummary {
   readonly reason: string;
   readonly succeededAt?: string;
   readonly createdAt: string;
+}
+
+export interface BillingProviderAvailability {
+  readonly provider: OnlineBillingPaymentProvider;
+  readonly available: boolean;
+  readonly recurring: boolean;
+  readonly automaticRefunds: boolean;
+  readonly mode: "LIVE" | "TEST";
 }

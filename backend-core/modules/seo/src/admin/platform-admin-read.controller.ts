@@ -26,6 +26,12 @@ type InternalHeaders = Readonly<
 export class PlatformAdminReadController {
   public constructor(private readonly admin: PlatformAdminReadService) {}
 
+  @Post("overview")
+  public async overview(@Headers() headers: InternalHeaders, @Req() request: FastifyRequest) {
+    internalUuid(String(headers["x-actor-id"]), "actorId");
+    return { data: await this.admin.overview(), meta: { requestId: request.id } };
+  }
+
   @Post()
   public async projectStatistics(
     @Body() body: unknown,

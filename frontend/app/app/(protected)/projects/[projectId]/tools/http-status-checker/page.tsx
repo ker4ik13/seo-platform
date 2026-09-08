@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { HttpStatusCheckTool } from "../../../../../../../components/http-status-check-tool";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
+import { UiText, UiElement } from "../../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +21,11 @@ export default async function HttpStatusCheckerPage({
 
   return (
     <>
-      <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
-        <a href="/app/tools">Инструменты</a>
+      <UiElement tag="nav" uiLabels={{"aria-label": "Хлебные крошки"}}  className="app-breadcrumbs">
+        <a href="/app/tools"><UiText text="Инструменты" /></a>
         <span aria-hidden="true">/</span>
-        <span aria-current="page">Обход сайта</span>
-      </nav>
+        <span aria-current="page"><UiText text="Обход сайта" /></span>
+      </UiElement>
       <HttpStatusCheckTool
         canReorderProjects={context.projectCapabilities?.canReorder ?? false}
         project={project}

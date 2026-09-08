@@ -175,7 +175,7 @@ wait_for_public_api() {
   endpoint=$(public_api_endpoint)
   for ((attempt = 1; attempt <= 60; attempt += 1)); do
     response_code=$(
-      curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+      curl --silent --output /dev/null --write-out '%{http_code}' \
         --max-time 2 "$endpoint/api/v1/workspaces" 2>/dev/null || true
     )
     [ "$response_code" = 401 ] && return 0

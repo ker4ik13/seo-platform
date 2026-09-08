@@ -20,6 +20,8 @@ import {
 import { CustomSelect } from "./custom-select";
 import { IntegrationStatusBadge } from "./integration-status-badge";
 import { ProviderLogo } from "./provider-logo";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type ProjectRouteDraft = {
   readonly source: "WORKSPACE" | "PROJECT";
@@ -168,14 +170,14 @@ export function ProjectIntegrationRouting({
   }
 
   if (loading) {
-    return <section className="panel integration-routing-panel" aria-busy="true"><span className="spinner" /><p>Загружаем маршруты проекта…</p></section>;
+    return <section className="panel integration-routing-panel" aria-busy="true"><span className="spinner" /><p><UiText text="Загружаем маршруты проекта…" /></p></section>;
   }
   if (!settings || !workspace) {
     return (
       <section className="panel panel-empty compact">
-        <strong>Маршрутизация проекта временно недоступна</strong>
-        <p>{error ?? "Не удалось загрузить настройки."}</p>
-        <button className="secondary-button" onClick={() => void load()} type="button">Повторить</button>
+        <strong><UiText text="Маршрутизация проекта временно недоступна" /></strong>
+        <p>{error ?? <UiText text="Не удалось загрузить настройки." />}</p>
+        <button className="secondary-button" onClick={() => void load()} type="button"><UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -184,12 +186,12 @@ export function ProjectIntegrationRouting({
     <section className="panel integration-routing-panel">
       <header className="security-card-header integration-routing-header">
         <div>
-          <h2>Источники операций проекта</h2>
-          <p>Наследуйте общий маршрут рабочей области или задайте отдельную цепочку аккаунтов для конкретного проекта.</p>
+          <h2><UiText text="Источники операций проекта" /></h2>
+          <p><UiText text="Наследуйте общий маршрут рабочей области или задайте отдельную цепочку аккаунтов для конкретного проекта." /></p>
         </div>
-        <span className="security-status">Проектный уровень</span>
+        <span className="security-status"><UiText text="Проектный уровень" /></span>
       </header>
-      {error && <div className="inline-alert danger" role="alert">{error}</div>}
+      {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
       <div className="integration-routing-list">
         {integrationCapabilities.map((capability) => (
           <ProjectCapabilityRoutingRow
@@ -237,6 +239,7 @@ function ProjectCapabilityRoutingRow({
   success: boolean;
   workspaceBinding: WorkspaceConnectorBinding | undefined;
 }>) {
+  const { t: uiText } = useUiLocale();
   const selected = draft.credentialIds
     .map((id) => options.find((option) => option.id === id))
     .filter((option): option is ProjectConnectorCredentialOption => Boolean(option));
@@ -245,17 +248,17 @@ function ProjectCapabilityRoutingRow({
   return (
     <article className="integration-routing-row">
       <div className="integration-routing-title">
-        <div><strong>{integrationCapabilityLabel(capability)}</strong><span>{capabilityDescription(capability)}</span></div>
+        <div><strong>{<UiText text={integrationCapabilityLabel(capability) ?? ""} />}</strong><span><UiText text={capabilityDescription(capability)} /></span></div>
         <IntegrationStatusBadge status={binding?.availability === "READY" ? "ACTIVE" : "PENDING_VERIFICATION"} />
       </div>
-      <div className="integration-routing-source-tabs" role="radiogroup" aria-label={`Источник ${integrationCapabilityLabel(capability)}`}>
+      <div className="integration-routing-source-tabs" role="radiogroup" aria-label={uiText("Источник {0}", [String(integrationCapabilityLabel(capability))])}>
         <label>
           <input checked={draft.source === "WORKSPACE"} disabled={!canUpdate || saving || !workspaceBinding} name={`${capability}-source`} onChange={() => onChange((current) => ({ ...current, source: "WORKSPACE" }))} type="radio" />
-          <span>Наследовать рабочую область</span>
+          <span><UiText text="Наследовать рабочую область" /></span>
         </label>
         <label>
           <input checked={draft.source === "PROJECT"} disabled={!canUpdate || saving} name={`${capability}-source`} onChange={() => onChange((current) => ({ ...current, source: "PROJECT", credentialIds: current.source === "PROJECT" ? current.credentialIds : [] }))} type="radio" />
-          <span>Отдельный маршрут проекта</span>
+          <span><UiText text="Отдельный маршрут проекта" /></span>
         </label>
       </div>
       {draft.source === "WORKSPACE" ? (
@@ -264,47 +267,48 @@ function ProjectCapabilityRoutingRow({
         <>
           <label className="integration-routing-switch">
             <input checked={draft.enabled} disabled={!canUpdate || saving} onChange={(event) => onChange((current) => ({ ...current, enabled: event.target.checked }))} type="checkbox" />
-            <span>{draft.enabled ? "Операция включена" : "Операция выключена"}</span>
+            <span>{draft.enabled ? <UiText text="Операция включена" /> : <UiText text="Операция выключена" />}</span>
           </label>
           <RouteChain onChange={onChange} saving={saving} selected={selected} />
           {canUpdate && available.length > 0 && (
             <label className="form-field integration-route-add">
-              <span>{selected.length === 0 ? "Основное подключение" : "Добавить резерв проекта"}</span>
+              <span>{selected.length === 0 ? <UiText text="Основное подключение" /> : <UiText text="Добавить резерв проекта" />}</span>
               <CustomSelect disabled={saving || (selected.length > 0 && !canManageFallback)} onChange={(event) => onChange((current) => ({ ...current, credentialIds: [...current.credentialIds, event.target.value], fallbackReasons: current.fallbackReasons.length > 0 ? current.fallbackReasons : [...connectorFallbackReasons] }))} searchable value="">
-                <option value="">Выберите подключение</option>
-                {available.map((credential) => <option disabled={credential.status !== "ACTIVE"} key={credential.id} value={credential.id}>{integrationProviderLabel(credential.provider)} · {credential.label}</option>)}
+                <option value=""><UiText text="Выберите подключение" /></option>
+                {available.map((credential) => <option disabled={credential.status !== "ACTIVE"} key={credential.id} value={credential.id}>{<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} · {credential.label}</option>)}
               </CustomSelect>
             </label>
           )}
           {workspaceBinding && canManageFallback && (
             <label className="integration-workspace-fallback">
               <input checked={draft.appendWorkspaceFallback} disabled={saving} onChange={(event) => onChange((current) => ({ ...current, appendWorkspaceFallback: event.target.checked, fallbackReasons: current.fallbackReasons.length > 0 ? current.fallbackReasons : [...connectorFallbackReasons] }))} type="checkbox" />
-              <span>После резервов проекта использовать цепочку рабочей области</span>
+              <span><UiText text="После резервов проекта использовать цепочку рабочей области" /></span>
             </label>
           )}
           {(draft.credentialIds.length > 1 || draft.appendWorkspaceFallback) && (
             <fieldset className="integration-fallback-reasons" disabled={!canManageFallback || saving}>
-              <legend>Переключать на следующий источник, если</legend>
+              <legend><UiText text="Переключать на следующий источник, если" /></legend>
               {connectorFallbackReasons.map((reason) => <label key={reason}><input checked={draft.fallbackReasons.includes(reason)} onChange={(event) => onChange((current) => ({ ...current, fallbackReasons: event.target.checked ? [...current.fallbackReasons, reason] : current.fallbackReasons.filter((value) => value !== reason) }))} type="checkbox" /><span>{FALLBACK_REASON_LABELS[reason]}</span></label>)}
             </fieldset>
           )}
         </>
       )}
       <div className="integration-routing-actions">
-        <span className={success ? "integration-save-success" : ""}>{success ? "Сохранено" : draft.source === "WORKSPACE" ? "Обновления маршрута применяются ко всем наследующим проектам" : `${selected.length} проектных источников`}</span>
-        {canUpdate && <button className="secondary-button" disabled={saving || (draft.source === "PROJECT" && draft.enabled && selected.length === 0)} onClick={onSave} type="button">{saving ? "Сохраняем…" : "Сохранить"}</button>}
+        <span className={success ? "integration-save-success" : ""}>{success ? <UiText text="Сохранено" /> : draft.source === "WORKSPACE" ? <UiText text="Обновления маршрута применяются ко всем наследующим проектам" /> : <UiText text="{0} проектных источников" values={[String(selected.length)]} />}</span>
+        {canUpdate && <button className="secondary-button" disabled={saving || (draft.source === "PROJECT" && draft.enabled && selected.length === 0)} onClick={onSave} type="button">{saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}</button>}
       </div>
     </article>
   );
 }
 
 function RouteChain({ onChange, saving, selected }: Readonly<{ onChange: (update: (current: ProjectRouteDraft) => ProjectRouteDraft) => void; saving: boolean; selected: readonly ProjectConnectorCredentialOption[] }>) {
-  return <div className="integration-route-chain">{selected.map((credential, index) => <div className="integration-route-item" key={credential.id}><span className="integration-route-position">{index + 1}</span><ProviderLogo provider={credential.provider} size="compact" /><div className="integration-route-copy"><strong>{credential.label}</strong><span>{integrationProviderLabel(credential.provider)} · {index === 0 ? "основной" : "резерв"}</span></div><IntegrationStatusBadge status={credential.status} /><button aria-label={`Убрать ${credential.label}`} className="icon-button" disabled={saving} onClick={() => onChange((current) => ({ ...current, credentialIds: current.credentialIds.filter((id) => id !== credential.id) }))} type="button">×</button></div>)}{selected.length === 0 && <div className="integration-route-empty">Проектные подключения ещё не выбраны.</div>}</div>;
+  const { t: uiText } = useUiLocale();
+  return <div className="integration-route-chain">{selected.map((credential, index) => <div className="integration-route-item" key={credential.id}><span className="integration-route-position">{index + 1}</span><ProviderLogo provider={credential.provider} size="compact" /><div className="integration-route-copy"><strong>{credential.label}</strong><span>{<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} · {index === 0 ? <UiText text="основной" /> : <UiText text="резерв" />}</span></div><IntegrationStatusBadge status={credential.status} /><button aria-label={uiText("Убрать {0}", [String(credential.label)])} className="icon-button" disabled={saving} onClick={() => onChange((current) => ({ ...current, credentialIds: current.credentialIds.filter((id) => id !== credential.id) }))} type="button">×</button></div>)}{selected.length === 0 && <div className="integration-route-empty"><UiText text="Проектные подключения ещё не выбраны." /></div>}</div>;
 }
 
 function WorkspaceRoutePreview({ binding, options }: Readonly<{ binding: WorkspaceConnectorBinding | undefined; options: readonly ProjectConnectorCredentialOption[] }>) {
-  if (!binding) return <div className="integration-route-empty">Для этой операции маршрут рабочей области ещё не настроен.</div>;
-  return <div className="integration-route-chain">{binding.routes.map((route, index) => { const credential = options.find(({ id }) => id === route.credentialId); return <div className="integration-route-item" key={route.id}><span className="integration-route-position">{index + 1}</span><ProviderLogo provider={route.provider} size="compact" /><div className="integration-route-copy"><strong>{credential?.label ?? integrationProviderLabel(route.provider)}</strong><span>{index === 0 ? "основной workspace" : "резерв workspace"}</span></div>{credential && <IntegrationStatusBadge status={credential.status} />}</div>; })}</div>;
+  if (!binding) return <div className="integration-route-empty"><UiText text="Для этой операции маршрут рабочей области ещё не настроен." /></div>;
+  return <div className="integration-route-chain">{binding.routes.map((route, index) => { const credential = options.find(({ id }) => id === route.credentialId); return <div className="integration-route-item" key={route.id}><span className="integration-route-position">{index + 1}</span><ProviderLogo provider={route.provider} size="compact" /><div className="integration-route-copy"><strong>{credential?.label ?? integrationProviderLabel(route.provider)}</strong><span>{index === 0 ? <UiText text="основной workspace" /> : <UiText text="резерв workspace" />}</span></div>{credential && <IntegrationStatusBadge status={credential.status} />}</div>; })}</div>;
 }
 
 function projectPayload(draft: ProjectRouteDraft) {

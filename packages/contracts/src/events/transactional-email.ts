@@ -14,7 +14,8 @@ export const transactionalEmailEventTypesV1 = {
   passwordResetRequested: domainEventTypes.passwordResetRequested,
   workspaceInviteRequested: domainEventTypes.workspaceInviteRequested,
   billingNpdReceiptDeliveryRequested:
-    domainEventTypes.billingNpdReceiptDeliveryRequested
+    domainEventTypes.billingNpdReceiptDeliveryRequested,
+  billingNoticeRequested: domainEventTypes.billingNoticeRequested
 } as const;
 
 export type TransactionalEmailEventTypeV1 =
@@ -140,10 +141,25 @@ export interface BillingNpdReceiptDeliveryRequestedEventEnvelopeV1
 }
 
 export type TransactionalEmailEventEnvelopeV1 =
+  | BillingNoticeRequestedEventEnvelopeV1
   | EmailVerificationRequestedEventEnvelopeV1
   | PasswordResetRequestedEventEnvelopeV1
   | WorkspaceInviteRequestedEventEnvelopeV1
   | BillingNpdReceiptDeliveryRequestedEventEnvelopeV1;
+
+export interface BillingNoticeRequestedEventEnvelopeV1 extends DomainEventEnvelope<{ readonly noticeId: string; readonly workspaceId: string }> {
+  readonly eventType: typeof transactionalEmailEventTypesV1.billingNoticeRequested;
+  readonly producer: typeof transactionalEmailEventProducerV1;
+  readonly workspaceId: WorkspaceId;
+  readonly projectId?: never;
+  readonly aggregate: { readonly type: "billingNotice"; readonly id: string; readonly version: 1 };
+  readonly metadata: TransactionalEmailEventMetadataV1;
+}
+export interface CreateBillingNoticeRequestedEventEnvelopeV1Input extends CreateTransactionalEmailEventEnvelopeBaseV1Input {
+  readonly eventType: typeof transactionalEmailEventTypesV1.billingNoticeRequested;
+  readonly noticeId: string;
+  readonly workspaceId: string;
+}
 
 interface CreateTransactionalEmailEventEnvelopeBaseV1Input {
   readonly eventId: string;
@@ -193,6 +209,7 @@ export interface CreateBillingNpdReceiptDeliveryRequestedEventEnvelopeV1Input
 }
 
 export type CreateTransactionalEmailEventEnvelopeV1Input =
+  | CreateBillingNoticeRequestedEventEnvelopeV1Input
   | CreateEmailVerificationRequestedEventEnvelopeV1Input
   | CreatePasswordResetRequestedEventEnvelopeV1Input
   | CreateWorkspaceInviteRequestedEventEnvelopeV1Input
@@ -252,7 +269,8 @@ export function createTransactionalEmailEventEnvelopeV1(
         "aggregateVersion",
         "inviteId",
         "workspaceId",
-        "receiptId"
+        "receiptId",
+        "noticeId"
       ],
       "input"
     );
@@ -260,6 +278,12 @@ export function createTransactionalEmailEventEnvelopeV1(
       candidate.eventType,
       "input.eventType"
     );
+
+    if (eventType === transactionalEmailEventTypesV1.billingNoticeRequested) {
+      const record = exactRecord(input, ["eventId", "eventType", "occurredAt", "traceId", "metadata", "noticeId", "workspaceId"], [], "input");
+      const noticeId = canonicalUuid(record.noticeId, "input.noticeId"), workspaceId = canonicalUuid(record.workspaceId, "input.workspaceId");
+      return parseTransactionalEmailEventEnvelopeV1({ eventId: canonicalUuid(record.eventId, "input.eventId"), eventType, occurredAt: canonicalDate(record.occurredAt, "input.occurredAt"), producer: transactionalEmailEventProducerV1, traceId: safeContextId(record.traceId, "input.traceId"), workspaceId, aggregate: { type: "billingNotice", id: noticeId, version: 1 }, data: { noticeId, workspaceId }, metadata: validatedMetadata(record.metadata, "input.metadata") });
+    }
 
     if (
       eventType ===
@@ -435,9 +459,10 @@ export function parseTransactionalEmailEventEnvelopeV1(
     const isNpdReceipt =
       eventType ===
       transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested;
+    const isBillingNotice = eventType === transactionalEmailEventTypesV1.billingNoticeRequested;
     const envelope = exactRecord(
       input,
-      isWorkspaceInvite || isNpdReceipt
+      isWorkspaceInvite || isNpdReceipt || isBillingNotice
         ? [
             "eventId",
             "eventType",
@@ -488,6 +513,15 @@ export function parseTransactionalEmailEventEnvelopeV1(
       aggregate.id,
       "event.aggregate.id"
     );
+
+    if (isBillingNotice) {
+      if (aggregate.type !== "billingNotice" || aggregate.version !== 1) invalidEvent("event.aggregate");
+      const workspaceId = canonicalUuid(envelope.workspaceId, "event.workspaceId");
+      const data = exactRecord(envelope.data, ["noticeId", "workspaceId"], [], "event.data");
+      const noticeId = canonicalUuid(data.noticeId, "event.data.noticeId");
+      if (aggregateId !== noticeId || workspaceId !== data.workspaceId) invalidEvent("event.aggregate");
+      return Object.freeze({ ...common, eventType: transactionalEmailEventTypesV1.billingNoticeRequested, producer: transactionalEmailEventProducerV1, workspaceId: workspaceId as WorkspaceId, aggregate: Object.freeze({ type: "billingNotice", id: noticeId, version: 1 }), data: Object.freeze({ noticeId, workspaceId }), metadata: common.metadata });
+    }
 
     if (isWorkspaceInvite) {
       if (
@@ -976,6 +1010,7 @@ function transactionalEmailEventType(
     value !== transactionalEmailEventTypesV1.emailVerificationRequested &&
     value !== transactionalEmailEventTypesV1.passwordResetRequested &&
     value !== transactionalEmailEventTypesV1.workspaceInviteRequested &&
+    value !== transactionalEmailEventTypesV1.billingNoticeRequested &&
     value !==
       transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
   ) {

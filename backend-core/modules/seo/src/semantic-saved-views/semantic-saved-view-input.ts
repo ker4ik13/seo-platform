@@ -1,3 +1,4 @@
+import { parseSemanticRankColumnKey, parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticKeywordIntents,
@@ -113,7 +114,7 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     semanticSavedViewGroupSidebarWidthMax
   );
   const expandedGroupIds = optionalUuidArray(input.expandedGroupIds, 1_000);
-  const selectedGroupIds = optionalUuidArray(input.selectedGroupIds, 100);
+  const selectedGroupIds = optionalUuidArray(input.selectedGroupIds, 2_000);
   const appliedViewId = input.appliedViewId === undefined
     ? undefined
     : uuid(input.appliedViewId, "config.appliedViewId");
@@ -168,7 +169,10 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     "isFavorite",
     "isTracked",
     "priorityMin",
-    "priorityMax"
+    "priorityMax",
+    "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+    "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
   ]);
   const search = optionalString(input.search, "config.filters.search", 200);
   const tag = optionalString(input.tag, "config.filters.tag", 160)
@@ -205,6 +209,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     input.priorityMax,
     "config.filters.priorityMax"
   );
+  const advanced = advancedFilters(input, "config.filters");
   if (
     priorityMin !== undefined &&
     priorityMax !== undefined &&
@@ -221,7 +226,53 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
-    ...(priorityMax === undefined ? {} : { priorityMax })
+    ...(priorityMax === undefined ? {} : { priorityMax }),
+    ...advanced
+  };
+}
+
+function advancedFilters(input: Readonly<Record<string, unknown>>, field: string): Omit<SemanticSavedViewFilters, "search" | "tag" | "intent" | "groupId" | "clusterId" | "isFavorite" | "isTracked" | "priorityMin" | "priorityMax"> {
+  const decimal = (name: string): string | undefined => {
+    const value = input[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,18})$/u.test(value) || BigInt(value) > 9_223_372_036_854_775_807n) invalid(`${field}.${name}`);
+    return value;
+  };
+  const integer = (name: string, max: number): number | undefined => {
+    const value = input[name];
+    if (value === undefined) return undefined;
+    if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > max) invalid(`${field}.${name}`);
+    return Number(value);
+  };
+  const baseMin = decimal("frequencyBaseMin"), baseMax = decimal("frequencyBaseMax");
+  const exactMin = decimal("frequencyExactMin"), exactMax = decimal("frequencyExactMax");
+  const fixedMin = decimal("frequencyFixedMin"), fixedMax = decimal("frequencyFixedMax");
+  for (const [min, max, name] of [[baseMin, baseMax, "frequencyBaseMin"], [exactMin, exactMax, "frequencyExactMin"], [fixedMin, fixedMax, "frequencyFixedMin"]] as const) if (min && max && BigInt(min) > BigInt(max)) invalid(`${field}.${name}`);
+  const wordCountMin = integer("wordCountMin", 10_000), wordCountMax = integer("wordCountMax", 10_000);
+  const rankPositionMin = integer("rankPositionMin", 100), rankPositionMax = integer("rankPositionMax", 100);
+  if (wordCountMin && wordCountMax && wordCountMin > wordCountMax) invalid(`${field}.wordCountMin`);
+  if (rankPositionMin && rankPositionMax && rankPositionMin > rankPositionMax) invalid(`${field}.rankPositionMin`);
+  const targetUrlState = input.targetUrlState === undefined ? undefined : requiredEnum(input.targetUrlState, ["SET", "EMPTY"] as const, `${field}.targetUrlState`);
+  const rankState = input.rankState === undefined ? undefined : requiredEnum(input.rankState, ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const, `${field}.rankState`);
+  const rankDimensionKey = input.rankDimensionKey;
+  if (rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid(`${field}.rankDimensionKey`);
+  const instant = (name: string): string | undefined => {
+    const value = input[name]; if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.length !== 24 || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) invalid(`${field}.${name}`);
+    return value;
+  };
+  const rankCheckedFrom = instant("rankCheckedFrom"), rankCheckedBefore = instant("rankCheckedBefore");
+  if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) invalid(`${field}.rankCheckedFrom`);
+  if (!rankDimensionKey && (rankState || rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) invalid(`${field}.rankDimensionKey`);
+  if ((rankState === "NOT_CHECKED" && (rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) || (rankState === "NOT_FOUND" && (rankPositionMin || rankPositionMax))) invalid(`${field}.rankState`);
+  return {
+    ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}),
+    ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}),
+    ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}),
+    ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}),
+    ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}),
+    ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}),
+    ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {})
   };
 }
 
@@ -241,7 +292,7 @@ function requiredColumns(
       typeof column !== "string" ||
       (!semanticSystemColumnKeys.includes(
         column as (typeof semanticSystemColumnKeys)[number]
-      ) &&
+      ) && !parseSemanticRankColumnKey(column) &&
         !/^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
           column
         ))

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectPositionHistoryDateRange } from "../lib/project-position-history";
 import { Icon } from "./icon";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
 const DEFAULT_CUSTOM_RANGE_DAYS = 30;
@@ -26,6 +28,8 @@ export function ProjectPositionDateRangePicker({
   open: boolean;
   value?: ProjectPositionHistoryDateRange;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [draftFrom, setDraftFrom] = useState(availableRange.from);
@@ -122,9 +126,7 @@ export function ProjectPositionDateRangePicker({
       <button
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={active && value
-          ? `Свой период: ${formatFullRange(value)}`
-          : "Выбрать свой период"}
+        aria-label={active && value ? uiText("Свой период: {0}", [String(formatFullRange(value, uiLocale))]) : uiText("Выбрать свой период")}
         aria-pressed={active}
         className={`dashboard-date-range-trigger${active ? " is-active" : ""}`}
         onClick={() => onOpenChange(!open)}
@@ -132,7 +134,7 @@ export function ProjectPositionDateRangePicker({
         type="button"
       >
         <Icon name="calendar" />
-        <span>{active && value ? formatCompactRange(value) : "Свой период"}</span>
+        <span>{active && value ? formatCompactRange(value, uiLocale) : <UiText text="Свой период" />}</span>
         <Icon className="dashboard-date-range-chevron" name="chevronDown" />
       </button>
 
@@ -144,7 +146,7 @@ export function ProjectPositionDateRangePicker({
             onPointerDown={() => onOpenChange(false)}
           />
           <div
-            aria-label="Выбрать период графика"
+            aria-label={uiText("Выбрать период графика")}
             className="dashboard-date-range-popover"
             data-exclusive-dropdown-layer
             ref={panelRef}
@@ -152,17 +154,17 @@ export function ProjectPositionDateRangePicker({
           >
             <header className="dashboard-date-range-header">
               <div>
-                <span>Период графика</span>
+                <span><UiText text="Период графика" /></span>
                 <strong className="dashboard-date-range-month-label is-desktop">
-                  {formatMonthRange(months)}
+                  {formatMonthRange(months, uiLocale)}
                 </strong>
                 <strong className="dashboard-date-range-month-label is-mobile">
-                  {formatMonth(months.at(-1)!)}
+                  {formatMonth(months.at(-1)!, uiLocale)}
                 </strong>
               </div>
               <div className="dashboard-date-range-navigation">
                 <button
-                  aria-label="Предыдущий месяц"
+                  aria-label={uiText("Предыдущий месяц")}
                   disabled={previousDisabled}
                   onClick={() => setAnchorMonth((current) => addMonths(current, -1))}
                   type="button"
@@ -170,7 +172,7 @@ export function ProjectPositionDateRangePicker({
                   <Icon name="chevronRight" />
                 </button>
                 <button
-                  aria-label="Следующий месяц"
+                  aria-label={uiText("Следующий месяц")}
                   disabled={nextDisabled}
                   onClick={() => setAnchorMonth((current) => addMonths(current, 1))}
                   type="button"
@@ -178,7 +180,7 @@ export function ProjectPositionDateRangePicker({
                   <Icon name="chevronRight" />
                 </button>
                 <button
-                  aria-label="Закрыть выбор периода"
+                  aria-label={uiText("Закрыть выбор периода")}
                   className="dashboard-date-range-close"
                   onClick={() => onOpenChange(false)}
                   type="button"
@@ -195,8 +197,8 @@ export function ProjectPositionDateRangePicker({
                 onClick={() => editBoundary("FROM")}
                 type="button"
               >
-                <small>Начало</small>
-                <strong>{formatSelectedDate(draftFrom)}</strong>
+                <small><UiText text="Начало" /></small>
+                <strong>{formatSelectedDate(draftFrom, uiLocale)}</strong>
               </button>
               <span aria-hidden="true">→</span>
               <button
@@ -205,17 +207,17 @@ export function ProjectPositionDateRangePicker({
                 onClick={() => editBoundary("TO")}
                 type="button"
               >
-                <small>Конец</small>
-                <strong>{draftTo ? formatSelectedDate(draftTo) : "Выберите дату"}</strong>
+                <small><UiText text="Конец" /></small>
+                <strong>{draftTo ? formatSelectedDate(draftTo, uiLocale) : <UiText text="Выберите дату" />}</strong>
               </button>
             </div>
 
             <p aria-live="polite" className="dashboard-date-range-guidance">
               {activeBoundary === "FROM"
-                ? "Выберите первый день периода"
+                ? <UiText text="Выберите первый день периода" />
                 : draftTo
-                  ? "Диапазон готов — можно применить"
-                  : "Теперь выберите последний день периода"}
+                  ? <UiText text="Диапазон готов — можно применить" />
+                  : <UiText text="Теперь выберите последний день периода" />}
             </p>
 
             <div className="dashboard-date-range-calendars">
@@ -238,7 +240,7 @@ export function ProjectPositionDateRangePicker({
 
             <footer className="dashboard-date-range-footer">
               <span>
-                Доступные срезы: {formatSelectedDate(availableRange.from)} — {formatSelectedDate(availableRange.to)}
+                <UiText text="Доступные срезы:" after=" " />{formatSelectedDate(availableRange.from, uiLocale)} — {formatSelectedDate(availableRange.to, uiLocale)}
               </span>
               <div>
                 <button
@@ -249,8 +251,7 @@ export function ProjectPositionDateRangePicker({
                   }}
                   type="button"
                 >
-                  Вернуть 30 дней
-                </button>
+                  <UiText text="Вернуть 30 дней" /></button>
                 <button
                   className="dashboard-date-range-apply"
                   disabled={!completeDraft}
@@ -261,8 +262,7 @@ export function ProjectPositionDateRangePicker({
                   }}
                   type="button"
                 >
-                  Применить
-                </button>
+                  <UiText text="Применить" /></button>
               </div>
             </footer>
           </div>
@@ -287,14 +287,15 @@ function CalendarMonth({
   onSelect: (date: string) => void;
   to?: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
   const days = calendarDays(month);
   const today = dateKey(new Date());
   return (
     <section
-      aria-label={formatMonth(month)}
+      aria-label={formatMonth(month, uiLocale)}
       className={`dashboard-calendar-month ${className}`}
     >
-      <strong>{formatMonth(month)}</strong>
+      <strong>{formatMonth(month, uiLocale)}</strong>
       <div aria-hidden="true" className="dashboard-calendar-weekdays">
         {WEEKDAYS.map((weekday) => <span key={weekday}>{weekday}</span>)}
       </div>
@@ -312,7 +313,7 @@ function CalendarMonth({
           return (
             <button
               aria-current={day.key === today ? "date" : undefined}
-              aria-label={formatAccessibleDate(day.key)}
+              aria-label={formatAccessibleDate(day.key, uiLocale)}
               aria-pressed={rangeStart || rangeFinish}
               className={[
                 inRange ? "is-in-range" : "",
@@ -415,39 +416,39 @@ function dateKey(value: Date): string {
   ].join("-");
 }
 
-function formatMonth(value: Date): string {
-  const formatted = new Intl.DateTimeFormat("ru-RU", {
+function formatMonth(value: Date, uiLocale: string = "ru-RU"): string {
+  const formatted = new Intl.DateTimeFormat(uiLocale, {
     month: "long",
     year: "numeric"
   }).format(value);
   return formatted.charAt(0).toLocaleUpperCase("ru-RU") + formatted.slice(1);
 }
 
-function formatMonthRange(months: readonly Date[]): string {
-  if (months.length === 1) return formatMonth(months[0]!);
+function formatMonthRange(months: readonly Date[], uiLocale: string = "ru-RU"): string {
+  if (months.length === 1) return formatMonth(months[0]!, uiLocale);
   const [first, second] = months;
   if (first!.getFullYear() === second!.getFullYear()) {
-    const left = new Intl.DateTimeFormat("ru-RU", { month: "long" }).format(first);
-    const right = new Intl.DateTimeFormat("ru-RU", {
+    const left = new Intl.DateTimeFormat(uiLocale, { month: "long" }).format(first);
+    const right = new Intl.DateTimeFormat(uiLocale, {
       month: "long",
       year: "numeric"
     }).format(second);
     const result = `${left} — ${right}`;
     return result.charAt(0).toLocaleUpperCase("ru-RU") + result.slice(1);
   }
-  return `${formatMonth(first!)} — ${formatMonth(second!)}`;
+  return `${formatMonth(first!, uiLocale)} — ${formatMonth(second!, uiLocale)}`;
 }
 
-function formatSelectedDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatSelectedDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric"
   }).format(dateFromKey(value));
 }
 
-function formatAccessibleDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatAccessibleDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -455,19 +456,19 @@ function formatAccessibleDate(value: string): string {
   }).format(dateFromKey(value));
 }
 
-function formatCompactRange(range: ProjectPositionHistoryDateRange): string {
+function formatCompactRange(range: ProjectPositionHistoryDateRange, uiLocale: string = "ru-RU"): string {
   const from = dateFromKey(range.from);
   const to = dateFromKey(range.to);
-  const format = (value: Date, withYear: boolean) =>
-    new Intl.DateTimeFormat("ru-RU", {
+  const format = (value: Date, withYear: boolean, uiLocale: string = "ru-RU") =>
+    new Intl.DateTimeFormat(uiLocale, {
       day: "2-digit",
       month: "short",
       ...(withYear ? { year: "2-digit" } : {})
     }).format(value);
   const differentYear = from.getFullYear() !== to.getFullYear();
-  return `${format(from, differentYear)} — ${format(to, differentYear)}`;
+  return `${format(from, differentYear, uiLocale)} — ${format(to, differentYear, uiLocale)}`;
 }
 
-function formatFullRange(range: ProjectPositionHistoryDateRange): string {
-  return `${formatSelectedDate(range.from)} — ${formatSelectedDate(range.to)}`;
+function formatFullRange(range: ProjectPositionHistoryDateRange, uiLocale: string = "ru-RU"): string {
+  return `${formatSelectedDate(range.from, uiLocale)} — ${formatSelectedDate(range.to, uiLocale)}`;
 }

@@ -8,6 +8,8 @@ import {
 import { useId, useMemo, useState, type FormEvent } from "react";
 import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export type SemanticMultiSearchAction = "SHOW" | "SELECT" | "MOVE";
 
@@ -23,6 +25,8 @@ export function SemanticMultiSearchDialog({
   ) => void;
   onClose: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const formId = useId();
   const [text, setText] = useState(initialSearch?.terms.join("\n") ?? "");
   const [mode, setMode] = useState<SemanticKeywordMultiSearchMode>(
@@ -40,15 +44,15 @@ export function SemanticMultiSearchDialog({
   return (
     <SemanticModal
       className="semantic-multi-search-modal"
-      description="Вставьте список — одна фраза на строку"
+      description={uiText("Вставьте список — одна фраза на строку")}
       footer={(
         <div className="semantic-multi-search-footer">
           <span>
-            <strong>{parsed.terms.length.toLocaleString("ru-RU")}</strong>
-            запросов · дублей удалено: {parsed.duplicateCount.toLocaleString("ru-RU")}
+            <strong>{parsed.terms.length.toLocaleString(uiLocale)}</strong>
+            <UiText text="запросов · дублей удалено:" after=" " />{parsed.duplicateCount.toLocaleString(uiLocale)}
           </span>
           <div>
-            <button className="secondary-button" onClick={onClose} type="button">Отмена</button>
+            <button className="secondary-button" onClick={onClose} type="button"><UiText text="Отмена" /></button>
             <button
               className="primary-button"
               disabled={parsed.terms.length === 0 || parsed.tooMany}
@@ -56,10 +60,10 @@ export function SemanticMultiSearchDialog({
               type="submit"
             >
               {action === "MOVE"
-                ? "Найти и перенести"
+                ? <UiText text="Найти и перенести" />
                 : action === "SELECT"
-                  ? "Найти и выделить"
-                  : "Показать в таблице"}
+                  ? <UiText text="Найти и выделить" />
+                  : <UiText text="Показать в таблице" />}
             </button>
           </div>
         </div>
@@ -67,71 +71,69 @@ export function SemanticMultiSearchDialog({
       onClose={onClose}
       presenceKey="semantic-modal:multi-search"
       size="medium"
-      title="Поиск по списку запросов"
+      title={uiText("Поиск по списку запросов")}
     >
       <form className="semantic-multi-search" id={formId} onSubmit={submit}>
         <label className="semantic-multi-search-input">
-          <span>Запросы</span>
+          <span><UiText text="Запросы" /></span>
           <textarea
             autoFocus
             onChange={(event) => setText(event.target.value)}
-            placeholder={"купить холодильник\nхолодильник цена\nремонт холодильника"}
+            placeholder={uiText("купить холодильник холодильник цена ремонт холодильника")}
             rows={10}
             value={text}
           />
           <small>
-            До {semanticKeywordMultiSearchMaxTerms.toLocaleString("ru-RU")} уникальных строк
-          </small>
+            <UiText text="До" after=" " />{semanticKeywordMultiSearchMaxTerms.toLocaleString(uiLocale)} <UiText text="уникальных строк" before=" " /></small>
         </label>
 
         <fieldset className="semantic-multi-search-modes">
-          <legend>Как искать</legend>
+          <legend><UiText text="Как искать" /></legend>
           <SearchMode
             checked={mode === "EXACT"}
-            description="Полное совпадение нормализованной фразы"
-            label="Точно"
+            description={uiText("Полное совпадение нормализованной фразы")}
+            label={uiText("Точно")}
             onSelect={() => setMode("EXACT")}
           />
           <SearchMode
             checked={mode === "CONTAINS"}
-            description="Фраза встречается внутри запроса"
-            label="Вхождение"
+            description={uiText("Фраза встречается внутри запроса")}
+            label={uiText("Вхождение")}
             onSelect={() => setMode("CONTAINS")}
           />
           <SearchMode
             checked={mode === "ALL_WORDS"}
-            description="Все слова есть, порядок не важен"
-            label="Все слова"
+            description={uiText("Все слова есть, порядок не важен")}
+            label={uiText("Все слова")}
             onSelect={() => setMode("ALL_WORDS")}
           />
         </fieldset>
 
         <fieldset className="semantic-multi-search-actions">
-          <legend>Что сделать с найденными</legend>
+          <legend><UiText text="Что сделать с найденными" /></legend>
           <ActionCard
             checked={action === "SHOW"}
             icon="search"
-            label="Показать"
+            label={uiText("Показать")}
             onSelect={() => setAction("SHOW")}
           />
           <ActionCard
             checked={action === "SELECT"}
             icon="checkDouble"
-            label="Показать и выделить"
+            label={uiText("Показать и выделить")}
             onSelect={() => setAction("SELECT")}
           />
           <ActionCard
             checked={action === "MOVE"}
             icon="move"
-            label="Сразу перенести"
+            label={uiText("Сразу перенести")}
             onSelect={() => setAction("MOVE")}
           />
         </fieldset>
 
         {parsed.tooMany && (
           <div className="inline-alert danger" role="alert">
-            Список больше лимита. Оставьте не более {semanticKeywordMultiSearchMaxTerms.toLocaleString("ru-RU")} уникальных строк.
-          </div>
+            <UiText text="Список больше лимита. Оставьте не более" after=" " />{semanticKeywordMultiSearchMaxTerms.toLocaleString(uiLocale)} <UiText text="уникальных строк." before=" " /></div>
         )}
       </form>
     </SemanticModal>

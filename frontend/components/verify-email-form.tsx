@@ -16,6 +16,8 @@ import {
   fragmentFreeBrowserPath,
   readOneTimeTokenFragment
 } from "../lib/one-time-link";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface VerificationResult {
   readonly emailVerificationRequired: boolean;
@@ -33,6 +35,7 @@ export function VerifyEmailForm({
   initialEmail: string | undefined;
   initialReturnTo: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [email, setEmail] = useState(initialEmail ?? "");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -149,12 +152,12 @@ export function VerifyEmailForm({
     <form className="auth-form" onSubmit={verify}>
       {message && (
         <div className="inline-alert success" role="status">
-          {message}
+          {<UiText text={message ?? ""} />}
         </div>
       )}
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       <label className="form-field">
@@ -168,21 +171,19 @@ export function VerifyEmailForm({
         />
       </label>
       <label className="form-field">
-        <span>Токен из ссылки</span>
+        <span><UiText text="Токен из ссылки" /></span>
         <input
           autoComplete="one-time-code"
           onChange={(event) => setToken(event.target.value)}
-          placeholder="Вставьте токен подтверждения"
+          placeholder={uiText("Вставьте токен подтверждения")}
           required
           value={token}
         />
         <small>
-          В production токен открывается из письма; в локальной среде он
-          подставляется автоматически.
-        </small>
+          <UiText text="В production токен открывается из письма; в локальной среде он подставляется автоматически." /></small>
       </label>
       <button className="primary-button auth-submit" disabled={busy} type="submit">
-        {busy ? "Подтверждаем…" : "Подтвердить email"}
+        {busy ? <UiText text="Подтверждаем…" /> : <UiText text="Подтвердить email" />}
       </button>
       <button
         className="secondary-button auth-submit"
@@ -190,10 +191,10 @@ export function VerifyEmailForm({
         onClick={resend}
         type="button"
       >
-        {resending ? "Отправляем…" : "Отправить ссылку повторно"}
+        {resending ? <UiText text="Отправляем…" /> : <UiText text="Отправить ссылку повторно" />}
       </button>
       <p className="auth-switch">
-        <a href="/app/login">Вернуться ко входу</a>
+        <a href="/app/login"><UiText text="Вернуться ко входу" /></a>
       </p>
     </form>
   );

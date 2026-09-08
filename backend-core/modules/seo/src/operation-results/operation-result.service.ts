@@ -66,7 +66,7 @@ const crawlSelect = {
 const rankEntrySelect = {
   sequence: true,
   keywordId: true,
-  keyword: { select: { textOriginal: true } },
+  keyword: { select: { textOriginal: true, version: true, status: true } },
   rankSnapshot: {
     select: {
       id: true,
@@ -97,7 +97,7 @@ export class OperationResultService {
           projectId: input.projectId,
           id: { in: [...input.keywordIds] }
         },
-        select: { id: true, textOriginal: true }
+        select: { id: true, textOriginal: true, version: true, status: true }
       }),
       this.prisma.frequencySnapshot.findMany({
         where: {
@@ -120,7 +120,7 @@ export class OperationResultService {
       snapshots.length >
       input.keywordIds.length * semanticFrequencyTypes.length
     ) invalidStored("frequency result is oversized");
-    const keywordById = new Map(keywords.map((row) => [row.id, row.textOriginal]));
+    const keywordById = new Map(keywords.map((row) => [row.id, row]));
     const snapshotsById = new Map<string, typeof snapshots>();
     for (const snapshot of snapshots) {
       const current = snapshotsById.get(snapshot.keywordId) ?? [];
@@ -133,12 +133,11 @@ export class OperationResultService {
       jobId: input.jobId,
       rows: input.keywordIds.map((keywordId) => {
         const keyword = keywordById.get(keywordId);
-        if (keyword === undefined) {
-          throw new NotFoundException("Frequency result keyword not found");
-        }
         return {
           keywordId,
-          keyword,
+          keyword: keyword?.textOriginal ?? "",
+          keywordAvailable: keyword !== undefined,
+          ...(keyword?.status === "ACTIVE" ? { keywordVersion: keyword.version } : {}),
           snapshots: (snapshotsById.get(keywordId) ?? []).map((snapshot) => ({
             type: frequencyType(snapshot.type),
             regionCode: snapshot.regionCode,
@@ -286,17 +285,28 @@ export class OperationResultService {
       }
     });
     if (!manifest) throw new NotFoundException("Rank operation result not found");
-    const rows = await this.prisma.rankExecutionManifestEntry.findMany({
-      where: {
-        workspaceId: context.workspaceId,
-        projectId: context.projectId,
-        manifestId: manifest.id,
-        ...(cursor === undefined ? {} : { sequence: { gt: cursor } })
-      },
-      orderBy: { sequence: "asc" },
-      take: limit + 1,
-      select: rankEntrySelect
-    });
+    const [rows, resultCounts] = await Promise.all([
+      this.prisma.rankExecutionManifestEntry.findMany({
+        where: {
+          workspaceId: context.workspaceId,
+          projectId: context.projectId,
+          manifestId: manifest.id,
+          ...(cursor === undefined ? {} : { sequence: { gt: cursor } })
+        },
+        orderBy: { sequence: "asc" },
+        take: limit + 1,
+        select: rankEntrySelect
+      }),
+      this.prisma.rankSnapshot.groupBy({
+        by: ["found"],
+        where: {
+          workspaceId: context.workspaceId,
+          projectId: context.projectId,
+          jobId
+        },
+        _count: { _all: true }
+      })
+    ]);
     const pageRows = rows.slice(0, limit);
     const hasNext = rows.length > limit;
     const last = pageRows.at(-1);
@@ -357,6 +367,12 @@ export class OperationResultService {
       trackingContextId: manifest.trackingContextId,
       contextName: manifest.context.name,
       execution,
+      counts: {
+        foundCount:
+          resultCounts.find(({ found }) => found)?._count._all ?? 0,
+        notFoundCount:
+          resultCounts.find(({ found }) => !found)?._count._all ?? 0
+      },
       rows: pageRows.map((row) =>
         rankRow(row, competitorCollection, serpResultsBySnapshotId)
       ),
@@ -411,8 +427,12 @@ function rankRow(
   >
 ): RankOperationResultRow {
   const snapshot = row.rankSnapshot;
+  const editableKeyword = row.keyword.status === "ACTIVE"
+    ? { keywordVersion: row.keyword.version, keywordAvailable: true }
+    : { keywordAvailable: false };
   if (!snapshot) {
     return {
+      ...editableKeyword,
       sequence: row.sequence,
       keywordId: row.keywordId,
       keyword: row.keyword.textOriginal,
@@ -423,6 +443,7 @@ function rankRow(
   }
   if (!snapshot.found) {
     return {
+      ...editableKeyword,
       sequence: row.sequence,
       keywordId: row.keywordId,
       keyword: row.keyword.textOriginal,
@@ -438,6 +459,7 @@ function rankRow(
     invalidStored("found rank result is incomplete");
   }
   return {
+    ...editableKeyword,
     sequence: row.sequence,
     keywordId: row.keywordId,
     keyword: row.keyword.textOriginal,

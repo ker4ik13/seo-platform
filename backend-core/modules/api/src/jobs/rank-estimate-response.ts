@@ -1,10 +1,9 @@
 import {
   connectorRoutingScopes,
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
-  rankProviderOverflowCount,
+  rankExecutionPolicyShape,
+  rankPolicyTaskCount,
+  rankCommandKeywordLimit,
+  rankCommandOverflowCount,
   rankEstimateBlockerCodes,
   type RankEstimate,
   type RankEstimateBlocker,
@@ -21,7 +20,7 @@ const DECIMAL_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/u;
 const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,63}$/u;
 const BLOCKER_CODES = new Set<string>(rankEstimateBlockerCodes);
-const MAX_SCOPE_COUNT = BigInt(rankProviderOverflowCount);
+const MAX_SCOPE_COUNT = BigInt(rankCommandOverflowCount);
 const TTL_MILLISECONDS = 5 * 60 * 1_000;
 
 /** Maps only the redacted estimate owned by Jobs into the trusted project scope. */
@@ -83,7 +82,8 @@ export function scopedRankEstimate(
   const workload = providerWorkload(
     estimate.workload,
     scope.keywordCount,
-    provider
+    provider,
+    estimate.policyVersion
   );
   const blockers = blockerList(estimate.blockers);
   const calculatedAt = isoDate(estimate.calculatedAt);
@@ -229,7 +229,8 @@ function scopeSummary(value: unknown): RankEstimate["scope"] {
 function providerWorkload(
   value: unknown,
   keywordCount: string,
-  provider: "ARSENKIN" | "XMLSTOCK"
+  provider: "ARSENKIN" | "XMLSTOCK",
+  policyVersion: unknown
 ): RankEstimate["workload"] {
   const workload = exactRecord(value, [
     "taskCount",
@@ -244,32 +245,11 @@ function providerWorkload(
   ]);
   const taskCount = boundedCount(workload.taskCount);
   const minimumRequestCount = boundedRequestCount(workload.minimumRequestCount);
-  const keywordCountValue = BigInt(keywordCount);
-  const legacyWorkload =
-    workload.keywordLimitPerTask === String(legacyRankManifestChunkSize) &&
-    workload.keywordLimitPerCommand === String(legacyRankProviderKeywordLimit);
-  const currentWorkload =
-    workload.keywordLimitPerTask === String(rankManifestSingleTaskChunkSize) &&
-    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
-  const expectedTasks = legacyWorkload
-    ? keywordCountValue > BigInt(legacyRankProviderKeywordLimit)
-      ? 0n
-      : (keywordCountValue + BigInt(legacyRankManifestChunkSize - 1)) /
-        BigInt(legacyRankManifestChunkSize)
-    : currentWorkload
-      ? keywordCountValue > BigInt(rankProviderKeywordLimit)
-        ? 0n
-        : keywordCountValue === 0n
-          ? 0n
-          : 1n
-      : -1n;
-  const xmlStockWorkload =
-    workload.keywordLimitPerTask === "1" &&
-    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
-  const xmlStockTasks =
-    keywordCountValue > BigInt(rankProviderKeywordLimit)
-      ? 0n
-      : keywordCountValue;
+  const policy = rankExecutionPolicyShape(policyVersion, provider);
+  if (!policy || Number(keywordCount) > policy.commandLimit + 1) throw invalidResponse();
+  const matchingWorkload = workload.keywordLimitPerTask === String(policy.chunkSize) && workload.keywordLimitPerCommand === String(policy.commandLimit);
+  const expectedTasks = BigInt(rankPolicyTaskCount(policy, Number(keywordCount)));
+  const xmlStockTasks = expectedTasks;
   const requestStages = workload.requestStages;
   const arsenkinStages =
     Array.isArray(requestStages) &&
@@ -296,13 +276,13 @@ function providerWorkload(
         : -1n;
   const validArsenkin =
     provider === "ARSENKIN" &&
-    (legacyWorkload || currentWorkload) &&
+    matchingWorkload &&
     BigInt(taskCount) === expectedTasks &&
     BigInt(minimumRequestCount) === expectedTasks * 3n &&
     arsenkinStages;
   const validXmlStock =
     provider === "XMLSTOCK" &&
-    xmlStockWorkload &&
+    matchingWorkload &&
     BigInt(taskCount) === xmlStockTasks &&
     ((xmlStockYandexStages &&
       BigInt(minimumRequestCount) === xmlStockTasks * 2n) ||
@@ -332,10 +312,12 @@ function providerWorkload(
     keywordLimitPerTask: workload.keywordLimitPerTask as
       | "1"
       | "250"
+      | "5000"
       | "15000",
     keywordLimitPerCommand: workload.keywordLimitPerCommand as
       | "1000"
-      | "15000",
+      | "15000"
+      | "300000",
     format: "SIMPLE",
     rawSerp: false,
     fallbackMode: "NONE"
@@ -505,7 +487,7 @@ function boundedCount(value: unknown): string {
 
 function boundedRequestCount(value: unknown): string {
   const result = decimal(value);
-  if (BigInt(result) > BigInt(rankProviderKeywordLimit * 10)) {
+  if (BigInt(result) > BigInt(rankCommandKeywordLimit * 10)) {
     throw invalidResponse();
   }
   return result;

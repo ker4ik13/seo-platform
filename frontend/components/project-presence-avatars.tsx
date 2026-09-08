@@ -8,10 +8,13 @@ import {
   type ActiveProjectParticipant
 } from "../lib/project-presence";
 import { useProjectPresence } from "./project-presence-provider";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 const MAX_VISIBLE_PARTICIPANTS = 5;
 
 export function ProjectPresenceAvatars() {
+  const { t: uiText } = useUiLocale();
   const {
     activeParticipants,
     connectionStatus,
@@ -40,7 +43,7 @@ export function ProjectPresenceAvatars() {
 
   return (
     <div
-      aria-label={`${statusLabel}. Других активных участников: ${remoteActiveParticipants.length}`}
+      aria-label={uiText("{0}. Других активных участников: {1}", [String(statusLabel), String(remoteActiveParticipants.length)])}
       className={`project-presence-avatars status-${connectionStatus.toLowerCase()}`}
       role="group"
     >
@@ -59,9 +62,9 @@ export function ProjectPresenceAvatars() {
       ))}
       {overflow > 0 && (
         <span
-          aria-label={`Ещё активных участников: ${overflow}`}
+          aria-label={uiText("Ещё активных участников: {0}", [String(overflow)])}
           className="project-presence-overflow"
-          title={`Ещё ${overflow}`}
+          title={uiText("Ещё {0}", [String(overflow)])}
         >
           +{overflow}
         </span>
@@ -77,16 +80,11 @@ export function ProjectPresenceAvatars() {
         aria-pressed={showRemoteActivity}
         className={`project-presence-visibility-toggle${showRemoteActivity ? " active" : ""}`}
         onClick={() => setShowRemoteActivity(!showRemoteActivity)}
-        title={
-          showRemoteActivity
-            ? "Скрыть курсоры и действия участников"
-            : "Показать курсоры и действия участников"
-        }
+        title={showRemoteActivity ? uiText("Скрыть курсоры и действия участников") : uiText("Показать курсоры и действия участников")}
         type="button"
       >
         <span aria-hidden="true">{showRemoteActivity ? "◉" : "○"}</span>
-        Показывать курсоры
-      </button>
+        <UiText text="Показывать курсоры" /></button>
       <span className="visually-hidden" role="status">
         {statusLabel}
       </span>

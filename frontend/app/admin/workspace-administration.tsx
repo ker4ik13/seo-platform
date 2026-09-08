@@ -1,5 +1,6 @@
 "use client";
 
+import { isPermanentFreeSubscription } from "../../lib/billing-subscription-period";
 import {
   useCallback,
   useEffect,
@@ -18,6 +19,8 @@ import {
   adminApi,
   adminApiCollection
 } from "../../lib/admin-browser-api";
+import { UiText, useUiLocale } from "../../components/ui-locale";
+
 
 interface StableAttempt {
   readonly fingerprint: string;
@@ -27,6 +30,8 @@ interface StableAttempt {
 export function WorkspaceAdministration({
   canManageBilling
 }: Readonly<{ canManageBilling: boolean }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<AdminWorkspaceSearchResult>();
   const [plans, setPlans] = useState<readonly AdminBillingPlanSummary[]>([]);
@@ -97,71 +102,68 @@ export function WorkspaceAdministration({
       <section className="heading">
         <div>
           <p>Tenant operations</p>
-          <h1>Рабочие области</h1>
+          <h1><UiText text="Рабочие области" /></h1>
         </div>
-        <span className="external">Не более 50 записей в выборке</span>
+        <span className="external"><UiText text="Не более 50 записей в выборке" /></span>
       </section>
       <aside className="warning">
-        <strong>Изменения тарифа записываются в аудит.</strong>
+        <strong><UiText text="Изменения тарифа записываются в аудит." /></strong>
         <span>
-          Ручная подписка не создаёт оплату или чек и отвязывает прежний
-          автоплатёж рабочей области.
-        </span>
+          <UiText text="Ручная подписка не создаёт оплату или чек и отвязывает прежний автоплатёж рабочей области." /></span>
       </aside>
       <form className="workspace-search" onSubmit={search}>
         <label>
-          <span className="sr-only">Поиск рабочей области</span>
+          <span className="sr-only"><UiText text="Поиск рабочей области" /></span>
           <input
             maxLength={160}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Название, slug, UUID, имя или email владельца"
+            placeholder={uiText("Название, slug, UUID, имя или email владельца")}
             value={query}
           />
         </label>
         <button className="primary" disabled={loading} type="submit">
-          {loading ? "Ищем…" : "Найти"}
+          {loading ? <UiText text="Ищем…" /> : <UiText text="Найти" />}
         </button>
       </form>
-      {error && <div className="form-alert workspace-message" role="alert">{error}</div>}
-      {notice && <div className="form-success workspace-message" role="status">{notice}</div>}
+      {error && <div className="form-alert workspace-message" role="alert">{<UiText text={error ?? ""} />}</div>}
+      {notice && <div className="form-success workspace-message" role="status">{<UiText text={notice ?? ""} />}</div>}
       <section className="metric-grid workspace-metrics">
-        <WorkspaceMetric label="В выборке" value={metrics.workspaces} />
+        <WorkspaceMetric label={uiText("В выборке")} value={metrics.workspaces} />
         <WorkspaceMetric
-          label="Активные подписки"
+          label={uiText("Активные подписки")}
           value={metrics.activeSubscriptions}
         />
         <WorkspaceMetric
-          label="Без подписки"
+          label={uiText("Без подписки")}
           value={metrics.withoutSubscription}
         />
-        <WorkspaceMetric label="Проектов" value={metrics.projects} />
+        <WorkspaceMetric label={uiText("Проектов")} value={metrics.projects} />
       </section>
       <section className="panel workspace-panel">
         <header>
           <div>
-            <h2>Рабочие области и владельцы</h2>
-            <p>Текущий тариф показывается из источника истины биллинга</p>
+            <h2><UiText text="Рабочие области и владельцы" /></h2>
+            <p><UiText text="Текущий тариф показывается из источника истины биллинга" /></p>
           </div>
         </header>
         {result?.truncated && (
           <div className="workspace-hint">
-            Найдено больше 50 записей. Уточните поисковый запрос.
-          </div>
+            <UiText text="Найдено больше 50 записей. Уточните поисковый запрос." /></div>
         )}
         {loading ? (
-          <div className="empty">Загружаем рабочие области…</div>
+          <div className="empty"><UiText text="Загружаем рабочие области…" /></div>
         ) : !result || result.data.length === 0 ? (
           <div className="empty">
-            <strong>Ничего не найдено</strong>
-            <span>Проверьте название, UUID или email владельца.</span>
+            <strong><UiText text="Ничего не найдено" /></strong>
+            <span><UiText text="Проверьте название, UUID или email владельца." /></span>
           </div>
         ) : (
           <div className="workspace-table">
             <div className="workspace-row workspace-head" aria-hidden="true">
-              <span>Рабочая область</span>
-              <span>Владелец</span>
-              <span>Использование</span>
-              <span>Подписка</span>
+              <span><UiText text="Рабочая область" /></span>
+              <span><UiText text="Владелец" /></span>
+              <span><UiText text="Использование" /></span>
+              <span><UiText text="Подписка" /></span>
               <span />
             </div>
             {result.data.map((workspace) => (
@@ -180,7 +182,7 @@ export function WorkspaceAdministration({
           onClose={() => setSelected(undefined)}
           onUpdated={(grant) => {
             setNotice(
-              `${grant.planName} выдан рабочей области до ${formatDate(grant.currentPeriodEnd)}.`
+              `${grant.planName} выдан рабочей области до ${formatDate(grant.currentPeriodEnd, uiLocale)}.`
             );
             setSelected(undefined);
             void loadWorkspaces(query);
@@ -200,6 +202,7 @@ function WorkspaceRow({
   onOpen: () => void;
   workspace: AdminWorkspaceSummary;
 }>) {
+  const uiLocale = useUiLocale().locale;
   return (
     <article className="workspace-row">
       <div className="workspace-primary">
@@ -217,24 +220,23 @@ function WorkspaceRow({
         </small>
       </div>
       <div className="workspace-counts" data-label="Использование">
-        <span><strong>{workspace.projectCount}</strong><small>проектов</small></span>
-        <span><strong>{workspace.memberCount}</strong><small>участников</small></span>
+        <span><strong>{workspace.projectCount}</strong><small><UiText text="проектов" /></small></span>
+        <span><strong>{workspace.memberCount}</strong><small><UiText text="участников" /></small></span>
       </div>
       <div className="workspace-subscription" data-label="Подписка">
         {workspace.subscription ? (
           <>
             <strong>{workspace.subscription.planName}</strong>
             <small>
-              {subscriptionStatus(workspace.subscription.status)} · до {formatDate(workspace.subscription.currentPeriodEnd)}
+              {<UiText text={subscriptionStatus(workspace.subscription.status) ?? ""} />} · {isPermanentFreeSubscription(workspace.subscription) ? <UiText text="без ограничения срока" /> : <UiText text="до {0}" values={[String(formatDate(workspace.subscription.currentPeriodEnd, uiLocale))]} />}
             </small>
           </>
         ) : (
-          <><strong>Не оформлена</strong><small>Нет активной записи</small></>
+          <><strong><UiText text="Не оформлена" /></strong><small><UiText text="Нет активной записи" /></small></>
         )}
       </div>
       <button className="ghost workspace-open" onClick={onOpen} type="button">
-        Открыть
-      </button>
+        <UiText text="Открыть" /></button>
     </article>
   );
 }
@@ -252,6 +254,8 @@ function WorkspaceDrawer({
   plans: readonly AdminBillingPlanSummary[];
   workspace: AdminWorkspaceSummary;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const defaultPlan = useMemo(
     () =>
       plans.find(
@@ -350,57 +354,57 @@ function WorkspaceDrawer({
   return (
     <div className="drawer-backdrop" onMouseDown={busy ? undefined : onClose}>
       <aside
-        aria-label={`Рабочая область ${workspace.name}`}
+        aria-label={uiText("Рабочая область {0}", [String(workspace.name)])}
         aria-modal="true"
         className="drawer workspace-drawer"
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
       >
         <header>
-          <div><p>Рабочая область</p><h2>{workspace.name}</h2></div>
-          <button aria-label="Закрыть" disabled={busy} onClick={onClose} type="button">×</button>
+          <div><p><UiText text="Рабочая область" /></p><h2>{workspace.name}</h2></div>
+          <button aria-label={uiText("Закрыть")} disabled={busy} onClick={onClose} type="button">×</button>
         </header>
         <div className="snapshot">
           <Snapshot label="Workspace ID" value={workspace.id} />
-          <Snapshot label="Статус" value={workspaceStatus(workspace.status)} />
-          <Snapshot label="Владелец" value={workspace.owner.displayName} />
+          <Snapshot label={uiText("Статус")} value={workspaceStatus(workspace.status)} />
+          <Snapshot label={uiText("Владелец")} value={workspace.owner.displayName} />
           <Snapshot label="Email" value={workspace.owner.email || "Нет данных"} />
-          <Snapshot label="Статус владельца" value={ownerStatus(workspace.owner.status)} />
-          <Snapshot label="Проекты" value={String(workspace.projectCount)} />
-          <Snapshot label="Участники" value={String(workspace.memberCount)} />
+          <Snapshot label={uiText("Статус владельца")} value={ownerStatus(workspace.owner.status)} />
+          <Snapshot label={uiText("Проекты")} value={String(workspace.projectCount)} />
+          <Snapshot label={uiText("Участники")} value={String(workspace.memberCount)} />
           <Snapshot
-            label="Текущий тариф"
+            label={uiText("Текущий тариф")}
             value={workspace.subscription?.planName ?? "Не оформлен"}
           />
           <Snapshot
-            label="Текущий срок"
+            label={uiText("Текущий срок")}
             value={workspace.subscription
-              ? `до ${formatDate(workspace.subscription.currentPeriodEnd)}`
+              ? isPermanentFreeSubscription(workspace.subscription)
+                ? "без ограничения срока"
+                : `до ${formatDate(workspace.subscription.currentPeriodEnd, uiLocale)}`
               : "—"}
           />
         </div>
         {!canManageBilling ? (
           <div className="empty workspace-readonly">
-            <strong>Режим просмотра</strong>
-            <span>Для изменения подписки нужна роль FINANCE или SUPER_ADMIN.</span>
+            <strong><UiText text="Режим просмотра" /></strong>
+            <span><UiText text="Для изменения подписки нужна роль FINANCE или SUPER_ADMIN." /></span>
           </div>
         ) : plans.length === 0 ? (
           <div className="empty workspace-readonly">
-            <strong>Каталог тарифов недоступен</strong>
-            <span>Повторно откройте раздел или проверьте Platform API.</span>
+            <strong><UiText text="Каталог тарифов недоступен" /></strong>
+            <span><UiText text="Повторно откройте раздел или проверьте Platform API." /></span>
           </div>
         ) : (
           <form className="operation-form" onSubmit={submit}>
             <div>
-              <h3>Ручная подписка</h3>
+              <h3><UiText text="Ручная подписка" /></h3>
               <p className="form-description">
-                Новый период начнётся сейчас. Платёжная привязка и автоплатёж
-                будут сброшены, денежная операция не создаётся.
-              </p>
+                <UiText text="Новый период начнётся сейчас. Платёжная привязка и автоплатёж будут сброшены, денежная операция не создаётся." /></p>
             </div>
-            {error && <div className="form-alert" role="alert">{error}</div>}
+            {error && <div className="form-alert" role="alert">{<UiText text={error ?? ""} />}</div>}
             <label>
-              <span>Тариф и версия</span>
+              <span><UiText text="Тариф и версия" /></span>
               <select
                 onChange={(event) => setPlanKey(event.target.value)}
                 required
@@ -417,12 +421,11 @@ function WorkspaceDrawer({
               <div className="plan-preview">
                 <strong>{chosenPlan.name}</strong>
                 <span>
-                  {chosenPlan.features.projects} проектов · {chosenPlan.features.seats} участников · {chosenPlan.features.concurrentJobs} параллельных операций
-                </span>
+                  {chosenPlan.features.projects} <UiText text="проектов ·" before=" " after=" " />{chosenPlan.features.seats} <UiText text="участников ·" before=" " after=" " />{chosenPlan.features.concurrentJobs} <UiText text="параллельных операций" before=" " /></span>
               </div>
             )}
             <label>
-              <span>Действует до</span>
+              <span><UiText text="Действует до" /></span>
               <input
                 max={dateTimeLocal(addYears(new Date(), 5))}
                 min={dateTimeLocal(addMinutes(new Date(), 1))}
@@ -432,18 +435,18 @@ function WorkspaceDrawer({
                 value={periodEnd}
               />
             </label>
-            <div className="period-presets" aria-label="Быстрый выбор срока">
-              <button onClick={() => setPeriodEnd(dateTimeLocal(addMonths(new Date(), 1)))} type="button">1 месяц</button>
-              <button onClick={() => setPeriodEnd(dateTimeLocal(addYears(new Date(), 1)))} type="button">1 год</button>
-              <button onClick={() => setPeriodEnd(dateTimeLocal(addYears(new Date(), 5)))} type="button">5 лет</button>
+            <div className="period-presets" aria-label={uiText("Быстрый выбор срока")}>
+              <button onClick={() => setPeriodEnd(dateTimeLocal(addMonths(new Date(), 1)))} type="button"><UiText text="1 месяц" /></button>
+              <button onClick={() => setPeriodEnd(dateTimeLocal(addYears(new Date(), 1)))} type="button"><UiText text="1 год" /></button>
+              <button onClick={() => setPeriodEnd(dateTimeLocal(addYears(new Date(), 5)))} type="button"><UiText text="5 лет" /></button>
             </div>
             <label>
-              <span>Причина / комментарий аудита</span>
+              <span><UiText text="Причина / комментарий аудита" /></span>
               <textarea
                 maxLength={500}
                 minLength={8}
                 name="reason"
-                placeholder="Например: партнёрская подписка по договорённости"
+                placeholder={uiText("Например: партнёрская подписка по договорённости")}
                 required
                 rows={3}
               />
@@ -456,11 +459,11 @@ function WorkspaceDrawer({
                 type="checkbox"
               />
               <span>
-                Подтверждаю изменение подписки именно для <strong>{workspace.name}</strong> ({workspace.id})
+                <UiText text="Подтверждаю изменение подписки именно для" after=" " /><strong>{workspace.name}</strong> ({workspace.id})
               </span>
             </label>
             <button className="primary" disabled={busy || !confirmed || !chosenPlan} type="submit">
-              {busy ? "Применяем…" : "Выдать подписку"}
+              {busy ? <UiText text="Применяем…" /> : <UiText text="Выдать подписку" />}
             </button>
           </form>
         )}
@@ -473,7 +476,7 @@ function WorkspaceMetric({
   label,
   value
 }: Readonly<{ label: string; value: number }>) {
-  return <article><span>{label}</span><strong>{value}</strong><small>Текущая выборка</small></article>;
+  return <article><span>{label}</span><strong>{value}</strong><small><UiText text="Текущая выборка" /></small></article>;
 }
 
 function WorkspaceStatus({ status }: Readonly<{ status: string }>) {
@@ -533,11 +536,11 @@ function shortId(value: string): string {
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         dateStyle: "medium",
         timeStyle: "short"
       }).format(date);

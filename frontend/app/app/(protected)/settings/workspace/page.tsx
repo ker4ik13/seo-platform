@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { WorkspaceSettings } from "../../../../../components/workspace-settings";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +18,9 @@ export default async function WorkspaceSettingsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Рабочая область</h1>
+          <h1><UiText text="Рабочая область" /></h1>
           <p>
-            Управляйте названием, локалью и часовым поясом текущей рабочей
-            области.
-          </p>
+            <UiText text="Управляйте названием, языком и часовым поясом текущей рабочей области." /></p>
         </div>
       </section>
       <SettingsTabs
@@ -35,11 +35,10 @@ export default async function WorkspaceSettingsPage() {
         <WorkspaceSettings workspace={context.workspace} />
       ) : (
         <section className="panel panel-empty compact">
-          <strong>Рабочая область ещё не создана</strong>
-          <p>Создайте её на обзорной странице, затем вернитесь к настройкам.</p>
+          <strong><UiText text="Рабочая область ещё не создана" /></strong>
+          <p><UiText text="Создайте её на обзорной странице, затем вернитесь к настройкам." /></p>
           <a className="primary-button" href="/app">
-            Перейти к созданию
-          </a>
+            <UiText text="Перейти к созданию" /></a>
         </section>
       )}
     </>

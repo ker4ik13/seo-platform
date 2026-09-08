@@ -44,6 +44,8 @@ test("reserves included tokens before prepaid balance with balanced ledger entri
     }
   };
   const transaction = {
+    billingSubscription: { findUnique: async () => null },
+    billingRefund: { aggregate: async () => ({ _sum: { amountMinor: null } }) },
     $queryRaw: async (strings: TemplateStringsArray) => {
       rawSql.push(strings.join("?"));
       rawCall += 1;
@@ -122,6 +124,8 @@ test("rejects an insufficient balance before creating ledger or reservation rows
     }
   } as never);
   const transaction = {
+    billingSubscription: { findUnique: async () => null },
+    billingRefund: { aggregate: async () => ({ _sum: { amountMinor: null } }) },
     $queryRaw: async () => {
       rawCall += 1;
       if (rawCall === 3) return [{ now }];
@@ -159,6 +163,8 @@ test("replays only the exact billing usage request", async () => {
     }
   } as never);
   const transaction = {
+    billingSubscription: { findUnique: async () => null },
+    billingRefund: { aggregate: async () => ({ _sum: { amountMinor: null } }) },
     $queryRaw: async () => {
       rawCall += 1;
       if (rawCall === 3) return [{ now }];
@@ -386,6 +392,19 @@ test("captures once, rejects expired capture and releases the original balance s
   ]);
 });
 
+test("release never resurrects included credits into a new subscription period", async () => {
+  const active = storedReservation({ includedPeriodEnd: new Date(now.getTime() + 60_000), includedAmountMinor: 60n, prepaidAmountMinor: 40n });
+  const posts: Array<{ entries: Array<{ accountType: string; amountMinor: bigint }> }> = [];
+  await new BillingUsageService({ post: async (_tx: unknown, value: typeof posts[number]) => { posts.push(value); return "0198f2fb-4c00-7000-8000-000000000022"; } } as never).release({
+    $queryRaw: async () => [{ now }],
+    billingSubscription: { findUnique: async () => ({ currentPeriodEnd: new Date(now.getTime() + 86_400_000) }) },
+    billingUsageReservation: { findUnique: async () => active, update: async ({ data }: { data: object }) => ({ ...active, ...data }) }
+  } as never, active.id);
+  assert.equal(posts[0]?.entries.find(entry => entry.accountType === "PROMOTIONAL_EXPENSE")?.amountMinor, 60n);
+  assert.equal(posts[0]?.entries.find(entry => entry.accountType === "CUSTOMER_PREPAID_LIABILITY")?.amountMinor, 40n);
+  assert.equal(posts[0]?.entries.some(entry => entry.accountType === "PROMOTIONAL_LIABILITY"), false);
+});
+
 test("holds only a live reservation for a bounded provider window", async () => {
   const active = storedReservation({
     expiresAt: new Date(now.getTime() + 10_000)
@@ -450,7 +469,7 @@ test("releases only the locked bounded batch of expired reservations", async () 
     {
       $queryRaw: async () => {
         rawCall += 1;
-        if (rawCall === 1) return [{ id: expired.id }];
+        if (rawCall === 1) return [{ id: expired.id, workspaceId: expired.workspaceId }];
         if (rawCall === 2) return [];
         return [{ now }];
       },
@@ -476,6 +495,9 @@ function storedReservation(
   overrides: Partial<BillingUsageReservation> = {}
 ): BillingUsageReservation {
   return {
+    includedPeriodEnd: null,
+    providerStartedAt: null,
+    reviewDecision: null,
     id: "0198f2fb-4c00-7000-8000-000000000011",
     workspaceId: input.workspaceId,
     projectId: input.projectId,

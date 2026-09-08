@@ -1,5 +1,5 @@
+import { rankCommandKeywordLimit } from "./rank-policy.js";
 import {
-  rankProviderKeywordLimit,
   type RankCollectionPurpose,
   type RankEstimateEntitlementStatus,
   type RankEstimateQuota,
@@ -890,6 +890,8 @@ export interface InternalRankManifestEstimateSeal {
  * the service must never partially seal a manifest.
  */
 export interface InternalSealRankManifestInput {
+  /** Absent on legacy commands. New commands explicitly pin their batching policy. */
+  readonly providerPolicyVersion?: string;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
@@ -971,7 +973,7 @@ export interface InternalRankManifestSeal {
   readonly deduplicationHash: RankManifestHash;
   readonly pairCount: string;
   readonly chunkCount: string;
-  readonly chunkSize: "1" | "250" | "15000";
+  readonly chunkSize: "1" | "250" | "5000" | "15000";
   readonly execution: InternalRankExecutionParameters;
   readonly retention: {
     readonly normalizedRankHistory: "LONG_TERM";
@@ -1278,8 +1280,8 @@ export const normalizedRankDataQualityFlags = [
 export type NormalizedRankDataQualityFlag =
   (typeof normalizedRankDataQualityFlags)[number];
 
-export const rankResultChunkMaxCount = rankProviderKeywordLimit;
-export const rankResultPairMaxCount = rankProviderKeywordLimit;
+export const rankResultChunkMaxCount = rankCommandKeywordLimit;
+export const rankResultPairMaxCount = rankCommandKeywordLimit;
 export const rankSerpResultMaxCount = 100 as const;
 
 interface InternalNormalizedRankResultBase {

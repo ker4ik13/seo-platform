@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import {
   rankRunConflictDetails,
+  rankExecutionPolicyShape,
   type InternalCancelRankJobInput,
   type InternalCreateRankRunInput,
   type InternalRankOperationScope,
@@ -36,7 +37,6 @@ import {
   credentialSnapshot,
   executionProjection,
   rankEstimateContinuationScopeHash,
-  rankProviderPolicyVersion,
   rankEstimateProjectDomainHash,
   verifiedRankEstimate,
   type CredentialSnapshot
@@ -1310,7 +1310,7 @@ export function rankEstimatePolicyMatchesProvider(
   providerPolicyVersion: string
 ): boolean {
   if (provider !== "ARSENKIN" && provider !== "XMLSTOCK") return false;
-  return providerPolicyVersion === rankProviderPolicyVersion(provider);
+  return rankExecutionPolicyShape(providerPolicyVersion, provider) !== undefined;
 }
 
 export function assertExecutionProjectionCurrent(

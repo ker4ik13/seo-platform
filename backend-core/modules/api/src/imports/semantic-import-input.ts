@@ -4,6 +4,7 @@ import {
   semanticImportEncodings,
   semanticImportHeaderModes,
   semanticImportTargets,
+  parseSemanticPositionHistoryImportOptions,
   type ConfigureSemanticImportInput,
   type CreateSemanticImportInput,
   type SemanticImportDuplicatePolicy,
@@ -110,8 +111,14 @@ export function configureSemanticImportInput(
       input.createMissingKeywords,
       false,
       "createMissingKeywords"
-    )
+    ),
+    ...(input.positionHistory === undefined ? {} : { positionHistory: positionHistoryOptions(input.positionHistory) })
   };
+}
+
+function positionHistoryOptions(value: unknown) {
+  try { return parseSemanticPositionHistoryImportOptions(value); }
+  catch { return invalid("positionHistory"); }
 }
 
 function mappingColumn(

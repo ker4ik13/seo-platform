@@ -20,6 +20,8 @@ import {
 } from "../lib/project-position-history";
 import { ProjectPositionDateRangePicker } from "./project-position-date-range-picker";
 import { Icon } from "./icon";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 const SERIES: Readonly<Record<
   ProjectPositionTopThreshold,
@@ -51,6 +53,8 @@ export function ProjectPositionHistoryChart({
   scopeError?: string;
   scopeLoading: boolean;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [period, setPeriod] = useState<SelectedPeriod>("30D");
   const [customRange, setCustomRange] = useState<ProjectPositionHistoryDateRange>();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -123,7 +127,7 @@ export function ProjectPositionHistoryChart({
   return (
     <div className="dashboard-position-chart">
       <div className="dashboard-position-controls">
-        <div aria-label="Период графика" className="dashboard-chart-button-group" role="group">
+        <div aria-label={uiText("Период графика")} className="dashboard-chart-button-group" role="group">
           {projectPositionHistoryPeriods.map((value) => (
             <button
               aria-pressed={period === value}
@@ -135,7 +139,7 @@ export function ProjectPositionHistoryChart({
               }}
               type="button"
             >
-              {projectPositionHistoryPeriodLabel(value)}
+              {<UiText text={projectPositionHistoryPeriodLabel(value) ?? ""} />}
             </button>
           ))}
           {availableRange && (
@@ -153,16 +157,14 @@ export function ProjectPositionHistoryChart({
             />
           )}
         </div>
-        <div aria-label="Область запросов и показываемые диапазоны позиций" className="dashboard-top-filters" role="group">
+        <div aria-label={uiText("Область запросов и показываемые диапазоны позиций")} className="dashboard-top-filters" role="group">
           <button
             aria-busy={scopeLoading}
             aria-pressed={includeUntracked}
             className={`dashboard-untracked-filter${includeUntracked ? " is-active" : ""}`}
             disabled={scopeLoading}
             onClick={() => onIncludeUntrackedChange(!includeUntracked)}
-            title={includeUntracked
-              ? "Неотслеживаемые запросы учитываются в ТОПах"
-              : "Учитывать в ТОПах активные неотслеживаемые запросы"}
+            title={includeUntracked ? uiText("Неотслеживаемые запросы учитываются в ТОПах") : uiText("Учитывать в ТОПах активные неотслеживаемые запросы")}
             type="button"
           >
             {scopeLoading ? (
@@ -170,7 +172,7 @@ export function ProjectPositionHistoryChart({
             ) : (
               <Icon name={includeUntracked ? "eye" : "eyeOff"} />
             )}
-            <span>{scopeLoading ? "Загружаем…" : "Неотслеживаемые"}</span>
+            <span>{scopeLoading ? <UiText text="Загружаем…" /> : <UiText text="Неотслеживаемые" />}</span>
           </button>
           {projectPositionTopThresholds.map((top) => {
             const selected = visibleTops.has(top);
@@ -184,7 +186,7 @@ export function ProjectPositionHistoryChart({
                 type="button"
               >
                 <i aria-hidden="true" />
-                {SERIES[top].label}
+                {seriesLabel(top, uiLocale)}
               </button>
             );
           })}
@@ -193,13 +195,12 @@ export function ProjectPositionHistoryChart({
 
       {scopeError && (
         <div className="dashboard-chart-scope-error" role="alert">
-          <span>{scopeError}</span>
+          <span>{<UiText text={scopeError ?? ""} />}</span>
           <button
             onClick={() => onIncludeUntrackedChange(true)}
             type="button"
           >
-            Повторить
-          </button>
+            <UiText text="Повторить" /></button>
         </div>
       )}
 
@@ -207,14 +208,14 @@ export function ProjectPositionHistoryChart({
         <div className="dashboard-chart-period-empty" role="status">
           <strong>{history.points.length === 0
             ? includeUntracked
-              ? "Срезов позиций пока нет"
-              : "По отслеживаемым запросам срезов пока нет"
-            : "В выбранном периоде съёмов нет"}</strong>
+              ? <UiText text="Срезов позиций пока нет" />
+              : <UiText text="По отслеживаемым запросам срезов пока нет" />
+            : <UiText text="В выбранном периоде съёмов нет" />}</strong>
           <span>{history.points.length === 0
             ? includeUntracked
-              ? "Запустите новую проверку позиций."
-              : "Можно включить неотслеживаемые запросы или запустить новый съём."
-            : "Выберите больший период или запустите новую проверку позиций."}</span>
+              ? <UiText text="Запустите новую проверку позиций." />
+              : <UiText text="Можно включить неотслеживаемые запросы или запустить новый съём." />
+            : <UiText text="Выберите больший период или запустите новую проверку позиций." />}</span>
         </div>
       ) : (
         <div className="dashboard-position-plot" ref={plotRef}>
@@ -223,20 +224,20 @@ export function ProjectPositionHistoryChart({
               className="dashboard-position-tooltip"
               style={chartTooltipStyle(activeIndex, points.length)}
             >
-              <strong>{formatChartDateTime(activePoint.observedAt)}</strong>
-              <span>{formatInteger(activePoint.positionedKeywordCount)} запросов с позицией</span>
+              <strong>{formatChartDay(activePoint.date, uiLocale)}</strong>
+              <span>{formatInteger(activePoint.positionedKeywordCount, uiLocale)} <UiText text="запросов с позицией" before=" " /></span>
               <div>
                 {selectedSeries.map((top) => (
                   <span key={top}>
                     <i style={{ background: SERIES[top].color }} />
-                    {SERIES[top].label}: <b>{formatInteger(projectPositionTopValue(activePoint, top))}</b>
+                    {seriesLabel(top, uiLocale)}: <b>{formatInteger(projectPositionTopValue(activePoint, top), uiLocale)}</b>
                   </span>
                 ))}
               </div>
             </div>
           )}
           <svg
-            aria-label={chartAriaLabel(points, selectedSeries)}
+            aria-label={chartAriaLabel(points, selectedSeries, uiLocale)}
             onMouseLeave={() => setActivePointId(undefined)}
             role="img"
             viewBox={`0 0 ${chartWidth} ${HEIGHT}`}
@@ -246,7 +247,7 @@ export function ProjectPositionHistoryChart({
               return (
                 <g className="dashboard-chart-grid" key={tick}>
                   <line x1={PADDING.left} x2={chartWidth - PADDING.right} y1={y} y2={y} />
-                  <text x={10} y={y + 4}>{formatCompactInteger(tick)}</text>
+                  <text x={10} y={y + 4}>{formatCompactInteger(tick, uiLocale)}</text>
                 </g>
               );
             })}
@@ -269,11 +270,11 @@ export function ProjectPositionHistoryChart({
                 <g key={point.id}>
                   {showXAxisLabel(index, points.length, chartWidth) && (
                     <text className="dashboard-chart-x-label" x={x} y={HEIGHT - 13}>
-                      {formatChartDate(point.observedAt)}
+                      {formatChartDay(point.date, uiLocale, true)}
                     </text>
                   )}
                   <rect
-                    aria-label={pointAriaLabel(point, selectedSeries)}
+                    aria-label={pointAriaLabel(point, selectedSeries, uiLocale)}
                     className="dashboard-position-hit"
                     height={HEIGHT - PADDING.top - PADDING.bottom}
                     onFocus={() => setActivePointId(point.id)}
@@ -302,11 +303,10 @@ export function ProjectPositionHistoryChart({
       )}
       <div className="dashboard-chart-note">
         <span>{includeUntracked
-          ? "Количество всех активных запросов в выбранном ТОПе"
-          : "Количество отслеживаемых запросов в выбранном ТОПе"}</span>
+          ? <UiText text="Количество всех активных запросов в выбранном ТОПе" />
+          : <UiText text="Количество отслеживаемых запросов в выбранном ТОПе" />}</span>
         <span>
-          До {projectPositionHistoryDefaultSlices} срезов
-          {history.truncated ? " · более ранняя история скрыта" : ""}
+          <UiText text="До" after=" " />{projectPositionHistoryDefaultSlices} <UiText text="дней" before=" " />{history.truncated ? <UiText text="· более ранняя история скрыта" before=" " /> : ""}
         </span>
       </div>
     </div>
@@ -353,46 +353,52 @@ function chartTooltipStyle(index: number, count: number): CSSProperties {
 
 function pointAriaLabel(
   point: ProjectPositionHistoryPoint,
-  tops: readonly ProjectPositionTopThreshold[]
+  tops: readonly ProjectPositionTopThreshold[], uiLocale: string = "ru-RU"
 ): string {
   return [
-    formatChartDateTime(point.observedAt),
+    formatChartDay(point.date, uiLocale),
     ...tops.map((top) =>
-      `${SERIES[top].label}: ${formatInteger(projectPositionTopValue(point, top))}`
+      `${seriesLabel(top, uiLocale)}: ${formatInteger(projectPositionTopValue(point, top), uiLocale)}`
     )
   ].join(". ");
 }
 
 function chartAriaLabel(
   points: readonly ProjectPositionHistoryPoint[],
-  tops: readonly ProjectPositionTopThreshold[]
+  tops: readonly ProjectPositionTopThreshold[], uiLocale: string = "ru-RU"
 ): string {
   const latest = points.at(-1)!;
-  return `Динамика позиций по ${points.length} срезам. ${pointAriaLabel(latest, tops)}`;
+  return uiLocale.startsWith("en")
+    ? `Ranking history across ${points.length} days. ${pointAriaLabel(latest, tops, uiLocale)}`
+    : `Динамика позиций по ${points.length} дням. ${pointAriaLabel(latest, tops, uiLocale)}`;
 }
 
-function formatChartDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short"
-  }).format(new Date(value));
+function seriesLabel(
+  threshold: ProjectPositionTopThreshold,
+  uiLocale: string
+): string {
+  return `${uiLocale.startsWith("en") ? "Top" : "Топ"}-${threshold}`;
 }
 
-function formatChartDateTime(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatChartDay(
+  value: string,
+  uiLocale: string = "ru-RU",
+  compact = false
+): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+    ...(compact ? {} : { year: "numeric" as const }),
+    timeZone: "UTC"
+  }).format(new Date(`${value}T12:00:00.000Z`));
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
-function formatCompactInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU", {
+function formatCompactInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, {
     notation: value >= 1_000 ? "compact" : "standard",
     maximumFractionDigits: 1
   }).format(value);

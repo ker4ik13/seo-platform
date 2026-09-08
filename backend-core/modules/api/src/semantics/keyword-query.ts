@@ -5,6 +5,7 @@ import {
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
+  parseSemanticRankDimensionKey,
   type KeywordListQuery,
   type ProjectPositionHistoryQuery,
   type SemanticKeywordMultiSearchInput
@@ -15,7 +16,10 @@ import { validationError } from "../common/domain-error.js";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 const BODY_QUERY_FIELDS = [
   "limit", "cursor", "search", "tag", "intent", "groupId", "groupIds",
-  "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
+  "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort",
+  "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+  "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
 ] as const;
 
 export function keywordMultiSearchInput(
@@ -62,6 +66,18 @@ export function keywordMultiSearchInput(
     ? search.mode as SemanticKeywordMultiSearchInput["search"]["mode"]
     : invalid("search.mode", `Must be one of: ${semanticKeywordMultiSearchModes.join(", ")}`);
   return { ...parsedQuery, multiSearch: { terms, mode } };
+}
+
+/** Body-only read used when a large folder union would overflow a request URL. */
+export function keywordBodyListInput(value: unknown): KeywordListQuery {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid("body", "Must be an object");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(input).some((key) => key !== "query")) {
+    invalid("body", "Contains unsupported fields");
+  }
+  return keywordListQuery(bodyQuery(input.query));
 }
 
 export function keywordTagOptionsQuery(
@@ -129,6 +145,22 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const isTracked = optionalBoolean(query.isTracked, "isTracked");
   const priorityMin = optionalInteger(query.priorityMin, "priorityMin");
   const priorityMax = optionalInteger(query.priorityMax, "priorityMax");
+  const frequencyBaseMin = optionalBigintString(query.frequencyBaseMin, "frequencyBaseMin");
+  const frequencyBaseMax = optionalBigintString(query.frequencyBaseMax, "frequencyBaseMax");
+  const frequencyExactMin = optionalBigintString(query.frequencyExactMin, "frequencyExactMin");
+  const frequencyExactMax = optionalBigintString(query.frequencyExactMax, "frequencyExactMax");
+  const frequencyFixedMin = optionalBigintString(query.frequencyFixedMin, "frequencyFixedMin");
+  const frequencyFixedMax = optionalBigintString(query.frequencyFixedMax, "frequencyFixedMax");
+  const wordCountMin = optionalInteger(query.wordCountMin, "wordCountMin");
+  const wordCountMax = optionalInteger(query.wordCountMax, "wordCountMax");
+  const targetUrlState = optionalEnum(query.targetUrlState, "targetUrlState", ["SET", "EMPTY"] as const);
+  const rankDimensionKey = optionalSingleString(query.rankDimensionKey, "rankDimensionKey");
+  if (rankDimensionKey && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid("rankDimensionKey", "Must identify a known rank dimension");
+  const rankState = optionalEnum(query.rankState, "rankState", ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const);
+  const rankPositionMin = optionalInteger(query.rankPositionMin, "rankPositionMin");
+  const rankPositionMax = optionalInteger(query.rankPositionMax, "rankPositionMax");
+  const rankCheckedFrom = optionalIsoInstant(query.rankCheckedFrom, "rankCheckedFrom");
+  const rankCheckedBefore = optionalIsoInstant(query.rankCheckedBefore, "rankCheckedBefore");
   const sort =
     optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
     "CREATED_DESC";
@@ -176,6 +208,15 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   ) {
     invalid("priorityMin", "Must not be greater than priorityMax");
   }
+  validateRange(frequencyBaseMin, frequencyBaseMax, "frequencyBaseMin");
+  validateRange(frequencyExactMin, frequencyExactMax, "frequencyExactMin");
+  validateRange(frequencyFixedMin, frequencyFixedMax, "frequencyFixedMin");
+  validateNumberRange(wordCountMin, wordCountMax, 1, 10_000, "wordCountMin");
+  validateNumberRange(rankPositionMin, rankPositionMax, 1, 100, "rankPositionMin");
+  if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) invalid("rankCheckedFrom", "Must precede rankCheckedBefore");
+  if (!rankDimensionKey && (rankState || rankPositionMin !== undefined || rankPositionMax !== undefined || rankCheckedFrom || rankCheckedBefore)) invalid("rankDimensionKey", "Choose a geographic rank slice first");
+  if ((rankState === "NOT_CHECKED" && (rankPositionMin !== undefined || rankPositionMax !== undefined || rankCheckedFrom || rankCheckedBefore)) ||
+    (rankState === "NOT_FOUND" && (rankPositionMin !== undefined || rankPositionMax !== undefined))) invalid("rankState", "Selected rank state is incompatible with numeric/date limits");
 
   return {
     limit: parsedLimit,
@@ -190,6 +231,14 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
     ...(priorityMax === undefined ? {} : { priorityMax }),
+    ...(frequencyBaseMin ? { frequencyBaseMin } : {}), ...(frequencyBaseMax ? { frequencyBaseMax } : {}),
+    ...(frequencyExactMin ? { frequencyExactMin } : {}), ...(frequencyExactMax ? { frequencyExactMax } : {}),
+    ...(frequencyFixedMin ? { frequencyFixedMin } : {}), ...(frequencyFixedMax ? { frequencyFixedMax } : {}),
+    ...(wordCountMin === undefined ? {} : { wordCountMin }), ...(wordCountMax === undefined ? {} : { wordCountMax }),
+    ...(targetUrlState ? { targetUrlState } : {}), ...(rankDimensionKey ? { rankDimensionKey } : {}),
+    ...(rankState ? { rankState } : {}), ...(rankPositionMin === undefined ? {} : { rankPositionMin }),
+    ...(rankPositionMax === undefined ? {} : { rankPositionMax }), ...(rankCheckedFrom ? { rankCheckedFrom } : {}),
+    ...(rankCheckedBefore ? { rankCheckedBefore } : {}),
     sort
   };
 }
@@ -205,6 +254,7 @@ function optionalUuidList(value: unknown, field: string): readonly string[] {
   if (new Set(ids).size !== ids.length) {
     invalid(field, "Must contain unique UUIDs");
   }
+  if (ids.length > 2_000) invalid(field, "Must contain at most 2000 identifiers");
   return [...ids].sort();
 }
 
@@ -269,6 +319,28 @@ function optionalInteger(
     invalid(field, "Must be an integer");
   }
   return integer;
+}
+
+function optionalBigintString(value: unknown, field: string): string | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (!/^(?:0|[1-9]\d{0,18})$/u.test(parsed) || BigInt(parsed) > 9_223_372_036_854_775_807n) invalid(field, "Must be a non-negative bigint");
+  return parsed;
+}
+
+function optionalIsoInstant(value: unknown, field: string): string | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (parsed.length !== 24 || Number.isNaN(Date.parse(parsed)) || new Date(parsed).toISOString() !== parsed) invalid(field, "Must be a canonical UTC instant");
+  return parsed;
+}
+
+function validateRange(min: string | undefined, max: string | undefined, field: string): void {
+  if (min !== undefined && max !== undefined && BigInt(min) > BigInt(max)) invalid(field, "Minimum must not exceed maximum");
+}
+
+function validateNumberRange(min: number | undefined, max: number | undefined, lower: number, upper: number, field: string): void {
+  if ((min !== undefined && (min < lower || min > upper)) || (max !== undefined && (max < lower || max > upper)) || (min !== undefined && max !== undefined && min > max)) invalid(field, `Expected ${lower}–${upper} and minimum <= maximum`);
 }
 
 function optionalSingleString(

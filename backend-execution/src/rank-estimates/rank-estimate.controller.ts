@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Param,
   Post,
@@ -27,6 +28,14 @@ import { RankEstimateService } from "./rank-estimate.service.js";
 @UseGuards(IntegrationCredentialApiGuard)
 export class RankEstimateController {
   public constructor(private readonly estimates: RankEstimateService) {}
+
+  @Get(":estimateId/pricing-scope")
+  public async pricingScope(@Param("workspaceId") workspaceId: string, @Param("projectId") projectId: string, @Param("estimateId") estimateId: string, @Headers() headers: Readonly<Record<string, string | string[] | undefined>>, @Req() request: FastifyRequest) {
+    const context = internalCommandContext(headers);
+    const scope = { workspaceId: internalUuid(workspaceId, "workspaceId"), projectId: internalUuid(projectId, "projectId"), actorId: context.actorId };
+    assertInternalContext(scope, context);
+    return { data: await this.estimates.pricingScope(scope.workspaceId, scope.projectId, scope.actorId, internalUuid(estimateId, "estimateId")), meta: { requestId: request.id } };
+  }
 
   @Post()
   public async create(

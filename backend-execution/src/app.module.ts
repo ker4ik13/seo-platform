@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { PaidOperationModule } from "./paid-operations/paid-operation.module.js";
 import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { EmailModule } from "./email/email.module.js";
@@ -27,6 +28,7 @@ import { ClusteringRunModule } from "./clustering-runs/clustering-run.module.js"
 
 @Module({
   imports: [
+    PaidOperationModule,
     ConfigModule.forRole("HTTP"),
     DatabaseModule,
     MessagingModule,

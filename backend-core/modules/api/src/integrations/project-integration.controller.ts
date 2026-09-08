@@ -25,7 +25,7 @@ import { AuditService } from "../audit/audit.service.js";
 import {
   type TenantRequest
 } from "../authorization/authorization.types.js";
-import { hasEffectiveProjectPermission } from "../authorization/permissions.js";
+import { hasEffectiveProjectPermission, hasSystemPermission } from "../authorization/permissions.js";
 import {
   internalProjectContext,
   requiredMutableProjectTenant,
@@ -127,6 +127,16 @@ export class ProjectIntegrationController {
     });
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Post("prepare-system")
+  @RequirePermission("integration.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async prepareSystem(@Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal) {
+    const tenant = requiredMutableProjectTenant(request);
+    assertCanUseWorkspaceCredentials(tenant);
+    if (!hasSystemPermission(tenant.roleCode, "integration.update")) throw new ForbiddenException("Workspace integration management is required");
+    return apiResponse(request, await this.jobs.prepareSystemConnectors(internalProjectContext(request, principal, tenant)));
   }
 
   @Patch(":bindingId")

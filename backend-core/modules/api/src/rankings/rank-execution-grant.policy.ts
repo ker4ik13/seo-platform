@@ -1,6 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   currentRankProviderPolicyVersion,
+  batchedArsenkinRankPolicyVersion,
+  largeXmlStockRankPolicyVersion,
+  rankExecutionPolicyShape,
   supportedRankProviderPolicyVersions,
   xmlStockRankProviderPolicyVersion
 } from "@seo-platform/contracts";
@@ -81,6 +84,7 @@ export class ControlledBetaRankExecutionGrantPolicy
       !supportedRankProviderPolicyVersions.includes(
         input.policyVersion as (typeof supportedRankProviderPolicyVersions)[number]
       ) ||
+      !rankExecutionPolicyShape(input.policyVersion, input.provider) ||
       input.usageIntent.meter !== "RANK_PROVIDER_TASK" ||
       input.usageIntent.quantity !== 1 ||
       (input.credentialMode !== "BYOK_API_KEY" &&
@@ -202,8 +206,8 @@ function platformPolicyMatchesProvider(
   policyVersion: string
 ): boolean {
   return provider === "ARSENKIN"
-    ? policyVersion === currentRankProviderPolicyVersion
-    : policyVersion === xmlStockRankProviderPolicyVersion;
+    ? [currentRankProviderPolicyVersion, batchedArsenkinRankPolicyVersion].includes(policyVersion as typeof currentRankProviderPolicyVersion)
+    : [xmlStockRankProviderPolicyVersion, largeXmlStockRankPolicyVersion].includes(policyVersion as typeof xmlStockRankProviderPolicyVersion);
 }
 
 function positiveSafeMinor(value: unknown): value is string {

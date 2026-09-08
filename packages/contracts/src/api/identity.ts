@@ -11,6 +11,8 @@ export interface UserSummary {
   readonly createdAt: string;
 }
 
+export interface UpdateUserPreferencesInput { readonly locale: "ru" | "en" }
+
 export interface SessionSummary {
   readonly id: string;
   readonly authenticatedAt: string;

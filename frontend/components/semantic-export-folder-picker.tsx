@@ -12,6 +12,8 @@ import {
   visibleFolderRows
 } from "../lib/semantic-operation-tree";
 import { Icon } from "./icon";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function SemanticExportFolderPicker({
   disabled,
@@ -28,6 +30,8 @@ export function SemanticExportFolderPicker({
   onSelectedGroupIdsChange: (value: ReadonlySet<string>) => void;
   selectedGroupIds: ReadonlySet<string>;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const availableGroups = useMemo(
     () => groups.filter(({ systemKind }) => systemKind === undefined),
     [groups]
@@ -101,28 +105,25 @@ export function SemanticExportFolderPicker({
     <section className="semantic-export-folder-picker" aria-labelledby="semantic-export-folder-title">
       <header>
         <div>
-          <strong id="semantic-export-folder-title">Папки карты сайта</strong>
+          <strong id="semantic-export-folder-title"><UiText text="Папки карты сайта" /></strong>
           <span>
-            В карту попадёт {formatInteger(includedGroupIds.size)} папок · до {formatInteger(includedKeywordRows)} строк
-          </span>
+            <UiText text="В карту попадёт" after=" " />{formatInteger(includedGroupIds.size, uiLocale)} <UiText text="папок · до" before=" " after=" " />{formatInteger(includedKeywordRows, uiLocale)} <UiText text="строк" before=" " /></span>
         </div>
         <div className="semantic-export-folder-actions">
           <button disabled={disabled || availableGroups.length === 0} onClick={selectAll} type="button">
-            Выбрать все
-          </button>
+            <UiText text="Выбрать все" /></button>
           <button disabled={disabled || selectedGroupIds.size === 0} onClick={() => onSelectedGroupIdsChange(new Set())} type="button">
-            Очистить
-          </button>
+            <UiText text="Очистить" /></button>
         </div>
       </header>
       <div className="semantic-export-folder-controls">
         <label className="semantic-export-folder-search">
           <Icon name="search" />
           <input
-            aria-label="Поиск папок карты сайта"
+            aria-label={uiText("Поиск папок карты сайта")}
             disabled={disabled}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Найти папку по названию или пути"
+            placeholder={uiText("Найти папку по названию или пути")}
             type="search"
             value={search}
           />
@@ -134,10 +135,10 @@ export function SemanticExportFolderPicker({
             onChange={(event) => onIncludeDescendantsChange(event.target.checked)}
             type="checkbox"
           />
-          <span>Включать все вложенные папки выбранных</span>
+          <span><UiText text="Включать все вложенные папки выбранных" /></span>
         </label>
       </div>
-      <div className="semantic-operation-folder-list semantic-export-folder-tree" aria-label="Дерево папок карты сайта">
+      <div className="semantic-operation-folder-list semantic-export-folder-tree" aria-label={uiText("Дерево папок карты сайта")}>
         {rows.map(({ group, depth, hasChildren }) => {
           const selected = selectedGroupIds.has(group.id);
           const includedByParent = !selected && includedGroupIds.has(group.id);
@@ -150,7 +151,7 @@ export function SemanticExportFolderPicker({
             >
               {hasChildren ? (
                 <button
-                  aria-label={expandedGroupIds.has(group.id) ? "Свернуть папку" : "Развернуть папку"}
+                  aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
                   aria-expanded={expandedGroupIds.has(group.id)}
                   className="semantic-operation-folder-toggle"
                   disabled={disabled}
@@ -180,19 +181,18 @@ export function SemanticExportFolderPicker({
                   style={{ background: group.color ?? "#a8a5b8" }}
                 />
                 <span>{group.name}</span>
-                {includedByParent && <em>из вложенных</em>}
-                <b>{formatInteger(group.keywordCount)}</b>
+                {includedByParent && <em><UiText text="из вложенных" /></em>}
+                <b>{formatInteger(group.keywordCount, uiLocale)}</b>
               </label>
             </div>
           );
         })}
         {rows.length === 0 && (
-          <p>{search.trim() ? "Папки по этому поиску не найдены." : "В проекте пока нет обычных папок."}</p>
+          <p>{search.trim() ? <UiText text="Папки по этому поиску не найдены." /> : <UiText text="В проекте пока нет обычных папок." />}</p>
         )}
       </div>
       <small>
-        Пустые папки сохраняются в дереве. Отдельный лист создаётся для каждой папки, в которой есть запросы.
-      </small>
+        <UiText text="Пустые папки сохраняются в дереве. Отдельный лист создаётся для каждой папки, в которой есть запросы." /></small>
     </section>
   );
 }
@@ -208,6 +208,6 @@ interface SemanticExportFolderGroup {
   readonly systemKind?: "UNGROUPED" | "TRASH";
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, { maximumFractionDigits: 0 }).format(value);
 }

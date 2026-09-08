@@ -46,7 +46,7 @@ test("rejects extensible, disabled and malformed execution evidence", () => {
     { ...value, executionAttempt: 0 },
     {
       ...value,
-      manifest: { ...value.manifest, chunkIndex: 15_000 }
+      manifest: { ...value.manifest, chunkIndex: 300_000 }
     },
     {
       ...value,

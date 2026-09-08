@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
+import { PaidOperationRuntimeService, PaidOperationReviewError, PaidOperationUnavailableError } from "../paid-operations/paid-operation-runtime.service.js";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   internalAiAnswerPersistBatchLimit,
@@ -34,7 +36,8 @@ export class AiAnswerRuntimeService {
     private readonly arsenkin: ArsenkinAiAnswerConnector,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
-    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
+    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
+    @Optional() private readonly billing?: PaidOperationRuntimeService
   ) {}
 
   public async processBatch(
@@ -68,15 +71,18 @@ export class AiAnswerRuntimeService {
       this.assertLease(activeClaim, timeoutMs * 2 + PERSISTENCE_MARGIN_MS);
       const currentRequestId = sharedProviderRequestId(activeClaim.items);
       if (currentRequestId?.startsWith("submitting:")) {
+        const acceptedTaskId = await this.billing?.acceptedTaskId(activeClaim, activeClaim.items.map(item => item.jobItemId));
+        if (acceptedTaskId) { await this.broker.defer(activeClaim, acceptedTaskId, 5); return "RETRY_SCHEDULED"; }
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
       }
-      const secret = this.crypto.decrypt(
+      const secret = selectIntegrationCredentialSecret(this.crypto.decrypt(
         activeClaim.workspaceId,
         "ARSENKIN",
         activeClaim.credentialId,
         activeClaim.encryptedCredential
-      );
+      ), activeClaim.jobId, activeClaim.credentialId);
+      const sourceMode = await this.billing?.mode(activeClaim) === "PLATFORM_PAID" ? "PLATFORM" as const : "BYOK" as const;
       let keywords: readonly InternalAiAnswerKeyword[] | undefined;
       const resolve = async (): Promise<readonly string[]> => {
         const resolved = await this.resolveKeywords(activeClaim, leaseSeconds);
@@ -101,7 +107,7 @@ export class AiAnswerRuntimeService {
             secret,
             timeoutMs
           )
-        : await this.arsenkin.submit(
+        : await this.runPaid(activeClaim, () => this.arsenkin.submit(
             { ...providerInput, keywords: (keywords ?? []).map(({ text }) => text) },
             secret,
             timeoutMs,
@@ -116,7 +122,7 @@ export class AiAnswerRuntimeService {
               activeClaim = marked;
               return true;
             }
-          );
+          ));
       if (
         sharedProviderRequestId(activeClaim.items)?.startsWith("submitting:") &&
         (outcome.status === "OUTCOME_UNKNOWN" || outcome.status === "RETRYABLE_FAILURE")
@@ -141,6 +147,7 @@ export class AiAnswerRuntimeService {
           this.config.internalCommandTimeoutMs + PERSISTENCE_MARGIN_MS
         );
         await this.seoData.persistAiAnswerSnapshots({
+          ...(sourceMode === "PLATFORM" ? { sourceMode } : {}),
           workspaceId: activeClaim.workspaceId,
           projectId: activeClaim.projectId,
           actorId: activeClaim.actorId,
@@ -167,6 +174,8 @@ export class AiAnswerRuntimeService {
       await this.broker.complete(activeClaim);
       return "COMPLETED_BATCH";
     } catch (error) {
+      if (error instanceof PaidOperationReviewError) { await this.broker.fail(activeClaim, { code: "PAID_OPERATION_REQUIRES_REVIEW", retryable: false }).catch(() => {}); return "ACTION_REQUIRED"; }
+      if (error instanceof PaidOperationUnavailableError) { await this.broker.fail(activeClaim, { code: "PAID_OPERATION_UNAVAILABLE", retryable: true, retryAfterSeconds: 30 }).catch(() => {}); return "RETRY_SCHEDULED"; }
       if (error instanceof AiAnswerLeaseLostError) return "LEASE_LOST";
       if (error instanceof SeoDataClientError && !error.retryable) {
         await this.broker.fail(activeClaim, {
@@ -190,6 +199,10 @@ export class AiAnswerRuntimeService {
         ?.scheduleAfterProviderOperation(activeClaim.credentialId)
         .catch(() => undefined);
     }
+  }
+
+  private async runPaid<T extends object>(claim: AiAnswerClaim, network: () => Promise<T>): Promise<T> {
+    return this.billing ? this.billing.execute(claim, "TASK", claim.items.map(item => item.jobItemId), network) : network();
   }
 
   private async resolveKeywords(

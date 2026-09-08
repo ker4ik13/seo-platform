@@ -30,7 +30,13 @@ case "$component" in
       -k "$runtime_root/postgres/socket" \
       -p 5432 \
       -c password_encryption=scram-sha-256 \
-      -c timezone=UTC
+      -c timezone=UTC \
+      -c log_timezone=UTC \
+      -c log_statement=none \
+      -c log_min_error_statement=panic \
+      -c log_error_verbosity=terse \
+      -c log_parameter_max_length=0 \
+      -c log_parameter_max_length_on_error=0
     ;;
   redis-jobs)
     redis_jobs_config=$runtime_root/redis/jobs/redis.conf
@@ -191,6 +197,9 @@ case "$component" in
       NODE_ENV=production \
       TZ=UTC \
       BIND_ADDRESS=127.0.0.1 \
+      TELEGRAM_ALERTS_ENABLED="${TELEGRAM_ALERTS_ENABLED:-false}" \
+      OPERATIONAL_ALERTS_INTERNAL_URL="http://127.0.0.1:4004" \
+      OPERATIONAL_ALERT_TOKEN="$OPERATIONAL_ALERT_TOKEN" \
       SERVICE_VERSION=0.1.0 \
       PLATFORM_PORT=4000 \
       PLATFORM_DATABASE_URL="postgresql://platform_runtime:${PLATFORM_DATABASE_PASSWORD}@${postgres_url}/platform_db" \
@@ -232,6 +241,17 @@ case "$component" in
       AUTH_EXPOSE_DEVELOPMENT_TOKENS=false \
       AUTH_PASSWORD_PEPPER="$AUTH_PASSWORD_PEPPER" \
       AUTH_DATA_ENCRYPTION_KEY="$AUTH_DATA_ENCRYPTION_KEY" \
+      TELEGRAM_LOGIN_ENABLED="${TELEGRAM_LOGIN_ENABLED:-false}" \
+      TELEGRAM_LOGIN_BOT_TOKEN="${TELEGRAM_LOGIN_BOT_TOKEN:-}" \
+      TELEGRAM_LOGIN_BOT_USERNAME="${TELEGRAM_LOGIN_BOT_USERNAME:-}" \
+      TELEGRAM_LOGIN_WEBHOOK_SECRET="${TELEGRAM_LOGIN_WEBHOOK_SECRET:-}" \
+      TELEGRAM_LOGIN_WEBHOOK_URL="${TELEGRAM_LOGIN_WEBHOOK_URL:-}" \
+      NPD_RECEIPTS_ENABLED="${NPD_RECEIPTS_ENABLED:-false}" \
+      NPD_PROCESSOR_API_TOKEN="${NPD_PROCESSOR_API_TOKEN:-}" \
+      CRYPTO_PAY_ENABLED="${CRYPTO_PAY_ENABLED:-false}" \
+      CRYPTO_PAY_API_TOKEN="${CRYPTO_PAY_API_TOKEN:-}" \
+      CRYPTO_PAY_API_BASE_URL="${CRYPTO_PAY_API_BASE_URL:-https://pay.crypt.bot/api}" \
+      CRYPTO_PAY_REQUEST_TIMEOUT_MS="${CRYPTO_PAY_REQUEST_TIMEOUT_MS:-10000}" \
       YOOKASSA_ENABLED="${YOOKASSA_ENABLED:-false}" \
       YOOKASSA_SHOP_ID="${YOOKASSA_SHOP_ID:-}" \
       YOOKASSA_SECRET_KEY="${YOOKASSA_SECRET_KEY:-}" \
@@ -540,6 +560,14 @@ case "$component" in
       MALWARE_SCANNER_ENABLED=false \
       "$node_bin" "$project_root/backend-execution/dist/connector-worker.main.js"
     ;;
+  npd-worker)
+    exec env -i PATH="$node_path" HOME=/home/dev \
+      NODE_ENV=production \
+      TZ=UTC \
+      NPD_RECEIPTS_ENABLED=true NPD_PROCESSOR_API_TOKEN="${NPD_PROCESSOR_API_TOKEN:-}" \
+      NPD_INN="${NPD_INN:-}" NPD_PASSWORD="${NPD_PASSWORD:-}" NPD_DEVICE_ID="${NPD_DEVICE_ID:-}" \
+      "$node_bin" "$project_root/backend-core/dist/npd-worker.main.js"
+    ;;
   web)
     exec env \
       -i \
@@ -555,10 +583,14 @@ case "$component" in
       AUTH_SESSION_COOKIE_NAME=seo_session \
       AUTH_CSRF_COOKIE_NAME=seo_csrf \
       NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME=seo_csrf \
-      NEXT_PUBLIC_TERMS_VERSION=2026-07-01 \
-      NEXT_PUBLIC_PRIVACY_VERSION=2026-07-01 \
-      NEXT_PUBLIC_MARKETING_VERSION=2026-07-01 \
+      NEXT_PUBLIC_TERMS_VERSION=2026-09-07 \
+      NEXT_PUBLIC_PRIVACY_VERSION=2026-09-07 \
+      NEXT_PUBLIC_MARKETING_VERSION=2026-09-07 \
       DEFAULT_LOCALE=ru \
+      LEGAL_DOCUMENTS_PUBLISHED="${LEGAL_DOCUMENTS_PUBLISHED:-false}" \
+      LEGAL_SELLER_NAME="${LEGAL_SELLER_NAME:-}" \
+      LEGAL_SELLER_INN="${LEGAL_SELLER_INN:-}" \
+      LEGAL_CONTACT_ADDRESS="${LEGAL_CONTACT_ADDRESS:-}" \
       "$pnpm_bin" \
       --dir "$project_root" \
       --filter @seo-platform/frontend \

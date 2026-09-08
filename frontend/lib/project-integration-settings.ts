@@ -7,6 +7,7 @@ import type {
   UpdateProjectConnectorBindingInput,
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
+import { credentialModeSupportsCapability } from "@seo-platform/contracts";
 import {
   type IdempotentCommand,
   stableIdempotencyCommand
@@ -119,7 +120,7 @@ export function projectConnectorOptions(
 ): readonly ProjectConnectorCredentialOption[] {
   return settings.credentialOptions.filter(
     (credential) =>
-      credentialModeSupportsCapability(credential.mode, capability) &&
+      credentialModeSupportsCapability(credential.mode, capability, credential.provider) &&
       credential.capabilities.includes(capability)
   );
 }
@@ -173,7 +174,7 @@ export function projectConnectorIncompatibleOptions(
 ): readonly ProjectConnectorCredentialOption[] {
   return settings.credentialOptions.filter(
     (credential) =>
-      credentialModeSupportsCapability(credential.mode, capability) &&
+      credentialModeSupportsCapability(credential.mode, capability, credential.provider) &&
       !credential.capabilities.includes(capability)
   );
 }
@@ -183,19 +184,9 @@ export function isProjectConnectorCredentialEligible(
   capability: IntegrationCapability
 ): boolean {
   return (
-    credentialModeSupportsCapability(credential.mode, capability) &&
+    credentialModeSupportsCapability(credential.mode, capability, credential.provider) &&
     credential.status === "ACTIVE" &&
     credential.capabilities.includes(capability)
-  );
-}
-
-function credentialModeSupportsCapability(
-  mode: ProjectConnectorCredentialOption["mode"],
-  capability: IntegrationCapability
-): boolean {
-  return (
-    mode === "BYOK_API_KEY" ||
-    (mode === "PLATFORM_PAID" && capability === "SERP_RANK_TRACKING")
   );
 }
 

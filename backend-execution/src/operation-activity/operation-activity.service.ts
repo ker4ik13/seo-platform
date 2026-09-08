@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  InternalWorkspaceExecutionUsage,
+  InternalExecutionOverview,
   AdminOperationResultMetrics,
   AdminOperationStatus,
   AdminOperationStatusGroup,
@@ -14,6 +16,9 @@ import {
 } from "../generated/prisma/client.js";
 import { INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE } from "../integrations/integration-credential-validation-job.js";
 import type { PlatformAdminOperationQuery } from "./platform-admin-operation-input.js";
+
+import { ACTIVE_JOB_STATUSES, ACTIVE_IMPORT_STATUSES } from "../jobs/job-capacity.js";
+import { STORAGE_RESERVING_UPLOAD_STATUSES } from "../uploads/storage-capacity.js";
 
 const visibleOperationTypes = [
   "FREQUENCY_COLLECTION",
@@ -109,6 +114,16 @@ export class OperationActivityService {
     );
   }
 
+  public async workspaceUsage(workspaceId: string): Promise<InternalWorkspaceExecutionUsage> {
+    const [jobs, imports, automations, storage] = await this.prisma.$transaction([
+      this.prisma.job.count({ where: { workspaceId, status: { in: [...ACTIVE_JOB_STATUSES] } } }),
+      this.prisma.semanticImport.count({ where: { workspaceId, status: { in: [...ACTIVE_IMPORT_STATUSES] } } }),
+      this.prisma.automation.count({ where: { workspaceId, enabled: true } }),
+      this.prisma.upload.aggregate({ where: { workspaceId, status: { in: [...STORAGE_RESERVING_UPLOAD_STATUSES] } }, _sum: { sizeBytes: true } })
+    ]);
+    return { workspaceId, concurrentJobs: jobs + imports, automations, storageBytes: (storage._sum.sizeBytes ?? 0n).toString() };
+  }
+
   public async adminList(
     query: PlatformAdminOperationQuery
   ): Promise<InternalAdminOperationSearchResult> {
@@ -173,6 +188,19 @@ export class OperationActivityService {
         .sort((left, right) => right.count - left.count || left.type.localeCompare(right.type))
         .slice(0, 50)
     };
+  }
+
+  public async overview(): Promise<InternalExecutionOverview> {
+    const now = Date.now();
+    const [active, queued, attention, failed24h, completed30d, groups] = await Promise.all([
+      this.prisma.job.count({ where: { status: { in: [...ACTIVE_JOB_STATUSES] } } }),
+      this.prisma.job.count({ where: { status: "QUEUED" } }),
+      this.prisma.job.count({ where: { status: "ACTION_REQUIRED" } }),
+      this.prisma.job.count({ where: { status: "FAILED_FINAL", updatedAt: { gte: new Date(now - 86_400_000) } } }),
+      this.prisma.job.count({ where: { status: { in: ["COMPLETED", "PARTIALLY_COMPLETED"] }, finishedAt: { gte: new Date(now - 30 * 86_400_000) } } }),
+      this.prisma.job.groupBy({ by: ["type"], where: { createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } })
+    ]);
+    return { active, queued, attention, failed24h, completed30d, byType30d: groups.map(row => ({ type: row.type, count: row._count._all })).sort((a, b) => b.count - a.count).slice(0, 50) };
   }
 }
 

@@ -1,0 +1,51 @@
+.public-document-site { min-height:100dvh; background:#f8f9fd; color:#202539; font-family:Arial,Helvetica,sans-serif; }
+.public-document-header { display:flex; align-items:center; gap:28px; max-width:1280px; padding:24px 32px; margin:0 auto; }
+.public-document-brand { display:flex; align-items:center; gap:10px; font-size:21px; color:inherit; text-decoration:none; }
+.public-document-header nav { display:flex; gap:24px; margin-left:auto; }
+.public-document-header a, .public-document-footer a { text-decoration:none; }
+.public-document-header nav a { color:#596174; font-size:14px; }
+.public-document-header-actions { display:flex; align-items:center; gap:20px; }
+.public-document-button { display:inline-flex; justify-content:center; align-items:center; padding:11px 18px; border-radius:10px; background:#6242ef; color:#fff!important; font-size:14px; font-weight:700; text-decoration:none; }
+.public-document-site a:focus-visible { outline:3px solid #b3a3ff; outline-offset:4px; }
+.public-document-main { max-width:1160px; padding:44px 32px 80px; margin:0 auto; }
+.public-document-title { max-width:830px; margin-bottom:36px; }
+.public-document-title>p:first-child { color:#7255ed; text-transform:uppercase; font-size:12px; letter-spacing:.07em; font-weight:700; }
+.public-document-title h1 { font-size:clamp(29px,4vw,44px); line-height:1.16; margin:14px 0 18px; letter-spacing:-.025em; }
+.public-document-title p { font-size:17px; line-height:1.65; color:#626b7d; }
+.public-document-title small { color:#788195; font-size:13px; }
+.public-document-draft { border:1px solid #eadcaf; background:#fffaf0; padding:18px 22px; border-radius:14px; margin:0 0 32px; font-size:14px; line-height:1.6; }
+.public-document-draft p { margin:6px 0 0; }
+.public-document-layout { display:grid; grid-template-columns:210px minmax(0,1fr); gap:44px; align-items:start; }
+.public-document-toc { position:sticky; top:24px; font-size:13px; line-height:1.5; }
+.public-document-toc nav { display:grid; gap:12px; margin:18px 0 28px; }
+.public-document-toc a { color:#606b81; text-decoration:none; }
+.public-document-toc a:hover { color:#6242ef; }
+.public-document-copy { background:#fff; border:1px solid #e2e6f0; border-radius:18px; padding:12px 36px 32px; min-width:0; }
+.public-document-copy section { scroll-margin-top:24px; padding:24px 0 12px; }
+.public-document-copy h2 { font-size:21px; line-height:1.4; margin:0 0 18px; }
+.public-document-copy p { font-size:15px; line-height:1.85; color:#505b70; margin:0 0 16px; overflow-wrap:anywhere; }
+.public-document-related { border-top:1px solid #e6e9f0; padding-top:24px; display:grid; gap:12px; font-size:14px; }
+.public-document-related a { color:#6242ef; text-decoration:none; }
+.public-document-footer { border-top:1px solid #e2e6f0; max-width:1216px; margin:0 auto; padding:28px 32px; display:flex; flex-wrap:wrap; gap:20px 36px; color:#647087; font-size:13px; }
+.public-document-footer nav { display:flex; flex-wrap:wrap; gap:14px; }
+.public-document-footer a { color:#596174; }
+.public-pricing-main { max-width:1280px; }
+.public-pricing-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+.public-price-card { background:#fff; border:1px solid #e1e5ef; border-radius:18px; padding:22px; display:flex; flex-direction:column; min-width:0; }
+.public-price-card.is-recommended { border-color:#7b60f0; box-shadow:0 8px 30px #6242ef0b; }
+.public-price-kicker { font-size:11px!important; text-transform:uppercase; letter-spacing:.04em; color:#7358e0!important; min-height:30px; }
+.public-price-card h2 { font-size:24px; margin:0 0 10px; }
+.public-price-card>p { font-size:14px; line-height:1.6; color:#687187; margin:0 0 12px; min-height:67px; }
+.public-price-amount { font-size:28px; font-weight:700; letter-spacing:-.04em; display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; margin-top:16px; }
+.public-price-amount span { font-size:12px; font-weight:400; letter-spacing:0; color:#747c90; }
+.public-price-year { color:#626b7e; font-size:12px; margin:7px 0 22px; }
+.public-price-card ul { display:grid; gap:13px; margin:0 0 24px; padding:0; list-style:none; font-size:13px; line-height:1.55; }
+.public-price-card li { padding-left:17px; position:relative; overflow-wrap:anywhere; }
+.public-price-card li::before { content:'✓'; position:absolute; left:0; color:#7659e9; }
+.public-price-card .public-document-button { margin-top:auto; }
+.public-pricing-details { display:grid; grid-template-columns:1fr 1fr; gap:36px; margin-top:48px; padding:30px; background:#eeebfb; border-radius:18px; }
+.public-pricing-details h2 { font-size:22px; margin:0 0 16px; }
+.public-pricing-details p { font-size:14px; line-height:1.8; color:#5e6479; }
+@media(max-width:1050px) { .public-pricing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.public-document-layout { grid-template-columns:180px minmax(0,1fr); gap:24px; } }
+@media(max-width:680px) { .public-document-header { flex-wrap:wrap; padding:18px 20px; gap:18px; }.public-document-header nav { order:3; width:100%; margin:0; gap:22px; }.public-document-header-actions { margin-left:auto; gap:12px; }.public-document-brand { font-size:18px; }.public-document-main { padding:28px 20px 48px; }.public-document-layout { display:block; }.public-document-toc { position:static; padding-bottom:20px; }.public-document-toc nav { display:flex; overflow-x:auto; padding-bottom:12px; gap:16px; }.public-document-toc nav a { flex:0 0 180px; }.public-document-copy { padding:4px 20px 24px; }.public-document-copy p { font-size:14px; }.public-pricing-grid,.public-pricing-details { grid-template-columns:1fr; }.public-price-card>p { min-height:0; }.public-pricing-details { padding:24px; gap:20px; }.public-document-footer { padding:24px 20px; }.public-document-header .public-document-button { padding:10px 12px; } }
+@media(prefers-color-scheme:dark) { .public-document-site { color:#eef0f8; background:#151823; }.public-price-card,.public-document-copy { background:#202431; border-color:#363c4e; }.public-document-title p,.public-document-copy p,.public-price-card>p,.public-document-header nav a,.public-document-footer a,.public-document-toc a,.public-pricing-details p { color:#b2bad0; }.public-pricing-details { background:#29253e; }.public-document-draft { background:#342e23; border-color:#75623c; }.public-document-related,.public-document-footer { border-color:#363c4e; } }

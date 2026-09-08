@@ -6,6 +6,7 @@ import {
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
+  parseSemanticRankDimensionKey,
   type KeywordListQuery,
   type ProjectPositionHistoryQuery,
   type SemanticKeywordMultiSearchInput
@@ -15,6 +16,9 @@ const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 const BODY_QUERY_FIELDS = [
   "limit", "cursor", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
+  , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+  "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
 ] as const;
 
 export function keywordMultiSearchInput(value: unknown): KeywordListQuery {
@@ -37,6 +41,13 @@ export function keywordMultiSearchInput(value: unknown): KeywordListQuery {
     ? search.mode as SemanticKeywordMultiSearchInput["search"]["mode"]
     : invalid("search.mode");
   return { ...parsedQuery, multiSearch: { terms, mode } };
+}
+
+export function keywordBodyListInput(value: unknown): KeywordListQuery {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalid("body");
+  const input = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(input).some((key) => key !== "query")) invalid("body");
+  return keywordListQuery(bodyQuery(input.query));
 }
 
 export function keywordTagOptionsQuery(
@@ -96,6 +107,22 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const isTracked = optionalBoolean(query.isTracked, "isTracked");
   const priorityMin = optionalInteger(query.priorityMin, "priorityMin");
   const priorityMax = optionalInteger(query.priorityMax, "priorityMax");
+  const frequencyBaseMin = optionalBigintString(query.frequencyBaseMin, "frequencyBaseMin");
+  const frequencyBaseMax = optionalBigintString(query.frequencyBaseMax, "frequencyBaseMax");
+  const frequencyExactMin = optionalBigintString(query.frequencyExactMin, "frequencyExactMin");
+  const frequencyExactMax = optionalBigintString(query.frequencyExactMax, "frequencyExactMax");
+  const frequencyFixedMin = optionalBigintString(query.frequencyFixedMin, "frequencyFixedMin");
+  const frequencyFixedMax = optionalBigintString(query.frequencyFixedMax, "frequencyFixedMax");
+  const wordCountMin = optionalInteger(query.wordCountMin, "wordCountMin");
+  const wordCountMax = optionalInteger(query.wordCountMax, "wordCountMax");
+  const targetUrlState = optionalEnum(query.targetUrlState, "targetUrlState", ["SET", "EMPTY"] as const);
+  const rankDimensionKey = optionalSingleString(query.rankDimensionKey, "rankDimensionKey");
+  if (rankDimensionKey && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid("rankDimensionKey");
+  const rankState = optionalEnum(query.rankState, "rankState", ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const);
+  const rankPositionMin = optionalInteger(query.rankPositionMin, "rankPositionMin");
+  const rankPositionMax = optionalInteger(query.rankPositionMax, "rankPositionMax");
+  const rankCheckedFrom = optionalIsoInstant(query.rankCheckedFrom, "rankCheckedFrom");
+  const rankCheckedBefore = optionalIsoInstant(query.rankCheckedBefore, "rankCheckedBefore");
   const sort =
     optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
     "CREATED_DESC";
@@ -117,6 +144,15 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   ) {
     invalid("priorityMin");
   }
+  validateRange(frequencyBaseMin, frequencyBaseMax, "frequencyBaseMin");
+  validateRange(frequencyExactMin, frequencyExactMax, "frequencyExactMin");
+  validateRange(frequencyFixedMin, frequencyFixedMax, "frequencyFixedMin");
+  validateNumberRange(wordCountMin, wordCountMax, 1, 10_000, "wordCountMin");
+  validateNumberRange(rankPositionMin, rankPositionMax, 1, 100, "rankPositionMin");
+  if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) invalid("rankCheckedFrom");
+  if (!rankDimensionKey && (rankState || rankPositionMin !== undefined || rankPositionMax !== undefined || rankCheckedFrom || rankCheckedBefore)) invalid("rankDimensionKey");
+  if ((rankState === "NOT_CHECKED" && (rankPositionMin !== undefined || rankPositionMax !== undefined || rankCheckedFrom || rankCheckedBefore)) ||
+    (rankState === "NOT_FOUND" && (rankPositionMin !== undefined || rankPositionMax !== undefined))) invalid("rankState");
   if (groupId && groupIds.length > 0) invalid("groupIds");
   if (
     priorityMax !== undefined &&
@@ -144,6 +180,14 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
     ...(priorityMax === undefined ? {} : { priorityMax }),
+    ...(frequencyBaseMin ? { frequencyBaseMin } : {}), ...(frequencyBaseMax ? { frequencyBaseMax } : {}),
+    ...(frequencyExactMin ? { frequencyExactMin } : {}), ...(frequencyExactMax ? { frequencyExactMax } : {}),
+    ...(frequencyFixedMin ? { frequencyFixedMin } : {}), ...(frequencyFixedMax ? { frequencyFixedMax } : {}),
+    ...(wordCountMin === undefined ? {} : { wordCountMin }), ...(wordCountMax === undefined ? {} : { wordCountMax }),
+    ...(targetUrlState ? { targetUrlState } : {}), ...(rankDimensionKey ? { rankDimensionKey } : {}),
+    ...(rankState ? { rankState } : {}), ...(rankPositionMin === undefined ? {} : { rankPositionMin }),
+    ...(rankPositionMax === undefined ? {} : { rankPositionMax }), ...(rankCheckedFrom ? { rankCheckedFrom } : {}),
+    ...(rankCheckedBefore ? { rankCheckedBefore } : {}),
     sort
   };
 }
@@ -157,6 +201,7 @@ function optionalUuidList(value: unknown, field: string): readonly string[] {
   if (ids.some((id) => id === undefined)) invalid(field);
   const canonical = ids as string[];
   if (new Set(canonical).size !== canonical.length) invalid(field);
+  if (canonical.length > 2_000) invalid(field);
   return [...canonical].sort();
 }
 
@@ -209,6 +254,28 @@ function optionalInteger(
   const result = Number(parsed);
   if (!Number.isSafeInteger(result)) invalid(field);
   return result;
+}
+
+function optionalBigintString(value: unknown, field: string): string | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (!/^(?:0|[1-9]\d{0,18})$/u.test(parsed) || BigInt(parsed) > 9_223_372_036_854_775_807n) invalid(field);
+  return parsed;
+}
+
+function optionalIsoInstant(value: unknown, field: string): string | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (parsed.length !== 24 || Number.isNaN(Date.parse(parsed)) || new Date(parsed).toISOString() !== parsed) invalid(field);
+  return parsed;
+}
+
+function validateRange(min: string | undefined, max: string | undefined, field: string): void {
+  if (min !== undefined && max !== undefined && BigInt(min) > BigInt(max)) invalid(field);
+}
+
+function validateNumberRange(min: number | undefined, max: number | undefined, lower: number, upper: number, field: string): void {
+  if ((min !== undefined && (min < lower || min > upper)) || (max !== undefined && (max < lower || max > upper)) || (min !== undefined && max !== undefined && min > max)) invalid(field);
 }
 
 function optionalUuid(

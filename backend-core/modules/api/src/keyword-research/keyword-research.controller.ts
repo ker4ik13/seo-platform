@@ -32,6 +32,7 @@ import {
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
+import { OperationBillingService } from "../billing/operation-billing.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { setEntityVersion } from "../common/entity-version.js";
@@ -61,7 +62,8 @@ export class KeywordResearchController {
   public constructor(
     private readonly jobs: JobsClient,
     private readonly billing: BillingEntitlementService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly operations?: OperationBillingService
   ) {}
 
   @Get()
@@ -138,11 +140,13 @@ export class KeywordResearchController {
       this.billing.semanticCapacity(tenant.workspaceId),
       this.billing.jobCapacity(tenant.workspaceId)
     ]);
+    const input = createKeywordResearchRunInput(body);
     const run = await this.jobs.createKeywordResearchRun(
       internalProjectContext(request, principal, tenant),
-      createKeywordResearchRunInput(body),
+      input,
       idempotencyKey,
-      jobCapacity
+      jobCapacity,
+      await this.operations?.admit(internalProjectContext(request, principal, tenant), { kind: "KEYWORD_RESEARCH", command: input }, idempotencyKey, request.headers["x-operation-estimate-id"])
     );
     await committed(
       this.audit,

@@ -19,6 +19,8 @@ import {
 import { semanticGroupColors } from "../lib/semantic-group-colors";
 import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function SemanticGroupColorLegendControl({
   onLegendChange,
@@ -29,6 +31,8 @@ export function SemanticGroupColorLegendControl({
   projectId: string;
   refreshVersion: number;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [legend, setLegend] = useState<SemanticGroupColorLegend>();
   const [draft, setDraft] = useState<Readonly<Record<string, string>>>({});
   const [open, setOpen] = useState(false);
@@ -172,14 +176,10 @@ export function SemanticGroupColorLegendControl({
     <>
       <button
         aria-busy={loading || undefined}
-        aria-label={legend?.unread
-          ? "Примечание по цветам: есть непросмотренные изменения"
-          : "Открыть примечание по цветам"}
+        aria-label={legend?.unread ? uiText("Примечание по цветам: есть непросмотренные изменения") : uiText("Открыть примечание по цветам")}
         className={`semantic-group-legend-trigger${configuredCount > 0 ? " configured" : ""}${legend?.unread ? " unread" : ""}`}
         onClick={showLegend}
-        title={legend?.unread
-          ? "Примечание по цветам обновилось"
-          : "Примечание по цветам"}
+        title={legend?.unread ? uiText("Примечание по цветам обновилось") : uiText("Примечание по цветам")}
         type="button"
       >
         <Icon name="palette" />
@@ -188,9 +188,7 @@ export function SemanticGroupColorLegendControl({
       {open && typeof document !== "undefined" && createPortal(
         <SemanticModal
           className="semantic-group-color-legend-modal"
-          description={legend?.access.canManage
-            ? "Общее для проекта. Пустые цвета не будут считаться настроенными."
-            : "Общее для проекта. Изменять может SEO Lead, Admin или Owner."}
+          description={legend?.access.canManage ? uiText("Общее для проекта. Пустые цвета не будут считаться настроенными.") : uiText("Общее для проекта. Изменять может SEO Lead, Admin или Owner.")}
           footer={
             <div className="semantic-group-color-legend-actions">
               {legend?.access.canManage && (
@@ -200,8 +198,7 @@ export function SemanticGroupColorLegendControl({
                   onClick={() => legend && setDraft(draftFromLegend(legend))}
                   type="button"
                 >
-                  Отменить изменения
-                </button>
+                  <UiText text="Отменить изменения" /></button>
               )}
               <button
                 className={legend?.access.canManage ? "primary-button" : "secondary-button"}
@@ -212,8 +209,8 @@ export function SemanticGroupColorLegendControl({
                 type="button"
               >
                 {legend?.access.canManage
-                  ? saving ? "Сохраняем…" : "Сохранить"
-                  : "Закрыть"}
+                  ? saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />
+                  : <UiText text="Закрыть" />}
               </button>
             </div>
           }
@@ -223,35 +220,33 @@ export function SemanticGroupColorLegendControl({
             if (legend) setDraft(draftFromLegend(legend));
           }}
           size="large"
-          title="Примечание по цветам групп"
+          title={uiText("Примечание по цветам групп")}
         >
           <div className="semantic-group-color-legend">
             <section className="semantic-group-color-legend-summary">
               <div>
-                <strong>{configuredCount} из {semanticGroupColors.length}</strong>
-                <span>цветов имеют общее пояснение</span>
+                <strong>{configuredCount} <UiText text="из" before=" " after=" " />{semanticGroupColors.length}</strong>
+                <span><UiText text="цветов имеют общее пояснение" /></span>
               </div>
               {legend?.updatedAt && (
-                <small>Обновлено {formatUpdatedAt(legend.updatedAt)}</small>
+                <small><UiText text="Обновлено" after=" " />{formatUpdatedAt(legend.updatedAt, uiLocale)}</small>
               )}
             </section>
 
             {loadError && (
               <div className="semantic-group-color-legend-state error" role="alert">
-                <span>{loadError}</span>
+                <span>{<UiText text={loadError ?? ""} />}</span>
                 <button onClick={() => setRetryVersion((value) => value + 1)} type="button">
-                  Повторить
-                </button>
+                  <UiText text="Повторить" /></button>
               </div>
             )}
             {loading && !legend && (
               <div className="semantic-group-color-legend-state" role="status">
-                Загружаем проектное примечание…
-              </div>
+                <UiText text="Загружаем проектное примечание…" /></div>
             )}
             {mutationError && (
               <div className="semantic-group-color-legend-state error" role="alert">
-                <span>{mutationError}</span>
+                <span>{<UiText text={mutationError ?? ""} />}</span>
                 {remoteConflict && legend && (
                   <button
                     disabled={loading}
@@ -262,12 +257,11 @@ export function SemanticGroupColorLegendControl({
                     }}
                     type="button"
                   >
-                    Принять актуальную
-                  </button>
+                    <UiText text="Принять актуальную" /></button>
                 )}
               </div>
             )}
-            {notice && <div className="semantic-group-color-legend-state success" role="status">{notice}</div>}
+            {notice && <div className="semantic-group-color-legend-state success" role="status">{<UiText text={notice ?? ""} />}</div>}
 
             {legend && (
               <div className="semantic-group-color-legend-grid">
@@ -308,6 +302,7 @@ function ColorLegendEntry({
   note: string;
   onChange: (value: string) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <label className={`semantic-group-color-legend-entry${note.trim() ? " configured" : ""}`}>
       <i aria-hidden="true" style={{ backgroundColor: color }} />
@@ -317,15 +312,15 @@ function ColorLegendEntry({
       </span>
       {canManage ? (
         <textarea
-          aria-label={`Пояснение для цвета ${label}`}
+          aria-label={uiText("Пояснение для цвета {0}", [String(label)])}
           maxLength={semanticGroupColorLegendNoteMaxLength}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="Например: ждёт сбора позиций"
+          placeholder={uiText("Например: ждёт сбора позиций")}
           rows={2}
           value={note}
         />
       ) : (
-        <p>{note.trim() || "Примечание не задано"}</p>
+        <p>{note.trim() || <UiText text="Примечание не задано" />}</p>
       )}
     </label>
   );
@@ -364,10 +359,10 @@ function legendPath(projectId: string): string {
   return `/app/api/projects/${encodeURIComponent(projectId)}/semantic-group-color-legend`;
 }
 
-function formatUpdatedAt(value: string): string {
+function formatUpdatedAt(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "недавно";
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
     hour: "2-digit",

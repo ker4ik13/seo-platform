@@ -1,3 +1,4 @@
+import { rankManifestShapeIsSupported } from "@seo-platform/contracts";
 import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import {
@@ -7,13 +8,9 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import {
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   rankExecutionPurpose,
   rankExecutionTracksProjectPosition,
-  xmlStockRankManifestChunkSize,
   rankManifestChunkHashPreimage,
   type InternalIngestRankChunkInput,
   type InternalNormalizedRankResult,
@@ -490,37 +487,7 @@ function assertManifest(
 }
 
 function validManifestShape(manifest: LockedManifest): boolean {
-  if (
-    !Number.isSafeInteger(manifest.pairCount) ||
-    !Number.isSafeInteger(manifest.chunkCount) ||
-    !Number.isSafeInteger(manifest.chunkSize)
-  ) {
-    return false;
-  }
-  if (manifest.chunkSize === legacyRankManifestChunkSize) {
-    return (
-      manifest.pairCount >= 1 &&
-      manifest.pairCount <= legacyRankProviderKeywordLimit &&
-      manifest.chunkCount ===
-        Math.ceil(
-          manifest.pairCount / legacyRankManifestChunkSize
-        )
-    );
-  }
-  if (manifest.chunkSize === xmlStockRankManifestChunkSize) {
-    return (
-      manifest.provider === "XMLSTOCK" &&
-      manifest.pairCount >= 1 &&
-      manifest.pairCount <= rankProviderKeywordLimit &&
-      manifest.chunkCount === manifest.pairCount
-    );
-  }
-  return (
-    manifest.chunkSize === rankManifestSingleTaskChunkSize &&
-    manifest.pairCount >= 1 &&
-    manifest.pairCount <= rankProviderKeywordLimit &&
-    manifest.chunkCount === 1
-  );
+  return (manifest.provider === "ARSENKIN" || manifest.provider === "XMLSTOCK") && rankManifestShapeIsSupported(manifest.provider, manifest.pairCount, manifest.chunkCount, manifest.chunkSize);
 }
 
 function storedSealedChunk(
@@ -887,11 +854,11 @@ function storedReceipt(
     !UUID_V7_PATTERN.test(record.ingestedBy) ||
     !Number.isSafeInteger(record.chunkIndex) ||
     record.chunkIndex < 0 ||
-    record.chunkIndex > 14_999 ||
+    record.chunkIndex > rankCommandKeywordLimit - 1 ||
     !validCount(
       record.persistedCount,
       1,
-      rankProviderKeywordLimit
+      rankCommandKeywordLimit
     ) ||
     !validCount(record.foundCount, 0, record.persistedCount) ||
     !validCount(

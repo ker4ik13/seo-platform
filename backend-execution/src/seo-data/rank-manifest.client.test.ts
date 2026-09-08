@@ -282,7 +282,7 @@ test("rejects invalid chunk requests before network access", async () => {
     await assert.rejects(
       () =>
         new RankManifestClient(config).getChunk(
-          { ...chunkCommand(), chunkIndex: 15_000 },
+          { ...chunkCommand(), chunkIndex: 300_000 },
           ids.actorId
         ),
       (error: unknown) =>

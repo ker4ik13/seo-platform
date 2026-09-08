@@ -11,11 +11,15 @@ import {
   BrowserApiError,
   browserApiRequest
 } from "../lib/browser-api";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function CrawlAutomationPanel({
   projectId,
   defaultStartUrl
 }: Readonly<{ projectId: string; defaultStartUrl: string }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [settings, setSettings] = useState<CrawlAutomationSettings>();
   const [name, setName] = useState("Регулярный технический аудит");
   const [startUrl, setStartUrl] = useState(defaultStartUrl);
@@ -150,23 +154,22 @@ export function CrawlAutomationPanel({
       <summary>
         <span className="crawl-radar-icon" aria-hidden="true">R</span>
         <span>
-          <strong>Автоматический Radar</strong>
-          <small>{settings?.automations.length ? `${settings.automations.filter(({ enabled }) => enabled).length} активных из ${settings.automations.length}` : "Регулярные проверки по расписанию"}</small>
+          <strong><UiText text="Автоматический Radar" /></strong>
+          <small>{settings?.automations.length ? <UiText text="{0} активных из {1}" values={[String(settings.automations.filter(({ enabled }) => enabled).length), String(settings.automations.length)]} /> : <UiText text="Регулярные проверки по расписанию" />}</small>
         </span>
-        <span className="crawl-radar-action">Настроить</span>
+        <span className="crawl-radar-action"><UiText text="Настроить" /></span>
       </summary>
       <div className="crawl-radar-body">
         <p className="muted-copy">
-          Запуски не пересекаются и автоматически ставятся на паузу после трёх ошибок.
-        </p>
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {notice && <div className="inline-success" role="status">{notice}</div>}
+          <UiText text="Запуски не пересекаются и автоматически ставятся на паузу после трёх ошибок." /></p>
+      {error && <div className="inline-error" role="alert">{<UiText text={error ?? ""} />}</div>}
+      {notice && <div className="inline-success" role="status">{<UiText text={notice ?? ""} />}</div>}
       {loading && !settings ? (
-        <p className="muted-copy">Загружаем расписания…</p>
+        <p className="muted-copy"><UiText text="Загружаем расписания…" /></p>
       ) : (
         <form className="crawl-audit-form" onSubmit={create}>
           <label className="form-field crawl-audit-url">
-            <span>Название</span>
+            <span><UiText text="Название" /></span>
             <input
               maxLength={160}
               onChange={(event) => setName(event.target.value)}
@@ -175,7 +178,7 @@ export function CrawlAutomationPanel({
             />
           </label>
           <label className="form-field crawl-audit-url">
-            <span>Стартовый URL</span>
+            <span><UiText text="Стартовый URL" /></span>
             <input
               onChange={(event) => setStartUrl(event.target.value)}
               required
@@ -184,19 +187,19 @@ export function CrawlAutomationPanel({
             />
           </label>
           <label className="form-field">
-            <span>Периодичность</span>
+            <span><UiText text="Периодичность" /></span>
             <CustomSelect
               onChange={(event) =>
                 setCadence(event.target.value as "DAILY" | "WEEKLY")
               }
               value={cadence}
             >
-              <option value="DAILY">Ежедневно</option>
-              <option value="WEEKLY">По дням недели</option>
+              <option value="DAILY"><UiText text="Ежедневно" /></option>
+              <option value="WEEKLY"><UiText text="По дням недели" /></option>
             </CustomSelect>
           </label>
           <label className="form-field">
-            <span>Время запуска</span>
+            <span><UiText text="Время запуска" /></span>
             <input
               onChange={(event) => setTime(event.target.value)}
               required
@@ -205,7 +208,7 @@ export function CrawlAutomationPanel({
             />
           </label>
           <label className="form-field">
-            <span>Окно с</span>
+            <span><UiText text="Окно с" /></span>
             <input
               onChange={(event) => setWindowStart(event.target.value)}
               required
@@ -214,7 +217,7 @@ export function CrawlAutomationPanel({
             />
           </label>
           <label className="form-field">
-            <span>Окно до</span>
+            <span><UiText text="Окно до" /></span>
             <input
               onChange={(event) => setWindowEnd(event.target.value)}
               required
@@ -224,7 +227,7 @@ export function CrawlAutomationPanel({
           </label>
           {cadence === "WEEKLY" && (
             <fieldset className="form-field crawl-audit-scope">
-              <legend>Дни недели</legend>
+              <legend><UiText text="Дни недели" /></legend>
               <div className="crawl-weekdays">
                 {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map(
                   (label, index) => {
@@ -250,10 +253,10 @@ export function CrawlAutomationPanel({
               </div>
             </fieldset>
           )}
-          <NumberField label="Лимит URL" max={5000} min={1} set={setMaxUrls} value={maxUrls} />
-          <NumberField label="Глубина" max={10} min={0} set={setMaxDepth} value={maxDepth} />
-          <NumberField label="Макс. время, мин" max={360} min={1} set={setMaxRuntimeMinutes} value={maxRuntimeMinutes} />
-          <NumberField label="Запросов/мин" max={60} min={1} set={setRpm} value={rpm} />
+          <NumberField label={uiText("Лимит URL")} max={5000} min={1} set={setMaxUrls} value={maxUrls} />
+          <NumberField label={uiText("Глубина")} max={10} min={0} set={setMaxDepth} value={maxDepth} />
+          <NumberField label={uiText("Макс. время, мин")} max={360} min={1} set={setMaxRuntimeMinutes} value={maxRuntimeMinutes} />
+          <NumberField label={uiText("Запросов/мин")} max={60} min={1} set={setRpm} value={rpm} />
           <button
             className="primary-button"
             disabled={
@@ -263,7 +266,7 @@ export function CrawlAutomationPanel({
             }
             type="submit"
           >
-            {busy ? "Подождите…" : "Создать расписание"}
+            {busy ? <UiText text="Подождите…" /> : <UiText text="Создать расписание" />}
           </button>
         </form>
       )}
@@ -274,17 +277,17 @@ export function CrawlAutomationPanel({
               <div>
                 <strong>{automation.name}</strong>
                 <span>
-                  {automation.enabled ? "Активно" : "На паузе"} ·{" "}
-                  {scheduleLabel(automation)}
+                  {automation.enabled ? <UiText text="Активно" /> : <UiText text="На паузе" />} ·{" "}
+                  {<UiText text={scheduleLabel(automation) ?? ""} />}
                 </span>
               </div>
               <p>
-                Следующий запуск:{" "}
+                <UiText text="Следующий запуск:" />{" "}
                 {automation.nextRunAt
-                  ? new Date(automation.nextRunAt).toLocaleString("ru-RU")
-                  : "не запланирован"}
+                  ? new Date(automation.nextRunAt).toLocaleString(uiLocale)
+                  : <UiText text="не запланирован" />}
                 {automation.consecutiveErrors > 0
-                  ? ` · ошибок подряд: ${automation.consecutiveErrors}`
+                  ? <UiText text="· ошибок подряд: {0}" values={[String(automation.consecutiveErrors)]} before=" " />
                   : ""}
               </p>
               <div>
@@ -294,8 +297,7 @@ export function CrawlAutomationPanel({
                   onClick={() => void action(automation, "runs")}
                   type="button"
                 >
-                  Запустить сейчас
-                </button>
+                  <UiText text="Запустить сейчас" /></button>
                 <button
                   className="text-button"
                   disabled={busy || !settings.access.canEnable}
@@ -307,14 +309,14 @@ export function CrawlAutomationPanel({
                   }
                   type="button"
                 >
-                  {automation.enabled ? "Пауза" : "Возобновить"}
+                  {automation.enabled ? <UiText text="Пауза" /> : <UiText text="Возобновить" />}
                 </button>
               </div>
             </article>
           ))}
         </div>
       ) : (
-        !loading && <p className="muted-copy">Расписания ещё не созданы.</p>
+        !loading && <p className="muted-copy"><UiText text="Расписания ещё не созданы." /></p>
       )}
       </div>
     </details>

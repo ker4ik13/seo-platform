@@ -1,7 +1,7 @@
 import {
   aiAnswerDevices,
   aiAnswerSearchEngines,
-  arsenkinAiAnswerKeywordLimit,
+  aiAnswerCollectionKeywordLimit,
   type CreateAiAnswerCollectionInput
 } from "@seo-platform/contracts";
 import { domainToASCII } from "node:url";
@@ -18,7 +18,7 @@ export function createAiAnswerCollectionInput(value: unknown): CreateAiAnswerCol
     "items", "searchEngine", "regionCode", "device", "host",
     "excludeSubdomains", "brands", "purpose", "saveProjectPosition"
   ]);
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > arsenkinAiAnswerKeywordLimit) {
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > aiAnswerCollectionKeywordLimit) {
     invalid("items");
   }
   const items = input.items.map((candidate, index) => {

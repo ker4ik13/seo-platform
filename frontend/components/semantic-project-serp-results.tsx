@@ -9,6 +9,8 @@ import {
   SemanticSerpResultUrl,
   SemanticSiteFavicon
 } from "./semantic-competitor-snapshots";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function SemanticProjectSerpResults({
   results,
@@ -17,6 +19,7 @@ export function SemanticProjectSerpResults({
   results: readonly SemanticKeywordListSiteResult[];
   targetUrl?: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <ol className="semantic-project-serp-results">
       {results.map((result) => {
@@ -44,10 +47,10 @@ export function SemanticProjectSerpResults({
                   result.snippet ?? "Описание не передано провайдером"
                 }
               >
-                {result.snippet ?? "Описание не передано провайдером"}
+                {result.snippet ?? <UiText text="Описание не передано провайдером" />}
               </small>
               <a
-                aria-label={`Открыть страницу на позиции ${result.position}: ${resultUrlHost(result.rankingUrl)}`}
+                aria-label={uiText("Открыть страницу на позиции {0}: {1}", [String(result.position), String(resultUrlHost(result.rankingUrl))])}
                 href={result.rankingUrl}
                 rel="noopener noreferrer"
                 target="_blank"
@@ -55,7 +58,7 @@ export function SemanticProjectSerpResults({
               >
                 <SemanticSerpResultUrl value={result.rankingUrl} />
               </a>
-              {isTarget && <em>Целевой URL</em>}
+              {isTarget && <em><UiText text="Целевой URL" /></em>}
             </div>
           </li>
         );

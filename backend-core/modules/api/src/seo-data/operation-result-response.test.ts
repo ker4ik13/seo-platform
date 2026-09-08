@@ -167,6 +167,7 @@ test("accepts a rank result page beyond the former 1,000-row boundary", () => {
       trackingContextId: "01900000-0000-7000-8000-000000000006",
       contextName: "Google · Москва",
       execution: execution(),
+      counts: { foundCount: 37, notFoundCount: 163 },
       rows: [
         {
           sequence: 1_000,
@@ -187,6 +188,7 @@ test("accepts a rank result page beyond the former 1,000-row boundary", () => {
 
   assert.equal(result.rows[0]?.sequence, 1_000);
   assert.deepEqual(result.page, { hasNext: false });
+  assert.deepEqual(result.counts, { foundCount: 37, notFoundCount: 163 });
 });
 
 test("accepts a competitor rank result only with its bounded Top-10 rows", () => {
@@ -202,6 +204,7 @@ test("accepts a competitor rank result only with its bounded Top-10 rows", () =>
         purpose: "COMPETITOR_SERP",
         saveProjectPosition: false
       },
+      counts: { foundCount: 0, notFoundCount: 1 },
       rows: [{
         sequence: 0,
         keywordId,
@@ -256,6 +259,7 @@ test("rejects forged tenant scope and oversized projections", () => {
           trackingContextId: "01900000-0000-7000-8000-000000000006",
           contextName: "Google · Москва",
           execution: execution(),
+          counts: { foundCount: 0, notFoundCount: 0 },
           rows: Array.from({ length: 201 }, () => ({})),
           page: { hasNext: false }
         },

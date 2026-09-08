@@ -4,6 +4,7 @@ import { BillingModule } from "../billing/billing.module.js";
 import { IdentityModule } from "../identity/identity.module.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { KeywordController } from "./keyword.controller.js";
+import { KeywordRankComparisonController } from "./keyword-rank-comparison.controller.js";
 import { KeywordGroupController } from "./keyword-group.controller.js";
 import { SemanticBulkController } from "./semantic-bulk.controller.js";
 import { SemanticSavedViewController } from "./semantic-saved-view.controller.js";
@@ -29,6 +30,7 @@ import { SemanticGroupColorLegendController } from "./semantic-group-color-legen
   ],
   controllers: [
     KeywordController,
+    KeywordRankComparisonController,
     KeywordGroupController,
     SemanticClusterController,
     SemanticBulkController,

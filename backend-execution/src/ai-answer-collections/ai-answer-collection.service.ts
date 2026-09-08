@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { paidOperationJobFields } from "../paid-operations/paid-operation-admission.js";
 import {
   ConflictException,
   Injectable,
@@ -46,7 +47,8 @@ export class AiAnswerCollectionService {
       input.projectId,
       "SERP_COLLECTION",
       input.actorId,
-      "ARSENKIN"
+      "ARSENKIN",
+      input.billing?.credentialId
     );
     if (route.provider !== "ARSENKIN") {
       throw new Error("AI answers require an Arsenkin route");
@@ -57,6 +59,7 @@ export class AiAnswerCollectionService {
           await assertJobCapacity(transaction, input.workspaceId, input.jobCapacity);
           const job = await transaction.job.create({
             data: {
+              ...paidOperationJobFields("AI_ANSWER_COLLECTION", input, route),
               workspaceId: input.workspaceId,
               projectId: input.projectId,
               type: "AI_ANSWER_COLLECTION",

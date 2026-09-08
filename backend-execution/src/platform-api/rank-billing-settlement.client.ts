@@ -62,7 +62,7 @@ export class RankBillingSettlementClient {
   }
 
   private async settle(
-    action: "HOLD" | "CAPTURE",
+    action: "HOLD" | "CAPTURE" | "RELEASE",
     command: RankBillingSettlementCommand,
     context: RankBillingSettlementRequestContext
   ): Promise<InternalRankExecutionGrantSettlementResultV1> {
@@ -98,7 +98,7 @@ export class RankBillingSettlementClient {
           }),
           redirect: "error",
           signal: AbortSignal.timeout(
-            this.config.platformApiCommandTimeoutMs
+            Math.min(this.config.platformApiCommandTimeoutMs, 5_000)
           )
         }
       );
@@ -139,11 +139,16 @@ export class RankBillingSettlementClient {
       result.grantId !== command.grantId ||
       (action === "CAPTURE"
         ? result.status !== "CAPTURED"
+        : action === "RELEASE" ? result.status !== "RELEASED"
         : result.status !== "RESERVED" && result.status !== "CAPTURED")
     ) {
       invalidResponse();
     }
     return result;
+  }
+
+  public release(command: RankBillingSettlementCommand, context: RankBillingSettlementRequestContext): Promise<InternalRankExecutionGrantSettlementResultV1> {
+    return this.settle("RELEASE", command, context);
   }
 }
 

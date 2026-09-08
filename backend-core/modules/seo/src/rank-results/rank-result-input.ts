@@ -1,3 +1,4 @@
+import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import {
   normalizedRankDataQualityFlags,
@@ -101,10 +102,10 @@ export function resultChunkIndex(value: unknown): number {
   const parsed =
     typeof value === "number"
       ? value
-      : typeof value === "string" && /^(?:0|[1-9]\d{0,3}|1[0-4]\d{3})$/u.test(value)
+      : typeof value === "string" && /^(?:0|[1-9]\d{0,5})$/u.test(value)
         ? Number(value)
         : Number.NaN;
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 14_999) {
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > rankCommandKeywordLimit - 1) {
     invalid("chunkIndex");
   }
   return parsed;

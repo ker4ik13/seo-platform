@@ -7,6 +7,7 @@ import type {
 } from "../generated/prisma/client.js";
 import { uuidV7 } from "../common/uuid-v7.js";
 import { BillingLedgerService } from "./billing-ledger.service.js";
+import { spendablePrepaidMinor } from "./billing-balance-availability.js";
 
 const RESERVATION_TTL_MILLISECONDS = 10 * 60 * 1_000;
 const RESERVATION_HOLD_MILLISECONDS = 60 * 1_000;
@@ -78,17 +79,20 @@ export class BillingUsageService {
       throw new Error("Invalid billing usage release batch size");
     }
     const candidates = await transaction.$queryRaw<
-      readonly { readonly id: string }[]
+      readonly { readonly id: string; readonly workspaceId: string }[]
     >`
-      SELECT "id"::text AS "id"
+      SELECT "id"::text AS "id", "workspace_id"::text AS "workspaceId"
       FROM "billing_usage_reservations"
       WHERE "status" = 'RESERVED'
+        AND "provider_started_at" IS NULL
         AND "expires_at" <= clock_timestamp()
       ORDER BY "expires_at", "id"
       FOR UPDATE SKIP LOCKED
       LIMIT ${batchSize}
     `;
-    for (const candidate of candidates) {
+    // Two sweepers can hold disjoint reservation batches. Acquire their
+    // workspace locks in one global order to avoid cross-workspace deadlocks.
+    for (const candidate of [...candidates].sort((a, b) => a.workspaceId.localeCompare(b.workspaceId))) {
       await this.release(transaction, candidate.id);
     }
     return candidates.length;
@@ -108,7 +112,7 @@ export class BillingUsageService {
 
     const amountMinor = input.unitPriceMinor * BigInt(input.quantity);
     await transaction.$queryRaw`
-      SELECT pg_advisory_xact_lock(
+      SELECT true AS locked FROM pg_advisory_xact_lock(
         hashtextextended(
           ${`billing-usage-provider-budget:${input.provider}`},
           0
@@ -146,12 +150,13 @@ export class BillingUsageService {
       transaction,
       input.workspaceId
     );
+    const subscription = await transaction.billingSubscription.findUnique({ where: { workspaceId: input.workspaceId }, select: { currentPeriodEnd: true } });
     const includedAmountMinor = minimum(
-      positiveBalance(balance.includedCreditsMinor),
+      subscription && subscription.currentPeriodEnd <= clock.now ? 0n : positiveBalance(balance.includedCreditsMinor),
       amountMinor
     );
     const prepaidAmountMinor = amountMinor - includedAmountMinor;
-    if (positiveBalance(balance.prepaidMinor) < prepaidAmountMinor) {
+    if (await spendablePrepaidMinor(transaction, input.workspaceId, balance.prepaidMinor) < prepaidAmountMinor) {
       throw new BillingUsageInsufficientBalanceError();
     }
     const reservationId = uuidV7();
@@ -210,6 +215,7 @@ export class BillingUsageService {
           unitPriceMinor: input.unitPriceMinor,
           amountMinor,
           includedAmountMinor,
+          includedPeriodEnd: subscription?.currentPeriodEnd ?? null,
           prepaidAmountMinor,
           businessReference: input.businessReference,
           requestHash: Uint8Array.from(requestHash),
@@ -225,7 +231,8 @@ export class BillingUsageService {
 
   public async capture(
     transaction: Prisma.TransactionClient,
-    reservationId: string
+    reservationId: string,
+    reviewDecision?: Prisma.InputJsonValue
   ): Promise<BillingUsageReservationResult> {
     const reservation = await lockReservation(transaction, reservationId);
     if (reservation.status === "CAPTURED") {
@@ -240,7 +247,7 @@ export class BillingUsageService {
     if (!clock?.now || Number.isNaN(clock.now.getTime())) {
       throw new Error("Unable to capture billing usage reservation");
     }
-    if (clock.now.getTime() >= reservation.expiresAt.getTime()) {
+    if (!reservation.providerStartedAt && clock.now.getTime() >= reservation.expiresAt.getTime()) {
       throw new BillingUsageReservationExpiredError();
     }
     const captureTransactionId = await this.ledger.post(transaction, {
@@ -269,6 +276,7 @@ export class BillingUsageService {
         where: { id: reservation.id },
         data: {
           status: "CAPTURED",
+          ...(reviewDecision ? { reviewDecision } : {}),
           captureTransactionId,
           capturedAt: clock.now
         }
@@ -293,25 +301,26 @@ export class BillingUsageService {
     if (!clock?.now || Number.isNaN(clock.now.getTime())) {
       throw new Error("Unable to hold billing usage reservation");
     }
-    if (clock.now.getTime() >= reservation.expiresAt.getTime()) {
+    if (!reservation.providerStartedAt && clock.now.getTime() >= reservation.expiresAt.getTime()) {
       throw new BillingUsageReservationExpiredError();
     }
     const holdExpiresAt = new Date(
       clock.now.getTime() + RESERVATION_HOLD_MILLISECONDS
     );
-    if (reservation.expiresAt.getTime() >= holdExpiresAt.getTime()) {
+    if (reservation.providerStartedAt) {
       return reservationResult(reservation);
     }
     const held = await transaction.billingUsageReservation.update({
       where: { id: reservation.id },
-      data: { expiresAt: holdExpiresAt }
+      data: { providerStartedAt: clock.now, ...(reservation.expiresAt < holdExpiresAt ? { expiresAt: holdExpiresAt } : {}) }
     });
     return reservationResult(held);
   }
 
   public async release(
     transaction: Prisma.TransactionClient,
-    reservationId: string
+    reservationId: string,
+    reviewDecision?: Prisma.InputJsonValue
   ): Promise<BillingUsageReservationResult> {
     const reservation = await lockReservation(transaction, reservationId);
     if (reservation.status === "RELEASED") {
@@ -320,12 +329,15 @@ export class BillingUsageService {
     if (reservation.status !== "RESERVED") {
       throw new Error("Captured billing usage cannot be released");
     }
+    await transaction.$queryRaw`SELECT id FROM workspaces WHERE id = ${reservation.workspaceId}::uuid FOR UPDATE`;
     const [clock] = await transaction.$queryRaw<
       readonly { readonly now: Date }[]
     >`SELECT clock_timestamp() AS "now"`;
     if (!clock?.now || Number.isNaN(clock.now.getTime())) {
       throw new Error("Unable to release billing usage reservation");
     }
+    const subscription = reservation.includedPeriodEnd ? await transaction.billingSubscription.findUnique({ where: { workspaceId: reservation.workspaceId }, select: { currentPeriodEnd: true } }) : null;
+    const includedExpired = Boolean(reservation.includedPeriodEnd && (reservation.includedPeriodEnd <= clock.now || subscription?.currentPeriodEnd.getTime() !== reservation.includedPeriodEnd.getTime()));
     const releaseTransactionId = await this.ledger.post(transaction, {
       type: "RELEASE",
       businessReference: ledgerReference(reservation.id, "release"),
@@ -343,8 +355,8 @@ export class BillingUsageService {
         ...(reservation.includedAmountMinor > 0n
           ? [
               {
-                workspaceId: reservation.workspaceId,
-                accountType: "PROMOTIONAL_LIABILITY" as const,
+                  ...(includedExpired ? {} : { workspaceId: reservation.workspaceId }),
+                  accountType: includedExpired ? "PROMOTIONAL_EXPENSE" as const : "PROMOTIONAL_LIABILITY" as const,
                 direction: "CREDIT" as const,
                 amountMinor: reservation.includedAmountMinor
               }
@@ -367,6 +379,7 @@ export class BillingUsageService {
         where: { id: reservation.id },
         data: {
           status: "RELEASED",
+          ...(reviewDecision ? { reviewDecision } : {}),
           releaseTransactionId,
           releasedAt: clock.now
         }
@@ -429,7 +442,7 @@ async function assertProviderBudget(
       COALESCE(
         SUM("amount_minor") FILTER (
           WHERE "status" = 'RESERVED'
-            AND "expires_at" > ${now}
+            AND ("expires_at" > ${now} OR "provider_started_at" IS NOT NULL)
         ),
         0
       )::text AS "reservedMinor"
@@ -437,7 +450,7 @@ async function assertProviderBudget(
     WHERE "provider" = ${input.provider}
       AND (
         ("status" = 'CAPTURED' AND "captured_at" >= ${monthStartedAt})
-        OR ("status" = 'RESERVED' AND "expires_at" > ${now})
+        OR ("status" = 'RESERVED' AND ("expires_at" > ${now} OR "provider_started_at" IS NOT NULL))
       )
   `;
   if (!exposure) {

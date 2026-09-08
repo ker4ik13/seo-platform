@@ -634,6 +634,13 @@ SELECT format(
 
 -- A PostgreSQL role is cluster-wide. REVOKE above intentionally touches only
 -- jobs_db/public and must never mutate another service database. Instead,
+SELECT format('GRANT EXECUTE ON FUNCTION public.prepare_provider_usage_ticket(uuid,uuid,uuid,text,integer,text,uuid[]) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.start_provider_usage_ticket(uuid,uuid) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.finish_provider_usage_ticket(uuid,uuid,text,jsonb) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.read_provider_operation_mode(uuid,uuid,uuid,text,integer) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.claim_platform_provider_account_probe(text) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.finish_platform_provider_account_probe(uuid,text,uuid,text,text) TO %I', :'connector_user') \gexec
+
 -- reject an existing role if any direct ACL dependency remains outside the
 -- exact jobs_db allowlist. pg_shdepend exposes ACL dependencies in every
 -- database without connecting to them: database ACLs are shared pg_database
@@ -663,6 +670,12 @@ BEGIN
   WHERE nspname = 'public';
 
   allowed_routine_ids := ARRAY[
+    'public.claim_platform_provider_account_probe(text)'::regprocedure::oid,
+    'public.finish_platform_provider_account_probe(uuid,text,uuid,text,text)'::regprocedure::oid,
+    'public.prepare_provider_usage_ticket(uuid,uuid,uuid,text,integer,text,uuid[])'::regprocedure::oid,
+    'public.start_provider_usage_ticket(uuid,uuid)'::regprocedure::oid,
+    'public.finish_provider_usage_ticket(uuid,uuid,text,jsonb)'::regprocedure::oid,
+    'public.read_provider_operation_mode(uuid,uuid,uuid,text,integer)'::regprocedure::oid,
     'public.list_integration_credential_execution_kek_canaries(text[])'::regprocedure::oid,
     'public.list_due_integration_credential_validations(integer)'::regprocedure::oid,
     'public.schedule_integration_credential_validation_refreshes(uuid[],timestamptz,jsonb,text,integer)'::regprocedure::oid,

@@ -1,3 +1,7 @@
+import { TelegramBotClient } from "./telegram-bot.client.js";
+import { UserPreferencesController } from "./user-preferences.controller.js";
+import { TelegramLoginController } from "./telegram-login.controller.js";
+import { TelegramLoginService } from "./telegram-login.service.js";
 import { Logger, Module } from "@nestjs/common";
 import { AuditModule } from "../audit/audit.module.js";
 import { OutboxModule } from "../outbox/outbox.module.js";
@@ -32,8 +36,10 @@ const sessionExpirySweeperScheduler: SessionExpirySweeperScheduler = {
 
 @Module({
   imports: [AuditModule, OutboxModule],
-  controllers: [IdentityController, MfaController],
+  controllers: [IdentityController, MfaController, TelegramLoginController, UserPreferencesController],
   providers: [
+    TelegramBotClient,
+    TelegramLoginService,
     AuthCryptoService,
     AuthRateLimitService,
     ApiTokenAuthenticationService,

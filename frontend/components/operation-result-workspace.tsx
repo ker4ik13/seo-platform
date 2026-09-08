@@ -74,6 +74,7 @@ import {
   rankJobFailureMessage,
   rankSearchSystemLabel
 } from "../lib/rank-jobs";
+import { rankOperationCounts } from "../lib/rank-operation-counts";
 import { ProviderLogo } from "./provider-logo";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
@@ -81,6 +82,8 @@ import { KeywordResearchRunPreview } from "./keyword-research-workspace";
 import { SemanticGroupPicker } from "./semantic-group-picker";
 import { SemanticModal } from "./semantic-modal";
 import styles from "./operation-result-workspace.module.css";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type OperationResultData =
   | Readonly<{ kind: "frequency"; value: FrequencyOperationResult }>
@@ -111,6 +114,8 @@ export function OperationResultWorkspace({
   onRankRuntimeLogStateChange?: (state?: RankRuntimeLogState) => void;
   projectId: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [data, setData] = useState<OperationResultData>();
   const [rankJobWithoutResult, setRankJobWithoutResult] = useState<RankJobSummary>();
   const [loading, setLoading] = useState(true);
@@ -336,8 +341,8 @@ export function OperationResultWorkspace({
       <section className={workspaceClass(embedded)}>
         <div className={styles.state} role="status">
           <span className={styles.spinner} />
-          <strong>Загружаем результат операции…</strong>
-          <p>Получаем только данные этого запуска в текущем проекте.</p>
+          <strong><UiText text="Загружаем результат операции…" /></strong>
+          <p><UiText text="Получаем только данные этого запуска в текущем проекте." /></p>
         </div>
       </section>
     );
@@ -354,13 +359,13 @@ export function OperationResultWorkspace({
               role={active ? "status" : "alert"}
             >
               {active && <span className={styles.spinner} />}
-              <strong>{active ? "Результат ещё формируется" : "Результат не сформирован"}</strong>
+              <strong>{active ? <UiText text="Результат ещё формируется" /> : <UiText text="Результат не сформирован" />}</strong>
               <p>
                 {active
-                  ? `${operationStatusLabel(rankJobWithoutResult.status)} · ${rankJobWithoutResult.progress.current} из ${rankJobWithoutResult.progress.total}`
+                  ? <UiText text="{0} · {1} из {2}" values={[String(operationStatusLabel(rankJobWithoutResult.status)), String(rankJobWithoutResult.progress.current), String(rankJobWithoutResult.progress.total)]} />
                   : rankJobWithoutResult.failure
                     ? rankJobFailureMessage(rankJobWithoutResult.failure.code)
-                    : `Операция завершена со статусом «${operationStatusLabel(rankJobWithoutResult.status)}».`}
+                    : <UiText text="Операция завершена со статусом «{0}»." values={[String(operationStatusLabel(rankJobWithoutResult.status))]} />}
               </p>
               {!embedded && rankJobWithoutResult.provider === "XMLSTOCK" && (
                 <button
@@ -369,13 +374,11 @@ export function OperationResultWorkspace({
                   type="button"
                 >
                   <span aria-hidden="true" />
-                  Логи XMLStock
-                </button>
+                  <UiText text="Логи XMLStock" /></button>
               )}
               {!active && (
                 <button onClick={() => void load(undefined, true)} type="button">
-                  Повторить загрузку
-                </button>
+                  <UiText text="Повторить загрузку" /></button>
               )}
             </div>
           </section>
@@ -393,17 +396,16 @@ export function OperationResultWorkspace({
     return (
       <section className={workspaceClass(embedded)}>
         <div className={`${styles.state} ${styles.error}`} role="alert">
-          <strong>Не удалось открыть результат</strong>
-          <p>{error ?? "Результат операции временно недоступен."}</p>
+          <strong><UiText text="Не удалось открыть результат" /></strong>
+          <p>{error ?? <UiText text="Результат операции временно недоступен." />}</p>
           <button onClick={() => void load(undefined, true)} type="button">
-            Повторить
-          </button>
+            <UiText text="Повторить" /></button>
         </div>
       </section>
     );
   }
 
-  const summary = operationSummary(data);
+  const summary = operationSummary(data, uiLocale);
   const visibleError = pageError?.message ?? error;
   const actorId = operationActorId(data);
   const actor = actorId
@@ -431,17 +433,16 @@ export function OperationResultWorkspace({
                 type="button"
               >
                 <span aria-hidden="true" />
-                Логи XMLStock
-              </button>
+                <UiText text="Логи XMLStock" /></button>
             )}
             <button
               disabled={refreshing}
               onClick={() => void load(undefined, true)}
               type="button"
             >
-              {refreshing ? "Обновляем…" : "Обновить"}
+              {refreshing ? <UiText text="Обновляем…" /> : <UiText text="Обновить" />}
             </button>
-            <a href="/app/tasks">История операций</a>
+            <a href="/app/tasks"><UiText text="История операций" /></a>
           </div>
         </header>
       )}
@@ -450,7 +451,7 @@ export function OperationResultWorkspace({
         {summary.context && (
           <span className={styles.contextItem}>
             <Icon name="projects" />
-            <span><small>Контекст</small><strong>{summary.context}</strong></span>
+            <span><small><UiText text="Контекст" /></small><strong>{summary.context}</strong></span>
           </span>
         )}
         <span className={styles.contextItem}>
@@ -463,7 +464,7 @@ export function OperationResultWorkspace({
             <i>{actor ? initials(actor.displayName) : "A"}</i>
           )}
           <span>
-            <small>Пользователь</small>
+            <small><UiText text="Пользователь" /></small>
             <strong>{actor?.displayName ?? (actorId ? "Участник проекта" : "Автоматический запуск")}</strong>
           </span>
         </span>
@@ -490,8 +491,8 @@ export function OperationResultWorkspace({
 
       {visibleError && (
         <div className={styles.inlineError} role="alert">
-          <span>{visibleError}</span>
-          <button onClick={retryResultLoad} type="button">Повторить</button>
+          <span>{<UiText text={visibleError ?? ""} />}</span>
+          <button onClick={retryResultLoad} type="button"><UiText text="Повторить" /></button>
         </div>
       )}
 
@@ -527,16 +528,16 @@ export function OperationResultWorkspace({
         )}
       </div>}
       {resultPage && data.kind !== "clustering" && (
-        <div className={styles.resultPager} aria-label="Состояние загрузки результата">
-          <span>{operationResultRange(data)}</span>
+        <div className={styles.resultPager} aria-label={uiText("Состояние загрузки результата")}>
+          <span>{operationResultRange(data, uiLocale)}</span>
           <span aria-live="polite" className={styles.resultLoadState}>
             {loadingMore
-              ? "Подгружаем следующие строки…"
+              ? <UiText text="Подгружаем следующие строки…" />
               : resultPage.hasNext
-                ? "Прокрутите ниже — строки загрузятся автоматически"
+                ? <UiText text="Прокрутите ниже — строки загрузятся автоматически" />
                 : isActiveOperation(data)
-                  ? "Все доступные строки загружены · ждём новые"
-                  : "Все строки загружены"}
+                  ? <UiText text="Все доступные строки загружены · ждём новые" />
+                  : <UiText text="Все строки загружены" />}
           </span>
         </div>
       )}
@@ -664,7 +665,7 @@ function ResearchApplyPanel({
 
   return (
     <div className={styles.researchApplyPanel}>
-      {error && <div className={styles.inlineError} role="alert">{error}</div>}
+      {error && <div className={styles.inlineError} role="alert">{<UiText text={error ?? ""} />}</div>}
       <KeywordResearchRunPreview
         busy={busy}
         canCancel={collection?.access.canCancel === true}
@@ -695,6 +696,8 @@ function ClusteringApplyPanel({
   projectId: string;
   result: ClusteringOperationResult;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const proposal = result.proposal;
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
   const [semanticClusters, setSemanticClusters] = useState<readonly SemanticCluster[]>([]);
@@ -782,7 +785,7 @@ function ClusteringApplyPanel({
     return (
       <section className={styles.clusteringPending}>
         <span className={styles.inlineSpinner} />
-        <div><strong>Arsenkin формирует группы</strong><small>Черновик раскладки появится здесь после получения и проверки результата.</small></div>
+        <div><strong><UiText text="Arsenkin формирует группы" /></strong><small><UiText text="Черновик раскладки появится здесь после получения и проверки результата." /></small></div>
       </section>
     );
   }
@@ -1012,21 +1015,21 @@ function ClusteringApplyPanel({
     <section className={`${styles.clusteringApply}${ready ? "" : ` ${styles.clusteringReadOnly}`}`}>
       <header className={styles.clusteringApplyHeader}>
         <div>
-          <strong>{ready ? "Распределите запросы по SEO-кластерам и папкам" : proposal.status === "APPLIED" ? "Раскладка применена" : "Черновик отклонён"}</strong>
+          <strong>{ready ? <UiText text="Распределите запросы по SEO-кластерам и папкам" /> : proposal.status === "APPLIED" ? <UiText text="Раскладка применена" /> : <UiText text="Черновик отклонён" />}</strong>
           <small>{ready
-            ? "Для каждого результата отдельно выберите SEO-кластер и папку. Текущие назначения можно безопасно оставить."
+            ? <UiText text="Для каждого результата отдельно выберите SEO-кластер и папку. Текущие назначения можно безопасно оставить." />
             : proposal.status === "APPLIED"
-              ? `${formatInteger(proposal.appliedKeywordCount)} запросов обновлено · ${formatInteger(proposal.createdGroupCount)} папок создано.`
-              : "Кластеры и папки проекта не изменялись."}</small>
+              ? <UiText text="{0} запросов обновлено · {1} папок создано." values={[String(formatInteger(proposal.appliedKeywordCount, uiLocale)), String(formatInteger(proposal.createdGroupCount, uiLocale))]} />
+              : <UiText text="Кластеры и папки проекта не изменялись." />}</small>
         </div>
-        <span>{ready ? `${formatInteger(proposal.readyCount)} можно применить` : proposal.status === "APPLIED" ? "Применено" : "Отклонено"}</span>
+        <span>{ready ? <UiText text="{0} можно применить" values={[String(formatInteger(proposal.readyCount, uiLocale))]} /> : proposal.status === "APPLIED" ? <UiText text="Применено" /> : <UiText text="Отклонено" />}</span>
       </header>
       <div className={styles.clusteringApplyBody}>
         <div className={styles.clusteringClusterPicker}>
           <div className={styles.clusteringClusterTools}>
-            <label><Icon name="search" /><input aria-label="Поиск кластера" onChange={(event) => setQuery(event.target.value)} placeholder="Найти запрос, кластер или URL" type="search" value={query} /></label>
+            <label><Icon name="search" /><input aria-label={uiText("Поиск кластера")} onChange={(event) => setQuery(event.target.value)} placeholder={uiText("Найти запрос, кластер или URL")} type="search" value={query} /></label>
             <button disabled={renderedSectionIds.length === 0} onClick={toggleAllSections} type="button">
-              {allSectionsCollapsed ? "Развернуть все" : "Свернуть все"}
+              {allSectionsCollapsed ? <UiText text="Развернуть все" /> : <UiText text="Свернуть все" />}
             </button>
           </div>
           <div className={styles.clusteringSectionList}>
@@ -1080,7 +1083,7 @@ function ClusteringApplyPanel({
                     {cluster && ready && canRename ? (
                       <label
                         className={styles.clusteringFolderNameField}
-                        title="Название можно изменить перед применением"
+                        title={uiText("Название можно изменить перед применением")}
                       >
                         <Icon name="edit" />
                         <span>{namePurpose}</span>
@@ -1091,24 +1094,24 @@ function ClusteringApplyPanel({
                           value={nameOverrides.get(cluster.id) ?? cluster.name}
                         />
                       </label>
-                    ) : <strong>{cluster?.name ?? "Некластеризовано"}</strong>}
-                    <span>{formatInteger(cluster?.keywordCount ?? rows.length)} запросов</span>
+                    ) : <strong>{cluster?.name ?? <UiText text="Некластеризовано" />}</strong>}
+                    <span>{formatInteger(cluster?.keywordCount ?? rows.length, uiLocale)} <UiText text="запросов" before=" " /></span>
                     {ready && <div className={`${styles.clusteringClusterControls}${cluster ? "" : ` ${styles.clusteringFolderControlsOnly}`}`}>
                       {cluster && <CustomSelect
-                        aria-label={`SEO-кластер для результата ${cluster.name}`}
+                        aria-label={uiText("SEO-кластер для результата {0}", [String(cluster.name)])}
                         className={styles.clusteringSemanticClusterSelect ?? ""}
                         disabled={groupsLoading}
-                        emptyMessage="SEO-кластеры не найдены"
+                        emptyMessage={uiText("SEO-кластеры не найдены")}
                         onChange={(event) => updateClusterAssignment(cluster, event.target.value)}
                         searchable={semanticClusters.length > 8}
-                        searchPlaceholder="Найти SEO-кластер"
+                        searchPlaceholder={uiText("Найти SEO-кластер")}
                         value={clusterAssignmentValue}
                       >
-                        <option value="NEW">Создать новый SEO-кластер</option>
+                        <option value="NEW"><UiText text="Создать новый SEO-кластер" /></option>
                         <option value="KEEP">
                           {cluster.currentClusterKeywordCount > 0
-                            ? `Оставить текущие SEO-кластеры · ${formatInteger(cluster.currentClusterKeywordCount)}`
-                            : "Оставить без SEO-кластера"}
+                            ? <UiText text="Оставить текущие SEO-кластеры · {0}" values={[String(formatInteger(cluster.currentClusterKeywordCount, uiLocale))]} />
+                            : <UiText text="Оставить без SEO-кластера" />}
                         </option>
                         {semanticClusters.map((semanticCluster) => (
                           <option
@@ -1116,13 +1119,13 @@ function ClusteringApplyPanel({
                             key={semanticCluster.id}
                             value={`EXISTING:${semanticCluster.id}`}
                           >
-                            {`В существующий: ${semanticCluster.name} · ${formatInteger(semanticCluster.keywordCount)}`}
+                            {<UiText text="В существующий: {0} · {1}" values={[String(semanticCluster.name), String(formatInteger(semanticCluster.keywordCount, uiLocale))]} />}
                           </option>
                         ))}
                       </CustomSelect>}
                       <div className={styles.clusteringClusterDestination}>
                         <CustomSelect
-                          aria-label={`Куда перенести ${cluster ? `результат ${cluster.name}` : "некластеризованные запросы"}`}
+                          aria-label={uiText("Куда перенести {0}", [String(cluster ? `результат ${cluster.name}` : "некластеризованные запросы")])}
                           className={styles.clusteringDestinationSelect ?? ""}
                           onChange={(event) => {
                             const value = event.target.value as "NEW" | "KEEP" | "EXISTING";
@@ -1131,9 +1134,9 @@ function ClusteringApplyPanel({
                           }}
                           value={folderDecisionValue}
                         >
-                          <option value="NEW">{cluster ? "Создать новую папку" : "Создать папку «Некластеризовано»"}</option>
-                          {cluster && <option value="EXISTING">Перенести в существующую папку</option>}
-                          <option value="KEEP">Оставить в текущих папках</option>
+                          <option value="NEW">{cluster ? <UiText text="Создать новую папку" /> : <UiText text="Создать папку «Некластеризовано»" />}</option>
+                          {cluster && <option value="EXISTING"><UiText text="Перенести в существующую папку" /></option>}
+                          <option value="KEEP"><UiText text="Оставить в текущих папках" /></option>
                         </CustomSelect>
                         {cluster && folderDecisionValue !== "KEEP" && (
                           <button
@@ -1191,26 +1194,26 @@ function ClusteringApplyPanel({
                       selectedKeywordIds={selectedKeywordIds}
                     />
                     <aside className={styles.clusteringUrls}>
-                      <div className={styles.clusteringColumnTitle}><strong>URL в выдаче</strong><span>{formatInteger(topUrls.length)}</span></div>
+                      <div className={styles.clusteringColumnTitle}><strong><UiText text="URL в выдаче" /></strong><span>{formatInteger(topUrls.length, uiLocale)}</span></div>
                       {topUrls.length > 0 ? topUrls.map(({ url, overlapCount }, index) => (
                         <a href={url} key={`${url}:${index}`} rel="noreferrer" target="_blank" title={url}>
                           <span>{url}</span>
-                          <b>{overlapCount === undefined ? "—" : formatInteger(overlapCount)}</b>
+                          <b>{overlapCount === undefined ? "—" : formatInteger(overlapCount, uiLocale)}</b>
                         </a>
-                      )) : <p>Arsenkin не передал URL для этого кластера.</p>}
+                      )) : <p><UiText text="Arsenkin не передал URL для этого кластера." /></p>}
                     </aside>
                   </div>}
                 </article>
               );
             })}
-            {clusterSections.length === 0 && <p>Запросы и кластеры по поиску не найдены.</p>}
+            {clusterSections.length === 0 && <p><UiText text="Запросы и кластеры по поиску не найдены." /></p>}
             {clusterSections.length > renderedSections.length && (
-              <p>Показаны первые 500 из {formatInteger(clusterSections.length)}. Уточните поиск для остальных.</p>
+              <p><UiText text="Показаны первые 500 из" after=" " />{formatInteger(clusterSections.length, uiLocale)}<UiText text=". Уточните поиск для остальных." /></p>
             )}
           </div>
           {ready && selectedKeywordIds.size > 0 && (
             <div className={styles.clusteringSelectionBar}>
-              <div><strong>Выбрано запросов: {formatInteger(selectedKeywordIds.size)}</strong><small>Назначение ниже имеет приоритет над решением для кластера.</small></div>
+              <div><strong><UiText text="Выбрано запросов:" after=" " />{formatInteger(selectedKeywordIds.size, uiLocale)}</strong><small><UiText text="Назначение ниже имеет приоритет над решением для кластера." /></small></div>
               <details className={styles.clusteringBatchFolderPicker}>
                 <summary>
                   <span><Icon name="inbox" />{groupPath(groups, assignmentGroupId, "Папка кластера (авто)")}</span>
@@ -1223,43 +1226,43 @@ function ClusteringApplyPanel({
                     onChange={setAssignmentGroupId}
                     rootIcon="cluster"
                     rootLabel="Папка кластера (авто)"
-                    searchPlaceholder="Найти целевую папку"
+                    searchPlaceholder={uiText("Найти целевую папку")}
                     value={assignmentGroupId}
                   />
                 </div>
               </details>
               <button disabled={groupsLoading} onClick={assignSelectedKeywords} type="button">
-                {assignmentGroupId ? "Назначить папку" : "Вернуть автоназначение"}
+                {assignmentGroupId ? <UiText text="Назначить папку" /> : <UiText text="Вернуть автоназначение" />}
               </button>
-              <button className={styles.clusteringSelectionClear} onClick={() => setSelectedKeywordIds(new Set())} type="button">Снять выбор</button>
+              <button className={styles.clusteringSelectionClear} onClick={() => setSelectedKeywordIds(new Set())} type="button"><UiText text="Снять выбор" /></button>
             </div>
           )}
         </div>
       </div>
-      {ready && error && <div className={styles.clusteringApplyError} role="alert">{error}</div>}
+      {ready && error && <div className={styles.clusteringApplyError} role="alert">{<UiText text={error ?? ""} />}</div>}
       {ready && confirmReject && !busy && (
         <div className={styles.clusteringRejectConfirm} role="alert">
-          <span>Черновик будет закрыт без изменений в проекте.</span>
-          <button onClick={() => setConfirmReject(false)} type="button">Отмена</button>
+          <span><UiText text="Черновик будет закрыт без изменений в проекте." /></span>
+          <button onClick={() => setConfirmReject(false)} type="button"><UiText text="Отмена" /></button>
         </div>
       )}
       <footer className={styles.clusteringApplyActions}>
         <div className={styles.clusteringFooterStatus}>
           <strong>{ready
-            ? `Новых SEO-кластеров: ${formatInteger(newSemanticClusterCount)} · новых папок: ${formatInteger(newFolderCount)}`
-            : operationResultRange({ kind: "clustering", value: result })}</strong>
+            ? <UiText text="Новых SEO-кластеров: {0} · новых папок: {1}" values={[String(formatInteger(newSemanticClusterCount, uiLocale)), String(formatInteger(newFolderCount, uiLocale))]} />
+            : operationResultRange({ kind: "clustering", value: result }, uiLocale)}</strong>
           <span aria-live="polite">{resultLoadState}</span>
         </div>
         {ready && <div className={styles.clusteringFooterButtons}>
           <button className={styles.clusteringReject} disabled={Boolean(busy)} onClick={() => void reject()} type="button">
-            {busy === "REJECT" ? "Отклоняем…" : confirmReject ? "Подтвердить отклонение" : "Отклонить результат"}
+            {busy === "REJECT" ? <UiText text="Отклоняем…" /> : confirmReject ? <UiText text="Подтвердить отклонение" /> : <UiText text="Отклонить результат" />}
           </button>
           <button className={styles.clusteringApplyButton} disabled={Boolean(busy) || !canApply || invalidRequiredName} onClick={() => void apply()} type="button">
             {busy === "APPLY"
-              ? "Применяем…"
+              ? <UiText text="Применяем…" />
               : newSemanticClusterCount > 0 || newFolderCount > 0
-                ? `Создать и применить · ${formatInteger(newSemanticClusterCount)} / ${formatInteger(newFolderCount)}`
-                : "Применить раскладку"}
+                ? <UiText text="Создать и применить · {0} / {1}" values={[String(formatInteger(newSemanticClusterCount, uiLocale)), String(formatInteger(newFolderCount, uiLocale))]} />
+                : <UiText text="Применить раскладку" />}
           </button>
         </div>}
       </footer>
@@ -1294,6 +1297,8 @@ function ClusteringSectionQueries({
   sectionId: string;
   selectedKeywordIds: ReadonlySet<string>;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [rows, setRows] = useState(initialRows);
   const [page, setPage] = useState<OperationResultPageInfo>();
   const [requestedFirstPage, setRequestedFirstPage] = useState(false);
@@ -1381,11 +1386,11 @@ function ClusteringSectionQueries({
   return (
     <div className={styles.clusteringQueries}>
       <div className={styles.clusteringColumnTitle}>
-        <strong>Запросы</strong>
+        <strong><UiText text="Запросы" /></strong>
         <span>
           {rowFilter
-            ? `Найдено ${formatInteger(visibleRows.length)} · загружено ${formatInteger(rows.length)} из ${formatInteger(expectedCount)}`
-            : `Показано ${formatInteger(rows.length)} из ${formatInteger(expectedCount)}`}
+            ? <UiText text="Найдено {0} · загружено {1} из {2}" values={[String(formatInteger(visibleRows.length, uiLocale)), String(formatInteger(rows.length, uiLocale)), String(formatInteger(expectedCount, uiLocale))]} />
+            : <UiText text="Показано {0} из {1}" values={[String(formatInteger(rows.length, uiLocale)), String(formatInteger(expectedCount, uiLocale))]} />}
         </span>
       </div>
       {visibleRows.map((row) => {
@@ -1402,7 +1407,7 @@ function ClusteringSectionQueries({
             )}
             <span>
               <strong>{row.keyword}</strong>
-              <small>{clusteringRowStateLabel(row)}</small>
+              <small>{<UiText text={clusteringRowStateLabel(row) ?? ""} />}</small>
             </span>
             {destination && (
               <b title={groupPath(groups, destination, destination)}>
@@ -1415,26 +1420,25 @@ function ClusteringSectionQueries({
       })}
       {rows.length < expectedCount && !requestedFirstPage && (
         <div
-          aria-label="Подгрузка запросов кластера"
+          aria-label={uiText("Подгрузка запросов кластера")}
           className={styles.clusteringQuerySentinel}
           ref={sentinelRef}
         >
           <span className={styles.inlineSpinner} />
-          <span>Загружаем запросы этого кластера…</span>
+          <span><UiText text="Загружаем запросы этого кластера…" /></span>
         </div>
       )}
       {loading && requestedFirstPage && (
         <div className={styles.clusteringQuerySentinel} role="status">
           <span className={styles.inlineSpinner} />
-          <span>Загружаем следующую часть…</span>
+          <span><UiText text="Загружаем следующую часть…" /></span>
         </div>
       )}
       {error && (
         <div className={styles.clusteringQueryError} role="alert">
-          <span>{error}</span>
+          <span>{<UiText text={error ?? ""} />}</span>
           <button onClick={() => void loadPage()} type="button">
-            Повторить
-          </button>
+            <UiText text="Повторить" /></button>
         </div>
       )}
       {!error && page?.hasNext && !loading && (
@@ -1443,13 +1447,11 @@ function ClusteringSectionQueries({
           onClick={() => void loadPage()}
           type="button"
         >
-          Загрузить ещё запросы
-        </button>
+          <UiText text="Загрузить ещё запросы" /></button>
       )}
       {!loading && !error && requestedFirstPage && rows.length === 0 && (
         <p className={styles.clusteringQueryEmpty}>
-          В этом кластере больше нет доступных запросов.
-        </p>
+          <UiText text="В этом кластере больше нет доступных запросов." /></p>
       )}
     </div>
   );
@@ -1553,6 +1555,7 @@ function ClusteringFolderPopover({
   selectedLabel: string;
   value: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [position, setPosition] = useState<CSSProperties>({});
@@ -1631,14 +1634,14 @@ function ClusteringFolderPopover({
       <header>
         <strong>{title}</strong>
         <span title={selectedLabel}>{selectedLabel}</span>
-        <button aria-label="Закрыть выбор папки" onClick={onClose} type="button">
+        <button aria-label={uiText("Закрыть выбор папки")} onClick={onClose} type="button">
           <Icon name="close" />
         </button>
       </header>
       {loading ? (
-        <div className={styles.clusteringFolderPopoverLoading}>Загружаем папки…</div>
+        <div className={styles.clusteringFolderPopoverLoading}><UiText text="Загружаем папки…" /></div>
       ) : mode === "EXISTING" && groups.length === 0 ? (
-        <div className={styles.clusteringFolderPopoverLoading}>В проекте пока нет папок.</div>
+        <div className={styles.clusteringFolderPopoverLoading}><UiText text="В проекте пока нет папок." /></div>
       ) : (
         <div className={styles.clusteringFolderPopoverBody}>
           <SemanticGroupPicker
@@ -1648,7 +1651,7 @@ function ClusteringFolderPopover({
             onChange={onChange}
             rootIcon="projects"
             rootLabel="Корневая папка"
-            searchPlaceholder="Найти папку"
+            searchPlaceholder={uiText("Найти папку")}
             showRootOption={mode === "NEW"}
             value={value}
           />
@@ -1660,6 +1663,7 @@ function ClusteringFolderPopover({
 }
 
 function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>) {
+  const uiLocale = useUiLocale().locale;
   if (isCompetitorCollection(result.collection)) {
     return <AiCompetitorTable result={result} />;
   }
@@ -1669,12 +1673,12 @@ function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>
   return (
     <div className={styles.tableScroll}>
       <table className={styles.table}>
-        <caption>Журнал сбора ИИ-ответов этого запуска</caption>
+        <caption><UiText text="Журнал сбора ИИ-ответов этого запуска" /></caption>
         <thead>
           <tr>
-            <th>#</th><th>Запрос</th><th>Статус</th><th>Провайдер</th>
-            <th>ИИ-ответ</th><th>Сайт найден</th><th>ИИ-позиция</th>
-            <th>Источники</th><th>Обновлено</th>
+            <th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Статус" /></th><th><UiText text="Провайдер" /></th>
+            <th><UiText text="ИИ-ответ" /></th><th><UiText text="Сайт найден" /></th><th><UiText text="ИИ-позиция" /></th>
+            <th><UiText text="Источники" /></th><th><UiText text="Обновлено" /></th>
           </tr>
         </thead>
         <tbody>{result.rows.map((row) => (
@@ -1685,14 +1689,14 @@ function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>
             </td>
             <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
             <td>
-              {row.providerSubmitted ? "Отправлен" : "Ожидает отправки"}
-              <small>Попытка {row.attempt}</small>
+              {row.providerSubmitted ? <UiText text="Отправлен" /> : <UiText text="Ожидает отправки" />}
+              <small><UiText text="Попытка" after=" " />{row.attempt}</small>
             </td>
             <td>{row.snapshot ? (row.snapshot.answerPresent ? "Есть" : "Нет") : "—"}</td>
             <td>{row.snapshot ? (row.snapshot.siteFound ? "Да" : "Нет") : "—"}</td>
-            <td className={styles.numberCell}>{formatOptionalNumber(row.snapshot?.position)}</td>
-            <td className={styles.numberCell}>{row.snapshot ? formatInteger(row.snapshot.sourceCount) : "—"}</td>
-            <td>{formatDateTime(row.snapshot?.observedAt ?? row.updatedAt)}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.snapshot?.position, uiLocale)}</td>
+            <td className={styles.numberCell}>{row.snapshot ? formatInteger(row.snapshot.sourceCount, uiLocale) : "—"}</td>
+            <td>{formatDateTime(row.snapshot?.observedAt ?? row.updatedAt, uiLocale)}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -1708,6 +1712,7 @@ interface AiCompetitorSourceRow {
 function AiCompetitorTable({
   result
 }: Readonly<{ result: AiAnswerOperationResult }>) {
+  const uiLocale = useUiLocale().locale;
   if (result.rows.length === 0) {
     return <EmptyRows active={isActiveStatus(result.collection.status)} />;
   }
@@ -1722,12 +1727,12 @@ function AiCompetitorTable({
   return (
     <div className={styles.tableScroll}>
       <table className={`${styles.table} ${styles.competitorTable}`}>
-        <caption>Источники ИИ-выдачи конкурентов этого запуска</caption>
+        <caption><UiText text="Источники ИИ-выдачи конкурентов этого запуска" /></caption>
         <thead>
           <tr>
-            <th>#</th><th>Запрос</th><th>Статус</th><th>Место</th>
-            <th>URL источника</th><th>Заголовок</th><th>Описание</th>
-            <th>Проверено</th>
+            <th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Статус" /></th><th><UiText text="Место" /></th>
+            <th><UiText text="URL источника" /></th><th><UiText text="Заголовок" /></th><th><UiText text="Описание" /></th>
+            <th><UiText text="Проверено" /></th>
           </tr>
         </thead>
         <tbody>{sourceRows.map(({ operation, source }) => (
@@ -1740,17 +1745,17 @@ function AiCompetitorTable({
                 {...(operation.errorCode ? { errorCode: operation.errorCode } : {})}
               />
             </td>
-            <td className={styles.numberCell}>{formatOptionalNumber(source?.position)}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(source?.position, uiLocale)}</td>
             <td className={styles.urlCell}>
               {source
                 ? <ExternalUrl value={source.url} />
                 : operation.snapshot
-                  ? <span className={styles.mutedCell}>Источников нет</span>
+                  ? <span className={styles.mutedCell}><UiText text="Источников нет" /></span>
                   : "—"}
             </td>
             <td className={styles.longCell} title={source?.title}>{source?.title ?? "—"}</td>
             <td className={styles.longCell} title={source?.description}>{source?.description ?? "—"}</td>
-            <td>{formatDateTime(operation.snapshot?.observedAt ?? operation.updatedAt)}</td>
+            <td>{formatDateTime(operation.snapshot?.observedAt ?? operation.updatedAt, uiLocale)}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -1759,22 +1764,23 @@ function AiCompetitorTable({
 }
 
 function FrequencyTable({ result }: Readonly<{ result: FrequencyOperationResult }>) {
+  const uiLocale = useUiLocale().locale;
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.collection.status)} />;
   return (
     <div className={styles.tableScroll}>
       <table className={styles.table}>
-        <caption>Частотность запросов этого запуска</caption>
-        <thead><tr><th>#</th><th>Запрос</th><th>Статус</th><th>Я База</th><th>Я &quot;&quot;</th><th>Я &quot;!&quot;</th><th>Источник</th><th>Обновлено</th></tr></thead>
+        <caption><UiText text="Частотность запросов этого запуска" /></caption>
+        <thead><tr><th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Статус" /></th><th><UiText text="Я База" /></th><th><UiText text="Я &quot;&quot;" /></th><th><UiText text="Я &quot;!&quot;" /></th><th><UiText text="Источник" /></th><th><UiText text="Обновлено" /></th></tr></thead>
         <tbody>{result.rows.map((row) => (
           <tr key={row.keywordId}>
             <td>{row.sequence + 1}</td>
-            <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
+            <td className={styles.primaryCell}><strong>{row.keywordAvailable === false ? <UiText text="Запрос недоступен" /> : row.keyword}</strong></td>
             <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
             <FrequencyCell row={row} type="BASE" />
             <FrequencyCell row={row} type="EXACT" />
             <FrequencyCell row={row} type="FIXED" />
             <td>{frequencyProvider(row)}</td>
-            <td>{frequencyObservedAt(row)}</td>
+            <td>{frequencyObservedAt(row, uiLocale)}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -1783,8 +1789,9 @@ function FrequencyTable({ result }: Readonly<{ result: FrequencyOperationResult 
 }
 
 function FrequencyCell({ row, type }: Readonly<{ row: FrequencyOperationResultRow; type: SemanticFrequencyType }>) {
+  const uiLocale = useUiLocale().locale;
   const snapshot = row.snapshots.find((item) => item.type === type);
-  return <td className={styles.numberCell}>{snapshot?.value === undefined ? "—" : formatDecimal(snapshot.value)}</td>;
+  return <td className={styles.numberCell}>{snapshot?.value === undefined ? "—" : formatDecimal(snapshot.value, uiLocale)}</td>;
 }
 
 interface RankRuntimeLogEvent extends RankRuntimeDiagnosticEntry {
@@ -1802,6 +1809,8 @@ export function RankRuntimeDiagnosticsModal({
   operationId: string;
   projectId: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [snapshot, setSnapshot] = useState<RankRuntimeDiagnostics>();
   const [events, setEvents] = useState<readonly RankRuntimeLogEvent[]>([]);
   const [error, setError] = useState<string>();
@@ -1864,86 +1873,86 @@ export function RankRuntimeDiagnosticsModal({
   return (
     <SemanticModal
       bodyClassName={styles.runtimeLogBody ?? ""}
-      description="Безопасный live-монитор запросов: обновление раз в секунду, без API-ключей и provider req_id."
+      description={uiText("Безопасный live-монитор запросов: обновление раз в секунду, без API-ключей и provider req_id.")}
       footer={(
         <div className={styles.runtimeLogFooter}>
           <span>
             {active
-              ? "Мониторинг продолжится, пока открыто окно"
-              : "Операция завершена · показан финальный снимок"}
+              ? <UiText text="Мониторинг продолжится, пока открыто окно" />
+              : <UiText text="Операция завершена · показан финальный снимок" />}
           </span>
-          <button onClick={onClose} type="button">Закрыть</button>
+          <button onClick={onClose} type="button"><UiText text="Закрыть" /></button>
         </div>
       )}
       onClose={onClose}
       presenceKey={`rank-runtime-diagnostics:${operationId}`}
       size="large"
-      title="Логи XMLStock"
+      title={uiText("Логи XMLStock")}
     >
       <div className={styles.runtimeLogWorkspace}>
         <div className={styles.runtimeLogOverview}>
           <div className={styles.runtimeLiveState}>
             <span className={active ? styles.runtimeLiveDot : styles.runtimeDoneDot} />
             <div>
-              <strong>{active ? "В реальном времени" : "Операция завершена"}</strong>
-              <small>{snapshot ? rankRuntimeProductLabel(snapshot.policy.product) : "Подключаем монитор…"}</small>
+              <strong>{active ? <UiText text="В реальном времени" /> : <UiText text="Операция завершена" />}</strong>
+              <small>{snapshot ? rankRuntimeProductLabel(snapshot.policy.product) : <UiText text="Подключаем монитор…" />}</small>
             </div>
           </div>
-          <RuntimeMetric label="Активных потоков" value={snapshot?.totals.active ?? 0} />
-          <RuntimeMetric label="Ожидают провайдера" value={snapshot?.totals.waitingProvider ?? 0} />
-          <RuntimeMetric label="Завершено" value={snapshot?.totals.completed ?? 0} />
-          <RuntimeMetric label="Ошибок" value={snapshot?.totals.failed ?? 0} tone="error" />
+          <RuntimeMetric label={uiText("Активных потоков")} value={snapshot?.totals.active ?? 0} />
+          <RuntimeMetric label={uiText("Ожидают провайдера")} value={snapshot?.totals.waitingProvider ?? 0} />
+          <RuntimeMetric label={uiText("Завершено")} value={snapshot?.totals.completed ?? 0} />
+          <RuntimeMetric label={uiText("Ошибок")} value={snapshot?.totals.failed ?? 0} tone="error" />
           <div className={styles.runtimePolicy}>
-            <small>Лимит подключения</small>
+            <small><UiText text="Лимит подключения" /></small>
             <strong>
               {snapshot
-                ? `${snapshot.policy.concurrency} потоков · ${snapshot.policy.requestsPerSecond} запросов/с`
+                ? <UiText text="{0} потоков · {1} запросов/с" values={[String(snapshot.policy.concurrency), String(snapshot.policy.requestsPerSecond)]} />
                 : "—"}
             </strong>
           </div>
         </div>
 
         <div className={styles.runtimeLaneBar}>
-          <strong>Сейчас выполняются</strong>
+          <strong><UiText text="Сейчас выполняются" /></strong>
           <div>
             {activeLanes.length > 0 ? activeLanes.map((lane) => (
               <span
                 key={lane}
                 style={{ "--runtime-lane-color": rankRuntimeLaneColor(lane) } as CSSProperties}
               >
-                Поток {lane}
+                <UiText text="Поток" after=" " />{lane}
               </span>
-            )) : <small>{refreshing ? "Обновляем…" : "Свободные потоки ожидают запросы"}</small>}
+            )) : <small>{refreshing ? <UiText text="Обновляем…" /> : <UiText text="Свободные потоки ожидают запросы" />}</small>}
           </div>
           <button
             disabled={refreshing}
             onClick={() => void load()}
             type="button"
           >
-            {refreshing ? "Обновление…" : "Обновить"}
+            {refreshing ? <UiText text="Обновление…" /> : <UiText text="Обновить" />}
           </button>
         </div>
 
-        {error && <div className={styles.runtimeLogError} role="alert">{error}</div>}
+        {error && <div className={styles.runtimeLogError} role="alert">{<UiText text={error ?? ""} />}</div>}
 
         <div className={styles.runtimeLogTableWrap}>
           <table className={styles.runtimeLogTable}>
-            <caption>Живой журнал выполнения XMLStock</caption>
+            <caption><UiText text="Живой журнал выполнения XMLStock" /></caption>
             <thead>
               <tr>
-                <th>Время</th>
-                <th>Поток</th>
-                <th>Запрос</th>
-                <th>Состояние</th>
-                <th>HTTP-попытки</th>
-                <th>Страницы</th>
-                <th>Следующее действие</th>
+                <th><UiText text="Время" /></th>
+                <th><UiText text="Поток" /></th>
+                <th><UiText text="Запрос" /></th>
+                <th><UiText text="Состояние" /></th>
+                <th><UiText text="HTTP-попытки" /></th>
+                <th><UiText text="Страницы" /></th>
+                <th><UiText text="Следующее действие" /></th>
               </tr>
             </thead>
             <tbody>
               {events.map((entry) => (
                 <tr key={entry.eventKey}>
-                  <td>{formatRuntimeTime(entry.updatedAt)}</td>
+                  <td>{formatRuntimeTime(entry.updatedAt, uiLocale)}</td>
                   <td>
                     <span
                       className={styles.runtimeLane}
@@ -1954,15 +1963,15 @@ export function RankRuntimeDiagnosticsModal({
                   </td>
                   <td className={styles.runtimeKeyword}>
                     <strong>{entry.keyword}</strong>
-                    <small>Строка {entry.sequence + 1} · попытка {entry.executionAttempt}</small>
+                    <small><UiText text="Строка" after=" " />{entry.sequence + 1} <UiText text="· попытка" before=" " after=" " />{entry.executionAttempt}</small>
                   </td>
                   <td>
                     <span className={`${styles.runtimeState ?? ""} ${styles[`runtimeState${entry.state}`] ?? ""}`}>
-                      {rankRuntimeStateLabel(entry.state)}
+                      {<UiText text={rankRuntimeStateLabel(entry.state) ?? ""} />}
                     </span>
                   </td>
-                  <td>{entry.submitAttempts + entry.pollAttempts}<small>{entry.submitAttempts} отправка · {entry.pollAttempts} опрос</small></td>
-                  <td>{entry.completedPages} из {entry.totalPages}</td>
+                  <td>{entry.submitAttempts + entry.pollAttempts}<small>{entry.submitAttempts} <UiText text="отправка ·" before=" " after=" " />{entry.pollAttempts} <UiText text="опрос" before=" " /></small></td>
+                  <td>{entry.completedPages} <UiText text="из" before=" " after=" " />{entry.totalPages}</td>
                   <td className={entry.errorCode ? styles.runtimeErrorCode : undefined}>
                     {entry.errorCode ?? formatRuntimeNextAction(entry.nextActionAt)}
                   </td>
@@ -1973,8 +1982,8 @@ export function RankRuntimeDiagnosticsModal({
           {events.length === 0 && (
             <div className={styles.runtimeLogEmpty}>
               <span className={styles.inlineSpinner} />
-              <strong>Ждём первые события</strong>
-              <small>Подготовленные запросы появятся здесь автоматически.</small>
+              <strong><UiText text="Ждём первые события" /></strong>
+              <small><UiText text="Подготовленные запросы появятся здесь автоматически." /></small>
             </div>
           )}
         </div>
@@ -1988,10 +1997,11 @@ function RuntimeMetric({
   tone,
   value
 }: Readonly<{ label: string; tone?: "error"; value: number }>) {
+  const uiLocale = useUiLocale().locale;
   return (
     <div className={tone === "error" ? styles.runtimeMetricError : styles.runtimeMetric}>
       <small>{label}</small>
-      <strong>{formatInteger(value)}</strong>
+      <strong>{formatInteger(value, uiLocale)}</strong>
     </div>
   );
 }
@@ -2035,11 +2045,11 @@ function rankRuntimeLaneColor(lane: number): string {
   return `hsl(${(lane * 47 + 238) % 360} 72% 52%)`;
 }
 
-function formatRuntimeTime(value: string): string {
+function formatRuntimeTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit"
@@ -2055,6 +2065,7 @@ function formatRuntimeNextAction(value: string | undefined): string {
 }
 
 function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
+  const uiLocale = useUiLocale().locale;
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.job.status)} />;
   if (isCompetitorCollection(result.execution)) {
     return <CompetitorRankTable result={result} />;
@@ -2071,17 +2082,17 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
       {resultRows.length > 0 && (
         <div className={styles.tableScroll}>
           <table className={styles.table}>
-            <caption>Позиции запросов этого запуска</caption>
-            <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Проверено</th></tr></thead>
+            <caption><UiText text="Позиции запросов этого запуска" /></caption>
+            <thead><tr><th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Результат" /></th><th><UiText text="Позиция" /></th><th><UiText text="Релевантный URL" /></th><th><UiText text="Заголовок" /></th><th><UiText text="Проверено" /></th></tr></thead>
             <tbody>{resultRows.map((row) => (
               <tr key={`${row.sequence}:${row.keywordId}`}>
                 <td>{row.sequence + 1}</td>
                 <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
                 <td><RankState state={row.state} /></td>
-                <td className={styles.numberCell}>{rankPosition(row)}</td>
+                <td className={styles.numberCell}>{rankPosition(row, uiLocale)}</td>
                 <td className={styles.urlCell}><ExternalUrl value={row.rankingUrl} /></td>
                 <td className={styles.longCell} title={row.title ?? row.snippet}>{row.title ?? row.snippet ?? "—"}</td>
-                <td>{formatDateTime(row.observedAt)}</td>
+                <td>{formatDateTime(row.observedAt, uiLocale)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -2104,6 +2115,7 @@ interface CompetitorRankResultRow {
 function CompetitorRankTable({
   result
 }: Readonly<{ result: RankOperationResult }>) {
+  const uiLocale = useUiLocale().locale;
   const active = isActiveStatus(result.job.status);
   const failedRows = active
     ? []
@@ -2124,12 +2136,12 @@ function CompetitorRankTable({
       {serpRows.length > 0 && (
         <div className={styles.tableScroll}>
           <table className={`${styles.table} ${styles.competitorTable}`}>
-            <caption>Органическая выдача конкурентов Топ-10 этого запуска</caption>
+            <caption><UiText text="Органическая выдача конкурентов Топ-10 этого запуска" /></caption>
             <thead>
               <tr>
-                <th>#</th><th>Запрос</th><th>Результат</th><th>Место</th>
-                <th>URL конкурента</th><th>Заголовок</th><th>Описание</th>
-                <th>Проверено</th>
+                <th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Результат" /></th><th><UiText text="Место" /></th>
+                <th><UiText text="URL конкурента" /></th><th><UiText text="Заголовок" /></th><th><UiText text="Описание" /></th>
+                <th><UiText text="Проверено" /></th>
               </tr>
             </thead>
             <tbody>{serpRows.map(({ operation, result: serpResult }) => (
@@ -2138,20 +2150,20 @@ function CompetitorRankTable({
                 <td className={styles.primaryCell}><strong>{operation.keyword}</strong></td>
                 <td>
                   <span className={`${styles.itemStatus} ${operation.state === "PENDING" ? "" : styles.found}`}>
-                    {operation.state === "PENDING" ? "В работе" : "Собрано"}
+                    {operation.state === "PENDING" ? <UiText text="В работе" /> : <UiText text="Собрано" />}
                   </span>
                 </td>
-                <td className={styles.numberCell}>{formatOptionalNumber(serpResult?.position)}</td>
+                <td className={styles.numberCell}>{formatOptionalNumber(serpResult?.position, uiLocale)}</td>
                 <td className={styles.urlCell}>
                   {serpResult
                     ? <ExternalUrl value={serpResult.rankingUrl} />
                     : operation.state === "PENDING"
                       ? "—"
-                      : <span className={styles.mutedCell}>Выдача пуста</span>}
+                      : <span className={styles.mutedCell}><UiText text="Выдача пуста" /></span>}
                 </td>
                 <td className={styles.longCell} title={serpResult?.title}>{serpResult?.title ?? "—"}</td>
                 <td className={styles.longCell} title={serpResult?.snippet}>{serpResult?.snippet ?? "—"}</td>
-                <td>{formatDateTime(operation.observedAt)}</td>
+                <td>{formatDateTime(operation.observedAt, uiLocale)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -2175,6 +2187,7 @@ function RankFailures({
   provider: RankJobSummary["provider"];
   rows: readonly RankOperationResultRow[];
 }>) {
+  const uiLocale = useUiLocale().locale;
   if (rows.length === 0) return null;
   const titleId = competitorCollection
     ? "competitor-rank-failures-title"
@@ -2185,33 +2198,32 @@ function RankFailures({
         <div>
           <strong id={titleId}>
             {competitorCollection
-              ? "Не удалось собрать выдачу конкурентов"
-              : "Не удалось снять позиции"}
+              ? <UiText text="Не удалось собрать выдачу конкурентов" />
+              : <UiText text="Не удалось снять позиции" />}
           </strong>
           <small>
-            Эти запросы завершены с ошибкой и больше не выполняются в этом запуске.
-          </small>
+            <UiText text="Эти запросы завершены с ошибкой и больше не выполняются в этом запуске." /></small>
         </div>
-        <span>{formatInteger(rows.length)}</span>
+        <span>{formatInteger(rows.length, uiLocale)}</span>
       </header>
       <div className={styles.tableScroll}>
         <table className={`${styles.table} ${styles.rankFailureTable}`}>
-          <caption>Запросы без результата после завершения сбора</caption>
-          <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Причина</th><th>Попытки провайдера</th></tr></thead>
+          <caption><UiText text="Запросы без результата после завершения сбора" /></caption>
+          <thead><tr><th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Результат" /></th><th><UiText text="Причина" /></th><th><UiText text="Попытки провайдера" /></th></tr></thead>
           <tbody>{rows.map((row) => (
             <tr key={`failed:${row.sequence}:${row.keywordId}`}>
               <td>{row.sequence + 1}</td>
               <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
               <td>
                 <span className={`${styles.itemStatus} ${styles.failed}`}>
-                  {competitorCollection ? "Не собран" : "Не снят"}
+                  {competitorCollection ? <UiText text="Не собран" /> : <UiText text="Не снят" />}
                 </span>
               </td>
               <td className={styles.rankFailureReason} title={row.errorCode}>
                 <strong>{rankFailureReason(row, provider)}</strong>
                 {row.errorCode && <small>{row.errorCode}</small>}
               </td>
-              <td className={styles.numberCell}>{rankPollAttempts(row)}</td>
+              <td className={styles.numberCell}>{rankPollAttempts(row, uiLocale)}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -2221,6 +2233,8 @@ function RankFailures({
 }
 
 function CrawlTable({ result }: Readonly<{ result: CrawlOperationResultPage }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CrawlStatusFilter>("ALL");
   const [sort, setSort] = useState<CrawlSort>("SEQUENCE_ASC");
@@ -2236,58 +2250,58 @@ function CrawlTable({ result }: Readonly<{ result: CrawlOperationResultPage }>) 
     <div className={styles.crawlResult}>
       <div className={styles.crawlToolbar}>
         <label>
-          <span className={styles.visuallyHidden}>Поиск URL</span>
+          <span className={styles.visuallyHidden}><UiText text="Поиск URL" /></span>
           <input
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Найти URL"
+            placeholder={uiText("Найти URL")}
             type="search"
             value={query}
           />
         </label>
         <CustomSelect
-          aria-label="Фильтр HTTP-ответов"
+          aria-label={uiText("Фильтр HTTP-ответов")}
           onChange={(event) => setStatusFilter(event.target.value as CrawlStatusFilter)}
           value={statusFilter}
         >
-          <option value="ALL">Все ответы</option>
-          <option value="2XX">Успешные · 2xx</option>
-          <option value="3XX">Ответы · 3xx</option>
-          <option value="4XX">Ошибки клиента · 4xx</option>
-          <option value="5XX">Ошибки сервера · 5xx</option>
-          <option value="REDIRECTS">Только редиректы</option>
-          <option value="ISSUES">Только с проблемами</option>
+          <option value="ALL"><UiText text="Все ответы" /></option>
+          <option value="2XX"><UiText text="Успешные · 2xx" /></option>
+          <option value="3XX"><UiText text="Ответы · 3xx" /></option>
+          <option value="4XX"><UiText text="Ошибки клиента · 4xx" /></option>
+          <option value="5XX"><UiText text="Ошибки сервера · 5xx" /></option>
+          <option value="REDIRECTS"><UiText text="Только редиректы" /></option>
+          <option value="ISSUES"><UiText text="Только с проблемами" /></option>
         </CustomSelect>
         <CustomSelect
-          aria-label="Сортировка результатов"
+          aria-label={uiText("Сортировка результатов")}
           onChange={(event) => setSort(event.target.value as CrawlSort)}
           value={sort}
         >
-          <option value="SEQUENCE_ASC">В порядке обхода</option>
-          <option value="STATUS_ASC">HTTP-код · по возрастанию</option>
-          <option value="STATUS_DESC">HTTP-код · по убыванию</option>
-          <option value="TIME_DESC">Самые медленные</option>
-          <option value="TIME_ASC">Самые быстрые</option>
-          <option value="URL_ASC">URL · А—Я</option>
+          <option value="SEQUENCE_ASC"><UiText text="В порядке обхода" /></option>
+          <option value="STATUS_ASC"><UiText text="HTTP-код · по возрастанию" /></option>
+          <option value="STATUS_DESC"><UiText text="HTTP-код · по убыванию" /></option>
+          <option value="TIME_DESC"><UiText text="Самые медленные" /></option>
+          <option value="TIME_ASC"><UiText text="Самые быстрые" /></option>
+          <option value="URL_ASC"><UiText text="URL · А—Я" /></option>
         </CustomSelect>
-        <span>{formatInteger(rows.length)} из {formatInteger(result.rows.length)}</span>
+        <span>{formatInteger(rows.length, uiLocale)} <UiText text="из" before=" " after=" " />{formatInteger(result.rows.length, uiLocale)}</span>
       </div>
       {rows.length === 0 ? (
         <div className={styles.filteredEmpty}>
-          <strong>По выбранным условиям страниц нет</strong>
-          <button onClick={() => { setQuery(""); setStatusFilter("ALL"); }} type="button">Сбросить фильтры</button>
+          <strong><UiText text="По выбранным условиям страниц нет" /></strong>
+          <button onClick={() => { setQuery(""); setStatusFilter("ALL"); }} type="button"><UiText text="Сбросить фильтры" /></button>
         </div>
       ) : httpStatusCheck ? (
         <div className={styles.tableScroll}>
           <table className={`${styles.table} ${styles.httpTable}`}>
-            <caption>HTTP-ответы этого запуска</caption>
-            <thead><tr><th>#</th><th>URL</th><th>HTTP</th><th className={styles.centerCell}>Цепочка редиректов</th><th className={styles.centerCell}>Время</th><th className={styles.centerCell}>Размер</th><th className={styles.centerCell}>Тип ответа</th></tr></thead>
+            <caption><UiText text="HTTP-ответы этого запуска" /></caption>
+            <thead><tr><th>#</th><th>URL</th><th>HTTP</th><th className={styles.centerCell}><UiText text="Цепочка редиректов" /></th><th className={styles.centerCell}><UiText text="Время" /></th><th className={styles.centerCell}><UiText text="Размер" /></th><th className={styles.centerCell}><UiText text="Тип ответа" /></th></tr></thead>
             <tbody>{rows.map((row) => (
               <tr key={`${row.sequence}:${row.requestedUrl}`}>
                 <td>{row.sequence + 1}</td>
-                <td className={`${styles.primaryCell} ${styles.urlCell}`}><ExternalUrl value={row.finalUrl} />{row.requestedUrl !== row.finalUrl && <small>Запрошено: {row.requestedUrl}</small>}</td>
+                <td className={`${styles.primaryCell} ${styles.urlCell}`}><ExternalUrl value={row.finalUrl} />{row.requestedUrl !== row.finalUrl && <small><UiText text="Запрошено:" after=" " />{row.requestedUrl}</small>}</td>
                 <td><HttpStatus status={row.statusCode} /></td>
                 <td className={styles.centerCell}><RedirectChain row={row} /></td>
-                <td className={`${styles.numberCell} ${styles.centerCell}`}>{formatInteger(row.responseTimeMs)} мс</td>
+                <td className={`${styles.numberCell} ${styles.centerCell}`}>{formatInteger(row.responseTimeMs, uiLocale)} <UiText text="мс" before=" " /></td>
                 <td className={`${styles.numberCell} ${styles.centerCell}`}>{formatBytes(row.sizeBytes)}</td>
                 <td className={styles.centerCell}>{row.contentType || "—"}</td>
               </tr>
@@ -2297,20 +2311,20 @@ function CrawlTable({ result }: Readonly<{ result: CrawlOperationResultPage }>) 
       ) : (
         <div className={styles.tableScroll}>
           <table className={`${styles.table} ${styles.wideTable}`}>
-            <caption>Страницы технического аудита</caption>
-            <thead><tr><th>#</th><th>URL</th><th>HTTP</th><th>Индексируемость</th><th>Title / H1</th><th>Проблемы</th><th>Время</th><th>Размер</th><th>Слова</th><th>Ссылки</th></tr></thead>
+            <caption><UiText text="Страницы технического аудита" /></caption>
+            <thead><tr><th>#</th><th>URL</th><th>HTTP</th><th><UiText text="Индексируемость" /></th><th>Title / H1</th><th><UiText text="Проблемы" /></th><th><UiText text="Время" /></th><th><UiText text="Размер" /></th><th><UiText text="Слова" /></th><th><UiText text="Ссылки" /></th></tr></thead>
             <tbody>{rows.map((row) => (
               <tr key={`${row.sequence}:${row.requestedUrl}`}>
                 <td>{row.sequence + 1}</td>
-                <td className={`${styles.primaryCell} ${styles.urlCell}`}><ExternalUrl value={row.finalUrl} />{row.requestedUrl !== row.finalUrl && <small>Запрошено: {row.requestedUrl}</small>}</td>
+                <td className={`${styles.primaryCell} ${styles.urlCell}`}><ExternalUrl value={row.finalUrl} />{row.requestedUrl !== row.finalUrl && <small><UiText text="Запрошено:" after=" " />{row.requestedUrl}</small>}</td>
                 <td><HttpStatus status={row.statusCode} /></td>
-                <td>{indexabilityLabel(row.indexability)}</td>
-                <td className={styles.longCell}><strong>{row.title ?? "Без title"}</strong><small>{row.h1 ?? "Без H1"}</small></td>
+                <td>{<UiText text={indexabilityLabel(row.indexability) ?? ""} />}</td>
+                <td className={styles.longCell}><strong>{row.title ?? <UiText text="Без title" />}</strong><small>{row.h1 ?? <UiText text="Без H1" />}</small></td>
                 <td><IssueSummary row={row} /></td>
-                <td className={styles.numberCell}>{formatInteger(row.responseTimeMs)} мс</td>
+                <td className={styles.numberCell}>{formatInteger(row.responseTimeMs, uiLocale)} <UiText text="мс" before=" " /></td>
                 <td className={styles.numberCell}>{formatBytes(row.sizeBytes)}</td>
-                <td className={styles.numberCell}>{formatInteger(row.wordCount)}</td>
-                <td className={styles.numberCell}>{formatInteger(row.internalLinkCount)} / {formatInteger(row.externalLinkCount)}</td>
+                <td className={styles.numberCell}>{formatInteger(row.wordCount, uiLocale)}</td>
+                <td className={styles.numberCell}>{formatInteger(row.internalLinkCount, uiLocale)} / {formatInteger(row.externalLinkCount, uiLocale)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -2351,7 +2365,7 @@ function crawlRows(
 }
 
 function RedirectChain({ row }: Readonly<{ row: CrawlOperationResultRow }>) {
-  if (row.redirectChain.length === 0) return <span className={styles.noIssues}>Нет</span>;
+  if (row.redirectChain.length === 0) return <span className={styles.noIssues}><UiText text="Нет" /></span>;
   const chain = [row.requestedUrl, ...row.redirectChain];
   if (chain.at(-1) !== row.finalUrl) chain.push(row.finalUrl);
   return (
@@ -2372,23 +2386,24 @@ function pluralRedirect(value: number): string {
 }
 
 function ResearchTable({ result }: Readonly<{ result: KeywordResearchRunSummary }>) {
+  const uiLocale = useUiLocale().locale;
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.status)} />;
   return (
     <div className={styles.tableScroll}>
       <table className={styles.table}>
-        <caption>Ключевые слова, найденные в Keys.so</caption>
-        <thead><tr><th>#</th><th>Запрос</th><th>URL</th><th>База</th><th>&quot;&quot;</th><th>&quot;!&quot;</th><th>Позиция</th><th>KEI</th><th>Импорт</th></tr></thead>
+        <caption><UiText text="Ключевые слова, найденные в Keys.so" /></caption>
+        <thead><tr><th>#</th><th><UiText text="Запрос" /></th><th>URL</th><th><UiText text="База" /></th><th>&quot;&quot;</th><th>&quot;!&quot;</th><th><UiText text="Позиция" /></th><th>KEI</th><th><UiText text="Импорт" /></th></tr></thead>
         <tbody>{result.rows.map((row, index) => (
           <tr key={row.id}>
             <td>{index + 1}</td>
             <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
             <td className={styles.urlCell}><ExternalUrl value={row.url} /></td>
-            <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyBase)}</td>
-            <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyExact)}</td>
-            <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyFixed)}</td>
-            <td className={styles.numberCell}>{formatOptionalNumber(row.position)}</td>
-            <td className={styles.numberCell}>{formatOptionalNumber(row.kei)}</td>
-            <td>{row.selected ? "Выбрано" : "Не выбрано"}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyBase, uiLocale)}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyExact, uiLocale)}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyFixed, uiLocale)}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.position, uiLocale)}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.kei, uiLocale)}</td>
+            <td>{row.selected ? <UiText text="Выбрано" /> : <UiText text="Не выбрано" />}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -2399,18 +2414,18 @@ function ResearchTable({ result }: Readonly<{ result: KeywordResearchRunSummary 
 function EmptyRows({ active }: Readonly<{ active: boolean }>) {
   return (
     <div className={styles.emptyRows}>
-      <strong>{active ? "Результаты ещё формируются" : "В этой операции нет строк результата"}</strong>
-      <p>{active ? "Таблица обновится автоматически по мере обработки." : "Проверьте статус и входные параметры операции в истории."}</p>
+      <strong>{active ? <UiText text="Результаты ещё формируются" /> : <UiText text="В этой операции нет строк результата" />}</strong>
+      <p>{active ? <UiText text="Таблица обновится автоматически по мере обработки." /> : <UiText text="Проверьте статус и входные параметры операции в истории." />}</p>
     </div>
   );
 }
 
 function ItemStatus({ status, errorCode }: Readonly<{ status: string; errorCode?: string }>) {
-  return <span className={styles.itemStatus} title={errorCode}>{itemStatusLabel(status)}{errorCode ? ` · ${errorCode}` : ""}</span>;
+  return <span className={styles.itemStatus} title={errorCode}>{<UiText text={itemStatusLabel(status) ?? ""} />}{errorCode ? ` · ${errorCode}` : ""}</span>;
 }
 
 function RankState({ state }: Readonly<{ state: RankOperationResultRow["state"] }>) {
-  return <span className={`${styles.itemStatus} ${state === "FOUND" ? styles.found : state === "NOT_FOUND" ? styles.notFound : ""}`}>{state === "FOUND" ? "Найден" : state === "NOT_FOUND" ? "Не найден" : "Ожидает"}</span>;
+  return <span className={`${styles.itemStatus} ${state === "FOUND" ? styles.found : state === "NOT_FOUND" ? styles.notFound : ""}`}>{state === "FOUND" ? <UiText text="Найден" /> : state === "NOT_FOUND" ? <UiText text="Не найден" /> : <UiText text="Ожидает" />}</span>;
 }
 
 function HttpStatus({ status }: Readonly<{ status: number }>) {
@@ -2419,14 +2434,15 @@ function HttpStatus({ status }: Readonly<{ status: number }>) {
 }
 
 function IssueSummary({ row }: Readonly<{ row: CrawlOperationResultRow }>) {
-  if (row.issues.length === 0) return <span className={styles.noIssues}>Нет</span>;
+  if (row.issues.length === 0) return <span className={styles.noIssues}><UiText text="Нет" /></span>;
   return <span className={styles.issueSummary} title={row.issues.map(({ title }) => title).join("\n")}>{row.issues.length} · {row.issues.slice(0, 2).map(({ title }) => title).join(", ")}</span>;
 }
 
 function ExternalUrl({ value }: Readonly<{ value: string | undefined }>) {
+  const { t: uiText } = useUiLocale();
   if (!value) return <>—</>;
   const href = safeExternalUrl(value);
-  return href ? <a href={href} rel="noreferrer" target="_blank">{value}</a> : <span title="Некорректный внешний URL">{value}</span>;
+  return href ? <a href={href} rel="noreferrer" target="_blank">{value}</a> : <span title={uiText("Некорректный внешний URL")}>{value}</span>;
 }
 
 interface SummaryView {
@@ -2441,7 +2457,7 @@ interface SummaryView {
   readonly facts: readonly Readonly<{ label: string; value: string }>[];
 }
 
-function operationSummary(data: OperationResultData): SummaryView {
+function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU"): SummaryView {
   if (data.kind === "frequency") {
     const value = data.value.collection;
     const current = value.completedKeywords + value.failedKeywords;
@@ -2453,11 +2469,11 @@ function operationSummary(data: OperationResultData): SummaryView {
         value.status,
         current,
         value.selectedKeywords,
-        value.stage
+        value.stage, uiLocale
       ),
       facts: [
-        { label: "Обработано", value: formatInteger(current) },
-        { label: "Ошибок", value: formatInteger(value.failedKeywords) },
+        { label: "Обработано", value: formatInteger(current, uiLocale) },
+        { label: "Ошибок", value: formatInteger(value.failedKeywords, uiLocale) },
         { label: "Регион", value: value.regionCode },
         { label: "Устройство", value: deviceLabel(value.device) },
         ...(value.failureCode
@@ -2478,16 +2494,16 @@ function operationSummary(data: OperationResultData): SummaryView {
       title: aiAnswerCollectionTitle(value),
       description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${deviceLabel(value.device)}${competitorCollection ? " · источники ИИ-выдачи" : ""}`,
       provider: "ARSENKIN",
-      ...summaryStatus(value.status, current, value.selectedKeywords, value.stage),
+      ...summaryStatus(value.status, current, value.selectedKeywords, value.stage, uiLocale),
       facts: [
-        { label: "Обработано", value: formatInteger(current) },
+        { label: "Обработано", value: formatInteger(current, uiLocale) },
         {
           label: competitorCollection ? "Источников загружено" : "Успешно",
           value: formatInteger(
-            competitorCollection ? loadedSourceCount : value.completedKeywords
+            competitorCollection ? loadedSourceCount : value.completedKeywords, uiLocale
           )
         },
-        { label: "Ошибок", value: formatInteger(value.failedKeywords) },
+        { label: "Ошибок", value: formatInteger(value.failedKeywords, uiLocale) },
         { label: "Регион", value: value.regionCode },
         ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
       ]
@@ -2508,11 +2524,11 @@ function operationSummary(data: OperationResultData): SummaryView {
       title: "Кластеризация запросов",
       description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${value.method === "SOFT" ? "мягкая" : "жёсткая"}`,
       provider: "ARSENKIN",
-      ...summaryStatus(value.status, current, value.selectedKeywords, value.stage),
+      ...summaryStatus(value.status, current, value.selectedKeywords, value.stage, uiLocale),
       ...settledStatus,
       facts: [
-        { label: "Кластеров", value: formatInteger(value.clusterCount ?? proposal?.clusterCount ?? 0) },
-        { label: "Без кластера", value: formatInteger(value.unclusteredCount ?? proposal?.unclusteredCount ?? 0) },
+        { label: "Кластеров", value: formatInteger(value.clusterCount ?? proposal?.clusterCount ?? 0, uiLocale) },
+        { label: "Без кластера", value: formatInteger(value.unclusteredCount ?? proposal?.unclusteredCount ?? 0, uiLocale) },
         { label: "Совпадений", value: String(value.overlapCount) },
         { label: "Глубина", value: `ТОП-${value.depth}` },
         ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
@@ -2524,9 +2540,7 @@ function operationSummary(data: OperationResultData): SummaryView {
     const competitorCollection = isCompetitorCollection(value.execution);
     const current = Number(value.job.progress.current);
     const total = Number(value.job.progress.total);
-    const found = Number(value.job.result?.foundCount ?? value.rows.filter(({ state }) => state === "FOUND").length);
-    const notFound = Number(value.job.result?.notFoundCount ?? value.rows.filter(({ state }) => state === "NOT_FOUND").length);
-    const failed = Number(value.job.result?.failedCount ?? 0);
+    const { found, notFound, failed } = rankOperationCounts(value);
     const searchSource = rankSearchSourceFromProviderMappingVersion(
       value.execution.searchEngine,
       value.execution.providerMappingVersion
@@ -2540,14 +2554,14 @@ function operationSummary(data: OperationResultData): SummaryView {
       description: `${searchSystem} · ${deviceLabel(value.execution.device)}${competitorCollection ? " · органическая выдача" : ""}`,
       context: value.contextName,
       provider: value.job.provider,
-      ...summaryStatus(value.job.status, current, total),
+      ...summaryStatus(value.job.status, current, total, undefined, uiLocale),
       facts: [
         ...(competitorCollection
           ? [
               {
                 label: "Срезов",
                 value: formatInteger(
-                  Number(value.job.result?.persistedCount ?? current - failed)
+                  Number(value.job.result?.persistedCount ?? current - failed), uiLocale
                 )
               },
               {
@@ -2556,15 +2570,15 @@ function operationSummary(data: OperationResultData): SummaryView {
                   value.rows.reduce(
                     (total, row) => total + (row.serpResults?.length ?? 0),
                     0
-                  )
+                  ), uiLocale
                 )
               }
             ]
           : [
-              { label: "Найдено", value: formatInteger(found) },
-              { label: "Не найдено", value: formatInteger(notFound) }
+              { label: "Найдено", value: formatInteger(found, uiLocale) },
+              { label: "Не найдено", value: formatInteger(notFound, uiLocale) }
             ]),
-        { label: "Ошибок", value: formatInteger(failed) },
+        { label: "Ошибок", value: formatInteger(failed, uiLocale) },
         { label: "Регион", value: value.execution.regionCode ?? value.execution.countryCode },
         { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—" },
         ...("failure" in value.job && value.job.failure
@@ -2578,15 +2592,15 @@ function operationSummary(data: OperationResultData): SummaryView {
     const total = Math.max(value.discoveredUrls, value.processedUrls);
     return {
       title: value.config.purpose === "HTTP_STATUS_CHECK" ? "Обход сайта" : "Технический аудит",
-      description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls)} страниц`,
-      ...summaryStatus(value.status, value.processedUrls, total),
+      description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls, uiLocale)} страниц`,
+      ...summaryStatus(value.status, value.processedUrls, total, undefined, uiLocale),
       facts: [
-        { label: "Обработано", value: formatInteger(value.processedUrls) },
-        { label: "Ошибок", value: formatInteger(value.failedUrls) },
+        { label: "Обработано", value: formatInteger(value.processedUrls, uiLocale) },
+        { label: "Ошибок", value: formatInteger(value.failedUrls, uiLocale) },
         ...(value.config.purpose === "HTTP_STATUS_CHECK"
           ? []
-          : [{ label: "SEO-проблем", value: formatInteger(value.issueCount) }]),
-        { label: "Успешно", value: formatInteger(value.successfulUrls) },
+          : [{ label: "SEO-проблем", value: formatInteger(value.issueCount, uiLocale) }]),
+        { label: "Успешно", value: formatInteger(value.successfulUrls, uiLocale) },
         ...(value.failureCode
           ? [{ label: "Код ошибки", value: value.failureCode }]
           : [])
@@ -2606,12 +2620,12 @@ function operationSummary(data: OperationResultData): SummaryView {
       ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
       : `${wordstatProvider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
     provider: keysSo ? "KEYS_SO" : wordstatProvider,
-    ...summaryStatus(value.status, current, total),
+    ...summaryStatus(value.status, current, total, undefined, uiLocale),
     facts: [
-      { label: "Найдено", value: formatInteger(value.collectedKeywords) },
-      { label: "Выбрано", value: formatInteger(value.selectedKeywords) },
-      { label: "Импортировано", value: formatInteger(value.importedKeywords) },
-      { label: "Доступно", value: value.totalAvailable === undefined ? "—" : formatInteger(value.totalAvailable) },
+      { label: "Найдено", value: formatInteger(value.collectedKeywords, uiLocale) },
+      { label: "Выбрано", value: formatInteger(value.selectedKeywords, uiLocale) },
+      { label: "Импортировано", value: formatInteger(value.importedKeywords, uiLocale) },
+      { label: "Доступно", value: value.totalAvailable === undefined ? "—" : formatInteger(value.totalAvailable, uiLocale) },
       ...(value.failureCode
         ? [{ label: "Код ошибки", value: value.failureCode }]
         : [])
@@ -2619,11 +2633,11 @@ function operationSummary(data: OperationResultData): SummaryView {
   };
 }
 
-function summaryStatus(status: string, current: number, total: number, stage?: string): Pick<SummaryView, "status" | "tone" | "progress" | "progressPercent"> {
+function summaryStatus(status: string, current: number, total: number, stage?: string, uiLocale: string = "ru-RU"): Pick<SummaryView, "status" | "tone" | "progress" | "progressPercent"> {
   return {
     status: operationStatusLabel(status, stage),
     tone: statusTone(status),
-    progress: total > 0 ? `${formatInteger(current)} из ${formatInteger(total)}` : "Ожидает данных",
+    progress: total > 0 ? `${formatInteger(current, uiLocale)} из ${formatInteger(total, uiLocale)}` : "Ожидает данных",
     progressPercent: total > 0 ? Math.min(100, Math.round(current / total * 100)) : 0
   };
 }
@@ -2645,15 +2659,15 @@ async function loadOperationResult(
 }
 
 function operationResultRange(
-  data: OperationResultData
+  data: OperationResultData, uiLocale: string = "ru-RU"
 ): string {
   if (data.kind === "research") return "";
   const loaded = data.value.rows.length;
   const total = operationResultTotal(data);
   if (loaded === 0) return "Строк пока нет";
   return total > 0
-    ? `Загружено ${formatInteger(loaded)} из ${formatInteger(Math.max(loaded, total))}`
-    : `Загружено ${formatInteger(loaded)}`;
+    ? `Загружено ${formatInteger(loaded, uiLocale)} из ${formatInteger(Math.max(loaded, total), uiLocale)}`
+    : `Загружено ${formatInteger(loaded, uiLocale)}`;
 }
 
 function operationResultPageRequest(
@@ -2798,13 +2812,13 @@ function initials(value: string): string {
 }
 
 function frequencyProvider(row: FrequencyOperationResultRow): string { return row.snapshots[0]?.provider ?? "—"; }
-function frequencyObservedAt(row: FrequencyOperationResultRow): string { return formatDateTime(row.snapshots[0]?.observedAt); }
-function rankPosition(row: RankOperationResultRow): string { return row.state === "FOUND" ? formatOptionalNumber(row.position ?? row.absolutePosition) : row.state === "NOT_FOUND" ? "Не найден" : "—"; }
-function formatOptionalNumber(value: number | undefined): string { return value === undefined ? "—" : formatInteger(value); }
-function formatDecimal(value: string): string { const number = Number(value); return Number.isSafeInteger(number) ? formatInteger(number) : value; }
-function formatInteger(value: number): string { return new Intl.NumberFormat("ru-RU").format(value); }
+function frequencyObservedAt(row: FrequencyOperationResultRow, uiLocale: string = "ru-RU"): string { return formatDateTime(row.snapshots[0]?.observedAt, uiLocale); }
+function rankPosition(row: RankOperationResultRow, uiLocale: string = "ru-RU"): string { return row.state === "FOUND" ? formatOptionalNumber(row.position ?? row.absolutePosition, uiLocale) : row.state === "NOT_FOUND" ? "Не найден" : "—"; }
+function formatOptionalNumber(value: number | undefined, uiLocale: string = "ru-RU"): string { return value === undefined ? "—" : formatInteger(value, uiLocale); }
+function formatDecimal(value: string, uiLocale: string = "ru-RU"): string { const number = Number(value); return Number.isSafeInteger(number) ? formatInteger(number, uiLocale) : value; }
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string { return new Intl.NumberFormat(uiLocale).format(value); }
 function formatBytes(value: number): string { if (value < 1024) return `${value} Б`; if (value < 1_048_576) return `${(value / 1024).toFixed(1)} КБ`; return `${(value / 1_048_576).toFixed(1)} МБ`; }
-function formatDateTime(value: string | undefined): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date); }
+function formatDateTime(value: string | undefined, uiLocale: string = "ru-RU"): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(date); }
 function safeExternalUrl(value: string): string | undefined { try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined; } catch { return undefined; } }
 function providerLabel(provider: "XMLSTOCK" | "ARSENKIN"): string { return provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"; }
 function frequencyTypeLabel(type: string): string { return ({ BASE: "База", EXACT: '""', FIXED: '"!"' } as Readonly<Record<string, string>>)[type] ?? type; }

@@ -9,6 +9,8 @@ import {
   fragmentFreeBrowserPath,
   readOneTimeTokenFragment
 } from "../lib/one-time-link";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface PasswordResetAccepted {
   readonly accepted: true;
@@ -60,12 +62,9 @@ export function RequestPasswordResetForm() {
     return (
       <div className="auth-form">
         <div className="inline-alert success" role="status">
-          Если аккаунт с таким email существует, мы отправили ссылку для
-          восстановления. Проверьте также папку «Спам».
-        </div>
+          <UiText text="Если аккаунт с таким email существует, мы отправили ссылку для восстановления. Проверьте также папку «Спам»." /></div>
         <a className="secondary-button auth-submit" href="/app/login">
-          Вернуться ко входу
-        </a>
+          <UiText text="Вернуться ко входу" /></a>
       </div>
     );
   }
@@ -74,7 +73,7 @@ export function RequestPasswordResetForm() {
     <form className="auth-form" noValidate onSubmit={submit}>
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       <label className="form-field">
@@ -88,16 +87,17 @@ export function RequestPasswordResetForm() {
         />
       </label>
       <button className="primary-button auth-submit" disabled={busy} type="submit">
-        {busy ? "Отправляем…" : "Получить ссылку"}
+        {busy ? <UiText text="Отправляем…" /> : <UiText text="Получить ссылку" />}
       </button>
       <p className="auth-switch">
-        <a href="/app/login">Вернуться ко входу</a>
+        <a href="/app/login"><UiText text="Вернуться ко входу" /></a>
       </p>
     </form>
   );
 }
 
 export function ResetPasswordForm() {
+  const { t: uiText } = useUiLocale();
   const token = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -173,23 +173,23 @@ export function ResetPasswordForm() {
     <form className="auth-form" noValidate onSubmit={submit}>
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       <PasswordField
         error={fieldError}
-        label="Новый пароль"
+        label={uiText("Новый пароль")}
         name="password"
       />
       <PasswordField
-        label="Повторите пароль"
+        label={uiText("Повторите пароль")}
         name="passwordConfirmation"
       />
       <button className="primary-button auth-submit" disabled={busy} type="submit">
-        {busy ? "Сохраняем…" : "Сохранить новый пароль"}
+        {busy ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить новый пароль" />}
       </button>
       <p className="auth-switch">
-        <a href="/app/forgot-password">Запросить новую ссылку</a>
+        <a href="/app/forgot-password"><UiText text="Запросить новую ссылку" /></a>
       </p>
     </form>
   );
@@ -218,10 +218,10 @@ function PasswordField({
       />
       {error ? (
         <small className="field-error" id={`${name}-error`}>
-          {error}
+          {<UiText text={error ?? ""} />}
         </small>
       ) : (
-        <small id={`${name}-hint`}>Минимум 12 символов</small>
+        <small id={`${name}-hint`}><UiText text="Минимум 12 символов" /></small>
       )}
     </label>
   );

@@ -3,6 +3,7 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   keywordListQuery,
+  keywordBodyListInput,
   keywordMultiSearchInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
@@ -55,6 +56,20 @@ test("parses a bounded semantic keyword query", () => {
   assert.deepEqual(keywordTagOptionsQuery({ search: "  АкЦиЯ  " }), {
     search: "акция"
   });
+});
+
+test("accepts a large body-only folder union and advanced metric filters", () => {
+  const groupIds = Array.from({ length: 250 }, (_, index) => `01900000-0000-7000-8000-${index.toString().padStart(12, "0")}`);
+  const dimension = "GOOGLE|RU|1011969|ru|MOBILE";
+  const result = keywordBodyListInput({ query: {
+    limit: 100, groupIds, frequencyBaseMin: "1000", frequencyBaseMax: "5000",
+    rankDimensionKey: dimension, rankState: "FOUND", rankPositionMin: 1, rankPositionMax: 10,
+    rankCheckedFrom: "2026-09-01T00:00:00.000Z", rankCheckedBefore: "2026-09-09T00:00:00.000Z"
+  } });
+  assert.equal(result.groupIds?.length, 250);
+  assert.equal(result.rankDimensionKey, dimension);
+  assert.throws(() => keywordBodyListInput({ query: { groupIds: Array.from({ length: 2_001 }, (_, index) => `01900000-0000-7000-8000-${index.toString().padStart(12, "0")}`) } }), DomainError);
+  assert.throws(() => keywordListQuery({ rankState: "FOUND" }), DomainError);
 });
 
 test("parses the project position history tracking scope", () => {

@@ -1,3 +1,4 @@
+import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import { timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import type { RankManifestHash } from "@seo-platform/contracts";
@@ -91,7 +92,7 @@ export class RankResultPersistenceBrokerService {
       manifestChunkIndex: boundedInteger(
         row.manifestChunkIndex,
         0,
-        14_999,
+        rankCommandKeywordLimit - 1,
         "chunk index"
       ),
       manifestChunkHash: {

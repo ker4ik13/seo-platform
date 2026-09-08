@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -17,7 +18,7 @@ import type {
   FrequencyCollectionSummary,
   FrequencyOperationResult
 } from "@seo-platform/contracts";
-import { arsenkinWordstatKeywordLimit } from "@seo-platform/contracts";
+import { frequencyCollectionKeywordLimit } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
@@ -28,6 +29,7 @@ import {
   requiredProjectTenant
 } from "../authorization/project-tenant.js";
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
+import { OperationBillingService } from "../billing/operation-billing.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { assertUuid } from "../common/identifier.js";
@@ -56,7 +58,8 @@ export class FrequencyCollectionController {
     private readonly jobs: JobsClient,
     private readonly billing: BillingEntitlementService,
     private readonly audit: AuditService,
-    private readonly seoData?: SeoDataClient
+    private readonly seoData?: SeoDataClient,
+    private readonly operations?: OperationBillingService
   ) {}
 
   @Get()
@@ -82,15 +85,17 @@ export class FrequencyCollectionController {
     @Query("limit") limitValue: unknown,
     @Query("cursor") cursorValue: unknown,
     @Req() request: TenantRequest,
-    @CurrentPrincipal() principal: AuthenticatedPrincipal
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Query("onlyFailed") onlyFailed?: string
   ): Promise<ApiResponse<FrequencyOperationResult>> {
     const tenant = requiredProjectTenant(request);
     const context = internalProjectContext(request, principal, tenant);
     const canonicalJobId = assertUuid(jobId, "jobId");
+    if (onlyFailed !== undefined && onlyFailed !== "true" && onlyFailed !== "false") throw new BadRequestException("Invalid result filter");
     const page = operationResultPageQuery(
       limitValue,
       cursorValue,
-      arsenkinWordstatKeywordLimit - 1
+      frequencyCollectionKeywordLimit - 1
     );
     const [collection, scope] = await Promise.all([
       this.jobs.getFrequencyCollection(context, canonicalJobId),
@@ -98,9 +103,11 @@ export class FrequencyCollectionController {
         context,
         canonicalJobId,
         page.limit,
-        page.cursor
+        page.cursor,
+        onlyFailed === "true"
       )
     ]);
+    if (scope.items.length === 0) return apiResponse(request, { collection, page: scope.page, rows: [] });
     if (!this.seoData) throw new Error("SEO data client is not available");
     const result = await this.seoData.frequencyOperationResult(
       context,
@@ -154,7 +161,8 @@ export class FrequencyCollectionController {
       internalProjectContext(request, principal, tenant),
       input,
       canonicalIdempotencyKey,
-      jobCapacity
+      jobCapacity,
+      await this.operations?.admit(internalProjectContext(request, principal, tenant), { kind: "FREQUENCY_COLLECTION", command: input }, canonicalIdempotencyKey, request.headers["x-operation-estimate-id"])
     );
     await committed(
       this.audit,

@@ -12,6 +12,8 @@ import {
 } from "../lib/semantic-rank-presentation";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function SemanticKeywordAiPositionHistoryModal({
   keywordId,
@@ -24,6 +26,8 @@ export function SemanticKeywordAiPositionHistoryModal({
   onClose: () => void;
   projectId: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [items, setItems] = useState<readonly SemanticAiAnswerHistoryItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [hasNext, setHasNext] = useState(false);
@@ -91,32 +95,30 @@ export function SemanticKeywordAiPositionHistoryModal({
 
   return (
     <SemanticModal
-      description="Все сохранённые проверки ИИ-ответов по этому запросу, независимо от региона и устройства. История загружается блоками по 200 записей."
+      description={uiText("Все сохранённые проверки ИИ-ответов по этому запросу, независимо от региона и устройства. История загружается блоками по 200 записей.")}
       onClose={onClose}
       size="large"
-      title={`История ИИ-позиций · ${keywordText}`}
+      title={uiText("История ИИ-позиций · {0}", [String(keywordText)])}
     >
       <div className="semantic-position-history-full semantic-ai-position-history-full">
         <header>
-          <span>Загружено записей: <strong>{items.length.toLocaleString("ru-RU")}</strong></span>
-          <span>Новые съёмы выше, старые ниже</span>
+          <span><UiText text="Загружено записей:" after=" " /><strong>{items.length.toLocaleString(uiLocale)}</strong></span>
+          <span><UiText text="Новые съёмы выше, старые ниже" /></span>
         </header>
 
         {loading ? (
           <div className="semantic-position-history-state" role="status">
-            Загружаем историю ИИ-позиций…
-          </div>
+            <UiText text="Загружаем историю ИИ-позиций…" /></div>
         ) : items.length === 0 && !error ? (
           <div className="semantic-position-history-state">
-            Сохранённых проверок ИИ-ответов пока нет.
-          </div>
+            <UiText text="Сохранённых проверок ИИ-ответов пока нет." /></div>
         ) : (
           <ol className="semantic-position-history-list semantic-ai-position-history-list">
             {items.map((item) => <HistoryRow item={item} key={item.snapshotId} />)}
           </ol>
         )}
 
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
+        {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
         {hasNext && (
           <button
             className="secondary-button semantic-position-history-more"
@@ -125,7 +127,7 @@ export function SemanticKeywordAiPositionHistoryModal({
             ref={loadMoreRef}
             type="button"
           >
-            {loadingMore ? "Загружаем следующие записи…" : "Прокрутите ниже или загрузите ещё 200"}
+            {loadingMore ? <UiText text="Загружаем следующие записи…" /> : <UiText text="Прокрутите ниже или загрузите ещё 200" />}
           </button>
         )}
       </div>
@@ -134,28 +136,29 @@ export function SemanticKeywordAiPositionHistoryModal({
 }
 
 function HistoryRow({ item }: Readonly<{ item: SemanticAiAnswerHistoryItem }>) {
+  const uiLocale = useUiLocale().locale;
   const status = aiHistoryStatus(item);
   return (
     <li className={item.siteFound ? undefined : "not-found"}>
       <div className="semantic-position-history-row-head">
-        <time dateTime={item.observedAt}>{formatDateTime(item.observedAt)}</time>
+        <time dateTime={item.observedAt}>{formatDateTime(item.observedAt, uiLocale)}</time>
         <span>
           <SearchEngineLogo engine={item.searchEngine} size="compact" />
-          <b>{item.searchEngine === "YANDEX" ? "ИИ-ответ Яндекса" : "ИИ-ответ Google"}</b>
+          <b>{item.searchEngine === "YANDEX" ? <UiText text="ИИ-ответ Яндекса" /> : <UiText text="ИИ-ответ Google" />}</b>
         </span>
-        <small>{item.regionCode} · {item.device === "DESKTOP" ? "десктоп" : "мобильное"}</small>
+        <small>{item.regionCode} · {item.device === "DESKTOP" ? <UiText text="десктоп" /> : <UiText text="мобильное" />}</small>
         <div className={`semantic-position-history-row-actions semantic-ai-position-history-row-actions ${status.tone}`}>
           <strong title={status.title}>{status.label}</strong>
         </div>
       </div>
       <div className="semantic-position-history-row-body">
-        <small>{item.answerPresent ? "ИИ-ответ найден" : "ИИ-ответ не найден"}{item.brandFound ? " · бренд упомянут" : ""}</small>
+        <small>{item.answerPresent ? <UiText text="ИИ-ответ найден" /> : <UiText text="ИИ-ответ не найден" />}{item.brandFound ? <UiText text="· бренд упомянут" before=" " /> : ""}</small>
         {item.rankingUrl ? (
           <a href={item.rankingUrl} rel="noopener noreferrer" target="_blank" title={item.rankingUrl}>
             {semanticDisplayUrl(item.rankingUrl)}
           </a>
         ) : (
-          <span>Сайт проекта в источниках этой проверки не найден.</span>
+          <span><UiText text="Сайт проекта в источниках этой проверки не найден." /></span>
         )}
       </div>
     </li>
@@ -224,11 +227,11 @@ function historyError(error: unknown): string {
   return "Не удалось загрузить историю ИИ-позиций.";
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         dateStyle: "medium",
         timeStyle: "short"
       }).format(date);

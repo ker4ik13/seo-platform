@@ -14,7 +14,7 @@ export function createProjectNoteInput(
   const input = record(value, ["title", "markdown", "visibility"]);
   return {
     title: text(input.title, "title", 160, false),
-    markdown: text(input.markdown, "markdown", 100_000, true),
+    markdown: text(input.markdown, "markdown", undefined, true),
     visibility: visibility(input.visibility)
   };
 }
@@ -24,7 +24,7 @@ export function updateProjectNoteInput(
 ): UpdateProjectNoteInput {
   const input = record(value, ["title", "markdown", "visibility"]);
   const title = optionalText(input.title, "title", 160, false);
-  const markdown = optionalText(input.markdown, "markdown", 100_000, true);
+  const markdown = optionalText(input.markdown, "markdown", undefined, true);
   const nextVisibility =
     input.visibility === undefined ? undefined : visibility(input.visibility);
   if (
@@ -70,10 +70,13 @@ function visibility(value: unknown): ProjectNoteVisibility {
 function text(
   value: unknown,
   field: string,
-  max: number,
+  max: number | undefined,
   allowEmpty: boolean
 ): string {
-  if (typeof value !== "string" || value.length > max) invalid(field);
+  if (
+    typeof value !== "string" ||
+    (max !== undefined && value.length > max)
+  ) invalid(field);
   const normalized = value.normalize("NFKC").trim();
   if (!allowEmpty && !normalized) invalid(field);
   return normalized;
@@ -82,7 +85,7 @@ function text(
 function optionalText(
   value: unknown,
   field: string,
-  max: number,
+  max: number | undefined,
   allowEmpty: boolean
 ): string | undefined {
   return value === undefined ? undefined : text(value, field, max, allowEmpty);

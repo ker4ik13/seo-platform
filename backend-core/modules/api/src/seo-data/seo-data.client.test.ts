@@ -39,6 +39,7 @@ import {
 test("validates ordered bounded project TOP history", () => {
   const first = {
     id: "01900000-0000-7000-8000-000000000041",
+    date: "2026-09-01",
     observedAt: "2026-09-01T10:00:00.000Z",
     measuredKeywordCount: 20,
     positionedKeywordCount: 16,
@@ -51,6 +52,7 @@ test("validates ordered bounded project TOP history", () => {
   const second = {
     ...first,
     id: "01900000-0000-7000-8000-000000000042",
+    date: "2026-09-02",
     observedAt: "2026-09-02T10:00:00.000Z",
     top3KeywordCount: 3
   };
@@ -62,6 +64,13 @@ test("validates ordered bounded project TOP history", () => {
   );
   assert.throws(
     () => projectPositionHistory({ points: [second, first], truncated: false }),
+    DomainError
+  );
+  assert.throws(
+    () => projectPositionHistory({
+      points: [first, { ...second, date: first.date }],
+      truncated: false
+    }),
     DomainError
   );
   assert.throws(
@@ -1776,6 +1785,44 @@ test("forwards the semantic undo idempotency key inside the trusted command", as
         trackedContextPairs: 50_000
       }
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("sends a large folder union through the body-only keyword route", async () => {
+  const originalFetch = globalThis.fetch;
+  const groupIds = Array.from({ length: 101 }, (_, index) =>
+    `01900000-0000-7000-8000-${String(1000 + index).padStart(12, "0")}`
+  );
+  let capturedUrl: URL | undefined;
+  let capturedMethod: string | undefined;
+  let capturedBody: unknown;
+  globalThis.fetch = (async (input, init): Promise<Response> => {
+    capturedUrl = new URL(String(input));
+    capturedMethod = init?.method;
+    capturedBody = JSON.parse(String(init?.body));
+    return jsonResponse({
+      data: [],
+      page: { hasNext: false, totalApprox: 0 },
+      meta: { requestId: "large-group-union" }
+    });
+  }) as typeof fetch;
+
+  try {
+    const page = await client().listKeywords(internalContext(), {
+      limit: 100,
+      groupIds,
+      sort: "CREATED_DESC"
+    });
+
+    assert.equal(page.data.length, 0);
+    assert.equal(capturedMethod, "POST");
+    assert.equal(capturedUrl?.pathname, `/internal/v1/projects/${projectId}/keywords/list`);
+    assert.deepEqual(
+      (capturedBody as { query: { groupIds: readonly string[] } }).query.groupIds,
+      groupIds
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

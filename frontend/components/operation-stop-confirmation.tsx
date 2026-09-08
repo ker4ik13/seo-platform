@@ -1,6 +1,8 @@
 "use client";
 
 import { SemanticModal } from "./semantic-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function OperationStopConfirmation({
   busy,
@@ -15,12 +17,13 @@ export function OperationStopConfirmation({
   onConfirm: () => void;
   title: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <SemanticModal
-      description="Проверьте выбранную операцию перед остановкой."
+      description={uiText("Проверьте выбранную операцию перед остановкой.")}
       onClose={busy ? () => undefined : onCancel}
       size="small"
-      title="Остановить операцию?"
+      title={uiText("Остановить операцию?")}
     >
       <div className="semantic-confirm-dialog operation-stop-confirmation">
         <div className="inline-alert warning" role="alert">
@@ -28,9 +31,7 @@ export function OperationStopConfirmation({
           <span>{description}</span>
         </div>
         <p>
-          Новые запросы перестанут обрабатываться. Уже сохранённые результаты и
-          текущий прогресс останутся в журнале.
-        </p>
+          <UiText text="Новые запросы перестанут обрабатываться. Уже сохранённые результаты и текущий прогресс останутся в журнале." /></p>
         <div className="semantic-modal-actions">
           <button
             autoFocus
@@ -39,15 +40,14 @@ export function OperationStopConfirmation({
             onClick={onCancel}
             type="button"
           >
-            Продолжить сбор
-          </button>
+            <UiText text="Продолжить сбор" /></button>
           <button
             className="danger-button"
             disabled={busy}
             onClick={onConfirm}
             type="button"
           >
-            {busy ? "Останавливаем…" : "Остановить"}
+            {busy ? <UiText text="Останавливаем…" /> : <UiText text="Остановить" />}
           </button>
         </div>
       </div>

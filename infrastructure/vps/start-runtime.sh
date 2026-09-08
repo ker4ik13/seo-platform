@@ -164,6 +164,11 @@ do
   start_window "$worker"
 done
 
+if [ "${NPD_RECEIPTS_ENABLED:-false}" = true ]; then
+  rm -f /tmp/seo-platform-npd-worker.ready
+  start_window npd-worker
+fi
+
 start_window web
 wait_for_http http://127.0.0.1:3000/ru
 

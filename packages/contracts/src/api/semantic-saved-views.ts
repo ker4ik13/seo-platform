@@ -71,7 +71,8 @@ export type SemanticSystemColumnKey =
 
 export type SemanticSavedViewColumnKey =
   | SemanticSystemColumnKey
-  | `custom:${string}`;
+  | `custom:${string}`
+  | import("./rank-dimensions.js").SemanticRankColumnKey;
 
 export interface SemanticSavedViewFilters {
   readonly search?: string;
@@ -83,6 +84,21 @@ export interface SemanticSavedViewFilters {
   readonly isTracked?: boolean;
   readonly priorityMin?: number;
   readonly priorityMax?: number;
+  readonly frequencyBaseMin?: string;
+  readonly frequencyBaseMax?: string;
+  readonly frequencyExactMin?: string;
+  readonly frequencyExactMax?: string;
+  readonly frequencyFixedMin?: string;
+  readonly frequencyFixedMax?: string;
+  readonly wordCountMin?: number;
+  readonly wordCountMax?: number;
+  readonly targetUrlState?: "SET" | "EMPTY";
+  readonly rankDimensionKey?: string;
+  readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
+  readonly rankPositionMin?: number;
+  readonly rankPositionMax?: number;
+  readonly rankCheckedFrom?: string;
+  readonly rankCheckedBefore?: string;
 }
 
 export interface SemanticSavedViewConfig {

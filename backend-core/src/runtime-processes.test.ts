@@ -38,7 +38,9 @@ test("core runtime exposes realtime credentials only to realtime", () => {
     definitions[0]?.environment.TELEGRAM_ALERT_BOT_TOKEN,
     "bot-secret"
   );
-  assert.equal(definitions[1]?.environment.OPERATIONAL_ALERT_TOKEN, undefined);
+  // HTTP reports provider balances through the private alert receiver; it
+  // still never receives the Telegram bot secret itself.
+  assert.equal(definitions[1]?.environment.OPERATIONAL_ALERT_TOKEN, "operational-token");
   assert.equal(definitions[1]?.environment.TELEGRAM_ALERT_BOT_TOKEN, undefined);
   assert.equal(definitions[1]?.environment.PLATFORM_ARSENKIN_ENABLED, "true");
   assert.equal(
@@ -101,4 +103,20 @@ test("web push role is opt-in and receives its dedicated database", () => {
     definitions[3]?.environment.WEB_PUSH_VAPID_PRIVATE_KEY,
     "private-value"
   );
+});
+
+test("NPD credentials are opt-in and remain only in the isolated fiscal worker", () => {
+  const env = { ...baseEnvironment, NPD_RECEIPTS_ENABLED: "true", NPD_PROCESSOR_API_TOKEN: "npd-control", NPD_INN: "123456789012", NPD_PASSWORD: "npd-private-password", NPD_DEVICE_ID: "npd-device-id" };
+  const definitions = coreProcessDefinitions(env);
+  const worker = definitions.find(definition => definition.name === "npd");
+  assert.ok(worker);
+  assert.equal(worker.environment.NPD_PASSWORD, "npd-private-password");
+  assert.equal(worker.environment.PLATFORM_DATABASE_URL, undefined);
+  assert.equal(worker.environment.AUTH_DATA_ENCRYPTION_KEY, undefined);
+  assert.equal(worker.environment.CRYPTO_PAY_API_TOKEN, undefined);
+  for (const definition of definitions.filter(item => item.name !== "npd")) {
+    assert.equal(definition.environment.NPD_PASSWORD, undefined);
+    assert.equal(definition.environment.NPD_INN, undefined);
+  }
+  assert.equal(coreProcessDefinitions({ ...env, NPD_RECEIPTS_ENABLED: "false" }).some(item => item.name === "npd"), false);
 });

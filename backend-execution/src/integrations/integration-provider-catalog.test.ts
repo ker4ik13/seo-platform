@@ -52,7 +52,7 @@ test("public catalog only advertises operational provider workflows", () => {
   );
 });
 
-test("advertises platform-paid mode only for configured rank providers", () => {
+test("advertises platform-paid mode only for configured providers", () => {
   const catalog = operationalIntegrationProviderCatalogForPlatform(
     new Set(["XMLSTOCK"])
   );
@@ -67,6 +67,6 @@ test("advertises platform-paid mode only for configured rank providers", () => {
   assert.match(
     catalog.find(({ provider }) => provider === "XMLSTOCK")
       ?.subscriptionNotice ?? "",
-    /внутренн/u
+    /баланса данных/u
   );
 });

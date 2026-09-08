@@ -14,6 +14,10 @@
     "./platform-admin-bootstrap": {
       "types": "./dist/admin/platform-admin-bootstrap.d.ts",
       "import": "./dist/admin/platform-admin-bootstrap.js"
+    },
+    "./npd-worker": {
+      "types": "./dist/npd/npd-worker.d.ts",
+      "import": "./dist/npd/npd-worker.js"
     }
   },
   "scripts": {
@@ -35,8 +39,9 @@
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
     "@seo-platform/contracts": "workspace:*",
+    "@seo-platform/operational-alerts": "workspace:*",
     "argon2": "0.45.1",
-    "fastify": "5.10.0",
+    "fastify": "5.12.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },

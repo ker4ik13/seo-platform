@@ -8,7 +8,7 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const keywordId = "01900000-0000-7000-8000-000000000003";
 
-test("exports newest daily rank independently of tracking context", async () => {
+test("exports newest daily rank independently per geographic and device dimension", async () => {
   const calls: unknown[] = [];
   const keywords = {
     list: async (...input: readonly unknown[]) => {
@@ -18,6 +18,7 @@ test("exports newest daily rank independently of tracking context", async () => 
           {
             id: keywordId,
             textOriginal: "купить трубу",
+            language: "ru",
             createdAt: "2026-07-01T10:00:00.000Z",
             groupPath: "Каталог / Трубы"
           }
@@ -57,11 +58,39 @@ test("exports newest daily rank independently of tracking context", async () => 
     {
       keywordId,
       text: "купить трубу",
+      keywordLanguage: "ru",
       createdAt: "2026-07-01T10:00:00.000Z",
       groupPath: "Каталог / Трубы",
+      dimension: {
+        key: "YANDEX|RU|213|ru|DESKTOP",
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP"
+      },
       snapshots: [
         { searchEngine: "YANDEX", observedDate: "2026-08-18", found: true, position: 3 },
-        { searchEngine: "YANDEX", observedDate: "2026-08-17", found: false },
+        { searchEngine: "YANDEX", observedDate: "2026-08-17", found: false }
+      ]
+    },
+    {
+      keywordId,
+      text: "купить трубу",
+      keywordLanguage: "ru",
+      createdAt: "2026-07-01T10:00:00.000Z",
+      groupPath: "Каталог / Трубы",
+      dimension: {
+        key: "GOOGLE|RU|1011969|ru|MOBILE",
+        searchEngine: "GOOGLE",
+        countryCode: "RU",
+        regionCode: "1011969",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "MOBILE"
+      },
+      snapshots: [
         { searchEngine: "GOOGLE", observedDate: "2026-08-18", found: true, position: 11 }
       ]
     }
@@ -92,6 +121,24 @@ function snapshot(
     observedAt: new Date(observedAt),
     found,
     position,
-    manifest: { configuration: { searchEngine } }
+    manifest: {
+      configuration: searchEngine === "YANDEX"
+        ? {
+            searchEngine,
+            countryCode: "RU",
+            regionCode: "213",
+            regionLabel: "Москва",
+            language: "ru",
+            device: "DESKTOP"
+          }
+        : {
+            searchEngine,
+            countryCode: "RU",
+            regionCode: "1011969",
+            regionLabel: "Москва",
+            language: "ru",
+            device: "MOBILE"
+          }
+    }
   };
 }

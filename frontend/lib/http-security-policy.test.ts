@@ -85,3 +85,10 @@ test("keeps the service worker revalidation-only and scoped to /app", () => {
   assert.equal(headers.get("cache-control"), "no-cache");
   assert.equal(headers.get("service-worker-allowed"), "/app/");
 });
+
+test("public note share URLs are private, non-indexable and never sent as referrers", () => {
+  const headers = headersByName(rule(createWebHttpHeaderRules("production"), "/notes/:path*"));
+  assert.equal(headers.get("cache-control"), "private, no-store");
+  assert.match(headers.get("x-robots-tag") ?? "", /noindex/u);
+  assert.equal(headers.get("referrer-policy"), "no-referrer");
+});

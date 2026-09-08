@@ -372,7 +372,7 @@ function resultHarness(
             execution: manifestExecution,
             pairCount: entryCount,
             chunkCount: 1,
-            chunkSize: 15_000,
+            chunkSize: manifestProvider === "XMLSTOCK" ? 1 : 15_000,
             status,
             appliedAt
           }

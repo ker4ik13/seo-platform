@@ -125,7 +125,7 @@ export class AiAnswerService {
           ...(snapshot.answerMarkdown === undefined ? {} : { answerMarkdown: snapshot.answerMarkdown }),
           positionTrackingEnabled,
           provider: input.provider,
-          sourceMode: "BYOK",
+          sourceMode: input.sourceMode ?? "BYOK",
           jobId: input.jobId,
           observedAt: new Date(input.observedAt)
         })),
@@ -253,7 +253,7 @@ export class AiAnswerService {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
         keywordId: input.keywordId,
-        sourceMode: "BYOK",
+        sourceMode: { in: ["BYOK", "PLATFORM"] },
         positionTrackingEnabled: true,
         ...(cursor
           ? {
@@ -304,7 +304,7 @@ export class AiAnswerService {
       projectId: input.projectId,
       keywordId: input.keywordId,
       items: pageRows.map((row) => {
-        if (row.provider !== "ARSENKIN" || row.sourceMode !== "BYOK") {
+        if (row.provider !== "ARSENKIN" || (row.sourceMode !== "BYOK" && row.sourceMode !== "PLATFORM")) {
           throw new Error("Stored AI answer history row is invalid");
         }
         const searchEngine = storedSearchEngine(row.searchEngine);

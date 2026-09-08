@@ -10,6 +10,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import { Icon } from "./icon";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 interface NoteDraft {
   readonly title: string;
@@ -27,6 +29,8 @@ export function ProjectNotes({
   projectId,
   canEdit
 }: Readonly<{ projectId: string; canEdit: boolean }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [notes, setNotes] = useState<readonly ProjectNoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [draft, setDraft] = useState<NoteDraft>(EMPTY_DRAFT);
@@ -157,15 +161,15 @@ export function ProjectNotes({
 
   return (
     <section className="project-notes-layout">
-      <aside className="project-notes-list panel" aria-label="Заметки проекта">
+      <aside className="project-notes-list panel" aria-label={uiText("Заметки проекта")}>
         <div className="project-notes-list-header">
-          <strong>База знаний</strong>
+          <strong><UiText text="База знаний" /></strong>
           {canEdit && (
             <button
-              aria-label="Новая заметка"
+              aria-label={uiText("Новая заметка")}
               className="icon-button"
               onClick={createDraft}
-              title="Новая заметка"
+              title={uiText("Новая заметка")}
               type="button"
             >
               <Icon name="plus" />
@@ -173,11 +177,11 @@ export function ProjectNotes({
           )}
         </div>
         {loading ? (
-          <div className="project-notes-state">Загружаем заметки…</div>
+          <div className="project-notes-state"><UiText text="Загружаем заметки…" /></div>
         ) : notes.length === 0 ? (
           <div className="project-notes-state">
-            <strong>Заметок пока нет</strong>
-            <span>Создайте первую Markdown-заметку проекта.</span>
+            <strong><UiText text="Заметок пока нет" /></strong>
+            <span><UiText text="Создайте первую Markdown-заметку проекта." /></span>
           </div>
         ) : (
           <div className="project-note-items">
@@ -190,9 +194,9 @@ export function ProjectNotes({
               >
                 <strong>{note.title}</strong>
                 <span>
-                  {note.visibility === "PUBLIC" ? "Открыта по ссылке" : "Только участники"}
+                  {note.visibility === "PUBLIC" ? <UiText text="Открыта по ссылке" /> : <UiText text="Только участники" />}
                   <time dateTime={note.updatedAt}>
-                    {new Intl.DateTimeFormat("ru-RU", {
+                    {new Intl.DateTimeFormat(uiLocale, {
                       day: "2-digit",
                       month: "short"
                     }).format(new Date(note.updatedAt))}
@@ -207,8 +211,8 @@ export function ProjectNotes({
       <article className="project-note-editor panel">
         <header className="project-note-editor-header">
           <div>
-            <small>{selected ? "Заметка проекта" : "Новая заметка"}</small>
-            <h2>{draft.title || "Без названия"}</h2>
+            <small>{selected ? <UiText text="Заметка проекта" /> : <UiText text="Новая заметка" />}</small>
+            <h2>{draft.title || <UiText text="Без названия" />}</h2>
           </div>
           <div className="project-note-tabs" role="tablist">
             <button
@@ -218,8 +222,7 @@ export function ProjectNotes({
               role="tab"
               type="button"
             >
-              Редактор
-            </button>
+              <UiText text="Редактор" /></button>
             <button
               aria-selected={view === "preview"}
               className={view === "preview" ? "active" : undefined}
@@ -227,8 +230,7 @@ export function ProjectNotes({
               role="tab"
               type="button"
             >
-              Просмотр
-            </button>
+              <UiText text="Просмотр" /></button>
           </div>
         </header>
 
@@ -240,7 +242,7 @@ export function ProjectNotes({
 
         <div className="project-note-title-row">
           <label className="form-field">
-            <span>Название</span>
+            <span><UiText text="Название" /></span>
             <input
               autoFocus={!selected}
               disabled={!canEdit || busy}
@@ -248,12 +250,12 @@ export function ProjectNotes({
               onChange={(event) =>
                 setDraft((current) => ({ ...current, title: event.target.value }))
               }
-              placeholder="Например, План продвижения"
+              placeholder={uiText("Например, План продвижения")}
               value={draft.title}
             />
           </label>
           <label className="form-field project-note-visibility">
-            <span>Доступ</span>
+            <span><UiText text="Доступ" /></span>
             <select
               disabled={!canEdit || busy}
               onChange={(event) =>
@@ -264,8 +266,8 @@ export function ProjectNotes({
               }
               value={draft.visibility}
             >
-              <option value="PROJECT_MEMBERS">Только участники</option>
-              <option value="PUBLIC">Все по ссылке</option>
+              <option value="PROJECT_MEMBERS"><UiText text="Только участники" /></option>
+              <option value="PUBLIC"><UiText text="Все по ссылке" /></option>
             </select>
           </label>
         </div>
@@ -275,17 +277,16 @@ export function ProjectNotes({
             <span>Markdown</span>
             <textarea
               disabled={!canEdit || busy}
-              maxLength={100_000}
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
                   markdown: event.target.value
                 }))
               }
-              placeholder="# Заголовок\n\nДобавьте текст, чек-лист или [ссылку](https://example.com)."
+              placeholder={uiText("# Заголовок\\n\\nДобавьте текст, чек-лист или [ссылку](https://example.com).")}
               value={draft.markdown}
             />
-            <small>{draft.markdown.length.toLocaleString("ru-RU")} из 100 000</small>
+            <small>{draft.markdown.length.toLocaleString(uiLocale)} <UiText text="символов" before=" " /></small>
           </label>
         ) : (
           <MarkdownDocument markdown={draft.markdown} />
@@ -296,16 +297,14 @@ export function ProjectNotes({
             {selected?.publicToken && selected.visibility === "PUBLIC" && (
               <>
                 <button className="secondary-button" onClick={() => void copyPublicLink()} type="button">
-                  Копировать ссылку
-                </button>
+                  <UiText text="Копировать ссылку" /></button>
                 <a
                   className="secondary-button"
                   href={`/notes/${selected.publicToken}`}
                   rel="noopener noreferrer"
                   target="_blank"
                 >
-                  Открыть
-                </a>
+                  <UiText text="Открыть" /></a>
               </>
             )}
           </div>
@@ -314,16 +313,13 @@ export function ProjectNotes({
               confirmDelete ? (
                 <>
                   <button className="danger-button" disabled={busy} onClick={() => void archive()} type="button">
-                    Подтвердить удаление
-                  </button>
+                    <UiText text="Подтвердить удаление" /></button>
                   <button className="secondary-button" disabled={busy} onClick={() => setConfirmDelete(false)} type="button">
-                    Отмена
-                  </button>
+                    <UiText text="Отмена" /></button>
                 </>
               ) : (
                 <button className="secondary-button danger-text-button" disabled={busy} onClick={() => setConfirmDelete(true)} type="button">
-                  Удалить
-                </button>
+                  <UiText text="Удалить" /></button>
               )
             )}
             {canEdit && (
@@ -333,7 +329,7 @@ export function ProjectNotes({
                 onClick={() => void save()}
                 type="button"
               >
-                {busy ? "Сохраняем…" : selected ? "Сохранить" : "Создать заметку"}
+                {busy ? <UiText text="Сохраняем…" /> : selected ? <UiText text="Сохранить" /> : <UiText text="Создать заметку" />}
               </button>
             )}
           </div>
@@ -360,7 +356,7 @@ export function MarkdownDocument({ markdown }: Readonly<{ markdown: string }>) {
           {markdown}
         </ReactMarkdown>
       ) : (
-        <div className="project-notes-state">Добавьте текст в редакторе.</div>
+        <div className="project-notes-state"><UiText text="Добавьте текст в редакторе." /></div>
       )}
     </div>
   );

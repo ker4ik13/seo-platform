@@ -3,10 +3,33 @@ import { createServer as createNetServer } from "node:net";
 import test from "node:test";
 import {
   createOperationalAlertClient,
+  sendConfirmedOperationalAlert,
   startOperationalAlertServer
 } from "./index.js";
 
 const operationalToken = "a".repeat(64);
+
+test("confirmed business alerts retain failure, acknowledge actual delivery and deduplicate retries", async () => {
+  const probe = createNetServer();
+  await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
+  const address = probe.address(); assert.ok(address && typeof address !== "string");
+  const port = address.port;
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  let succeeds = false, sends = 0;
+  const server = await startOperationalAlertServer({ TELEGRAM_ALERTS_ENABLED: "true", OPERATIONAL_ALERT_TOKEN: operationalToken, TELEGRAM_ALERT_BOT_TOKEN: `123456:${"a".repeat(35)}`, TELEGRAM_ALERT_CHAT_ID: "123456", BIND_ADDRESS: "127.0.0.1", OPERATIONAL_ALERTS_PORT: String(port), NODE_ENV: "test" }, {
+    now: () => 1000,
+    fetch: async (_url, init) => { sends++; assert.match(JSON.parse(String(init?.body)).text, /XMLStock #1.*500 ₽/su); return new Response(null, { status: succeeds ? 200 : 503 }); }
+  });
+  try {
+    const env = { TELEGRAM_ALERTS_ENABLED: "true", OPERATIONAL_ALERT_TOKEN: operationalToken, OPERATIONAL_ALERTS_INTERNAL_URL: `http://127.0.0.1:${port}` };
+    const alert = { source: "provider-balance", code: "XMLSTOCK_LOW_BALANCE_1", severity: "ERROR" as const, fingerprint: "b".repeat(64) };
+    assert.equal(await sendConfirmedOperationalAlert(env, "backend-core", alert), false);
+    succeeds = true;
+    assert.equal(await sendConfirmedOperationalAlert(env, "backend-core", alert), true);
+    assert.equal(await sendConfirmedOperationalAlert(env, "backend-core", alert), true);
+    assert.equal(sends, 2, "Retrying the acknowledgement must not duplicate a delivered alert");
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 
 test("disabled alerts are a no-op and require no secrets", async () => {
   const reporter = createOperationalAlertClient(

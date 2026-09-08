@@ -1,6 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import {
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
+  rankExecutionPolicyShape,
+  batchedArsenkinRankPolicyVersion,
+  largeXmlStockRankPolicyVersion,
   type InternalCreateRankRunInput,
   type InternalRankExecutionParameters,
   type InternalSealRankManifestInput,
@@ -45,7 +48,7 @@ export function rankManifestCommand(
     estimate.semanticScopeHash === null ||
     estimate.scopeHash === null ||
     (retry?.pairCount ?? estimate.keywordCount) < 1 ||
-    (retry?.pairCount ?? estimate.keywordCount) > rankProviderKeywordLimit
+    (retry?.pairCount ?? estimate.keywordCount) > rankCommandKeywordLimit
   ) {
     invalid();
   }
@@ -56,6 +59,7 @@ export function rankManifestCommand(
     jobId,
     estimateId: estimate.id,
     ...(retry ? { retryOfJobId: retry.parentJobId } : {}),
+    ...([batchedArsenkinRankPolicyVersion, largeXmlStockRankPolicyVersion].includes(estimate.providerPolicyVersion as typeof batchedArsenkinRankPolicyVersion) ? { providerPolicyVersion: estimate.providerPolicyVersion } : {}),
     provider: storedProvider(estimate.provider),
     operation: "POSITIONS",
     project: {
@@ -144,7 +148,9 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
     value !== null &&
     !Array.isArray(value) &&
     Object.hasOwn(value, "retryOfJobId");
+  const hasPolicy = typeof value === "object" && value !== null && Object.hasOwn(value, "providerPolicyVersion");
   const input = exactRecord(value, [
+    ...(hasPolicy ? ["providerPolicyVersion"] : []),
     "workspaceId",
     "projectId",
     "actorId",
@@ -190,10 +196,11 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
   const trackingContextId = uuid(estimate.trackingContextId);
   const pairCount = decimal(
     estimate.pairCount,
-    rankProviderKeywordLimit
+    rankCommandKeywordLimit
   );
   if (
     (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
+    (hasPolicy && !rankExecutionPolicyShape(input.providerPolicyVersion, input.provider as "ARSENKIN" | "XMLSTOCK")) ||
     input.operation !== "POSITIONS" ||
     uuid(project.id) !== projectId ||
     uuid(project.workspaceId) !== workspaceId ||
@@ -220,6 +227,7 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
     jobId,
     estimateId,
     ...(retryOfJobId ? { retryOfJobId } : {}),
+    ...(hasPolicy ? { providerPolicyVersion: String(input.providerPolicyVersion) } : {}),
     provider: input.provider,
     operation: "POSITIONS",
     project: {

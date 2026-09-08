@@ -2,7 +2,7 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 import type { JobCapacityEntitlement } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
 
-const ACTIVE_JOB_STATUSES = [
+export const ACTIVE_JOB_STATUSES = [
   "DRAFT",
   "ESTIMATING",
   "RESERVING_BALANCE",
@@ -15,7 +15,7 @@ const ACTIVE_JOB_STATUSES = [
   "RETRY_SCHEDULED"
 ] as const;
 
-const ACTIVE_IMPORT_STATUSES = [
+export const ACTIVE_IMPORT_STATUSES = [
   "QUEUED",
   "PARSING",
   "VALIDATING",

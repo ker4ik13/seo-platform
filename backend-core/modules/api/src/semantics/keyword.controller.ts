@@ -40,6 +40,8 @@ import {
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
+import { parseSemanticRankDimensionKey } from "@seo-platform/contracts";
+import { validationError } from "../common/domain-error.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { setEntityVersion } from "../common/entity-version.js";
 import { assertUuid } from "../common/identifier.js";
@@ -64,6 +66,7 @@ import { semanticFrequencyContextRoute } from "./frequency-collection-input.js";
 import { aiAnswerHistoryQuery } from "./ai-answer-history-query.js";
 import {
   keywordListQuery,
+  keywordBodyListInput,
   keywordMultiSearchInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
@@ -120,6 +123,16 @@ export class KeywordController {
       page: result.page,
       meta: { requestId: context.requestId }
     };
+  }
+
+  @Post("list")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, CsrfSessionGuard, TenantPermissionGuard)
+  public async bodyList(@Body() body: unknown, @Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
+    const context = requestContext(request), tenant = requiredProjectTenant(request);
+    const result = await this.seoData.listKeywords(internalProjectContext(request, principal, tenant), keywordBodyListInput(body));
+    return { data: result.data, page: result.page, meta: { requestId: context.requestId } };
   }
 
   @Get("tag-options")
@@ -290,15 +303,18 @@ export class KeywordController {
   public async insights(
     @Param("keywordId") keywordId: string,
     @Req() request: TenantRequest,
-    @CurrentPrincipal() principal: AuthenticatedPrincipal
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Query("dimensionKey") dimensionKey?: unknown
   ): Promise<ApiResponse<SemanticKeywordInsights>> {
     const tenant = requiredProjectTenant(request);
     const canonicalKeywordId = assertUuid(keywordId, "keywordId");
+    if (dimensionKey !== undefined && !parseSemanticRankDimensionKey(dimensionKey)) throw validationError("dimensionKey", "INVALID_DIMENSION", "Choose a valid rank dimension");
     return apiResponse(
       request,
       await this.seoData.keywordInsights(
         internalProjectContext(request, principal, tenant),
-        canonicalKeywordId
+        canonicalKeywordId,
+        dimensionKey as string | undefined
       )
     );
   }

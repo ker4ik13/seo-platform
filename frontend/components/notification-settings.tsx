@@ -8,6 +8,8 @@ import {
   BrowserApiError
 } from "../lib/browser-api";
 import { BrowserPushSettings } from "./browser-push-settings";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export type NotificationChannel = "IN_APP" | "EMAIL" | "WEB_PUSH";
 export type NotificationEventType =
@@ -75,6 +77,7 @@ export function NotificationSettings({
   emailVerified: boolean;
   projectId?: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [settings, setSettings] = useState<NotificationPreferences>();
   const [draft, setDraft] = useState<NotificationPreferences>();
   const [loading, setLoading] = useState(true);
@@ -206,22 +209,21 @@ export function NotificationSettings({
     return (
       <section className="panel notification-settings-loading" aria-busy="true">
         <span className="spinner" />
-        <p>Загружаем настройки уведомлений…</p>
+        <p><UiText text="Загружаем настройки уведомлений…" /></p>
       </section>
     );
   }
   if (!draft) {
     return (
       <section className="panel panel-empty compact">
-        <strong>Настройки уведомлений недоступны</strong>
-        <p>{error ?? "Попробуйте загрузить их ещё раз."}</p>
+        <strong><UiText text="Настройки уведомлений недоступны" /></strong>
+        <p>{error ?? <UiText text="Попробуйте загрузить их ещё раз." />}</p>
         <button
           className="secondary-button"
           onClick={() => setRetryVersion((value) => value + 1)}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -231,40 +233,38 @@ export function NotificationSettings({
     <div className="notification-settings-stack">
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       {saved && (
         <div className="inline-alert success" role="status">
-          Настройки сохранены
-        </div>
+          <UiText text="Настройки сохранены" /></div>
       )}
 
       <section className="panel notification-card">
         <header className="security-card-header">
           <div>
-            <h2>Каналы</h2>
+            <h2><UiText text="Каналы" /></h2>
             <p>
-              Глобальный запрет нельзя обойти настройкой отдельного проекта.
-            </p>
+              <UiText text="Глобальный запрет нельзя обойти настройкой отдельного проекта." /></p>
           </div>
         </header>
         <div className="notification-channel-grid">
           <ChannelSwitch
             checked={draft.channels.inApp}
-            description="Центр уведомлений внутри приложения"
-            label="В приложении"
+            description={uiText("Центр уведомлений внутри приложения")}
+            label={uiText("В приложении")}
             onChange={(checked) => updateChannel("inApp", checked)}
           />
           <ChannelSwitch
             checked={draft.channels.email}
-            description="Мгновенные письма или дайджест"
+            description={uiText("Мгновенные письма или дайджест")}
             label="Email"
             onChange={(checked) => updateChannel("email", checked)}
           />
           <ChannelSwitch
             checked={draft.channels.webPush}
-            description="Глобальный доступ для всех зарегистрированных браузеров"
+            description={uiText("Глобальный доступ для всех зарегистрированных браузеров")}
             label="Browser Push"
             onChange={(checked) => updateChannel("webPush", checked)}
           />
@@ -276,8 +276,8 @@ export function NotificationSettings({
             <strong>{email}</strong>
             <small>
               {emailVerified
-                ? "Email подтверждён и может получать разрешённые доставки."
-                : "Email не подтверждён — письма отправляться не будут."}
+                ? <UiText text="Email подтверждён и может получать разрешённые доставки." />
+                : <UiText text="Email не подтверждён — письма отправляться не будут." />}
             </small>
           </span>
           {!emailVerified && (
@@ -285,15 +285,11 @@ export function NotificationSettings({
               className="text-button"
               href={`/app/verify-email?email=${encodeURIComponent(email)}`}
             >
-              Подтвердить
-            </a>
+              <UiText text="Подтвердить" /></a>
           )}
         </div>
         <p className="notification-hint">
-          Master-переключатель относится ко всему профилю и не зависит от
-          разрешения текущего браузера. Проектные правила не могут обойти этот
-          глобальный запрет.
-        </p>
+          <UiText text="Master-переключатель относится ко всему профилю и не зависит от разрешения текущего браузера. Проектные правила не могут обойти этот глобальный запрет." /></p>
         <BrowserPushSettings
           userId={draft.userId}
           webPushEnabled={draft.channels.webPush}
@@ -303,8 +299,8 @@ export function NotificationSettings({
       <section className="panel notification-card">
         <header className="security-card-header">
           <div>
-            <h2>Время доставки</h2>
-            <p>Timezone применяется к quiet hours и ежедневному дайджесту.</p>
+            <h2><UiText text="Время доставки" /></h2>
+            <p><UiText text="Timezone применяется к quiet hours и ежедневному дайджесту." /></p>
           </div>
         </header>
         <div className="notification-time-grid">
@@ -328,7 +324,7 @@ export function NotificationSettings({
             </datalist>
           </label>
           <label className="form-field">
-            <span>Время дневного дайджеста</span>
+            <span><UiText text="Время дневного дайджеста" /></span>
             <input
               onChange={(event) => {
                 setSaved(false);
@@ -341,8 +337,8 @@ export function NotificationSettings({
         </div>
         <label className="notification-toggle-row">
           <span>
-            <strong>Тихие часы</strong>
-            <small>Обычные instant-события будут отложены, а не потеряны.</small>
+            <strong><UiText text="Тихие часы" /></strong>
+            <small><UiText text="Обычные instant-события будут отложены, а не потеряны." /></small>
           </span>
           <input
             checked={Boolean(draft.quietHours)}
@@ -353,7 +349,7 @@ export function NotificationSettings({
         {draft.quietHours && (
           <div className="notification-time-grid">
             <label className="form-field">
-              <span>Начало</span>
+              <span><UiText text="Начало" /></span>
               <input
                 onChange={(event) => {
                   setSaved(false);
@@ -370,7 +366,7 @@ export function NotificationSettings({
               />
             </label>
             <label className="form-field">
-              <span>Окончание</span>
+              <span><UiText text="Окончание" /></span>
               <input
                 onChange={(event) => {
                   setSaved(false);
@@ -401,8 +397,7 @@ export function NotificationSettings({
                 }}
                 type="checkbox"
               />
-              Критические события доставлять сразу
-            </label>
+              <UiText text="Критические события доставлять сразу" /></label>
           </div>
         )}
       </section>
@@ -410,26 +405,25 @@ export function NotificationSettings({
       <section className="panel notification-card">
         <header className="security-card-header">
           <div>
-            <h2>Категории и режимы</h2>
+            <h2><UiText text="Категории и режимы" /></h2>
             <p>
-              Эти правила становятся значениями по умолчанию для всех проектов.
-            </p>
+              <UiText text="Эти правила становятся значениями по умолчанию для всех проектов." /></p>
           </div>
         </header>
         <div className="notification-matrix-wrap" tabIndex={0}>
           <table className="notification-matrix">
             <thead>
               <tr>
-                <th>Категория</th>
+                <th><UiText text="Категория" /></th>
                 {NOTIFICATION_CHANNELS.map((channel) => (
-                  <th key={channel}>{channelLabel(channel)}</th>
+                  <th key={channel}>{<UiText text={channelLabel(channel) ?? ""} />}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {events.map((eventType) => (
                 <tr key={eventType}>
-                  <th>{eventLabel(eventType)}</th>
+                  <th>{<UiText text={eventLabel(eventType) ?? ""} />}</th>
                   {NOTIFICATION_CHANNELS.map((channel) => {
                     const rule = findRule(draft.rules, eventType, channel);
                     return (
@@ -448,7 +442,7 @@ export function NotificationSettings({
                             }
                             type="checkbox"
                           />
-                          <span>Включено</span>
+                          <span><UiText text="Включено" /></span>
                         </label>
                         <RuleSelectors
                           disabled={!rule.enabled}
@@ -472,16 +466,15 @@ export function NotificationSettings({
       <div className="notification-savebar">
         <span>
           {dirty
-            ? "Есть несохранённые изменения"
-            : `Сохранено · версия ${draft.version}`}
+            ? <UiText text="Есть несохранённые изменения" />
+            : <UiText text="Сохранено · версия {0}" values={[String(draft.version)]} />}
         </span>
         {projectId && (
           <a
             className="secondary-button notification-project-link"
             href={`/app/projects/${encodeURIComponent(projectId)}/settings/notifications`}
           >
-            Настроить текущий проект
-          </a>
+            <UiText text="Настроить текущий проект" /></a>
         )}
         <button
           className="primary-button"
@@ -489,7 +482,7 @@ export function NotificationSettings({
           onClick={() => void save()}
           type="button"
         >
-          {saving ? "Сохраняем…" : "Сохранить"}
+          {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
         </button>
       </div>
     </div>
@@ -509,14 +502,15 @@ export function RuleSelectors({
   onChange: (change: Partial<NotificationRule>) => void;
   rule: NotificationRule;
 }>) {
+  const { t: uiText } = useUiLocale();
   const label = eventLabel(eventType);
   const channelName = channelLabel(channel);
   return (
     <div className="matrix-selects">
       <label>
-        <small>Важность</small>
+        <small><UiText text="Важность" /></small>
         <CustomSelect
-          aria-label={`${label}: важность ${channelName}`}
+          aria-label={uiText("{0}: важность {1}", [String(label), String(channelName)])}
           disabled={disabled}
           onChange={(event) =>
             onChange({
@@ -526,15 +520,15 @@ export function RuleSelectors({
           }
           value={rule.minimumSeverity}
         >
-          <option value="INFO">Любая</option>
-          <option value="WARNING">Предупреждение</option>
-          <option value="CRITICAL">Критическая</option>
+          <option value="INFO"><UiText text="Любая" /></option>
+          <option value="WARNING"><UiText text="Предупреждение" /></option>
+          <option value="CRITICAL"><UiText text="Критическая" /></option>
         </CustomSelect>
       </label>
       <label>
-        <small>Доставка</small>
+        <small><UiText text="Доставка" /></small>
         <CustomSelect
-          aria-label={`${label}: режим ${channelName}`}
+          aria-label={uiText("{0}: режим {1}", [String(label), String(channelName)])}
           disabled={disabled}
           onChange={(event) =>
             onChange({
@@ -543,9 +537,9 @@ export function RuleSelectors({
           }
           value={rule.deliveryMode}
         >
-          <option value="INSTANT">Сразу</option>
-          <option value="HOURLY_DIGEST">Раз в час</option>
-          <option value="DAILY_DIGEST">Раз в день</option>
+          <option value="INSTANT"><UiText text="Сразу" /></option>
+          <option value="HOURLY_DIGEST"><UiText text="Раз в час" /></option>
+          <option value="DAILY_DIGEST"><UiText text="Раз в день" /></option>
         </CustomSelect>
       </label>
     </div>

@@ -1,15 +1,8 @@
+import { rankExecutionPolicyShape, rankPolicyMatchesManifest } from "@seo-platform/contracts";
 import { timingSafeEqual } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
-  currentRankProviderPolicyVersion,
   internalRankExecutionGrantDecision,
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
-  legacyRankProviderPolicyVersion,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
-  xmlStockRankManifestChunkSize,
-  xmlStockRankProviderPolicyVersion,
   type InternalIssueRankExecutionGrantInputV1,
   type InternalRankExecutionGrantDecisionV1
 } from "@seo-platform/contracts";
@@ -171,7 +164,7 @@ export class RankExecutionGrantAttemptService {
       await this.requestIntents.ensureForItem(jobItemId);
     } catch (error) {
       if (error instanceof RankProviderRequestIntentError) {
-        throw failure(error.code, error.retryable);
+        throw failure(error.code, error.retryable, error.detail);
       }
       throw failure("DEPENDENCY_UNAVAILABLE", true);
     }
@@ -1147,40 +1140,8 @@ function validRankRunManifestShape(
   chunkSize: number | null,
   policyVersion: string
 ): boolean {
-  if (
-    pairCount === null ||
-    chunkCount === null ||
-    chunkSize === null ||
-    !Number.isSafeInteger(pairCount) ||
-    !Number.isSafeInteger(chunkCount) ||
-    !Number.isSafeInteger(chunkSize)
-  ) {
-    return false;
-  }
-  if (policyVersion === legacyRankProviderPolicyVersion) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= legacyRankProviderKeywordLimit &&
-      chunkSize === legacyRankManifestChunkSize &&
-      chunkCount ===
-        Math.ceil(pairCount / legacyRankManifestChunkSize)
-    );
-  }
-  if (policyVersion === xmlStockRankProviderPolicyVersion) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= rankProviderKeywordLimit &&
-      chunkSize === xmlStockRankManifestChunkSize &&
-      chunkCount === pairCount
-    );
-  }
-  return (
-    policyVersion === currentRankProviderPolicyVersion &&
-    pairCount >= 1 &&
-    pairCount <= rankProviderKeywordLimit &&
-    chunkSize === rankManifestSingleTaskChunkSize &&
-    chunkCount === 1
-  );
+  const policy = rankExecutionPolicyShape(policyVersion);
+  return policy !== undefined && pairCount !== null && chunkCount !== null && chunkSize !== null && rankPolicyMatchesManifest(policyVersion, policy.provider, pairCount, chunkCount, chunkSize);
 }
 
 function assertExactAttempt(

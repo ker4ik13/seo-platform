@@ -4,7 +4,10 @@ import {
   type OnModuleDestroy,
   type OnModuleInit
 } from "@nestjs/common";
-import type { InternalDeliverCrawlNotificationInput } from "@seo-platform/contracts";
+import {
+  technicalCrawlMaxUrlLimit,
+  type InternalDeliverCrawlNotificationInput
+} from "@seo-platform/contracts";
 import { PrismaService } from "../database/prisma.service.js";
 import type { OutboxEvent, Prisma } from "../generated/prisma/client.js";
 import {
@@ -165,7 +168,7 @@ export function crawlNotificationPayload(
     !["COMPLETED", "PARTIALLY_COMPLETED", "CANCELLED", "FAILED"].includes(
       String(payload.status)
     ) ||
-    !nonNegativeInteger(payload.processedUrls, 1_000) ||
+    !nonNegativeInteger(payload.processedUrls, technicalCrawlMaxUrlLimit) ||
     !nonNegativeInteger(payload.issueCount, 5_000) ||
     payload.idempotencyKey !==
       `crawl-notification:${event.aggregateId}`

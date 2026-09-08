@@ -13,6 +13,8 @@ import {
   type SemanticCustomColumn,
   type SemanticCustomColumnType
 } from "./semantic-custom-column-types";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface ColumnDraft {
   readonly name: string;
@@ -39,6 +41,7 @@ export function SemanticCustomColumnManager({
   onChanged,
   projectId
 }: SemanticCustomColumnManagerProps) {
+  const { t: uiText } = useUiLocale();
   const [columns, setColumns] = useState<readonly SemanticCustomColumn[]>([]);
   const [draft, setDraft] = useState<ColumnDraft>(emptyDraft);
   const [editing, setEditing] = useState<SemanticCustomColumn>();
@@ -168,12 +171,11 @@ export function SemanticCustomColumnManager({
     <section className="panel semantic-custom-columns">
       <header className="panel-header">
         <div>
-          <h2>Пользовательские колонки</h2>
-          <p>Типизированные поля с индексируемыми значениями</p>
+          <h2><UiText text="Пользовательские колонки" /></h2>
+          <p><UiText text="Типизированные поля с индексируемыми значениями" /></p>
         </div>
         <button className="secondary-button" onClick={startCreate} type="button">
-          Добавить колонку
-        </button>
+          <UiText text="Добавить колонку" /></button>
       </header>
 
       {open && (
@@ -182,7 +184,7 @@ export function SemanticCustomColumnManager({
           onSubmit={(event) => void save(event)}
         >
           <label>
-            <span>Название</span>
+            <span><UiText text="Название" /></span>
             <input
               autoFocus
               maxLength={160}
@@ -197,7 +199,7 @@ export function SemanticCustomColumnManager({
             />
           </label>
           <label>
-            <span>Тип</span>
+            <span><UiText text="Тип" /></span>
             <CustomSelect
               disabled={Boolean(editing)}
               onChange={(event) =>
@@ -210,13 +212,13 @@ export function SemanticCustomColumnManager({
             >
               {columnTypes.map((type) => (
                 <option key={type} value={type}>
-                  {customColumnTypeLabel(type)}
+                  {<UiText text={customColumnTypeLabel(type) ?? ""} />}
                 </option>
               ))}
             </CustomSelect>
           </label>
           <label className="semantic-custom-description">
-            <span>Описание</span>
+            <span><UiText text="Описание" /></span>
             <input
               maxLength={2000}
               onChange={(event) =>
@@ -230,7 +232,7 @@ export function SemanticCustomColumnManager({
           </label>
           {customColumnSupportsOptions(draft.type) && (
             <label className="semantic-custom-options">
-              <span>Варианты — по одному на строку</span>
+              <span><UiText text="Варианты — по одному на строку" /></span>
               <textarea
                 onChange={(event) =>
                   setDraft((current) => ({
@@ -238,7 +240,7 @@ export function SemanticCustomColumnManager({
                     options: event.target.value
                   }))
                 }
-                placeholder={"Новый\nВ работе\nГотово"}
+                placeholder={uiText("Новый В работе Готово")}
                 required
                 rows={4}
                 value={draft.options}
@@ -256,7 +258,7 @@ export function SemanticCustomColumnManager({
               }
               type="checkbox"
             />
-            <span>Обязательное поле</span>
+            <span><UiText text="Обязательное поле" /></span>
           </label>
           <div className="semantic-editor-actions">
             <button
@@ -265,10 +267,9 @@ export function SemanticCustomColumnManager({
               onClick={() => setOpen(false)}
               type="button"
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
             <button className="primary-button" disabled={saving} type="submit">
-              {saving ? "Сохраняем…" : "Сохранить"}
+              {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
             </button>
           </div>
         </form>
@@ -276,15 +277,15 @@ export function SemanticCustomColumnManager({
 
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       {loading ? (
-        <div className="semantic-group-skeleton">Загружаем колонки…</div>
+        <div className="semantic-group-skeleton"><UiText text="Загружаем колонки…" /></div>
       ) : columns.length === 0 ? (
         <div className="semantic-group-empty">
-          <strong>Пользовательских колонок пока нет</strong>
-          <span>Добавьте поле для собственной классификации запросов.</span>
+          <strong><UiText text="Пользовательских колонок пока нет" /></strong>
+          <span><UiText text="Добавьте поле для собственной классификации запросов." /></span>
         </div>
       ) : (
         <div className="semantic-custom-column-list">
@@ -293,8 +294,8 @@ export function SemanticCustomColumnManager({
               <div>
                 <strong>{column.name}</strong>
                 <span>
-                  {customColumnTypeLabel(column.type)}
-                  {column.config.required ? " · обязательная" : ""}
+                  {<UiText text={customColumnTypeLabel(column.type) ?? ""} />}
+                  {column.config.required ? <UiText text="· обязательная" before=" " /> : ""}
                 </span>
               </div>
               <button
@@ -303,16 +304,14 @@ export function SemanticCustomColumnManager({
                 onClick={() => startEdit(column)}
                 type="button"
               >
-                Настроить
-              </button>
+                <UiText text="Настроить" /></button>
               <button
                 className="text-button danger-text"
                 disabled={saving}
                 onClick={() => void deleteColumn(column)}
                 type="button"
               >
-                Удалить
-              </button>
+                <UiText text="Удалить" /></button>
             </article>
           ))}
         </div>

@@ -5,6 +5,8 @@ import {
 } from "../../../components/tenant-onboarding";
 import { shouldShowWorkspaceCreationAction } from "../../../lib/app-navigation";
 import { requireProtectedAppContext } from "../../../lib/protected-app";
+import { UiText } from "../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -32,11 +34,9 @@ export default async function DashboardPage({
             <aside className="status-banner" role="status">
               <span className="status-dot" />
               <div>
-                <strong>Режим только для чтения</strong>
+                <strong><UiText text="Режим только для чтения" /></strong>
                 <p>
-                  История и результаты доступны; ограничены только новые
-                  операции.
-                </p>
+                  <UiText text="История и результаты доступны; ограничены только новые операции." /></p>
               </div>
             </aside>
           )}
@@ -44,11 +44,9 @@ export default async function DashboardPage({
             <aside className="status-banner" role="status">
               <span className="status-dot" />
               <div>
-                <strong>Проект в архиве</strong>
+                <strong><UiText text="Проект в архиве" /></strong>
                 <p>
-                  Данные доступны для просмотра и экспорта, автоматизации
-                  остановлены.
-                </p>
+                  <UiText text="Данные доступны для просмотра и экспорта, автоматизации остановлены." /></p>
               </div>
             </aside>
           )}

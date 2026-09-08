@@ -9,7 +9,7 @@ import {
 import {
   domainEventTypes,
   rankCheckCompletedEventDataV1,
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   type InternalFinalizeRankCheckInput,
   type InternalRankCheckFinalizationReceipt,
   type RankCheckFinalStatus,
@@ -233,7 +233,7 @@ async function aggregateIngestReceipts(
     !validCount(
       result.persistedCount,
       0,
-      rankProviderKeywordLimit
+      rankCommandKeywordLimit
     ) ||
     !validCount(result.foundCount, 0, result.persistedCount) ||
     !validCount(result.notFoundCount, 0, result.persistedCount) ||
@@ -370,7 +370,7 @@ function assertLockedManifest(manifest: LockedManifest): void {
     manifest.configurationVersion < 1 ||
     !Number.isSafeInteger(manifest.pairCount) ||
     manifest.pairCount < 1 ||
-    manifest.pairCount > rankProviderKeywordLimit ||
+    manifest.pairCount > rankCommandKeywordLimit ||
     !(manifest.sealedAt instanceof Date) ||
     Number.isNaN(manifest.sealedAt.getTime()) ||
     !(manifest.finalizedAt instanceof Date) ||
@@ -400,7 +400,7 @@ function finalizationOutcomeIsValid(
   persistedCount: number
 ): boolean {
   if (
-    !validCount(pairCount, 1, rankProviderKeywordLimit) ||
+    !validCount(pairCount, 1, rankCommandKeywordLimit) ||
     !validCount(persistedCount, 0, pairCount)
   ) {
     return false;

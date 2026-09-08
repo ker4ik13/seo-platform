@@ -30,7 +30,7 @@ test("parses only the exact immutable manifest chunk reference", () => {
   for (const candidate of [
     { ...reference, keywordText: "must-not-cross" },
     { ...reference, manifestId: "not-a-uuid" },
-    { ...reference, chunkIndex: 15_000 }
+    { ...reference, chunkIndex: 300_000 }
   ]) {
     assert.throws(() => rankJobItemReference(candidate), /Invalid rank/u);
   }

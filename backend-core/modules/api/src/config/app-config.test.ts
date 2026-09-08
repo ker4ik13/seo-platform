@@ -35,6 +35,8 @@ test("loads explicit service configuration", () => {
     lockTimeoutMs: 500
   });
   assert.deepEqual(config.billing, {
+    npd: { enabled: false },
+    cryptoPay: { enabled: false, apiBaseUrl: "https://pay.crypt.bot/api", requestTimeoutMs: 10_000 },
     yookassa: {
       enabled: false,
       apiBaseUrl: "https://api.yookassa.ru/v3",

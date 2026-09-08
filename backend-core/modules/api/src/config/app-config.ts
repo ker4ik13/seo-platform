@@ -50,6 +50,13 @@ export interface AppConfig {
     readonly lockTimeoutMs: number;
   };
   readonly billing: {
+    readonly npd?: { readonly enabled: boolean; readonly apiToken?: string };
+    readonly cryptoPay?: {
+      readonly enabled: boolean;
+      readonly apiToken?: string;
+      readonly apiBaseUrl: string;
+      readonly requestTimeoutMs: number;
+    };
     readonly yookassa: {
       readonly enabled: boolean;
       readonly apiBaseUrl: string;
@@ -73,6 +80,7 @@ export interface AppConfig {
       };
       readonly ARSENKIN: {
         readonly enabled: boolean;
+        readonly clusteringKeywordLimit?: number;
         readonly rankKeywordPriceMinor?: number;
         readonly dailySpendLimitMinor?: number;
         readonly monthlySpendLimitMinor?: number;
@@ -83,6 +91,10 @@ export interface AppConfig {
     readonly seoData: string;
     readonly jobs: string;
     readonly realtime: string;
+  };
+  readonly telegramLogin?: {
+    readonly enabled: boolean; readonly botToken?: string; readonly botUsername?: string;
+    readonly webhookSecret?: string; readonly webhookUrl?: string;
   };
   readonly auth: {
     readonly accessCookieName: string;
@@ -827,6 +839,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       lockTimeoutMs: sessionExpiryLockTimeoutMs
     },
     billing: {
+      npd: npdProcessingConfig(env),
+      cryptoPay: cryptoPayConfig(env),
       yookassa: {
         enabled: yookassaEnabled,
         apiBaseUrl: yookassaApiBaseUrl,
@@ -880,6 +894,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         },
         ARSENKIN: {
           enabled: platformArsenkinEnabled,
+          ...(env.PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT === undefined ? {} : { clusteringKeywordLimit: platformClusteringLimit(env.PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT) }),
           ...(platformArsenkinRankKeywordPriceMinor !== undefined
             ? {
                 rankKeywordPriceMinor:
@@ -905,6 +920,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       realtime:
         env.REALTIME_INTERNAL_URL?.trim() || "http://127.0.0.1:4003"
     },
+    telegramLogin: telegramLoginConfig(env),
     auth: {
       accessCookieName:
         env.AUTH_ACCESS_COOKIE_NAME?.trim() || "seo_access",
@@ -1092,4 +1108,44 @@ function optionalYookassaReturnUrl(
     throw new Error("YOOKASSA_RETURN_URL must be an explicit return URL");
   }
   return candidate;
+}
+
+function cryptoPayConfig(env: NodeJS.ProcessEnv): NonNullable<AppConfig["billing"]["cryptoPay"]> {
+  const enabled = env.CRYPTO_PAY_ENABLED === "true";
+  if (env.CRYPTO_PAY_ENABLED !== undefined && !["true", "false"].includes(env.CRYPTO_PAY_ENABLED)) throw new Error("Invalid CRYPTO_PAY_ENABLED");
+  const apiToken = env.CRYPTO_PAY_API_TOKEN?.trim();
+  const apiBaseUrl = env.CRYPTO_PAY_API_BASE_URL?.trim() || "https://pay.crypt.bot/api";
+  if (!["https://pay.crypt.bot/api", "https://testnet-pay.crypt.bot/api"].includes(apiBaseUrl)) throw new Error("CRYPTO_PAY_API_BASE_URL must use an official Crypto Pay endpoint");
+  if (enabled && (!apiToken || apiToken.length < 16 || isPlaceholderSecret(apiToken))) throw new Error("Crypto Pay token is required when enabled");
+  return { enabled, apiBaseUrl, ...(apiToken ? { apiToken } : {}), requestTimeoutMs: integerInRange(env.CRYPTO_PAY_REQUEST_TIMEOUT_MS, 10000, "CRYPTO_PAY_REQUEST_TIMEOUT_MS", 1000, 30000) };
+}
+
+function npdProcessingConfig(env: NodeJS.ProcessEnv): NonNullable<AppConfig["billing"]["npd"]> {
+  const enabled = env.NPD_RECEIPTS_ENABLED === "true";
+  if (env.NPD_RECEIPTS_ENABLED !== undefined && !["true", "false"].includes(env.NPD_RECEIPTS_ENABLED)) throw new Error("Invalid NPD_RECEIPTS_ENABLED");
+  const apiToken = env.NPD_PROCESSOR_API_TOKEN?.trim();
+  if (enabled && (!apiToken || apiToken.length < 32 || isPlaceholderSecret(apiToken))) throw new Error("A dedicated NPD_PROCESSOR_API_TOKEN is required");
+  if (enabled && Object.entries(env).some(([key, value]) => key !== "NPD_PROCESSOR_API_TOKEN" && key.endsWith("_TOKEN") && value === apiToken)) throw new Error("NPD_PROCESSOR_API_TOKEN must be distinct");
+  return { enabled, ...(apiToken ? { apiToken } : {}) };
+}
+
+function telegramLoginConfig(env: NodeJS.ProcessEnv): NonNullable<AppConfig["telegramLogin"]> {
+  const enabled = env.TELEGRAM_LOGIN_ENABLED === "true";
+  if (env.TELEGRAM_LOGIN_ENABLED !== undefined && !["true", "false"].includes(env.TELEGRAM_LOGIN_ENABLED)) throw new Error("Invalid TELEGRAM_LOGIN_ENABLED");
+  const botToken = env.TELEGRAM_LOGIN_BOT_TOKEN?.trim();
+  const botUsername = env.TELEGRAM_LOGIN_BOT_USERNAME?.trim().replace(/^@/, "");
+  const webhookSecret = env.TELEGRAM_LOGIN_WEBHOOK_SECRET?.trim();
+  const webhookUrl = env.TELEGRAM_LOGIN_WEBHOOK_URL?.trim();
+  if (enabled) {
+    if (!botToken || !/^[0-9]+:[A-Za-z0-9_-]{20,}$/u.test(botToken) || !botUsername || !/^[A-Za-z0-9_]{5,32}$/u.test(botUsername) || !webhookSecret || !/^[A-Za-z0-9_-]{32,256}$/u.test(webhookSecret) || !webhookUrl) throw new Error("Telegram login configuration is incomplete");
+    const url = new URL(webhookUrl);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/api/v1/auth/telegram/webhook" || (url.port && !["443", "8443"].includes(url.port))) throw new Error("Telegram login webhook must use its exact HTTPS route");
+  }
+  return { enabled, ...(botToken ? { botToken } : {}), ...(botUsername ? { botUsername } : {}), ...(webhookSecret ? { webhookSecret } : {}), ...(webhookUrl ? { webhookUrl } : {}) };
+}
+
+function platformClusteringLimit(value: string): number {
+  const limit = positiveInteger(value, 30_000, "PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT");
+  if (limit > 300_000) throw new Error("PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT must not exceed 300000");
+  return limit;
 }

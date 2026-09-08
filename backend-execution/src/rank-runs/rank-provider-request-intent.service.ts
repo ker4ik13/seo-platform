@@ -1,14 +1,7 @@
+import { rankExecutionPolicyShape, rankPolicyMatchesManifest } from "@seo-platform/contracts";
 import { timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
-  currentRankProviderPolicyVersion,
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
-  legacyRankProviderPolicyVersion,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
-  xmlStockRankManifestChunkSize,
-  xmlStockRankProviderPolicyVersion,
   type InternalGetRankManifestChunkInput,
   type InternalRankExecutionParameters,
   type RankManifestHash
@@ -60,7 +53,8 @@ export type RankProviderRequestIntentErrorCode =
 export class RankProviderRequestIntentError extends Error {
   public constructor(
     public readonly code: RankProviderRequestIntentErrorCode,
-    public readonly retryable: boolean
+    public readonly retryable: boolean,
+    public readonly detail?: string
   ) {
     super(code);
     this.name = "RankProviderRequestIntentError";
@@ -116,7 +110,7 @@ export class RankProviderRequestIntentService {
     jobItemId: string
   ): Promise<RankProviderRequestIntent> {
     if (!UUID_V7_PATTERN.test(jobItemId)) {
-      throw intentFailure("ITEM_NOT_FOUND", false);
+      throw intentFailure("ITEM_NOT_FOUND", false, "invalid_item_id");
     }
 
     try {
@@ -124,7 +118,7 @@ export class RankProviderRequestIntentService {
         where: { id: jobItemId },
         select: { jobId: true }
       });
-      if (!pointer) throw intentFailure("ITEM_NOT_FOUND", false);
+      if (!pointer) throw intentFailure("ITEM_NOT_FOUND", false, "item_not_found");
 
       const source = await this.lockedSource(pointer.jobId, jobItemId);
       const chunk = await this.manifests.getChunk(
@@ -202,13 +196,13 @@ export class RankProviderRequestIntentService {
       if (error instanceof RankProviderRequestIntentError) throw error;
       if (error instanceof RankManifestClientError) {
         throw error.retryable
-          ? intentFailure("DEPENDENCY_UNAVAILABLE", true)
-          : intentFailure("LOCAL_STATE_INVALID", false);
+          ? intentFailure("DEPENDENCY_UNAVAILABLE", true, "manifest_unavailable")
+          : intentFailure("LOCAL_STATE_INVALID", false, "manifest_response_invalid");
       }
       if (error instanceof TypeError) {
-        throw intentFailure("LOCAL_STATE_INVALID", false);
+        throw intentFailure("LOCAL_STATE_INVALID", false, "intent_shape_invalid");
       }
-      throw intentFailure("DEPENDENCY_UNAVAILABLE", true);
+      throw intentFailure("DEPENDENCY_UNAVAILABLE", true, "unexpected_dependency_error");
     }
   }
 
@@ -233,7 +227,7 @@ export function storedRankProviderRequestIntent(
     intent = rankProviderRequestIntent(row.requestSnapshot);
   } catch (error) {
     if (error instanceof TypeError) {
-      throw intentFailure("LOCAL_STATE_INVALID", false);
+      throw intentFailure("LOCAL_STATE_INVALID", false, "stored_intent_shape_invalid");
     }
     throw error;
   }
@@ -279,7 +273,7 @@ export function storedRankProviderRequestIntent(
       Buffer.from(intent.manifestChunk.chunkHash.value, "hex")
     )
   ) {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "stored_intent_invalid");
   }
   return intent;
 }
@@ -294,7 +288,7 @@ async function lockedIntentSource(
     !identity ||
     !(await lockRankJobItem(transaction, identity, jobItemId))
   ) {
-    throw intentFailure("ITEM_NOT_FOUND", false);
+    throw intentFailure("ITEM_NOT_FOUND", false, "item_lock_failed");
   }
   const job = await transaction.job.findUnique({
     where: { id: jobId },
@@ -303,14 +297,14 @@ async function lockedIntentSource(
   const item = await transaction.jobItem.findUnique({
     where: { id: jobItemId }
   });
-  if (!job || !item) throw intentFailure("ITEM_NOT_FOUND", false);
+  if (!job || !item) throw intentFailure("ITEM_NOT_FOUND", false, "item_graph_missing");
   const graph = job as RankIntentJobGraph;
   const source = intentSource(graph, item);
   if (
     identity.workspaceId !== source.binding.workspaceId ||
     identity.projectId !== source.binding.projectId
   ) {
-    throw intentFailure("ITEM_NOT_FOUND", false);
+    throw intentFailure("ITEM_NOT_FOUND", false, "item_scope_mismatch");
   }
   const existing =
     await transaction.rankProviderRequestIntent.findFirst({
@@ -378,21 +372,21 @@ function intentSource(
     run.projectStatus !== "ACTIVE" ||
     run.projectVersion !== estimate.projectVersion
   ) {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "locked_graph_base_invariant");
   }
 
   let reference: ReturnType<typeof rankJobItemReference>;
   try {
     reference = rankJobItemReference(item.inputReference);
   } catch {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "item_reference_invalid");
   }
   if (
     reference.manifestId !== run.manifestId ||
     reference.chunkIndex !== item.sequence ||
     reference.chunkIndex >= run.manifestChunkCount
   ) {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "manifest_reference_mismatch");
   }
   const commandBinding: RankManifestCommandBinding = {
     workspaceId: job.workspaceId,
@@ -413,7 +407,7 @@ function intentSource(
       commandBinding
     );
   } catch {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "manifest_command_invalid");
   }
   const manifestHash = hashFromBytes(run.manifestHash);
   const binding: RankProviderRequestIntentBinding = {
@@ -461,46 +455,14 @@ function validRankRunManifestShape(
   chunkSize: number | null,
   policyVersion: string
 ): boolean {
-  if (
-    pairCount === null ||
-    chunkCount === null ||
-    chunkSize === null ||
-    !Number.isSafeInteger(pairCount) ||
-    !Number.isSafeInteger(chunkCount) ||
-    !Number.isSafeInteger(chunkSize)
-  ) {
-    return false;
-  }
-  if (policyVersion === legacyRankProviderPolicyVersion) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= legacyRankProviderKeywordLimit &&
-      chunkSize === legacyRankManifestChunkSize &&
-      chunkCount ===
-        Math.ceil(pairCount / legacyRankManifestChunkSize)
-    );
-  }
-  if (policyVersion === xmlStockRankProviderPolicyVersion) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= rankProviderKeywordLimit &&
-      chunkSize === xmlStockRankManifestChunkSize &&
-      chunkCount === pairCount
-    );
-  }
-  return (
-    policyVersion === currentRankProviderPolicyVersion &&
-    pairCount >= 1 &&
-    pairCount <= rankProviderKeywordLimit &&
-    chunkSize === rankManifestSingleTaskChunkSize &&
-    chunkCount === 1
-  );
+  const policy = rankExecutionPolicyShape(policyVersion);
+  return policy !== undefined && pairCount !== null && chunkCount !== null && chunkSize !== null && rankPolicyMatchesManifest(policyVersion, policy.provider, pairCount, chunkCount, chunkSize);
 }
 
 function hashFromBytes(value: Uint8Array): RankManifestHash {
   const bytes = Buffer.from(value);
   if (bytes.length !== 32) {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "manifest_hash_invalid");
   }
   return { algorithm: "SHA_256", value: bytes.toString("hex") };
 }
@@ -510,7 +472,7 @@ function assertSameIntent(
   right: RankProviderRequestIntentV1
 ): void {
   if (canonicalizeJson(left) !== canonicalizeJson(right)) {
-    throw intentFailure("LOCAL_STATE_INVALID", false);
+    throw intentFailure("LOCAL_STATE_INVALID", false, "intent_revalidation_mismatch");
   }
 }
 
@@ -527,7 +489,8 @@ function bytesEqual(
 
 function intentFailure(
   code: RankProviderRequestIntentErrorCode,
-  retryable: boolean
+  retryable: boolean,
+  detail?: string
 ): RankProviderRequestIntentError {
-  return new RankProviderRequestIntentError(code, retryable);
+  return new RankProviderRequestIntentError(code, retryable, detail);
 }

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { AppWorkspace } from "../lib/app-types";
+import { useUiLocale } from "./ui-locale";
+
 
 export function WorkspaceAvatar({
   className = "workspace-avatar",
@@ -12,6 +14,7 @@ export function WorkspaceAvatar({
   size?: number;
   workspace: Pick<AppWorkspace, "id" | "name" | "avatarUpdatedAt">;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [failed, setFailed] = useState(false);
   const source = workspace.avatarUpdatedAt
     ? `/app/api/workspaces/${encodeURIComponent(workspace.id)}/avatar?v=${encodeURIComponent(workspace.avatarUpdatedAt)}`
@@ -22,7 +25,7 @@ export function WorkspaceAvatar({
   if (!source || failed) {
     return (
       <span
-        aria-label={`Рабочая область: ${workspace.name}`}
+        aria-label={uiText("Рабочая область: {0}", [String(workspace.name)])}
         className={`${className} fallback`}
         role="img"
         style={{ height: size, width: size }}

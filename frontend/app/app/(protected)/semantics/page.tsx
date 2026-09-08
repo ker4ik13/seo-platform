@@ -1,6 +1,8 @@
 import { SemanticsWorkspace } from "../../../../components/semantics-workspace";
 import { ProjectOnboarding } from "../../../../components/tenant-onboarding";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
+import { UiText } from "../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,7 @@ export default async function SemanticsPage() {
           <ProjectOnboarding workspace={context.workspace} />
         ) : (
           <section className="panel panel-empty">
-            <strong>Сначала создайте рабочую область</strong>
+            <strong><UiText text="Сначала создайте рабочую область" /></strong>
           </section>
         )
       ) : (

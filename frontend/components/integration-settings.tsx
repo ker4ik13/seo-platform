@@ -21,6 +21,8 @@ import {
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
 import { ProviderLogo } from "./provider-logo";
 import { WorkspaceIntegrationRouting } from "./workspace-integration-routing";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type Provider = IntegrationProvider;
 type ProviderCatalogItem = IntegrationProviderCatalogItem;
@@ -72,6 +74,7 @@ export function IntegrationSettings({
   canUsePlatform: boolean;
   readOnly: boolean;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [catalog, setCatalog] = useState<readonly ProviderCatalogItem[]>([]);
   const [credentials, setCredentials] = useState<readonly Credential[]>([]);
   const [draft, setDraft] = useState<CredentialDraft>(EMPTY_DRAFT);
@@ -446,7 +449,7 @@ export function IntegrationSettings({
     return (
       <section className="panel integration-loading" aria-busy="true">
         <span className="spinner" />
-        <p>Загружаем каталог интеграций и подключения…</p>
+        <p><UiText text="Загружаем каталог интеграций и подключения…" /></p>
       </section>
     );
   }
@@ -454,15 +457,14 @@ export function IntegrationSettings({
   if (catalog.length === 0) {
     return (
       <section className="panel panel-empty compact">
-        <strong>Интеграции временно недоступны</strong>
-        <p>{loadError ?? "Каталог провайдеров не удалось загрузить."}</p>
+        <strong><UiText text="Интеграции временно недоступны" /></strong>
+        <p>{loadError ?? <UiText text="Каталог провайдеров не удалось загрузить." />}</p>
         <button
           className="secondary-button"
           onClick={() => setReload((value) => value + 1)}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -471,10 +473,9 @@ export function IntegrationSettings({
     <div className="integration-settings-stack">
       <div className="integration-page-actions">
         <div>
-          <strong>Подключения и квоты</strong>
+          <strong><UiText text="Подключения и квоты" /></strong>
           <span>
-            Статусы, проверка ключей и фактические остатки провайдеров.
-          </span>
+            <UiText text="Статусы, проверка ключей и фактические остатки провайдеров." /></span>
         </div>
         {canManage && (
           <button
@@ -485,34 +486,33 @@ export function IntegrationSettings({
             }}
             type="button"
           >
-            + Добавить интеграцию
-          </button>
+            <UiText text="+ Добавить интеграцию" /></button>
         )}
       </div>
       {success && (
         <div className="inline-alert success" role="status">
-          {success}
+          {<UiText text={success ?? ""} />}
         </div>
       )}
 
       <section
         className="integration-overview-grid"
-        aria-label="Состояние подключений"
+        aria-label={uiText("Состояние подключений")}
       >
         <IntegrationOverviewStat
           icon="link"
-          label="подключения"
+          label={uiText("подключения")}
           value={credentials.length}
         />
         <IntegrationOverviewStat
           icon="success"
-          label="активны"
+          label={uiText("активны")}
           tone="success"
           value={credentials.filter(({ status }) => status === "ACTIVE").length}
         />
         <IntegrationOverviewStat
           icon="warning"
-          label="требуют внимания"
+          label={uiText("требуют внимания")}
           tone="warning"
           value={credentials.filter(({ status }) =>
             ["DEGRADED", "RATE_LIMITED", "LOW_BALANCE", "EXPIRED", "INVALID"].includes(status)
@@ -520,7 +520,7 @@ export function IntegrationSettings({
         />
         <IntegrationOverviewStat
           icon="disabled"
-          label="сервисов в каталоге"
+          label={uiText("сервисов в каталоге")}
           value={catalog.length}
         />
       </section>
@@ -544,15 +544,12 @@ export function IntegrationSettings({
         >
           <header className="security-card-header">
             <div>
-              <h2 id="new-integration-title">Новое подключение</h2>
+              <h2 id="new-integration-title"><UiText text="Новое подключение" /></h2>
               <p>
-                Браузер передаёт ключ в same-origin API по защищённому
-                HTTPS-соединению. Внутри платформы секрет обрабатывается
-                сервисом интеграций и сохраняется через AES-256-GCM.
-              </p>
+                <UiText text="Браузер передаёт ключ в same-origin API по защищённому HTTPS-соединению. Внутри платформы секрет обрабатывается сервисом интеграций и сохраняется через AES-256-GCM." /></p>
             </div>
             <button
-              aria-label="Закрыть окно"
+              aria-label={uiText("Закрыть окно")}
               className="integration-dialog-close"
               disabled={saving}
               onClick={() => setShowCreate(false)}
@@ -566,7 +563,7 @@ export function IntegrationSettings({
           )}
           <div className="integration-form-grid">
             <label className="form-field">
-              <span>Провайдер</span>
+              <span><UiText text="Провайдер" /></span>
               <CustomSelect
                 disabled={saving}
                 onChange={(event) => {
@@ -591,7 +588,7 @@ export function IntegrationSettings({
               </CustomSelect>
             </label>
             <label className="form-field">
-              <span>Название подключения (обязательно)</span>
+              <span><UiText text="Название подключения (обязательно)" /></span>
               <input
                 aria-describedby={
                   createFieldErrors.label
@@ -610,7 +607,7 @@ export function IntegrationSettings({
                     withoutFieldError(current, "label")
                   );
                 }}
-                placeholder="Например, Основной аккаунт"
+                placeholder={uiText("Например, Основной аккаунт")}
                 required
                 value={draft.label}
               />
@@ -619,7 +616,7 @@ export function IntegrationSettings({
                   className="field-error"
                   id="integration-create-label-error"
                 >
-                  {createFieldErrors.label}
+                  <UiText text={createFieldErrors.label ?? ""} />
                 </small>
               )}
             </label>
@@ -627,9 +624,8 @@ export function IntegrationSettings({
               <label className="form-field">
                 <span>
                   {selectedProvider.accountIdentifierLabel ??
-                    "Идентификатор аккаунта"}{" "}
-                  (обязательно)
-                </span>
+                    <UiText text="Идентификатор аккаунта" />}{" "}
+                  <UiText text="(обязательно)" /></span>
                 <input
                   aria-describedby={
                     createFieldErrors.accountIdentifier
@@ -667,7 +663,7 @@ export function IntegrationSettings({
               </label>
             )}
             <label className="form-field">
-              <span>API-ключ (обязательно)</span>
+              <span><UiText text="API-ключ (обязательно)" /></span>
               <input
                 aria-describedby={
                   createFieldErrors.apiKey
@@ -708,13 +704,13 @@ export function IntegrationSettings({
               onClick={() => void createCredential()}
               type="button"
             >
-              {saving ? "Шифруем…" : "Сохранить ключ"}
+              {saving ? <UiText text="Шифруем…" /> : <UiText text="Сохранить ключ" />}
             </button>
             <span>
               {selectedProvider?.credentialValidationMode ===
               "ACCOUNT_METADATA"
-                ? "После сохранения запустите безопасную проверку подключения в списке ниже."
-                : "Для XMLStock автоматическая внешняя проверка пока недоступна; подключение останется «ожидает проверки»."}
+                ? <UiText text="После сохранения запустите безопасную проверку подключения в списке ниже." />
+                : <UiText text="Для XMLStock автоматическая внешняя проверка пока недоступна; подключение останется «ожидает проверки»." />}
             </span>
           </div>
         </section>
@@ -722,33 +718,28 @@ export function IntegrationSettings({
       ) : (
         !canManage && <div className="inline-alert warning">
           {readOnly
-            ? "Workspace работает в режиме только для чтения: существующие подключения видны, новые операции временно заблокированы."
-            : "Просмотр доступен. Добавлять, менять и удалять workspace-ключи может только владелец или администратор."}
+            ? <UiText text="Workspace работает в режиме только для чтения: существующие подключения видны, новые операции временно заблокированы." />
+            : <UiText text="Просмотр доступен. Добавлять, менять и удалять workspace-ключи может только владелец или администратор." />}
         </div>
       )}
 
       <section className="panel integration-list-card">
         <header className="security-card-header">
           <div>
-            <h2>Сохранённые подключения</h2>
+            <h2><UiText text="Сохранённые подключения" /></h2>
             <p>
-              В задания передаётся только ID подключения; plaintext API-ключ в
-              очереди, события и ответы не попадает.
-            </p>
+              <UiText text="В задания передаётся только ID подключения; plaintext API-ключ в очереди, события и ответы не попадает." /></p>
           </div>
           <span className="security-status">
-            {credentials.length} подключений
-          </span>
+            {credentials.length} <UiText text="подключений" before=" " /></span>
         </header>
         {listError && <IntegrationErrorAlert error={listError} />}
 
         {credentials.length === 0 ? (
           <div className="panel-empty compact integration-empty">
-            <strong>Подключений пока нет</strong>
+            <strong><UiText text="Подключений пока нет" /></strong>
             <p>
-              Добавьте собственный ключ или включите системный XMLStock либо
-              Arsenkin с оплатой внутренними токенами.
-            </p>
+              <UiText text="Добавьте собственный ключ или включите системный XMLStock либо Arsenkin с оплатой внутренними токенами." /></p>
           </div>
         ) : (
           <div className="integration-list">
@@ -761,7 +752,7 @@ export function IntegrationSettings({
                       <div>
                         <strong>{credential.label}</strong>
                         <span>
-                          {integrationProviderLabel(credential.provider)} ·{" "}
+                          {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} ·{" "}
                           <code>{credential.displayHint}</code>
                         </span>
                       </div>
@@ -813,9 +804,9 @@ export function IntegrationSettings({
                     />
                   </header>
                   <div className="integration-credential-meta">
-                    <span>{integrationCredentialModeLabel(credential.mode)}</span>
+                    <span>{<UiText text={integrationCredentialModeLabel(credential.mode) ?? ""} />}</span>
                     <span>
-                      Обновлено{" "}
+                      <UiText text="Обновлено" />{" "}
                       {new Intl.DateTimeFormat("ru", {
                         dateStyle: "medium"
                       }).format(new Date(credential.updatedAt))}
@@ -836,12 +827,10 @@ export function IntegrationSettings({
                           onClick={() => beginEdit(credential)}
                           type="button"
                         >
-                          Изменить
-                        </button>
+                          <UiText text="Изменить" /></button>
                       ) : (
                         <span className="integration-system-managed">
-                          Секрет управляется платформой
-                        </span>
+                          <UiText text="Секрет управляется платформой" /></span>
                       )}
                       <button
                         className="secondary-button danger-button integration-card-action"
@@ -852,8 +841,7 @@ export function IntegrationSettings({
                         onClick={() => beginRevoke(credential)}
                         type="button"
                       >
-                        Отключить
-                      </button>
+                        <UiText text="Отключить" /></button>
                     </div>
                   </footer>
                 )}
@@ -864,11 +852,11 @@ export function IntegrationSettings({
       </section>
       <WorkspaceIntegrationRouting workspaceId={workspaceId} />
 
-      <section className="integration-catalog-section" aria-label="Каталог сервисов">
+      <section className="integration-catalog-section" aria-label={uiText("Каталог сервисов")}>
         <header>
           <div>
-            <h2>Каталог сервисов</h2>
-            <p>Доступные источники данных и поддерживаемые возможности.</p>
+            <h2><UiText text="Каталог сервисов" /></h2>
+            <p><UiText text="Доступные источники данных и поддерживаемые возможности." /></p>
           </div>
         </header>
         <div className="integration-catalog-grid">
@@ -895,28 +883,26 @@ export function IntegrationSettings({
                 <ProviderLogo provider={provider.provider} />
                 <div>
                   <h2>{provider.displayName}</h2>
-                  <p>{provider.description}</p>
+                  <p><UiText text={provider.description} /></p>
                 </div>
               </header>
               <div className="integration-capabilities">
                 {provider.capabilities.map((capability) => (
                   <span key={capability}>
-                    {integrationCapabilityLabel(capability)}
+                    {<UiText text={integrationCapabilityLabel(capability) ?? ""} />}
                   </span>
                 ))}
               </div>
-              <small>{provider.subscriptionNotice}</small>
+              <small><UiText text={provider.subscriptionNotice} /></small>
               <div className="integration-provider-actions">
                 {provider.provider === "KEYS_SO" && (
                   <a className="text-button integration-workflow-link" href="/app/competitors">
-                    Собрать семантику конкурента
-                  </a>
+                    <UiText text="Собрать семантику конкурента" /></a>
                 )}
                 {(provider.provider === "ARSENKIN" ||
                   provider.provider === "XMLSTOCK") && (
                   <a className="text-button integration-workflow-link" href="/app/semantics">
-                    Проверить позиции
-                  </a>
+                    <UiText text="Проверить позиции" /></a>
                 )}
                 {canManage && (
                   <button
@@ -928,8 +914,7 @@ export function IntegrationSettings({
                     }}
                     type="button"
                   >
-                    Подключить свой ключ
-                  </button>
+                    <UiText text="Подключить свой ключ" /></button>
                 )}
                 {canUsePlatform && platformSupported && platformProvider && (
                   <button
@@ -941,10 +926,10 @@ export function IntegrationSettings({
                     type="button"
                   >
                     {platformOperation === "enable-platform"
-                      ? "Подключаем…"
+                      ? <UiText text="Подключаем…" />
                       : platformConnected
-                        ? "Подключено за токены"
-                        : "Подключить за токены"}
+                        ? <UiText text="Подключено за токены" />
+                        : <UiText text="Подключить за токены" />}
                   </button>
                 )}
               </div>
@@ -973,18 +958,16 @@ export function IntegrationSettings({
             <header className="security-card-header">
               <div>
                 <h2 id="integration-edit-title">
-                  Изменить «{editing.label}»
+                  <UiText text="Изменить «" />{editing.label}»
                 </h2>
                 <p>
-                  Оставьте новый ключ пустым, чтобы изменить только название.
-                  При ротации старый секрет будет полностью заменён.
-                  {editing.provider === "XMLSTOCK"
-                    ? " Введите одновременно новый API-ключ и XMLStock user ID."
+                  <UiText text="Оставьте новый ключ пустым, чтобы изменить только название. При ротации старый секрет будет полностью заменён." />{editing.provider === "XMLSTOCK"
+                    ? <UiText text="Введите одновременно новый API-ключ и XMLStock user ID." before=" " />
                     : ""}
                 </p>
               </div>
               <button
-                aria-label="Закрыть окно"
+                aria-label={uiText("Закрыть окно")}
                 className="integration-dialog-close"
                 disabled={Boolean(editingOperation)}
                 onClick={closeEdit}
@@ -996,7 +979,7 @@ export function IntegrationSettings({
             {editError && <IntegrationErrorAlert error={editError} />}
             <div className="integration-form-grid">
             <label className="form-field">
-              <span>Название (обязательно)</span>
+              <span><UiText text="Название (обязательно)" /></span>
               <input
                 aria-describedby={
                   editFieldErrors.label
@@ -1021,12 +1004,12 @@ export function IntegrationSettings({
                   className="field-error"
                   id="integration-edit-label-error"
                 >
-                  {editFieldErrors.label}
+                  <UiText text={editFieldErrors.label ?? ""} />
                 </small>
               )}
             </label>
             <label className="form-field">
-              <span>Новый API-ключ</span>
+              <span><UiText text="Новый API-ключ" /></span>
               <input
                 aria-describedby={
                   editFieldErrors.apiKey
@@ -1047,7 +1030,7 @@ export function IntegrationSettings({
                     ])
                   );
                 }}
-                placeholder="Не менять"
+                placeholder={uiText("Не менять")}
                 required={Boolean(editAccountIdentifier.trim())}
                 spellCheck={false}
                 type="password"
@@ -1064,7 +1047,7 @@ export function IntegrationSettings({
             </label>
             {editing.provider === "XMLSTOCK" && (
               <label className="form-field">
-                <span>Новый XMLStock user ID</span>
+                <span><UiText text="Новый XMLStock user ID" /></span>
                 <input
                   aria-describedby={
                     editFieldErrors.accountIdentifier
@@ -1086,7 +1069,7 @@ export function IntegrationSettings({
                       ])
                     );
                   }}
-                  placeholder="Введите вместе с новым API-ключом"
+                  placeholder={uiText("Введите вместе с новым API-ключом")}
                   required={Boolean(editApiKey.trim())}
                   value={editAccountIdentifier}
                 />
@@ -1108,20 +1091,18 @@ export function IntegrationSettings({
                 onClick={closeEdit}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
               <button
                 className="primary-button"
                 disabled={Boolean(editingOperation)}
                 onClick={() => void saveEdit()}
                 type="button"
               >
-                {editingOperation === "update" ? "Сохраняем…" : "Сохранить"}
+                {editingOperation === "update" ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
               </button>
               {(editApiKey.trim() || editAccountIdentifier.trim()) && (
                 <span>
-                  После ротации статус вернётся в «ожидает проверки».
-                </span>
+                  <UiText text="После ротации статус вернётся в «ожидает проверки»." /></span>
               )}
             </div>
           </section>
@@ -1146,14 +1127,12 @@ export function IntegrationSettings({
           >
             <header className="security-card-header">
               <div>
-                <h2 id="integration-revoke-title">Отключить подключение?</h2>
+                <h2 id="integration-revoke-title"><UiText text="Отключить подключение?" /></h2>
                 <p>
-                  После подтверждения ключ «{revokeTarget.label}» будет
-                  отозван и перезаписан в активном vault.
-                </p>
+                  <UiText text="После подтверждения ключ «" />{revokeTarget.label}<UiText text="» будет отозван и перезаписан в активном vault." /></p>
               </div>
               <button
-                aria-label="Закрыть окно"
+                aria-label={uiText("Закрыть окно")}
                 className="integration-dialog-close"
                 disabled={Boolean(revokeOperation)}
                 onClick={closeRevoke}
@@ -1167,7 +1146,7 @@ export function IntegrationSettings({
               <div>
                 <strong>{revokeTarget.label}</strong>
                 <span>
-                  {integrationProviderLabel(revokeTarget.provider)} ·{" "}
+                  {<UiText text={integrationProviderLabel(revokeTarget.provider) ?? ""} />} ·{" "}
                   <code>{revokeTarget.displayHint}</code>
                 </span>
               </div>
@@ -1180,15 +1159,14 @@ export function IntegrationSettings({
                 onClick={closeRevoke}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
               <button
                 className="danger-button"
                 disabled={Boolean(revokeOperation)}
                 onClick={() => void revoke()}
                 type="button"
               >
-                {revokeOperation === "revoke" ? "Отключаем…" : "Отключить"}
+                {revokeOperation === "revoke" ? <UiText text="Отключаем…" /> : <UiText text="Отключить" />}
               </button>
             </div>
           </section>
@@ -1214,7 +1192,7 @@ function IntegrationErrorAlert({
 }: Readonly<{ error: IntegrationOperationError }>) {
   return (
     <div className="inline-alert danger integration-operation-error" role="alert">
-      <span>{error.message}</span>
+      <span>{<UiText text={error.message ?? ""} />}</span>
     </div>
   );
 }
@@ -1245,11 +1223,12 @@ function IntegrationOverviewStat({
 function IntegrationCredentialQuota({
   credential
 }: Readonly<{ credential: IntegrationCredentialSummary }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   if (credential.mode === "PLATFORM_PAID") {
     return (
       <span className="integration-quota-unavailable">
-        Точная стоимость во внутренних токенах показывается перед запуском
-      </span>
+        <UiText text="Точная стоимость во внутренних токенах показывается перед запуском" /></span>
     );
   }
   const quota = credential.quota;
@@ -1257,8 +1236,8 @@ function IntegrationCredentialQuota({
     return (
       <span className="integration-quota-unavailable">
         {credential.verifiedAt
-          ? "Провайдер не вернул числовую квоту"
-          : "Проверьте подключение, чтобы получить квоту"}
+          ? <UiText text="Провайдер не вернул числовую квоту" />
+          : <UiText text="Проверьте подключение, чтобы получить квоту" />}
       </span>
     );
   }
@@ -1272,25 +1251,24 @@ function IntegrationCredentialQuota({
       ? "Лимиты XMLStock"
       : "API-запросы";
   return (
-    <div className="integration-quota" aria-label="Квота провайдера">
+    <div className="integration-quota" aria-label={uiText("Квота провайдера")}>
       <span>
         {quotaLabel}
-        <strong>{formatNumber(quota.remaining)} осталось</strong>
+        <strong>{formatNumber(quota.remaining, uiLocale)} <UiText text="осталось" before=" " /></strong>
       </span>
       {quota.balance && (
         <strong className="integration-provider-balance">
-          Баланс: {formatMoney(quota.balance.amount, quota.balance.currency)}
+          <UiText text="Баланс:" after=" " />{formatMoney(quota.balance.amount, quota.balance.currency, uiLocale)}
         </strong>
       )}
       {(quota.usedToday !== undefined || quota.usedMonth !== undefined) && (
         <small>
-          Расход: {formatNumber(quota.usedToday ?? 0)} сегодня · {formatNumber(quota.usedMonth ?? 0)} за месяц
-        </small>
+          <UiText text="Расход:" after=" " />{formatNumber(quota.usedToday ?? 0, uiLocale)} <UiText text="сегодня ·" before=" " after=" " />{formatNumber(quota.usedMonth ?? 0, uiLocale)} <UiText text="за месяц" before=" " /></small>
       )}
       {quota.limit !== undefined && quota.used !== undefined && (
         <>
           <div
-            aria-label={`Использовано ${usedRatio ?? 0}%`}
+            aria-label={uiText("Использовано {0}%", [String(usedRatio ?? 0)])}
             aria-valuemax={100}
             aria-valuemin={0}
             aria-valuenow={usedRatio ?? 0}
@@ -1299,31 +1277,30 @@ function IntegrationCredentialQuota({
             <i style={{ width: `${usedRatio ?? 0}%` }} />
           </div>
           <small>
-            {formatNumber(quota.used)} из {formatNumber(quota.limit)} использовано
-          </small>
+            {formatNumber(quota.used, uiLocale)} <UiText text="из" before=" " after=" " />{formatNumber(quota.limit, uiLocale)} <UiText text="использовано" before=" " /></small>
         </>
       )}
       {quota.observedAt && (
-        <small>Проверено {formatDateTime(quota.observedAt)}</small>
+        <small><UiText text="Проверено" after=" " />{formatDateTime(quota.observedAt, uiLocale)}</small>
       )}
     </div>
   );
 }
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatNumber(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
-function formatMoney(value: string, currency: "RUB"): string {
-  return new Intl.NumberFormat("ru-RU", {
+function formatMoney(value: string, currency: "RUB", uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, {
     style: "currency",
     currency,
     maximumFractionDigits: 2
   }).format(Number(value));
 }
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     dateStyle: "short",
     timeStyle: "short"
   }).format(new Date(value));

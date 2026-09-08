@@ -246,7 +246,13 @@ export class IdentityService {
       });
     }
 
-    const issued = await this.prisma.$transaction(async (transaction) => {
+    return this.prisma.$transaction(transaction => this.issueVerifiedIdentity(transaction, user, context));
+  }
+
+  /** Server-only: callers must have consumed their provider proof in this transaction. */
+  public async issueVerifiedIdentity(transaction: Prisma.TransactionClient, user: User, context: RequestContext): Promise<LoginCommandResult> {
+    if (user.status !== "ACTIVE") throw unauthenticatedError();
+    const issued = await (async () => {
       await this.sessions.assertSessionLifecycleUser(transaction, user);
       const challenge = await this.mfa.createLoginChallenge(
         transaction,
@@ -278,8 +284,7 @@ export class IdentityService {
         transaction
       );
       return { session };
-    });
-
+    })();
     if (issued.challenge) {
       return { response: issued.challenge };
     }

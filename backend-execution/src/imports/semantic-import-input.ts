@@ -5,6 +5,7 @@ import {
   semanticImportEncodings,
   semanticImportHeaderModes,
   semanticImportTargets,
+  parseSemanticPositionHistoryImportOptions,
   type InternalCancelSemanticImportInput,
   type InternalConfigureSemanticImportInput,
   type InternalConfirmSemanticImportInput,
@@ -121,8 +122,14 @@ export function internalConfigureSemanticImportInput(
       input.createMissingKeywords,
       false,
       "createMissingKeywords"
-    )
+    ),
+    ...(input.positionHistory === undefined ? {} : { positionHistory: positionHistoryOptions(input.positionHistory) })
   };
+}
+
+function positionHistoryOptions(value: unknown) {
+  try { return parseSemanticPositionHistoryImportOptions(value); }
+  catch { return invalid("positionHistory"); }
 }
 
 export function internalConfirmSemanticImportInput(

@@ -27,6 +27,8 @@ import {
   type TenantSettingsFieldErrors,
   type WorkspaceSettingsField
 } from "../lib/tenant-settings";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 const WORKSPACE_FIELDS = ["name", "locale", "timezone"] as const;
 const WORKSPACE_AVATAR_MAX_BYTES = 512 * 1_024;
@@ -62,6 +64,7 @@ const WORKSPACE_TIMEZONES = [
 export function WorkspaceSettings({
   workspace
 }: Readonly<{ workspace: AppWorkspace }>) {
+  const { t: uiText } = useUiLocale();
   const router = useRouter();
   const [server, setServer] = useState(workspace);
   const [draft, setDraft] = useState(() => workspaceSettingsDraft(workspace));
@@ -283,7 +286,7 @@ export function WorkspaceSettings({
           body: payload
         }
       );
-      acceptAvatarWorkspace(updated, "Аватар рабочей области обновлён.");
+      acceptAvatarWorkspace(updated, "Фото рабочей области обновлён.");
     } catch (error) {
       if (error instanceof WorkspaceAvatarError) {
         setFailure({ message: error.message });
@@ -305,7 +308,7 @@ export function WorkspaceSettings({
         `${workspacePath(server.id)}/avatar`,
         { method: "DELETE", ifMatch: server.version }
       );
-      acceptAvatarWorkspace(updated, "Аватар рабочей области удалён.");
+      acceptAvatarWorkspace(updated, "Фото рабочей области удалён.");
     } catch (error) {
       handleFailure(error);
     } finally {
@@ -325,15 +328,13 @@ export function WorkspaceSettings({
     <div className="settings-stack">
       {!online && (
         <aside className="inline-alert warning" role="status">
-          Нет подключения к сети. Поля остаются доступными, отправка изменений
-          возобновится после подключения.
-        </aside>
+          <UiText text="Нет подключения к сети. Поля остаются доступными, отправка изменений возобновится после подключения." /></aside>
       )}
       {restriction && (
         <aside className="status-banner" role="status">
           <span className="status-dot" aria-hidden="true" />
           <div>
-            <strong>Редактирование недоступно</strong>
+            <strong><UiText text="Редактирование недоступно" /></strong>
             <p>{restriction}</p>
           </div>
         </aside>
@@ -348,7 +349,7 @@ export function WorkspaceSettings({
           {failure?.message ?? success}
           {failure?.requestId && (
             <small className="error-reference">
-              Код запроса: {failure.requestId}
+              <UiText text="Код запроса:" after=" " />{failure.requestId}
             </small>
           )}
           {conflict && (
@@ -359,7 +360,7 @@ export function WorkspaceSettings({
                 onClick={() => void reload(false)}
                 type="button"
               >
-                {busy === "reload" ? "Загружаем…" : "Загрузить серверную версию"}
+                {busy === "reload" ? <UiText text="Загружаем…" /> : <UiText text="Загрузить серверную версию" />}
               </button>
               <button
                 className="secondary-button"
@@ -367,7 +368,7 @@ export function WorkspaceSettings({
                 onClick={() => void reload(true)}
                 type="button"
               >
-                {busy === "retry" ? "Повторяем…" : "Повторить с моим черновиком"}
+                {busy === "retry" ? <UiText text="Повторяем…" /> : <UiText text="Повторить с моим черновиком" />}
               </button>
             </div>
           )}
@@ -377,14 +378,14 @@ export function WorkspaceSettings({
       <section className="panel security-card workspace-avatar-card" aria-busy={busy === "avatar-upload" || busy === "avatar-delete"}>
         <header className="security-card-header">
           <div>
-            <h2>Аватар рабочей области</h2>
-            <p>PNG, JPEG или WebP. Большие изображения уменьшаются до 512 × 512 px.</p>
+            <h2><UiText text="Фото рабочей области" /></h2>
+            <p><UiText text="PNG, JPEG или WebP. Большие изображения уменьшаются до 512 × 512 px." /></p>
           </div>
           <WorkspaceAvatar className="workspace-settings-avatar" size={72} workspace={server} />
         </header>
         <div className="workspace-avatar-actions">
           <label className={`secondary-button${canMutate ? "" : " disabled"}`}>
-            {busy === "avatar-upload" ? "Загружаем…" : server.avatarUpdatedAt ? "Заменить аватар" : "Загрузить аватар"}
+            {busy === "avatar-upload" ? <UiText text="Загружаем…" /> : server.avatarUpdatedAt ? <UiText text="Заменить фото" /> : <UiText text="Загрузить фото" />}
             <input
               accept="image/png,image/jpeg,image/webp"
               disabled={!canMutate}
@@ -403,7 +404,7 @@ export function WorkspaceSettings({
               onClick={() => void deleteAvatar()}
               type="button"
             >
-              {busy === "avatar-delete" ? "Удаляем…" : "Удалить"}
+              {busy === "avatar-delete" ? <UiText text="Удаляем…" /> : <UiText text="Удалить" />}
             </button>
           )}
         </div>
@@ -412,31 +413,19 @@ export function WorkspaceSettings({
       <section className="panel security-card" aria-busy={Boolean(busy)}>
         <header className="security-card-header">
           <div>
-            <h2>Основные данные</h2>
+            <h2><UiText text="Основные данные" /></h2>
             <p>
-              Slug остаётся неизменным; название, локаль и часовой пояс можно
-              обновлять независимо.
-            </p>
+              <UiText text="Название помогает участникам найти вашу команду. Часовой пояс используется в расписаниях и датах." /></p>
           </div>
           <span className="security-status">
-            {workspaceStatusLabel(server.status)}
+            {<UiText text={workspaceStatusLabel(server.status) ?? ""} />}
           </span>
         </header>
-        <div className="security-facts" aria-label="Состояние рабочей области">
-          <span>
-            Slug <strong>{server.slug}</strong>
-          </span>
-          <span>
-            Версия <strong>v{server.version}</strong>
-          </span>
-          <span>
-            Роль <strong>{server.roleCode}</strong>
-          </span>
-        </div>
+
 
         <form className="security-flow" id="workspace-settings-form" onSubmit={submit}>
           <label className="form-field">
-            <span>Название</span>
+            <span><UiText text="Название" /></span>
             <input
               aria-describedby={fieldErrors.name ? "workspace-name-error" : undefined}
               aria-invalid={Boolean(fieldErrors.name)}
@@ -459,7 +448,7 @@ export function WorkspaceSettings({
           </label>
           <div className="form-row">
             <label className="form-field">
-              <span>Локаль</span>
+              <span><UiText text="Язык рабочей области" /></span>
               <CustomSelect
                 aria-describedby={fieldErrors.locale ? "workspace-locale-error" : "workspace-locale-hint"}
                 aria-invalid={Boolean(fieldErrors.locale)}
@@ -474,7 +463,7 @@ export function WorkspaceSettings({
                 value={draft.locale}
               >
                 {selectOptions(WORKSPACE_LOCALES, draft.locale).map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}><UiText text={option.label} /></option>
                 ))}
               </CustomSelect>
               {fieldErrors.locale ? (
@@ -482,11 +471,11 @@ export function WorkspaceSettings({
                   {fieldErrors.locale}
                 </small>
               ) : (
-                <small id="workspace-locale-hint">BCP 47: ru, en или en-US</small>
+                <small id="workspace-locale-hint"><UiText text="Язык новых проектов и уведомлений." /></small>
               )}
             </label>
             <label className="form-field">
-              <span>Часовой пояс</span>
+              <span><UiText text="Часовой пояс" /></span>
               <CustomSelect
                 aria-describedby={fieldErrors.timezone ? "workspace-timezone-error" : "workspace-timezone-hint"}
                 aria-invalid={Boolean(fieldErrors.timezone)}
@@ -499,7 +488,7 @@ export function WorkspaceSettings({
                 onChange={(event) => updateDraft("timezone", event.target.value)}
                 required
                 searchable
-                searchPlaceholder="Город или IANA-зона"
+                searchPlaceholder={uiText("Найти город или часовой пояс")}
                 value={draft.timezone}
               >
                 {stringSelectOptions(WORKSPACE_TIMEZONES, draft.timezone).map((timezone) => (
@@ -511,13 +500,13 @@ export function WorkspaceSettings({
                   {fieldErrors.timezone}
                 </small>
               ) : (
-                <small id="workspace-timezone-hint">IANA: Europe/Moscow или UTC</small>
+                <small id="workspace-timezone-hint"><UiText text="Время запусков и событий в этой рабочей области." /></small>
               )}
             </label>
           </div>
           <div className="settings-savebar">
             <span>
-              {dirty ? "Есть несохранённые изменения" : "Все изменения сохранены"}
+              {dirty ? <UiText text="Есть несохранённые изменения" /> : <UiText text="Все изменения сохранены" />}
             </span>
             <button
               className="secondary-button"
@@ -525,14 +514,13 @@ export function WorkspaceSettings({
               onClick={discardDraft}
               type="button"
             >
-              Отменить изменения
-            </button>
+              <UiText text="Отменить изменения" /></button>
             <button
               className="primary-button"
               disabled={!canMutate || !dirty || conflict}
               type="submit"
             >
-              {busy === "save" ? "Сохраняем…" : "Сохранить"}
+              {busy === "save" ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
             </button>
           </div>
         </form>

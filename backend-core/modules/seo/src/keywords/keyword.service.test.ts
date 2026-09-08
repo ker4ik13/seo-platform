@@ -148,34 +148,36 @@ test("averages the latest found position once per active keyword", async () => {
   });
 });
 
-test("returns the latest bounded project position slices with TOP counts", async () => {
-  const firstJobId = "01900000-0000-7000-8000-000000000020";
-  const secondJobId = "01900000-0000-7000-8000-000000000021";
-  const groupByCalls: unknown[] = [];
+test("returns one latest-per-keyword aggregate for each UTC calendar day", async () => {
+  const queries: Prisma.Sql[] = [];
   const service = new KeywordService(
     {
-      rankSnapshot: {
-        groupBy: async (input: unknown) => {
-          groupByCalls.push(input);
-          return groupByCalls.length === 1
-            ? [
-                {
-                  jobId: secondJobId,
-                  _max: { observedAt: new Date("2026-09-02T10:00:00.000Z") }
-                },
-                {
-                  jobId: firstJobId,
-                  _max: { observedAt: new Date("2026-09-01T10:00:00.000Z") }
-                }
-              ]
-            : [
-                { jobId: firstJobId, found: true, position: 2, _count: { _all: 1 } },
-                { jobId: firstJobId, found: true, position: 8, _count: { _all: 2 } },
-                { jobId: firstJobId, found: false, position: null, _count: { _all: 1 } },
-                { jobId: secondJobId, found: true, position: 4, _count: { _all: 2 } },
-                { jobId: secondJobId, found: true, position: 25, _count: { _all: 1 } }
-              ];
-        }
+      $queryRaw: async (query: Prisma.Sql) => {
+        queries.push(query);
+        return [
+          {
+            dayKey: "2026-09-01",
+            observedAt: new Date("2026-09-01T18:00:00.000Z"),
+            measuredKeywordCount: 4n,
+            positionedKeywordCount: 3n,
+            top3KeywordCount: 1n,
+            top5KeywordCount: 1n,
+            top10KeywordCount: 3n,
+            top30KeywordCount: 3n,
+            top50KeywordCount: 3n
+          },
+          {
+            dayKey: "2026-09-02",
+            observedAt: new Date("2026-09-02T20:00:00.000Z"),
+            measuredKeywordCount: 3n,
+            positionedKeywordCount: 3n,
+            top3KeywordCount: 0n,
+            top5KeywordCount: 2n,
+            top10KeywordCount: 2n,
+            top30KeywordCount: 3n,
+            top50KeywordCount: 3n
+          }
+        ];
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -184,8 +186,9 @@ test("returns the latest bounded project position slices with TOP counts", async
   assert.deepEqual(await service.positionHistory(workspaceId, projectId), {
     points: [
       {
-        id: firstJobId,
-        observedAt: "2026-09-01T10:00:00.000Z",
+        id: "day:2026-09-01",
+        date: "2026-09-01",
+        observedAt: "2026-09-01T18:00:00.000Z",
         measuredKeywordCount: 4,
         positionedKeywordCount: 3,
         top3KeywordCount: 1,
@@ -195,8 +198,9 @@ test("returns the latest bounded project position slices with TOP counts", async
         top50KeywordCount: 3
       },
       {
-        id: secondJobId,
-        observedAt: "2026-09-02T10:00:00.000Z",
+        id: "day:2026-09-02",
+        date: "2026-09-02",
+        observedAt: "2026-09-02T20:00:00.000Z",
         measuredKeywordCount: 3,
         positionedKeywordCount: 3,
         top3KeywordCount: 0,
@@ -208,26 +212,20 @@ test("returns the latest bounded project position slices with TOP counts", async
     ],
     truncated: false
   });
-  assert.equal(groupByCalls.length, 2);
-  assert.deepEqual(
-    (groupByCalls[0] as {
-      readonly where: { readonly keyword: unknown };
-    }).where.keyword,
-    { status: "ACTIVE", isTracked: true }
-  );
+  assert.equal(queries.length, 1);
+  assert.match(queries[0]?.sql ?? "", /ROW_NUMBER\(\) OVER/u);
+  assert.match(queries[0]?.sql ?? "", /snapshot\.keyword_id/u);
+  assert.match(queries[0]?.sql ?? "", /keyword\.is_tracked = TRUE/u);
+  assert.equal(queries[0]?.values.includes(false), true);
 });
 
 test("can include active untracked keywords in project position history", async () => {
-  let observedWhere: Readonly<Record<string, unknown>> | undefined;
+  let observedQuery: Prisma.Sql | undefined;
   const service = new KeywordService(
     {
-      rankSnapshot: {
-        groupBy: async ({ where }: {
-          readonly where: Readonly<Record<string, unknown>>;
-        }) => {
-          observedWhere = where;
-          return [];
-        }
+      $queryRaw: async (query: Prisma.Sql) => {
+        observedQuery = query;
+        return [];
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -239,8 +237,8 @@ test("can include active untracked keywords in project position history", async 
     }),
     { points: [], truncated: false }
   );
-  assert.deepEqual(observedWhere?.keyword, { status: "ACTIVE" });
-  assert.equal(observedWhere?.positionTrackingEnabled, true);
+  assert.match(observedQuery?.sql ?? "", /position_tracking_enabled = TRUE/u);
+  assert.equal(observedQuery?.values.includes(true), true);
 });
 
 test("returns a scoped cursor page with groups, tags and target URLs", async () => {
@@ -698,6 +696,12 @@ test("keeps competitor SERP evidence out of position history when projection is 
     trackingContextId: contextId,
     contextName: "Яндекс · Москва",
     searchEngine: "YANDEX",
+    countryCode: "RU",
+    regionCode: "213",
+    regionLabel: "Москва",
+    language: "ru",
+    device: "DESKTOP",
+    dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
     searchSource: "LIVE",
     provider: "XMLSTOCK",
     observedAt: "2026-08-06T11:45:00.000Z",
@@ -922,8 +926,12 @@ test("projects context-independent previous positions into keyword insights", as
     trackingContextId: contextId,
     contextName: "Новый профиль",
     searchEngine: "YANDEX",
+    countryCode: "RU",
     device: "DESKTOP",
     regionCode: "213",
+    regionLabel: "Москва",
+    language: "ru",
+    dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
     found: true,
     position: 7,
     previousPosition: 11,
@@ -964,6 +972,41 @@ test("filters a keyword page by the union of selected groups", async () => {
   );
   assert.equal(result.data.length, 0);
   assert.equal(result.page.totalApprox, 0);
+});
+
+test("applies latest frequency, word count, URL and exact geographic rank filters before pagination", async () => {
+  const queries: string[] = [];
+  const service = new KeywordService({
+    $queryRaw: async (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+      const sql = taggedSqlText(strings, values);
+      queries.push(sql);
+      return /count\s*\(\s*\*\s*\)/iu.test(sql) ? [{ count: 0n }] : [];
+    },
+    keyword: { findMany: async () => { throw new Error("No IDs should be hydrated"); } }
+  } as unknown as PrismaService, semanticVersions());
+  const result = await service.list(workspaceId, projectId, {
+    limit: 100,
+    frequencyBaseMin: "100",
+    frequencyExactMax: "1000",
+    wordCountMin: 2,
+    wordCountMax: 5,
+    targetUrlState: "SET",
+    rankDimensionKey: "GOOGLE|RU|1011969|ru|MOBILE",
+    rankState: "FOUND",
+    rankPositionMin: 1,
+    rankPositionMax: 10,
+    rankCheckedFrom: "2026-09-01T00:00:00.000Z",
+    rankCheckedBefore: "2026-09-09T00:00:00.000Z"
+  }, "advanced-filter");
+  assert.equal(result.page.totalApprox, 0);
+  assert.equal(queries.length, 2);
+  for (const sql of queries) {
+    assert.match(sql, /frequency_snapshots/u);
+    assert.match(sql, /regexp_split_to_array/u);
+    assert.match(sql, /target_page_id IS NOT NULL/u);
+    assert.match(sql, /current_ranks/u);
+    assert.match(sql, /tracking_context_versions/u);
+  }
 });
 
 test("projects a shared canonical keyword through the currently opened group", async () => {
@@ -1088,6 +1131,7 @@ test("projects imported Key Collector positions without poisoning keyword insigh
     regionLabel: "Импорт Key Collector",
     countryCode: "RU",
     language: "ru",
+    dimensionKey: "YANDEX|RU|global|ru|DESKTOP",
     depth: 100,
     provider: "KEY_COLLECTOR",
     found: true,
@@ -1095,6 +1139,16 @@ test("projects imported Key Collector positions without poisoning keyword insigh
     observedAt: "2026-08-07T14:00:00.000Z"
   }]);
 });
+
+function taggedSqlText(strings: TemplateStringsArray, values: readonly unknown[]): string {
+  return strings.reduce((result, part, index) => `${result}${part}${sqlFragmentText(values[index])}`, "");
+}
+
+function sqlFragmentText(value: unknown): string {
+  if (!value || typeof value !== "object") return String(value ?? "");
+  if ("sql" in value && typeof value.sql === "string") return value.sql;
+  return "";
+}
 
 test("orders source sorting on the server before cursor pagination", async () => {
   let observedOrderBy: unknown;

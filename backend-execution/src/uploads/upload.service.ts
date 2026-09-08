@@ -33,17 +33,12 @@ import {
 } from "../storage/object-storage.port.js";
 import {
   assertStorageCapacity,
-  lockStorageCapacity
+  lockStorageCapacity,
+  STORAGE_RESERVING_UPLOAD_STATUSES
 } from "./storage-capacity.js";
 
 const MEBIBYTE = 1_024 * 1_024;
-const STORAGE_RESERVING_UPLOAD_STATUSES = [
-  "INITIATED",
-  "UPLOADING",
-  "UPLOADED",
-  "SCANNING",
-  "READY"
-] as const;
+
 
 @Injectable()
 export class UploadService {

@@ -1,13 +1,6 @@
 import { types as nodeTypes } from "node:util";
 import {
-  currentRankProviderPolicyVersion,
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
-  legacyRankProviderPolicyVersion,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
-  xmlStockRankManifestChunkSize,
-  xmlStockRankProviderPolicyVersion,
+  rankExecutionPolicyShape,
   rankManifestChunkHashPreimage,
   type InternalRankExecutionParameters,
   type InternalRankManifestChunk,
@@ -92,10 +85,7 @@ export interface RankProviderRequestIntentBuildInput {
 }
 
 interface RankProviderIntentBounds {
-  readonly version:
-    | typeof legacyRankProviderPolicyVersion
-    | typeof currentRankProviderPolicyVersion
-    | typeof xmlStockRankProviderPolicyVersion;
+  readonly version: string;
   readonly maximumPairs: number;
   readonly chunkSize: number;
   readonly maximumChunkIndex: number;
@@ -122,7 +112,7 @@ export function buildRankProviderRequestIntent(
   );
   const command = manifestCommand(
     input.command,
-    providerPolicy.maximumPairs
+    providerPolicy
   );
   const pairCount = Number(command.estimate.pairCount);
   const chunk = manifestChunk(input.chunk, pairCount, providerPolicy);
@@ -248,7 +238,7 @@ export function rankProviderRequestIntent(
     input.schemaVersion !== RANK_PROVIDER_REQUEST_INTENT_SCHEMA ||
     (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
     (input.provider === "XMLSTOCK") !==
-      (providerPolicy.version === xmlStockRankProviderPolicyVersion) ||
+      (rankExecutionPolicyShape(providerPolicy.version)?.provider === "XMLSTOCK") ||
     input.operation !== "POSITIONS" ||
     manifest.hashSchemaVersion !== MANIFEST_HASH_SCHEMA ||
     manifestChunk.hashSchemaVersion !==
@@ -339,14 +329,19 @@ export function rankProviderRequestIntentHash(
 
 function manifestCommand(
   value: unknown,
-  maximumPairs: number
+  providerPolicy: RankProviderIntentBounds
 ): InternalSealRankManifestInput {
+  const hasProviderPolicy =
+    typeof value === "object" &&
+    value !== null &&
+    Object.hasOwn(value, "providerPolicyVersion");
   const input = exactRecord(value, [
     "workspaceId",
     "projectId",
     "actorId",
     "jobId",
     "estimateId",
+    ...(hasProviderPolicy ? ["providerPolicyVersion"] : []),
     "provider",
     "operation",
     "project",
@@ -389,6 +384,8 @@ function manifestCommand(
 
   if (
     (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
+    (hasProviderPolicy &&
+      input.providerPolicyVersion !== providerPolicy.version) ||
     input.operation !== "POSITIONS" ||
     projectSnapshotId !== projectId ||
     projectSnapshotWorkspaceId !== workspaceId ||
@@ -406,6 +403,9 @@ function manifestCommand(
     actorId,
     jobId,
     estimateId,
+    ...(hasProviderPolicy
+      ? { providerPolicyVersion: providerPolicy.version }
+      : {}),
     provider: input.provider,
     operation: "POSITIONS",
     project: {
@@ -422,7 +422,10 @@ function manifestCommand(
       configurationHash: hash(estimate.configurationHash),
       semanticScopeHash: hash(estimate.semanticScopeHash),
       scopeHash: hash(estimate.scopeHash),
-      pairCount: decimal(estimate.pairCount, maximumPairs),
+      pairCount: decimal(
+        estimate.pairCount,
+        providerPolicy.maximumPairs
+      ),
       expiresAt: timestamp(estimate.expiresAt)
     },
     execution: parseRankExecutionParameters(input.execution),
@@ -606,35 +609,9 @@ function expectedChunkEntryCount(
 }
 
 function rankProviderPolicy(value: unknown): RankProviderIntentBounds {
-  if (value === legacyRankProviderPolicyVersion) {
-    return {
-      version: legacyRankProviderPolicyVersion,
-      maximumPairs: legacyRankProviderKeywordLimit,
-      chunkSize: legacyRankManifestChunkSize,
-      maximumChunkIndex:
-        legacyRankProviderKeywordLimit /
-          legacyRankManifestChunkSize -
-        1
-    };
-  }
-  if (value === currentRankProviderPolicyVersion) {
-    return {
-      version: currentRankProviderPolicyVersion,
-      maximumPairs: rankProviderKeywordLimit,
-      chunkSize: rankManifestSingleTaskChunkSize,
-      maximumChunkIndex: 0
-    };
-  }
-  if (value === xmlStockRankProviderPolicyVersion) {
-    return {
-      version: xmlStockRankProviderPolicyVersion,
-      maximumPairs: rankProviderKeywordLimit,
-      chunkSize: xmlStockRankManifestChunkSize,
-      maximumChunkIndex:
-        rankProviderKeywordLimit / xmlStockRankManifestChunkSize - 1
-    };
-  }
-  invalid();
+  const shape = rankExecutionPolicyShape(value);
+  if (!shape || typeof value !== "string") invalid();
+  return { version: value, maximumPairs: shape.commandLimit, chunkSize: shape.chunkSize, maximumChunkIndex: Math.ceil(shape.commandLimit / shape.chunkSize) - 1 };
 }
 
 function exactRecord(

@@ -16,7 +16,7 @@ export function applyClusteringRunBodyLimit(
     : [options.method];
   if (
     methods.some((method) => String(method).toUpperCase() === "POST") &&
-    /^\/internal\/v1\/workspaces\/[^/]+\/projects\/[^/]+\/clustering-runs\/?$/u.test(
+    /^\/internal\/v1\/workspaces\/[^/]+\/projects\/[^/]+\/(?:clustering-runs|frequency-collections|ai-answer-collections)\/?$/u.test(
       options.url
     )
   ) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   rankProviderKeywordLimit,
-  rankProviderOverflowCount
+  rankCommandOverflowCount
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import {
@@ -150,6 +150,115 @@ test("uses the Jobs-only semantic export read boundary", async () => {
   }
 });
 
+test("reads the rank-dimension envelope and validates comparison rows", async () => {
+  const originalFetch = globalThis.fetch;
+  const keywordId = "01900000-0000-7000-8000-000000000011";
+  const snapshotId = "01900000-0000-7000-8000-000000000012";
+  const jobId = "01900000-0000-7000-8000-000000000013";
+  const dimensionKey = "YANDEX|RU|213|ru|DESKTOP";
+  const observedBodies: unknown[] = [];
+  globalThis.fetch = (async (input, init) => {
+    if (init?.body) observedBodies.push(JSON.parse(String(init.body)));
+    return String(input).endsWith("/rank-dimensions")
+      ? Response.json({
+          data: {
+            dimensions: [{
+              key: dimensionKey,
+              searchEngine: "YANDEX",
+              countryCode: "RU",
+              regionCode: "213",
+              regionLabel: "Москва",
+              language: "ru",
+              device: "DESKTOP"
+            }],
+            truncated: false
+          },
+          meta: { requestId: "dimensions" }
+        })
+      : Response.json({
+          data: [{
+            keywordId,
+            dimensionKey,
+            searchEngine: "YANDEX",
+            found: false,
+            observedAt: "2026-09-08T12:00:00.000Z",
+            snapshotId,
+            trackingContextId: context.importId,
+            configurationVersion: 1,
+            jobId,
+            provider: "MANUAL_IMPORT",
+            depth: 100
+          }],
+          meta: { requestId: "comparison" }
+        });
+  }) as typeof fetch;
+  try {
+    const client = new SeoDataClient(config);
+    const catalog = await client.listExportRankDimensions(context);
+    const rows = await client.listExportRankComparison(context, {
+      keywordIds: [keywordId],
+      dimensionKeys: [dimensionKey]
+    });
+
+    assert.equal(catalog.dimensions[0]?.regionLabel, "Москва");
+    assert.equal(rows[0]?.provider, "MANUAL_IMPORT");
+    assert.deepEqual(observedBodies, [{
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      actorId: context.actorId,
+      keywordIds: [keywordId],
+      dimensionKeys: [dimensionKey]
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uses body-only export reads for a large folder union", async () => {
+  const originalFetch = globalThis.fetch;
+  const groupIds = Array.from({ length: 21 }, (_, index) =>
+    `01900000-0000-7000-8000-${String(100 + index).padStart(12, "0")}`
+  );
+  const observed: Array<{ url: string; method?: string; body: unknown }> = [];
+  globalThis.fetch = (async (input, init) => {
+    observed.push({
+      url: String(input),
+      ...(init?.method ? { method: init.method } : {}),
+      body: JSON.parse(String(init?.body))
+    });
+    return Response.json({
+      data: {
+        data: [],
+        page: { hasNext: false, totalApprox: 0 },
+        meta: { requestId: "inner" }
+      },
+      meta: { requestId: "outer" }
+    });
+  }) as typeof fetch;
+  try {
+    const client = new SeoDataClient(config);
+    const query = { limit: 100, groupIds, sort: "CREATED_DESC" as const };
+    await client.listExportKeywords(context, query);
+    await client.listExportCompetitors(context, query, { sources: ["SERP"] });
+    await client.listExportPositionHistory(context, query, {
+      observedFrom: "2026-08-01T00:00:00.000Z",
+      observedBefore: "2026-09-01T00:00:00.000Z",
+      searchEngines: ["YANDEX"]
+    });
+
+    assert.deepEqual(observed.map(item => item.url), [
+      `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keyword-query`,
+      `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/competitor-query`,
+      `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/position-history-query`
+    ]);
+    assert.equal(observed.every(item => item.method === "POST"), true);
+    assert.ok(observed[0]);
+    assert.deepEqual((observed[0].body as { query: { groupIds: string[] } }).query.groupIds, groupIds);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("treats an incomplete normalization response as retryable", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
@@ -242,7 +351,7 @@ test("accepts rank scopes through the current provider limit and its overflow se
     for (const [keywordCount, semanticScopeHash] of [
       ["1640", rankScope().semanticScopeHash],
       [String(rankProviderKeywordLimit), rankScope().semanticScopeHash],
-      [String(rankProviderOverflowCount), { availability: "UNAVAILABLE" }]
+      [String(rankCommandOverflowCount), { availability: "UNAVAILABLE" }]
     ] as const) {
       globalThis.fetch = (async () =>
         Response.json({
@@ -284,8 +393,8 @@ test("rejects secret-bearing, unhashable-empty or scope-inconsistent rank scope 
       },
       {
         ...rankScope(),
-        keywordCount: String(rankProviderOverflowCount),
-        pairCount: String(rankProviderOverflowCount)
+        keywordCount: String(rankCommandOverflowCount),
+        pairCount: String(rankCommandOverflowCount)
       }
     ]) {
       globalThis.fetch = (async () =>

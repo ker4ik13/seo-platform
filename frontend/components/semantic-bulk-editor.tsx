@@ -1,6 +1,8 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { KeywordTagPicker } from "./keyword-tag-picker";
+import { keywordTagChanges, keywordTagKey, uniqueKeywordTags } from "../lib/keyword-tags";
 import {
   SemanticGroupPickerField,
   type SemanticGroupPickerSpecialOption
@@ -12,7 +14,7 @@ import {
   type SemanticKeywordCleaningPreview,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import {
   browserApiRequest,
   BrowserApiError
@@ -22,6 +24,8 @@ import {
   previewSemanticKeywordCleaningInBatches,
   updateSemanticKeywordsInBatches
 } from "../lib/semantic-keyword-bulk";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface BulkSelection {
   readonly id: string;
@@ -101,6 +105,7 @@ export function SemanticBulkEditor({
   onCompleted: (result: BulkResult) => void;
   onSplitCompleted: (result: SplitResult) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   const single = selections.length === 1 ? selections[0] : undefined;
   const [text, setText] = useState(single?.text ?? "");
   const [language, setLanguage] = useState(single?.language ?? "ru");
@@ -127,8 +132,12 @@ export function SemanticBulkEditor({
       single ? (single.targetUrl ? "SET" : "CLEAR") : "KEEP"
     );
   const [targetUrl, setTargetUrl] = useState(single?.targetUrl ?? "");
-  const [replaceTags, setReplaceTags] = useState(Boolean(single));
-  const [tagNames, setTagNames] = useState(single?.tags.join(", ") ?? "");
+  const [tagNames, setTagNames] = useState<readonly string[]>(single?.tags ?? []);
+  const [removeTagNames, setRemoveTagNames] = useState<readonly string[]>([]);
+  const selectedTagNames = useMemo(
+    () => uniqueKeywordTags(selections.flatMap(selection => selection.tags)),
+    [selections]
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<BulkResult>();
@@ -273,7 +282,7 @@ export function SemanticBulkEditor({
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (saving) return;
-    const nextTags = parseTags(tagNames);
+    const nextTags = uniqueKeywordTags(tagNames);
     const patch = single
       ? singleKeywordPatch(single, {
           text,
@@ -309,7 +318,8 @@ export function SemanticBulkEditor({
             : {
                 targetUrl: targetUrlMode === "CLEAR" ? null : targetUrl
               }),
-          ...(replaceTags ? { tagNames: nextTags } : {})
+          ...(nextTags.length ? { addTagNames: nextTags } : {}),
+          ...(removeTagNames.length ? { removeTagNames } : {})
         };
     if (Object.keys(patch).length === 0) {
       setError(single ? "Нет изменений для сохранения." : "Выберите хотя бы одно изменение.");
@@ -336,12 +346,12 @@ export function SemanticBulkEditor({
       <div className="semantic-bulk-heading">
         <div>
           <strong>
-            {single ? "Свойства запроса" : `Выбрано запросов: ${selections.length}`}
+            {single ? <UiText text="Свойства запроса" /> : <UiText text="Выбрано запросов: {0}" values={[String(selections.length)]} />}
           </strong>
           <span>
             {single
-              ? "Измените нужные значения в одной форме."
-              : "Поля со значением «Не менять» останутся без изменений."}
+              ? <UiText text="Измените нужные значения в одной форме." />
+              : <UiText text="Поля со значением «Не менять» останутся без изменений." />}
           </span>
         </div>
       </div>
@@ -349,7 +359,7 @@ export function SemanticBulkEditor({
         {single && (
           <>
             <label className="semantic-bulk-query">
-              <span>Запрос</span>
+              <span><UiText text="Запрос" /></span>
               <input
                 autoFocus
                 maxLength={2_000}
@@ -359,7 +369,7 @@ export function SemanticBulkEditor({
               />
             </label>
             <label className="semantic-bulk-language">
-              <span>Язык</span>
+              <span><UiText text="Язык" /></span>
               <input
                 maxLength={16}
                 onChange={(event) => setLanguage(event.target.value)}
@@ -370,63 +380,63 @@ export function SemanticBulkEditor({
           </>
         )}
         <label className="semantic-bulk-priority">
-          <span>Приоритет</span>
+          <span><UiText text="Приоритет" /></span>
           <input
             max={100}
             min={0}
             onChange={(event) => setPriority(event.target.value)}
-            placeholder="Не менять"
+            placeholder={uiText("Не менять")}
             required={Boolean(single)}
             type="number"
             value={priority}
           />
         </label>
         <label className="semantic-bulk-favorite">
-          <span>Избранное</span>
+          <span><UiText text="Избранное" /></span>
           <CustomSelect
             onChange={(event) =>
               setFavorite(event.target.value as typeof favorite)
             }
             value={favorite}
           >
-            {!single && <option value="KEEP">Не менять</option>}
-            <option value="YES">{single ? "Да" : "Добавить"}</option>
-            <option value="NO">{single ? "Нет" : "Убрать"}</option>
+            {!single && <option value="KEEP"><UiText text="Не менять" /></option>}
+            <option value="YES">{single ? <UiText text="Да" /> : <UiText text="Добавить" />}</option>
+            <option value="NO">{single ? <UiText text="Нет" /> : <UiText text="Убрать" />}</option>
           </CustomSelect>
         </label>
         <label className="semantic-bulk-tracked">
-          <span>Отслеживается</span>
+          <span><UiText text="Отслеживается" /></span>
           <CustomSelect
             onChange={(event) =>
               setTracked(event.target.value as typeof tracked)
             }
             value={tracked}
           >
-            {!single && <option value="KEEP">Не менять</option>}
-            <option value="YES">Да</option>
-            <option value="NO">Нет</option>
+            {!single && <option value="KEEP"><UiText text="Не менять" /></option>}
+            <option value="YES"><UiText text="Да" /></option>
+            <option value="NO"><UiText text="Нет" /></option>
           </CustomSelect>
         </label>
         <label className="semantic-bulk-intent">
-          <span>Интент</span>
+          <span><UiText text="Интент" /></span>
           <CustomSelect
             onChange={(event) =>
               setIntent(event.target.value as typeof intent)
             }
             value={intent}
           >
-            {!single && <option value="KEEP">Не менять</option>}
-            <option value="CLEAR">{single ? "Не задан" : "Очистить"}</option>
-            <option value="INFORMATIONAL">Информационный</option>
-            <option value="NAVIGATIONAL">Навигационный</option>
-            <option value="COMMERCIAL">Коммерческий</option>
-            <option value="TRANSACTIONAL">Транзакционный</option>
-            <option value="LOCAL">Локальный</option>
-            <option value="MIXED">Смешанный</option>
+            {!single && <option value="KEEP"><UiText text="Не менять" /></option>}
+            <option value="CLEAR">{single ? <UiText text="Не задан" /> : <UiText text="Очистить" />}</option>
+            <option value="INFORMATIONAL"><UiText text="Информационный" /></option>
+            <option value="NAVIGATIONAL"><UiText text="Навигационный" /></option>
+            <option value="COMMERCIAL"><UiText text="Коммерческий" /></option>
+            <option value="TRANSACTIONAL"><UiText text="Транзакционный" /></option>
+            <option value="LOCAL"><UiText text="Локальный" /></option>
+            <option value="MIXED"><UiText text="Смешанный" /></option>
           </CustomSelect>
         </label>
         <label className="semantic-bulk-group">
-          <span>Группа</span>
+          <span><UiText text="Группа" /></span>
           <SemanticGroupPickerField
             dialogTitle="Группа запроса"
             groups={groups}
@@ -441,10 +451,10 @@ export function SemanticBulkEditor({
           />
         </label>
         <label className="semantic-bulk-cluster">
-          <span>Кластер</span>
+          <span><UiText text="Кластер" /></span>
           <CustomSelect onChange={(event) => setClusterId(event.target.value)} value={clusterId}>
-            {!single && <option value="KEEP">Не менять</option>}
-            <option value="CLEAR">Без кластера</option>
+            {!single && <option value="KEEP"><UiText text="Не менять" /></option>}
+            <option value="CLEAR"><UiText text="Без кластера" /></option>
             {clusters.map((cluster) => (
               <option key={cluster.id} value={cluster.id}>{cluster.name}</option>
             ))}
@@ -452,7 +462,7 @@ export function SemanticBulkEditor({
         </label>
         {single ? (
           <label className="semantic-bulk-url">
-            <span>Целевой URL</span>
+            <span><UiText text="Целевой URL" /></span>
             <input
               maxLength={2_048}
               onChange={(event) => {
@@ -467,22 +477,22 @@ export function SemanticBulkEditor({
           </label>
         ) : (
           <label>
-            <span>Целевой URL</span>
+            <span><UiText text="Целевой URL" /></span>
             <CustomSelect
               onChange={(event) =>
                 setTargetUrlMode(event.target.value as typeof targetUrlMode)
               }
               value={targetUrlMode}
             >
-              <option value="KEEP">Не менять</option>
-              <option value="CLEAR">Очистить</option>
-              <option value="SET">Задать URL</option>
+              <option value="KEEP"><UiText text="Не менять" /></option>
+              <option value="CLEAR"><UiText text="Очистить" /></option>
+              <option value="SET"><UiText text="Задать URL" /></option>
             </CustomSelect>
           </label>
         )}
         {!single && targetUrlMode === "SET" && (
           <label className="semantic-bulk-url">
-            <span>Новая URL</span>
+            <span><UiText text="Новая URL" /></span>
             <input
               onChange={(event) => setTargetUrl(event.target.value)}
               required
@@ -491,39 +501,46 @@ export function SemanticBulkEditor({
             />
           </label>
         )}
-        <label className="semantic-bulk-tags">
-          <span>
-            {!single && (
-              <input
-                checked={replaceTags}
-                onChange={(event) => setReplaceTags(event.target.checked)}
-                type="checkbox"
-              />
-            )}
-            {single ? "Теги через запятую" : "Заменить теги"}
-          </span>
-          <input
-            disabled={!replaceTags}
-            onChange={(event) => setTagNames(event.target.value)}
-            placeholder="Важно, Услуги (пусто — удалить все)"
-            value={tagNames}
-          />
-        </label>
+      </div>
+      <div className={`semantic-bulk-tags${single ? "" : " has-removal"}`}>
+        <KeywordTagPicker
+          projectId={projectId}
+          value={tagNames}
+          onChange={tags => {
+            setTagNames(tags);
+            const additions = new Set(tags.map(keywordTagKey));
+            setRemoveTagNames(current => current.filter(tag => !additions.has(keywordTagKey(tag))));
+          }}
+          disabled={saving}
+          mode={single ? "edit" : "add"}
+        />
+        {!single && <KeywordTagPicker
+          projectId={projectId}
+          value={removeTagNames}
+          onChange={tags => {
+            setRemoveTagNames(tags);
+            const removals = new Set(tags.map(keywordTagKey));
+            setTagNames(current => current.filter(tag => !removals.has(keywordTagKey(tag))));
+          }}
+          disabled={saving}
+          mode="remove"
+          availableTags={selectedTagNames}
+        />}
       </div>
       {!single && (
         <>
       <details className="semantic-bulk-split">
         <summary>
-          <span>Выделить в новый кластер</span>
+          <span><UiText text="Выделить в новый кластер" /></span>
           <small>
             {sourceCluster
-              ? `Из «${sourceCluster.name}» · ${selections.length} запросов`
-              : "Выберите запросы одного кластера"}
+              ? <UiText text="Из «{0}» · {1} запросов" values={[String(sourceCluster.name), String(selections.length)]} />
+              : <UiText text="Выберите запросы одного кластера" />}
           </small>
         </summary>
         <div className="semantic-bulk-split-body">
           <label>
-            <span>Название нового кластера</span>
+            <span><UiText text="Название нового кластера" /></span>
             <input
               disabled={!sourceCluster || splitSaving}
               maxLength={255}
@@ -531,7 +548,7 @@ export function SemanticBulkEditor({
                 setSplitName(event.target.value);
                 setSplitPreview(undefined);
               }}
-              placeholder="Например, Купить ноутбук"
+              placeholder={uiText("Например, Купить ноутбук")}
               value={splitName}
             />
           </label>
@@ -546,8 +563,7 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Зафиксировать
-            </label>
+              <UiText text="Зафиксировать" /></label>
             <label>
               <input
                 checked={splitExcluded}
@@ -558,8 +574,7 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Исключить из автокластеризации
-            </label>
+              <UiText text="Исключить из автокластеризации" /></label>
           </div>
           {splitPreview && (
             <div
@@ -567,21 +582,21 @@ export function SemanticBulkEditor({
               role="status"
             >
               {splitPreview.readiness === "READY"
-                ? `Готово к переносу: ${splitPreview.movableKeywordCount} из ${splitPreview.sourceKeywordCount} запросов исходного кластера.`
+                ? <UiText text="Готово к переносу: {0} из {1} запросов исходного кластера." values={[String(splitPreview.movableKeywordCount), String(splitPreview.sourceKeywordCount)]} />
                 : splitPreview.sourceWouldBeEmpty
-                  ? "Нельзя перенести весь кластер: переименуйте его или оставьте хотя бы один запрос."
+                  ? <UiText text="Нельзя перенести весь кластер: переименуйте его или оставьте хотя бы один запрос." />
                   : splitPreview.duplicateName
-                    ? "Кластер с таким названием уже существует."
+                    ? <UiText text="Кластер с таким названием уже существует." />
                     : splitPreview.readiness === "BACKGROUND_REQUIRED"
-                      ? `Для переноса более ${splitPreview.synchronousKeywordLimit} запросов нужна фоновая задача.`
-                      : "Часть запросов или исходный кластер изменилась. Обновите таблицу и повторите preview."}
+                      ? <UiText text="Для переноса более {0} запросов нужна фоновая задача." values={[String(splitPreview.synchronousKeywordLimit)]} />
+                      : <UiText text="Часть запросов или исходный кластер изменилась. Обновите таблицу и повторите preview." />}
               {splitPreview.sourceLocked && (
-                <span> Исходный кластер зафиксирован; ручное действие разрешено.</span>
+                <span> <UiText text="Исходный кластер зафиксирован; ручное действие разрешено." before=" " /></span>
               )}
             </div>
           )}
           {splitError && (
-            <div className="inline-alert danger" role="alert">{splitError}</div>
+            <div className="inline-alert danger" role="alert">{<UiText text={splitError ?? ""} />}</div>
           )}
           <div className="semantic-editor-actions">
             <button
@@ -590,7 +605,7 @@ export function SemanticBulkEditor({
               onClick={() => void previewClusterSplit()}
               type="button"
             >
-              {splitSaving ? "Проверяем…" : "Проверить"}
+              {splitSaving ? <UiText text="Проверяем…" /> : <UiText text="Проверить" />}
             </button>
             <button
               className="primary-button"
@@ -598,20 +613,19 @@ export function SemanticBulkEditor({
               onClick={() => void applyClusterSplit()}
               type="button"
             >
-              Выделить кластер
-            </button>
+              <UiText text="Выделить кластер" /></button>
           </div>
         </div>
       </details>
       <details className="semantic-bulk-split">
         <summary>
-          <span>Очистить запросы</span>
-          <small>Preview, проверка дублей и отмена через историю</small>
+          <span><UiText text="Очистить запросы" /></span>
+          <small><UiText text="Preview, проверка дублей и отмена через историю" /></small>
         </summary>
         <div className="semantic-bulk-split-body">
           <div className="semantic-cleaning-options">
             <label>
-              <span>Регистр</span>
+              <span><UiText text="Регистр" /></span>
               <CustomSelect
                 disabled={Boolean(cleaningBusy)}
                 onChange={(event) => {
@@ -622,9 +636,9 @@ export function SemanticBulkEditor({
                 }}
                 value={cleaningCase}
               >
-                <option value="KEEP">Не менять</option>
-                <option value="LOWER">строчные</option>
-                <option value="UPPER">ПРОПИСНЫЕ</option>
+                <option value="KEEP"><UiText text="Не менять" /></option>
+                <option value="LOWER"><UiText text="строчные" /></option>
+                <option value="UPPER"><UiText text="ПРОПИСНЫЕ" /></option>
               </CustomSelect>
             </label>
             <label>
@@ -637,8 +651,7 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Пробелы
-            </label>
+              <UiText text="Пробелы" /></label>
             <label>
               <input
                 checked={normalizeQuotes}
@@ -649,8 +662,7 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Кавычки
-            </label>
+              <UiText text="Кавычки" /></label>
             <label>
               <input
                 checked={normalizeDashes}
@@ -661,8 +673,7 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Дефисы
-            </label>
+              <UiText text="Дефисы" /></label>
             <label>
               <input
                 checked={normalizeYo}
@@ -673,8 +684,7 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Ё → Е
-            </label>
+              <UiText text="Ё → Е" /></label>
             <label>
               <input
                 checked={removeSearchOperators}
@@ -685,24 +695,19 @@ export function SemanticBulkEditor({
                 }}
                 type="checkbox"
               />
-              Удалить операторы
-            </label>
+              <UiText text="Удалить операторы" /></label>
           </div>
           {cleaningPreview && (
             <div className="semantic-cleaning-preview" role="status">
               <div className="semantic-cluster-bulk-preview">
                 <span>
-                  <strong>{cleaningPreview.applicable}</strong> изменятся
-                </span>
+                  <strong>{cleaningPreview.applicable}</strong> <UiText text="изменятся" before=" " /></span>
                 <span>
-                  <strong>{cleaningPreview.unchanged}</strong> без изменений
-                </span>
+                  <strong>{cleaningPreview.unchanged}</strong> <UiText text="без изменений" before=" " /></span>
                 <span className={cleaningPreview.conflicted > 0 ? "danger" : ""}>
-                  <strong>{cleaningPreview.conflicted}</strong> конфликтов
-                </span>
+                  <strong>{cleaningPreview.conflicted}</strong> <UiText text="конфликтов" before=" " /></span>
                 <span className={cleaningPreview.failed > 0 ? "danger" : ""}>
-                  <strong>{cleaningPreview.failed}</strong> ошибок/дублей
-                </span>
+                  <strong>{cleaningPreview.failed}</strong> <UiText text="ошибок/дублей" before=" " /></span>
               </div>
               <div className="semantic-cleaning-preview-list">
                 {cleaningPreview.changes
@@ -710,11 +715,11 @@ export function SemanticBulkEditor({
                   .slice(0, 8)
                   .map((change) => (
                     <div key={change.keywordId}>
-                      <span>{change.beforeText ?? "Запрос недоступен"}</span>
+                      <span>{change.beforeText ?? <UiText text="Запрос недоступен" />}</span>
                       <strong aria-hidden="true">→</strong>
                       <span>{change.afterText ?? cleaningStateLabel(change.state)}</span>
                       {change.state !== "APPLICABLE" && (
-                        <small>{cleaningStateLabel(change.state)}</small>
+                        <small>{<UiText text={cleaningStateLabel(change.state) ?? ""} />}</small>
                       )}
                     </div>
                   ))}
@@ -723,7 +728,7 @@ export function SemanticBulkEditor({
           )}
           {cleaningError && (
             <div className="inline-alert danger" role="alert">
-              {cleaningError}
+              {<UiText text={cleaningError ?? ""} />}
             </div>
           )}
           <div className="semantic-editor-actions">
@@ -733,7 +738,7 @@ export function SemanticBulkEditor({
               onClick={() => void previewCleaning()}
               type="button"
             >
-              {cleaningBusy === "PREVIEW" ? "Проверяем…" : "Проверить очистку"}
+              {cleaningBusy === "PREVIEW" ? <UiText text="Проверяем…" /> : <UiText text="Проверить очистку" />}
             </button>
             <button
               className="primary-button"
@@ -742,8 +747,8 @@ export function SemanticBulkEditor({
               type="button"
             >
               {cleaningBusy === "APPLY"
-                ? "Применяем…"
-                : `Применить ${cleaningPreview?.applicable ?? 0}`}
+                ? <UiText text="Применяем…" />
+                : <UiText text="Применить {0}" values={[String(cleaningPreview?.applicable ?? 0)]} />}
             </button>
           </div>
         </div>
@@ -752,13 +757,12 @@ export function SemanticBulkEditor({
       )}
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
       {result && (
         <div className="inline-alert success" role="status">
-          Изменено: {result.changed}; конфликтов: {result.conflicted};
-          пропущено: {result.skipped}; ошибок: {result.failed}.
+          <UiText text="Изменено:" after=" " />{result.changed}<UiText text="; конфликтов:" after=" " />{result.conflicted}<UiText text="; пропущено:" after=" " />{result.skipped}<UiText text="; ошибок:" after=" " />{result.failed}.
         </div>
       )}
       <div className="semantic-editor-actions">
@@ -768,27 +772,15 @@ export function SemanticBulkEditor({
           onClick={onCancel}
           type="button"
         >
-          Отмена
-        </button>
+          <UiText text="Отмена" /></button>
         <button className="primary-button" disabled={saving} type="submit">
-          {saving ? "Применяем…" : "Применить"}
+          {saving ? <UiText text="Применяем…" /> : <UiText text="Применить" />}
         </button>
       </div>
     </form>
   );
 }
 
-function parseTags(value: string): readonly string[] {
-  return [
-    ...new Map(
-      value
-        .split(",")
-        .map((tag) => tag.normalize("NFKC").trim())
-        .filter(Boolean)
-        .map((tag) => [tag.toLocaleLowerCase(), tag] as const)
-    ).values()
-  ].slice(0, 50);
-}
 
 function singleKeywordPatch(
   initial: BulkSelection,
@@ -824,7 +816,6 @@ function singleKeywordPatch(
       ? (initial.clusterId ?? null)
       : values.clusterId;
   const targetUrl = values.targetUrl.normalize("NFKC").trim() || null;
-  const initialTags = parseTags(initial.tags.join(","));
   return {
     ...(text === initial.text ? {} : { text }),
     ...(language === initial.language ? {} : { language }),
@@ -839,9 +830,7 @@ function singleKeywordPatch(
     ...(groupId === (initial.groupId ?? null) ? {} : { groupId }),
     ...(clusterId === (initial.clusterId ?? null) ? {} : { clusterId }),
     ...(targetUrl === (initial.targetUrl ?? null) ? {} : { targetUrl }),
-    ...(sameTags(values.tagNames, initialTags)
-      ? {}
-      : { tagNames: values.tagNames })
+    ...keywordTagChanges(initial.tags, values.tagNames)
   };
 }
 
@@ -863,9 +852,6 @@ async function updateSingleKeyword(
   };
 }
 
-function sameTags(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((tag, index) => tag === right[index]);
-}
 
 function cleaningStateLabel(
   state: SemanticKeywordCleaningPreview["changes"][number]["state"]

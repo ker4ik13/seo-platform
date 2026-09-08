@@ -39,6 +39,16 @@ const CORRELATION_ID = "correlation-0001";
 const CAUSATION_ID = "causation-0001";
 const FAILURE_ID = "a".repeat(64);
 
+test("billing notice events contain only scoped identifiers and reject recipient or tenant injection", () => {
+  const input = { eventId: EVENT_ID, eventType: transactionalEmailEventTypesV1.billingNoticeRequested, occurredAt: new Date(OCCURRED_AT), traceId: TRACE_ID, metadata: {}, noticeId: RECEIPT_ID, workspaceId: WORKSPACE_ID };
+  const envelope = createTransactionalEmailEventEnvelopeV1(input);
+  assert.deepEqual(envelope.data, { noticeId: RECEIPT_ID, workspaceId: WORKSPACE_ID });
+  assert.deepEqual(parseTransactionalEmailEventEnvelopeV1(envelope), envelope);
+  assert.throws(() => createTransactionalEmailEventEnvelopeV1({ ...input, recipient: "private@example.test" } as never));
+  assert.throws(() => parseTransactionalEmailEventEnvelopeV1({ ...envelope, workspaceId: USER_ID }));
+  assert.throws(() => parseTransactionalEmailEventEnvelopeV1({ ...envelope, data: { ...envelope.data, email: "private@example.test" } }));
+});
+
 function identityEnvelope(
   eventType:
     | typeof transactionalEmailEventTypesV1.emailVerificationRequested
@@ -134,8 +144,9 @@ function deadLetterEnvelope(): Readonly<Record<string, unknown>> {
   };
 }
 
-test("transactional email constants expose only the four allowlisted events", () => {
+test("transactional email constants expose only the five allowlisted events", () => {
   assert.deepEqual(transactionalEmailEventTypesV1, {
+    billingNoticeRequested: "billing.notice.requested.v1",
     emailVerificationRequested:
       "identity.email-verification.requested.v1",
     passwordResetRequested: "identity.password-reset.requested.v1",

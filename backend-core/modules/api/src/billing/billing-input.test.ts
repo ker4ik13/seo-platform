@@ -74,7 +74,7 @@ test("enforces bounded integer amounts for top-ups and refunds", () => {
     reason: "Test"
   });
   assert.throws(
-    () => billingRefundInput({ amountMinor: 99, reason: "Test" }),
+    () => billingRefundInput({ amountMinor: 0, reason: "Test" }),
     fieldError("amountMinor", "INVALID_AMOUNT")
   );
 });

@@ -1,3 +1,4 @@
+import { rankDimensionConfigurationWhere, rankDimensionMetadata } from "../rank-results/rank-dimension.js";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import {
@@ -8,6 +9,7 @@ import {
 } from "@nestjs/common";
 import {
   projectPositionHistoryMaxPoints,
+  parseSemanticRankDimensionKey,
   semanticKeywordBulkCreatePreviewMaxGroups,
   type ApiCollectionResponse,
   type InternalCreateSemanticKeywordInput,
@@ -77,6 +79,18 @@ interface KeywordCursor {
   readonly sort: SemanticKeywordSort;
   readonly sortValue: string | number;
   readonly filterHash: string;
+}
+
+interface ProjectPositionHistoryDayRow {
+  readonly dayKey: string;
+  readonly observedAt: Date;
+  readonly measuredKeywordCount: bigint;
+  readonly positionedKeywordCount: bigint;
+  readonly top3KeywordCount: bigint;
+  readonly top5KeywordCount: bigint;
+  readonly top10KeywordCount: bigint;
+  readonly top30KeywordCount: bigint;
+  readonly top50KeywordCount: bigint;
 }
 
 const KEYWORD_INCLUDE = {
@@ -183,75 +197,91 @@ export class KeywordService {
     projectId: string,
     query: ProjectPositionHistoryQuery = { includeUntracked: false }
   ): Promise<ProjectPositionHistory> {
-    const where = {
-      workspaceId,
-      projectId,
-      positionTrackingEnabled: true,
-      keyword: {
-        status: "ACTIVE" as const,
-        ...(query.includeUntracked ? {} : { isTracked: true })
-      }
-    } satisfies Prisma.RankSnapshotWhereInput;
-    const slices = await this.prisma.rankSnapshot.groupBy({
-      by: ["jobId"],
-      where,
-      _max: { observedAt: true },
-      orderBy: { _max: { observedAt: "desc" } },
-      take: projectPositionHistoryMaxPoints + 1
-    });
-    const boundedSlices = slices.slice(0, projectPositionHistoryMaxPoints);
-    if (boundedSlices.length === 0) {
-      return { points: [], truncated: false };
-    }
-    const jobIds = boundedSlices.map(({ jobId }) => jobId);
-    const counts = await this.prisma.rankSnapshot.groupBy({
-      by: ["jobId", "found", "position"],
-      where: { ...where, jobId: { in: jobIds } },
-      _count: { _all: true }
-    });
-    const countsByJob = new Map<string, {
-      measuredKeywordCount: number;
-      positionedKeywordCount: number;
-      topCounts: ProjectPositionTopCounts;
-    }>();
-    for (const row of counts) {
-      const aggregate = countsByJob.get(row.jobId) ?? {
-        measuredKeywordCount: 0,
-        positionedKeywordCount: 0,
-        topCounts: emptyPositionTopCounts()
-      };
-      aggregate.measuredKeywordCount += row._count._all;
-      if (row.found && row.position !== null) {
-        aggregate.positionedKeywordCount += row._count._all;
-        aggregate.topCounts = addPositionTopCount(
-          aggregate.topCounts,
-          row.position,
-          row._count._all
-        );
-      }
-      countsByJob.set(row.jobId, aggregate);
-    }
-    const points = boundedSlices
-      .map((slice): ProjectPositionHistoryPoint => {
-        const observedAt = slice._max.observedAt;
-        if (!observedAt) throw new Error("Position history slice has no timestamp");
-        const aggregate = countsByJob.get(slice.jobId) ?? {
-          measuredKeywordCount: 0,
-          positionedKeywordCount: 0,
-          topCounts: emptyPositionTopCounts()
-        };
-        return {
-          id: slice.jobId,
-          observedAt: observedAt.toISOString(),
-          measuredKeywordCount: aggregate.measuredKeywordCount,
-          positionedKeywordCount: aggregate.positionedKeywordCount,
-          ...aggregate.topCounts
-        };
-      })
-      .reverse();
+    const rows = await this.prisma.$queryRaw<
+      readonly ProjectPositionHistoryDayRow[]
+    >(Prisma.sql`
+      WITH daily_latest AS (
+        SELECT
+          TO_CHAR(
+            snapshot.observed_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD'
+          ) AS "dayKey",
+          snapshot.observed_at AS "observedAt",
+          snapshot.keyword_id,
+          snapshot.found,
+          snapshot.position,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              (snapshot.observed_at AT TIME ZONE 'UTC')::date,
+              snapshot.keyword_id
+            ORDER BY snapshot.observed_at DESC, snapshot.id DESC
+          ) AS daily_sequence
+        FROM rank_snapshots snapshot
+        INNER JOIN keywords keyword
+          ON keyword.workspace_id = snapshot.workspace_id
+         AND keyword.project_id = snapshot.project_id
+         AND keyword.id = snapshot.keyword_id
+        WHERE snapshot.workspace_id = ${workspaceId}::uuid
+          AND snapshot.project_id = ${projectId}::uuid
+          AND snapshot.position_tracking_enabled = TRUE
+          AND keyword.status = 'ACTIVE'
+          AND (${query.includeUntracked}::boolean OR keyword.is_tracked = TRUE)
+      ),
+      daily_aggregates AS (
+        SELECT
+          "dayKey",
+          MAX("observedAt") AS "observedAt",
+          COUNT(*)::bigint AS "measuredKeywordCount",
+          COUNT(*) FILTER (
+            WHERE found = TRUE AND position IS NOT NULL
+          )::bigint AS "positionedKeywordCount",
+          COUNT(*) FILTER (
+            WHERE found = TRUE AND position BETWEEN 1 AND 3
+          )::bigint AS "top3KeywordCount",
+          COUNT(*) FILTER (
+            WHERE found = TRUE AND position BETWEEN 1 AND 5
+          )::bigint AS "top5KeywordCount",
+          COUNT(*) FILTER (
+            WHERE found = TRUE AND position BETWEEN 1 AND 10
+          )::bigint AS "top10KeywordCount",
+          COUNT(*) FILTER (
+            WHERE found = TRUE AND position BETWEEN 1 AND 30
+          )::bigint AS "top30KeywordCount",
+          COUNT(*) FILTER (
+            WHERE found = TRUE AND position BETWEEN 1 AND 50
+          )::bigint AS "top50KeywordCount"
+        FROM daily_latest
+        WHERE daily_sequence = 1
+        GROUP BY "dayKey"
+      ),
+      bounded_days AS (
+        SELECT *
+        FROM daily_aggregates
+        ORDER BY "dayKey" DESC
+        LIMIT ${projectPositionHistoryMaxPoints + 1}
+      )
+      SELECT *
+      FROM bounded_days
+      ORDER BY "dayKey" ASC
+    `);
+    const boundedRows = rows.length > projectPositionHistoryMaxPoints
+      ? rows.slice(1)
+      : rows;
+    const points = boundedRows.map((row): ProjectPositionHistoryPoint => ({
+      id: `day:${row.dayKey}`,
+      date: row.dayKey,
+      observedAt: row.observedAt.toISOString(),
+      measuredKeywordCount: safeHistoryCount(row.measuredKeywordCount),
+      positionedKeywordCount: safeHistoryCount(row.positionedKeywordCount),
+      top3KeywordCount: safeHistoryCount(row.top3KeywordCount),
+      top5KeywordCount: safeHistoryCount(row.top5KeywordCount),
+      top10KeywordCount: safeHistoryCount(row.top10KeywordCount),
+      top30KeywordCount: safeHistoryCount(row.top30KeywordCount),
+      top50KeywordCount: safeHistoryCount(row.top50KeywordCount)
+    }));
     return {
       points,
-      truncated: slices.length > projectPositionHistoryMaxPoints
+      truncated: rows.length > projectPositionHistoryMaxPoints
     };
   }
 
@@ -354,10 +384,11 @@ export class KeywordService {
         ? {}
         : { isTracked: query.isTracked })
     };
-    let externalSortValueById = new Map<string, string>();
+    let externalSortValueById = new Map<string, string | number>();
     let rows: KeywordAggregate[];
     let totalApprox: number | undefined;
-    if (isExternalKeywordSort(sort)) {
+    const advancedFilters = hasAdvancedKeywordFilters(query);
+    if (isExternalKeywordSort(sort) || advancedFilters) {
       const [externalPage, count] = await Promise.all([
         isMetricKeywordSort(sort)
           ? metricSortedKeywordPage(
@@ -371,7 +402,8 @@ export class KeywordService {
               cursor,
               keywordStatus
             )
-          : tagSortedKeywordPage(
+          : sort === "TAGS_ASC" || sort === "TAGS_DESC"
+            ? tagSortedKeywordPage(
               this.prisma,
               workspaceId,
               projectId,
@@ -381,10 +413,13 @@ export class KeywordService {
               sort,
               cursor,
               keywordStatus
-            ),
+            )
+            : rawSortedKeywordPage(this.prisma, workspaceId, projectId, query, search, tag, sort, cursor, keywordStatus),
         cursor
           ? Promise.resolve(undefined)
-          : this.prisma.keyword.count({ where: baseWhere })
+          : advancedFilters
+            ? rawKeywordCount(this.prisma, workspaceId, projectId, query, search, tag, keywordStatus)
+            : this.prisma.keyword.count({ where: baseWhere })
       ]);
       const aggregates: KeywordAggregate[] = externalPage.ids.length === 0
         ? []
@@ -797,7 +832,8 @@ export class KeywordService {
   public async insights(
     workspaceId: string,
     projectId: string,
-    keywordId: string
+    keywordId: string,
+    dimensionKey?: string
   ): Promise<SemanticKeywordInsights> {
     const keyword = await this.prisma.keyword.findFirst({
       where: {
@@ -830,10 +866,10 @@ export class KeywordService {
       this.prisma.currentRank.findMany({
         where: { workspaceId, projectId, keywordId },
         orderBy: [{ observedAt: "desc" }, { snapshotId: "desc" }],
-        take: 50
+        take: 200
       }),
       this.prisma.rankSnapshot.findMany({
-        where: { workspaceId, projectId, keywordId },
+        where: { workspaceId, projectId, keywordId, ...(dimensionKey ? { manifest: { configuration: rankDimensionConfigurationWhere(dimensionKey) } } : {}) },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 240,
         select: {
@@ -988,7 +1024,7 @@ export class KeywordService {
       serpResultsBySnapshotId.set(result.snapshotId, [...rows, result]);
     }
     const latestSerpSnapshotByEngine = new Map<
-      "GOOGLE" | "YANDEX",
+      string,
       (typeof rankSnapshots)[number]
     >();
     for (const snapshot of serpCandidateSnapshots) {
@@ -1000,10 +1036,10 @@ export class KeywordService {
       );
       if (
         configuration &&
-        !latestSerpSnapshotByEngine.has(configuration.searchEngine)
+        !latestSerpSnapshotByEngine.has(rankDimensionMetadata(configuration).dimensionKey)
       ) {
         latestSerpSnapshotByEngine.set(
-          configuration.searchEngine,
+          rankDimensionMetadata(configuration).dimensionKey,
           snapshot
         );
       }
@@ -1040,6 +1076,7 @@ export class KeywordService {
           )
         ) ?? rank.previousPosition ?? undefined;
         return [{
+          ...rankDimensionMetadata(configuration),
           trackingContextId: rank.trackingContextId,
           contextName: context.name,
           searchEngine,
@@ -1064,6 +1101,7 @@ export class KeywordService {
           configuration.searchEngine
         );
         return [{
+          ...rankDimensionMetadata(configuration),
           snapshotId: snapshot.id,
           trackingContextId: snapshot.trackingContextId,
           contextName: context.name,
@@ -1095,6 +1133,7 @@ export class KeywordService {
           configuration.searchEngine
         );
         return [{
+          ...rankDimensionMetadata(configuration),
           snapshotId: snapshot.id,
           trackingContextId: snapshot.trackingContextId,
           contextName: context.name,
@@ -1859,6 +1898,20 @@ export class KeywordService {
                 input.projectId,
                 input.tagNames
               );
+        if (input.tagNames !== undefined && (input.addTagNames !== undefined || input.removeTagNames !== undefined)) {
+          throw new HttpException({ code: "VALIDATION_FAILED", message: "Use either tag replacement or tag changes" }, HttpStatus.BAD_REQUEST);
+        }
+        const removedNames = new Set((input.removeTagNames ?? []).map(normalizeTagName));
+        const removedTagIds = current.tags.filter(({ tag }) => removedNames.has(normalizeTagName(tag.name))).map(({ tag }) => tag.id);
+        const addedTags = input.addTagNames === undefined ? [] : await resolveTags(transaction, input.workspaceId, input.projectId, input.addTagNames, true);
+        if (input.addTagNames !== undefined || input.removeTagNames !== undefined) {
+          const retained = current.tags.filter(({ tag }) => !removedTagIds.includes(tag.id)).map(({ tag }) => tag.id);
+          // Preserve legacy rows above the cap; a delta may reduce their tags
+          // without silently truncating them, but cannot increase that count.
+          if (new Set([...retained, ...addedTags.map(tag => tag.id)]).size > Math.max(50, current.tags.length)) {
+            throw new HttpException({ code: "VALIDATION_FAILED", message: "У одного запроса может быть не больше 50 тегов. Существующие теги сохранены." }, HttpStatus.BAD_REQUEST);
+          }
+        }
         const normalized =
           input.text === undefined
             ? undefined
@@ -1934,6 +1987,12 @@ export class KeywordService {
               }))
             });
           }
+        }
+        if (removedTagIds.length > 0) {
+          await transaction.keywordTag.deleteMany({ where: { projectId: input.projectId, keywordId, tagId: { in: removedTagIds } } });
+        }
+        if (addedTags.length > 0) {
+          await transaction.keywordTag.createMany({ data: addedTags.map(tag => ({ projectId: input.projectId, keywordId, tagId: tag.id })), skipDuplicates: true });
         }
         const result = await requiredKeyword(
           transaction,
@@ -2560,7 +2619,8 @@ async function resolveTags(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
   projectId: string,
-  names: readonly string[]
+  names: readonly string[],
+  preserveExistingName = false
 ): Promise<readonly { readonly id: string }[]> {
   const result: { id: string }[] = [];
   for (const name of names) {
@@ -2576,7 +2636,7 @@ async function resolveTags(
         normalizedName
       },
       update: {
-        name,
+        ...(preserveExistingName ? {} : { name }),
         status: "ACTIVE"
       },
       select: { id: true }
@@ -2953,6 +3013,21 @@ function keywordFilterHash(
       isTracked: query.isTracked ?? null,
       priorityMin: query.priorityMin ?? null,
       priorityMax: query.priorityMax ?? null,
+      frequencyBaseMin: query.frequencyBaseMin ?? null,
+      frequencyBaseMax: query.frequencyBaseMax ?? null,
+      frequencyExactMin: query.frequencyExactMin ?? null,
+      frequencyExactMax: query.frequencyExactMax ?? null,
+      frequencyFixedMin: query.frequencyFixedMin ?? null,
+      frequencyFixedMax: query.frequencyFixedMax ?? null,
+      wordCountMin: query.wordCountMin ?? null,
+      wordCountMax: query.wordCountMax ?? null,
+      targetUrlState: query.targetUrlState ?? null,
+      rankDimensionKey: query.rankDimensionKey ?? null,
+      rankState: query.rankState ?? null,
+      rankPositionMin: query.rankPositionMin ?? null,
+      rankPositionMax: query.rankPositionMax ?? null,
+      rankCheckedFrom: query.rankCheckedFrom ?? null,
+      rankCheckedBefore: query.rankCheckedBefore ?? null,
       multiSearch: query.multiSearch ?? null
     })
   );
@@ -3117,6 +3192,65 @@ function previousFoundPositionKey(
   snapshotId: string
 ): string {
   return `${keywordId}:${searchEngine}:${observedAt.toISOString()}:${snapshotId}`;
+}
+
+function hasAdvancedKeywordFilters(query: KeywordListQuery): boolean {
+  return [
+    query.frequencyBaseMin, query.frequencyBaseMax, query.frequencyExactMin, query.frequencyExactMax,
+    query.frequencyFixedMin, query.frequencyFixedMax, query.wordCountMin, query.wordCountMax,
+    query.targetUrlState, query.rankState, query.rankPositionMin, query.rankPositionMax,
+    query.rankCheckedFrom, query.rankCheckedBefore
+  ].some(value => value !== undefined);
+}
+
+async function rawKeywordCount(
+  prisma: PrismaService, workspaceId: string, projectId: string, query: KeywordListQuery,
+  search: string, tag: string, keywordStatus: "ACTIVE" | "DELETED"
+): Promise<number> {
+  const filters = keywordRawFilters(workspaceId, projectId, query, search, tag, keywordStatus);
+  const rows = await prisma.$queryRaw<readonly { count: bigint }[]>`
+    SELECT count(*)::bigint AS count FROM keywords k WHERE ${Prisma.join(filters, " AND ")}
+  `;
+  const count = rows[0]?.count;
+  if (count === undefined || count < 0n || count > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Keyword filter count is invalid");
+  return Number(count);
+}
+
+async function rawSortedKeywordPage(
+  prisma: PrismaService, workspaceId: string, projectId: string, query: KeywordListQuery,
+  search: string, tag: string, sort: SemanticKeywordSort, cursor: KeywordCursor | undefined,
+  keywordStatus: "ACTIVE" | "DELETED"
+): Promise<Readonly<{ ids: readonly string[]; sortValueById: Map<string, string | number> }>> {
+  const filters = keywordRawFilters(workspaceId, projectId, query, search, tag, keywordStatus);
+  const ascending = isAscendingKeywordSort(sort), operator = ascending ? Prisma.sql`>` : Prisma.sql`<`;
+  const direction = ascending ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+  if (sort === "PRIORITY_ASC" || sort === "PRIORITY_DESC") {
+    const value = cursor ? requiredCursorNumber(cursor.sortValue) : undefined;
+    const rows = await prisma.$queryRaw<readonly { id: string; sort_value: number }[]>`
+      SELECT k.id, k.priority AS sort_value FROM keywords k
+      WHERE ${Prisma.join(filters, " AND ")}
+        ${value === undefined ? Prisma.empty : Prisma.sql`AND (k.priority, k.id) ${operator} (${value}, ${cursor!.id}::uuid)`}
+      ORDER BY k.priority ${direction}, k.id ${direction} LIMIT ${query.limit + 1}`;
+    return { ids: rows.map(row => row.id), sortValueById: new Map(rows.map(row => [row.id, row.sort_value])) };
+  }
+  if (["TEXT_ASC", "TEXT_DESC", "SOURCE_ASC", "SOURCE_DESC"].includes(sort)) {
+    const field = sort.startsWith("TEXT_") ? Prisma.sql`k.text_normalized` : Prisma.sql`k.source_mode::text`;
+    const value = cursor ? requiredCursorString(cursor.sortValue) : undefined;
+    const rows = await prisma.$queryRaw<readonly { id: string; sort_value: string }[]>`
+      SELECT k.id, ${field} AS sort_value FROM keywords k
+      WHERE ${Prisma.join(filters, " AND ")}
+        ${value === undefined ? Prisma.empty : Prisma.sql`AND (${field}, k.id) ${operator} (${value}, ${cursor!.id}::uuid)`}
+      ORDER BY ${field} ${direction}, k.id ${direction} LIMIT ${query.limit + 1}`;
+    return { ids: rows.map(row => row.id), sortValueById: new Map(rows.map(row => [row.id, row.sort_value])) };
+  }
+  const field = sort.startsWith("UPDATED_") ? Prisma.sql`k.updated_at` : Prisma.sql`k.created_at`;
+  const value = cursor ? requiredCursorDate(cursor.sortValue) : undefined;
+  const rows = await prisma.$queryRaw<readonly { id: string; sort_value: Date }[]>`
+    SELECT k.id, ${field} AS sort_value FROM keywords k
+    WHERE ${Prisma.join(filters, " AND ")}
+      ${value === undefined ? Prisma.empty : Prisma.sql`AND (${field}, k.id) ${operator} (${value}, ${cursor!.id}::uuid)`}
+    ORDER BY ${field} ${direction}, k.id ${direction} LIMIT ${query.limit + 1}`;
+  return { ids: rows.map(row => row.id), sortValueById: new Map(rows.map(row => [row.id, row.sort_value.toISOString()])) };
 }
 
 async function previousFoundPositions(
@@ -3556,6 +3690,52 @@ function keywordRawFilters(
   if (query.isFavorite !== undefined) filters.push(Prisma.sql`k.is_favorite = ${query.isFavorite}`);
   if (query.priorityMin !== undefined) filters.push(Prisma.sql`k.priority >= ${query.priorityMin}`);
   if (query.priorityMax !== undefined) filters.push(Prisma.sql`k.priority <= ${query.priorityMax}`);
+  for (const [type, min, max] of [
+    ["BASE", query.frequencyBaseMin, query.frequencyBaseMax],
+    ["EXACT", query.frequencyExactMin, query.frequencyExactMax],
+    ["FIXED", query.frequencyFixedMin, query.frequencyFixedMax]
+  ] as const) {
+    if (min === undefined && max === undefined) continue;
+    const latest = Prisma.sql`(
+      SELECT fs.value FROM frequency_snapshots fs
+      WHERE fs.project_id = k.project_id AND fs.keyword_id = k.id AND fs.type = ${type}
+      ORDER BY fs.observed_at DESC, fs.id DESC LIMIT 1
+    )`;
+    if (min !== undefined) filters.push(Prisma.sql`${latest} >= ${BigInt(min)}`);
+    if (max !== undefined) filters.push(Prisma.sql`${latest} <= ${BigInt(max)}`);
+  }
+  const wordCount = Prisma.sql`CASE WHEN btrim(k.text_original) = '' THEN 0 ELSE cardinality(regexp_split_to_array(btrim(k.text_original), E'\\s+')) END`;
+  if (query.wordCountMin !== undefined) filters.push(Prisma.sql`${wordCount} >= ${query.wordCountMin}`);
+  if (query.wordCountMax !== undefined) filters.push(Prisma.sql`${wordCount} <= ${query.wordCountMax}`);
+  if (query.targetUrlState === "SET") filters.push(Prisma.sql`k.target_page_id IS NOT NULL`);
+  if (query.targetUrlState === "EMPTY") filters.push(Prisma.sql`k.target_page_id IS NULL`);
+  if (query.rankDimensionKey && (query.rankState || query.rankPositionMin !== undefined || query.rankPositionMax !== undefined || query.rankCheckedFrom || query.rankCheckedBefore)) {
+    const dimension = parseSemanticRankDimensionKey(query.rankDimensionKey);
+    if (!dimension) throw new Error("Validated rank dimension is invalid");
+    const base = Prisma.sql`
+      SELECT cr.found, cr.position, cr.observed_at
+      FROM current_ranks cr
+      INNER JOIN tracking_context_versions tcv
+        ON tcv.workspace_id = cr.workspace_id AND tcv.project_id = cr.project_id
+       AND tcv.context_id = cr.tracking_context_id AND tcv.configuration_version = cr.configuration_version
+      WHERE cr.workspace_id = k.workspace_id AND cr.project_id = k.project_id AND cr.keyword_id = k.id
+        AND tcv.search_engine::text = ${dimension.searchEngine} AND tcv.country_code = ${dimension.countryCode}
+        AND COALESCE(tcv.region_code, tcv.country_code) = ${dimension.regionCode}
+        AND tcv.language = ${dimension.language} AND tcv.device::text = ${dimension.device}
+      ORDER BY cr.observed_at DESC, cr.snapshot_id DESC, cr.tracking_context_id DESC LIMIT 1`;
+    if (query.rankState === "NOT_CHECKED") {
+      filters.push(Prisma.sql`NOT EXISTS (${base})`);
+    } else {
+      const conditions: Prisma.Sql[] = [];
+      if (query.rankState === "NOT_FOUND") conditions.push(Prisma.sql`NOT latest.found`);
+      if (query.rankState === "FOUND" || query.rankPositionMin !== undefined || query.rankPositionMax !== undefined) conditions.push(Prisma.sql`latest.found`);
+      if (query.rankPositionMin !== undefined) conditions.push(Prisma.sql`latest.position >= ${query.rankPositionMin}`);
+      if (query.rankPositionMax !== undefined) conditions.push(Prisma.sql`latest.position <= ${query.rankPositionMax}`);
+      if (query.rankCheckedFrom) conditions.push(Prisma.sql`latest.observed_at >= ${new Date(query.rankCheckedFrom)}`);
+      if (query.rankCheckedBefore) conditions.push(Prisma.sql`latest.observed_at < ${new Date(query.rankCheckedBefore)}`);
+      filters.push(Prisma.sql`EXISTS (SELECT 1 FROM (${base}) latest${conditions.length ? Prisma.sql` WHERE ${Prisma.join(conditions, " AND ")}` : Prisma.empty})`);
+    }
+  }
   const groupIds = query.groupIds?.length
     ? query.groupIds
     : query.groupId
@@ -3691,7 +3871,8 @@ function rankHistoryProvider(
   if (
     value === "ARSENKIN" ||
     value === "XMLSTOCK" ||
-    value === "KEY_COLLECTOR"
+    value === "KEY_COLLECTOR" ||
+    value === "MANUAL_IMPORT"
   ) return value;
   throw new Error("Stored rank history provider is unsupported");
 }
@@ -3703,6 +3884,13 @@ function positionTopCounts(
     (counts, position) => addPositionTopCount(counts, position, 1),
     emptyPositionTopCounts()
   );
+}
+
+function safeHistoryCount(value: bigint): number {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Project position history count is invalid");
+  }
+  return Number(value);
 }
 
 function emptyPositionTopCounts(): ProjectPositionTopCounts {

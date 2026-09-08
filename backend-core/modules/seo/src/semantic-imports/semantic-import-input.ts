@@ -11,6 +11,7 @@ import {
   type SemanticImportDuplicatePolicy,
   type SemanticImportFrequencyValue,
   type SemanticImportPositionValue,
+  type SemanticImportRankHistoryValue,
   type SemanticImportPublishRow
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -261,6 +262,10 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
     input.observedAt === undefined
       ? undefined
       : isoDate(input.observedAt, `${path}.observedAt`);
+  const positionHistory = input.positionHistory === undefined
+    ? undefined
+    : array(input.positionHistory, `${path}.positionHistory`).map((value, index) => historyPositionValue(value, `${path}.positionHistory.${index}`));
+  if (positionHistory && (positionHistory.length > 1_100 || new Set(positionHistory.map(value => `${value.searchEngine}:${value.countryCode}:${value.regionCode}:${value.language}:${value.device}:${value.observedAt}`)).size !== positionHistory.length)) invalid(`${path}.positionHistory`);
   const tags =
     input.tags === undefined
       ? undefined
@@ -297,10 +302,28 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
     ...(targetUrl ? { targetUrl } : {}),
     ...(frequencies ? { frequencies } : {}),
     ...(positions ? { positions } : {}),
+    ...(positionHistory ? { positionHistory } : {}),
     ...(observedAt ? { observedAt } : {}),
     ...(tags ? { tags } : {}),
     customValues
   };
+}
+
+function historyPositionValue(value: unknown, path: string): SemanticImportRankHistoryValue {
+  const input = record(value);
+  if (Object.keys(input).some(key => !["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "observedAt", "found", "position"].includes(key))) invalid(path);
+  if (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") invalid(`${path}.searchEngine`);
+  const countryCode = boundedString(input.countryCode, `${path}.countryCode`, 2).toUpperCase();
+  if (!/^[A-Z]{2}$/u.test(countryCode)) invalid(`${path}.countryCode`);
+  const regionCode = boundedString(input.regionCode, `${path}.regionCode`, 100);
+  const regionLabel = boundedString(input.regionLabel, `${path}.regionLabel`, 160);
+  const lang = language(input.language, `${path}.language`);
+  if (input.device !== "DESKTOP" && input.device !== "MOBILE") invalid(`${path}.device`);
+  const date = isoDate(input.observedAt, `${path}.observedAt`);
+  const found = boolean(input.found, `${path}.found`);
+  const position = input.position === undefined ? undefined : positiveInteger(input.position, `${path}.position`);
+  if ((found && (position === undefined || position > 100)) || (!found && position !== undefined)) invalid(`${path}.position`);
+  return { searchEngine: input.searchEngine, countryCode, regionCode, regionLabel, language: lang, device: input.device, observedAt: date, found, ...(position === undefined ? {} : { position }) };
 }
 
 function positionValue(

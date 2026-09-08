@@ -7,6 +7,8 @@ import {
   canViewWorkspaceIntegrations
 } from "../../../../../lib/app-permissions";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +31,11 @@ export default async function IntegrationSettingsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Подключения SEO API</h1>
+          <h1><UiText text="Подключения SEO API" /></h1>
           <p>
             {canView
-              ? "Используйте собственные API-ключи или системные XMLStock и Arsenkin с оплатой внутренними токенами. Секреты после подключения не показываются."
-              : "Управление workspace-подключениями доступно только участникам с разрешением на просмотр интеграций."}
+              ? <UiText text="Используйте собственные API-ключи или системные XMLStock и Arsenkin с оплатой внутренними токенами. Секреты после подключения не показываются." />
+              : <UiText text="Управление workspace-подключениями доступно только участникам с разрешением на просмотр интеграций." />}
           </p>
         </div>
       </section>
@@ -47,22 +49,19 @@ export default async function IntegrationSettingsPage() {
       />
       {!context.workspace ? (
         <section className="panel panel-empty compact">
-          <strong>Сначала создайте рабочее пространство</strong>
-          <p>API-ключи принадлежат workspace, а не отдельному проекту.</p>
+          <strong><UiText text="Сначала создайте рабочее пространство" /></strong>
+          <p><UiText text="API-ключи принадлежат workspace, а не отдельному проекту." /></p>
           <a className="primary-button" href="/app">
-            Перейти к созданию
-          </a>
+            <UiText text="Перейти к созданию" /></a>
         </section>
       ) : !canView ? (
         <section className="panel panel-empty compact">
-          <strong>Недостаточно прав</strong>
+          <strong><UiText text="Недостаточно прав" /></strong>
           <p>
-            Для просмотра подключений требуется разрешение{" "}
-            <code>integration.view</code>. Обратитесь к владельцу workspace.
-          </p>
+            <UiText text="Для просмотра подключений требуется разрешение" />{" "}
+            <code>integration.view</code><UiText text=". Обратитесь к владельцу workspace." /></p>
           <a className="secondary-button setup-link" href="/app">
-            Вернуться в приложение
-          </a>
+            <UiText text="Вернуться в приложение" /></a>
         </section>
       ) : (
         <IntegrationSettings

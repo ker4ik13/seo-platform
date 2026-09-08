@@ -190,6 +190,53 @@ test("canonicalizes nested KC4 position fields before hashing a publish chunk", 
   );
 });
 
+test("canonicalizes nested manual history fields before hashing a publish chunk", () => {
+  const canonical = canonicalPublishRow({
+    language: "ru",
+    customValues: {},
+    textOriginal: "история позиции",
+    normalizedHash: "d".repeat(64),
+    textNormalized: "история позиции",
+    sourceRowNumber: "5",
+    positionHistory: [{
+      found: true,
+      device: "MOBILE",
+      language: "ru",
+      position: 7,
+      observedAt: "2026-09-06T12:00:00.000Z",
+      regionCode: "1011969",
+      countryCode: "RU",
+      regionLabel: "Москва",
+      searchEngine: "GOOGLE"
+    }]
+  });
+
+  assert.ok(canonical);
+  assert.deepEqual(canonical.positionHistory, [{
+    searchEngine: "GOOGLE",
+    countryCode: "RU",
+    regionCode: "1011969",
+    regionLabel: "Москва",
+    language: "ru",
+    device: "MOBILE",
+    observedAt: "2026-09-06T12:00:00.000Z",
+    found: true,
+    position: 7
+  }]);
+  assert.ok(canonical.positionHistory[0]);
+  assert.deepEqual(Object.keys(canonical.positionHistory[0]), [
+    "searchEngine",
+    "countryCode",
+    "regionCode",
+    "regionLabel",
+    "language",
+    "device",
+    "observedAt",
+    "found",
+    "position"
+  ]);
+});
+
 function sha256(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(value))

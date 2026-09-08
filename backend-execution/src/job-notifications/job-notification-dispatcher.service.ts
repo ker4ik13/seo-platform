@@ -12,7 +12,7 @@ import {
 import { PrismaService } from "../database/prisma.service.js";
 import {
   Prisma,
-  type JobStatus,
+  type Job,
   type OutboxEvent
 } from "../generated/prisma/client.js";
 import {
@@ -68,74 +68,79 @@ export class JobNotificationDispatcherService
     try {
       await this.enqueueTerminalJobs();
       await this.dispatchPending();
-    } catch (error) {
-      this.logger.error(
-        "Job notification reconciliation failed",
-        error instanceof Error ? error.stack : undefined
-      );
+    } catch {
+      // Database errors may contain query parameters; keep tenant data out of logs.
+      this.logger.error("Job notification reconciliation failed");
     } finally {
       this.running = false;
     }
   }
 
   public async enqueueTerminalJobs(limit = 200): Promise<number> {
-    const jobs = await this.prisma.job.findMany({
-      where: {
-        actorId: { not: null },
-        projectId: { not: null },
-        type: { not: "TECHNICAL_CRAWL" },
-        status: { in: [...terminalJobNotificationStatuses] as JobStatus[] },
-        updatedAt: { gte: new Date(Date.now() - TERMINAL_LOOKBACK_MS) }
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: Math.min(Math.max(limit, 1), 500),
-      select: {
-        id: true,
-        workspaceId: true,
-        projectId: true,
-        actorId: true,
-        type: true,
-        status: true,
-        progressCurrent: true,
-        progressTotal: true,
-        errorSummary: true
-      }
-    });
-    let created = 0;
+    const batchSize = Number.isSafeInteger(limit)
+      ? Math.min(Math.max(limit, 1), 500)
+      : 200;
+    // Exclude already enqueued states BEFORE the limit. Otherwise the latest
+    // 200 jobs starve the rest forever and cause a duplicate INSERT every tick.
+    const eventTypes = Prisma.join(Object.entries(OUTBOX_EVENT_TYPES).map(
+      ([status, eventType]) => Prisma.sql`WHEN ${status} THEN ${eventType}`
+    ), " ");
+    const jobs = await this.prisma.$queryRaw<Pick<Job,
+      "id" | "workspaceId" | "projectId" | "actorId" | "type" | "status" |
+      "progressCurrent" | "progressTotal" | "errorSummary"
+    >[]>(Prisma.sql`
+      SELECT j.id, j.workspace_id AS "workspaceId", j.project_id AS "projectId",
+        j.actor_id AS "actorId", j.type, j.status,
+        j.progress_current AS "progressCurrent", j.progress_total AS "progressTotal",
+        j.error_summary AS "errorSummary"
+      FROM jobs j
+      WHERE j.actor_id IS NOT NULL AND j.project_id IS NOT NULL
+        AND j.type <> 'TECHNICAL_CRAWL'
+        AND j.status::text IN (${Prisma.join(terminalJobNotificationStatuses)})
+        AND j.updated_at >= ${new Date(Date.now() - TERMINAL_LOOKBACK_MS)}
+        AND NOT EXISTS (
+          SELECT 1 FROM outbox_events e
+          WHERE e.aggregate_id = j.id
+            AND e.event_type = CASE j.status::text ${eventTypes} END
+        )
+      ORDER BY j.updated_at ASC, j.id ASC
+      LIMIT ${batchSize}
+    `);
+    const events: Prisma.OutboxEventCreateManyInput[] = [];
     for (const job of jobs) {
       if (!job.projectId || !job.actorId || !isTerminal(job.status)) continue;
       const eventType = OUTBOX_EVENT_TYPES[job.status];
       if (!eventType) continue;
-      try {
-        await this.prisma.outboxEvent.create({
-          data: {
-            eventType,
-            aggregateId: job.id,
-            workspaceId: job.workspaceId,
-            projectId: job.projectId,
-            payload: {
-              workspaceId: job.workspaceId,
-              projectId: job.projectId,
-              actorId: job.actorId,
-              jobId: job.id,
-              jobType: job.type,
-              status: job.status,
-              progressCurrent: progressNumber(job.progressCurrent),
-              progressTotal: job.progressTotal === null
-                ? null
-                : progressNumber(job.progressTotal),
-              errorCode: errorCode(job.errorSummary),
-              idempotencyKey: `job-notification:${job.id}:${job.status}`
-            },
-            metadata: { schemaVersion: 1 }
-          }
-        });
-        created += 1;
-      } catch (error) {
-        if (!isUniqueConstraint(error)) throw error;
-      }
+      events.push({
+        eventType,
+        aggregateId: job.id,
+        workspaceId: job.workspaceId,
+        projectId: job.projectId,
+        payload: {
+          workspaceId: job.workspaceId,
+          projectId: job.projectId,
+          actorId: job.actorId,
+          jobId: job.id,
+          jobType: job.type,
+          status: job.status,
+          progressCurrent: progressNumber(job.progressCurrent),
+          progressTotal: job.progressTotal === null
+            ? null
+            : progressNumber(job.progressTotal),
+          errorCode: errorCode(job.errorSummary),
+          idempotencyKey: `job-notification:${job.id}:${job.status}`
+        },
+        metadata: { schemaVersion: 1 }
+      });
     }
-    return created;
+    if (events.length === 0) return 0;
+    // The partial unique index remains the final arbiter between replicas.
+    // ON CONFLICT avoids exceptions and PostgreSQL ERROR/STATEMENT log floods.
+    const result = await this.prisma.outboxEvent.createMany({
+      data: events,
+      skipDuplicates: true
+    });
+    return result.count;
   }
 
   public async dispatchPending(limit = 50): Promise<number> {
@@ -293,8 +298,4 @@ function isTerminal(value: string): value is TerminalJobNotificationStatus {
   return terminalJobNotificationStatuses.includes(
     value as TerminalJobNotificationStatus
   );
-}
-
-function isUniqueConstraint(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

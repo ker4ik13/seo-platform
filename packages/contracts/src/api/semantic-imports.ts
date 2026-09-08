@@ -1,3 +1,5 @@
+import { parseSemanticRankDimensionKey, semanticRankDimensionKey } from "./rank-dimensions.js";
+
 export const semanticImportEncodings = [
   "AUTO",
   "UTF_8",
@@ -141,6 +143,61 @@ export interface SemanticImportMapping {
    * behaviour so an in-flight import can resume safely after deployment.
    */
   readonly createMissingKeywords: boolean;
+  /** Wide history table: one keyword row and one measurement date per column. */
+  readonly positionHistory?: SemanticPositionHistoryImportOptions;
+}
+
+export interface SemanticPositionHistoryImportOptions {
+  /** One uploaded file represents exactly one search engine. */
+  readonly searchEngine: "YANDEX" | "GOOGLE";
+  readonly countryCode: string;
+  readonly regionCode: string;
+  readonly regionLabel: string;
+  readonly language: string;
+  readonly device: "DESKTOP" | "MOBILE";
+}
+
+export function parseSemanticPositionHistoryImportOptions(value: unknown): SemanticPositionHistoryImportOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid position history options");
+  const input = value as Record<string, unknown>;
+  const allowed = ["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
+  if (Object.keys(input).some(key => !allowed.includes(key)) ||
+    (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") ||
+    typeof input.countryCode !== "string" || !/^[A-Za-z]{2}$/u.test(input.countryCode) ||
+    typeof input.regionCode !== "string" || !input.regionCode.trim() || input.regionCode.length > 100 ||
+    typeof input.regionLabel !== "string" || !input.regionLabel.trim() || input.regionLabel.length > 160 ||
+    typeof input.language !== "string" || !input.language.trim() || input.language.length > 16 ||
+    (input.device !== "DESKTOP" && input.device !== "MOBILE")) throw new TypeError("Invalid position history context");
+  let language: string;
+  try { language = Intl.getCanonicalLocales(input.language.trim())[0]!; } catch { throw new TypeError("Invalid position history language"); }
+  const result: SemanticPositionHistoryImportOptions = {
+    searchEngine: input.searchEngine as "YANDEX" | "GOOGLE",
+    countryCode: input.countryCode.toUpperCase(),
+    regionCode: input.regionCode.normalize("NFKC").trim(),
+    regionLabel: input.regionLabel.normalize("NFKC").replace(/\s+/gu, " ").trim(),
+    language,
+    device: input.device as "DESKTOP" | "MOBILE"
+  };
+  if (!parseSemanticRankDimensionKey(semanticRankDimensionKey(result))) {
+    throw new TypeError("Invalid position history context");
+  }
+  return result;
+}
+
+/** Canonicalizes ISO and common Russian/European spreadsheet date headers. */
+export function semanticPositionHistoryHeaderDate(value: string): string | undefined {
+  const source = value.normalize("NFKC").trim();
+  let year: number, month: number, day: number;
+  let match = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:T00:00:00(?:\.000)?Z)?$/u.exec(source);
+  if (match) [, year, month, day] = [match[0], Number(match[1]), Number(match[2]), Number(match[3])];
+  else {
+    match = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/u.exec(source);
+    if (!match) return undefined;
+    [, day, month, year] = [match[0], Number(match[1]), Number(match[2]), Number(match[3])];
+  }
+  const date = new Date(Date.UTC(year!, month! - 1, day!));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date.toISOString().slice(0, 10) : undefined;
 }
 
 export interface ConfigureSemanticImportInput
@@ -273,6 +330,18 @@ export interface SemanticImportPositionValue {
   readonly rankingUrl?: string;
 }
 
+export interface SemanticImportRankHistoryValue {
+  readonly searchEngine: "YANDEX" | "GOOGLE";
+  readonly countryCode: string;
+  readonly regionCode: string;
+  readonly regionLabel?: string;
+  readonly language: string;
+  readonly device: "DESKTOP" | "MOBILE";
+  readonly observedAt: string;
+  readonly found: boolean;
+  readonly position?: number;
+}
+
 export interface SemanticImportPublishRow {
   readonly sourceRowNumber: string;
   readonly textOriginal: string;
@@ -287,6 +356,7 @@ export interface SemanticImportPublishRow {
   readonly targetUrl?: string;
   readonly frequencies?: readonly SemanticImportFrequencyValue[];
   readonly positions?: readonly SemanticImportPositionValue[];
+  readonly positionHistory?: readonly SemanticImportRankHistoryValue[];
   readonly observedAt?: string;
   readonly tags?: readonly string[];
   readonly customValues: Readonly<Record<string, string>>;

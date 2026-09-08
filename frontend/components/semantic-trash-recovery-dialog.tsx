@@ -7,6 +7,8 @@ import type {
 } from "@seo-platform/contracts";
 import { browserApiRequest } from "../lib/browser-api";
 import { SemanticModal } from "./semantic-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export interface SemanticTrashRecoveryItem {
   readonly keywordId: string;
@@ -25,6 +27,7 @@ export function SemanticTrashRecoveryDialog({
   onCompleted: (result: { restored: number; skipped: number }) => void;
   projectId: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set(items.map(({ keywordId }) => keywordId))
   );
@@ -85,11 +88,11 @@ export function SemanticTrashRecoveryDialog({
 
   return (
     <SemanticModal
-      description="Эти запросы уже находятся в корзине. Отметьте те, которые нужно восстановить и добавить в проект."
+      description={uiText("Эти запросы уже находятся в корзине. Отметьте те, которые нужно восстановить и добавить в проект.")}
       onClose={saving ? () => undefined : onClose}
       presenceKey="semantic-modal:trash-recovery"
       size="large"
-      title="Найдены запросы в корзине"
+      title={uiText("Найдены запросы в корзине")}
     >
       <div className="semantic-trash-recovery">
         <div className="semantic-trash-recovery-summary">
@@ -105,18 +108,18 @@ export function SemanticTrashRecoveryDialog({
               }
               type="checkbox"
             />
-            <span>Выбрать все</span>
+            <span><UiText text="Выбрать все" /></span>
           </label>
-          <span>Выбрано: {selected.size} из {items.length}</span>
+          <span><UiText text="Выбрано:" after=" " />{selected.size} <UiText text="из" before=" " after=" " />{items.length}</span>
         </div>
-        <div className="semantic-trash-recovery-table" role="region" aria-label="Запросы в корзине">
+        <div className="semantic-trash-recovery-table" role="region" aria-label={uiText("Запросы в корзине")}>
           <table>
             <thead>
               <tr>
-                <th aria-label="Выбор" />
-                <th>Запрос</th>
-                <th>Язык</th>
-                <th>Действие</th>
+                <th aria-label={uiText("Выбор")} />
+                <th><UiText text="Запрос" /></th>
+                <th><UiText text="Язык" /></th>
+                <th><UiText text="Действие" /></th>
               </tr>
             </thead>
             <tbody>
@@ -124,7 +127,7 @@ export function SemanticTrashRecoveryDialog({
                 <tr key={item.keywordId}>
                   <td>
                     <input
-                      aria-label={`Восстановить ${item.text}`}
+                      aria-label={uiText("Восстановить {0}", [String(item.text)])}
                       checked={selected.has(item.keywordId)}
                       onChange={() => toggle(item.keywordId)}
                       type="checkbox"
@@ -132,19 +135,18 @@ export function SemanticTrashRecoveryDialog({
                   </td>
                   <td><strong>{item.text}</strong></td>
                   <td>{item.input.language}</td>
-                  <td>Убрать из корзины</td>
+                  <td><UiText text="Убрать из корзины" /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
+        {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
         <div className="semantic-editor-actions">
           <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
-            Пропустить
-          </button>
+            <UiText text="Пропустить" /></button>
           <button className="primary-button" disabled={saving || selected.size === 0} onClick={() => void restore()} type="button">
-            {saving ? "Восстанавливаем…" : `Восстановить (${selected.size})`}
+            {saving ? <UiText text="Восстанавливаем…" /> : <UiText text="Восстановить ({0})" values={[String(selected.size)]} />}
           </button>
         </div>
       </div>

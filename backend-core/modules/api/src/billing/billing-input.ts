@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   billingBuyerTypes,
+  billingPaymentProviders,
+  type BillingPaymentProvider,
+  type OnlineBillingPaymentProvider,
   billingPeriods,
   type BillingBuyerType,
   type BillingPeriod,
@@ -29,6 +32,7 @@ const WEBHOOK_EVENTS = new Set([
 ]);
 
 export interface YookassaWebhookInput {
+  readonly provider?: BillingPaymentProvider;
   readonly event: string;
   readonly objectType: "payment" | "refund";
   readonly objectId: string;
@@ -48,11 +52,14 @@ export function billingCheckoutInput(
   if (!PLAN_CODE_PATTERN.test(planCode) || planCode === "TRIAL") {
     invalid("planCode", "INVALID_PLAN", "Select a paid plan");
   }
+  if (input.planVersion !== undefined && (!Number.isSafeInteger(input.planVersion) || Number(input.planVersion) < 1 || Number(input.planVersion) > 10000)) invalid("planVersion", "INVALID_VERSION", "Select a published plan version");
   return {
     planCode,
+    ...(input.planVersion === undefined ? {} : { planVersion: Number(input.planVersion) }),
     period: periodField(input.period),
     ...buyerFields(input),
-    ...checkoutConsent(input)
+    ...checkoutConsent(input),
+    ...paymentProvider(input.provider)
   };
 }
 
@@ -63,7 +70,8 @@ export function billingTopUpInput(
   return {
     amountMinor: moneyInteger(input.amountMinor, "amountMinor", 10_000),
     ...buyerFields(input),
-    ...checkoutConsent(input)
+    ...checkoutConsent(input),
+    ...paymentProvider(input.provider)
   };
 }
 
@@ -72,7 +80,7 @@ export function billingRefundInput(
 ): CreateBillingRefundInput {
   const input = inputObject(value);
   return {
-    amountMinor: moneyInteger(input.amountMinor, "amountMinor", 100),
+    amountMinor: moneyInteger(input.amountMinor, "amountMinor", 1),
     reason: stringField(input, "reason", {
       min: 3,
       max: 500
@@ -266,4 +274,10 @@ function moneyInteger(
 
 function invalid(path: string, code: string, message: string): never {
   throw validationError(path, code, message);
+}
+
+function paymentProvider(value: unknown): { provider?: OnlineBillingPaymentProvider } {
+  if (value === undefined || value === "YOOKASSA") return {};
+  if (!billingPaymentProviders.includes(value as OnlineBillingPaymentProvider)) invalid("provider", "INVALID_PROVIDER", "Unsupported payment provider");
+  return { provider: value as OnlineBillingPaymentProvider };
 }

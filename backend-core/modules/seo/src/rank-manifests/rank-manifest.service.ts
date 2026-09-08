@@ -1,3 +1,4 @@
+import { rankExecutionPolicyShape, rankManifestShapeIsSupported } from "@seo-platform/contracts";
 import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import {
@@ -7,8 +8,6 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import {
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
   rankManifestSingleTaskChunkSize,
   xmlStockRankManifestChunkSize,
   type InternalGetRankManifestChunkInput,
@@ -35,6 +34,8 @@ import { trackingContextIncludesUntracked } from "../tracking-contexts/tracking-
 import { semanticRankScopeHash } from "../rank-scopes/rank-scope-hash.js";
 import {
   inspectRankScopeBounds,
+  withRankScopeReadPlan,
+  readRankScopeAssignments,
   MAX_RANK_SCOPE_ENTRIES,
   rankScopeIsMaterializable,
   type RankScopeBounds
@@ -240,7 +241,7 @@ export class RankManifestService {
             assignments.length,
             snapshotAt
           );
-          const chunkSize = rankManifestChunkSize(input.provider);
+          const chunkSize = rankManifestChunkSize(input.provider, input.providerPolicyVersion);
           const entries = manifestEntries(
             allocation.entryIds,
             assignments,
@@ -322,8 +323,9 @@ export class RankManifestService {
               sealedAt: allocation.sealedAt
             }
           });
+          for (let offset = 0; offset < chunks.length; offset += MANIFEST_ENTRY_INSERT_BATCH_SIZE) {
           await transaction.rankExecutionManifestChunk.createMany({
-            data: chunks.map((chunk) => ({
+            data: chunks.slice(offset, offset + MANIFEST_ENTRY_INSERT_BATCH_SIZE).map((chunk) => ({
               workspaceId: input.workspaceId,
               projectId: input.projectId,
               manifestId: allocation.manifestId,
@@ -333,6 +335,7 @@ export class RankManifestService {
               entryCount: chunk.entries.length
             }))
           });
+          }
           const manifestEntryRows = entries.map((entry) => ({
               id: entry.id,
               workspaceId: input.workspaceId,
@@ -466,17 +469,13 @@ async function currentManifestScope(
     throw new Error("Tracking context has no configuration version");
   }
   if (input.retryOfJobId) {
-    const assignments = await currentRetryManifestAssignments(
-      transaction,
-      input,
-      context,
-      configuration
-    );
+    const assignments = await withRankScopeReadPlan(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, contextId: context.id, includeUntracked: true }, () => currentRetryManifestAssignments(transaction, input, context, configuration));
     return { context, configuration, assignments, retry: true };
   }
   const includeUntracked = trackingContextIncludesUntracked(
     context.launchProfile
   );
+  return withRankScopeReadPlan(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, contextId: context.id, includeUntracked }, async () => {
   const bounds = await inspectRankScopeBounds(transaction, {
     workspaceId: input.workspaceId,
     projectId: input.projectId,
@@ -484,23 +483,9 @@ async function currentManifestScope(
     includeUntracked
   });
   assertManifestScopeBounds(input, bounds);
-  const assignments =
-    await transaction.trackingContextKeywordAssignment.findMany({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        contextId: context.id,
-        removedAt: null,
-        keyword: {
-          status: "ACTIVE",
-          ...(includeUntracked ? {} : { isTracked: true })
-        }
-      },
-      orderBy: { keywordId: "asc" },
-      take: MAX_RANK_SCOPE_ENTRIES + 1,
-      select: ASSIGNMENT_SELECT
-    });
+  const assignments = await readRankScopeAssignments(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, contextId: context.id, includeUntracked });
   return { context, configuration, assignments, retry: false };
+  });
 }
 
 async function currentRetryManifestAssignments(
@@ -600,18 +585,14 @@ async function currentRetryManifestAssignments(
     );
   }
 
-  const assignments =
-    await transaction.trackingContextKeywordAssignment.findMany({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        contextId: context.id,
-        id: { in: missingEntries.map((entry) => entry.assignmentId) },
-        removedAt: null,
-        keyword: { status: "ACTIVE" }
-      },
-      select: ASSIGNMENT_SELECT
-    });
+  const assignments: AssignmentRecord[] = [];
+  for (let offset = 0; offset < missingEntries.length; offset += 5000) {
+    assignments.push(...await transaction.trackingContextKeywordAssignment.findMany({ where: {
+      workspaceId: input.workspaceId, projectId: input.projectId, contextId: context.id,
+      id: { in: missingEntries.slice(offset, offset + 5000).map(entry => entry.assignmentId) },
+      removedAt: null, keyword: { status: "ACTIVE" }
+    }, select: ASSIGNMENT_SELECT }));
+  }
   const byId = new Map(assignments.map((assignment) => [assignment.id, assignment]));
   const ordered = missingEntries.map((entry) => {
     const assignment = byId.get(entry.assignmentId);
@@ -903,7 +884,7 @@ function manifestSealWithoutHash(
     deduplicationHash,
     pairCount: input.estimate.pairCount,
     chunkCount: String(chunkCount),
-    chunkSize: String(chunkSize) as "1" | "250" | "15000",
+    chunkSize: String(chunkSize) as InternalRankManifestSeal["chunkSize"],
     execution: input.execution,
     retention: input.retention,
     status: "SEALED",
@@ -1017,7 +998,7 @@ function storedManifestSeal(
     deduplicationHash,
     pairCount: String(record.pairCount),
     chunkCount: String(record.chunkCount),
-    chunkSize: String(record.chunkSize) as "1" | "250" | "15000",
+    chunkSize: String(record.chunkSize) as InternalRankManifestSeal["chunkSize"],
     execution,
     retention,
     status: "SEALED",
@@ -1050,37 +1031,15 @@ function validStoredManifestShape(
   chunkCount: number,
   chunkSize: number
 ): boolean {
-  if (
-    !Number.isSafeInteger(pairCount) ||
-    !Number.isSafeInteger(chunkCount) ||
-    !Number.isSafeInteger(chunkSize)
-  ) {
-    return false;
-  }
-  if (chunkSize === legacyRankManifestChunkSize) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= legacyRankProviderKeywordLimit &&
-      chunkCount ===
-        Math.ceil(pairCount / legacyRankManifestChunkSize)
-    );
-  }
-  if (chunkSize === xmlStockRankManifestChunkSize) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= MAX_RANK_SCOPE_ENTRIES &&
-      chunkCount === pairCount
-    );
-  }
-  return (
-    chunkSize === rankManifestSingleTaskChunkSize &&
-    pairCount >= 1 &&
-    pairCount <= MAX_RANK_SCOPE_ENTRIES &&
-    chunkCount === 1
-  );
+  return rankManifestShapeIsSupported(chunkSize === 1 ? "XMLSTOCK" : "ARSENKIN", pairCount, chunkCount, chunkSize);
 }
 
-function rankManifestChunkSize(provider: "ARSENKIN" | "XMLSTOCK"): number {
+function rankManifestChunkSize(provider: "ARSENKIN" | "XMLSTOCK", policyVersion?: string): number {
+  if (policyVersion !== undefined) {
+    const policy = rankExecutionPolicyShape(policyVersion, provider);
+    if (!policy) throw new Error("Unsupported rank manifest policy");
+    return policy.chunkSize;
+  }
   return provider === "XMLSTOCK"
     ? xmlStockRankManifestChunkSize
     : rankManifestSingleTaskChunkSize;

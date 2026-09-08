@@ -20,7 +20,7 @@ export function rankFailureReason(
   return "Провайдер не вернул пригодный результат";
 }
 
-export function rankPollAttempts(row: RankOperationResultRow): string {
+export function rankPollAttempts(row: RankOperationResultRow, uiLocale: string = "ru-RU"): string {
   const value = row.pollAttempts;
   if (value === undefined) return "—";
   const mod100 = value % 100;
@@ -32,5 +32,5 @@ export function rankPollAttempts(row: RankOperationResultRow): string {
       : mod10 >= 2 && mod10 <= 4
         ? "попытки"
         : "попыток";
-  return `${new Intl.NumberFormat("ru-RU").format(value)} ${noun}`;
+  return `${new Intl.NumberFormat(uiLocale).format(value)} ${noun}`;
 }

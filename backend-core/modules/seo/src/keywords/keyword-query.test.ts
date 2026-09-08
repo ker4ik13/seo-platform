@@ -3,6 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
   keywordListQuery,
+  keywordBodyListInput,
   keywordMultiSearchInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
@@ -61,6 +62,14 @@ test("parses bounded keyword list query", () => {
       "01900000-0000-7000-8000-000000000012"
     ]
   );
+});
+
+test("trusted body list keeps a large group union and exact rank filter", () => {
+  const groupIds = Array.from({ length: 250 }, (_, index) => `01900000-0000-7000-8000-${index.toString().padStart(12, "0")}`);
+  const result = keywordBodyListInput({ query: { groupIds, rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP", rankState: "NOT_FOUND", frequencyExactMax: "0" } });
+  assert.equal(result.groupIds?.length, 250);
+  assert.equal(result.rankState, "NOT_FOUND");
+  assert.throws(() => keywordListQuery({ rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP", rankState: "NOT_FOUND", rankPositionMin: "1" }), BadRequestException);
 });
 
 test("parses the internal project position history tracking scope", () => {

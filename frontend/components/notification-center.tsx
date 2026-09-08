@@ -33,6 +33,8 @@ import {
   type OperationResultKind
 } from "../lib/operation-result-routes";
 import { OperationResultModal } from "./operation-result-modal";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 type NotificationSeverity = "INFO" | "WARNING" | "CRITICAL";
 const NOTIFICATION_REFRESH_INTERVAL_MS = 20_000;
@@ -64,6 +66,8 @@ interface NotificationOperation {
 }
 
 export function NotificationCenter({ projectId }: Readonly<{ projectId?: string }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [items, setItems] = useState<readonly NotificationItem[]>([]);
   const [invites, setInvites] = useState<readonly PendingWorkspaceInviteSummary[]>([]);
   const [transfers, setTransfers] = useState<readonly ProjectTransferRequestSummary[]>([]);
@@ -234,7 +238,7 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
     }
   }
 
-  async function openItem(item: NotificationItem): Promise<void> {
+  async function openItem(item: NotificationItem, uiLocale: string = "ru-RU"): Promise<void> {
     if (!item.deepLink) return;
     if (!item.readAt) await markRead(item.id);
     const operation = parseOperationResultHref(item.deepLink);
@@ -244,7 +248,7 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
         ...operation,
         projectId: operationProjectId,
         title: notificationOperationTitle(operation.kind, item.title),
-        description: `${item.title} · ${formatNotificationTime(item.createdAt)}`
+        description: `${item.title} · ${formatNotificationTime(item.createdAt, uiLocale)}`
       });
       return;
     }
@@ -308,52 +312,48 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
   return (
     <div className="notification-center-stack">
       <section className="panel notification-center-toolbar">
-        <div className="notification-filter" role="group" aria-label="Фильтр">
+        <div className="notification-filter" role="group" aria-label={uiText("Фильтр")}>
           <button
             aria-pressed={!unreadOnly}
             className={!unreadOnly ? "active" : undefined}
             onClick={() => setUnreadOnly(false)}
             type="button"
           >
-            Все
-          </button>
+            <UiText text="Все" /></button>
           <button
             aria-pressed={unreadOnly}
             className={unreadOnly ? "active" : undefined}
             onClick={() => setUnreadOnly(true)}
             type="button"
           >
-            Непрочитанные
-            {totalUnread > 0 && (
+            <UiText text="Непрочитанные" />{totalUnread > 0 && (
               <span>{totalUnread}</span>
             )}
           </button>
         </div>
         <div className="notification-center-actions">
           <a className="text-button" href="/app/settings/notifications">
-            Настроить доставку
-          </a>
+            <UiText text="Настроить доставку" /></a>
           <button
             className="secondary-button"
             disabled={markingAll || (page.unreadCount ?? 0) === 0}
             onClick={() => void markAllRead()}
             type="button"
           >
-            {markingAll ? "Отмечаем…" : "Прочитать всё"}
+            {markingAll ? <UiText text="Отмечаем…" /> : <UiText text="Прочитать всё" />}
           </button>
         </div>
       </section>
 
       {error && (
         <div className="inline-alert danger notification-center-error" role="alert">
-          <span>{error}</span>
+          <span>{<UiText text={error ?? ""} />}</span>
           <button
             className="text-button"
             onClick={() => setRetryVersion((value) => value + 1)}
             type="button"
           >
-            Повторить
-          </button>
+            <UiText text="Повторить" /></button>
         </div>
       )}
 
@@ -376,7 +376,7 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
         <section
           className="panel notification-center-loading"
           aria-busy="true"
-          aria-label="Загружаем уведомления"
+          aria-label={uiText("Загружаем уведомления")}
         >
           {Array.from({ length: 5 }, (_, index) => (
             <i key={index} />
@@ -388,13 +388,13 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
             <span className="state-icon">✓</span>
             <strong>
               {unreadOnly
-                ? "Все уведомления прочитаны"
-                : "Уведомлений пока нет"}
+                ? <UiText text="Все уведомления прочитаны" />
+                : <UiText text="Уведомлений пока нет" />}
             </strong>
             <p>
               {unreadOnly
-                ? "Новые события появятся здесь после выполнения работ."
-                : "Здесь будут результаты заданий, упоминания, предупреждения и отчёты."}
+                ? <UiText text="Новые события появятся здесь после выполнения работ." />
+                : <UiText text="Здесь будут результаты заданий, упоминания, предупреждения и отчёты." />}
             </p>
           </section>
         ) : null
@@ -412,9 +412,9 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
               />
               <div className="notification-item-copy">
                 <div>
-                  <span>{eventLabel(item.eventType)}</span>
+                  <span>{<UiText text={eventLabel(item.eventType) ?? ""} />}</span>
                   <time dateTime={item.createdAt}>
-                    {formatNotificationTime(item.createdAt)}
+                    {formatNotificationTime(item.createdAt, uiLocale)}
                   </time>
                 </div>
                 <h2>{item.title}</h2>
@@ -428,23 +428,22 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
                       type="button"
                     >
                       {markingId === item.id
-                        ? "Отмечаем…"
-                        : "Отметить прочитанным"}
+                        ? <UiText text="Отмечаем…" />
+                        : <UiText text="Отметить прочитанным" />}
                     </button>
                   )}
                   {item.deepLink && (
                     <button
                       className="text-button"
-                      onClick={() => void openItem(item)}
+                      onClick={() => void openItem(item, uiLocale)}
                       type="button"
                     >
-                      Открыть
-                    </button>
+                      <UiText text="Открыть" /></button>
                   )}
                 </div>
               </div>
               {!item.readAt && (
-                <span className="notification-unread-dot" aria-label="Не прочитано" />
+                <span className="notification-unread-dot" aria-label={uiText("Не прочитано")} />
               )}
             </article>
           ))}
@@ -458,7 +457,7 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
           onClick={() => void loadMore()}
           type="button"
         >
-          {loadingMore ? "Загружаем…" : "Показать ещё"}
+          {loadingMore ? <UiText text="Загружаем…" /> : <UiText text="Показать ещё" />}
         </button>
       )}
       {selectedOperation && (
@@ -528,8 +527,8 @@ function mergeLatestNotifications(
   return [...latest, ...current.filter(({ id }) => !latestIds.has(id))];
 }
 
-function formatNotificationTime(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatNotificationTime(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
     hour: "2-digit",

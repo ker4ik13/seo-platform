@@ -1,11 +1,12 @@
 import type {
-  InternalAuthEmailMaterialDecisionV1
+  InternalAuthEmailMaterialDecisionV1,
+  BillingNoticeKind
 } from "@seo-platform/contracts";
 import type { TransactionalEmail } from "../email/email.port.js";
 
 type ReadyMaterial = Extract<
   InternalAuthEmailMaterialDecisionV1,
-  { readonly decision: "READY" | "READY_RECEIPT" }
+  { readonly decision: "READY" | "READY_RECEIPT" | "READY_NOTICE" }
 >;
 type ActionReadyMaterial = Extract<
   ReadyMaterial,
@@ -115,6 +116,7 @@ export function renderAuthEmail(
   messageIdDomain: string
 ): TransactionalEmail {
   const locale = templateLocale(material.locale);
+  if (material.decision === "READY_NOTICE") return renderBillingNotice(material, locale, messageIdDomain);
   if (material.decision === "READY_RECEIPT") {
     return renderReceiptEmail(material, locale, messageIdDomain);
   }
@@ -159,6 +161,31 @@ export function renderAuthEmail(
     text,
     html
   };
+}
+
+function renderBillingNotice(material: Extract<ReadyMaterial, { decision: "READY_NOTICE" }>, locale: "en" | "ru", messageIdDomain: string): TransactionalEmail {
+  const messages: Record<BillingNoticeKind, readonly [string, string]> = {
+    PAYMENT_SUCCEEDED: ["Оплата получена", "Payment received"],
+    REFUND_REQUESTED: ["Заявка на возврат принята", "Refund request received"],
+    REFUND_APPROVED: ["Возврат одобрен и ожидает зачисления", "Refund approved and awaiting transfer"],
+    REFUND_REJECTED: ["По заявке на возврат принято решение", "Your refund request has been reviewed"],
+    REFUND_SUCCEEDED: ["Возврат выполнен", "Refund completed"],
+    REFUND_FAILED: ["Для возврата требуется помощь поддержки", "Your refund needs support assistance"],
+    SUBSCRIPTION_ENDING_3D: ["Подписка скоро заканчивается", "Your subscription ends soon"],
+    SUBSCRIPTION_ENDING_1D: ["До окончания подписки осталось меньше суток", "Your subscription ends within 24 hours"],
+    SUBSCRIPTION_EXPIRED: ["Оплаченный период завершён", "Your paid subscription period has ended"]
+  };
+  const ru = locale === "ru", heading = messages[material.kind][ru ? 0 : 1];
+  const details = [
+    `${ru ? "Рабочая область" : "Workspace"}: ${material.workspaceName}`,
+    ...(material.amountMinor === undefined ? [] : [`${ru ? "Сумма" : "Amount"}: ${new Intl.NumberFormat(locale, { style: "currency", currency: "RUB" }).format(material.amountMinor / 100)}`]),
+    ...(material.periodEnd ? [`${ru ? "Окончание периода" : "Period ends"}: ${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(material.periodEnd))} UTC`] : []),
+    ...(material.kind.startsWith("SUBSCRIPTION_") ? [ru ? "Проекты и сохранённые данные остаются доступны. Для новых операций может потребоваться продление. Если автопродление включено, его состояние видно в настройках оплаты." : "Your projects and saved data remain available. New operations may require renewal. If automatic renewal is enabled, its status is shown in billing settings."] : []),
+    ru ? "Подробности и история доступны в настройках оплаты. Выберите указанную рабочую область. Поддержка: @ker4ik13." : "Details and history are available in billing settings. Select the workspace named above. Support: @ker4ik13."
+  ];
+  // Material is strictly validated at the private API boundary; escape all UGC.
+  const action = ru ? "Открыть настройки оплаты" : "Open billing settings";
+  return { messageId: authEmailMessageId(material.eventId, messageIdDomain), to: material.recipient, subject: `${heading} · ${ru ? "SEOньорита" : "SEOnorita"}`, text: [heading, "", ...details, "", `${action}: ${material.billingUrl}`].join("\n"), html: `<!doctype html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#172033"><h1>${escapeHtml(heading)}</h1>${details.map(detail => `<p>${escapeHtml(detail)}</p>`).join("")}<p><a href="${escapeHtml(material.billingUrl)}">${escapeHtml(action)}</a></p></body></html>` };
 }
 
 function renderReceiptEmail(

@@ -16,6 +16,8 @@ import {
 } from "../lib/rank-automation-money";
 import { CustomSelect } from "./custom-select";
 import styles from "./rank-automation-panel.module.css";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type Cadence = "ONCE" | "DAILY" | "WEEKLY";
 
@@ -35,6 +37,8 @@ interface Draft {
 export function RankAutomationPanel({
   projectId
 }: Readonly<{ projectId: string }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [settings, setSettings] = useState<RankTrackingAutomationSettings>();
   const [contexts, setContexts] = useState<TrackingContextSettings>();
   const [editingId, setEditingId] = useState<string>();
@@ -233,45 +237,41 @@ export function RankAutomationPanel({
     <section className={`${styles.panel} panel`}>
       <header className={styles.header}>
         <div>
-          <span>Автоматизация</span>
-          <h2>Регулярные и отложенные съёмы</h2>
+          <span><UiText text="Автоматизация" /></span>
+          <h2><UiText text="Регулярные и отложенные съёмы" /></h2>
           <p>
-            Выберите сохранённый контекст: один запуск выполнится в указанную
-            дату, регулярный — ежедневно или по дням недели.
-          </p>
+            <UiText text="Выберите сохранённый контекст: один запуск выполнится в указанную дату, регулярный — ежедневно или по дням недели." /></p>
         </div>
         {settings && (
           <span
             className={styles.counter}
-            title="Лимит тарифа на включённые расписания в рабочей области"
+            title={uiText("Лимит тарифа на включённые расписания в рабочей области")}
           >
-            {settings.enabledCount} из {settings.limit} активных расписаний
-          </span>
+            {settings.enabledCount} <UiText text="из" before=" " after=" " />{settings.limit} <UiText text="активных расписаний" before=" " /></span>
         )}
       </header>
 
-      {error && <div className="inline-alert danger" role="alert">{error}</div>}
-      {notice && <div className="inline-alert success" role="status">{notice}</div>}
+      {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
+      {notice && <div className="inline-alert success" role="status">{<UiText text={notice ?? ""} />}</div>}
 
       {loading && !settings ? (
-        <p>Загружаем расписания…</p>
+        <p><UiText text="Загружаем расписания…" /></p>
       ) : activeContexts.length === 0 ? (
         <div className="inline-alert info">
-          Сначала создайте активный контекст съёма ниже на этой странице.
-        </div>
+          <UiText text="Сначала создайте активный контекст съёма ниже на этой странице." /></div>
       ) : (
         <div className={styles.form}>
           <label className={styles.wide}>
-            <span>Название</span>
+            <span><UiText text="Название" /></span>
             <input
               maxLength={160}
               onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              placeholder="Например, Еженедельный съём"
+              placeholder={uiText("Например, Еженедельный съём")}
               value={draft.name}
             />
           </label>
           <label>
-            <span>Контекст</span>
+            <span><UiText text="Контекст" /></span>
             <CustomSelect
               onChange={(event) =>
                 setDraft({ ...draft, trackingContextId: event.target.value })
@@ -284,21 +284,21 @@ export function RankAutomationPanel({
             </CustomSelect>
           </label>
           <label>
-            <span>Тип запуска</span>
+            <span><UiText text="Тип запуска" /></span>
             <CustomSelect
               onChange={(event) =>
                 setDraft({ ...draft, cadence: event.target.value as Cadence })
               }
               value={draft.cadence}
             >
-              <option value="ONCE">Один раз позже</option>
-              <option value="DAILY">Каждый день</option>
-              <option value="WEEKLY">По дням недели</option>
+              <option value="ONCE"><UiText text="Один раз позже" /></option>
+              <option value="DAILY"><UiText text="Каждый день" /></option>
+              <option value="WEEKLY"><UiText text="По дням недели" /></option>
             </CustomSelect>
           </label>
           {draft.cadence === "ONCE" ? (
             <label className={styles.wide}>
-              <span>Дата и время запуска</span>
+              <span><UiText text="Дата и время запуска" /></span>
               <input
                 min={minimumRunAtValue || undefined}
                 onChange={(event) => setDraft({ ...draft, runAt: event.target.value })}
@@ -306,12 +306,12 @@ export function RankAutomationPanel({
                 value={draft.runAt}
               />
               <small>
-                Часовой пояс браузера: {browserTimezone || "определяем…"}
+                <UiText text="Часовой пояс браузера:" after=" " />{browserTimezone || <UiText text="определяем…" />}
               </small>
             </label>
           ) : (
             <label>
-              <span>Время запуска</span>
+              <span><UiText text="Время запуска" /></span>
               <input
                 onChange={(event) => setDraft({ ...draft, time: event.target.value })}
                 type="time"
@@ -321,7 +321,7 @@ export function RankAutomationPanel({
           )}
           {draft.cadence === "WEEKLY" && (
             <fieldset className={styles.weekdays}>
-              <legend>Дни недели</legend>
+              <legend><UiText text="Дни недели" /></legend>
               {dayNames.map((label, index) => {
                 const day = index + 1;
                 return (
@@ -343,7 +343,7 @@ export function RankAutomationPanel({
             </fieldset>
           )}
           <label>
-            <span>Пауза после ошибок</span>
+            <span><UiText text="Пауза после ошибок" /></span>
             <input
               max={10}
               min={1}
@@ -366,16 +366,14 @@ export function RankAutomationPanel({
               type="checkbox"
             />
             <span>
-              <strong>Разрешить внутренние токены</strong>
+              <strong><UiText text="Разрешить внутренние токены" /></strong>
               <small>
-                Перед каждым запуском цена и баланс проверяются заново; выше
-                заданного лимита съём не начнётся.
-              </small>
+                <UiText text="Перед каждым запуском цена и баланс проверяются заново; выше заданного лимита съём не начнётся." /></small>
             </span>
           </label>
           {draft.allowPlatformPaid && (
             <label>
-              <span>Лимит списания за запуск, ₽</span>
+              <span><UiText text="Лимит списания за запуск, ₽" /></span>
               <input
                 min="0.000001"
                 onChange={(event) =>
@@ -398,8 +396,8 @@ export function RankAutomationPanel({
               type="checkbox"
             />
             <span>
-              <strong>Активировать сразу</strong>
-              <small>Запуск не пересечётся с уже активным заданием этого расписания</small>
+              <strong><UiText text="Активировать сразу" /></strong>
+              <small><UiText text="Запуск не пересечётся с уже активным заданием этого расписания" /></small>
             </span>
           </label>
           <div className={styles.formActions}>
@@ -409,7 +407,7 @@ export function RankAutomationPanel({
               onClick={() => void save()}
               type="button"
             >
-              {busy ? "Сохраняем…" : editing ? "Сохранить" : "Запланировать"}
+              {busy ? <UiText text="Сохраняем…" /> : editing ? <UiText text="Сохранить" /> : <UiText text="Запланировать" />}
             </button>
             {editing && (
               <button
@@ -420,8 +418,7 @@ export function RankAutomationPanel({
                 }}
                 type="button"
               >
-                Отмена
-              </button>
+                <UiText text="Отмена" /></button>
             )}
           </div>
         </div>
@@ -434,32 +431,32 @@ export function RankAutomationPanel({
               <div className={styles.itemHead}>
                 <div>
                   <strong>{automation.name}</strong>
-                  <span>{scheduleLabel(automation)}</span>
+                  <span>{<UiText text={scheduleLabel(automation, uiLocale) ?? ""} />}</span>
                 </div>
                 <span className={automation.enabled ? styles.active : styles.inactive}>
                   {automation.enabled
-                    ? "Активно"
+                    ? <UiText text="Активно" />
                     : automation.pausedReason === "ONE_TIME_COMPLETED"
-                      ? "Выполнено"
-                      : "На паузе"}
+                      ? <UiText text="Выполнено" />
+                      : <UiText text="На паузе" />}
                 </span>
               </div>
               <p>
                 {automation.nextRunAt
-                  ? `Следующий запуск: ${dateLabel(automation.nextRunAt)}`
+                  ? <UiText text="Следующий запуск: {0}" values={[String(dateLabel(automation.nextRunAt, uiLocale))]} />
                   : automation.lastRunAt
-                    ? `Последний запуск: ${dateLabel(automation.lastRunAt)}`
-                    : "Запусков ещё не было"}
+                    ? <UiText text="Последний запуск: {0}" values={[String(dateLabel(automation.lastRunAt, uiLocale))]} />
+                    : <UiText text="Запусков ещё не было" />}
                 {automation.consecutiveErrors
-                  ? ` · ошибок подряд: ${automation.consecutiveErrors}`
+                  ? <UiText text="· ошибок подряд: {0}" values={[String(automation.consecutiveErrors)]} before=" " />
                   : ""}
                 {automation.maxPlatformChargeMicro === "0"
-                  ? " · только свои ключи"
-                  : ` · до ${microToRubles(automation.maxPlatformChargeMicro)} ₽ внутренних токенов`}
+                  ? <UiText text="· только свои ключи" before=" " />
+                  : <UiText text="· до {0} ₽ внутренних токенов" values={[String(microToRubles(automation.maxPlatformChargeMicro))]} before=" " />}
               </p>
               <div className={styles.itemActions}>
                 <button className="text-button" disabled={busy} onClick={() => edit(automation)} type="button">
-                  {automation.pausedReason === "ONE_TIME_COMPLETED" ? "Запланировать снова" : "Изменить"}
+                  {automation.pausedReason === "ONE_TIME_COMPLETED" ? <UiText text="Запланировать снова" /> : <UiText text="Изменить" />}
                 </button>
                 <button
                   className="text-button"
@@ -467,8 +464,7 @@ export function RankAutomationPanel({
                   onClick={() => void action(automation, "runs")}
                   type="button"
                 >
-                  Запустить сейчас
-                </button>
+                  <UiText text="Запустить сейчас" /></button>
                 {automation.pausedReason !== "ONE_TIME_COMPLETED" && (
                   <button
                     className="text-button"
@@ -478,7 +474,7 @@ export function RankAutomationPanel({
                     }
                     type="button"
                   >
-                    {automation.enabled ? "Пауза" : "Возобновить"}
+                    {automation.enabled ? <UiText text="Пауза" /> : <UiText text="Возобновить" />}
                   </button>
                 )}
               </div>
@@ -486,7 +482,7 @@ export function RankAutomationPanel({
           ))}
         </div>
       ) : (
-        !loading && <p className={styles.empty}>Расписаний пока нет.</p>
+        !loading && <p className={styles.empty}><UiText text="Расписаний пока нет." /></p>
       )}
     </section>
   );
@@ -519,9 +515,9 @@ function scheduleInput(draft: Draft) {
     : { cadence: "WEEKLY" as const, hour, minute, weekdays: draft.weekdays };
 }
 
-function scheduleLabel(automation: RankTrackingAutomationSummary): string {
+function scheduleLabel(automation: RankTrackingAutomationSummary, uiLocale: string = "ru-RU"): string {
   const schedule = automation.schedule;
-  if (schedule.cadence === "ONCE") return `один раз · ${dateLabel(schedule.runAt)}`;
+  if (schedule.cadence === "ONCE") return `один раз · ${dateLabel(schedule.runAt, uiLocale)}`;
   const time = `${pad(schedule.hour)}:${pad(schedule.minute)}`;
   if (schedule.cadence === "DAILY") return `ежедневно в ${time}`;
   return `${schedule.weekdays.map((day) => dayNames[day - 1]).join(", ")} в ${time}`;
@@ -549,8 +545,8 @@ function isoToLocal(value: string): string {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-function dateLabel(value: string): string {
-  return new Date(value).toLocaleString("ru-RU", {
+function dateLabel(value: string, uiLocale: string = "ru-RU"): string {
+  return new Date(value).toLocaleString(uiLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric",

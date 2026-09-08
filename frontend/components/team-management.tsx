@@ -53,6 +53,8 @@ import {
   type TeamCollection,
   type TeamInviteFieldErrors
 } from "../lib/team-management";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface TeamFailure {
   readonly message: string;
@@ -102,6 +104,7 @@ export function TeamManagement({
   projects: readonly AppProject[];
   workspace: AppWorkspace;
 }>) {
+  const { t: uiText } = useUiLocale();
   const router = useRouter();
   const [members, setMembers] =
     useState<TeamCollectionState<WorkspaceMemberSummary>>(INITIAL_COLLECTION);
@@ -653,14 +656,11 @@ export function TeamManagement({
         <span aria-hidden="true" className="state-icon">
           403
         </span>
-        <strong>Доступ к команде был отозван</strong>
+        <strong><UiText text="Доступ к команде был отозван" /></strong>
         <p>
-          Сервер отклонил member.view. Обновите рабочую область или обратитесь
-          к владельцу; ранее загруженные данные скрыты.
-        </p>
+          <UiText text="Сервер отклонил member.view. Обновите рабочую область или обратитесь к владельцу; ранее загруженные данные скрыты." /></p>
         <a className="primary-button" href="/app">
-          Вернуться к обзору
-        </a>
+          <UiText text="Вернуться к обзору" /></a>
       </section>
     );
   }
@@ -669,28 +669,21 @@ export function TeamManagement({
     <div className="settings-stack">
       {!online && (
         <aside className="inline-alert warning" role="status">
-          Нет подключения к сети. Проверенные данные остаются видимыми, но
-          загрузка страниц и изменения отключены.
-        </aside>
+          <UiText text="Нет подключения к сети. Проверенные данные остаются видимыми, но загрузка страниц и изменения отключены." /></aside>
       )}
       {degraded && (
         <aside className="inline-alert warning" role="status">
-          Часть данных команды недоступна. Каждый список ниже показывает своё
-          фактическое состояние; непроверенные partial-страницы не отображаются.
-        </aside>
+          <UiText text="Часть данных команды недоступна. Каждый список ниже показывает своё фактическое состояние; непроверенные partial-страницы не отображаются." /></aside>
       )}
       {!projectCatalogValid && (
         <aside className="inline-alert danger" role="alert">
-          Каталог проектов не прошёл tenant-проверку или превышает безопасный
-          предел. Данные команды остаются видимыми, но приглашения и изменения
-          отключены до обновления контекста.
-        </aside>
+          <UiText text="Каталог проектов не прошёл tenant-проверку или превышает безопасный предел. Данные команды остаются видимыми, но приглашения и изменения отключены до обновления контекста." /></aside>
       )}
       {restriction && (
         <aside className="status-banner" role="status">
           <span className="status-dot" aria-hidden="true" />
           <div>
-            <strong>Управление командой недоступно</strong>
+            <strong><UiText text="Управление командой недоступно" /></strong>
             <p>{restriction}</p>
           </div>
         </aside>
@@ -702,10 +695,10 @@ export function TeamManagement({
           role={feedback.tone === "danger" ? "alert" : "status"}
           tabIndex={-1}
         >
-          {feedback.message}
+          {<UiText text={feedback.message ?? ""} />}
           {feedback.requestId && (
             <small className="error-reference">
-              Код запроса: {feedback.requestId}
+              <UiText text="Код запроса:" after=" " />{feedback.requestId}
             </small>
           )}
         </div>
@@ -715,13 +708,11 @@ export function TeamManagement({
         <section className="panel security-card team-invite-card">
           <header className="security-card-header">
             <div>
-              <h2>Пригласить участника</h2>
+              <h2><UiText text="Пригласить участника" /></h2>
               <p>
-                Ссылка действует 7 дней. Новый участник получит выбранную роль
-                и явно указанный ниже доступ к проектам workspace.
-              </p>
+                <UiText text="Ссылка действует 7 дней. Новый участник получит выбранную роль и выбранный ниже доступ к проектам рабочей области." /></p>
             </div>
-            <span className="security-status">7 дней</span>
+            <span className="security-status"><UiText text="7 дней" /></span>
           </header>
           <form
             className="security-flow team-invite-form"
@@ -762,7 +753,7 @@ export function TeamManagement({
                 )}
               </label>
               <label className="form-field">
-                <span>Системная роль</span>
+                <span><UiText text="Системная роль" /></span>
                 <CustomSelect
                   aria-describedby={
                     inviteErrors.roleCode ? "team-invite-role-error" : undefined
@@ -782,7 +773,7 @@ export function TeamManagement({
                 >
                   {assignableWorkspaceRoleCodes.map((roleCode) => (
                     <option key={roleCode} value={roleCode}>
-                      {workspaceRoleLabel(roleCode)}
+                      {<UiText text={workspaceRoleLabel(roleCode) ?? ""} />}
                     </option>
                   ))}
                 </CustomSelect>
@@ -794,7 +785,7 @@ export function TeamManagement({
               </label>
             </div>
             <label className="form-field">
-              <span>Сообщение участнику (необязательно)</span>
+              <span><UiText text="Сообщение участнику (необязательно)" /></span>
               <textarea
                 aria-describedby={
                   inviteErrors.message ? "team-invite-message-error" : undefined
@@ -811,14 +802,14 @@ export function TeamManagement({
                   setInviteErrors({});
                   setFeedback(undefined);
                 }}
-                placeholder="Например: присоединяйтесь к SEO-команде проекта"
+                placeholder={uiText("Например: присоединяйтесь к SEO-команде проекта")}
                 rows={3}
                 value={inviteMessage}
               />
-              <small>{inviteMessage.length} из 2 000</small>
+              <small>{inviteMessage.length} <UiText text="из 2 000" before=" " /></small>
               {inviteErrors.message && (
                 <small className="field-error" id="team-invite-message-error">
-                  {inviteErrors.message}
+                  {<UiText text={inviteErrors.message ?? ""} />}
                 </small>
               )}
             </label>
@@ -847,17 +838,15 @@ export function TeamManagement({
             />
             <footer className="team-invite-actions">
               <span>
-                Участник увидит приглашение в приложении и сможет принять или
-                отклонить его.
-              </span>
+                <UiText text="Участник увидит приглашение в приложении и сможет принять или отклонить его." /></span>
               <button
                 className="primary-button"
                 disabled={!canMutate}
                 type="submit"
               >
                 {operation === "invite:create"
-                  ? "Создаём приглашение…"
-                  : "Отправить приглашение"}
+                  ? <UiText text="Создаём приглашение…" />
+                  : <UiText text="Отправить приглашение" />}
               </button>
             </footer>
           </form>
@@ -946,15 +935,14 @@ function MembersPanel({
     input: UpdateWorkspaceMemberInput
   ) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <section className="panel security-card">
       <header className="security-card-header">
         <div>
-          <h2>Участники</h2>
+          <h2><UiText text="Участники" /></h2>
           <p>
-            Системная роль определяет возможности в рабочей области, а роль в
-            каждом проекте может только сузить эти права.
-          </p>
+            <UiText text="Системная роль определяет возможности в рабочей области, а роль в каждом проекте может только сузить эти права." /></p>
         </div>
         {state.phase === "ready" && (
           <span className="security-status on">
@@ -993,7 +981,7 @@ function MembersPanel({
         <CollectionContinuation
           failure={state.continuationFailure}
           disabled={Boolean(operation)}
-          label="участников"
+          label={uiText("участников")}
           loading={state.loadingMore}
           onLoadMore={onLoadMore}
           online={online}
@@ -1020,14 +1008,14 @@ function InvitesPanel({
   onReload: () => void;
   onRevoke: (invite: WorkspaceInviteSummary) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <section className="panel security-card">
       <header className="security-card-header">
         <div>
-          <h2>Ожидающие приглашения</h2>
+          <h2><UiText text="Ожидающие приглашения" /></h2>
           <p>
-            Показываются только SENT и DELIVERED, срок которых ещё не истёк.
-          </p>
+            <UiText text="Приглашения, которые ещё можно принять." /></p>
         </div>
         {state.phase === "ready" && (
           <span className="security-status">
@@ -1062,7 +1050,7 @@ function InvitesPanel({
         <CollectionContinuation
           failure={state.continuationFailure}
           disabled={Boolean(operation)}
-          label="приглашений"
+          label={uiText("приглашений")}
           loading={state.loadingMore}
           onLoadMore={onLoadMore}
           online={online}
@@ -1094,8 +1082,8 @@ function CollectionBody<Data>({
       <div className="session-loading" role="status">
         <span aria-hidden="true" className="spinner" />
         <div>
-          <strong>Загружаем {entityLabel}…</strong>
-          <p>Получаем проверенную страницу из Platform API.</p>
+          <strong><UiText text="Загружаем" after=" " /><UiText text={entityLabel} />…</strong>
+          <p><UiText text="Получаем проверенную страницу из Platform API." /></p>
         </div>
       </div>
     );
@@ -1106,19 +1094,16 @@ function CollectionBody<Data>({
         <span aria-hidden="true" className="state-icon">
           !
         </span>
-        <strong>Список скрыт из-за ошибки целостности</strong>
+        <strong><UiText text="Список скрыт из-за ошибки целостности" /></strong>
         <p>
-          Cursor или строки страницы несогласованы. Partial-данные не
-          показываются; загрузите список с начала.
-        </p>
+          <UiText text="Cursor или строки страницы несогласованы. Partial-данные не показываются; загрузите список с начала." /></p>
         <button
           className="primary-button"
           disabled={!online}
           onClick={onReload}
           type="button"
         >
-          Загрузить заново
-        </button>
+          <UiText text="Загрузить заново" /></button>
       </div>
     );
   }
@@ -1128,11 +1113,11 @@ function CollectionBody<Data>({
         <span aria-hidden="true" className="state-icon">
           !
         </span>
-        <strong>Не удалось загрузить {entityLabel}</strong>
-        <p>{state.failure.message}</p>
+        <strong><UiText text="Не удалось загрузить" after=" " /><UiText text={entityLabel} /></strong>
+        <p>{<UiText text={state.failure.message ?? ""} />}</p>
         {state.failure.requestId && (
           <small className="error-reference">
-            Код запроса: {state.failure.requestId}
+            <UiText text="Код запроса:" after=" " />{state.failure.requestId}
           </small>
         )}
         <button
@@ -1141,8 +1126,7 @@ function CollectionBody<Data>({
           onClick={onReload}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </div>
     );
   }
@@ -1152,8 +1136,8 @@ function CollectionBody<Data>({
         <span aria-hidden="true" className="state-icon">
           0
         </span>
-        <strong>{emptyTitle}</strong>
-        <p>{emptyCopy}</p>
+        <strong><UiText text={emptyTitle} /></strong>
+        <p><UiText text={emptyCopy} /></p>
       </div>
     );
   }
@@ -1182,11 +1166,11 @@ function CollectionContinuation({
         role={failure ? "alert" : "status"}
       >
         {failure
-          ? `Показана только проверенная часть списка: ${failure.message}`
-          : `Есть ещё ${label}. Текущая страница — проверенная, но список пока неполный.`}
+          ? <UiText text="Показана только проверенная часть списка: {0}" values={[String(failure.message)]} />
+          : <UiText text="Есть ещё {0}. Текущая страница — проверенная, но список пока неполный." values={[String(label)]} />}
         {failure?.requestId && (
           <small className="error-reference">
-            Код запроса: {failure.requestId}
+            <UiText text="Код запроса:" after=" " />{failure.requestId}
           </small>
         )}
       </div>
@@ -1197,10 +1181,10 @@ function CollectionContinuation({
         type="button"
       >
         {loading
-          ? "Загружаем…"
+          ? <UiText text="Загружаем…" />
           : failure
-            ? "Повторить страницу"
-            : "Загрузить ещё"}
+            ? <UiText text="Повторить страницу" />
+            : <UiText text="Загрузить ещё" />}
       </button>
     </footer>
   );
@@ -1227,6 +1211,7 @@ function ProjectAccessEditor({
   onAllProjectsChange: (value: boolean) => void;
   onAssignmentsChange: (value: readonly ProjectAccessAssignment[]) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [search, setSearch] = useState("");
   const choices = useMemo(
     () => teamProjectChoices(projects, workspaceId, assignments, search),
@@ -1263,7 +1248,7 @@ function ProjectAccessEditor({
       id={idPrefix}
       tabIndex={error ? -1 : undefined}
     >
-      <legend>Доступ к проектам</legend>
+      <legend><UiText text="Доступ к проектам" /></legend>
       <label className="checkbox-field team-project-access-toggle">
         <input
           checked={allProjects}
@@ -1272,41 +1257,36 @@ function ProjectAccessEditor({
           type="checkbox"
         />
         <span>
-          <strong>Все текущие и будущие проекты</strong>
+          <strong><UiText text="Все текущие и будущие проекты" /></strong>
           <small>
-            Выключите, чтобы разрешить только явно выбранные проекты. Для
-            каждого проекта можно назначить более узкую роль.
-          </small>
+            <UiText text="Выключите, чтобы разрешить только явно выбранные проекты. Для каждого проекта можно назначить более узкую роль." /></small>
         </span>
       </label>
       <label className="form-field">
-        <span>Поиск проекта</span>
+        <span><UiText text="Поиск проекта" /></span>
         <input
           autoComplete="off"
           disabled={disabled}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Название, домен или ID"
+          placeholder={uiText("Название, домен или ID")}
           type="search"
           value={search}
         />
       </label>
       <p className="session-network-metadata team-project-access-summary" role="status">
-        <span>В текущем контексте: {projects.length}</span>
-        <span>Явных назначений: {explicitCount}</span>
-        <span>Найдено: {choices.totalMatches}</span>
+        <span><UiText text="В текущем контексте:" after=" " />{projects.length}</span>
+        <span><UiText text="Явных назначений:" after=" " />{explicitCount}</span>
+        <span><UiText text="Найдено:" after=" " />{choices.totalMatches}</span>
       </p>
       {choices.truncated && (
         <div className="inline-alert info" role="status">
-          Показаны первые 50 совпадений из {choices.totalMatches}. Уточните
-          поиск — остальные проекты не удаляются и не теряются.
-        </div>
+          <UiText text="Показаны первые 50 совпадений из" after=" " />{choices.totalMatches}<UiText text=". Уточните поиск — остальные проекты не удаляются и не теряются." /></div>
       )}
       {choices.items.length === 0 ? (
         <div className="panel-empty compact session-empty">
-          <strong>Проекты не найдены</strong>
+          <strong><UiText text="Проекты не найдены" /></strong>
           <p>
-            Измените запрос или оставьте правило доступа ко всем проектам.
-          </p>
+            <UiText text="Измените запрос или оставьте правило доступа ко всем проектам." /></p>
         </div>
       ) : (
         <ul className="team-project-access-list">
@@ -1318,21 +1298,20 @@ function ProjectAccessEditor({
                   <div className="session-row-title">
                     <strong>{project.name}</strong>
                     {!project.listed && (
-                      <span className="security-status">Вне подборки</span>
+                      <span className="security-status"><UiText text="Вне подборки" /></span>
                     )}
                     {project.status === "ARCHIVED" && (
-                      <span className="security-status">Архив</span>
+                      <span className="security-status"><UiText text="Архив" /></span>
                     )}
                   </div>
                   <div className="session-network-metadata">
                     {project.domain && <span>{project.domain}</span>}
-                    <span>{project.id}</span>
                   </div>
                 </div>
                 <label className="form-field">
-                  <span>Роль в проекте</span>
+                  <span><UiText text="Роль в проекте" /></span>
                   <CustomSelect
-                    aria-label={`Доступ к проекту ${project.name}`}
+                    aria-label={uiText("Доступ к проекту {0}", [String(project.name)])}
                     disabled={disabled}
                     onChange={(event) =>
                       changeProject(project.id, event.target.value)
@@ -1341,19 +1320,18 @@ function ProjectAccessEditor({
                   >
                     {allProjects && (
                       <option value="INHERIT">
-                        По системной роли
-                      </option>
+                        <UiText text="По системной роли" /></option>
                     )}
                     {projectAccessLevels.map((accessLevel) => (
                       <option key={accessLevel} value={accessLevel}>
-                        {projectAccessLabel(accessLevel)}
+                        {<UiText text={projectAccessLabel(accessLevel) ?? ""} />}
                       </option>
                     ))}
                   </CustomSelect>
                   <small>
-                    {projectAccessDescription(
+                    <UiText text={projectAccessDescription(
                       level ?? (allProjects ? "INHERIT" : "NONE")
-                    )}
+                    )} />
                   </small>
                 </label>
               </li>
@@ -1363,7 +1341,7 @@ function ProjectAccessEditor({
       )}
       {error && (
         <small className="field-error" id={errorId}>
-          {error}
+          {<UiText text={error ?? ""} />}
         </small>
       )}
     </fieldset>
@@ -1389,6 +1367,8 @@ function MemberRow({
   onRemove: () => void;
   onUpdate: (input: UpdateWorkspaceMemberInput) => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [roleCode, setRoleCode] = useState(member.roleCode);
   const [allProjects, setAllProjects] = useState(member.allProjects);
   const [projectAccesses, setProjectAccesses] = useState(
@@ -1428,44 +1408,41 @@ function MemberRow({
       <div className="session-row-copy">
         <div className="session-row-title">
           <strong>{member.displayName}</strong>
-          {current && <span className="security-status on">Вы</span>}
+          {current && <span className="security-status on"><UiText text="Вы" /></span>}
           {member.status === "SUSPENDED" && (
-            <span className="security-status">Приостановлен</span>
+            <span className="security-status"><UiText text="Приостановлен" /></span>
           )}
         </div>
         <div className="session-network-metadata">
           <span>{member.email}</span>
-          <span>{memberProjectAccessLabel(member)}</span>
-          <span>Версия v{member.version}</span>
+          <span>{<UiText text={memberProjectAccessLabel(member) ?? ""} />}</span>
           {member.joinedAt && (
             <span>
-              В команде с{" "}
+              <UiText text="В команде с" />{" "}
               <time dateTime={member.joinedAt}>
-                {formatTeamDate(member.joinedAt)}
+                {formatTeamDate(member.joinedAt, uiLocale)}
               </time>
             </span>
           )}
         </div>
         <label className="form-field">
-          <span>Системная роль</span>
+          <span><UiText text="Системная роль" /></span>
           <CustomSelect
-            aria-label={`Роль участника ${member.email}`}
+            aria-label={uiText("Роль участника {0}", [String(member.email)])}
             disabled={!canMutate || owner || Boolean(operation)}
             onChange={(event) => setRoleCode(event.target.value)}
             value={roleCode}
           >
-            {owner && <option value="OWNER">Владелец</option>}
+            {owner && <option value="OWNER"><UiText text="Владелец" /></option>}
             {assignableWorkspaceRoleCodes.map((role) => (
               <option key={role} value={role}>
-                {workspaceRoleLabel(role)}
+                {<UiText text={workspaceRoleLabel(role) ?? ""} />}
               </option>
             ))}
           </CustomSelect>
           {owner && (
             <small>
-              Владельца нельзя изменить или удалить обычным flow. Сначала
-              передайте владение — это защищает последнего owner.
-            </small>
+              <UiText text="Чтобы изменить роль владельца или удалить его из команды, сначала передайте владение другому участнику." /></small>
           )}
         </label>
         {!owner && (
@@ -1478,7 +1455,7 @@ function MemberRow({
               onClick={() => setAccessExpanded((value) => !value)}
               type="button"
             >
-              {accessExpanded ? "Скрыть доступ к проектам" : "Настроить доступ к проектам"}
+              {accessExpanded ? <UiText text="Скрыть доступ к проектам" /> : <UiText text="Настроить доступ к проектам" />}
             </button>
             {accessExpanded && (
               <ProjectAccessEditor
@@ -1508,8 +1485,8 @@ function MemberRow({
                 type="button"
               >
                 {busy && operation?.startsWith("member:update")
-                  ? "Сохраняем…"
-                  : "Сохранить роль и доступ"}
+                  ? <UiText text="Сохраняем…" />
+                  : <UiText text="Сохранить роль и доступ" />}
               </button>
               <button
                 className="danger-button"
@@ -1518,10 +1495,10 @@ function MemberRow({
                 type="button"
               >
                 {busy && operation?.startsWith("member:remove")
-                  ? "Удаляем…"
+                  ? <UiText text="Удаляем…" />
                   : current
-                    ? "Покинуть workspace"
-                    : "Удалить участника"}
+                    ? <UiText text="Покинуть workspace" />
+                    : <UiText text="Удалить участника" />}
               </button>
             </div>
           </>
@@ -1542,6 +1519,7 @@ function InviteRow({
   operation: string | undefined;
   onRevoke: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
   const busy = operation === `invite:revoke:${invite.id}`;
   return (
     <li className="session-row">
@@ -1552,18 +1530,18 @@ function InviteRow({
         <div className="session-row-title">
           <strong>{invite.email}</strong>
           <span className="security-status">
-            {invite.status === "DELIVERED" ? "Доставлено" : "Отправлено"}
+            {invite.status === "DELIVERED" ? <UiText text="Доставлено" /> : <UiText text="Отправлено" />}
           </span>
         </div>
         <div className="session-network-metadata">
-          <span>{workspaceRoleLabel(invite.roleCode)}</span>
+          <span>{<UiText text={workspaceRoleLabel(invite.roleCode) ?? ""} />}</span>
           <span>
-            {invite.allProjects ? "Все проекты" : "Ограниченный доступ"}
+            {invite.allProjects ? <UiText text="Все проекты" /> : <UiText text="Ограниченный доступ" />}
           </span>
           <span>
-            Истекает{" "}
+            <UiText text="Истекает" />{" "}
             <time dateTime={invite.expiresAt}>
-              {formatTeamDate(invite.expiresAt)}
+              {formatTeamDate(invite.expiresAt, uiLocale)}
             </time>
           </span>
         </div>
@@ -1574,7 +1552,7 @@ function InviteRow({
             onClick={onRevoke}
             type="button"
           >
-            {busy ? "Отзываем…" : "Отозвать приглашение"}
+            {busy ? <UiText text="Отзываем…" /> : <UiText text="Отозвать приглашение" />}
           </button>
         </div>
       </div>
@@ -1652,30 +1630,26 @@ function TeamConfirmationDialog({
           !
         </span>
         <div>
-          <h3 id="team-confirmation-title">{presentation.title}</h3>
-          <p id="team-confirmation-description">{presentation.description}</p>
+          <h3 id="team-confirmation-title"><UiText text={presentation.title} /></h3>
+          <p id="team-confirmation-description"><UiText text={presentation.description} /></p>
         </div>
         {error && (
           <div className="inline-alert danger session-dialog-error" role="alert">
-            {error.message}
+            {<UiText text={error.message ?? ""} />}
             {error.requestId && (
               <small className="error-reference">
-                Код запроса: {error.requestId}
+                <UiText text="Код запроса:" after=" " />{error.requestId}
               </small>
             )}
           </div>
         )}
         {!error && offline && (
           <div className="inline-alert warning session-dialog-error" role="status">
-            Нет подключения. Отмените действие или повторите после
-            восстановления сети.
-          </div>
+            <UiText text="Нет подключения. Отмените действие или повторите после восстановления сети." /></div>
         )}
         {!error && !offline && blocked && (
           <div className="inline-alert warning session-dialog-error" role="status">
-            Действие больше недоступно: права или состояние workspace
-            изменились. Закройте подтверждение и обновите список.
-          </div>
+            <UiText text="Действие больше недоступно: права или состояние workspace изменились. Закройте подтверждение и обновите список." /></div>
         )}
         <div className="session-dialog-actions">
           <button
@@ -1685,15 +1659,14 @@ function TeamConfirmationDialog({
             ref={cancelButton}
             type="button"
           >
-            Отмена
-          </button>
+            <UiText text="Отмена" /></button>
           <button
             className="danger-button"
             disabled={busy || offline || blocked}
             onClick={onConfirm}
             type="button"
           >
-            {busy ? presentation.busyLabel : presentation.confirmLabel}
+            <UiText text={busy ? presentation.busyLabel : presentation.confirmLabel} />
           </button>
         </div>
       </div>
@@ -1947,8 +1920,8 @@ function memberInitials(displayName: string): string {
   return initials || "?";
 }
 
-function formatTeamDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatTeamDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

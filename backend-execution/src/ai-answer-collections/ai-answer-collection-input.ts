@@ -1,9 +1,10 @@
 import { BadRequestException } from "@nestjs/common";
+import { paidOperationAdmissionInput } from "../paid-operations/paid-operation-admission.js";
 import { domainToASCII } from "node:url";
 import {
   aiAnswerDevices,
   aiAnswerSearchEngines,
-  arsenkinAiAnswerKeywordLimit,
+  aiAnswerCollectionKeywordLimit,
   operationResultDefaultPageSize,
   operationResultPageSizes,
   type OperationResultPageSize,
@@ -25,6 +26,7 @@ export function internalCreateAiAnswerCollectionInput(
 ): InternalCreateAiAnswerCollectionInput {
   const input = record(value, [
     "workspaceId",
+    "billing",
     "projectId",
     "actorId",
     "idempotencyKey",
@@ -43,7 +45,7 @@ export function internalCreateAiAnswerCollectionInput(
   if (
     !Array.isArray(input.items) ||
     input.items.length < 1 ||
-    input.items.length > arsenkinAiAnswerKeywordLimit
+    input.items.length > aiAnswerCollectionKeywordLimit
   ) invalid("items");
   const items = input.items.map((candidate, index) => {
     const item = record(candidate, ["id", "version"]);
@@ -81,6 +83,7 @@ export function internalCreateAiAnswerCollectionInput(
   ]);
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
+    ...paidOperationAdmissionInput(input.billing),
     projectId: uuid(input.projectId, "projectId"),
     actorId: uuid(input.actorId, "actorId"),
     idempotencyKey: pattern(input.idempotencyKey, "idempotencyKey", KEY_PATTERN),
@@ -128,11 +131,11 @@ export function aiAnswerResultPageLimit(value: unknown): OperationResultPageSize
 
 export function aiAnswerResultCursor(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,3})$/u.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,5})$/u.test(value)) {
     invalid("result.cursor");
   }
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed >= arsenkinAiAnswerKeywordLimit) {
+  if (!Number.isSafeInteger(parsed) || parsed >= aiAnswerCollectionKeywordLimit) {
     invalid("result.cursor");
   }
   return parsed;

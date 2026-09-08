@@ -248,6 +248,37 @@ test("not-found history is exact and cannot carry ranking metadata", () => {
   );
 });
 
+test("manual history keeps the measured position without fabricating a URL", () => {
+  const item = {
+    snapshotId: "2c64b96f-0747-5cc4-8477-43bade090d31",
+    keywordId: ids.keywordId,
+    trackingContextId: "c53bcb2b-c890-5ed0-97cb-c8ba4bb975e3",
+    configurationVersion: 1,
+    provider: "MANUAL_IMPORT",
+    connectorVersion: "manual-history@1",
+    dimensionKey: "GOOGLE|RU|1011969|ru|MOBILE",
+    countryCode: "RU",
+    regionCode: "1011969",
+    language: "ru",
+    device: "MOBILE",
+    observedAt: "2026-07-29T12:00:00.000Z",
+    storedAt: "2026-07-30T12:00:00.000Z",
+    jobId: "4223aa99-a200-5efa-a377-0dca071ebd5c",
+    dataQualityFlags: ["IMPORTED_MANUAL_HISTORY"],
+    found: true,
+    position: 12
+  } as const satisfies RankHistoryItem;
+
+  assert.deepEqual(redactRankHistoryItem(item), item);
+  assert.throws(
+    () => redactRankHistoryItem({
+      ...item,
+      rankingUrl: "https://invented.example/"
+    } as unknown as RankHistoryItem),
+    /Invalid rank history item/u
+  );
+});
+
 test("history accepts TOP-100 and rejects positions above the storage boundary", () => {
   const item = {
     snapshotId: ids.snapshotId,

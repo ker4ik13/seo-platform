@@ -7,9 +7,11 @@ import {
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
+import { UiText } from "./ui-locale";
 
 export interface ContextMenuItem {
   readonly id: string;
+  /** Authored action copy; user text belongs in children/footer, not this label. */
   readonly label: string;
   readonly icon?: ReactNode;
   readonly danger?: boolean;
@@ -74,7 +76,7 @@ export function ContextMenu({
         type="button"
       >
         {item.icon && <span aria-hidden="true">{item.icon}</span>}
-        {item.label}
+        <UiText text={item.label} />
       </button>
     );
   }
@@ -130,31 +132,40 @@ export function ContextMenu({
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-    const reposition = () => onClose();
-    // Сначала переводим фокус внутрь уже открытого меню. На телефоне браузер
-    // может прокрутить drawer к сфокусированной кнопке; если подписаться на
-    // scroll раньше, меню тут же закроется собственным автофокусом.
+    const openingAnchor = triggerRef?.current?.getBoundingClientRect();
+    const scroll = () => {
+      const anchor = triggerRef?.current?.getBoundingClientRect();
+      // A horizontally scrolled toolbar can deliver its scroll event after
+      // the click opened this menu. Keep it if the anchor has not moved since
+      // opening; close on a real subsequent scroll, not the queued old event.
+      if (presentation === "dropdown" && openingAnchor && anchor &&
+        Math.abs(anchor.left - openingAnchor.left) < 0.5 &&
+        Math.abs(anchor.top - openingAnchor.top) < 0.5) return;
+      onClose();
+    };
+    // The fixed menu is already inside the viewport. Focusing it must not
+    // scroll a mobile toolbar and asynchronously trigger our close listener.
     const first = menuRef.current?.querySelector<HTMLButtonElement>(
       "button:not(:disabled)"
     );
-    first?.focus();
+    first?.focus({ preventScroll: true });
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", escape);
     window.addEventListener("blur", onClose);
-    window.addEventListener("resize", reposition);
+    window.addEventListener("resize", onClose);
     const shouldCloseOnScroll =
       presentation === "dropdown" ||
       !window.matchMedia("(max-width: 620px)").matches;
     if (shouldCloseOnScroll) {
-      window.addEventListener("scroll", reposition, true);
+      window.addEventListener("scroll", scroll, true);
     }
     return () => {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", escape);
       window.removeEventListener("blur", onClose);
-      window.removeEventListener("resize", reposition);
+      window.removeEventListener("resize", onClose);
       if (shouldCloseOnScroll) {
-        window.removeEventListener("scroll", reposition, true);
+        window.removeEventListener("scroll", scroll, true);
       }
     };
   }, [onClose, presentation, triggerRef]);

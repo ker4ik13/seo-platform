@@ -21,7 +21,9 @@ const MAX_SHARED_STRINGS = 1_000_000;
 const MAX_SHARED_STRING_CHARS = 256 * 1_024 * 1_024;
 const MAX_METADATA_XML_BYTES = 16 * 1_024 * 1_024;
 const MAX_WORKSHEET_XML_BYTES = MAX_ARCHIVE_UNCOMPRESSED_BYTES;
-const MAX_COLUMNS = 500;
+// Nine context/keyword columns plus the maximum 1,100 date columns emitted by the
+// position-history exporter. The bound still rejects unreasonably wide files.
+const MAX_COLUMNS = 1_109;
 const MAX_FIELD_CHARS = 1_000_000;
 const MAX_ROW_CHARS = 8_000_000;
 

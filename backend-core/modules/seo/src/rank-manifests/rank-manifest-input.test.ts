@@ -178,7 +178,7 @@ test("normalizes a bounded manifest chunk query", () => {
         projectId,
         jobId,
         manifestId,
-        chunkIndex: "15000"
+        chunkIndex: "300000"
       }),
     BadRequestException
   );

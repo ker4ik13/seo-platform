@@ -1,3 +1,4 @@
+import { parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import { Buffer } from "node:buffer";
 import {
   rankHistoryMaxPageSize,
@@ -14,6 +15,8 @@ const ALLOWED_QUERY_KEYS = [
   "observedFrom",
   "observedBefore",
   "trackingContextId",
+    "dimensionKey",
+    "mode",
   "keywordId",
   "limit",
   "cursor"
@@ -44,7 +47,12 @@ export function rankHistoryQuery(value: unknown): RankHistoryQuery {
   const cursor = optionalCursor(input.cursor);
   const limit = pageLimit(input.limit);
 
+  if (input.dimensionKey !== undefined && !parseSemanticRankDimensionKey(input.dimensionKey)) invalid("dimensionKey", "Choose a valid geographic dimension");
+  if (input.mode !== undefined && input.mode !== "SERP") invalid("mode", "Expected SERP");
+  if (input.mode === "SERP" && Number(input.limit ?? 200) > 10) invalid("limit", "SERP history accepts up to 10 snapshots per page");
   return {
+    ...(typeof input.dimensionKey === "string" ? { dimensionKey: input.dimensionKey } : {}),
+    ...(input.mode === "SERP" ? { mode: "SERP" as const } : {}),
     observedFrom,
     observedBefore,
     ...(trackingContextId ? { trackingContextId } : {}),

@@ -1,3 +1,4 @@
+import { parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import type { RankHistoryQuery } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -11,6 +12,8 @@ export function rankHistoryQuery(value: unknown): RankHistoryQuery {
     "observedFrom",
     "observedBefore",
     "trackingContextId",
+    "dimensionKey",
+    "mode",
     "keywordId",
     "limit",
     "cursor"
@@ -29,7 +32,12 @@ export function rankHistoryQuery(value: unknown): RankHistoryQuery {
   if (Date.parse(observedFrom) >= Date.parse(observedBefore)) {
     invalid("observedBefore");
   }
+  if (input.dimensionKey !== undefined && !parseSemanticRankDimensionKey(input.dimensionKey)) invalid("dimensionKey");
+  if (input.mode !== undefined && input.mode !== "SERP") invalid("mode");
+  if (input.mode === "SERP" && Number(input.limit ?? 200) > 10) invalid("limit");
   return {
+    ...(typeof input.dimensionKey === "string" ? { dimensionKey: input.dimensionKey } : {}),
+    ...(input.mode === "SERP" ? { mode: "SERP" as const } : {}),
     observedFrom,
     observedBefore,
     ...optionalUuid(input.trackingContextId, "trackingContextId"),

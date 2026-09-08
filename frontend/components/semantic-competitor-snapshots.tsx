@@ -14,6 +14,8 @@ import {
 } from "../lib/semantic-rank-presentation";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function SemanticCompetitorSnapshots({
   emptyText = "После следующего поддерживаемого съёма здесь появятся позиции, URL и доступные мета-данные результатов.",
@@ -32,6 +34,8 @@ export function SemanticCompetitorSnapshots({
   showEmpty?: boolean;
   snapshots: readonly CompetitorSnapshot[];
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [expandedSnapshots, setExpandedSnapshots] =
     useState<ReadonlySet<string>>(new Set());
 
@@ -53,10 +57,11 @@ export function SemanticCompetitorSnapshots({
           >
             <header>
               <div>
-                <h3>{heading} ({rankEngineLabel(snapshot.searchEngine)})</h3>
+                <h3>{heading} ({<UiText text={rankEngineLabel(snapshot.searchEngine) ?? ""} />})</h3>
                 <small>
-                  {competitorSourceLabel(snapshot)} · {formatDateTime(snapshot.observedAt)}
+                  {<UiText text={competitorSourceLabel(snapshot) ?? ""} />} · {formatDateTime(snapshot.observedAt, uiLocale)}
                 </small>
+                {"regionCode" in snapshot && snapshot.regionCode && <small className="semantic-competitor-geography">{"regionLabel" in snapshot && snapshot.regionLabel ? snapshot.regionLabel : snapshot.regionCode} · <UiText text={snapshot.device === "MOBILE" ? "Телефон" : "ПК"} /></small>}
               </div>
               <ProviderLogo provider={snapshot.provider} size="compact" />
             </header>
@@ -87,10 +92,10 @@ export function SemanticCompetitorSnapshots({
                         {result.title ?? urlHost(result.url)}
                       </strong>
                       <small title={result.snippet ?? "Описание не передано провайдером"}>
-                        {result.snippet ?? "Описание не передано провайдером"}
+                        {result.snippet ?? <UiText text="Описание не передано провайдером" />}
                       </small>
                       <a
-                        aria-label={`Открыть результат ${result.position}: ${urlHost(result.url)}`}
+                        aria-label={uiText("Открыть результат {0}: {1}", [String(result.position), String(urlHost(result.url))])}
                         href={result.url}
                         rel="noopener noreferrer"
                         target="_blank"
@@ -113,7 +118,7 @@ export function SemanticCompetitorSnapshots({
                 }
                 type="button"
               >
-                {expanded ? "Скрыть" : "Показать все"}
+                {expanded ? <UiText text="Скрыть" /> : <UiText text="Показать все" />}
               </button>
             )}
           </section>
@@ -142,15 +147,16 @@ export function SemanticCompetitorSnapshots({
 export function SemanticSerpResultUrl({
   value
 }: Readonly<{ value: string }>) {
+  const { t: uiText } = useUiLocale();
   const parts = resultUrlParts(value);
   return (
     <span className="semantic-competitor-url">
       {isInsecureHttpUrl(value) && (
         <span
-          aria-label="Незащищённое HTTP-соединение"
+          aria-label={uiText("Незащищённое HTTP-соединение")}
           className="semantic-insecure-http"
           role="img"
-          title="Незащищённое HTTP-соединение"
+          title={uiText("Незащищённое HTTP-соединение")}
         >
           <Icon name="lockOpen" />
         </span>
@@ -255,11 +261,11 @@ function toggleSetValue(
   return next;
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         dateStyle: "medium",
         timeStyle: "short"
       }).format(date);

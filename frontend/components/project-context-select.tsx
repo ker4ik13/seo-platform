@@ -2,6 +2,8 @@
 
 import type { AppProject } from "../lib/app-types";
 import { ProjectSelect } from "./project-select";
+import { useUiLocale } from "./ui-locale";
+
 
 type ProjectDestination = "notes" | "pages" | "tasks";
 
@@ -18,6 +20,7 @@ export function ProjectContextSelect({
   projects: readonly AppProject[];
   workspaceId: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   function selectProject(nextProjectId: string): void {
     if (!nextProjectId || nextProjectId === projectId) return;
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
@@ -27,7 +30,7 @@ export function ProjectContextSelect({
 
   return (
     <ProjectSelect
-      ariaLabel="Выбрать проект"
+      ariaLabel={uiText("Выбрать проект")}
       canReorder={canReorder}
       className="project-context-select"
       onChange={selectProject}

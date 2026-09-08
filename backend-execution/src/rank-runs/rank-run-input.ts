@@ -3,7 +3,7 @@ import {
   maximumPlatformRankKeywordPriceMinor,
   operationResultDefaultPageSize,
   operationResultPageSizes,
-  rankProviderKeywordLimit
+  rankCommandKeywordLimit
 } from "@seo-platform/contracts";
 import type {
   InternalCancelRankJobInput,
@@ -171,11 +171,11 @@ export function rankResultPageLimit(
 
 export function rankResultCursor(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,4})$/u.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,5})$/u.test(value)) {
     invalid("result cursor");
   }
   const parsed = Number(value);
-  if (parsed >= rankProviderKeywordLimit) invalid("result cursor");
+  if (parsed >= rankCommandKeywordLimit) invalid("result cursor");
   return parsed;
 }
 

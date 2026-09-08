@@ -34,6 +34,7 @@ import {
   requiredProjectTenant
 } from "../authorization/project-tenant.js";
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
+import { OperationBillingService } from "../billing/operation-billing.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { assertUuid } from "../common/identifier.js";
@@ -60,7 +61,8 @@ export class ClusteringRunController {
     private readonly jobs: JobsClient,
     private readonly billing: BillingEntitlementService,
     private readonly audit: AuditService,
-    private readonly seoData?: SeoDataClient
+    private readonly seoData?: SeoDataClient,
+    private readonly operations?: OperationBillingService
   ) {}
 
   @Get()
@@ -179,11 +181,13 @@ export class ClusteringRunController {
       outcome: "REQUESTED",
       requestId: context.requestId
     });
+    const input = createClusteringRunInput(body);
     const result = await this.jobs.createClusteringRun(
       internalProjectContext(request, principal, tenant),
-      createClusteringRunInput(body),
+      input,
       canonicalIdempotencyKey,
-      jobCapacity
+      jobCapacity,
+      await this.operations?.admit(internalProjectContext(request, principal, tenant), { kind: "CLUSTERING_RUN", command: input }, canonicalIdempotencyKey, request.headers["x-operation-estimate-id"])
     );
     await committed(this.audit, this.logger, principal, tenant, context.requestId, "semantic.clustering_run.created", result.id);
     return apiResponse(request, result, result.version);

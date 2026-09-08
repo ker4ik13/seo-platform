@@ -317,6 +317,13 @@ test("frequency cancellation replays an already terminal state without writes", 
   assert.equal(result.status, "CANCELLED");
 });
 
+test("a settled platform operation cannot be reopened without fresh pricing", async () => {
+  const transaction = { job: { findFirst: async () => ({ version: 7, status: "FAILED_FINAL", credentialMode: "PLATFORM_PAID" }) }, jobItem: { updateMany: async () => { throw new Error("Must not touch paid items"); } } };
+  const prisma = { $transaction: async (work: (tx: typeof transaction) => unknown) => work(transaction) };
+  const service = new FrequencyCollectionService(prisma as never, route as never);
+  await assert.rejects(() => service.retryFailed(jobId, { workspaceId, projectId, actorId, version: 7 }), error => error instanceof ConflictException && JSON.stringify(error.getResponse()).includes("PAID_RETRY_REQUIRES_ESTIMATE"));
+});
+
 test("manual retry resets only failed items and preserves completed progress", async () => {
   let itemUpdate: unknown;
   let jobUpdate: unknown;

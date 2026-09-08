@@ -3,6 +3,8 @@ import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { WorkspaceRoleCatalog } from "../../../../../components/workspace-role-catalog";
 import { canViewWorkspaceTeam } from "../../../../../lib/app-permissions";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +19,8 @@ export default async function WorkspaceRolesPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Роли и права</h1>
-          <p>Проверьте системную матрицу перед назначением роли участнику.</p>
+          <h1><UiText text="Роли и права" /></h1>
+          <p><UiText text="Проверьте системную матрицу перед назначением роли участнику." /></p>
         </div>
       </section>
       <SettingsTabs
@@ -33,13 +35,13 @@ export default async function WorkspaceRolesPage() {
       />
       {!workspace ? (
         <section className="panel panel-empty compact">
-          <strong>Рабочая область ещё не создана</strong>
-          <p>Роли назначаются участникам workspace.</p>
+          <strong><UiText text="Рабочая область ещё не создана" /></strong>
+          <p><UiText text="Роли назначаются участникам workspace." /></p>
         </section>
       ) : !canView ? (
         <section className="panel panel-empty compact">
-          <strong>Недостаточно прав</strong>
-          <p>Для просмотра матрицы требуется разрешение member.view.</p>
+          <strong><UiText text="Недостаточно прав" /></strong>
+          <p><UiText text="Для просмотра матрицы требуется разрешение member.view." /></p>
         </section>
       ) : (
         <WorkspaceRoleCatalog currentRoleCode={workspace.roleCode} />

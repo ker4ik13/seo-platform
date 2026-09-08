@@ -1,4 +1,9 @@
 import { Module } from "@nestjs/common";
+import { PlatformUsageReviewController } from "./platform-usage-review.controller.js";
+import { PlatformRefundController } from "./platform-refund.controller.js";
+import { PlatformProviderController } from "./platform-provider.controller.js";
+import { PlatformOverviewService } from "./platform-overview.service.js";
+import { PlatformOverviewController } from "./platform-overview.controller.js";
 import { AuditModule } from "../audit/audit.module.js";
 import { BillingModule } from "../billing/billing.module.js";
 import { IdentityModule } from "../identity/identity.module.js";
@@ -25,6 +30,10 @@ import { PlatformAdminReadService } from "./platform-admin-read.service.js";
 @Module({
   imports: [AuditModule, BillingModule, IdentityModule, JobsModule, SeoDataModule],
   controllers: [
+    PlatformUsageReviewController,
+    PlatformOverviewController,
+    PlatformProviderController,
+    PlatformRefundController,
     PlatformAdminProfileController,
     PlatformAdminNpdController,
     PlatformAdminStaffRoleController,
@@ -34,6 +43,7 @@ import { PlatformAdminReadService } from "./platform-admin-read.service.js";
     PlatformAdminOperationController
   ],
   providers: [
+    PlatformOverviewService,
     PlatformAdminService,
     PlatformAdminWorkspaceService,
     PlatformAdminReadService,

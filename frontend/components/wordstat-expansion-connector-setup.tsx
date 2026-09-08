@@ -16,12 +16,15 @@ import {
   type FormEvent
 } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import {
   integrationCredentialStatusPresentation,
   integrationProviderLabel
 } from "../lib/integration-presentation";
 import { CustomSelect } from "./custom-select";
 import { ProviderLogo } from "./provider-logo";
+import { UiText } from "./ui-locale";
+
 
 const CAPABILITY = "KEYWORD_RESEARCH";
 const FALLBACK_REASONS = [
@@ -49,10 +52,7 @@ export function WordstatExpansionConnectorSetup({
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const result = await browserApiRequest<ProjectConnectorSettings>(
-        path(projectId),
-        signal ? { signal } : {}
-      );
+      const result = await preparedProjectIntegrations(projectId, signal);
       if (signal?.aborted) return;
       const current = binding(result);
       const routes = bindingRoutes(current);
@@ -85,7 +85,7 @@ export function WordstatExpansionConnectorSetup({
     () =>
       settings?.credentialOptions.filter(
         (credential) =>
-          credential.mode === "BYOK_API_KEY" &&
+          (credential.mode === "BYOK_API_KEY" || credential.mode === "PLATFORM_PAID") &&
           credential.capabilities.includes(CAPABILITY) &&
           (credential.provider === "XMLSTOCK" || credential.provider === "ARSENKIN")
       ) ?? [],
@@ -211,29 +211,29 @@ export function WordstatExpansionConnectorSetup({
   }
 
   if (loading && !settings) {
-    return <section className="panel connector-setup-state" aria-busy="true"><span className="spinner" aria-hidden="true" /><span>Проверяем провайдеров Wordstat…</span></section>;
+    return <section className="panel connector-setup-state" aria-busy="true"><span className="spinner" aria-hidden="true" /><span><UiText text="Проверяем провайдеров Wordstat…" /></span></section>;
   }
   if (!settings) {
-    return <section className="panel connector-setup-state"><span>{error ?? "Провайдеры Wordstat недоступны."}</span><button className="secondary-button" onClick={() => void load()} type="button">Повторить</button></section>;
+    return <section className="panel connector-setup-state"><span>{error ?? <UiText text="Провайдеры Wordstat недоступны." />}</span><button className="secondary-button" onClick={() => void load()} type="button"><UiText text="Повторить" /></button></section>;
   }
 
   return (
     <details className="panel competitor-connector" open={!ready}>
       <summary>
         <span className="connector-provider-mark keyword-research-provider-pair"><ProviderLogo provider="XMLSTOCK" size="compact" /><ProviderLogo provider="ARSENKIN" size="compact" /><span className={ready ? "connector-ready-mark" : "connector-pending-mark"}>{ready ? "✓" : "!"}</span></span>
-        <span><strong>Парсинг Wordstat · XMLStock и Arsenkin</strong><small>{ready ? `${currentIds.length} ${currentIds.length === 1 ? "провайдер готов" : "провайдера готовы"}` : "Выберите хотя бы одно проверенное подключение"}</small></span>
-        <span className="connector-summary-action">{ready ? "Изменить" : "Настроить"}</span>
+        <span><strong><UiText text="Парсинг Wordstat · XMLStock и Arsenkin" /></strong><small>{ready ? `${currentIds.length} ${currentIds.length === 1 ? "провайдер готов" : "провайдера готовы"}` : <UiText text="Выберите хотя бы одно проверенное подключение" />}</small></span>
+        <span className="connector-summary-action">{ready ? <UiText text="Изменить" /> : <UiText text="Настроить" />}</span>
       </summary>
       <form className="competitor-connector-body wordstat-connector-body" onSubmit={save}>
-        {error && <div className="inline-error" role="alert">{error}</div>}
-        {notice && <div className="inline-success" role="status">{notice}</div>}
+        {error && <div className="inline-error" role="alert">{<UiText text={error ?? ""} />}</div>}
+        {notice && <div className="inline-success" role="status">{<UiText text={notice ?? ""} />}</div>}
         <CredentialField disabled={saving || !settings.access.canUpdateBindings} label="XMLStock" onChange={setXmlStockId} options={xmlStockOptions} value={xmlStockId} />
         <CredentialField disabled={saving || !settings.access.canUpdateBindings || (Boolean(xmlStockId) && !settings.access.canManageFallback)} label="Arsenkin Tools" onChange={setArsenkinId} options={arsenkinOptions} value={arsenkinId} />
-        {current && <label className="connector-enabled-toggle"><input checked={enabled} disabled={saving || !settings.access.canUpdateBindings} onChange={(event) => setEnabled(event.target.checked)} type="checkbox" />Использовать в новых парсингах</label>}
-        {routeIds.length > 1 && !settings.access.canManageFallback && <p className="inline-note">Для двух провайдеров нужно право управления резервными маршрутами.</p>}
-        {options.length === 0 && <p className="inline-note">Сначала добавьте и проверьте XMLStock или Arsenkin Tools в рабочей области.</p>}
-        {settings.access.mutationRestriction !== "NONE" && <p className="inline-note">Изменение ограничено текущей ролью или состоянием рабочей области.</p>}
-        <div className="button-row"><a className="secondary-button" href="/app/settings/integrations">Управление API-ключами</a><button className="primary-button" disabled={!canSubmit || saving} type="submit">{saving ? "Сохраняем…" : "Сохранить провайдеров"}</button></div>
+        {current && <label className="connector-enabled-toggle"><input checked={enabled} disabled={saving || !settings.access.canUpdateBindings} onChange={(event) => setEnabled(event.target.checked)} type="checkbox" /><UiText text="Использовать в новых парсингах" /></label>}
+        {routeIds.length > 1 && !settings.access.canManageFallback && <p className="inline-note"><UiText text="Для двух провайдеров нужно право управления резервными маршрутами." /></p>}
+        {options.length === 0 && <p className="inline-note"><UiText text="Сначала добавьте и проверьте XMLStock или Arsenkin Tools в рабочей области." /></p>}
+        {settings.access.mutationRestriction !== "NONE" && <p className="inline-note"><UiText text="Изменение ограничено текущей ролью или состоянием рабочей области." /></p>}
+        <div className="button-row"><a className="secondary-button" href="/app/settings/integrations"><UiText text="Управление API-ключами" /></a><button className="primary-button" disabled={!canSubmit || saving} type="submit">{saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить провайдеров" />}</button></div>
       </form>
     </details>
   );
@@ -242,7 +242,7 @@ export function WordstatExpansionConnectorSetup({
 function CredentialField({ disabled, label, onChange, options, value }: Readonly<{ disabled: boolean; label: string; onChange: (value: string) => void; options: readonly ProjectConnectorCredentialOption[]; value: string }>) {
   const selected = options.find(({ id }) => id === value);
   return (
-    <label className="form-field"><span>{label}</span><CustomSelect disabled={disabled} onChange={(event) => onChange(event.target.value)} value={value}><option value="">Не использовать</option>{value && !selected && <option disabled value={value}>Подключение недоступно</option>}{options.map((credential) => <option disabled={credential.status !== "ACTIVE"} key={credential.id} value={credential.id}>{credential.label} · {integrationProviderLabel(credential.provider)}{credential.status === "ACTIVE" ? "" : ` · ${integrationCredentialStatusPresentation(credential.status).label}`}</option>)}</CustomSelect></label>
+    <label className="form-field"><span>{label}</span><CustomSelect disabled={disabled} onChange={(event) => onChange(event.target.value)} value={value}><option value=""><UiText text="Не использовать" /></option>{value && !selected && <option disabled value={value}><UiText text="Подключение недоступно" /></option>}{options.map((credential) => <option disabled={credential.status !== "ACTIVE"} key={credential.id} value={credential.id}>{credential.label} · {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />}{credential.status === "ACTIVE" ? "" : ` · ${integrationCredentialStatusPresentation(credential.status).label}`}</option>)}</CustomSelect></label>
   );
 }
 

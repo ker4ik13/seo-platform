@@ -2,7 +2,7 @@ import {
   competitorSerpOperationResultDepth,
   normalizedRankDataQualityFlags,
   operationResultItemStatuses,
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   semanticFrequencyDevices,
   semanticFrequencyQualityFlags,
   semanticFrequencyTypes,
@@ -118,13 +118,14 @@ export function scopedInternalFrequencyOperationResult(
   ) invalid();
   const seen = new Set<string>();
   const rows = input.rows.map((value) => {
-    const row = exact(value, ["keywordId", "keyword", "snapshots"]);
+    const row = exact(value, ["keywordId", "keyword", "snapshots"], ["keywordVersion", "keywordAvailable"]);
     const keywordId = uuid(row.keywordId);
     if (
       !expectedKeywordIds.includes(keywordId) ||
       seen.has(keywordId) ||
       typeof row.keyword !== "string" ||
-      row.keyword.length < 1 ||
+      (row.keyword.length < 1 && row.keywordAvailable !== false) ||
+      (row.keywordAvailable !== undefined && typeof row.keywordAvailable !== "boolean") ||
       row.keyword.length > 2_000 ||
       !Array.isArray(row.snapshots) ||
       row.snapshots.length > 3
@@ -134,6 +135,8 @@ export function scopedInternalFrequencyOperationResult(
     return {
       keywordId,
       keyword: row.keyword,
+      ...(row.keywordVersion === undefined ? {} : { keywordVersion: integer(row.keywordVersion, 1, 2_147_483_647) }),
+      ...(row.keywordAvailable === undefined ? {} : { keywordAvailable: row.keywordAvailable as boolean }),
       snapshots: row.snapshots.map((value) => {
         const snapshot = exact(
           value,
@@ -214,10 +217,12 @@ export function scopedInternalRankOperationResult(
     "trackingContextId",
     "contextName",
     "execution",
+    "counts",
     "rows",
     "page"
   ]);
   const page = exact(input.page, ["hasNext"], ["nextCursor"]);
+  const counts = exact(input.counts, ["foundCount", "notFoundCount"]);
   const execution = rankExecution(input.execution);
   const competitorCollection =
     rankExecutionPurpose(execution) === "COMPETITOR_SERP";
@@ -228,6 +233,12 @@ export function scopedInternalRankOperationResult(
     typeof input.contextName !== "string" ||
     input.contextName.length < 1 ||
     input.contextName.length > 160 ||
+    !Number.isSafeInteger(counts.foundCount) ||
+    Number(counts.foundCount) < 0 ||
+    !Number.isSafeInteger(counts.notFoundCount) ||
+    Number(counts.notFoundCount) < 0 ||
+    Number(counts.foundCount) + Number(counts.notFoundCount) >
+      rankCommandKeywordLimit ||
     !Array.isArray(input.rows) ||
     input.rows.length > limit ||
     typeof page.hasNext !== "boolean" ||
@@ -242,6 +253,8 @@ export function scopedInternalRankOperationResult(
       value,
       ["sequence", "keywordId", "keyword", "state", "dataQualityFlags"],
       [
+        "keywordVersion",
+        "keywordAvailable",
         "position",
         "absolutePosition",
         "pixelPosition",
@@ -256,7 +269,7 @@ export function scopedInternalRankOperationResult(
     const sequence = integer(
       row.sequence,
       0,
-      rankProviderKeywordLimit - 1
+      rankCommandKeywordLimit - 1
     );
     if (
       keywordIds.has(keywordId) ||
@@ -270,6 +283,11 @@ export function scopedInternalRankOperationResult(
     ) invalid();
     keywordIds.add(keywordId);
     sequences.add(sequence);
+    if (row.keywordAvailable !== undefined && typeof row.keywordAvailable !== "boolean") invalid();
+    const editableKeyword = {
+      ...(row.keywordAvailable === undefined ? {} : { keywordAvailable: row.keywordAvailable as boolean }),
+      ...(row.keywordVersion === undefined ? {} : { keywordVersion: integer(row.keywordVersion, 1, Number.MAX_SAFE_INTEGER) })
+    };
     const dataQualityFlags = row.dataQualityFlags.map((flag) =>
       member(flag, normalizedRankDataQualityFlags)
     );
@@ -290,6 +308,7 @@ export function scopedInternalRankOperationResult(
         keywordId,
         keyword: row.keyword,
         state: "FOUND",
+        ...editableKeyword,
         position: integer(row.position, 1, 100),
         ...optionalInteger(row.absolutePosition, "absolutePosition"),
         ...optionalInteger(row.pixelPosition, "pixelPosition", 0),
@@ -316,6 +335,7 @@ export function scopedInternalRankOperationResult(
       keywordId,
       keyword: row.keyword,
       state: row.state as "PENDING" | "NOT_FOUND",
+      ...editableKeyword,
       ...(row.state === "NOT_FOUND"
         ? { observedAt: timestamp(row.observedAt) }
         : {}),
@@ -335,6 +355,10 @@ export function scopedInternalRankOperationResult(
     trackingContextId: uuid(input.trackingContextId),
     contextName: input.contextName,
     execution,
+    counts: {
+      foundCount: Number(counts.foundCount),
+      notFoundCount: Number(counts.notFoundCount)
+    },
     rows,
     page: {
       hasNext: page.hasNext,

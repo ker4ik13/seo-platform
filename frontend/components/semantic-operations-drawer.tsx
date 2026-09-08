@@ -1,4 +1,8 @@
 "use client";
+import { prepareFrequencyRetry, type FrequencyRetryDraft } from "../lib/frequency-retry";
+import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
+import { SemanticPositionDialog } from "./semantic-position-dialog";
+import { prepareRankRetry, type RankRetryDraft } from "../lib/rank-retry";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -31,6 +35,8 @@ import {
 } from "./operation-result-modal";
 import { OperationStopConfirmation } from "./operation-stop-confirmation";
 import { ProviderLogo } from "./provider-logo";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 type OperationTab = "ACTIVE" | "COMPLETED" | "ERROR";
 
@@ -49,6 +55,12 @@ export function SemanticOperationsDrawer({
   refreshToken?: number;
   watchedFrequencyId?: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const [rankRetry, setRankRetry] = useState<RankRetryDraft>();
+  const [frequencyRetry, setFrequencyRetry] = useState<FrequencyRetryDraft>();
+  const frequencyRetryLoad = useRef<AbortController | undefined>(undefined);
+  useEffect(() => { setFrequencyRetry(undefined); setRankRetry(undefined); return () => frequencyRetryLoad.current?.abort(); }, [projectId]);
+  const { t: uiText } = useUiLocale();
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
@@ -162,16 +174,16 @@ export function SemanticOperationsDrawer({
   const allOperations = useMemo(() => {
     const values: Operation[] = [
       ...frequencies.map(frequencyOperation),
-      ...ranks.map(rankOperation),
+      ...ranks.map(value => rankOperation(value, uiLocale)),
       ...aiAnswers.map(aiAnswerOperation),
       ...clusteringRuns.map(clusteringOperation),
-      ...researchRuns.map(researchOperation),
+      ...researchRuns.map(value => researchOperation(value, uiLocale)),
       ...semanticExports.map(exportOperation)
     ];
     return values.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt)
     );
-  }, [aiAnswers, clusteringRuns, frequencies, ranks, researchRuns, semanticExports]);
+  }, [aiAnswers, clusteringRuns, frequencies, ranks, researchRuns, semanticExports, uiLocale]);
 
   const operations = useMemo(
     () => allOperations.filter((operation) => operation.tab === tab),
@@ -253,19 +265,15 @@ export function SemanticOperationsDrawer({
     setError(undefined);
     try {
       if (operation.kind === "FREQUENCY") {
-        await browserApiRequest(
-          `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(operation.id)}/retry-failed`,
-          { method: "POST", body: { version: operation.version } }
-        );
+        frequencyRetryLoad.current?.abort();
+        const controller = new AbortController(); frequencyRetryLoad.current = controller;
+        const draft = await prepareFrequencyRetry(projectId, operation.id, controller.signal);
+        if (!controller.signal.aborted) setFrequencyRetry(draft);
       } else {
-        await browserApiRequest(
-          `/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(operation.id)}/retry-missing`,
-          {
-            method: "POST",
-            body: {},
-            idempotencyKey: `rank-retry:${globalThis.crypto.randomUUID()}`
-          }
-        );
+        frequencyRetryLoad.current?.abort();
+        const controller = new AbortController(); frequencyRetryLoad.current = controller;
+        const draft = await prepareRankRetry(projectId, operation.id, controller.signal);
+        if (!controller.signal.aborted) setRankRetry(draft);
       }
       setTab("ACTIVE");
       await load();
@@ -278,27 +286,29 @@ export function SemanticOperationsDrawer({
 
   return (
     <>
+    {rankRetry && <SemanticPositionDialog projectId={projectId} workspaceId={rankRetry.result.job.workspaceId} groups={rankRetry.groups} initialSelections={rankRetry.selections} initialRun={rankRetry.result} mode={rankRetry.result.execution.purpose === "COMPETITOR_SERP" ? "competitors" : "positions"} onClose={() => setRankRetry(undefined)} onStarted={() => { setRankRetry(undefined); void load(); }} />}
+      {frequencyRetry && <SemanticFrequencyDialog projectId={projectId} groups={frequencyRetry.groups} initialSelections={frequencyRetry.selections} initialConfiguration={frequencyRetry.collection} onClose={() => setFrequencyRetry(undefined)} onStarted={() => { setFrequencyRetry(undefined); void load(); }} />}
     <aside
-      aria-label="Задачи и операции"
+      aria-label={uiText("Задачи и операции")}
       className="semantic-operations-drawer"
       data-presence-cursor-anchor="true"
       data-presence-key="semantic-operations-drawer"
     >
       <header>
-        <div><h2>Задачи и операции</h2><span>Прогресс обновляется автоматически</span></div>
-        <button aria-label="Закрыть операции" onClick={onClose} type="button">×</button>
+        <div><h2><UiText text="Задачи и операции" /></h2><span><UiText text="Прогресс обновляется автоматически" /></span></div>
+        <button aria-label={uiText("Закрыть операции")} onClick={onClose} type="button">×</button>
       </header>
       <div className="semantic-operation-tabs" role="tablist">
         {(["ACTIVE", "COMPLETED", "ERROR"] as const).map((value) => (
           <button aria-selected={tab === value} key={value} onClick={() => setTab(value)} role="tab" type="button">
-            {tabLabel(value)} <span>{counts[value]}</span>
+            {<UiText text={tabLabel(value) ?? ""} />} <span>{counts[value]}</span>
           </button>
         ))}
       </div>
       <div className="semantic-operation-list">
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
+        {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
         {loading ? (
-          <div className="semantic-dialog-loading" role="status">Загружаем журнал операций…</div>
+          <div className="semantic-dialog-loading" role="status"><UiText text="Загружаем журнал операций…" /></div>
         ) : operations.length > 0 ? operations.map((operation) => (
           <article className={`semantic-operation-card state-${operation.tab.toLocaleLowerCase()}`} key={`${operation.kind}:${operation.id}`}>
             <header>
@@ -317,19 +327,19 @@ export function SemanticOperationsDrawer({
               <span>{operation.progressLabel}</span>
             </div>
             <div className="semantic-operation-progress"><i style={{ width: `${operation.percent}%` }} /></div>
-            <div className="semantic-operation-meta"><span>{operation.routeLabel ?? "Фоновая операция"}</span><time>{formatDateTime(operation.createdAt)}</time></div>
+            <div className="semantic-operation-meta"><span>{operation.routeLabel ?? <UiText text="Фоновая операция" />}</span><time>{formatDateTime(operation.createdAt, uiLocale)}</time></div>
             {(operation.durationLabel || operation.resultLabel) && (
               <div className="semantic-operation-card-facts">
                 {operation.resultLabel && <span>{operation.resultLabel}</span>}
-                {operation.durationLabel && <span>Выполнено за <strong>{operation.durationLabel}</strong></span>}
+                {operation.durationLabel && <span><UiText text="Выполнено за" after=" " /><strong>{operation.durationLabel}</strong></span>}
               </div>
             )}
-            {operation.errorCode && <small>Код: {operation.errorCode}</small>}
+            {operation.errorCode && <small><UiText text="Код:" after=" " />{operation.errorCode}</small>}
             <footer>
               {operation.retryable && (
                 <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">
                   {retryingId === operation.id
-                    ? "Запускаем…"
+                    ? <UiText text="Запускаем…" />
                     : operation.retryLabel}
                 </button>
               )}
@@ -338,12 +348,11 @@ export function SemanticOperationsDrawer({
                   className="semantic-operation-download"
                   href={semanticExportFileUrl(projectId, operation.id)}
                 >
-                  Скачать файл
-                </a>
+                  <UiText text="Скачать файл" /></a>
               )}
               {operation.cancellable && (
                 <button disabled={cancellingId === operation.id} onClick={() => setStopConfirmation(operation)} type="button">
-                  {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
+                  {cancellingId === operation.id ? <UiText text="Останавливаем…" /> : <UiText text="Остановить" />}
                 </button>
               )}
               {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING" || operation.kind === "RESEARCH") && (
@@ -352,20 +361,19 @@ export function SemanticOperationsDrawer({
                   onClick={() => setSelectedOperation(operation)}
                   type="button"
                 >
-                  Открыть лог
-                </button>
+                  <UiText text="Открыть лог" /></button>
               )}
             </footer>
           </article>
         )) : (
           <div className="semantic-inspector-empty semantic-operation-empty">
-            <strong>{tab === "ACTIVE" ? "Активных задач нет" : "В этом разделе задач нет"}</strong>
-            <span>История хранится на сервере и обновляется без перезагрузки страницы.</span>
+            <strong>{tab === "ACTIVE" ? <UiText text="Активных задач нет" /> : <UiText text="В этом разделе задач нет" />}</strong>
+            <span><UiText text="История хранится на сервере и обновляется без перезагрузки страницы." /></span>
           </div>
         )}
         {tab === "ACTIVE" && !loading && recentlyCompleted.length > 0 && (
           <section className="semantic-recent-operations">
-            <h3>Недавно завершённые</h3>
+            <h3><UiText text="Недавно завершённые" /></h3>
             {recentlyCompleted.map((operation) => operation.kind === "EXPORT" ? (
               <a
                 href={semanticExportFileUrl(projectId, operation.id)}
@@ -373,7 +381,7 @@ export function SemanticOperationsDrawer({
               >
                 <span aria-hidden="true">↓</span>
                 <strong>{operation.title}</strong>
-                <time>{formatShortTime(operation.createdAt)}</time>
+                <time>{formatShortTime(operation.createdAt, uiLocale)}</time>
               </a>
             ) : (
               <button
@@ -383,15 +391,14 @@ export function SemanticOperationsDrawer({
               >
                 <span aria-hidden="true">✓</span>
                 <strong>{operation.title}</strong>
-                <time>{formatShortTime(operation.createdAt)}</time>
+                <time>{formatShortTime(operation.createdAt, uiLocale)}</time>
               </button>
             ))}
           </section>
         )}
         {!loading && (
           <Link className="semantic-operation-journal-link" href="/app/tasks">
-            Открыть журнал операций
-          </Link>
+            <UiText text="Открыть журнал операций" /></Link>
         )}
       </div>
     </aside>
@@ -405,17 +412,17 @@ export function SemanticOperationsDrawer({
       <OperationResultModal
         actions={openedOperation.cancellable ? (
           <button
-            aria-label={cancellingId === openedOperation.id ? "Операция останавливается" : "Остановить операцию"}
+            aria-label={cancellingId === openedOperation.id ? uiText("Операция останавливается") : uiText("Остановить операцию")}
             className="operation-result-header-action is-danger"
             disabled={cancellingId === openedOperation.id}
             onClick={() => setStopConfirmation(openedOperation)}
-            title={cancellingId === openedOperation.id ? "Останавливаем…" : "Остановить операцию"}
+            title={cancellingId === openedOperation.id ? uiText("Останавливаем…") : uiText("Остановить операцию")}
             type="button"
           >
             <OperationStopIcon />
           </button>
         ) : undefined}
-        description={`${openedOperation.description} · ${formatDateTime(openedOperation.createdAt)}`}
+        description={`${openedOperation.description} · ${formatDateTime(openedOperation.createdAt, uiLocale)}`}
         kind={openedOperation.kind === "FREQUENCY"
           ? "frequency"
           : openedOperation.kind === "AI_ANSWER"
@@ -429,19 +436,7 @@ export function SemanticOperationsDrawer({
         onClose={() => setSelectedOperation(undefined)}
         operationId={openedOperation.id}
         projectId={projectId}
-        title={openedOperation.kind === "FREQUENCY"
-          ? "Сбор частотности"
-          : openedOperation.kind === "AI_ANSWER"
-            ? openedOperation.competitorCollection
-              ? "ИИ-выдача конкурентов"
-              : "Сбор ИИ-ответов"
-            : openedOperation.kind === "CLUSTERING"
-              ? "Кластеризация запросов"
-              : openedOperation.kind === "RESEARCH"
-                ? openedOperation.title
-            : openedOperation.competitorCollection
-              ? "Выдача конкурентов · Топ-10"
-              : "Проверка позиций"}
+        title={openedOperation.kind === "FREQUENCY" ? uiText("Сбор частотности") : openedOperation.kind === "AI_ANSWER" ? openedOperation.competitorCollection ? uiText("ИИ-выдача конкурентов") : uiText("Сбор ИИ-ответов") : openedOperation.kind === "CLUSTERING" ? uiText("Кластеризация запросов") : openedOperation.kind === "RESEARCH" ? openedOperation.title : openedOperation.competitorCollection ? uiText("Выдача конкурентов · Топ-10") : uiText("Проверка позиций")}
       />
     )}
     {stopConfirmation && (
@@ -498,7 +493,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     percent: value.selectedKeywords > 0 ? Math.round(done / value.selectedKeywords * 100) : 0,
     tab: operationTab(value.status),
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
-    retryable: ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
+    retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
     retryLabel: "Повторить ошибки",
     downloadable: false,
     version: value.version,
@@ -517,7 +512,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
   };
 }
 
-function rankOperation(value: RankJobSummary): Operation {
+function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Operation {
   const competitorCollection = value.purpose === "COMPETITOR_SERP";
   const current = Number(value.progress.current);
   const total = Number(value.progress.total);
@@ -567,8 +562,8 @@ function rankOperation(value: RankJobSummary): Operation {
     ...(value.result
       ? {
           resultLabel: competitorCollection
-            ? `Сохранено срезов: ${formatInteger(Number(value.result.persistedCount))}`
-            : `Найдено позиций: ${formatInteger(Number(value.result.foundCount))}`
+            ? `Сохранено срезов: ${formatInteger(Number(value.result.persistedCount), uiLocale)}`
+            : `Найдено позиций: ${formatInteger(Number(value.result.foundCount), uiLocale)}`
         }
       : {})
   };
@@ -665,7 +660,7 @@ function clusteringOperation(value: ClusteringRunSummary): Operation {
   };
 }
 
-function researchOperation(value: KeywordResearchRunSummary): Operation {
+function researchOperation(value: KeywordResearchRunSummary, uiLocale: string = "ru-RU"): Operation {
   const keysSo = value.source === "KEYS_SO";
   const current = value.importedKeywords > 0
     ? value.importedKeywords
@@ -687,9 +682,9 @@ function researchOperation(value: KeywordResearchRunSummary): Operation {
       : `${providerLabel} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
     statusLabel: operationStatusLabel(value.status),
     progressLabel: value.status === "READY_TO_IMPORT"
-      ? `Найдено ${formatInteger(value.collectedKeywords)}`
+      ? `Найдено ${formatInteger(value.collectedKeywords, uiLocale)}`
       : total > 0
-        ? `${formatInteger(current)} из ${formatInteger(total)}`
+        ? `${formatInteger(current, uiLocale)} из ${formatInteger(total, uiLocale)}`
         : "Ожидает данных",
     percent: value.status === "READY_TO_IMPORT" || value.status === "COMPLETED"
       ? 100
@@ -713,7 +708,7 @@ function researchOperation(value: KeywordResearchRunSummary): Operation {
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(durationLabel ? { durationLabel } : {}),
     ...(value.collectedKeywords > 0
-      ? { resultLabel: `Найдено запросов: ${formatInteger(value.collectedKeywords)}` }
+      ? { resultLabel: `Найдено запросов: ${formatInteger(value.collectedKeywords, uiLocale)}` }
       : {})
   };
 }
@@ -812,23 +807,23 @@ function tabLabel(value: OperationTab): string {
   return { ACTIVE: "Активные", COMPLETED: "Завершённые", ERROR: "Ошибки" }[value];
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
-function formatShortTime(value: string): string {
+function formatShortTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         hour: "2-digit",
         minute: "2-digit"
       }).format(date);
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
 function operationError(error: unknown): string {

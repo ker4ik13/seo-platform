@@ -3,6 +3,8 @@ import { ProjectNotes } from "../../../../../../components/project-notes";
 import { canEditProjectNotes } from "../../../../../../lib/app-permissions";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
 import { ProjectContextSelect } from "../../../../../../components/project-context-select";
+import { UiText } from "../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +26,7 @@ export default async function ProjectNotesPage({
       <section className="page-heading project-notes-heading">
         <div>
           <div className="project-page-title-row">
-            <h1>Заметки</h1>
+            <h1><UiText text="Заметки" /></h1>
             <ProjectContextSelect
               canReorder={context.projectCapabilities?.canReorder ?? false}
               destination="notes"
@@ -34,9 +36,7 @@ export default async function ProjectNotesPage({
             />
           </div>
           <p>
-            Markdown-документы проекта. Оставляйте их участникам или
-            открывайте безопасной ссылкой без индексации.
-          </p>
+            <UiText text="Markdown-документы проекта. Оставляйте их участникам или открывайте безопасной ссылкой без индексации." /></p>
         </div>
       </section>
       <ProjectNotes

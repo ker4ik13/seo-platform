@@ -231,6 +231,7 @@ function exportInputSnapshot(
     ...(input.sort ? { sort: input.sort } : {}),
     ...(input.keywordIds ? { keywordIds: [...input.keywordIds] } : {}),
     ...(input.includeBom === undefined ? {} : { includeBom: input.includeBom }),
+    ...(input.competitorRows === undefined ? {} : { competitorRows: input.competitorRows }),
     ...(input.positionHistory
       ? {
           positionHistory: {

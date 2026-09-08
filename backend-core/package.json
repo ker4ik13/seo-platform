@@ -23,7 +23,7 @@
     "@seo-platform/backend-core-api": "workspace:*",
     "@seo-platform/backend-core-realtime": "workspace:*",
     "@seo-platform/backend-core-seo": "workspace:*",
-    "fastify": "5.10.0",
+    "fastify": "5.12.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },

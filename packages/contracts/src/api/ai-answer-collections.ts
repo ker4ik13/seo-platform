@@ -18,7 +18,9 @@ export const aiAnswerCollectionPurposes = [
 export type AiAnswerCollectionPurpose =
   (typeof aiAnswerCollectionPurposes)[number];
 
-/** A bounded platform command submitted as one background Arsenkin task. */
+/** Platform selection may contain multiple independent provider tasks. */
+export const aiAnswerCollectionKeywordLimit = 300_000 as const;
+/** Maximum physical Arsenkin task; do not raise with the platform selection. */
 export const arsenkinAiAnswerKeywordLimit = 10_000 as const;
 export const internalAiAnswerResolveBatchLimit = 1_000 as const;
 export const internalAiAnswerPersistBatchLimit = 25 as const;
@@ -55,6 +57,7 @@ export interface CreateAiAnswerCollectionInput {
 
 export interface InternalCreateAiAnswerCollectionInput
   extends CreateAiAnswerCollectionInput {
+  readonly billing?: import("./paid-operations.js").InternalPaidOperationAdmission;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
@@ -139,6 +142,7 @@ export interface InternalPersistAiAnswerSnapshotBatchItem {
 }
 
 export interface InternalPersistAiAnswerSnapshotBatchInput {
+  readonly sourceMode?: "BYOK" | "PLATFORM";
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

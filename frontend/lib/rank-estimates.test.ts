@@ -26,6 +26,16 @@ import {
 
 const hash = "a".repeat(64);
 
+test("50k estimates keep new batching and old overflow counts distinct", () => {
+  for (const count of [1001, 15001, 50000]) {
+    const value = { ...estimate, policyVersion: "manual-arsenkin-positions@3.0.0", scope: { ...estimate.scope, keywordCount: String(count), pairCount: String(count) }, workload: { ...estimate.workload, keywordLimitPerTask: "5000", keywordLimitPerCommand: "300000", taskCount: String(Math.ceil(count / 5000)), minimumRequestCount: String(Math.ceil(count / 5000) * 3) } };
+    const parsed = parseRankEstimate(value, { projectId: estimate.projectId, trackingContextId: estimate.trackingContextId });
+    assert.equal(parsed.scope.keywordCount, String(count));
+    assert.equal(parsed.workload.keywordLimitPerTask, "5000");
+    assert.throws(() => parseRankEstimate({ ...value, policyVersion: "manual-arsenkin-positions@2.0.0" }, { projectId: estimate.projectId, trackingContextId: estimate.trackingContextId }));
+  }
+});
+
 const estimate: RankEstimate = {
   id: "estimate-1",
   workspaceId: "workspace-1",
@@ -70,7 +80,7 @@ const estimate: RankEstimate = {
   },
   blockers: [{ code: "PROVIDER_CONTRACT_NOT_READY" }],
   executionAllowed: false,
-  policyVersion: "arsenkin-positions.v1",
+  policyVersion: "manual-arsenkin-positions@1.0.0",
   calculatedAt: "2026-07-29T12:00:00.000Z",
   expiresAt: "2026-07-29T12:05:00.000Z"
 };
@@ -273,6 +283,7 @@ test("renders bounded overflow and unavailable hash honestly", () => {
 test("parses one 15,000-keyword Arsenkin positions task", () => {
   const current = {
     ...estimate,
+    policyVersion: "manual-arsenkin-positions@2.0.0",
     scope: {
       ...estimate.scope,
       keywordCount: "15000",

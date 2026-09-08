@@ -20,6 +20,8 @@ import {
   persistedCredentialValidationPresentation,
   supportsAutomaticCredentialValidation
 } from "../lib/integration-credential-validation";
+import { UiText } from "./ui-locale";
+
 
 const VALIDATION_POLL_INTERVAL_MS = 2_000;
 const VALIDATION_POLL_TIMEOUT_MS = 5 * 60 * 1_000;
@@ -90,11 +92,11 @@ export function IntegrationCredentialValidation({
   if (!supportsAutomaticCredentialValidation(validationMode)) {
     return (
       <div className="integration-validation-note" role="note">
-        <strong>Без автоматической проверки</strong>
+        <strong><UiText text="Без автоматической проверки" /></strong>
         <span>
           {provider === "XMLSTOCK"
-            ? "Для XMLStock пока не подтверждён безопасный read-only метод. Платформа не считает локальное чтение секрета проверкой провайдера."
-            : "Провайдер пока не поддерживает безопасную автоматическую проверку этого подключения."}
+            ? <UiText text="Для XMLStock пока не подтверждён безопасный read-only метод. Платформа не считает локальное чтение секрета проверкой провайдера." />
+            : <UiText text="Провайдер пока не поддерживает безопасную автоматическую проверку этого подключения." />}
         </span>
       </div>
     );
@@ -170,7 +172,7 @@ export function IntegrationCredentialValidation({
             title={validation.error.message}
           >
             <ValidationStateGlyph tone="danger" />
-            <span className="visually-hidden">{validation.error.message}</span>
+            <span className="visually-hidden">{<UiText text={validation.error.message ?? ""} />}</span>
           </span>
         )}
 
@@ -187,7 +189,7 @@ export function IntegrationCredentialValidation({
             title={presentation.message}
           >
             <ValidationStateGlyph tone={presentation.tone} />
-            <span className="visually-hidden">{presentation.message}</span>
+            <span className="visually-hidden">{<UiText text={presentation.message ?? ""} />}</span>
           </span>
         )}
 

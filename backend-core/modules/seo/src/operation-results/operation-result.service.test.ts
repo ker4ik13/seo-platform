@@ -11,6 +11,15 @@ const jobId = "01900000-0000-7000-8000-000000000004";
 const crawlId = "01900000-0000-7000-8000-000000000005";
 const context = { workspaceId, projectId, actorId };
 
+test("frequency retry metadata uses current active versions and preserves other rows after deletion", async () => {
+  const service = new OperationResultService({ keyword: { findMany: async () => [{ id: "active", textOriginal: "Текущая фраза", version: 9, status: "ACTIVE" }, { id: "trash", textOriginal: "В корзине", version: 12, status: "TRASHED" }] }, frequencySnapshot: { findMany: async () => [] } } as never);
+  const result = await service.frequency({ ...context, jobId, keywordIds: ["active", "deleted", "trash"] });
+  assert.deepEqual(result.rows.map(row => ({ id: row.keywordId, version: row.keywordVersion, available: row.keywordAvailable })), [
+    { id: "active", version: 9, available: true }, { id: "deleted", version: undefined, available: false }, { id: "trash", version: undefined, available: true }
+  ]);
+  assert.equal(result.rows[0]?.keyword, "Текущая фраза");
+});
+
 test("returns AI answer rows with per-job snapshot state", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000010";
   const service = new OperationResultService({
@@ -161,6 +170,12 @@ test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
           ? entries.filter(({ sequence }) => sequence > sequenceFilter.gt)
           : entries;
       }
+    },
+    rankSnapshot: {
+      groupBy: async () => [
+        { found: true, _count: { _all: 1 } },
+        { found: false, _count: { _all: 1 } }
+      ]
     }
   } as unknown as PrismaService);
 
@@ -174,6 +189,7 @@ test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
     ["PENDING", "FOUND", "NOT_FOUND"]
   );
   assert.deepEqual(first.page, { hasNext: true, nextCursor: "1" });
+  assert.deepEqual(first.counts, { foundCount: 1, notFoundCount: 1 });
   assert.deepEqual(second.page, { hasNext: false });
   assert.equal(rows[1]?.position, 7);
   assert.equal(rows[1]?.rankingUrl, "https://example.com/found");
@@ -210,6 +226,9 @@ test("preserves competitor purpose and returns its exact organic Top-10", async 
           dataQualityFlags: []
         })
       }]
+    },
+    rankSnapshot: {
+      groupBy: async () => [{ found: false, _count: { _all: 1 } }]
     },
     rankSerpResult: {
       findMany: async () => [
@@ -341,7 +360,7 @@ function rankEntry(sequence: number, rankSnapshot: unknown) {
   return {
     sequence,
     keywordId: `01900000-0000-7000-8000-${suffix}`,
-    keyword: { textOriginal: `Keyword ${sequence + 1}` },
+    keyword: { textOriginal: `Keyword ${sequence + 1}`, version: 7, status: "ACTIVE" },
     rankSnapshot
   };
 }

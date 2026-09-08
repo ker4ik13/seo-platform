@@ -9,15 +9,20 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
+import type { WorkspaceUsageSummary } from "@seo-platform/contracts";
+import { WorkspaceUsageService } from "./workspace-usage.service.js";
+import { RefundRequestService } from "./refund-request.service.js";
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  BillingProviderAvailability,
   BillingBalanceSummary,
   BillingLedgerTransactionSummary,
   BillingOrderSummary,
   BillingPaymentMethodSummary,
   BillingPlanSummary,
-  BillingRefundSummary,
+  BillingRefundEligibility,
+  BillingRefundRequestSummary,
   BillingSubscriptionSummary,
   NpdReceiptObligationSummary
 } from "@seo-platform/contracts";
@@ -54,6 +59,11 @@ import { BillingService } from "./billing.service.js";
 export class BillingCatalogController {
   public constructor(private readonly billing: BillingService) {}
 
+  @Get("providers")
+  public providers(@Req() request: FastifyRequest): ApiResponse<readonly BillingProviderAvailability[]> {
+    return apiResponse(request, this.billing.providers());
+  }
+
   @Get("plans")
   public async plans(
     @Req() request: FastifyRequest
@@ -66,8 +76,22 @@ export class BillingCatalogController {
 export class BillingController {
   public constructor(
     private readonly billing: BillingService,
-    private readonly recentAuthentication: RecentAuthenticationService
+    private readonly recentAuthentication: RecentAuthenticationService,
+    private readonly usage: WorkspaceUsageService,
+    private readonly refunds: RefundRequestService
   ) {}
+
+  @Get("usage")
+  @RequirePermission("billing.view_plan")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async workspaceUsage(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceUsageSummary>> {
+    const tenant = request.tenantAuthorization;
+    if (!tenant) throw new Error("Workspace authorization is missing");
+    return apiResponse(request, await this.usage.read({ tenant, actorId: principal.userId, requestId: request.id }));
+  }
 
   @Get("subscription")
   @RequirePermission("billing.view_plan")
@@ -261,6 +285,7 @@ export class BillingController {
   }
 
   @Post("payments/:paymentId/refunds")
+  @HttpCode(202)
   @RequirePermission("billing.manage_plan")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async refund(
@@ -268,11 +293,11 @@ export class BillingController {
     @Body() body: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
-  ): Promise<ApiResponse<BillingRefundSummary>> {
+  ): Promise<ApiResponse<BillingRefundRequestSummary>> {
     this.recentAuthentication.assert(principal);
     return apiResponse(
       request,
-      await this.billing.createRefund(
+      await this.refunds.create(
         workspaceId(request),
         assertUuid(paymentId, "paymentId"),
         principal.userId,
@@ -281,6 +306,20 @@ export class BillingController {
         requestContext(request)
       )
     );
+  }
+
+  @Get("payments/:paymentId/refund-eligibility")
+  @RequirePermission("billing.view_plan")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async refundEligibility(@Param("paymentId") paymentId: string, @Req() request: TenantRequest): Promise<ApiResponse<BillingRefundEligibility>> {
+    return apiResponse(request, await this.refunds.eligibility(workspaceId(request), assertUuid(paymentId, "paymentId")));
+  }
+
+  @Get("refund-requests")
+  @RequirePermission("billing.view_plan")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async refundRequests(@Req() request: TenantRequest) {
+    return apiResponse(request, await this.refunds.list(workspaceId(request)));
   }
 }
 

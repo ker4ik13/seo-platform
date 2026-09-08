@@ -7,6 +7,8 @@ import {
   canViewWorkspaceBilling
 } from "../../../../../lib/app-permissions";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +21,9 @@ export default async function BillingSettingsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Тариф, баланс и оплата</h1>
+          <h1><UiText text="Тариф, баланс и оплата" /></h1>
           <p>
-            Подписка оплачивает доступ к платформе, а системные SEO API
-            оплачиваются внутренними токенами из включённого и пополненного
-            баланса.
-          </p>
+            <UiText text="Подписка определяет возможности рабочей области. Данные SEO-сервисов оплачиваются с отдельного баланса; стоимость подтверждается перед запуском." /></p>
         </div>
       </section>
       <SettingsTabs
@@ -37,22 +36,20 @@ export default async function BillingSettingsPage() {
       />
       {!context.workspace ? (
         <section className="panel panel-empty compact">
-          <strong>Сначала создайте рабочее пространство</strong>
-          <p>Тариф и баланс принадлежат workspace.</p>
+          <strong><UiText text="Сначала создайте рабочее пространство" /></strong>
+          <p><UiText text="Здесь будут тариф, баланс и история платежей вашей рабочей области." /></p>
           <a className="primary-button" href="/app">
-            Перейти к созданию
-          </a>
+            <UiText text="Перейти к созданию" /></a>
         </section>
       ) : !canView ? (
         <section className="panel panel-empty compact">
-          <strong>Недостаточно прав</strong>
+          <strong><UiText text="Недостаточно прав" /></strong>
           <p>
-            Для просмотра биллинга требуется разрешение{" "}
-            <code>billing.view_plan</code>.
-          </p>
+            <UiText text="Владелец рабочей области может предоставить доступ к оплате." /></p>
         </section>
       ) : (
         <BillingSettings
+          key={context.workspace.id}
           canManagePaymentMethods={canManageWorkspacePaymentMethods(
             roleCode
           )}

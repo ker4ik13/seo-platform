@@ -6,6 +6,7 @@ import type {
   ConnectorOperationAttemptSummary,
   ConnectorRoutingScope
 } from "@seo-platform/contracts";
+import { aiAnswerCollectionKeywordLimit } from "@seo-platform/contracts";
 import type { Job } from "../generated/prisma/client.js";
 
 export function aiAnswerCollectionSummary(job: Job): AiAnswerCollectionSummary {
@@ -115,13 +116,13 @@ function status(value: string): AiAnswerCollectionStatus {
 
 function count(value: bigint): number {
   const result = Number(value);
-  if (!Number.isSafeInteger(result) || result < 0 || result > 10_000) invalid();
+  if (!Number.isSafeInteger(result) || result < 0 || result > aiAnswerCollectionKeywordLimit) invalid();
   return result;
 }
 
 function summaryCount(result: unknown, error: unknown): number {
   const value = objectOrUndefined(result)?.failed ?? objectOrUndefined(error)?.failed ?? 0;
-  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 10_000) invalid();
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > aiAnswerCollectionKeywordLimit) invalid();
   return Number(value);
 }
 

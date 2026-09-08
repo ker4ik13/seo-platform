@@ -1,4 +1,5 @@
 "use client";
+import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 
 import {
   arsenkinClusteringKeywordLimit,
@@ -11,8 +12,9 @@ import {
   type ProjectConnectorBinding,
   type ProjectConnectorSettings
 } from "@seo-platform/contracts";
-import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import {
   createProjectConnectorBindingInput,
   projectConnectorBinding,
@@ -41,6 +43,8 @@ import {
   type SemanticOperationGroup,
   type SemanticOperationSelection
 } from "./semantic-operation-scope";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function SemanticClusteringDialog({
   activeGroupId,
@@ -57,7 +61,9 @@ export function SemanticClusteringDialog({
   onStarted: (run: ClusteringRunSummary) => void;
   projectId: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const formId = useId();
+  const operationAttempt = useRef<OperationAttempt | undefined>(undefined);
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [searchEngine, setSearchEngine] = useState<ClusteringSearchEngine>("YANDEX");
@@ -114,10 +120,7 @@ export function SemanticClusteringDialog({
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void browserApiRequest<ProjectConnectorSettings>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-      { signal: controller.signal }
-    )
+    void preparedProjectIntegrations(projectId, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
         const current = projectConnectorBinding(result, "CLUSTERING");
@@ -154,12 +157,8 @@ export function SemanticClusteringDialog({
         throw new Error("Нет активного подключения Arsenkin с доступом к кластеризации.");
       }
       await ensureBinding(settings, binding, selectedSource.id);
-      const run = await browserApiRequest<ClusteringRunSummary>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`,
-        {
-          method: "POST",
-          idempotencyKey: `semantic-clustering:${crypto.randomUUID()}`,
-          body: {
+      const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`;
+      const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
             searchEngine,
             regionCode,
@@ -170,9 +169,11 @@ export function SemanticClusteringDialog({
             stopDomains,
             frequencyTypes,
             replaceExistingClusters
-          }
-        }
-      );
+          };
+      operationAttempt.current = prepareOperationAttempt(operationAttempt.current, operationPath, body, selectedSource.id, "semantic-clustering");
+      const run = await browserApiRequest<ClusteringRunSummary>(operationPath, {
+        method: "POST", operationAttempt: operationAttempt.current, body
+      });
       writeLastSemanticRegion(
         window.localStorage,
         projectId,
@@ -182,6 +183,7 @@ export function SemanticClusteringDialog({
       );
       onStarted(run);
     } catch (requestError) {
+      if (requestError instanceof BrowserApiError && requestError.code === "OPERATION_CANCELLED") return;
       setError(clusteringErrorMessage(requestError));
     } finally {
       setRunning(false);
@@ -221,19 +223,19 @@ export function SemanticClusteringDialog({
 
   return (
     <SemanticModal
-      description="Arsenkin сравнит выдачу по каждому запросу. Результат сначала сохраняется как черновик: папки и кластеры изменятся только после вашего подтверждения."
+      description={uiText("Arsenkin сравнит выдачу по каждому запросу. Результат сначала сохраняется как черновик: папки и кластеры изменятся только после вашего подтверждения.")}
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="cluster" /><div><dt>Запросов</dt><dd>{selections.length}</dd></div></div>
-            <div><SearchEngineLogo engine={searchEngine} /><div><dt>Выдача</dt><dd>{searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ТОП-{depth}</dd></div></div>
-            <div><Icon name="multiGroup" /><div><dt>Метод</dt><dd>{method === "SOFT" ? "Мягкий" : "Жёсткий"} · {overlapCount} совп.</dd></div></div>
-            <div><ProviderLogo provider="ARSENKIN" size="compact" /><div><dt>Применение</dt><dd>После проверки</dd></div></div>
+            <div><Icon name="cluster" /><div><dt><UiText text="Запросов" /></dt><dd>{selections.length}</dd></div></div>
+            <div><SearchEngineLogo engine={searchEngine} /><div><dt><UiText text="Выдача" /></dt><dd>{searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"} <UiText text="· ТОП-" before=" " />{depth}</dd></div></div>
+            <div><Icon name="multiGroup" /><div><dt><UiText text="Метод" /></dt><dd>{method === "SOFT" ? <UiText text="Мягкий" /> : <UiText text="Жёсткий" />} · {overlapCount} <UiText text="совп." before=" " /></dd></div></div>
+            <div><ProviderLogo provider="ARSENKIN" size="compact" /><div><dt><UiText text="Применение" /></dt><dd><UiText text="После проверки" /></dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
-            <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
+            <button className="secondary-button" disabled={running} onClick={onClose} type="button"><UiText text="Отмена" /></button>
             <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || selections.length === 0 || stopDomains.length > 100} form={formId} type="submit">
-              {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Кластеризовать (${selections.length})`}
+              {resolvingScope ? <UiText text="Загружаем запросы…" /> : running ? <UiText text="Запускаем…" /> : <UiText text="Кластеризовать ({0})" values={[String(selections.length)]} />}
             </button>
           </div>
         </div>
@@ -241,16 +243,16 @@ export function SemanticClusteringDialog({
       onClose={running ? () => undefined : onClose}
       presenceKey="semantic-modal:clustering"
       size="large"
-      title="Кластеризовать запросы"
+      title={uiText("Кластеризовать запросы")}
     >
       <form className="semantic-clustering-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         <div className="semantic-workflow-grid semantic-clustering-workflow-grid">
           <section className="semantic-workflow-panel semantic-clustering-source-panel">
             <header>
-              <h3>Источник и выдача</h3>
-              <p>Выберите поисковик и подключение Arsenkin.</p>
+              <h3><UiText text="Источник и выдача" /></h3>
+              <p><UiText text="Выберите поисковик и подключение Arsenkin." /></p>
             </header>
-            <div aria-label="Поисковая система" className="semantic-engine-cards" role="group">
+            <div aria-label={uiText("Поисковая система")} className="semantic-engine-cards" role="group">
               {(["YANDEX", "GOOGLE"] as const).map((engine) => (
                 <button
                   aria-pressed={searchEngine === engine}
@@ -260,13 +262,13 @@ export function SemanticClusteringDialog({
                   type="button"
                 >
                   <SearchEngineLogo engine={engine} />
-                  <span>{engine === "YANDEX" ? "Яндекс" : "Google"}</span>
+                  <span>{engine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</span>
                   <i aria-hidden="true" />
                 </button>
               ))}
             </div>
             <label className="semantic-workflow-field">
-              <span>Регион выдачи</span>
+              <span><UiText text="Регион выдачи" /></span>
               <SearchableRegionSelect
                 kind={searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
                 onChange={(region) => setRegions((current) => ({
@@ -276,18 +278,17 @@ export function SemanticClusteringDialog({
                 value={regionCode}
               />
               <small>
-                Первый запуск — Москва; затем используется регион последней успешной кластеризации.
-              </small>
+                <UiText text="Первый запуск — Москва; затем используется регион последней успешной кластеризации." /></small>
             </label>
             <div className="semantic-provider-field">
               <div className="semantic-provider-field-heading">
-                <h4>Провайдер</h4>
-                <a className="semantic-dialog-link" href="/app/settings/integrations">Управлять</a>
+                <h4><UiText text="Провайдер" /></h4>
+                <a className="semantic-dialog-link" href="/app/settings/integrations"><UiText text="Управлять" /></a>
               </div>
               {loading ? (
-                <div className="semantic-dialog-loading" role="status">Загружаем подключение…</div>
+                <div className="semantic-dialog-loading" role="status"><UiText text="Загружаем подключение…" /></div>
               ) : sources.length > 0 ? (
-                <div aria-label="Подключение Arsenkin" className="semantic-provider-list" role="radiogroup">
+                <div aria-label={uiText("Подключение Arsenkin")} className="semantic-provider-list" role="radiogroup">
                   {sources.map((source) => (
                     <button
                       aria-checked={source.id === credentialId}
@@ -301,37 +302,38 @@ export function SemanticClusteringDialog({
                       <span className="semantic-provider-card-copy">
                         <strong>Arsenkin Tools</strong>
                         <small>{source.label} · Clustering API</small>
-                        <b>Подключено</b>
+                        <b><UiText text="Подключено" /></b>
                       </span>
                       <i aria-hidden="true" className="semantic-provider-radio" />
                     </button>
                   ))}
                 </div>
               ) : (
-                <div className="inline-alert warning">Нет проверенного подключения Arsenkin с функцией кластеризации.</div>
+                <div className="inline-alert warning"><UiText text="Нет проверенного подключения Arsenkin с функцией кластеризации." /></div>
               )}
             </div>
           </section>
 
           <section className="semantic-workflow-panel semantic-clustering-settings-panel">
+            {selections.length > 30_000 && <p className="inline-alert warning"><UiText text="Для кластеризации более 30 000 фраз нужен подходящий тариф Arsenkin: до 70 000 на «Корпоративном», больше — по согласованию с провайдером. Группировка выполняется целиком, чтобы сохранить связи между запросами." /></p>}
             <header>
-              <h3>Правила кластеризации</h3>
-              <p>Настройте силу объединения и глубину выдачи.</p>
+              <h3><UiText text="Правила кластеризации" /></h3>
+              <p><UiText text="Настройте силу объединения и глубину выдачи." /></p>
             </header>
             <fieldset className="semantic-segmented-field">
-              <legend>Метод</legend>
-              <div className="semantic-segmented-control" role="radiogroup" aria-label="Метод кластеризации">
+              <legend><UiText text="Метод" /></legend>
+              <div className="semantic-segmented-control" role="radiogroup" aria-label={uiText("Метод кластеризации")}>
                 {semanticClusteringMethodOptions.map((option) => (
                   <label className={method === option.value ? "selected" : undefined} key={option.value}>
                     <input checked={method === option.value} onChange={() => setMethod(option.value)} type="radio" />
-                    <span>{option.label}</span>
+                    <span><UiText text={option.label} /></span>
                   </label>
                 ))}
               </div>
-              <small>{method === "SOFT" ? "Запросы объединяются, если имеют общие URL с ведущим запросом." : "Все запросы внутри группы должны быть связаны общими URL."}</small>
+              <small>{method === "SOFT" ? <UiText text="Запросы объединяются, если имеют общие URL с ведущим запросом." /> : <UiText text="Все запросы внутри группы должны быть связаны общими URL." />}</small>
             </fieldset>
             <label className="semantic-workflow-field">
-              <span>Совпадений в ТОПе: {overlapCount}</span>
+              <span><UiText text="Совпадений в ТОПе:" after=" " />{overlapCount}</span>
               <input
                 max={10}
                 min={2}
@@ -339,26 +341,26 @@ export function SemanticClusteringDialog({
                 type="range"
                 value={overlapCount}
               />
-              <small>Чем больше значение, тем уже и точнее получатся группы.</small>
+              <small><UiText text="Чем больше значение, тем уже и точнее получатся группы." /></small>
             </label>
             <fieldset className="semantic-segmented-field">
-              <legend>Глубина выдачи</legend>
-              <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина выдачи">
+              <legend><UiText text="Глубина выдачи" /></legend>
+              <div className="semantic-segmented-control" role="radiogroup" aria-label={uiText("Глубина выдачи")}>
                 {clusteringDepths.map((value) => (
                   <label className={depth === value ? "selected" : undefined} key={value}>
                     <input checked={depth === value} onChange={() => setDepth(value)} type="radio" />
-                    <span>ТОП-{value}</span>
+                    <span><UiText text="ТОП-" />{value}</span>
                   </label>
                 ))}
               </div>
             </fieldset>
             <label className="semantic-check-row">
               <input checked={excludeMainPages} onChange={(event) => setExcludeMainPages(event.target.checked)} type="checkbox" />
-              <span><strong>Исключить главные страницы</strong><small>Не учитывать главные страницы сайтов при сравнении выдачи.</small></span>
+              <span><strong><UiText text="Исключить главные страницы" /></strong><small><UiText text="Не учитывать главные страницы сайтов при сравнении выдачи." /></small></span>
             </label>
             <fieldset className="semantic-segmented-field">
-              <legend>Частотность <small>необязательно</small></legend>
-              <div aria-label="Виды частотности" className="semantic-segmented-control" role="group">
+              <legend><UiText text="Частотность" after=" " /><small><UiText text="необязательно" /></small></legend>
+              <div aria-label={uiText("Виды частотности")} className="semantic-segmented-control" role="group">
                 {([[
                   "BASE", "Базовая"
                 ], ["QUOTED", "Фразовая"], ["OVERALL", "Общая"], ["EXACT", "Точная"]] as const).map(([value, label]) => (
@@ -370,27 +372,27 @@ export function SemanticClusteringDialog({
                         : [...current, value])}
                       type="checkbox"
                     />
-                    <span>{label}</span>
+                    <span><UiText text={label} /></span>
                   </label>
                 ))}
               </div>
-              <small>Можно оставить все варианты выключенными, чтобы не собирать частотность.</small>
+              <small><UiText text="Можно оставить все варианты выключенными, чтобы не собирать частотность." /></small>
             </fieldset>
             <label className="semantic-check-row">
               <input checked={replaceExistingClusters} onChange={(event) => setReplaceExistingClusters(event.target.checked)} type="checkbox" />
-              <span><strong>Разрешить перекластеризацию</strong><small>Иначе запросы из существующих кластеров будут отмечены конфликтами и останутся без изменений.</small></span>
+              <span><strong><UiText text="Разрешить перекластеризацию" /></strong><small><UiText text="Иначе запросы из существующих кластеров будут отмечены конфликтами и останутся без изменений." /></small></span>
             </label>
             <label className="semantic-workflow-field semantic-clustering-stoplist">
-              <span>Стоп-домены <small>необязательно, до 100</small></span>
+              <span><UiText text="Стоп-домены" after=" " /><small><UiText text="необязательно, до 100" /></small></span>
               <textarea onChange={(event) => setStopDomainsText(event.target.value)} placeholder="market.yandex.ru&#10;ozon.ru" rows={3} value={stopDomainsText} />
-              <small>По одному домену на строку. Эти сайты не участвуют в сравнении.</small>
+              <small><UiText text="По одному домену на строку. Эти сайты не участвуют в сравнении." /></small>
             </label>
           </section>
 
           <section className="semantic-workflow-panel semantic-clustering-scope-panel">
             <header>
-              <h3>Запросы</h3>
-              <p>Выберите вручную, из папок или весь проект.</p>
+              <h3><UiText text="Запросы" /></h3>
+              <p><UiText text="Выберите вручную, из папок или весь проект." /></p>
             </header>
             <SemanticOperationScope
               activeGroupId={activeGroupId}
@@ -404,8 +406,8 @@ export function SemanticClusteringDialog({
         </div>
         {(error || scopeError) && (
           <div className="semantic-workflow-feedback">
-            {error && <div className="inline-alert danger" role="alert">{error}</div>}
-            {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
+            {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
+            {scopeError && <div className="inline-alert warning" role="alert">{<UiText text={scopeError ?? ""} />}</div>}
           </div>
         )}
       </form>

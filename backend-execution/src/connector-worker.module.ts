@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { PaidOperationRuntimeService } from "./paid-operations/paid-operation-runtime.service.js";
+import { PlatformAccountProbeService } from "./integrations/platform-account-probe.service.js";
 import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { IntegrationCredentialConnectorRegistry } from "./integrations/integration-credential-connector.registry.js";
@@ -46,6 +48,8 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     PlatformApiModule
   ],
   providers: [
+    PlatformAccountProbeService,
+    PaidOperationRuntimeService,
     ArsenkinHttpRateLimiter,
     XmlStockHttpQuotaLimiter,
     IntegrationCredentialConnectorRegistry,

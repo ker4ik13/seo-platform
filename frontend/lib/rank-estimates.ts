@@ -1,9 +1,9 @@
 import {
-  legacyRankManifestChunkSize,
   legacyRankProviderKeywordLimit,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
   rankProviderOverflowCount,
+  rankCommandOverflowCount,
+  rankExecutionPolicyShape,
+  rankPolicyTaskCount,
   rankEstimateBlockerCodes,
   type CreateRankEstimateInput,
   type RankEstimate,
@@ -45,7 +45,7 @@ const blockerLabels: Readonly<
   NO_ASSIGNED_KEYWORDS:
     "В контекст не назначено ни одного запроса.",
   KEYWORD_LIMIT_EXCEEDED:
-    "В запуске более 15 000 запросов. Уменьшите выбор перед запуском.",
+    "Выбранных запросов больше допустимого для этой операции. Уменьшите область или выберите отдельные папки.",
   SCOPE_HASH_UNAVAILABLE:
     "Точный хеш состава запросов недоступен для переполненного scope.",
   UNSUPPORTED_SEARCH_ENGINE:
@@ -309,9 +309,10 @@ export function parseRankEstimate(
     /^(?:0|[1-9]\d*)$/u.test(estimate.platformChargeMicro)
       ? estimate.platformChargeMicro
       : undefined;
-  const scope = parseScope(estimate.scope);
+  const policy = rankExecutionPolicyShape(estimate.policyVersion, provider);
+  const scope = policy ? parseScope(estimate.scope, policy.commandLimit) : undefined;
   const workload = scope && provider
-    ? parseWorkload(estimate.workload, scope.keywordCount, provider)
+    ? parseWorkload(estimate.workload, scope.keywordCount, provider, estimate.policyVersion)
     : undefined;
   const providerLimits = objectValue(estimate.providerLimits);
   const expectedDuration = objectValue(estimate.expectedDuration);
@@ -505,12 +506,13 @@ export function rankEstimateFeedback(
   };
 }
 
-export function rankEstimateCountLabel(value: string): string {
+export function rankEstimateCountLabel(value: string, uiLocale: string = "ru-RU"): string {
+  if (value === String(rankCommandOverflowCount)) return "более 300 000";
   if (value === String(rankProviderOverflowCount)) return "более 15 000";
   if (value === String(legacyRankProviderKeywordLimit + 1)) {
     return "более 1 000";
   }
-  return formatDecimalInteger(value);
+  return formatDecimalInteger(value, uiLocale);
 }
 
 export function rankEstimateShortHash(
@@ -521,7 +523,7 @@ export function rankEstimateShortHash(
 }
 
 export function rankEstimateQuotaLabel(
-  quota: RankEstimateQuota
+  quota: RankEstimateQuota, uiLocale: string = "ru-RU"
 ): string {
   if (quota.status === "UNLIMITED") {
     return "Без внутреннего лимита";
@@ -530,25 +532,25 @@ export function rankEstimateQuotaLabel(
     return "Тарифная квота пока не подключена";
   }
   const summary = `${formatDecimalInteger(
-    quota.remaining
-  )} из ${formatDecimalInteger(quota.limit)} осталось`;
+    quota.remaining, uiLocale
+  )} из ${formatDecimalInteger(quota.limit, uiLocale)} осталось`;
   const statusLabel = quota.status === "EXHAUSTED"
     ? `Квота исчерпана · ${summary}`
     : summary;
   return quota.resetsAt
-    ? `${statusLabel} · обновится ${formatDateTime(quota.resetsAt)}`
+    ? `${statusLabel} · обновится ${formatDateTime(quota.resetsAt, uiLocale)}`
     : statusLabel;
 }
 
 export function rankEstimateCredentialFreshnessLabel(
-  freshness: RankEstimateCredentialFreshness
+  freshness: RankEstimateCredentialFreshness, uiLocale: string = "ru-RU"
 ): string {
   if (freshness.status === "FRESH") {
-    return `Проверен ${formatDateTime(freshness.verifiedAt)}`;
+    return `Проверен ${formatDateTime(freshness.verifiedAt, uiLocale)}`;
   }
   if (freshness.status === "STALE") {
     return freshness.verifiedAt
-      ? `Проверка устарела · ${formatDateTime(freshness.verifiedAt)}`
+      ? `Проверка устарела · ${formatDateTime(freshness.verifiedAt, uiLocale)}`
       : "Проверка API-ключа устарела";
   }
   return freshness.status === "UNVERIFIED"
@@ -573,7 +575,7 @@ export function rankEstimateExpired(
   return !Number.isFinite(expires) || expires <= now;
 }
 
-function parseScope(value: unknown): RankEstimate["scope"] | undefined {
+function parseScope(value: unknown, commandLimit: number): RankEstimate["scope"] | undefined {
   const scope = objectValue(value);
   const keywordCount = boundedScopeCount(scope.keywordCount);
   const pairCount = boundedScopeCount(scope.pairCount);
@@ -591,11 +593,9 @@ function parseScope(value: unknown): RankEstimate["scope"] | undefined {
     !configurationVersion ||
     !scopeHash ||
     configurationVersion > contextVersion ||
-    ([
-      String(legacyRankProviderKeywordLimit + 1),
-      String(rankProviderOverflowCount)
-    ].includes(keywordCount)) !==
-      (scopeHash.availability === "UNAVAILABLE")
+    (BigInt(keywordCount) > BigInt(commandLimit + 1)) ||
+    (keywordCount === String(commandLimit + 1) && scopeHash.availability !== "UNAVAILABLE") ||
+    (keywordCount === "0" && scopeHash.availability === "UNAVAILABLE")
   ) {
     return undefined;
   }
@@ -612,7 +612,8 @@ function parseScope(value: unknown): RankEstimate["scope"] | undefined {
 function parseWorkload(
   value: unknown,
   keywordCount: string,
-  provider: "ARSENKIN" | "XMLSTOCK"
+  provider: "ARSENKIN" | "XMLSTOCK",
+  policyVersion: unknown
 ): RankEstimate["workload"] | undefined {
   const workload = objectValue(value);
   const polling = objectValue(workload.pollingRequestCount);
@@ -624,29 +625,11 @@ function parseWorkload(
   )
     ? BigInt(workload.minimumRequestCount)
     : undefined;
-  const count = BigInt(keywordCount);
-  const legacyWorkload =
-    workload.keywordLimitPerTask === String(legacyRankManifestChunkSize) &&
-    workload.keywordLimitPerCommand === String(legacyRankProviderKeywordLimit);
-  const currentWorkload =
-    workload.keywordLimitPerTask === String(rankManifestSingleTaskChunkSize) &&
-    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
-  const expectedTaskCount = legacyWorkload
-    ? count > BigInt(legacyRankProviderKeywordLimit)
-      ? 0n
-      : (count + BigInt(legacyRankManifestChunkSize - 1)) /
-        BigInt(legacyRankManifestChunkSize)
-    : currentWorkload
-      ? count > BigInt(rankProviderKeywordLimit)
-        ? 0n
-        : count === 0n
-          ? 0n
-          : 1n
-      : -1n;
-  const xmlStockWorkload =
-    workload.keywordLimitPerTask === "1" &&
-    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
-  const xmlStockTasks = count > BigInt(rankProviderKeywordLimit) ? 0n : count;
+  const policy = rankExecutionPolicyShape(policyVersion, provider);
+  if (!policy || Number(keywordCount) > policy.commandLimit + 1) return undefined;
+  const matchingWorkload = workload.keywordLimitPerTask === String(policy.chunkSize) && workload.keywordLimitPerCommand === String(policy.commandLimit);
+  const expectedTaskCount = BigInt(rankPolicyTaskCount(policy, Number(keywordCount)));
+  const xmlStockTasks = expectedTaskCount;
   const requestStages = workload.requestStages;
   const arsenkinStages =
     Array.isArray(requestStages) &&
@@ -672,13 +655,13 @@ function parseWorkload(
         : -1n;
   const validArsenkin =
     provider === "ARSENKIN" &&
-    (legacyWorkload || currentWorkload) &&
+    matchingWorkload &&
     taskCount === expectedTaskCount &&
     minimumRequestCount === expectedTaskCount * 3n &&
     arsenkinStages;
   const validXmlStock =
     provider === "XMLSTOCK" &&
-    xmlStockWorkload &&
+    matchingWorkload &&
     taskCount === xmlStockTasks &&
     minimumRequestCount !== undefined &&
     ((xmlStockYandexStages && minimumRequestCount === xmlStockTasks * 2n) ||
@@ -710,10 +693,12 @@ function parseWorkload(
     keywordLimitPerTask: workload.keywordLimitPerTask as
       | "1"
       | "250"
+      | "5000"
       | "15000",
     keywordLimitPerCommand: workload.keywordLimitPerCommand as
       | "1000"
-      | "15000",
+      | "15000"
+      | "300000",
     format: "SIMPLE",
     rawSerp: false,
     fallbackMode: "NONE"
@@ -811,7 +796,7 @@ function parseCredentialFreshness(
 function boundedScopeCount(value: unknown): string | undefined {
   if (!decimalInteger(value)) return undefined;
   const numeric = Number(value);
-  return numeric <= rankProviderOverflowCount ? value : undefined;
+  return numeric <= rankCommandOverflowCount ? value : undefined;
 }
 
 function orderedUniqueBlockers(
@@ -867,18 +852,18 @@ function invalidEstimate(): BrowserApiError {
   );
 }
 
-function formatDecimalInteger(value: string): string {
+function formatDecimalInteger(value: string, uiLocale: string = "ru-RU"): string {
   try {
-    return new Intl.NumberFormat("ru-RU").format(BigInt(value));
+    return new Intl.NumberFormat(uiLocale).format(BigInt(value));
   } catch {
     return value;
   }
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "дата неизвестна";
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(uiLocale, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(date);

@@ -30,6 +30,11 @@ export const integrationCredentialModes = [
 export type IntegrationCredentialMode =
   (typeof integrationCredentialModes)[number];
 
+/** Shared compatibility rule for catalog/route projections, not an execution grant. */
+export function credentialModeSupportsCapability(mode: string, capability: IntegrationCapability, provider: string): boolean {
+  return mode === "BYOK_API_KEY" || mode === "PLATFORM_PAID" && (provider === "XMLSTOCK" || provider === "ARSENKIN") && ["SERP_RANK_TRACKING", "WORDSTAT", "SERP_COLLECTION", "CLUSTERING", "KEYWORD_RESEARCH"].includes(capability);
+}
+
 export const integrationCredentialStatuses = [
   "PENDING_VERIFICATION",
   "ACTIVE",

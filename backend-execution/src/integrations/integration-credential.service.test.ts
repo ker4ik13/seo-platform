@@ -334,7 +334,8 @@ test("enables one encrypted platform credential without exposing shared quota", 
         createCount += 1;
         assert.deepEqual(data.providerMeta, {
           accountIdentifierConfigured: true,
-          platformPoolSize: 2
+          platformPoolSize: 2,
+          platformAccountIds: crypto.platformCredentialPoolSecret("XMLSTOCK", platformMaterial).platformPool!.map(entry => entry.id)
         });
         stored = credentialRecord(
           crypto,
@@ -379,7 +380,7 @@ test("enables one encrypted platform credential without exposing shared quota", 
   assert.equal(replay.id, first.id);
   assert.equal(first.mode, "PLATFORM_PAID");
   assert.equal(first.displayHint, "Системный");
-  assert.deepEqual(first.capabilities, ["SERP_RANK_TRACKING"]);
+  assert.deepEqual(first.capabilities, ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "KEYWORD_RESEARCH"]);
   assert.deepEqual(first.quota, { status: "NOT_AVAILABLE" });
   assert.deepEqual(activeLookup, {
     workspaceId,
@@ -823,6 +824,7 @@ function credentialRecord(
 function validationJobRecord(overrides: Partial<Job> = {}): Job {
   const now = new Date("2026-07-29T09:00:00.000Z");
   return {
+    billingQuoteId: null, billingCommandHash: null, billingMaximumUnitsMilli: null,
     id: validationId,
     workspaceId,
     projectId: null,

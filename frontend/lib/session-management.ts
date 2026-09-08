@@ -184,7 +184,7 @@ export function sessionDevicePresentation(
 
 export function formatSessionActivity(
   value: string,
-  now = Date.now()
+  now = Date.now(), uiLocale: string = "ru-RU"
 ): string {
   const timestamp = Date.parse(value);
   const elapsed = Math.max(0, now - timestamp);
@@ -195,11 +195,11 @@ export function formatSessionActivity(
   if (elapsed < 24 * 60 * 60_000) {
     return `${Math.floor(elapsed / (60 * 60_000))} ч назад`;
   }
-  return formatSessionDate(value);
+  return formatSessionDate(value, uiLocale);
 }
 
-export function formatSessionDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+export function formatSessionDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));

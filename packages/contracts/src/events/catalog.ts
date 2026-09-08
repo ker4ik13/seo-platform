@@ -54,7 +54,8 @@ export const domainEventTypes = {
   billingReservationCreated: "billing.reservation.created.v1",
   billingReservationSettled: "billing.reservation.settled.v1",
   billingNpdReceiptDeliveryRequested:
-    "billing.npd-receipt.delivery-requested.v1"
+    "billing.npd-receipt.delivery-requested.v1",
+  billingNoticeRequested: "billing.notice.requested.v1"
 } as const;
 
 export type DomainEventType =

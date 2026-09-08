@@ -161,7 +161,7 @@ test("rejects replacement overflow and duplicate identifiers", () => {
   assert.throws(
     () =>
       replaceTrackingContextKeywordsInput({
-        keywordIds: keywordIdentifiers(15_001)
+        keywordIds: keywordIdentifiers(300_001)
       }),
     DomainError
   );

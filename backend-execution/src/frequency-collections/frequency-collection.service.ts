@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { paidOperationJobFields } from "../paid-operations/paid-operation-admission.js";
 import {
   BadRequestException,
   ConflictException,
@@ -16,8 +17,7 @@ import type {
   InternalRetryFrequencyCollectionInput
 } from "@seo-platform/contracts";
 import {
-  arsenkinWordstatKeywordLimit,
-  xmlStockWordstatKeywordLimit
+  frequencyCollectionKeywordLimit
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -60,18 +60,17 @@ export class FrequencyCollectionService {
       input.workspaceId,
       input.projectId,
       "WORDSTAT",
-      input.actorId
+      input.actorId,
+      input.billing?.provider,
+      input.billing?.credentialId
     );
     if (route.provider !== "XMLSTOCK" && route.provider !== "ARSENKIN") {
       throw new Error("Resolved Wordstat provider is unsupported");
     }
-    const providerKeywordLimit =
-      route.provider === "ARSENKIN"
-        ? arsenkinWordstatKeywordLimit
-        : xmlStockWordstatKeywordLimit;
+    const providerKeywordLimit = frequencyCollectionKeywordLimit;
     if (input.items.length > providerKeywordLimit) {
       throw new BadRequestException(
-        `Wordstat provider accepts at most ${providerKeywordLimit} keywords per collection`
+        `A frequency collection accepts at most ${providerKeywordLimit} keywords`
       );
     }
 
@@ -85,6 +84,7 @@ export class FrequencyCollectionService {
           );
           const created = await transaction.job.create({
             data: {
+              ...paidOperationJobFields("FREQUENCY_COLLECTION", input, route),
               workspaceId: input.workspaceId,
               projectId: input.projectId,
               type: "FREQUENCY_COLLECTION",
@@ -164,7 +164,9 @@ export class FrequencyCollectionService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 25
     });
-    return jobs.map(frequencyCollectionSummary);
+    const pending = jobs.some(job => job.credentialMode === "PLATFORM_PAID") ? await this.prisma.providerUsageTicket.groupBy({ by: ["jobId"], where: { jobId: { in: jobs.filter(job => job.credentialMode === "PLATFORM_PAID").map(job => job.id) }, state: { in: ["STARTED", "UNKNOWN"] }, resolvedAt: null }, _count: true }) : [];
+    const pendingIds = new Set(pending.map(row => row.jobId));
+    return jobs.map(job => ({ ...frequencyCollectionSummary(job), ...(job.credentialMode === "PLATFORM_PAID" ? { requiresUsageReview: pendingIds.has(job.id) } : {}) }));
   }
 
   public async get(
@@ -172,9 +174,8 @@ export class FrequencyCollectionService {
     projectId: string,
     jobId: string
   ): Promise<FrequencyCollectionSummary> {
-    return frequencyCollectionSummary(
-      await this.required(workspaceId, projectId, jobId)
-    );
+    const job = await this.required(workspaceId, projectId, jobId);
+    return { ...frequencyCollectionSummary(job), ...(job.credentialMode === "PLATFORM_PAID" ? { requiresUsageReview: await this.prisma.providerUsageTicket.count({ where: { jobId, state: { in: ["STARTED", "UNKNOWN"] }, resolvedAt: null } }) > 0 } : {}) };
   }
 
   public async resultScope(
@@ -182,7 +183,8 @@ export class FrequencyCollectionService {
     projectId: string,
     jobId: string,
     limit: number,
-    cursor?: number
+    cursor?: number,
+    onlyFailed = false
   ): Promise<InternalFrequencyOperationScope> {
     const job = await this.prisma.job.findFirst({
       where: {
@@ -193,9 +195,7 @@ export class FrequencyCollectionService {
       },
       select: {
         items: {
-          ...(cursor === undefined
-            ? {}
-            : { where: { sequence: { gt: cursor } } }),
+          where: { ...(cursor === undefined ? {} : { sequence: { gt: cursor } }), ...(onlyFailed ? { status: "FAILED_FINAL" as const } : {}) },
           orderBy: { sequence: "asc" },
           take: limit + 1,
           select: {
@@ -283,6 +283,7 @@ export class FrequencyCollectionService {
       });
       if (!current) throw new NotFoundException("Frequency collection not found");
       if (current.version !== input.version) versionConflict();
+      if (current.credentialMode === "PLATFORM_PAID") throw new ConflictException({ error: { code: "PAID_RETRY_REQUIRES_ESTIMATE", message: "Create a new collection for failed keywords and confirm its price" } });
       if (current.status === "ACTION_REQUIRED") {
         throw new ConflictException(
           "Frequency collection requires manual provider reconciliation"

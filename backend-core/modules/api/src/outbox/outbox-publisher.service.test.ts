@@ -61,7 +61,8 @@ test("claims one row with SKIP LOCKED and publishes the exact shared envelope", 
     "identity.email-verification.requested.v1",
     "identity.password-reset.requested.v1",
     "workspace.invite.requested.v1",
-    "billing.npd-receipt.delivery-requested.v1"
+    "billing.npd-receipt.delivery-requested.v1",
+    "billing.notice.requested.v1"
   ]);
   assert.equal(fixture.publishCalls.length, 1);
   assert.deepEqual(fixture.publishCalls[0], {

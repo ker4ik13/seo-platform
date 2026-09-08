@@ -1,3 +1,5 @@
+
+import { UiElement } from "./ui-locale";
 export function SearchEngineLogo({
   engine,
   size = "regular"
@@ -7,8 +9,8 @@ export function SearchEngineLogo({
 }>) {
   if (engine === "YANDEX") {
     return (
-      <span
-        aria-label="Яндекс"
+      <UiElement tag="span" uiLabels={{"aria-label": "Яндекс"}}
+
         className={`search-engine-logo yandex ${size}`}
         role="img"
       >
@@ -18,7 +20,7 @@ export function SearchEngineLogo({
             fill="currentColor"
           />
         </svg>
-      </span>
+      </UiElement>
     );
   }
 

@@ -1,3 +1,4 @@
+import { parseSemanticRankColumnKey, semanticCompetitorRowColumnKeys } from "@seo-platform/contracts";
 import {
   semanticCompetitorExportColumnKeys,
   semanticExportFormats,
@@ -14,6 +15,7 @@ import {
   type SemanticPositionHistoryExportOptions
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
+import { keywordListQuery } from "./keyword-query.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -34,6 +36,7 @@ export function createSemanticExportInput(
       "sort",
       "keywordIds",
       "includeBom",
+      "competitorRows",
       "positionHistory",
       "folderMap"
     ],
@@ -95,6 +98,7 @@ export function createSemanticExportInput(
     invalid("columns", "Folder map must include the query column");
   }
 
+  if (input.competitorRows === true && (folderMap || positionHistory)) invalid("competitorRows", "Choose one export layout");
   return {
     format,
     scope,
@@ -110,6 +114,7 @@ export function createSemanticExportInput(
     ...(input.includeBom === undefined
       ? {}
       : { includeBom: requiredBoolean(input.includeBom, "includeBom") }),
+    ...(input.competitorRows === undefined ? {} : { competitorRows: requiredBoolean(input.competitorRows, "competitorRows") }),
     ...(positionHistory ? { positionHistory } : {}),
     ...(folderMap ? { folderMap } : {})
   };
@@ -187,6 +192,9 @@ function exportFilters(value: unknown): SemanticExportFilters {
       "isTracked",
       "priorityMin",
       "priorityMax"
+      , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+      "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
     ],
     "filters"
   );
@@ -198,7 +206,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
       ? undefined
       : requiredEnum(input.intent, semanticKeywordIntents, "filters.intent");
   const groupId = optionalUuid(input.groupId, "filters.groupId");
-  const groupIds = optionalUuidList(input.groupIds, "filters.groupIds", 200);
+  const groupIds = optionalUuidList(input.groupIds, "filters.groupIds", 2_000);
   if (groupId && groupIds) {
     invalid("filters.groupIds", "Cannot be combined with groupId");
   }
@@ -216,6 +224,13 @@ function exportFilters(value: unknown): SemanticExportFilters {
     input.priorityMax,
     "filters.priorityMax"
   );
+  const advancedInput = Object.fromEntries([
+    "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax", "frequencyFixedMin", "frequencyFixedMax",
+    "wordCountMin", "wordCountMax", "targetUrlState", "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax",
+    "rankCheckedFrom", "rankCheckedBefore"
+  ].flatMap(field => input[field] === undefined ? [] : [[field, String(input[field])]]));
+  const { limit: _limit, sort: _sort, ...advanced } = keywordListQuery({ limit: "1", sort: "CREATED_DESC", ...advancedInput });
+  void _limit; void _sort;
   if (
     priorityMin !== undefined &&
     priorityMax !== undefined &&
@@ -236,7 +251,8 @@ function exportFilters(value: unknown): SemanticExportFilters {
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
-    ...(priorityMax === undefined ? {} : { priorityMax })
+    ...(priorityMax === undefined ? {} : { priorityMax }),
+    ...advanced
   };
 }
 
@@ -295,7 +311,7 @@ function exportColumns(
       ) && !semanticCompetitorExportColumnKeys.includes(
         column as (typeof semanticCompetitorExportColumnKeys)[number]
       ) &&
-        !CUSTOM_COLUMN_PATTERN.test(column))
+        !CUSTOM_COLUMN_PATTERN.test(column) && !parseSemanticRankColumnKey(column) && !semanticCompetitorRowColumnKeys.includes(column as typeof semanticCompetitorRowColumnKeys[number]))
     ) {
       invalid(`columns[${index}]`, "Must be a known column key");
     }

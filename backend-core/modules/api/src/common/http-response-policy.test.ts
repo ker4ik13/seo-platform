@@ -3,8 +3,9 @@ import test from "node:test";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   installHttpResponsePolicy,
+  serializeRequestForLog,
   STRICT_TRANSPORT_SECURITY,
-  TRUSTED_PROXY_HOPS
+  TRUSTED_PROXY_ADDRESSES
 } from "./http-response-policy.js";
 
 async function createApp(
@@ -12,7 +13,7 @@ async function createApp(
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
-    trustProxy: TRUSTED_PROXY_HOPS
+    trustProxy: TRUSTED_PROXY_ADDRESSES
   });
 
   installHttpResponsePolicy(app, nodeEnvironment);
@@ -174,4 +175,34 @@ test("emits HSTS only for production requests recognized as HTTPS through one pr
     proxiedHttps.headers["strict-transport-security"],
     STRICT_TRANSPORT_SECURITY
   );
+});
+
+
+test("ignores forged forwarding headers from a public origin connection", async (t) => {
+  const app = Fastify({ trustProxy: TRUSTED_PROXY_ADDRESSES });
+  t.after(async () => app.close());
+  app.get("/peer", async (request) => ({ ip: request.ip, protocol: request.protocol, hostname: request.hostname }));
+  const response = await app.inject({
+    method: "GET", url: "/peer", remoteAddress: "203.0.113.9",
+    headers: { host: "api.example.test", "x-forwarded-for": "198.51.100.1", "x-forwarded-proto": "https", "x-forwarded-host": "attacker.example" }
+  });
+  assert.deepEqual(response.json(), { ip: "203.0.113.9", protocol: "http", hostname: "api.example.test" });
+  const proxied = await app.inject({
+    method: "GET", url: "/peer", remoteAddress: "127.0.0.1",
+    headers: { host: "api.example.test", "x-forwarded-for": "198.51.100.1", "x-forwarded-proto": "https" }
+  });
+  assert.equal(proxied.json().ip, "198.51.100.1");
+  assert.equal(proxied.json().protocol, "https");
+});
+
+test("request logs do not retain public-note tokens or search query data", async (t) => {
+  const entries: string[] = [];
+  const app = Fastify({ logger: { serializers: { req: serializeRequestForLog }, stream: { write: (line: string) => { entries.push(line); } } } });
+  t.after(async () => app.close());
+  app.get("/api/v1/public/project-notes/:token", async () => ({ ok: true }));
+  await app.inject("/api/v1/public/project-notes/secret-share-canary?search=private-email-canary");
+  const logged = entries.join("\n");
+  assert.ok(logged.includes("/api/v1/public/project-notes/:token"));
+  assert.ok(!logged.includes("secret-share-canary"));
+  assert.ok(!logged.includes("private-email-canary"));
 });

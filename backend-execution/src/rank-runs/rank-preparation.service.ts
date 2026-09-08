@@ -1,10 +1,6 @@
+import { rankManifestShapeIsSupported } from "@seo-platform/contracts";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
-  legacyRankManifestChunkSize,
-  legacyRankProviderKeywordLimit,
-  rankManifestSingleTaskChunkSize,
-  rankProviderKeywordLimit,
-  xmlStockRankManifestChunkSize,
   type InternalFinalizeRankCheckInput,
   type InternalRankManifestSeal,
   type RankJobFailureCode,
@@ -297,10 +293,11 @@ export class RankPreparationService {
         if (current.status !== "PREPARING") {
           throw new Error("Rank manifest was sealed for an invalid Job state");
         }
+        for (let offset = 0; offset < Number(seal.chunkCount); offset += 1000) {
         await transaction.jobItem.createMany({
           data: Array.from(
-            { length: Number(seal.chunkCount) },
-            (_, chunkIndex) => ({
+            { length: Math.min(1000, Number(seal.chunkCount) - offset) },
+            (_, index) => { const chunkIndex = offset + index; return ({
               workspaceId: current.workspaceId,
               projectId: current.projectId,
               jobId: current.id,
@@ -311,9 +308,10 @@ export class RankPreparationService {
                 manifestId: seal.id,
                 chunkIndex
               }
-            })
+            }); }
           )
         });
+        }
         const queuedAt = new Date(seal.sealedAt);
         await updateClaimedJob(transaction, current, leaseOwner, {
           status: "QUEUED",
@@ -326,7 +324,7 @@ export class RankPreparationService {
         });
         return requiredRankJob(transaction, current.id);
       },
-      { isolationLevel: "ReadCommitted" }
+      { isolationLevel: "ReadCommitted", timeout: 60_000 }
     );
   }
 
@@ -745,33 +743,7 @@ function assertLeaseOwner(value: string): void {
 }
 
 function validManifestSealShape(seal: InternalRankManifestSeal): boolean {
-  const pairCount = Number(seal.pairCount);
-  const chunkCount = Number(seal.chunkCount);
-  if (!Number.isSafeInteger(pairCount) || !Number.isSafeInteger(chunkCount)) {
-    return false;
-  }
-  if (seal.chunkSize === String(legacyRankManifestChunkSize)) {
-    return (
-      pairCount >= 1 &&
-      pairCount <= legacyRankProviderKeywordLimit &&
-      chunkCount ===
-        Math.ceil(pairCount / legacyRankManifestChunkSize)
-    );
-  }
-  if (seal.chunkSize === String(xmlStockRankManifestChunkSize)) {
-    return (
-      seal.provider === "XMLSTOCK" &&
-      pairCount >= 1 &&
-      pairCount <= rankProviderKeywordLimit &&
-      chunkCount === pairCount
-    );
-  }
-  return (
-    seal.chunkSize === String(rankManifestSingleTaskChunkSize) &&
-    pairCount >= 1 &&
-    pairCount <= rankProviderKeywordLimit &&
-    chunkCount === 1
-  );
+  return rankManifestShapeIsSupported(seal.provider, Number(seal.pairCount), Number(seal.chunkCount), Number(seal.chunkSize));
 }
 
 function pendingLimit(value: number): number {

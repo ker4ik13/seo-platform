@@ -12,7 +12,9 @@ const PREFLIGHT_VARY_FIELDS = [
   "Access-Control-Request-Method"
 ] as const;
 
-export const TRUSTED_PROXY_HOPS = 1;
+// Caddy connects over loopback in VPS runtime; container ingress/BFF uses
+// the isolated private Docker network. Never trust a hop count alone.
+export const TRUSTED_PROXY_ADDRESSES = ["loopback", "uniquelocal"];
 
 export const STRICT_TRANSPORT_SECURITY =
   "max-age=31536000; includeSubDomains";

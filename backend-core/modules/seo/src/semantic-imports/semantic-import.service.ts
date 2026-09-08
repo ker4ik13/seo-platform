@@ -535,7 +535,7 @@ export class SemanticImportService {
           data: metricSnapshots
         });
       }
-      await applyImportedCurrentRanks(
+      const importedRankSnapshots = await applyImportedRanks(
         transaction,
         input,
         processedRows,
@@ -569,7 +569,7 @@ export class SemanticImportService {
           createdGroups: groups.created,
           createdPages: pages.created,
           createdTags: tags.created,
-          createdMetricSnapshots: metricSnapshots.length,
+          createdMetricSnapshots: metricSnapshots.length + importedRankSnapshots,
           trashedDuplicateCandidates: json(trashedDuplicateCandidates)
         }
       });
@@ -1263,7 +1263,7 @@ function keywordKey(language: string, normalizedHash: string): string {
   return `${language}\u0000${normalizedHash}`;
 }
 
-async function applyImportedCurrentRanks(
+async function applyImportedRanks(
   transaction: Prisma.TransactionClient,
   input: Pick<
     InternalApplySemanticImportChunkInput,
@@ -1271,7 +1271,7 @@ async function applyImportedCurrentRanks(
   >,
   rows: readonly SemanticImportPublishRow[],
   keywordByKey: ReadonlyMap<string, Keyword>
-): Promise<void> {
+): Promise<number> {
   const engines = [
     ...new Set(
       rows.flatMap((row) =>
@@ -1279,9 +1279,8 @@ async function applyImportedCurrentRanks(
       )
     )
   ];
-  if (engines.length === 0) return;
-
   const importedAt = new Date();
+  let snapshotCount = 0;
   for (const engine of engines) {
     const context = await ensureImportedRankContext(
       transaction,
@@ -1319,7 +1318,7 @@ async function applyImportedCurrentRanks(
     }
     const candidates = [...byKeyword.values()];
     if (candidates.length === 0) continue;
-    await persistImportedRankSnapshot(
+    snapshotCount += await persistImportedRankSnapshot(
       transaction,
       input,
       engine,
@@ -1328,6 +1327,39 @@ async function applyImportedCurrentRanks(
       importedAt
     );
   }
+  const historyGroups = new Map<string, {
+    readonly sample: NonNullable<SemanticImportPublishRow["positionHistory"]>[number];
+    readonly candidates: Map<string, ImportedRankCandidate>;
+  }>();
+  for (const row of rows) {
+    const keyword = keywordByKey.get(keywordKey(row.language, row.normalizedHash));
+    if (!keyword) continue;
+    for (const point of row.positionHistory ?? []) {
+      const key = `${point.searchEngine}:${point.countryCode}:${point.regionCode}:${point.language}:${point.device}:${point.observedAt}`;
+      const group = historyGroups.get(key) ?? { sample: point, candidates: new Map() };
+      group.candidates.set(keyword.id, { keyword, found: point.found, position: point.position ?? null, rankingUrl: null, normalizedRankingUrl: null });
+      historyGroups.set(key, group);
+    }
+  }
+  for (const { sample, candidates } of historyGroups.values()) {
+    const context = await ensureImportedHistoryContext(transaction, input, sample);
+    snapshotCount += await persistImportedRankSnapshot(transaction, input, sample.searchEngine, context, [...candidates.values()], importedAt, {
+      observedAt: new Date(sample.observedAt), provider: "MANUAL_IMPORT", qualityFlag: "IMPORTED_MANUAL_HISTORY",
+      source: "MANUAL_HISTORY", identity: `${input.importId}:${input.chunkIndex}:${sample.searchEngine}:${sample.countryCode}:${sample.regionCode}:${sample.language}:${sample.device}:${sample.observedAt}`,
+      connectorVersion: "manual-history@1", providerRequestPrefix: "manual-history-import"
+    });
+  }
+  return snapshotCount;
+}
+
+interface ImportedRankSource {
+  readonly observedAt: Date;
+  readonly provider: "KEY_COLLECTOR" | "MANUAL_IMPORT";
+  readonly qualityFlag: "IMPORTED_KC4" | "IMPORTED_MANUAL_HISTORY";
+  readonly source: "KC4" | "MANUAL_HISTORY";
+  readonly identity: string;
+  readonly connectorVersion: "key-collector@import" | "manual-history@1";
+  readonly providerRequestPrefix: "kc4-import" | "manual-history-import";
 }
 
 interface ImportedRankContext {
@@ -1354,8 +1386,12 @@ async function persistImportedRankSnapshot(
   engine: "YANDEX" | "GOOGLE",
   context: ImportedRankContext,
   candidates: readonly ImportedRankCandidate[],
-  importedAt: Date
-): Promise<void> {
+  importedAt: Date,
+  source: ImportedRankSource = {
+    observedAt: importedAt, provider: "KEY_COLLECTOR", qualityFlag: "IMPORTED_KC4", source: "KC4",
+    identity: `${input.importId}:${input.chunkIndex}:${engine}`, connectorVersion: "key-collector@import", providerRequestPrefix: "kc4-import"
+  }
+): Promise<number> {
   const keywordIds = candidates.map(({ keyword }) => keyword.id);
   const existingAssignments =
     await transaction.trackingContextKeywordAssignment.findMany({
@@ -1404,16 +1440,16 @@ async function persistImportedRankSnapshot(
     throw new Error("Unable to assign imported rank keywords");
   }
 
-  const identity = `${input.importId}:${input.chunkIndex}:${engine}`;
-  const manifestId = deterministicUuid(`kc4-manifest:${identity}`);
-  const jobId = deterministicUuid(`kc4-job:${identity}`);
-  const jobItemId = deterministicUuid(`kc4-job-item:${identity}`);
-  const estimateId = deterministicUuid(`kc4-estimate:${identity}`);
-  const chunkHash = sha256Bytes(`kc4-chunk:${identity}`);
-  const providerRequestId = `kc4-import-${identity}`;
-  const connectorVersion = "key-collector@import";
+  const { identity } = source;
+  const manifestId = deterministicUuid(`import-manifest:${identity}`);
+  const jobId = deterministicUuid(`import-job:${identity}`);
+  const jobItemId = deterministicUuid(`import-job-item:${identity}`);
+  const estimateId = deterministicUuid(`import-estimate:${identity}`);
+  const chunkHash = sha256Bytes(`import-chunk:${identity}`);
+  const providerRequestId = `${source.providerRequestPrefix}-${sha256(identity).slice(0, 40)}`;
+  const connectorVersion = source.connectorVersion;
   const entries = candidates.map(({ keyword }, sequence) => ({
-    id: deterministicUuid(`kc4-entry:${identity}:${keyword.id}`),
+    id: deterministicUuid(`import-entry:${identity}:${keyword.id}`),
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     manifestId,
@@ -1435,25 +1471,25 @@ async function persistImportedRankSnapshot(
       jobId,
       estimateId,
       sealedBy: input.actorId,
-      requestHash: sha256Bytes(`kc4-request:${identity}`),
-      provider: "KEY_COLLECTOR",
+      requestHash: sha256Bytes(`import-request:${identity}`),
+      provider: source.provider,
       operation: "POSITIONS",
-      projectDomain: "key-collector-import.invalid",
+      projectDomain: "manual-import.invalid",
       projectStatus: "ACTIVE",
       projectVersion: 1,
       trackingContextId: context.id,
       contextVersion: context.version,
       configurationVersion: context.configurationVersion,
       configurationHash: Buffer.from(context.configurationHash, "hex"),
-      semanticScopeHash: sha256Bytes(`kc4-semantic-scope:${identity}`),
-      scopeHash: sha256Bytes(`kc4-scope:${identity}`),
+      semanticScopeHash: sha256Bytes(`import-semantic-scope:${identity}`),
+      scopeHash: sha256Bytes(`import-scope:${identity}`),
       hashSchemaVersion: "rank-manifest@1",
-      manifestHash: sha256Bytes(`kc4-manifest-hash:${identity}`),
-      deduplicationHash: sha256Bytes(`kc4-deduplication:${identity}`),
+      manifestHash: sha256Bytes(`import-manifest-hash:${identity}`),
+      deduplicationHash: sha256Bytes(`import-deduplication:${identity}`),
       pairCount: candidates.length,
       chunkCount: 1,
       chunkSize: candidates.length,
-      execution: json({ source: "KC4", searchEngine: engine }),
+      execution: json({ source: source.source, searchEngine: engine }),
       retention: json({
         normalizedRankHistory: "LONG_TERM",
         rawSerp: "NOT_COLLECTED"
@@ -1480,10 +1516,10 @@ async function persistImportedRankSnapshot(
     data: { status: "SEALED" }
   });
 
-  const dataQualityFlags = json(["IMPORTED_KC4"]);
+  const dataQualityFlags = json([source.qualityFlag]);
   const snapshots = candidates.map((candidate, sequence) => ({
     id: deterministicUuid(
-      `kc4-snapshot:${identity}:${candidate.keyword.id}`
+      `import-snapshot:${identity}:${candidate.keyword.id}`
     ),
     workspaceId: input.workspaceId,
     projectId: input.projectId,
@@ -1496,7 +1532,7 @@ async function persistImportedRankSnapshot(
     sequence,
     jobId,
     jobItemId,
-    observedAt: importedAt,
+    observedAt: source.observedAt,
     found: candidate.found,
     position: candidate.position,
     rankingUrl: candidate.rankingUrl,
@@ -1504,7 +1540,7 @@ async function persistImportedRankSnapshot(
     resultType: candidate.found ? "ORGANIC" : null,
     serpFeatures: json([]),
     dataQualityFlags,
-    provider: "KEY_COLLECTOR",
+    provider: source.provider,
     sourceMode: "IMPORT" as const,
     providerRequestId,
     connectorVersion
@@ -1525,7 +1561,7 @@ async function persistImportedRankSnapshot(
   let currentUpdatedCount = 0;
   for (const snapshot of snapshots) {
     const current = currentByKeyword.get(snapshot.keywordId);
-    if (current && current.observedAt >= importedAt) continue;
+    if (current && current.observedAt >= source.observedAt) continue;
     const where = {
       workspaceId_projectId_keywordId_trackingContextId: {
         workspaceId: input.workspaceId,
@@ -1536,13 +1572,13 @@ async function persistImportedRankSnapshot(
     } as const;
     const values = {
       configurationVersion: context.configurationVersion,
-      observedAt: importedAt,
+      observedAt: source.observedAt,
       snapshotId: snapshot.id,
       found: snapshot.found,
       position: snapshot.position,
       rankingUrl: snapshot.rankingUrl,
       normalizedRankingUrl: snapshot.normalizedRankingUrl,
-      provider: "KEY_COLLECTOR",
+      provider: source.provider,
       sourceMode: "IMPORT" as const,
       dataQualityFlags,
       updatedAt: importedAt
@@ -1580,13 +1616,13 @@ async function persistImportedRankSnapshot(
       jobItemId,
       ingestedBy: input.actorId,
       schemaVersion: "rank-ingest@1",
-      ingestEnvelopeHash: sha256Bytes(`kc4-ingest:${identity}`),
+      ingestEnvelopeHash: sha256Bytes(`import-ingest:${identity}`),
       manifestChunkHash: chunkHash,
-      provider: "KEY_COLLECTOR",
+      provider: source.provider,
       operation: "POSITIONS",
       providerRequestId,
       connectorVersion,
-      observedAt: importedAt,
+      observedAt: source.observedAt,
       status: "APPLIED",
       persistedCount: snapshots.length,
       foundCount: snapshots.filter(({ found }) => found).length,
@@ -1596,6 +1632,7 @@ async function persistImportedRankSnapshot(
       appliedAt: importedAt
     }
   });
+  return snapshots.length;
 }
 
 async function ensureImportedRankContext(
@@ -1679,6 +1716,45 @@ async function ensureImportedRankContext(
       createdBy: input.actorId
     }
   });
+  return { ...context, configurationVersion, configurationHash };
+}
+
+async function ensureImportedHistoryContext(
+  transaction: Prisma.TransactionClient,
+  input: Pick<InternalApplySemanticImportChunkInput, "workspaceId" | "projectId" | "actorId">,
+  point: NonNullable<SemanticImportPublishRow["positionHistory"]>[number]
+): Promise<ImportedRankContext> {
+  const identity = `${input.projectId}:${point.searchEngine}:${point.countryCode}:${point.regionCode}:${point.language}:${point.device}`;
+  const id = deterministicUuid(`manual-history-context:${identity}`);
+  const configurationVersion = 1;
+  const configurationHash = sha256(JSON.stringify({
+    source: "MANUAL_HISTORY", searchEngine: point.searchEngine, countryCode: point.countryCode,
+    regionCode: point.regionCode, regionLabel: point.regionLabel, language: point.language,
+    device: point.device, depth: 100, domainMatchMode: "ANY_PROJECT_MIRROR", safeSearch: false
+  }));
+  const existing = await transaction.trackingContext.findUnique({ where: { id }, select: { id: true, workspaceId: true, projectId: true, version: true } });
+  if (existing) {
+    if (existing.workspaceId !== input.workspaceId || existing.projectId !== input.projectId) throw new Error("Imported history context collision");
+    const configuration = await transaction.trackingContextVersion.findUnique({
+      where: { contextId_configurationVersion: { contextId: id, configurationVersion } },
+      select: { configurationHash: true }
+    });
+    if (!configuration || configuration.configurationHash !== configurationHash) throw new Error("Imported history context configuration mismatch");
+    return { id, version: existing.version, configurationVersion, configurationHash };
+  }
+  const engine = point.searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  const device = point.device === "DESKTOP" ? "ПК" : "Телефон";
+  const context = await transaction.trackingContext.create({ data: {
+    id, workspaceId: input.workspaceId, projectId: input.projectId,
+    name: `Ручной импорт · ${engine} · ${point.regionLabel} · ${device}`.slice(0, 160),
+    createdBy: input.actorId, updatedBy: input.actorId
+  }, select: { id: true, version: true } });
+  await transaction.trackingContextVersion.create({ data: {
+    workspaceId: input.workspaceId, projectId: input.projectId, contextId: id, configurationVersion,
+    searchEngine: point.searchEngine, countryCode: point.countryCode, regionCode: point.regionCode,
+    regionLabel: point.regionLabel ?? null, language: point.language, device: point.device, depth: 100,
+    domainMatchMode: "ANY_PROJECT_MIRROR", safeSearch: false, configurationHash, createdBy: input.actorId
+  } });
   return { ...context, configurationVersion, configurationHash };
 }
 

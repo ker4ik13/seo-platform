@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { ProjectIntegrationRouting } from "../../../../../../../components/project-integration-routing";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
+import { UiText } from "../../../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -26,18 +28,15 @@ export default async function ProjectIntegrationSettingsPage({
     <>
       <section className="page-heading project-integration-heading">
         <div>
-          <h1>Источники данных проекта</h1>
+          <h1><UiText text="Источники данных проекта" /></h1>
           <p>
-            Наследуйте маршруты рабочей области или назначьте отдельные
-            аккаунты и fallback-цепочки для операций этого проекта.
-          </p>
+            <UiText text="Наследуйте маршруты рабочей области или назначьте отдельные аккаунты и fallback-цепочки для операций этого проекта." /></p>
         </div>
         <a
           className="secondary-button setup-link"
           href="/app/settings/integrations"
         >
-          Ключи workspace
-        </a>
+          <UiText text="Ключи workspace" /></a>
       </section>
       <SettingsTabs
         active="project-integrations"

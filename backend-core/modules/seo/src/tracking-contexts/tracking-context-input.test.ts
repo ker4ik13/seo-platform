@@ -166,7 +166,7 @@ test("validates an exact 15,000-keyword replacement command", () => {
   assert.equal(result.idempotencyKey, "replace-keywords-001");
 });
 
-test("rejects a 15,001-keyword replacement before persistence", () => {
+test("rejects a 300,001-keyword replacement before persistence", () => {
   assert.throws(
     () =>
       internalReplaceTrackingContextKeywordsInput({
@@ -176,7 +176,7 @@ test("rejects a 15,001-keyword replacement before persistence", () => {
         contextId,
         version: 1,
         idempotencyKey: "replace-keywords-001",
-        keywordIds: keywordIdentifiers(15_001),
+        keywordIds: keywordIdentifiers(300_001),
         entitlement: {
           planCode: "TEAM",
           planVersion: 1,

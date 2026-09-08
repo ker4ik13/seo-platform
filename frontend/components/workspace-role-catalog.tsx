@@ -1,3 +1,5 @@
+
+import { UiText } from "./ui-locale";
 const ROLE_COLUMNS = [
   ["OWNER", "Владелец"],
   ["ADMIN", "Администратор"],
@@ -29,36 +31,32 @@ export function WorkspaceRoleCatalog({
     <div className="workspace-role-catalog">
       <section className="panel workspace-role-summary">
         <div>
-          <span className="billing-label">Модель доступа</span>
-          <h2>Системные роли</h2>
+          <span className="billing-label"><UiText text="Модель доступа" /></span>
+          <h2><UiText text="Системные роли" /></h2>
           <p>
-            Роль задаёт верхнюю границу полномочий в workspace. Доступ к
-            отдельному проекту может только сузить её.
-          </p>
+            <UiText text="Роль задаёт верхнюю границу полномочий в workspace. Доступ к отдельному проекту может только сузить её." /></p>
         </div>
         <span className="security-status on">
-          Ваша роль: {roleLabel(currentRoleCode)}
+          <UiText text="Ваша роль:" after=" " />{<UiText text={roleLabel(currentRoleCode) ?? ""} />}
         </span>
       </section>
 
       <section className="panel workspace-role-matrix-panel">
         <header className="security-card-header">
           <div>
-            <h2>Матрица возможностей</h2>
+            <h2><UiText text="Матрица возможностей" /></h2>
             <p>
-              Системные роли неизменяемы. Сервер дополнительно проверяет
-              project assignment, состояние workspace и биллинг.
-            </p>
+              <UiText text="Системные роли неизменяемы. Сервер дополнительно проверяет project assignment, состояние workspace и биллинг." /></p>
           </div>
         </header>
         <div className="workspace-role-matrix-wrap" tabIndex={0}>
           <table className="workspace-role-matrix">
             <thead>
               <tr>
-                <th>Возможность</th>
+                <th><UiText text="Возможность" /></th>
                 {ROLE_COLUMNS.map(([code, label]) => (
                   <th className={code === currentRoleCode ? "current" : undefined} key={code}>
-                    {label}
+                    <UiText text={label} />
                   </th>
                 ))}
               </tr>
@@ -66,13 +64,13 @@ export function WorkspaceRoleCatalog({
             <tbody>
               {CAPABILITIES.map(([capability, ...values]) => (
                 <tr key={capability}>
-                  <th>{capability}</th>
+                  <th><UiText text={capability} /></th>
                   {values.map((value, index) => (
                     <td
                       className={ROLE_COLUMNS[index]?.[0] === currentRoleCode ? "current" : undefined}
                       key={`${capability}:${ROLE_COLUMNS[index]?.[0]}`}
                     >
-                      {value}
+                      <UiText text={value} />
                     </td>
                   ))}
                 </tr>
@@ -85,29 +83,27 @@ export function WorkspaceRoleCatalog({
       <section className="panel workspace-project-role-panel">
         <header className="security-card-header">
           <div>
-            <h2>Роли в проектах</h2>
+            <h2><UiText text="Роли в проектах" /></h2>
             <p>
-              Назначаются отдельно для каждого проекта и никогда не расширяют
-              системную роль участника.
-            </p>
+              <UiText text="Назначаются отдельно для каждого проекта и никогда не расширяют системную роль участника." /></p>
           </div>
         </header>
         <div className="workspace-project-role-grid">
           <article>
-            <strong>Нет доступа</strong>
-            <p>Проект не отображается и его данные недоступны.</p>
+            <strong><UiText text="Нет доступа" /></strong>
+            <p><UiText text="Проект не отображается и его данные недоступны." /></p>
           </article>
           <article>
-            <strong>Наблюдатель</strong>
-            <p>Просмотр таблиц, отчётов и истории без изменений.</p>
+            <strong><UiText text="Наблюдатель" /></strong>
+            <p><UiText text="Просмотр таблиц, отчётов и истории без изменений." /></p>
           </article>
           <article>
-            <strong>Участник</strong>
-            <p>Работа с данными проекта в пределах системной роли.</p>
+            <strong><UiText text="Участник" /></strong>
+            <p><UiText text="Работа с данными проекта в пределах системной роли." /></p>
           </article>
           <article>
-            <strong>Менеджер проекта</strong>
-            <p>Настройки проекта и управление доступом в пределах системной роли.</p>
+            <strong><UiText text="Менеджер проекта" /></strong>
+            <p><UiText text="Настройки проекта и управление доступом в пределах системной роли." /></p>
           </article>
         </div>
       </section>

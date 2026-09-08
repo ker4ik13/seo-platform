@@ -12,7 +12,7 @@ export interface ProviderUsageEstimate {
 export function frequencyProviderUsageEstimate(
   source: ProjectConnectorCredentialOption | undefined,
   keywordCount: number,
-  typeCount: number
+  typeCount: number, uiLocale: string = "ru-RU"
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
   if (source.mode === "PLATFORM_PAID") {
@@ -20,14 +20,14 @@ export function frequencyProviderUsageEstimate(
   }
   if (source.provider === "XMLSTOCK") {
     return {
-      usage: `до ${formatInteger(keywordCount * typeCount)} запросов XMLStock`,
-      available: providerQuotaLabel(source)
+      usage: `до ${formatInteger(keywordCount * typeCount, uiLocale)} запросов XMLStock`,
+      available: providerQuotaLabel(source, uiLocale)
     };
   }
   if (source.provider === "ARSENKIN") {
     return {
-      usage: keywordCount > 0 ? "1 пакет Arsenkin" : "0 пакетов",
-      available: providerQuotaLabel(source)
+      usage: `${formatInteger(keywordCount * typeCount, uiLocale)} лимитов Arsenkin`,
+      available: providerQuotaLabel(source, uiLocale)
     };
   }
   return unavailableEstimate();
@@ -40,7 +40,7 @@ export function rankProviderUsageEstimate(
   depth: 30 | 50 | 100,
   searchSource: "SEARCH_API" | "LIVE",
   yandexLiveMode?: "TURBO",
-  purpose: RankCollectionPurpose = "POSITION_TRACKING"
+  purpose: RankCollectionPurpose = "POSITION_TRACKING", uiLocale: string = "ru-RU"
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
   if (source.mode === "PLATFORM_PAID") {
@@ -50,10 +50,10 @@ export function rankProviderUsageEstimate(
     if (purpose === "COMPETITOR_SERP") {
       const requestCount = keywordCount;
       const pricePerThousand =
-        searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 24 : 12;
+        searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 28 : 25;
       return {
-        usage: `до ${formatInteger(requestCount)} запросов XMLStock · Топ-10 · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB")}`,
-        available: providerQuotaLabel(source)
+        usage: `до ${formatInteger(requestCount, uiLocale)} запросов XMLStock · Топ-10 · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB", uiLocale)}`,
+        available: providerQuotaLabel(source, uiLocale)
       };
     }
     if (
@@ -67,8 +67,8 @@ export function rankProviderUsageEstimate(
         keywordCount * Math.ceil(depth / 10);
       return {
         usage:
-          `${formatInteger(minimumRequestCount)}–${formatInteger(maximumRequestCount)} запросов XMLStock Turbo · повышенный тариф`,
-        available: providerQuotaLabel(source)
+          `${formatInteger(minimumRequestCount, uiLocale)}–${formatInteger(maximumRequestCount, uiLocale)} запросов XMLStock Turbo · повышенный тариф`,
+        available: providerQuotaLabel(source, uiLocale)
       };
     }
     const requestsPerKeyword =
@@ -77,10 +77,10 @@ export function rankProviderUsageEstimate(
         : Math.ceil(depth / 10);
     const requestCount = keywordCount * requestsPerKeyword;
     const pricePerThousand =
-      searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 24 : 12;
+      searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 28 : 25;
     return {
-      usage: `до ${formatInteger(requestCount)} запросов XMLStock · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB")}`,
-      available: providerQuotaLabel(source)
+      usage: `до ${formatInteger(requestCount, uiLocale)} запросов XMLStock · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB", uiLocale)}`,
+      available: providerQuotaLabel(source, uiLocale)
     };
   }
   if (source.provider === "ARSENKIN") {
@@ -88,18 +88,18 @@ export function rankProviderUsageEstimate(
       ? depth === 100 ? 5 : depth === 50 ? 3 : 2
       : 2;
     return {
-      usage: `${formatInteger(keywordCount * limitsPerKeyword)} лимитов Arsenkin (${limitsPerKeyword} на запрос)`,
-      available: providerQuotaLabel(source)
+      usage: `${formatInteger(keywordCount * limitsPerKeyword, uiLocale)} лимитов Arsenkin (${limitsPerKeyword} на запрос)`,
+      available: providerQuotaLabel(source, uiLocale)
     };
   }
   return unavailableEstimate();
 }
 
 export function providerQuotaLabel(
-  source: ProjectConnectorCredentialOption
+  source: ProjectConnectorCredentialOption, uiLocale: string = "ru-RU"
 ): string {
   if (source.mode === "PLATFORM_PAID") {
-    return "Внутренние токены workspace";
+    return "Баланс данных рабочей области";
   }
   const quota = source.quota;
   if (!quota || quota.status !== "AVAILABLE") {
@@ -107,25 +107,25 @@ export function providerQuotaLabel(
   }
   if (quota.unit === "XMLSTOCK_REQUESTS") {
     const balance = quota.balance
-      ? formatMoney(quota.balance.amount, quota.balance.currency)
+      ? formatMoney(quota.balance.amount, quota.balance.currency, uiLocale)
       : undefined;
-    const requests = `${formatInteger(quota.remaining)} запросов`;
+    const requests = `${formatInteger(quota.remaining, uiLocale)} запросов`;
     return balance ? `${balance} · ${requests}` : requests;
   }
   if (quota.unit === "ARSENKIN_LIMITS") {
-    return `${formatInteger(quota.remaining)} лимитов`;
+    return `${formatInteger(quota.remaining, uiLocale)} лимитов`;
   }
-  return `${formatInteger(quota.remaining)} API-запросов`;
+  return `${formatInteger(quota.remaining, uiLocale)} API-запросов`;
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
-function formatMoney(amount: string, currency: "RUB"): string {
+function formatMoney(amount: string, currency: "RUB", uiLocale: string = "ru-RU"): string {
   const value = Number(amount);
   return Number.isFinite(value)
-    ? new Intl.NumberFormat("ru-RU", {
+    ? new Intl.NumberFormat(uiLocale, {
         style: "currency",
         currency,
         maximumFractionDigits: 2
@@ -143,6 +143,6 @@ function unavailableEstimate(): ProviderUsageEstimate {
 function platformTokenEstimate(): ProviderUsageEstimate {
   return {
     usage: "Точная стоимость после расчёта",
-    available: "Внутренние токены workspace"
+    available: "Баланс данных рабочей области"
   };
 }

@@ -13,6 +13,9 @@ import {
   workspaceDropdownOpenEvent
 } from "../lib/dropdown-events";
 import { UserAvatar } from "./user-avatar";
+import { LanguageSwitcher } from "./ui-locale";
+import { UiText } from "./ui-locale";
+
 
 export function AccountMenu({
   user,
@@ -91,40 +94,38 @@ export function AccountMenu({
         <UserAvatar className="account-menu-avatar" size={34} user={user} />
         <span className="avatar-copy">
           <strong>{user.displayName}</strong>
-          <small>{roleLabel(roleCode)}</small>
+          <small>{<UiText text={roleLabel(roleCode) ?? ""} />}</small>
         </span>
       </button>
       {open && (
         <div className="account-popover" data-exclusive-dropdown-layer>
           <strong>{user.displayName}</strong>
           <span>{user.email}</span>
+          <LanguageSwitcher />
           <Link
             className="account-menu-link"
             href="/app/settings/security"
             onClick={() => setOpen(false)}
           >
-            Безопасность и профиль
-          </Link>
+            <UiText text="Безопасность и профиль" /></Link>
           <Link
             className="account-menu-link"
             href="/app/settings/notifications"
             onClick={() => setOpen(false)}
           >
-            Настройки уведомлений
-          </Link>
+            <UiText text="Настройки уведомлений" /></Link>
           {canViewWorkspaceIntegrations(roleCode) && (
             <Link
               className="account-menu-link"
               href="/app/settings/integrations"
               onClick={() => setOpen(false)}
             >
-              API-интеграции
-            </Link>
+              <UiText text="API-интеграции" /></Link>
           )}
           <button disabled={busy} onClick={logout} type="button">
-            {busy ? "Выходим…" : "Выйти"}
+            {busy ? <UiText text="Выходим…" /> : <UiText text="Выйти" />}
           </button>
-          {error && <small role="alert">{error}</small>}
+          {error && <small role="alert">{<UiText text={error ?? ""} />}</small>}
         </div>
       )}
     </div>

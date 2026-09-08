@@ -1,6 +1,7 @@
 "use client";
+import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 
-import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   FrequencyCollectionSummary,
   ProjectConnectorBinding,
@@ -10,9 +11,10 @@ import type {
 } from "@seo-platform/contracts";
 import {
   arsenkinWordstatKeywordLimit,
-  xmlStockWordstatKeywordLimit
+  frequencyCollectionKeywordLimit
 } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import {
   createProjectConnectorBindingInput,
   projectConnectorBinding,
@@ -36,6 +38,8 @@ import {
   type SemanticOperationGroup,
   type SemanticOperationSelection
 } from "./semantic-operation-scope";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function SemanticFrequencyDialog({
   onClose,
@@ -43,7 +47,8 @@ export function SemanticFrequencyDialog({
   projectId,
   activeGroupId,
   groups,
-  initialSelections
+  initialSelections,
+  initialConfiguration
 }: Readonly<{
   onClose: () => void;
   onStarted: (collection: FrequencyCollectionSummary) => void;
@@ -51,15 +56,19 @@ export function SemanticFrequencyDialog({
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
+  initialConfiguration?: Pick<FrequencyCollectionSummary, "types" | "regionCode" | "device" | "provider" | "credentialMode">;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const formId = useId();
+  const operationAttempt = useRef<OperationAttempt | undefined>(undefined);
   const [types, setTypes] = useState<ReadonlySet<SemanticFrequencyType>>(
-    new Set(["BASE", "EXACT", "FIXED"])
+    new Set(initialConfiguration?.types ?? ["BASE", "EXACT", "FIXED"])
   );
   const [regionCode, setRegionCode] = useState(
-    () => defaultSemanticRegion("WORDSTAT").code
+    () => initialConfiguration?.regionCode ?? defaultSemanticRegion("WORDSTAT").code
   );
-  const [device, setDevice] = useState<SemanticFrequencyDevice>("ALL");
+  const [device, setDevice] = useState<SemanticFrequencyDevice>(initialConfiguration?.device ?? "ALL");
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [loadingSources, setLoadingSources] = useState(true);
@@ -92,13 +101,9 @@ export function SemanticFrequencyDialog({
   const providerUsage = frequencyProviderUsageEstimate(
     selectedSource,
     scopeCount ?? selections.length,
-    orderedTypes.length
+    orderedTypes.length, uiLocale
   );
-  const keywordLimit = selectedSource?.provider === "ARSENKIN"
-    ? arsenkinWordstatKeywordLimit
-    : selectedSource
-      ? xmlStockWordstatKeywordLimit
-      : arsenkinWordstatKeywordLimit;
+  const keywordLimit = frequencyCollectionKeywordLimit;
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
     resolving: boolean,
@@ -114,6 +119,7 @@ export function SemanticFrequencyDialog({
   }, []);
 
   useEffect(() => {
+    if (initialConfiguration) return;
     setRegionCode(
       readLastSemanticRegion(
         window.localStorage,
@@ -122,15 +128,12 @@ export function SemanticFrequencyDialog({
         "WORDSTAT"
       ).code
     );
-  }, [projectId]);
+  }, [projectId, initialConfiguration]);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoadingSources(true);
-    void browserApiRequest<ProjectConnectorSettings>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-      { signal: controller.signal }
-    )
+    void preparedProjectIntegrations(projectId, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
         const binding = projectConnectorBinding(result, "WORDSTAT");
@@ -139,9 +142,9 @@ export function SemanticFrequencyDialog({
         );
         setSettings(result);
         setCredentialId(
-          options.some(({ id }) => id === binding?.route?.credentialId)
+          (initialConfiguration && options.find(option => option.provider === initialConfiguration.provider && (!initialConfiguration.credentialMode || option.mode === initialConfiguration.credentialMode)))?.id ?? (options.some(({ id }) => id === binding?.route?.credentialId)
             ? binding?.route?.credentialId ?? ""
-            : options[0]?.id ?? ""
+            : options[0]?.id ?? "")
         );
       })
       .catch((requestError) => {
@@ -151,7 +154,7 @@ export function SemanticFrequencyDialog({
         if (!controller.signal.aborted) setLoadingSources(false);
       });
     return () => controller.abort();
-  }, [projectId]);
+  }, [projectId, initialConfiguration]);
 
   function toggleType(type: SemanticFrequencyType): void {
     setTypes((current) => {
@@ -174,19 +177,17 @@ export function SemanticFrequencyDialog({
         );
       }
       await ensureWordstatBinding(settings, wordstatBinding, selectedSource.id);
-      const collection = await browserApiRequest<FrequencyCollectionSummary>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
-        {
-          method: "POST",
-          idempotencyKey: `semantic-frequency:${crypto.randomUUID()}`,
-          body: {
+      const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`;
+      const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
             types: orderedTypes,
             regionCode,
             device
-          }
-        }
-      );
+          };
+      operationAttempt.current = prepareOperationAttempt(operationAttempt.current, operationPath, body, selectedSource.id, "semantic-frequency");
+      const collection = await browserApiRequest<FrequencyCollectionSummary>(operationPath, {
+        method: "POST", operationAttempt: operationAttempt.current, body
+      });
       writeLastSemanticRegion(
         window.localStorage,
         projectId,
@@ -196,6 +197,7 @@ export function SemanticFrequencyDialog({
       );
       onStarted(collection);
     } catch (requestError) {
+      if (requestError instanceof BrowserApiError && requestError.code === "OPERATION_CANCELLED") return;
       setError(frequencyErrorMessage(requestError));
     } finally {
       setRunning(false);
@@ -207,18 +209,18 @@ export function SemanticFrequencyDialog({
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="semantic" /><div><dt>К сбору</dt><dd>{scopeCount === undefined ? "Считаем…" : `${scopeCount} запросов`}</dd></div></div>
+            <div><Icon name="semantic" /><div><dt><UiText text="К сбору" /></dt><dd>{scopeCount === undefined ? <UiText text="Считаем…" /> : <UiText text="{0} запросов" values={[String(scopeCount)]} />}</dd></div></div>
             <div>
               <Icon name="operations" />
-              <div><dt>Операций</dt><dd>{selectedSource?.provider === "ARSENKIN" ? ((scopeCount ?? selections.length) > 0 ? 1 : 0) : `до ${(scopeCount ?? selections.length) * orderedTypes.length}`}</dd></div>
+              <div><dt><UiText text="Обращений" /></dt><dd>{selectedSource?.provider === "ARSENKIN" ? Math.ceil((scopeCount ?? selections.length) / arsenkinWordstatKeywordLimit) : <UiText text="до {0}" values={[String((scopeCount ?? selections.length) * orderedTypes.length)]} />}</dd></div>
             </div>
-            <div><Icon name="frequency" /><div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div></div>
-            <div><Icon name="checkDouble" /><div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div></div>
+            <div><Icon name="frequency" /><div><dt><UiText text="Расход провайдера" /></dt><dd><UiText text={providerUsage.usage} /></dd></div></div>
+            <div><Icon name="checkDouble" /><div><dt><UiText text="Доступно сейчас" /></dt><dd><UiText text={providerUsage.available} /></dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
-            <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
+            <button className="secondary-button" disabled={running} onClick={onClose} type="button"><UiText text="Отмена" /></button>
             <button className="primary-button" disabled={loadingSources || resolvingScope || running || !selectedSource || selections.length === 0 || orderedTypes.length === 0} form={formId} type="submit">
-              {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Запустить сбор (${selections.length})`}
+              {resolvingScope ? <UiText text="Загружаем запросы…" /> : running ? <UiText text="Запускаем…" /> : <UiText text="Запустить сбор ({0})" values={[String(selections.length)]} />}
             </button>
           </div>
         </div>
@@ -226,20 +228,21 @@ export function SemanticFrequencyDialog({
       onClose={running ? () => undefined : onClose}
       presenceKey="semantic-modal:frequency"
       size="large"
-      title="Сбор частотности"
+      title={uiText("Сбор частотности")}
+      {...(initialConfiguration ? { description: uiText("Новый сбор только для запросов с ошибками. Параметры можно изменить; стоимость системного источника нужно подтвердить заново.") } : {})}
     >
       <form className="semantic-frequency-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         <div className="semantic-workflow-grid semantic-frequency-workflow-grid">
           <section className="semantic-workflow-panel semantic-source-panel">
             <header className="semantic-workflow-panel-heading">
-              <h3>Источник данных</h3>
-              <a className="semantic-dialog-link" href="/app/settings/integrations">Управлять</a>
-              <p>Выберите подключение, через которое будет выполнен сбор.</p>
+              <h3><UiText text="Источник данных" /></h3>
+              <a className="semantic-dialog-link" href="/app/settings/integrations"><UiText text="Управлять" /></a>
+              <p><UiText text="Выберите подключение, через которое будет выполнен сбор." /></p>
             </header>
             {loadingSources ? (
-              <div className="semantic-dialog-loading" role="status">Загружаем подключения…</div>
+              <div className="semantic-dialog-loading" role="status"><UiText text="Загружаем подключения…" /></div>
             ) : sources.length ? (
-              <div className="semantic-provider-list" role="radiogroup" aria-label="Источник Wordstat">
+              <div className="semantic-provider-list" role="radiogroup" aria-label={uiText("Источник Wordstat")}>
                 {sources.map((source) => (
                   <button
                     aria-checked={source.id === credentialId}
@@ -251,32 +254,32 @@ export function SemanticFrequencyDialog({
                   >
                     <ProviderLogo provider={source.provider} />
                     <span className="semantic-provider-card-copy">
-                      <strong>{integrationProviderLabel(source.provider)}</strong>
+                      <strong>{<UiText text={integrationProviderLabel(source.provider) ?? ""} />}</strong>
                       <small>{source.label} · Wordstat API</small>
-                      <b>Подключено</b>
+                      <b><UiText text="Подключено" /></b>
                     </span>
                     <i aria-hidden="true" className="semantic-provider-radio" />
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="inline-alert warning">Нет проверенного подключения с функцией Wordstat.</div>
+              <div className="inline-alert warning"><UiText text="Нет проверенного подключения с функцией Wordstat." /></div>
             )}
           </section>
           <section className="semantic-workflow-panel semantic-settings-panel">
             <header>
-              <h3>Настройки сбора</h3>
-              <p>Укажите регион, устройство и виды частотности.</p>
+              <h3><UiText text="Настройки сбора" /></h3>
+              <p><UiText text="Укажите регион, устройство и виды частотности." /></p>
             </header>
             <div className="semantic-frequency-settings">
               <fieldset className="semantic-check-list">
-              <legend>Виды частотности</legend>
-              <label><input checked={types.has("BASE")} onChange={() => toggleType("BASE")} type="checkbox" /> Базовая</label>
-              <label><input checked={types.has("EXACT")} onChange={() => toggleType("EXACT")} type="checkbox" /> Фразовая</label>
-              <label><input checked={types.has("FIXED")} onChange={() => toggleType("FIXED")} type="checkbox" /> Точная словоформа</label>
+              <legend><UiText text="Виды частотности" /></legend>
+              <label><input checked={types.has("BASE")} onChange={() => toggleType("BASE")} type="checkbox" /> <UiText text="Базовая" before=" " /></label>
+              <label><input checked={types.has("EXACT")} onChange={() => toggleType("EXACT")} type="checkbox" /> <UiText text="Фразовая" before=" " /></label>
+              <label><input checked={types.has("FIXED")} onChange={() => toggleType("FIXED")} type="checkbox" /> <UiText text="Точная словоформа" before=" " /></label>
               </fieldset>
               <label className="semantic-workflow-field">
-                <span>Регион Wordstat</span>
+                <span><UiText text="Регион Wordstat" /></span>
                 <SearchableRegionSelect
                   allowAll
                   autoFocus
@@ -285,13 +288,12 @@ export function SemanticFrequencyDialog({
                   value={regionCode}
                 />
                 <small>
-                  Первый запуск — Россия; затем используется регион последнего успешного запуска.
-                </small>
+                  <UiText text="Первый запуск — Россия; затем используется регион последнего успешного запуска." /></small>
               </label>
               <fieldset className="semantic-segmented-field">
-                <legend>Устройство</legend>
+                <legend><UiText text="Устройство" /></legend>
                 <div
-                  aria-label="Устройство Wordstat"
+                  aria-label={uiText("Устройство Wordstat")}
                   className="semantic-segmented-control semantic-frequency-device-control"
                   role="radiogroup"
                 >
@@ -304,7 +306,7 @@ export function SemanticFrequencyDialog({
                   ] as const).map(([value, label]) => (
                     <label className={device === value ? "selected" : undefined} key={value}>
                       <input checked={device === value} onChange={() => setDevice(value)} type="radio" />
-                      <span>{label}</span>
+                      <span><UiText text={label} /></span>
                     </label>
                   ))}
                 </div>
@@ -313,8 +315,8 @@ export function SemanticFrequencyDialog({
           </section>
           <section className="semantic-workflow-panel semantic-frequency-scope-panel">
             <header>
-              <h3>Охват сбора</h3>
-              <p>Выберите все запросы, конкретные запросы или папки.</p>
+              <h3><UiText text="Охват сбора" /></h3>
+              <p><UiText text="Выберите все запросы, конкретные запросы или папки." /></p>
             </header>
             <SemanticOperationScope
               activeGroupId={activeGroupId}
@@ -330,13 +332,13 @@ export function SemanticFrequencyDialog({
         {(error || scopeError) && <div className="semantic-workflow-feedback">
           {error && (
             <div className="inline-alert danger" role="alert">
-              <span>{error.message}</span>{" "}
+              <span>{<UiText text={error.message ?? ""} />}</span>{" "}
               {error.showRoutingLink && (
-                <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}>Настроить маршрут Wordstat</a>
+                <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}><UiText text="Настроить маршрут Wordstat" /></a>
               )}
             </div>
           )}
-          {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
+          {scopeError && <div className="inline-alert warning" role="alert">{<UiText text={scopeError ?? ""} />}</div>}
         </div>}
       </form>
     </SemanticModal>

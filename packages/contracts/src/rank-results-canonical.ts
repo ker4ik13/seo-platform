@@ -1,3 +1,4 @@
+import { parseSemanticRankDimensionKey } from "./api/rank-dimensions.js";
 import {
   canonicalJsonSha256,
   utf8Sha256
@@ -22,6 +23,7 @@ import {
   legacyRankManifestChunkSize,
   rankManifestSingleTaskChunkSize
 } from "./api/rank-estimates.js";
+import { batchedArsenkinRankChunkSize, rankCommandKeywordLimit } from "./api/rank-policy.js";
 import type {
   InternalRankHistoryFilterHashPreimage,
   InternalRankHistoryQuery
@@ -39,9 +41,9 @@ const MAX_KEYWORD_CODE_POINTS = 500;
 const MAX_KEYWORD_CODE_UNITS = MAX_KEYWORD_CODE_POINTS * 2;
 const MAX_KEYWORD_UTF8_BYTES = 2_000;
 const MAX_LANGUAGE_LENGTH = 16;
-const LEGACY_RANK_CHUNK_MAX_INDEX = 3;
+const ARSENKIN_RANK_CHUNK_MAX_INDEX = rankCommandKeywordLimit / batchedArsenkinRankChunkSize - 1;
 const XMLSTOCK_RANK_CHUNK_MAX_INDEX =
-  rankManifestSingleTaskChunkSize - 1;
+  rankCommandKeywordLimit - 1;
 
 const INGEST_COMMAND_KEYS = [
   "schemaVersion",
@@ -145,6 +147,8 @@ const HISTORY_QUERY_REQUIRED_KEYS = [
 ] as const;
 
 const HISTORY_QUERY_OPTIONAL_KEYS = [
+  "dimensionKey",
+  "mode",
   "trackingContextId",
   "keywordId",
   "cursor"
@@ -226,17 +230,23 @@ export function rankChunkIngestHashPreimage(
     sealedChunk.entries.length > rankManifestSingleTaskChunkSize ||
     (command.provider === "XMLSTOCK"
       ? sealedChunk.entries.length !== 1
-      : sealedChunk.chunkIndex > 0 &&
-        sealedChunk.entries.length > legacyRankManifestChunkSize) ||
+      : false) ||
     !Array.isArray(command.results) ||
     command.results.length !== sealedChunk.entries.length
   ) {
     return invalidCanonicalRankResult("sealedChunk");
   }
 
-  const expectedFirstSequence = command.provider === "XMLSTOCK"
-    ? sealedChunk.chunkIndex
-    : sealedChunk.chunkIndex * legacyRankManifestChunkSize;
+  // The caller verifies the parent manifest and its immutable chunk hash.
+  // Positive chunk indices identify legacy 250 or new 5000-entry strides;
+  // chunk zero has the same sequence origin under every supported policy.
+  const stride = command.provider === "XMLSTOCK" ? 1 : sealedChunk.chunkIndex === 0 ? rankManifestSingleTaskChunkSize : (sealedChunk.entries[0]?.sequence ?? -1) / sealedChunk.chunkIndex;
+  if (command.provider === "ARSENKIN" && sealedChunk.chunkIndex > 0 && (
+    ![legacyRankManifestChunkSize, batchedArsenkinRankChunkSize].includes(stride as typeof legacyRankManifestChunkSize) ||
+    sealedChunk.entries.length > stride ||
+    (stride === legacyRankManifestChunkSize && sealedChunk.chunkIndex > 3)
+  )) return invalidCanonicalRankResult("sealedChunk");
+  const expectedFirstSequence = sealedChunk.chunkIndex * stride;
   for (let index = 0; index < sealedChunk.entries.length; index += 1) {
     const entry = sealedChunk.entries[index];
     if (entry === undefined) {
@@ -381,6 +391,8 @@ export function rankHistoryFilterHashPreimage(
   if (query.keywordId !== undefined) {
     assertUuidV7(query.keywordId, "keywordId");
   }
+  if ((query.dimensionKey !== undefined && !parseSemanticRankDimensionKey(query.dimensionKey)) ||
+    (query.mode !== undefined && query.mode !== "SERP") || (query.mode === "SERP" && query.limit > 10)) return invalidCanonicalRankResult("historyQuery");
 
   return {
     schemaVersion: "rank-history-filter@1",
@@ -389,7 +401,9 @@ export function rankHistoryFilterHashPreimage(
     observedFrom: query.observedFrom,
     observedBefore: query.observedBefore,
     trackingContextId: query.trackingContextId ?? null,
-    keywordId: query.keywordId ?? null
+    keywordId: query.keywordId ?? null,
+    ...(query.dimensionKey === undefined ? {} : { dimensionKey: query.dimensionKey }),
+    ...(query.mode === undefined ? {} : { mode: query.mode })
   };
 }
 
@@ -646,7 +660,7 @@ function assertChunkIndex(
 ): void {
   const maximum = provider === "XMLSTOCK"
     ? XMLSTOCK_RANK_CHUNK_MAX_INDEX
-    : LEGACY_RANK_CHUNK_MAX_INDEX;
+    : ARSENKIN_RANK_CHUNK_MAX_INDEX;
   if (
     !Number.isSafeInteger(value) ||
     value < 0 ||

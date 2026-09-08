@@ -36,6 +36,7 @@ export function internalPersistAiAnswerSnapshotBatchInput(
   value: unknown
 ): InternalPersistAiAnswerSnapshotBatchInput {
   const input = record(value, [
+    "sourceMode",
     "workspaceId",
     "projectId",
     "actorId",
@@ -144,6 +145,7 @@ export function internalPersistAiAnswerSnapshotBatchInput(
     regionCode: pattern(input.regionCode, "regionCode", /^(?:0|[1-9]\d{0,9})$/u),
     device: member(input.device, aiAnswerDevices, "device"),
     provider: input.provider === "ARSENKIN" ? "ARSENKIN" : invalid("provider"),
+    ...(input.sourceMode === undefined ? {} : { sourceMode: input.sourceMode === "PLATFORM" || input.sourceMode === "BYOK" ? input.sourceMode : invalid("sourceMode") }),
     host,
     observedAt,
     items

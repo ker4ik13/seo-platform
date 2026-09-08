@@ -24,16 +24,23 @@ import {
 import { OperationAdministration } from "./operation-administration";
 import { ProjectAdministration } from "./project-administration";
 import { WorkspaceAdministration } from "./workspace-administration";
+import { RefundAdministration } from "./refund-administration";
+import { ProviderAdministration } from "./provider-administration";
+import { Overview } from "./overview";
+import { UsageReview } from "./usage-review";
+import { UiText, useUiLocale } from "../../components/ui-locale";
 
-type Screen = "workspaces" | "projects" | "operations" | "receipts" | "staff";
+
+type Screen = "overview" | "workspaces" | "projects" | "operations" | "receipts" | "staff" | "refunds" | "providers" | "usage";
 
 export function AdminApp() {
+  const { t: uiText } = useUiLocale();
   const [profile, setProfile] = useState<PlatformAdminProfile>();
   const [authState, setAuthState] = useState<
     "loading" | "login" | "mfa" | "forbidden" | "ready"
   >("loading");
   const [challengeToken, setChallengeToken] = useState("");
-  const [screen, setScreen] = useState<Screen>("workspaces");
+  const [screen, setScreen] = useState<Screen>("overview");
   const [error, setError] = useState<string>();
 
   const loadProfile = useCallback(async () => {
@@ -99,14 +106,13 @@ export function AdminApp() {
             onClick={() => void logout("/admin")}
             type="button"
           >
-            Войти заново
-          </button>
+            <UiText text="Войти заново" /></button>
         }
         text={
           error ??
           "Нужны активная platform role, подтверждённый email и вход с MFA."
         }
-        title="Доступ в operations закрыт"
+        title={uiText("Доступ в operations закрыт")}
       />
     );
   }
@@ -123,6 +129,8 @@ export function AdminApp() {
     ["SUPER_ADMIN", "FINANCE"].includes(role)
   );
   const canViewReceipts = canManageBilling;
+  const canViewRefunds = canManageBilling || profile.roles.includes("SUPPORT");
+  const canViewProviders = canManageBilling || profile.roles.includes("OPERATIONS");
   const hasVisibleScreen =
     canViewWorkspaces || canViewPlatformDirectory || canViewReceipts || canManageStaff;
   return (
@@ -130,17 +138,17 @@ export function AdminApp() {
       <aside className="sidebar">
         <a className="brand" href="/">
           <img alt="" aria-hidden="true" height={31} src="/brand/seonorita-mark.svg" width={31} />
-          <div><strong>SEOньорита</strong><small>Operations</small></div>
+          <div><strong><UiText text="SEOньорита" /></strong><small>Operations</small></div>
         </a>
-        <nav aria-label="Разделы администрирования">
+        <nav aria-label={uiText("Разделы администрирования")}>
+          {canViewWorkspaces && <button className={screen === "overview" ? "active" : undefined} onClick={() => setScreen("overview")} type="button"><i>00</i> <UiText text="Обзор" before=" " /></button>}
           {canViewWorkspaces && (
             <button
               className={screen === "workspaces" ? "active" : undefined}
               onClick={() => setScreen("workspaces")}
               type="button"
             >
-              <i>01</i> Рабочие области
-            </button>
+              <i>01</i> <UiText text="Рабочие области" before=" " /></button>
           )}
           {canViewPlatformDirectory && (
             <button
@@ -148,8 +156,7 @@ export function AdminApp() {
               onClick={() => setScreen("projects")}
               type="button"
             >
-              <i>02</i> Проекты
-            </button>
+              <i>02</i> <UiText text="Проекты" before=" " /></button>
           )}
           {canViewPlatformDirectory && (
             <button
@@ -157,8 +164,7 @@ export function AdminApp() {
               onClick={() => setScreen("operations")}
               type="button"
             >
-              <i>03</i> Операции
-            </button>
+              <i>03</i> <UiText text="Операции" before=" " /></button>
           )}
           {canViewReceipts && (
             <button
@@ -166,9 +172,9 @@ export function AdminApp() {
               onClick={() => setScreen("receipts")}
               type="button"
             >
-              <i>04</i> Чеки НПД
-            </button>
+              <i>04</i> <UiText text="Чеки НПД" before=" " /></button>
           )}
+          {canViewRefunds && <button className={screen === "refunds" ? "active" : undefined} onClick={() => setScreen("refunds")} type="button"><i>05</i> <UiText text="Возвраты" before=" " /></button>}
           {canManageStaff && (
             <button
               className={screen === "staff" ? "active" : undefined}
@@ -178,6 +184,8 @@ export function AdminApp() {
               <i>05</i> Platform roles
             </button>
           )}
+          {canManageBilling && <button className={screen === "usage" ? "active" : undefined} onClick={() => setScreen("usage")} type="button"><i>07</i> <UiText text="Расходы на проверке" /></button>}
+          {canViewProviders && <button className={screen === "providers" ? "active" : undefined} onClick={() => setScreen("providers")} type="button"><i>06</i> <UiText text="Провайдеры" before=" " /></button>}
         </nav>
         <div className="operator">
           <span>{initials(profile.displayName)}</span>
@@ -194,31 +202,38 @@ export function AdminApp() {
             <strong>Operations</strong>
             {hasVisibleScreen && (
               <select
-                aria-label="Раздел администрирования"
+                aria-label={uiText("Раздел администрирования")}
                 className="mobile-navigation"
                 onChange={(event) => setScreen(event.target.value as Screen)}
                 value={screen}
               >
-                {canViewWorkspaces && <option value="workspaces">Рабочие области</option>}
-                {canViewPlatformDirectory && <option value="projects">Проекты</option>}
-                {canViewPlatformDirectory && <option value="operations">Операции</option>}
-                {canViewReceipts && <option value="receipts">Чеки НПД</option>}
+                {canViewWorkspaces && <option value="overview"><UiText text="Обзор" /></option>}
+                {canViewWorkspaces && <option value="workspaces"><UiText text="Рабочие области" /></option>}
+                {canViewPlatformDirectory && <option value="projects"><UiText text="Проекты" /></option>}
+                {canViewPlatformDirectory && <option value="operations"><UiText text="Операции" /></option>}
+                {canViewReceipts && <option value="receipts"><UiText text="Чеки НПД" /></option>}
+                {canViewRefunds && <option value="refunds"><UiText text="Возвраты" /></option>}
                 {canManageStaff && <option value="staff">Platform roles</option>}
+                {canManageBilling && <option value="usage"><UiText text="Расходы на проверке" /></option>}
+                {canViewProviders && <option value="providers"><UiText text="Провайдеры" /></option>}
               </select>
             )}
           </div>
           <div className="topbar-actions">
             <span className="system-state"><i /> MFA · recent auth</span>
             <button className="ghost" onClick={() => void logout()} type="button">
-              Выйти
-            </button>
+              <UiText text="Выйти" /></button>
           </div>
         </header>
         {!hasVisibleScreen ? (
           <StatePage
             text="Для этого аккаунта пока нет доступных operations-разделов. Нужна подходящая platform role."
-            title="Нет доступных разделов"
+            title={uiText("Нет доступных разделов")}
           />
+        ) : screen === "overview" && canViewWorkspaces ? (
+          <Overview onNavigate={setScreen} />
+        ) : screen === "usage" && canManageBilling ? (
+          <UsageReview />
         ) : screen === "workspaces" && canViewWorkspaces ? (
           <WorkspaceAdministration canManageBilling={canManageBilling} />
         ) : screen === "projects" && canViewPlatformDirectory ? (
@@ -229,6 +244,10 @@ export function AdminApp() {
           <Receipts />
         ) : screen === "staff" && canManageStaff ? (
           <StaffRoles />
+        ) : screen === "refunds" && canViewRefunds ? (
+          <RefundAdministration canDecide={canManageBilling} />
+        ) : screen === "providers" && canViewProviders ? (
+          <ProviderAdministration />
         ) : canViewWorkspaces ? (
           <WorkspaceAdministration canManageBilling={canManageBilling} />
         ) : (
@@ -280,15 +299,15 @@ function Login({
     <main className="auth-page">
       <section className="auth-card">
         <div className="auth-logo">SW</div>
-        <p className="eyebrow">Внутренняя панель</p>
-        <h1>Вход в Operations</h1>
-        <p>Доступ только для platform staff. Второй фактор обязателен.</p>
+        <p className="eyebrow"><UiText text="Внутренняя панель" /></p>
+        <h1><UiText text="Вход в Operations" /></h1>
+        <p><UiText text="Доступ только для platform staff. Второй фактор обязателен." /></p>
         <form onSubmit={submit}>
-          {message && <div className="form-alert" role="alert">{message}</div>}
+          {message && <div className="form-alert" role="alert">{<UiText text={message ?? ""} />}</div>}
           <label><span>Email</span><input autoComplete="username" name="email" required type="email" /></label>
-          <label><span>Пароль</span><input autoComplete="current-password" name="password" required type="password" /></label>
+          <label><span><UiText text="Пароль" /></span><input autoComplete="current-password" name="password" required type="password" /></label>
           <button className="primary" disabled={busy} type="submit">
-            {busy ? "Проверяем…" : "Продолжить"}
+            {busy ? <UiText text="Проверяем…" /> : <UiText text="Продолжить" />}
           </button>
         </form>
       </section>
@@ -330,15 +349,15 @@ function Mfa({
       <section className="auth-card">
         <div className="auth-logo">2FA</div>
         <p className="eyebrow">Step-up authentication</p>
-        <h1>Подтвердите второй фактор</h1>
-        <p>Введите TOTP-код или одноразовый recovery code.</p>
+        <h1><UiText text="Подтвердите второй фактор" /></h1>
+        <p><UiText text="Введите TOTP-код или одноразовый recovery code." /></p>
         <form onSubmit={submit}>
-          {message && <div className="form-alert" role="alert">{message}</div>}
-          <label><span>Код</span><input autoComplete="one-time-code" inputMode="numeric" name="code" required /></label>
+          {message && <div className="form-alert" role="alert">{<UiText text={message ?? ""} />}</div>}
+          <label><span><UiText text="Код" /></span><input autoComplete="one-time-code" inputMode="numeric" name="code" required /></label>
           <button className="primary" disabled={busy} type="submit">
-            {busy ? "Проверяем…" : "Войти"}
+            {busy ? <UiText text="Проверяем…" /> : <UiText text="Войти" />}
           </button>
-          <button className="link-button" onClick={onBack} type="button">Назад</button>
+          <button className="link-button" onClick={onBack} type="button"><UiText text="Назад" /></button>
         </form>
       </section>
     </main>
@@ -346,6 +365,8 @@ function Mfa({
 }
 
 function Receipts() {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [page, setPage] = useState<AdminNpdReceiptListPage>();
   const [status, setStatus] = useState("");
   const [selected, setSelected] = useState<AdminNpdReceiptDetail>();
@@ -398,49 +419,48 @@ function Receipts() {
   return (
     <div className="content">
       <section className="heading">
-        <div><p>Billing operations</p><h1>Чеки НПД</h1></div>
+        <div><p>Billing operations</p><h1><UiText text="Чеки НПД" /></h1></div>
         <a className="external" href="https://lknpd.nalog.ru/" rel="noreferrer" target="_blank">
-          Открыть «Мой налог» ↗
-        </a>
+          <UiText text="Открыть «Мой налог» ↗" /></a>
       </section>
       <aside className="warning">
-        <strong>Ручной официальный workflow.</strong>
-        <span>Сверьте сумму и покупателя с snapshot, создайте чек в «Мой налог», затем сохраните официальный ID и print URL.</span>
+        <strong><UiText text="Ручной официальный workflow." /></strong>
+        <span><UiText text="Сверьте сумму и покупателя с snapshot, создайте чек в «Мой налог», затем сохраните официальный ID и print URL." /></span>
       </aside>
       <section className="metric-grid">
-        <Metric label="Ждут регистрации" value={counts.waiting} />
-        <Metric label="Ждут доставки" value={counts.delivery} />
-        <Metric label="Возврат / замена" value={counts.refund} />
-        <Metric danger={counts.overdue > 0} label="Старше 1 часа" value={counts.overdue} />
+        <Metric label={uiText("Ждут регистрации")} value={counts.waiting} />
+        <Metric label={uiText("Ждут доставки")} value={counts.delivery} />
+        <Metric label={uiText("Возврат / замена")} value={counts.refund} />
+        <Metric danger={counts.overdue > 0} label={uiText("Старше 1 часа")} value={counts.overdue} />
       </section>
       <section className="panel">
         <header className="panel-header">
-          <div><h2>Обязательства</h2><p>Не более 100 последних записей, новые сверху</p></div>
+          <div><h2><UiText text="Обязательства" /></h2><p><UiText text="Не более 100 последних записей, новые сверху" /></p></div>
           <div className="filters">
             <select onChange={(event) => setStatus(event.target.value)} value={status}>
-              <option value="">Все статусы</option>
-              {receiptStatuses.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
+              <option value=""><UiText text="Все статусы" /></option>
+              {receiptStatuses.map((item) => <option key={item} value={item}>{<UiText text={statusLabel(item) ?? ""} />}</option>)}
             </select>
-            <button className="ghost" onClick={() => void load()} type="button">Обновить</button>
+            <button className="ghost" onClick={() => void load()} type="button"><UiText text="Обновить" /></button>
           </div>
         </header>
-        {error && <div className="form-alert" role="alert">{error}</div>}
+        {error && <div className="form-alert" role="alert">{<UiText text={error ?? ""} />}</div>}
         {loading ? (
-          <div className="empty">Загружаем обязательства…</div>
+          <div className="empty"><UiText text="Загружаем обязательства…" /></div>
         ) : !page || page.data.length === 0 ? (
-          <div className="empty"><strong>Очередь пуста</strong><span>Новых обязательств по чекам нет.</span></div>
+          <div className="empty"><strong><UiText text="Очередь пуста" /></strong><span><UiText text="Новых обязательств по чекам нет." /></span></div>
         ) : (
           <div className="receipt-table">
             <div className="receipt-row receipt-head">
-              <span>Оплата</span><span>Сумма</span><span>Возраст</span><span>Статус</span><span />
+              <span><UiText text="Оплата" /></span><span><UiText text="Сумма" /></span><span><UiText text="Возраст" /></span><span><UiText text="Статус" /></span><span />
             </div>
             {page.data.map((receipt) => (
               <button className="receipt-row" key={receipt.id} onClick={() => void open(receipt)} type="button">
-                <span><strong>{shortId(receipt.yookassaPaymentId)}</strong><small>#{receipt.sequence} · {formatDate(receipt.paidAt)}</small></span>
-                <span>{money(receipt.grossAmountMinor)}</span>
+                <span><strong>{shortId(receipt.yookassaPaymentId)}</strong><small>#{receipt.sequence} · {formatDate(receipt.paidAt, uiLocale)}</small></span>
+                <span>{money(receipt.grossAmountMinor, uiLocale)}</span>
                 <span>{age(receipt.ageSeconds)}</span>
                 <span><Status value={receipt.status} /></span>
-                <span>Открыть →</span>
+                <span><UiText text="Открыть →" /></span>
               </button>
             ))}
           </div>
@@ -469,6 +489,8 @@ function ReceiptDrawer({
   onClose: () => void;
   onUpdated: () => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const action =
@@ -531,48 +553,47 @@ function ReceiptDrawer({
   return (
     <div className="drawer-backdrop" onMouseDown={onClose}>
       <aside className="drawer" onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><p>Платёж {shortId(receipt.yookassaPaymentId)}</p><h2>Обязательство по чеку</h2></div><button aria-label="Закрыть" onClick={onClose} type="button">×</button></header>
+        <header><div><p><UiText text="Платёж" after=" " />{shortId(receipt.yookassaPaymentId)}</p><h2><UiText text="Обязательство по чеку" /></h2></div><button aria-label={uiText("Закрыть")} onClick={onClose} type="button">×</button></header>
         <div className="snapshot">
-          <Snapshot label="Gross-сумма" value={money(receipt.grossAmountMinor)} />
-          <Snapshot label="Дата оплаты" value={formatDate(receipt.paidAt)} />
-          <Snapshot label="Покупатель" value={buyerLabel(receipt)} />
-          <Snapshot label="ИНН" value={receipt.buyerInn ?? "Не требуется"} />
-          <Snapshot label="Email доставки" value={receipt.deliveryEmail} />
-          <Snapshot label="Услуга" value={receipt.serviceDescription} />
-          <Snapshot label="Возвращено" value={money(receipt.refundedAmountMinor)} />
-          <Snapshot label="Статус" value={statusLabel(receipt.status)} />
+          <Snapshot label={uiText("Gross-сумма")} value={money(receipt.grossAmountMinor, uiLocale)} />
+          <Snapshot label={uiText("Дата оплаты")} value={formatDate(receipt.paidAt, uiLocale)} />
+          <Snapshot label={uiText("Покупатель")} value={buyerLabel(receipt)} />
+          <Snapshot label={uiText("ИНН")} value={receipt.buyerInn ?? "Не требуется"} />
+          <Snapshot label={uiText("Email доставки")} value={receipt.deliveryEmail} />
+          <Snapshot label={uiText("Услуга")} value={receipt.serviceDescription} />
+          <Snapshot label={uiText("Возвращено")} value={money(receipt.refundedAmountMinor, uiLocale)} />
+          <Snapshot label={uiText("Статус")} value={statusLabel(receipt.status)} />
         </div>
         {receipt.officialReceiptUrl && (
           <a className="receipt-link" href={receipt.officialReceiptUrl} rel="noreferrer" target="_blank">
-            Открыть официальный чек ↗
-          </a>
+            <UiText text="Открыть официальный чек ↗" /></a>
         )}
         {action ? (
           <form className="operation-form" onSubmit={submit}>
             <h3>{actionTitle(action)}</h3>
-            {error && <div className="form-alert" role="alert">{error}</div>}
+            {error && <div className="form-alert" role="alert">{<UiText text={error ?? ""} />}</div>}
             {action !== "register" && (
               <>
-                <label><span>Подтверждение аннулирования</span><input name="cancellationOfficialReference" placeholder="Официальный ID/номер операции" required /></label>
-                <label><span>Дата аннулирования</span><input defaultValue={localNow()} name="cancelledAt" required type="datetime-local" /></label>
+                <label><span><UiText text="Подтверждение аннулирования" /></span><input name="cancellationOfficialReference" placeholder={uiText("Официальный ID/номер операции")} required /></label>
+                <label><span><UiText text="Дата аннулирования" /></span><input defaultValue={localNow()} name="cancelledAt" required type="datetime-local" /></label>
               </>
             )}
             {action !== "cancel" && (
               <>
-                <label><span>ID нового чека</span><input name="officialReceiptId" placeholder="Например, 205ldfqqhc" required /></label>
-                <label><span>Официальный print URL</span><input name="officialReceiptUrl" placeholder="https://lknpd.nalog.ru/api/v1/receipt/…/…/print" required type="url" /></label>
-                <label><span>Дата регистрации</span><input defaultValue={localNow()} name="registeredAt" required type="datetime-local" /></label>
-                <label className="check"><input name="amountChecked" required type="checkbox" /><span>Сумма чека в «Мой налог» совпадает: <strong>{money(action === "replace" ? receipt.grossAmountMinor - receipt.refundedAmountMinor : receipt.grossAmountMinor)}</strong></span></label>
-                <label className="check"><input name="buyerChecked" required type="checkbox" /><span>Тип и данные покупателя сверены со snapshot</span></label>
+                <label><span><UiText text="ID нового чека" /></span><input name="officialReceiptId" placeholder={uiText("Например, 205ldfqqhc")} required /></label>
+                <label><span><UiText text="Официальный print URL" /></span><input name="officialReceiptUrl" placeholder="https://lknpd.nalog.ru/api/v1/receipt/…/…/print" required type="url" /></label>
+                <label><span><UiText text="Дата регистрации" /></span><input defaultValue={localNow()} name="registeredAt" required type="datetime-local" /></label>
+                <label className="check"><input name="amountChecked" required type="checkbox" /><span><UiText text="Сумма чека в «Мой налог» совпадает:" after=" " /><strong>{money(action === "replace" ? receipt.grossAmountMinor - receipt.refundedAmountMinor : receipt.grossAmountMinor, uiLocale)}</strong></span></label>
+                <label className="check"><input name="buyerChecked" required type="checkbox" /><span><UiText text="Тип и данные покупателя сверены со snapshot" /></span></label>
               </>
             )}
-            <label><span>Причина / комментарий аудита</span><textarea minLength={8} name="reason" required rows={3} /></label>
+            <label><span><UiText text="Причина / комментарий аудита" /></span><textarea minLength={8} name="reason" required rows={3} /></label>
             <button className="primary" disabled={busy} type="submit">
-              {busy ? "Сохраняем…" : actionButton(action)}
+              {busy ? <UiText text="Сохраняем…" /> : actionButton(action)}
             </button>
           </form>
         ) : (
-          <div className="empty"><strong>Ручных действий сейчас нет</strong><span>Следующий переход выполняется системой или появляется после подтверждённого refund.</span></div>
+          <div className="empty"><strong><UiText text="Ручных действий сейчас нет" /></strong><span><UiText text="Следующий переход выполняется системой или появляется после подтверждённого refund." /></span></div>
         )}
       </aside>
     </div>
@@ -580,6 +601,7 @@ function ReceiptDrawer({
 }
 
 function StaffRoles() {
+  const uiLocale = useUiLocale().locale;
   const [roles, setRoles] = useState<readonly PlatformStaffRoleAssignmentSummary[]>([]);
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -627,22 +649,22 @@ function StaffRoles() {
   return (
     <div className="content">
       <section className="heading"><div><p>Security</p><h1>Platform roles</h1></div></section>
-      <aside className="warning"><strong>Высокорисковое действие.</strong><span>Назначайте минимальную роль; аккаунт обязан иметь подтверждённый email и активный MFA.</span></aside>
+      <aside className="warning"><strong><UiText text="Высокорисковое действие." /></strong><span><UiText text="Назначайте минимальную роль; аккаунт обязан иметь подтверждённый email и активный MFA." /></span></aside>
       <section className="grid roles-grid">
         <article className="panel">
-          <header><div><h2>Назначения</h2><p>Активные и отозванные записи сохраняются для аудита</p></div></header>
-          {error && <div className="form-alert">{error}</div>}
-          {loading ? <div className="empty">Загрузка…</div> : roles.length === 0 ? <div className="empty">Назначений нет.</div> : (
-            <div className="role-list">{roles.map((role) => <div className="role-row" key={role.id}><div><strong>{role.displayName}</strong><small>{role.email}</small></div><Status value={role.revokedAt ? "REVOKED" : role.roleCode} /><small>{formatDate(role.assignedAt)}</small>{!role.revokedAt && <button className="danger-button" onClick={() => void revoke(role)} type="button">Отозвать</button>}</div>)}</div>
+          <header><div><h2><UiText text="Назначения" /></h2><p><UiText text="Активные и отозванные записи сохраняются для аудита" /></p></div></header>
+          {error && <div className="form-alert">{<UiText text={error ?? ""} />}</div>}
+          {loading ? <div className="empty"><UiText text="Загрузка…" /></div> : roles.length === 0 ? <div className="empty"><UiText text="Назначений нет." /></div> : (
+            <div className="role-list">{roles.map((role) => <div className="role-row" key={role.id}><div><strong>{role.displayName}</strong><small>{role.email}</small></div><Status value={role.revokedAt ? "REVOKED" : role.roleCode} /><small>{formatDate(role.assignedAt, uiLocale)}</small>{!role.revokedAt && <button className="danger-button" onClick={() => void revoke(role)} type="button"><UiText text="Отозвать" /></button>}</div>)}</div>
           )}
         </article>
         <article className="panel">
-          <header><div><h2>Назначить роль</h2><p>Изменение требует недавнего MFA-входа и попадает в audit</p></div></header>
+          <header><div><h2><UiText text="Назначить роль" /></h2><p><UiText text="Изменение требует недавнего MFA-входа и попадает в audit" /></p></div></header>
           <form className="operation-form" onSubmit={assign}>
             <label><span>User UUID</span><input name="userId" required /></label>
-            <label><span>Роль</span><select name="roleCode">{platformRoles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
-            <label><span>Обоснование</span><textarea minLength={8} name="reason" required rows={3} /></label>
-            <button className="primary" type="submit">Назначить</button>
+            <label><span><UiText text="Роль" /></span><select name="roleCode">{platformRoles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+            <label><span><UiText text="Обоснование" /></span><textarea minLength={8} name="reason" required rows={3} /></label>
+            <button className="primary" type="submit"><UiText text="Назначить" /></button>
           </form>
         </article>
       </section>
@@ -651,16 +673,16 @@ function StaffRoles() {
 }
 
 function Metric({ danger = false, label, value }: Readonly<{ danger?: boolean; label: string; value: number }>) {
-  return <article><span>{label}</span><strong>{value}</strong><small className={danger ? "danger-text" : undefined}>{danger ? "Требует внимания" : "Текущая выборка"}</small></article>;
+  return <article><span>{label}</span><strong>{value}</strong><small className={danger ? "danger-text" : undefined}>{danger ? <UiText text="Требует внимания" /> : <UiText text="Текущая выборка" />}</small></article>;
 }
 function Status({ value }: Readonly<{ value: string }>) {
-  return <b className={`status status-${value.toLowerCase().replaceAll("_", "-")}`}>{statusLabel(value)}</b>;
+  return <b className={`status status-${value.toLowerCase().replaceAll("_", "-")}`}>{<UiText text={statusLabel(value) ?? ""} />}</b>;
 }
 function Snapshot({ label, value }: Readonly<{ label: string; value: string }>) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 function StatePage({ action, text, title = "Operations" }: Readonly<{ action?: ReactNode; text: string; title?: string }>) {
-  return <main className="state-page"><div className="auth-logo">SW</div><h1>{title}</h1><p>{text}</p>{action}</main>;
+  return <main className="state-page"><div className="auth-logo">SW</div><h1><UiText text={title} /></h1><p><UiText text={text} /></p>{action}</main>;
 }
 
 async function logout(returnTo = "/") {
@@ -701,11 +723,11 @@ function statusLabel(value: string): string {
     REPLACEMENT_REQUIRED: "Заменить", REVOKED: "Отозвана"
   } as Record<string, string>)[value] ?? value;
 }
-function money(value: number): string {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(value / 100);
+function money(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, { style: "currency", currency: "RUB" }).format(value / 100);
 }
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+function formatDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 }
 function age(seconds: number): string {
   if (seconds < 60) return `${seconds} сек`;

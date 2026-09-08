@@ -42,6 +42,8 @@ import {
   type ProjectPageDraftErrors
 } from "../lib/project-pages";
 import { Icon } from "./icon";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface PageFilters {
   readonly search: string;
@@ -100,6 +102,8 @@ export function ProjectPageMap({
   projectId: string;
   projectName: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [collection, setCollection] = useState<ProjectPageSettings>();
   const [filters, setFilters] = useState<PageFilters>(DEFAULT_FILTERS);
   const [appliedFilters, setAppliedFilters] =
@@ -481,7 +485,7 @@ export function ProjectPageMap({
     return (
       <section className="panel page-map-state" aria-busy="true">
         <span className="spinner" aria-hidden="true" />
-        <p>Загружаем страницы проекта…</p>
+        <p><UiText text="Загружаем страницы проекта…" /></p>
       </section>
     );
   }
@@ -489,15 +493,14 @@ export function ProjectPageMap({
   if (loadError && !collection) {
     return (
       <section className="panel page-map-state" role="alert">
-        <h2>Карта страниц недоступна</h2>
-        <p>{loadError}</p>
+        <h2><UiText text="Карта страниц недоступна" /></h2>
+        <p>{<UiText text={loadError ?? ""} />}</p>
         <button
           className="secondary-button"
           onClick={() => setReload((value) => value + 1)}
           type="button"
         >
-          Повторить
-        </button>
+          <UiText text="Повторить" /></button>
       </section>
     );
   }
@@ -526,37 +529,32 @@ export function ProjectPageMap({
     <div className="page-map" style={pageMapStyle}>
       {!online && (
         <div className="inline-warning" role="status">
-          Нет сети. Данные доступны для просмотра, изменения временно
-          отключены.
-        </div>
+          <UiText text="Нет сети. Данные доступны для просмотра, изменения временно отключены." /></div>
       )}
       {collection.access.mutationRestriction !== "NONE" && (
         <div className="inline-note" role="status">
-          {restrictionLabel(collection.access.mutationRestriction)}
+          {<UiText text={restrictionLabel(collection.access.mutationRestriction) ?? ""} />}
         </div>
       )}
       {operationError && (
-        <div className="inline-error" role="alert">{operationError}</div>
+        <div className="inline-error" role="alert">{<UiText text={operationError ?? ""} />}</div>
       )}
       {success && (
-        <div className="inline-success" role="status">{success}</div>
+        <div className="inline-success" role="status">{<UiText text={success ?? ""} />}</div>
       )}
 
-      <section className="page-map-primary-actions" aria-label="Действия карты страниц">
+      <section className="page-map-primary-actions" aria-label={uiText("Действия карты страниц")}>
         <a
           className="primary-button"
           href={`/app/projects/${encodeURIComponent(projectId)}/tools/http-status-checker`}
         >
           <Icon name="sitemap" />
-          Сканировать сайт
-        </a>
+          <UiText text="Сканировать сайт" /></a>
         <button className="secondary-button" onClick={exportVisiblePages} type="button">
           <Icon name="export" />
-          Экспорт
-        </button>
+          <UiText text="Экспорт" /></button>
         <span>
-          {structure.total.toLocaleString("ru-RU")} страниц в структуре
-        </span>
+          {structure.total.toLocaleString(uiLocale)} <UiText text="страниц в структуре" before=" " /></span>
       </section>
 
       <div className="page-map-workspace">
@@ -575,7 +573,7 @@ export function ProjectPageMap({
           total={structure.total}
         />
         <PanelResizeHandle
-          label="Изменить ширину структуры сайта"
+          label={uiText("Изменить ширину структуры сайта")}
           onDoubleClick={() => setStructureWidth(248)}
           onPointerDown={(event) =>
             beginHorizontalResize(event, {
@@ -590,7 +588,7 @@ export function ProjectPageMap({
         <section className="panel page-map-toolbar">
         <form className="page-map-commandbar" onSubmit={applyFilters}>
           <label className="form-field page-map-search">
-            <span className="visually-hidden">Поиск по карте страниц</span>
+            <span className="visually-hidden"><UiText text="Поиск по карте страниц" /></span>
             <input
               onChange={(event) =>
                 setFilters((value) => ({
@@ -598,21 +596,20 @@ export function ProjectPageMap({
                   search: event.target.value
                 }))
               }
-              placeholder="URL, Title или H1"
+              placeholder={uiText("URL, Title или H1")}
               type="search"
               value={filters.search}
             />
           </label>
           <button className="secondary-button page-map-search-button" type="submit">
-            Найти
-          </button>
+            <UiText text="Найти" /></button>
           <details className="page-map-filter-disclosure" data-exclusive-dropdown>
             <summary>
-              Фильтры{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
+              <UiText text="Фильтры" />{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
             </summary>
             <div className="page-map-filter-popover">
               <label className="form-field">
-                <span>Тип</span>
+                <span><UiText text="Тип" /></span>
                 <CustomSelect
                   onChange={(event) =>
                     setFilters((value) => ({
@@ -622,16 +619,16 @@ export function ProjectPageMap({
                   }
                   value={filters.pageType}
                 >
-                  <option value="">Все типы</option>
+                  <option value=""><UiText text="Все типы" /></option>
                   {pageTypes.map((value) => (
                     <option key={value} value={value}>
-                      {pageTypeLabel(value)}
+                      {<UiText text={pageTypeLabel(value) ?? ""} />}
                     </option>
                   ))}
                 </CustomSelect>
               </label>
               <label className="form-field">
-                <span>Индексируемость</span>
+                <span><UiText text="Индексируемость" /></span>
                 <CustomSelect
                   onChange={(event) =>
                     setFilters((value) => ({
@@ -641,16 +638,16 @@ export function ProjectPageMap({
                   }
                   value={filters.indexability}
                 >
-                  <option value="">Все состояния</option>
+                  <option value=""><UiText text="Все состояния" /></option>
                   {pageIndexabilities.map((value) => (
                     <option key={value} value={value}>
-                      {indexabilityLabel(value)}
+                      {<UiText text={indexabilityLabel(value) ?? ""} />}
                     </option>
                   ))}
                 </CustomSelect>
               </label>
               <label className="form-field">
-                <span>Раздел</span>
+                <span><UiText text="Раздел" /></span>
                 <CustomSelect
                   onChange={(event) =>
                     setFilters((value) => ({
@@ -661,8 +658,8 @@ export function ProjectPageMap({
                   }
                   value={filters.lifecycleStatus}
                 >
-                  <option value="ACTIVE">Активные</option>
-                  <option value="ARCHIVED">Архив</option>
+                  <option value="ACTIVE"><UiText text="Активные" /></option>
+                  <option value="ARCHIVED"><UiText text="Архив" /></option>
                 </CustomSelect>
               </label>
               <div className="page-map-filter-actions">
@@ -674,11 +671,9 @@ export function ProjectPageMap({
                   onClick={resetFilters}
                   type="button"
                 >
-                  Сбросить
-                </button>
+                  <UiText text="Сбросить" /></button>
                 <button className="primary-button" type="submit">
-                  Показать
-                </button>
+                  <UiText text="Показать" /></button>
               </div>
             </div>
           </details>
@@ -689,8 +684,7 @@ export function ProjectPageMap({
           onClick={startCreate}
           type="button"
         >
-          Добавить страницу
-        </button>
+          <UiText text="Добавить страницу" /></button>
         </section>
 
       {editor && (
@@ -721,20 +715,16 @@ export function ProjectPageMap({
           <section className="panel page-map-empty">
           <h2>
             {appliedFilters.lifecycleStatus === "ARCHIVED"
-              ? "Архив пуст"
+              ? <UiText text="Архив пуст" />
               : hasActiveMapFilter
-                ? "По фильтрам ничего не найдено"
-                : "Страниц пока нет"}
+                ? <UiText text="По фильтрам ничего не найдено" />
+                : <UiText text="Страниц пока нет" />}
           </h2>
           <p>
-            Добавьте существующую или планируемую посадочную страницу. URL,
-            назначенные запросы и последующие результаты crawl будут
-            объединены в одной карточке.
-          </p>
+            <UiText text="Добавьте существующую или планируемую посадочную страницу. URL, назначенные запросы и последующие результаты crawl будут объединены в одной карточке." /></p>
           {canManage && appliedFilters.lifecycleStatus === "ACTIVE" && (
             <button className="primary-button" onClick={startCreate} type="button">
-              Добавить первую страницу
-            </button>
+              <UiText text="Добавить первую страницу" /></button>
           )}
           </section>
         ) : (
@@ -754,14 +744,14 @@ export function ProjectPageMap({
               </colgroup>
               <thead>
                 <tr>
-                  <PageMapColumnHeader column="url" label="URL / страница" onResize={resizeColumn} width={columnWidths.url} />
+                  <PageMapColumnHeader column="url" label={uiText("URL / страница")} onResize={resizeColumn} width={columnWidths.url} />
                   <PageMapColumnHeader column="http" label="HTTP" onResize={resizeColumn} width={columnWidths.http} />
                   <PageMapColumnHeader column="title" label="Title" onResize={resizeColumn} width={columnWidths.title} />
                   <PageMapColumnHeader column="h1" label="H1" onResize={resizeColumn} width={columnWidths.h1} />
-                  <PageMapColumnHeader column="responseTime" label="Время" onResize={resizeColumn} width={columnWidths.responseTime} />
-                  <PageMapColumnHeader column="size" label="Размер" onResize={resizeColumn} width={columnWidths.size} />
-                  <PageMapColumnHeader column="issues" label="Проблемы" onResize={resizeColumn} width={columnWidths.issues} />
-                  <PageMapColumnHeader column="actions" label="Действия" onResize={resizeColumn} width={columnWidths.actions} />
+                  <PageMapColumnHeader column="responseTime" label={uiText("Время")} onResize={resizeColumn} width={columnWidths.responseTime} />
+                  <PageMapColumnHeader column="size" label={uiText("Размер")} onResize={resizeColumn} width={columnWidths.size} />
+                  <PageMapColumnHeader column="issues" label={uiText("Проблемы")} onResize={resizeColumn} width={columnWidths.issues} />
+                  <PageMapColumnHeader column="actions" label={uiText("Действия")} onResize={resizeColumn} width={columnWidths.actions} />
                 </tr>
               </thead>
                 <tbody>
@@ -795,7 +785,7 @@ export function ProjectPageMap({
                   onClick={() => void loadMore()}
                   type="button"
                 >
-                  {loadingMore ? "Загрузка…" : "Показать ещё"}
+                  {loadingMore ? <UiText text="Загрузка…" /> : <UiText text="Показать ещё" />}
                 </button>
               </footer>
             )}
@@ -804,7 +794,7 @@ export function ProjectPageMap({
         {selectedPage && (
           <>
             <PanelResizeHandle
-              label="Изменить ширину инспектора страницы"
+              label={uiText("Изменить ширину инспектора страницы")}
               onDoubleClick={() => setInspectorWidth(330)}
               onPointerDown={(event) =>
                 beginHorizontalResize(event, {
@@ -844,13 +834,14 @@ function PanelResizeHandle({
   onDoubleClick: () => void;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <button
       aria-label={label}
       className="page-map-panel-resizer"
       onDoubleClick={onDoubleClick}
       onPointerDown={onPointerDown}
-      title={`${label}. Двойной клик — сбросить.`}
+      title={uiText("{0}. Двойной клик — сбросить.", [String(label)])}
       type="button"
     />
   );
@@ -867,6 +858,7 @@ function PageMapColumnHeader({
   onResize: (column: PageMapColumn, width: number) => void;
   width: number;
 }>) {
+  const { t: uiText } = useUiLocale();
   function resizeFromKeyboard(event: ReactKeyboardEvent<HTMLSpanElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
@@ -877,7 +869,7 @@ function PageMapColumnHeader({
     <th className="page-map-resizable-column" scope="col">
       <span>{label}</span>
       <span
-        aria-label={`Изменить ширину колонки «${label}»`}
+        aria-label={uiText("Изменить ширину колонки «{0}»", [String(label)])}
         aria-orientation="vertical"
         aria-valuemax={640}
         aria-valuemin={PAGE_MAP_COLUMN_MINIMUMS[column]}
@@ -895,7 +887,7 @@ function PageMapColumnHeader({
         }
         role="separator"
         tabIndex={0}
-        title="Потяните для изменения ширины. Двойной клик — сбросить."
+        title={uiText("Потяните для изменения ширины. Двойной клик — сбросить.")}
       />
     </th>
   );
@@ -964,11 +956,13 @@ function SiteStructure({
   selectedPath: string;
   total: number;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   return (
-    <aside className="panel page-map-structure" aria-label="Структура сайта">
+    <aside className="panel page-map-structure" aria-label={uiText("Структура сайта")}>
       <header>
         <div>
-          <h2>Структура сайта</h2>
+          <h2><UiText text="Структура сайта" /></h2>
           <span>{domain}</span>
         </div>
       </header>
@@ -979,8 +973,8 @@ function SiteStructure({
         type="button"
       >
         <Icon name="sitemap" />
-        <span>Все страницы</span>
-        <strong>{total.toLocaleString("ru-RU")}</strong>
+        <span><UiText text="Все страницы" /></span>
+        <strong>{total.toLocaleString(uiLocale)}</strong>
       </button>
       {nodes.length > 0 ? (
         <ul className="page-map-tree">
@@ -997,8 +991,7 @@ function SiteStructure({
         </ul>
       ) : (
         <p className="page-map-tree-empty">
-          Структура появится после первого сохранённого обхода.
-        </p>
+          <UiText text="Структура появится после первого сохранённого обхода." /></p>
       )}
     </aside>
   );
@@ -1017,6 +1010,8 @@ function SiteStructureBranch({
   onToggle: (path: string, defaultExpanded: boolean) => void;
   selectedPath: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const hasChildren = node.children.length > 0;
   const defaultExpanded = node.depth < 3;
   const expanded = hasChildren && (expansion[node.path] ?? defaultExpanded);
@@ -1029,7 +1024,7 @@ function SiteStructureBranch({
         {hasChildren ? (
           <button
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Свернуть" : "Развернуть"} папку «${node.name}»`}
+            aria-label={uiText("{0} папку «{1}»", [String(expanded ? "Свернуть" : "Развернуть"), String(node.name)])}
             className="page-map-tree-toggle"
             onClick={() => {
               onToggle(node.path, defaultExpanded);
@@ -1041,7 +1036,7 @@ function SiteStructureBranch({
                 onSelect(node.path);
               }
             }}
-            title={expanded ? "Свернуть папку" : "Развернуть папку"}
+            title={expanded ? uiText("Свернуть папку") : uiText("Развернуть папку")}
             type="button"
           >
             <Icon name="chevronRight" />
@@ -1057,7 +1052,7 @@ function SiteStructureBranch({
         >
           <Icon name={hasChildren ? "projects" : "pages"} />
           <span>{node.name}</span>
-          <strong>{node.count.toLocaleString("ru-RU")}</strong>
+          <strong>{node.count.toLocaleString(uiLocale)}</strong>
         </button>
       </div>
       {expanded && (
@@ -1095,6 +1090,7 @@ function PageEditor({
   onChange: (patch: Partial<ProjectPageDraft>) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }>) {
+  const { t: uiText } = useUiLocale();
   const hasAdvancedErrors = Boolean(
     errors.httpStatus ||
     errors.language ||
@@ -1106,17 +1102,16 @@ function PageEditor({
     <section aria-labelledby="page-map-editor-title" aria-modal="true" className="panel page-map-editor" role="dialog">
       <header>
         <div>
-          <p className="eyebrow">{existing ? "Редактирование" : "Новая страница"}</p>
-          <h2 id="page-map-editor-title">{existing ? "Параметры страницы" : "Добавить в карту"}</h2>
+          <p className="eyebrow">{existing ? <UiText text="Редактирование" /> : <UiText text="Новая страница" />}</p>
+          <h2 id="page-map-editor-title">{existing ? <UiText text="Параметры страницы" /> : <UiText text="Добавить в карту" />}</h2>
         </div>
         <button className="text-button" onClick={onCancel} type="button">
-          Закрыть
-        </button>
+          <UiText text="Закрыть" /></button>
       </header>
       <form className="page-map-editor-grid" onSubmit={onSubmit}>
         <EditorField
           error={errors.url}
-          label="Канонический URL"
+          label={uiText("Канонический URL")}
           wide
         >
           <input
@@ -1128,7 +1123,7 @@ function PageEditor({
             value={draft.url}
           />
         </EditorField>
-        <EditorField label="Тип">
+        <EditorField label={uiText("Тип")}>
           <CustomSelect
             onChange={(event) =>
               onChange({ pageType: event.target.value as PageType })
@@ -1136,11 +1131,11 @@ function PageEditor({
             value={draft.pageType}
           >
             {pageTypes.map((value) => (
-              <option key={value} value={value}>{pageTypeLabel(value)}</option>
+              <option key={value} value={value}>{<UiText text={pageTypeLabel(value) ?? ""} />}</option>
             ))}
           </CustomSelect>
         </EditorField>
-        <EditorField label="Индексируемость">
+        <EditorField label={uiText("Индексируемость")}>
           <CustomSelect
             onChange={(event) =>
               onChange({
@@ -1151,12 +1146,12 @@ function PageEditor({
           >
             {pageIndexabilities.map((value) => (
               <option key={value} value={value}>
-                {indexabilityLabel(value)}
+                {<UiText text={indexabilityLabel(value) ?? ""} />}
               </option>
             ))}
           </CustomSelect>
         </EditorField>
-        <EditorField error={errors.priority} label="Приоритет">
+        <EditorField error={errors.priority} label={uiText("Приоритет")}>
           <input
             max="100"
             min="0"
@@ -1178,7 +1173,7 @@ function PageEditor({
             value={draft.h1}
           />
         </EditorField>
-        <EditorField label="Статус контента">
+        <EditorField label={uiText("Статус контента")}>
           <CustomSelect
             onChange={(event) =>
               onChange({
@@ -1187,16 +1182,16 @@ function PageEditor({
             }
             value={draft.contentStatus}
           >
-            <option value="">Не задан</option>
+            <option value=""><UiText text="Не задан" /></option>
             {pageContentStatuses.map((value) => (
-              <option key={value} value={value}>{contentStatusLabel(value)}</option>
+              <option key={value} value={value}>{<UiText text={contentStatusLabel(value) ?? ""} />}</option>
             ))}
           </CustomSelect>
         </EditorField>
         <details className="page-map-advanced" open={hasAdvancedErrors || undefined}>
-          <summary>Дополнительные параметры</summary>
+          <summary><UiText text="Дополнительные параметры" /></summary>
           <div className="page-map-advanced-grid">
-            <EditorField error={errors.httpStatus} label="HTTP-код">
+            <EditorField error={errors.httpStatus} label={uiText("HTTP-код")}>
               <input
                 inputMode="numeric"
                 onChange={(event) => onChange({ httpStatus: event.target.value })}
@@ -1204,14 +1199,14 @@ function PageEditor({
                 value={draft.httpStatus}
               />
             </EditorField>
-            <EditorField error={errors.language} label="Язык">
+            <EditorField error={errors.language} label={uiText("Язык")}>
               <input
                 onChange={(event) => onChange({ language: event.target.value })}
                 placeholder="ru-RU"
                 value={draft.language}
               />
             </EditorField>
-            <EditorField label="Шаблон">
+            <EditorField label={uiText("Шаблон")}>
               <input
                 onChange={(event) => onChange({ template: event.target.value })}
                 placeholder="service-detail"
@@ -1242,7 +1237,7 @@ function PageEditor({
                 value={draft.canonicalTarget}
               />
             </EditorField>
-            <EditorField error={errors.aliases} label="Алиасы URL" wide>
+            <EditorField error={errors.aliases} label={uiText("Алиасы URL")} wide>
               <textarea
                 onChange={(event) => onChange({ aliases: event.target.value })}
                 placeholder={"https://example.com/old-url/\nhttps://example.com/legacy/"}
@@ -1250,20 +1245,20 @@ function PageEditor({
                 value={draft.aliases}
               />
             </EditorField>
-            <EditorField error={errors.ownerId} label="ID владельца">
+            <EditorField error={errors.ownerId} label={uiText("ID владельца")}>
               <input
                 onChange={(event) => onChange({ ownerId: event.target.value })}
                 value={draft.ownerId}
               />
             </EditorField>
-            <EditorField label="Опубликована">
+            <EditorField label={uiText("Опубликована")}>
               <input
                 onChange={(event) => onChange({ publishedAt: event.target.value })}
                 type="datetime-local"
                 value={draft.publishedAt}
               />
             </EditorField>
-            <EditorField label="Заметки" wide>
+            <EditorField label={uiText("Заметки")} wide>
               <textarea
                 onChange={(event) => onChange({ notes: event.target.value })}
                 rows={3}
@@ -1274,10 +1269,9 @@ function PageEditor({
         </details>
         <div className="page-map-editor-actions">
           <button className="secondary-button" onClick={onCancel} type="button">
-            Отмена
-          </button>
+            <UiText text="Отмена" /></button>
           <button className="primary-button" disabled={busy} type="submit">
-            {busy ? "Сохраняем…" : "Сохранить"}
+            {busy ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
           </button>
         </div>
       </form>
@@ -1300,7 +1294,7 @@ function EditorField({
     <label className={`form-field${wide ? " page-map-field-wide" : ""}`}>
       <span>{label}</span>
       {children}
-      {error && <small className="field-error">{error}</small>}
+      {error && <small className="field-error">{<UiText text={error ?? ""} />}</small>}
     </label>
   );
 }
@@ -1322,6 +1316,7 @@ function PageRow({
   page: ProjectPageSummary;
   selected: boolean;
 }>) {
+  const uiLocale = useUiLocale().locale;
   const crawl = page.latestCrawl;
   const title = crawl?.title ?? page.title;
   const h1 = crawl?.h1 ?? page.h1;
@@ -1345,7 +1340,7 @@ function PageRow({
             {pagePath(page.normalizedUrl)}
           </a>
           <span>{title || page.normalizedUrl}</span>
-          <small>{page.assignedKeywordCount} запросов · {page.assignedClusterCount} кластеров</small>
+          <small>{page.assignedKeywordCount} <UiText text="запросов ·" before=" " after=" " />{page.assignedClusterCount} <UiText text="кластеров" before=" " /></small>
         </div>
       </td>
       <td>
@@ -1355,11 +1350,11 @@ function PageRow({
       </td>
       <td><span className="page-map-clamp">{title || "—"}</span></td>
       <td><span className="page-map-clamp">{h1 || "—"}</span></td>
-      <td>{crawl ? `${crawl.responseTimeMs.toLocaleString("ru-RU")} мс` : "—"}</td>
-      <td>{crawl ? formatBytes(crawl.sizeBytes) : "—"}</td>
+      <td>{crawl ? <UiText text="{0} мс" values={[String(crawl.responseTimeMs.toLocaleString(uiLocale))]} /> : "—"}</td>
+      <td>{crawl ? formatBytes(crawl.sizeBytes, uiLocale) : "—"}</td>
       <td>
         <span className={`page-map-issue-count${(page.openIssueCount ?? 0) > 0 ? " has-issues" : ""}`}>
-          {(page.openIssueCount ?? 0) > 0 ? page.openIssueCount : "Нет"}
+          {(page.openIssueCount ?? 0) > 0 ? page.openIssueCount : <UiText text="Нет" />}
         </span>
       </td>
       <td>
@@ -1374,8 +1369,7 @@ function PageRow({
               }}
               type="button"
             >
-              Изменить
-            </button>
+              <UiText text="Изменить" /></button>
           )}
           <button
             className="text-button"
@@ -1387,10 +1381,10 @@ function PageRow({
             type="button"
           >
             {busy
-              ? "Сохраняем…"
+              ? <UiText text="Сохраняем…" />
               : page.lifecycleStatus === "ACTIVE"
-                ? "В архив"
-                : "Восстановить"}
+                ? <UiText text="В архив" />
+                : <UiText text="Восстановить" />}
           </button>
         </div>
       </td>
@@ -1417,46 +1411,47 @@ function PageInspector({
   onEdit: () => void;
   page: ProjectPageSummary;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const crawl = page.latestCrawl;
   const title = crawl?.title ?? page.title;
   const description = crawl?.description ?? page.description;
   const h1 = crawl?.h1 ?? page.h1;
   const canonical = crawl?.canonicalUrl ?? page.canonicalTarget;
   return (
-    <aside className="page-map-inspector" aria-label="Информация о странице">
+    <aside className="page-map-inspector" aria-label={uiText("Информация о странице")}>
       <header>
         <div>
-          <span>Страница</span>
+          <span><UiText text="Страница" /></span>
           <h2>{pagePath(page.normalizedUrl)}</h2>
           <a href={page.normalizedUrl} rel="noreferrer" target="_blank">{page.normalizedUrl}</a>
         </div>
         <div className="page-map-inspector-actions">
           {page.lifecycleStatus === "ACTIVE" && (
-            <button className="secondary-button" disabled={!canManage} onClick={onEdit} type="button">Изменить</button>
+            <button className="secondary-button" disabled={!canManage} onClick={onEdit} type="button"><UiText text="Изменить" /></button>
           )}
-          <button aria-label="Закрыть" className="page-map-inspector-close" onClick={onClose} type="button">×</button>
+          <button aria-label={uiText("Закрыть")} className="page-map-inspector-close" onClick={onClose} type="button">×</button>
         </div>
       </header>
       <div className="page-map-inspector-body">
         {loading && (
           <p className="page-map-inspector-loading" role="status">
             <span aria-hidden="true" className="spinner" />
-            Загружаем данные последнего обхода…
-          </p>
+            <UiText text="Загружаем данные последнего обхода…" /></p>
         )}
         <section>
-          <h3>Обзор</h3>
+          <h3><UiText text="Обзор" /></h3>
           <dl>
-            <div><dt>Индексируемость</dt><dd><span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>{indexabilityLabel(page.indexability)}</span></dd></div>
-            <div><dt>Тип</dt><dd>{pageTypeLabel(page.pageType)}</dd></div>
+            <div><dt><UiText text="Индексируемость" /></dt><dd><span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>{<UiText text={indexabilityLabel(page.indexability) ?? ""} />}</span></dd></div>
+            <div><dt><UiText text="Тип" /></dt><dd>{<UiText text={pageTypeLabel(page.pageType) ?? ""} />}</dd></div>
             <div><dt>HTTP</dt><dd>{crawl?.statusCode ?? page.httpStatus ?? "—"}</dd></div>
-            <div><dt>Проблемы</dt><dd>{page.openIssueCount ?? 0}</dd></div>
-            <div><dt>В sitemap</dt><dd>{crawl ? (crawl.inSitemap ? "Да" : "Нет") : "—"}</dd></div>
+            <div><dt><UiText text="Проблемы" /></dt><dd>{page.openIssueCount ?? 0}</dd></div>
+            <div><dt><UiText text="В sitemap" /></dt><dd>{crawl ? (crawl.inSitemap ? "Да" : "Нет") : "—"}</dd></div>
           </dl>
         </section>
         <section className="page-map-issues">
           <header>
-            <h3>Проблемы</h3>
+            <h3><UiText text="Проблемы" /></h3>
             <span className={(page.openIssueCount ?? 0) > 0 ? "has-issues" : undefined}>
               {page.openIssueCount ?? 0}
             </span>
@@ -1464,24 +1459,23 @@ function PageInspector({
           {issuesLoading ? (
             <p className="page-map-inspector-loading" role="status">
               <span aria-hidden="true" className="spinner" />
-              Загружаем найденные проблемы…
-            </p>
+              <UiText text="Загружаем найденные проблемы…" /></p>
           ) : issuesError ? (
-            <p className="page-map-issue-error" role="alert">{issuesError}</p>
+            <p className="page-map-issue-error" role="alert">{<UiText text={issuesError ?? ""} />}</p>
           ) : issues.length > 0 ? (
             <div className="page-map-issue-list">
               {issues.map((issue) => (
                 <article className={`page-map-issue severity-${issue.severity.toLowerCase()}`} key={issue.id}>
                   <header>
                     <strong>{issue.title}</strong>
-                    <span>{issueSeverityLabel(issue.severity)}</span>
+                    <span>{<UiText text={issueSeverityLabel(issue.severity) ?? ""} />}</span>
                   </header>
-                  <small>{issue.code} · замечено {formatPageDate(issue.lastSeenAt)}</small>
+                  <small>{issue.code} <UiText text="· замечено" before=" " after=" " />{formatPageDate(issue.lastSeenAt, uiLocale)}</small>
                   {Object.keys(issue.details).length > 0 && (
                     <dl>
                       {Object.entries(issue.details).map(([key, value]) => (
                         <div key={key}>
-                          <dt>{issueDetailLabel(key)}</dt>
+                          <dt>{<UiText text={issueDetailLabel(key) ?? ""} />}</dt>
                           <dd>{String(value)}</dd>
                         </div>
                       ))}
@@ -1492,19 +1486,18 @@ function PageInspector({
             </div>
           ) : (page.openIssueCount ?? 0) > 0 ? (
             <p className="page-map-issue-empty">
-              Сводка показывает проблемы, но подробности не вошли в текущую выборку аудита.
-            </p>
+              <UiText text="Сводка показывает проблемы, но подробности не вошли в текущую выборку аудита." /></p>
           ) : (
-            <p className="page-map-issue-empty">Открытых проблем не найдено.</p>
+            <p className="page-map-issue-empty"><UiText text="Открытых проблем не найдено." /></p>
           )}
         </section>
         <section>
-          <h3>SEO-проверки</h3>
+          <h3><UiText text="SEO-проверки" /></h3>
           <dl>
-            <div><dt>Title</dt><dd className={lengthTone(title, 20, 70)}>{title ? `${title.length} символов` : "Нет"}</dd></div>
-            <div><dt>Description</dt><dd className={lengthTone(description, 40, 180)}>{description ? `${description.length} символов` : "Нет"}</dd></div>
+            <div><dt>Title</dt><dd className={lengthTone(title, 20, 70)}>{title ? <UiText text="{0} символов" values={[String(title.length)]} /> : <UiText text="Нет" />}</dd></div>
+            <div><dt>Description</dt><dd className={lengthTone(description, 40, 180)}>{description ? <UiText text="{0} символов" values={[String(description.length)]} /> : <UiText text="Нет" />}</dd></div>
             <div><dt>H1</dt><dd>{crawl ? crawl.h1Count : h1 ? 1 : 0}</dd></div>
-            <div><dt>Canonical</dt><dd>{canonical || "Не задан"}</dd></div>
+            <div><dt>Canonical</dt><dd>{canonical || <UiText text="Не задан" />}</dd></div>
             <div><dt>Robots</dt><dd>{crawl?.robots ?? page.robots ?? "—"}</dd></div>
           </dl>
           {title && <p><strong>Title:</strong> {title}</p>}
@@ -1512,27 +1505,27 @@ function PageInspector({
           {h1 && <p><strong>H1:</strong> {h1}</p>}
         </section>
         <section>
-          <h3>Загрузка и содержимое</h3>
+          <h3><UiText text="Загрузка и содержимое" /></h3>
           <dl>
-            <div><dt>Время ответа</dt><dd>{crawl ? `${crawl.responseTimeMs.toLocaleString("ru-RU")} мс` : "—"}</dd></div>
-            <div><dt>Размер</dt><dd>{crawl ? formatBytes(crawl.sizeBytes) : "—"}</dd></div>
-            <div><dt>Тип ответа</dt><dd>{crawl?.contentType ?? "—"}</dd></div>
-            <div><dt>Слов</dt><dd>{crawl?.wordCount.toLocaleString("ru-RU") ?? "—"}</dd></div>
-            <div><dt>Изображений</dt><dd>{crawl?.imageCount ?? "—"}</dd></div>
-            <div><dt>Без alt</dt><dd>{crawl?.imagesMissingAlt ?? "—"}</dd></div>
+            <div><dt><UiText text="Время ответа" /></dt><dd>{crawl ? <UiText text="{0} мс" values={[String(crawl.responseTimeMs.toLocaleString(uiLocale))]} /> : "—"}</dd></div>
+            <div><dt><UiText text="Размер" /></dt><dd>{crawl ? formatBytes(crawl.sizeBytes, uiLocale) : "—"}</dd></div>
+            <div><dt><UiText text="Тип ответа" /></dt><dd>{crawl?.contentType ?? "—"}</dd></div>
+            <div><dt><UiText text="Слов" /></dt><dd>{crawl?.wordCount.toLocaleString(uiLocale) ?? "—"}</dd></div>
+            <div><dt><UiText text="Изображений" /></dt><dd>{crawl?.imageCount ?? "—"}</dd></div>
+            <div><dt><UiText text="Без alt" /></dt><dd>{crawl?.imagesMissingAlt ?? "—"}</dd></div>
           </dl>
         </section>
         <section>
-          <h3>Семантика</h3>
+          <h3><UiText text="Семантика" /></h3>
           <dl>
-            <div><dt>Запросов</dt><dd>{page.assignedKeywordCount}</dd></div>
-            <div><dt>Кластеров</dt><dd>{page.assignedClusterCount}</dd></div>
-            <div><dt>Приоритет</dt><dd>{page.priority}</dd></div>
+            <div><dt><UiText text="Запросов" /></dt><dd>{page.assignedKeywordCount}</dd></div>
+            <div><dt><UiText text="Кластеров" /></dt><dd>{page.assignedClusterCount}</dd></div>
+            <div><dt><UiText text="Приоритет" /></dt><dd>{page.priority}</dd></div>
           </dl>
         </section>
         {crawl && crawl.metaTags.length > 0 && (
           <details className="page-map-meta-tags">
-            <summary>Метатеги · {crawl.metaTags.length}</summary>
+            <summary><UiText text="Метатеги ·" after=" " />{crawl.metaTags.length}</summary>
             <div>
               {crawl.metaTags.map((tag, index) => (
                 <article key={`${tag.name ?? tag.property ?? tag.httpEquiv}-${index}`}>
@@ -1544,11 +1537,11 @@ function PageInspector({
           </details>
         )}
         <section>
-          <h3>Источники и даты</h3>
+          <h3><UiText text="Источники и даты" /></h3>
           <dl>
-            <div><dt>Источники</dt><dd>{page.sources.map(({ source }) => sourceLabel(source)).join(", ") || "—"}</dd></div>
-            <div><dt>Обновлена</dt><dd>{formatPageDate(page.updatedAt)}</dd></div>
-            <div><dt>Последний обход</dt><dd>{crawl ? formatPageDate(crawl.crawledAt) : "Не запускался"}</dd></div>
+            <div><dt><UiText text="Источники" /></dt><dd>{page.sources.map(({ source }) => sourceLabel(source)).join(", ") || "—"}</dd></div>
+            <div><dt><UiText text="Обновлена" /></dt><dd>{formatPageDate(page.updatedAt, uiLocale)}</dd></div>
+            <div><dt><UiText text="Последний обход" /></dt><dd>{crawl ? formatPageDate(crawl.crawledAt, uiLocale) : <UiText text="Не запускался" />}</dd></div>
           </dl>
         </section>
       </div>
@@ -1556,11 +1549,11 @@ function PageInspector({
   );
 }
 
-function formatPageDate(value: string): string {
+function formatPageDate(value: string, uiLocale: string = "ru-RU"): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime())
     ? value
-    : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(parsed);
+    : new Intl.DateTimeFormat(uiLocale, { dateStyle: "medium", timeStyle: "short" }).format(parsed);
 }
 
 function buildSiteStructure(
@@ -1641,10 +1634,10 @@ function httpStatusKind(value: number | undefined): "ok" | "redirect" | "error" 
   return "error";
 }
 
-function formatBytes(value: number): string {
+function formatBytes(value: number, uiLocale: string = "ru-RU"): string {
   if (value < 1_024) return `${value} Б`;
-  if (value < 1_048_576) return `${(value / 1_024).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} КБ`;
-  return `${(value / 1_048_576).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} МБ`;
+  if (value < 1_048_576) return `${(value / 1_024).toLocaleString(uiLocale, { maximumFractionDigits: 1 })} КБ`;
+  return `${(value / 1_048_576).toLocaleString(uiLocale, { maximumFractionDigits: 1 })} МБ`;
 }
 
 function lengthTone(

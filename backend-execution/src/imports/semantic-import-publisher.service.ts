@@ -24,6 +24,7 @@ import {
   safeMapping,
   safeValidation
 } from "./semantic-import.service.js";
+import { positionHistoryDateColumns } from "./position-history-import.js";
 
 export interface SemanticImportPublishOutcome {
   readonly importId: string;
@@ -308,9 +309,18 @@ export class SemanticImportPublisherService {
     if (uniqueRows <= 0n) {
       return { code: "IMPORT_HAS_NO_VALID_ROWS" };
     }
+    const headers = Array.isArray(semanticImport.headers) && semanticImport.headers.every(value => typeof value === "string")
+      ? semanticImport.headers as string[] : [];
+    const historyDateCount = mapping.positionHistory
+      ? positionHistoryDateColumns(headers).length
+      : 1;
+    if (mapping.positionHistory && historyDateCount === 0) {
+      return { code: "IMPORT_MAPPING_INVALID" };
+    }
     const batchSize = Math.min(
       Math.max(this.config.imports.publishBatchRows, 1),
-      500
+      500,
+      Math.max(1, Math.floor(10_000 / historyDateCount))
     );
     const expectedChunksBig =
       (uniqueRows + BigInt(batchSize) - 1n) / BigInt(batchSize);
@@ -699,6 +709,12 @@ export function mergeCanonicalPublishRows(
       position
     ])
   ).values()];
+  const positionHistory = [...new Map(
+    rows.flatMap((row) => row.positionHistory ?? []).map((position) => [
+      `${position.searchEngine}:${position.countryCode}:${position.regionCode}:${position.language}:${position.device}:${position.observedAt}`,
+      position
+    ])
+  ).values()].sort((left, right) => left.observedAt.localeCompare(right.observedAt));
 
   // Keep the exact field order used by the receiving input canonicalizer.
   // The payload hash is deliberately calculated over canonical JSON, so
@@ -719,6 +735,7 @@ export function mergeCanonicalPublishRows(
     ...(first.targetUrl ? { targetUrl: first.targetUrl } : {}),
     ...(first.frequencies ? { frequencies: first.frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
+    ...(positionHistory.length > 0 ? { positionHistory } : {}),
     ...(first.observedAt ? { observedAt: first.observedAt } : {}),
     ...(tags.length > 0 ? { tags } : {}),
     customValues
@@ -830,6 +847,12 @@ export function canonicalPublishRow(
   ) {
     return undefined;
   }
+  if (
+    row.positionHistory !== undefined &&
+    (!Array.isArray(row.positionHistory) || row.positionHistory.length > 1_100 ||
+      row.positionHistory.some(item => !validHistoryPosition(item)) ||
+      new Set((row.positionHistory as readonly Record<string, unknown>[]).map(item => `${item.searchEngine}:${item.countryCode}:${item.regionCode}:${item.language}:${item.device}:${item.observedAt}`)).size !== row.positionHistory.length)
+  ) return undefined;
   const frequencies = row.frequencies
     ? (row.frequencies as readonly Readonly<Record<string, unknown>>[]).map(
         (frequency) => ({
@@ -855,6 +878,19 @@ export function canonicalPublishRow(
         })
       )
     : undefined;
+  const positionHistory = row.positionHistory
+    ? (row.positionHistory as readonly Readonly<Record<string, unknown>>[]).map((item) => ({
+        searchEngine: item.searchEngine as "YANDEX" | "GOOGLE",
+        countryCode: item.countryCode as string,
+        regionCode: item.regionCode as string,
+        regionLabel: item.regionLabel as string,
+        language: item.language as string,
+        device: item.device as "DESKTOP" | "MOBILE",
+        observedAt: item.observedAt as string,
+        found: item.found as boolean,
+        ...(item.position === undefined ? {} : { position: item.position as number })
+      }))
+    : undefined;
   return {
     sourceRowNumber: row.sourceRowNumber as string,
     textOriginal: row.textOriginal as string,
@@ -876,6 +912,7 @@ export function canonicalPublishRow(
     ...(row.targetUrl ? { targetUrl: row.targetUrl as string } : {}),
     ...(frequencies ? { frequencies } : {}),
     ...(positions ? { positions } : {}),
+    ...(positionHistory ? { positionHistory } : {}),
     ...(row.observedAt
       ? { observedAt: row.observedAt as string }
       : {}),
@@ -883,6 +920,20 @@ export function canonicalPublishRow(
     customValues:
       row.customValues as Readonly<Record<string, string>>
   };
+}
+
+function validHistoryPosition(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  if (Object.keys(item).some(key => !["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "observedAt", "found", "position"].includes(key)) ||
+    !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) || typeof item.countryCode !== "string" || !/^[A-Z]{2}$/u.test(item.countryCode) ||
+    typeof item.regionCode !== "string" || !item.regionCode || item.regionCode.length > 100 || typeof item.regionLabel !== "string" || !item.regionLabel || item.regionLabel.length > 160 ||
+    typeof item.language !== "string" || !item.language || item.language.length > 16 || !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
+    typeof item.observedAt !== "string" || Number.isNaN(Date.parse(item.observedAt)) || new Date(item.observedAt).toISOString() !== item.observedAt ||
+    typeof item.found !== "boolean") return false;
+  return item.found
+    ? Number.isSafeInteger(item.position) && Number(item.position) >= 1 && Number(item.position) <= 100
+    : item.position === undefined;
 }
 
 function importEntitlement(

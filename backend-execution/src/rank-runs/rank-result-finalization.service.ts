@@ -4,7 +4,7 @@ import type {
   RankCheckFinalStatus,
   RankJobFailureCode
 } from "@seo-platform/contracts";
-import { rankProviderKeywordLimit } from "@seo-platform/contracts";
+import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { Prisma } from "../generated/prisma/client.js";
@@ -131,7 +131,7 @@ export class RankResultFinalizationService {
         )
         AND run."seal_state" = 'SEALED'
         AND run."finalization_status" IS NULL
-        AND run."manifest_chunk_count" BETWEEN 1 AND ${rankProviderKeywordLimit}
+        AND run."manifest_chunk_count" BETWEEN 1 AND ${rankCommandKeywordLimit}
         AND (
           SELECT count(*)
           FROM (

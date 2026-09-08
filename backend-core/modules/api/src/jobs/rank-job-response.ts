@@ -1,7 +1,7 @@
 import {
   connectorRoutingScopes,
   rankRuntimeDiagnosticStates,
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   rankJobFailureCodes,
   redactRankJobSummary,
   type RankJobFailureCode,
@@ -15,8 +15,8 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DECIMAL_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/u;
-const MAX_FIRST_SLICE_PAIR_COUNT = BigInt(rankProviderKeywordLimit);
-const MAX_RANK_DECIMAL_DIGITS = String(rankProviderKeywordLimit).length;
+const MAX_FIRST_SLICE_PAIR_COUNT = BigInt(rankCommandKeywordLimit);
+const MAX_RANK_DECIMAL_DIGITS = String(rankCommandKeywordLimit).length;
 const FAILURE_CODES = new Set<string>(rankJobFailureCodes);
 const RESPONSE_FIELDS = [
   "id",
@@ -379,7 +379,7 @@ export function scopedRankRuntimeDiagnostics(
   const total = boundedInteger(
     totalsInput.total,
     0,
-    rankProviderKeywordLimit
+    rankCommandKeywordLimit
   );
   const prepared = boundedInteger(totalsInput.prepared, 0, total);
   const active = boundedInteger(totalsInput.active, 0, prepared);

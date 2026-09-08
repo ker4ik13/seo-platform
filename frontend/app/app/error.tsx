@@ -1,5 +1,8 @@
 "use client";
 
+import { UiText } from "../../components/ui-locale";
+
+
 export default function ErrorPage({
   error,
   reset
@@ -7,16 +10,15 @@ export default function ErrorPage({
   return (
     <main className="center-state">
       <span className="state-icon" aria-hidden="true">!</span>
-      <h1>Не удалось открыть рабочее пространство</h1>
-      <p>Проверьте соединение и повторите попытку.</p>
+      <h1><UiText text="Не удалось открыть рабочее пространство" /></h1>
+      <p><UiText text="Проверьте соединение и повторите попытку." /></p>
       {error.digest && (
         <small className="error-reference">
-          Код обращения: {error.digest}
+          <UiText text="Код обращения:" after=" " />{error.digest}
         </small>
       )}
       <button className="primary-button" onClick={reset} type="button">
-        Повторить
-      </button>
+        <UiText text="Повторить" /></button>
     </main>
   );
 }

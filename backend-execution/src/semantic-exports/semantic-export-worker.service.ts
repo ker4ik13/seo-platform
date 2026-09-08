@@ -36,10 +36,10 @@ import {
   type SemanticPositionHistoryWorkbookPlan
 } from "./semantic-export-encoder.js";
 import { storedSemanticExportInput } from "./semantic-export-input.js";
+import { parseSemanticRankColumnKey, semanticPositionHistoryReadPageSize, type SemanticRankComparisonItem } from "@seo-platform/contracts";
 
 const PAGE_SIZE = 1_000;
-const COMPETITOR_PAGE_SIZE = 100;
-const POSITION_HISTORY_PAGE_SIZE = 25;
+const COMPETITOR_PAGE_SIZE = 12;
 const LEASE_MILLISECONDS = 15 * 60 * 1_000;
 const MAX_PENDING_EXPORTS = 200;
 const UUID_PATTERN =
@@ -91,6 +91,12 @@ export class SemanticExportWorkerService {
       const counter = { value: 0 };
       let file: SemanticExportFile;
       if (input.positionHistory) {
+        const catalog = await this.seoData.listExportRankDimensions(context);
+        if (catalog.truncated) throw new ExportFailure("EXPORT_DIMENSIONS_UNAVAILABLE", false);
+        input = { ...input, positionHistory: { ...input.positionHistory,
+          dimensionKeys: catalog.dimensions.filter(dimension => input.positionHistory!.searchEngines.includes(dimension.searchEngine)).map(dimension => dimension.key),
+          storedBefore: (claimed.startedAt ?? claimed.createdAt).toISOString()
+        } };
         const plan = await this.positionHistoryPlan(claimed, input, leaseOwner);
         await this.updateProgressTotal(claimed.id, leaseOwner, plan.rowCount);
         file = semanticPositionHistoryExportFile(
@@ -113,7 +119,7 @@ export class SemanticExportWorkerService {
         }
         await this.updateProgressTotal(claimed.id, leaseOwner, totalRows);
         const customColumns = await this.seoData.listExportCustomColumns(context);
-        const customColumnNames = customColumnNameMap(customColumns);
+        const customColumnNames = { ...customColumnNameMap(customColumns), ...await this.rankColumnNames(input) };
         file = semanticFolderMapExportFile(
           (groupId) => counted(
             this.exportFolderMapRows(
@@ -131,7 +137,7 @@ export class SemanticExportWorkerService {
         );
       } else {
         const customColumns = await this.seoData.listExportCustomColumns(context);
-        const customColumnNames = customColumnNameMap(customColumns);
+        const customColumnNames = { ...customColumnNameMap(customColumns), ...await this.rankColumnNames(input) };
         file = semanticExportFile(
           counted(this.exportRows(claimed, input, leaseOwner), counter),
           input,
@@ -279,6 +285,7 @@ export class SemanticExportWorkerService {
     input: InternalCreateSemanticExportInput,
     leaseOwner: string
   ): AsyncGenerator<SemanticExportKeywordRow> {
+    if (input.competitorRows) { yield* this.exportCompetitorRows(job, input, leaseOwner); return; }
     const context = exportContext(input);
     const selected = input.keywordIds ? new Set(input.keywordIds) : undefined;
     const competitorSources = competitorSourcesForColumns(input.columns);
@@ -296,13 +303,10 @@ export class SemanticExportWorkerService {
         ...query,
         ...(cursor ? { cursor } : {})
       });
+      const ranks = await this.rankComparisonPage(input, page.data.map(item => item.id));
       const competitorPage = competitorSources.length === 0
         ? undefined
-        : await this.seoData.listExportCompetitors(
-            context,
-            { ...query, ...(cursor ? { cursor } : {}) },
-            { sources: competitorSources }
-          );
+        : await this.combinedCompetitorPage(context, { ...query, ...(cursor ? { cursor } : {}) }, competitorSources, page);
       if (competitorPage && !matchingCompetitorPage(page, competitorPage)) {
         throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
       }
@@ -319,12 +323,7 @@ export class SemanticExportWorkerService {
         if (!Number.isSafeInteger(exportedRows)) {
           throw new ExportFailure("EXPORT_ROW_COUNT_TOO_LARGE", false);
         }
-        yield competitorPage
-          ? {
-              ...item,
-              exportCompetitors: competitorPage.data[index]!.competitors
-            }
-          : item;
+        yield { ...item, ...(competitorPage ? { exportCompetitors: competitorPage.data[index]!.competitors } : {}), ...(ranks.has(item.id) ? { exportRankComparisons: ranks.get(item.id)! } : {}) };
       }
       await this.assertLease(job.id, leaseOwner, exportedRows);
       if (selected?.size === 0) break;
@@ -368,23 +367,15 @@ export class SemanticExportWorkerService {
         ...query,
         ...(cursor ? { cursor } : {})
       });
+      const ranks = await this.rankComparisonPage(input, page.data.map(item => item.id));
       const competitorPage = competitorSources.length === 0
         ? undefined
-        : await this.seoData.listExportCompetitors(
-            context,
-            { ...query, ...(cursor ? { cursor } : {}) },
-            { sources: competitorSources }
-          );
+        : await this.combinedCompetitorPage(context, { ...query, ...(cursor ? { cursor } : {}) }, competitorSources, page);
       if (competitorPage && !matchingCompetitorPage(page, competitorPage)) {
         throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
       }
       for (const [index, item] of page.data.entries()) {
-        yield competitorPage
-          ? {
-              ...item,
-              exportCompetitors: competitorPage.data[index]!.competitors
-            }
-          : item;
+        yield { ...item, ...(competitorPage ? { exportCompetitors: competitorPage.data[index]!.competitors } : {}), ...(ranks.has(item.id) ? { exportRankComparisons: ranks.get(item.id)! } : {}) };
       }
       await this.assertLease(job.id, leaseOwner, counter.value);
       if (!page.page.hasNext) break;
@@ -395,6 +386,81 @@ export class SemanticExportWorkerService {
       observedCursors.add(nextCursor);
       cursor = nextCursor;
     } while (cursor);
+  }
+
+  private async *competitorPages(context: ReturnType<typeof exportContext>, query: KeywordListQuery, sources: readonly SemanticCompetitorExportSource[]) {
+    if (sources.includes("SERP")) {
+      const catalog = await this.seoData.listExportRankDimensions(context);
+      if (catalog.truncated) throw new ExportFailure("EXPORT_DIMENSIONS_UNAVAILABLE", false);
+      const keys = catalog.dimensions.map(dimension => dimension.key);
+      if (!keys.length) yield await this.seoData.listExportCompetitors(context, query, { sources: ["SERP"] });
+      for (let index = 0; index < keys.length; index += 4) yield await this.seoData.listExportCompetitors(context, query, { sources: ["SERP"], dimensionKeys: keys.slice(index, index + 4) });
+    }
+    if (sources.includes("AI")) yield await this.seoData.listExportCompetitors(context, query, { sources: ["AI"] });
+  }
+
+  private async combinedCompetitorPage(context: ReturnType<typeof exportContext>, query: KeywordListQuery, sources: readonly SemanticCompetitorExportSource[], keywords: ApiCollectionResponse<SemanticKeywordListItem>): Promise<ApiCollectionResponse<SemanticCompetitorExportKeyword>> {
+    const rows = new Map(keywords.data.map(row => [row.id, [] as import("@seo-platform/contracts").SemanticCompetitorExportItem[]]));
+    for await (const page of this.competitorPages(context, query, sources)) {
+      if (!matchingCompetitorPage(keywords, page)) throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
+      for (const row of page.data) rows.get(row.keywordId)!.push(...row.competitors);
+    }
+    return { data: [...rows].map(([keywordId, competitors]) => ({ keywordId, competitors })), page: keywords.page, meta: keywords.meta };
+  }
+
+  private async *exportCompetitorRows(job: Job, input: InternalCreateSemanticExportInput, leaseOwner: string): AsyncGenerator<SemanticExportKeywordRow> {
+    const context = exportContext(input), selected = input.keywordIds ? new Set(input.keywordIds) : undefined;
+    const query = await this.exportQuery(input, context, COMPETITOR_PAGE_SIZE);
+    let cursor: string | undefined, count = 0;
+    const observedCursors = new Set<string>();
+    do {
+      await this.assertLease(job.id, leaseOwner, count);
+      const currentQuery = { ...query, ...(cursor ? { cursor } : {}) };
+      const keywords = await this.seoData.listExportKeywords(context, currentQuery);
+      const accepted = new Map(keywords.data.filter(row => !selected || selected.delete(row.id)).map(row => [row.id, row]));
+      const ranks = await this.rankComparisonPage(input, [...accepted.keys()]);
+      for await (const page of this.competitorPages(context, currentQuery, ["SERP"])) {
+        if (!matchingCompetitorPage(keywords, page)) throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
+        for (const row of page.data) {
+          const item = accepted.get(row.keywordId);
+          if (!item) continue;
+          for (const competitor of row.competitors) { count += 1; yield { ...item, exportCompetitor: competitor, ...(ranks.has(item.id) ? { exportRankComparisons: ranks.get(item.id)! } : {}) }; }
+        }
+        await this.assertLease(job.id, leaseOwner, count);
+      }
+      if (!keywords.page.hasNext || selected?.size === 0) break;
+      const next = keywords.page.nextCursor;
+      if (!next || observedCursors.has(next)) throw new ExportFailure("EXPORT_PAGINATION_STALLED", true);
+      observedCursors.add(next); cursor = next;
+    } while (cursor);
+    if (selected?.size && input.filters?.isTracked !== true) throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
+  }
+
+  private async rankComparisonPage(input: InternalCreateSemanticExportInput, keywordIds: readonly string[]) {
+    const keys = [...new Set(input.columns.flatMap(column => { const parsed = parseSemanticRankColumnKey(column); return parsed ? [parsed.dimension.key] : []; }))];
+    const result = new Map<string, SemanticRankComparisonItem[]>();
+    if (!keys.length || !keywordIds.length) return result;
+    for (let index = 0; index < keys.length; index += 24) {
+      const dimensionKeys = keys.slice(index, index + 24), size = Math.min(1_000, Math.floor(2_000 / dimensionKeys.length));
+      for (let offset = 0; offset < keywordIds.length; offset += size) {
+        const rows = await this.seoData.listExportRankComparison(exportContext(input), { keywordIds: keywordIds.slice(offset, offset + size), dimensionKeys });
+        for (const row of rows) { const list = result.get(row.keywordId) ?? []; list.push(row); result.set(row.keywordId, list); }
+      }
+    }
+    return result;
+  }
+
+  private async rankColumnNames(input: InternalCreateSemanticExportInput): Promise<Record<string, string>> {
+    const columns = input.columns.filter(column => parseSemanticRankColumnKey(column));
+    if (!columns.length) return {};
+    const catalog = await this.seoData.listExportRankDimensions(exportContext(input));
+    return Object.fromEntries(columns.map(column => {
+      const parsed = parseSemanticRankColumnKey(column)!, dimension = catalog.dimensions.find(item => item.key === parsed.dimension.key) ?? parsed.dimension;
+      const english = input.locale === "en", metric = parsed.metric === "position" ? english ? "Position" : "Позиция" : parsed.metric === "url" ? "URL" : english ? "Checked at" : "Дата съёма";
+      const engine = dimension.searchEngine === "YANDEX" ? english ? "Yandex" : "Яндекс" : "Google";
+      const device = dimension.device === "DESKTOP" ? english ? "Desktop" : "ПК" : english ? "Mobile" : "Телефон";
+      return [column, `${engine} · ${dimension.regionLabel || dimension.regionCode} · ${device} · ${metric}`];
+    }));
   }
 
   private async positionHistoryPlan(
@@ -437,66 +503,45 @@ export class SemanticExportWorkerService {
   }
 
   private async *exportPositionHistoryRows(
-    job: Job,
-    input: InternalCreateSemanticExportInput,
-    leaseOwner: string,
-    reportProgress: boolean
+    job: Job, input: InternalCreateSemanticExportInput, leaseOwner: string, reportProgress: boolean
   ): AsyncGenerator<SemanticPositionHistoryExportRow> {
-    if (!input.positionHistory) {
-      throw new ExportFailure("INVALID_EXPORT_MANIFEST", false);
-    }
-    const context = exportContext(input);
-    const selected = input.keywordIds ? new Set(input.keywordIds) : undefined;
-    const query = await this.exportQuery(
-      input,
-      context,
-      POSITION_HISTORY_PAGE_SIZE
-    );
-    let cursor: string | undefined;
-    let exportedRows = 0;
+    if (!input.positionHistory) throw new ExportFailure("INVALID_EXPORT_MANIFEST", false);
+    const context = exportContext(input), selected = input.keywordIds ? new Set(input.keywordIds) : undefined;
+    const query = await this.exportQuery(input, context, semanticPositionHistoryReadPageSize(input.positionHistory));
+    const keys = input.positionHistory.dimensionKeys ?? [];
+    const partitions: (readonly string[] | undefined)[] = keys.length ? Array.from({ length: Math.ceil(keys.length / 4) }, (_, index) => keys.slice(index * 4, index * 4 + 4)) : [undefined];
+    let cursor: string | undefined, exportedRows = 0;
     const observedCursors = new Set<string>();
     do {
-      await this.assertLease(
-        job.id,
-        leaseOwner,
-        reportProgress ? exportedRows : 0
-      );
-      const page = await this.seoData.listExportPositionHistory(
-        context,
-        { ...query, ...(cursor ? { cursor } : {}) },
-        input.positionHistory
-      );
-      if (reportProgress && page.page.totalApprox !== undefined) {
-        await this.updateProgressTotal(
-          job.id,
-          leaseOwner,
-          selected ? selected.size + exportedRows : page.page.totalApprox
-        );
-      }
-      for (const item of page.data) {
-        if (selected && !selected.delete(item.keywordId)) continue;
-        exportedRows += 1;
-        if (!Number.isSafeInteger(exportedRows)) {
-          throw new ExportFailure("EXPORT_ROW_COUNT_TOO_LARGE", false);
+      await this.assertLease(job.id, leaseOwner, reportProgress ? exportedRows : 0);
+      let firstPage: ApiCollectionResponse<SemanticPositionHistoryExportRow> | undefined;
+      const accepted = new Set<string>(), measured = new Set<string>(), emptyRows = new Map<string, SemanticPositionHistoryExportRow>();
+      let pageIdentity = "";
+      for (const dimensionKeys of partitions) {
+        const { dimensionKeys: _allDimensions, ...options } = input.positionHistory;
+        const page = await this.seoData.listExportPositionHistory(context, { ...query, ...(cursor ? { cursor } : {}) }, { ...options, ...(dimensionKeys ? { dimensionKeys } : {}) });
+        const keywordIds = [...new Set(page.data.map(row => row.keywordId))];
+        const identity = keywordIds.join(":");
+        if (!firstPage) {
+          firstPage = page; pageIdentity = identity;
+          for (const id of keywordIds) if (!selected || selected.delete(id)) accepted.add(id);
+        } else if (identity !== pageIdentity || page.page.nextCursor !== firstPage.page.nextCursor || page.page.hasNext !== firstPage.page.hasNext) throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
+        for (const item of page.data) {
+          if (!accepted.has(item.keywordId)) continue;
+          if (!item.snapshots.length) { emptyRows.set(item.keywordId, item); continue; }
+          measured.add(item.keywordId); exportedRows += 1;
+          if (!Number.isSafeInteger(exportedRows)) throw new ExportFailure("EXPORT_ROW_COUNT_TOO_LARGE", false);
+          yield item;
         }
-        yield item;
+        await this.assertLease(job.id, leaseOwner, reportProgress ? exportedRows : 0);
       }
-      await this.assertLease(
-        job.id,
-        leaseOwner,
-        reportProgress ? exportedRows : 0
-      );
-      if (selected?.size === 0) break;
-      if (!page.page.hasNext) break;
-      const nextCursor = page.page.nextCursor;
-      if (!nextCursor || observedCursors.has(nextCursor)) {
-        throw new ExportFailure("EXPORT_PAGINATION_STALLED", true);
-      }
-      observedCursors.add(nextCursor);
-      cursor = nextCursor;
+      for (const [id, item] of emptyRows) if (!measured.has(id)) { exportedRows += 1; yield item; }
+      if (!firstPage || selected?.size === 0 || !firstPage.page.hasNext) break;
+      const nextCursor = firstPage.page.nextCursor;
+      if (!nextCursor || observedCursors.has(nextCursor)) throw new ExportFailure("EXPORT_PAGINATION_STALLED", true);
+      observedCursors.add(nextCursor); cursor = nextCursor;
     } while (cursor);
-
-    if (selected && selected.size > 0) {
+    if (selected?.size) {
       if (input.filters?.isTracked === true) selected.clear();
       else throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
     }

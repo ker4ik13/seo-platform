@@ -240,3 +240,13 @@ test("validates exact tenant-scoped keyword cleaning commands", () => {
     })
   );
 });
+test("trusted tag changes reject mixed replacement and allow exact bulk deltas", () => {
+  const context = { workspaceId, projectId, actorId, version: 1 };
+  assert.deepEqual(internalUpdateSemanticKeywordInput({ ...context, addTagNames: [" Новый ", "новый"], removeTagNames: ["Старый, особый"] }), { ...context, addTagNames: ["новый"], removeTagNames: ["Старый, особый"] });
+  const bulk = { workspaceId, projectId, actorId, items: [{ id: keywordId, version: 1 }] };
+  assert.deepEqual(internalSemanticKeywordBulkInput({ ...bulk, patch: { addTagNames: ["Спрос, бренд"] } }).patch, { addTagNames: ["Спрос, бренд"] });
+  assert.deepEqual(internalSemanticKeywordBulkInput({ ...bulk, patch: { addTagNames: ["Новый"], removeTagNames: [" A ", "a"] } }).patch, { addTagNames: ["Новый"], removeTagNames: ["a"] });
+  assert.throws(() => internalSemanticKeywordBulkInput({ ...bulk, patch: { addTagNames: ["A"], removeTagNames: ["a"] } }));
+  assert.throws(() => internalSemanticKeywordBulkInput({ ...bulk, patch: { tagNames: [], removeTagNames: ["A"] } }));
+  for (const patch of [{ tagNames: [], addTagNames: ["A"] }, { addTagNames: ["A"], removeTagNames: ["a"] }]) assert.throws(() => internalUpdateSemanticKeywordInput({ ...context, ...patch }));
+});

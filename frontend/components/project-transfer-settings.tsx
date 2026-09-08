@@ -13,6 +13,8 @@ import {
   BrowserApiError
 } from "../lib/browser-api";
 import { CustomSelect } from "./custom-select";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface TransferFailure {
   readonly message: string;
@@ -28,6 +30,8 @@ export function ProjectTransferSettings({
   project: AppProject;
   workspace: AppWorkspace;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [members, setMembers] = useState<readonly WorkspaceMemberSummary[]>([]);
   const [transfer, setTransfer] = useState<ProjectTransferRequestSummary | null>();
   const [targetMemberId, setTargetMemberId] = useState("");
@@ -128,30 +132,27 @@ export function ProjectTransferSettings({
     <section className="panel security-card project-transfer-card">
       <header className="security-card-header">
         <div>
-          <h2>Передача проекта</h2>
+          <h2><UiText text="Передача проекта" /></h2>
           <p>
-            Новый владелец выберет свою рабочую область. После подтверждения
-            подключения проекта будут сброшены, а провайдеры нужно будет
-            настроить заново уже в новой рабочей области.
-          </p>
+            <UiText text="Новый владелец выберет свою рабочую область. После подтверждения подключения проекта будут сброшены, а провайдеры нужно будет настроить заново уже в новой рабочей области." /></p>
         </div>
-        <span className="security-status">7 дней</span>
+        <span className="security-status"><UiText text="7 дней" /></span>
       </header>
 
       {failure && (
         <div className="inline-alert danger" role="alert">
-          {failure.message}
+          {<UiText text={failure.message ?? ""} />}
           {failure.requestId && (
-            <small className="error-reference">Код запроса: {failure.requestId}</small>
+            <small className="error-reference"><UiText text="Код запроса:" after=" " />{failure.requestId}</small>
           )}
         </div>
       )}
-      {success && <div className="inline-alert success" role="status">{success}</div>}
+      {success && <div className="inline-alert success" role="status">{<UiText text={success ?? ""} />}</div>}
 
       {loading ? (
         <div className="project-transfer-loading" aria-busy="true">
           <span className="spinner compact" />
-          <span>Проверяем текущий запрос…</span>
+          <span><UiText text="Проверяем текущий запрос…" /></span>
         </div>
       ) : transfer ? (
         <div
@@ -163,20 +164,18 @@ export function ProjectTransferSettings({
           <div>
             <small>
               {transfer.status === "PROCESSING"
-                ? "Безопасный перенос"
-                : "Ожидает подтверждения"}
+                ? <UiText text="Безопасный перенос" />
+                : <UiText text="Ожидает подтверждения" />}
             </small>
             <strong>{transfer.toDisplayName}</strong>
             <p>
               {transfer.status === "PROCESSING"
-                ? `Проект переносится в ${
-                    transfer.destinationWorkspaceName ?? "новую рабочую область"
-                  }. ${ownerProcessingMessage(transfer.processingErrorCode)}`
+                ? <UiText text="Проект переносится в {0}. {1}" values={[String(transfer.destinationWorkspaceName ?? "новую рабочую область"), String(ownerProcessingMessage(transfer.processingErrorCode))]} />
                 : (
                   <>
-                    {transfer.toEmail} · действует до{" "}
+                    {transfer.toEmail} <UiText text="· действует до" before=" " />{" "}
                     <time dateTime={transfer.expiresAt}>
-                      {formatTransferDate(transfer.expiresAt)}
+                      {formatTransferDate(transfer.expiresAt, uiLocale)}
                     </time>
                   </>
                 )}
@@ -189,26 +188,25 @@ export function ProjectTransferSettings({
               onClick={() => void cancel()}
               type="button"
             >
-              {busy === "cancel" ? "Отменяем…" : "Отменить запрос"}
+              {busy === "cancel" ? <UiText text="Отменяем…" /> : <UiText text="Отменить запрос" />}
             </button>
           )}
         </div>
       ) : candidates.length === 0 ? (
         <p className="project-transfer-empty">
-          Для передачи нужен другой активный участник рабочей области.
-        </p>
+          <UiText text="Для передачи нужен другой активный участник рабочей области." /></p>
       ) : (
         <form className="project-transfer-form" onSubmit={create}>
           <label className="form-field">
-            <span>Новый владелец</span>
+            <span><UiText text="Новый владелец" /></span>
             <CustomSelect
               disabled={Boolean(busy)}
               onChange={(event) => setTargetMemberId(event.target.value)}
               searchable
-              searchPlaceholder="Найти участника"
+              searchPlaceholder={uiText("Найти участника")}
               value={targetMemberId}
             >
-              <option value="">Выберите участника</option>
+              <option value=""><UiText text="Выберите участника" /></option>
               {candidates.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.displayName} · {member.email}
@@ -221,7 +219,7 @@ export function ProjectTransferSettings({
             disabled={!targetMemberId || Boolean(busy)}
             type="submit"
           >
-            {busy === "create" ? "Отправляем…" : "Запросить передачу"}
+            {busy === "create" ? <UiText text="Отправляем…" /> : <UiText text="Запросить передачу" />}
           </button>
         </form>
       )}
@@ -239,8 +237,8 @@ function transferFailure(error: unknown): TransferFailure {
   return { message: "Не удалось изменить запрос на передачу проекта." };
 }
 
-function formatTransferDate(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", {
+function formatTransferDate(value: string, uiLocale: string = "ru-RU"): string {
+  return new Intl.DateTimeFormat(uiLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric",

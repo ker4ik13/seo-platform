@@ -28,6 +28,9 @@ import {
   nextSelectIndex,
   normalizeSelectSearchText
 } from "../lib/custom-select";
+import { UiText, useUiLocale } from "./ui-locale";
+import { Icon } from "./icon";
+
 
 interface CustomSelectOption {
   readonly disabled: boolean;
@@ -58,6 +61,9 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly defaultValue?: string | number;
   readonly emptyMessage?: string;
   readonly onChange?: (event: CustomSelectChangeEvent) => void;
+  readonly onSearchChange?: (query: string) => void;
+  readonly createOption?: (query: string) => Readonly<{ value: string; label: ReactNode }> | undefined;
+  readonly placeholder?: string;
   readonly onOptionOrderChange?: (
     values: readonly string[]
   ) => void | Promise<void>;
@@ -83,9 +89,12 @@ export function CustomSelect({
   name = "",
   onBlur,
   onChange,
+  onSearchChange,
+  createOption,
   onOptionOrderChange,
   onFocus,
   popoverFooter,
+  placeholder = "Выберите значение",
   required = false,
   searchPlaceholder = "Поиск…",
   searchable = false,
@@ -94,6 +103,7 @@ export function CustomSelect({
   optionOrderLabel = "Изменить порядок",
   value
 }: CustomSelectProps) {
+  const { t: uiText } = useUiLocale();
   const generatedId = useId();
   const selectId = id ?? `custom-select-${generatedId}`;
   const listboxId = `${selectId}-listbox`;
@@ -110,7 +120,7 @@ export function CustomSelect({
   const [uncontrolledValue, setUncontrolledValue] = useState(() =>
     String(defaultValue ?? "")
   );
-  const options = useMemo(() => collectOptions(children), [children]);
+  const options = useMemo(() => collectOptions(children, uiText), [children, uiText]);
   const sourceOptionOrder = JSON.stringify(options.map(({ value }) => value));
   const sourceOptionValues = useMemo(
     () => JSON.parse(sourceOptionOrder) as readonly string[],
@@ -144,10 +154,14 @@ export function CustomSelect({
   const selectedOption = orderedOptions.find(
     (option) => option.value === selectedValue
   );
-  const filteredOptions = useMemo(
-    () => filterSelectOptions(orderedOptions, query),
-    [orderedOptions, query]
-  );
+  const filteredOptions = useMemo(() => {
+    const matches = filterSelectOptions(orderedOptions, query);
+    const created = createOption?.(query);
+    return created && !orderedOptions.some(option => option.value === created.value)
+      ? [{ ...created, key: `${selectId}-create`, disabled: false, searchText: normalizeSelectSearchText(created.value) }, ...matches]
+      : matches;
+  }, [orderedOptions, query, createOption, selectId]);
+  useEffect(() => { onSearchChange?.(query); }, [query, onSearchChange]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -480,7 +494,7 @@ export function CustomSelect({
         type="button"
       >
         <span className={`custom-select-value${selectedOption ? "" : " is-placeholder"}`}>
-          {selectedOption?.label ?? "Выберите значение"}
+          {selectedOption?.label ?? <UiText text={placeholder} />}
         </span>
         <span aria-hidden="true" className="custom-select-chevron" />
       </button>
@@ -493,13 +507,13 @@ export function CustomSelect({
         >
           {searchable && (
             <div className="custom-select-search-wrap">
-              <span aria-hidden="true" className="custom-select-search-icon">⌕</span>
+              <span aria-hidden="true" className="custom-select-search-icon"><Icon name="search" /></span>
               <input
-                aria-label={searchPlaceholder}
+                aria-label={uiText(searchPlaceholder)}
                 className="custom-select-search"
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={searchPlaceholder}
+                placeholder={uiText(searchPlaceholder)}
                 ref={searchRef}
                 type="search"
                 value={query}
@@ -508,7 +522,7 @@ export function CustomSelect({
           )}
           <div aria-label={ariaLabel} className="custom-select-options" id={listboxId} role="listbox">
             {filteredOptions.length === 0 ? (
-              <div className="custom-select-empty">{emptyMessage}</div>
+              <div className="custom-select-empty"><UiText text={emptyMessage} /></div>
             ) : (
               filteredOptions.map((option, index) => (
                 <button
@@ -533,7 +547,7 @@ export function CustomSelect({
                     <span
                       aria-hidden="true"
                       className="custom-select-drag-handle"
-                      title={`${optionOrderLabel}. Также доступно Alt + стрелка`}
+                      title={uiText("{0}. Также доступно Alt + стрелка", [String(optionOrderLabel)])}
                     >
                       ⋮⋮
                     </span>
@@ -566,20 +580,20 @@ export function CustomSelect({
               aria-live="polite"
               className={`custom-select-order-status${orderMessage && !ordering && orderMessage.startsWith("Не удалось") ? " is-error" : ""}`}
             >
-              {orderMessage ?? `${optionOrderLabel}: перетащите строку или нажмите Alt + ↑/↓`}
+              {orderMessage ?? <UiText text="{0}: перетащите строку или нажмите Alt + ↑/↓" values={[String(optionOrderLabel)]} />}
             </p>
           )}
         </div>,
         portalTarget
       )}
       {required && !selectedValue && (
-        <span aria-live="polite" className="visually-hidden">Выберите обязательное значение</span>
+        <span aria-live="polite" className="visually-hidden"><UiText text="Выберите обязательное значение" /></span>
       )}
     </div>
   );
 }
 
-function collectOptions(children: ReactNode): readonly CustomSelectOption[] {
+function collectOptions(children: ReactNode, t: (text: string, values?: readonly string[]) => string): readonly CustomSelectOption[] {
   const result: CustomSelectOption[] = [];
   const visit = (nodes: ReactNode) => {
     Children.forEach(nodes, (child) => {
@@ -590,9 +604,9 @@ function collectOptions(children: ReactNode): readonly CustomSelectOption[] {
           disabled?: boolean;
           value?: string | number;
         }>;
-        const value = String(option.props.value ?? textFromNode(option.props.children));
+        const value = String(option.props.value ?? textFromNode(option.props.children, text => text));
         const searchText = normalizeSelectSearchText(
-          `${textFromNode(option.props.children)} ${value}`
+          `${textFromNode(option.props.children, t)} ${value}`
         );
         result.push({
           disabled: Boolean(option.props.disabled),
@@ -613,14 +627,17 @@ function collectOptions(children: ReactNode): readonly CustomSelectOption[] {
   return result;
 }
 
-function textFromNode(node: ReactNode): string {
+function textFromNode(node: ReactNode, t: (text: string, values?: readonly string[]) => string): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   let text = "";
   Children.forEach(node, (child) => {
     if (typeof child === "string" || typeof child === "number") {
       text += ` ${String(child)}`;
     } else if (isValidElement(child)) {
-      text += ` ${textFromNode((child as ReactElement<{ children?: ReactNode }>).props.children)}`;
+      if (child.type === UiText) {
+        const copy = child.props as { text: string; values?: readonly string[] };
+        text += ` ${t(copy.text, copy.values)}`;
+      } else text += ` ${textFromNode((child as ReactElement<{ children?: ReactNode }>).props.children, t)}`;
     }
   });
   return text.trim();

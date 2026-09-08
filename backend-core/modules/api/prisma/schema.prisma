@@ -137,6 +137,7 @@ enum BillingSubscriptionStatus {
 }
 
 enum BillingPaymentProvider {
+  CRYPTO_PAY
   YOOKASSA
   MANUAL
 }
@@ -236,6 +237,7 @@ enum BillingBuyerType {
 }
 
 enum NpdReceiptRegistrationMode {
+  API_MY_TAX
   MANUAL_MY_TAX
 }
 
@@ -264,6 +266,7 @@ enum PlatformRoleCode {
 }
 
 model User {
+  billingNotices BillingNotice[]
   id              String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   emailNormalized String     @unique(map: "users_email_normalized_key") @map("email_normalized") @db.VarChar(320)
   emailDisplay    String     @map("email_display") @db.VarChar(320)
@@ -484,6 +487,7 @@ model ApiTokenProjectAccess {
 }
 
 model Workspace {
+  billingNotices BillingNotice[]
   id              String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name            String          @db.VarChar(160)
   slug            String          @unique @db.VarChar(100)
@@ -762,7 +766,9 @@ model BillingPlan {
   code          String            @unique(map: "billing_plans_code_key") @db.VarChar(32)
   status        BillingPlanStatus @default(ACTIVE)
   nameRu        String            @map("name_ru") @db.VarChar(120)
+  nameEn        String?           @map("name_en") @db.VarChar(120)
   descriptionRu String            @map("description_ru") @db.Text
+  descriptionEn String?           @map("description_en") @db.Text
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -811,6 +817,9 @@ model BillingPlanPrice {
 }
 
 model BillingSubscription {
+  serviceValueMinor BigInt? @map("service_value_minor")
+  serviceValueAt DateTime? @map("service_value_at") @db.Timestamptz(6)
+  refundableFrom DateTime? @map("refundable_from") @db.Timestamptz(6)
   id                     String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId            String                    @unique(map: "billing_subscriptions_workspace_id_key") @map("workspace_id") @db.Uuid
   planVersionId          String                    @map("plan_version_id") @db.Uuid
@@ -886,6 +895,8 @@ model BillingOrder {
 }
 
 model BillingPayment {
+  isTest Boolean @default(false) @map("is_test")
+  creationStartedAt DateTime? @map("creation_started_at") @db.Timestamptz(6)
   id                     String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId            String                 @map("workspace_id") @db.Uuid
   orderId                String                 @map("order_id") @db.Uuid
@@ -912,6 +923,7 @@ model BillingPayment {
   order         BillingOrder           @relation(fields: [orderId], references: [id], onDelete: Restrict)
   paymentMethod BillingPaymentMethod?  @relation(fields: [paymentMethodRecordId], references: [id], onDelete: SetNull)
   refunds       BillingRefund[]
+  refundRequests BillingRefundRequest[]
   receipts      NpdReceiptObligation[]
 
   @@unique([orderId, provider], map: "billing_payments_order_provider_key")
@@ -945,6 +957,8 @@ model BillingPaymentMethod {
 }
 
 model BillingRefund {
+  refundRequestId String? @unique @map("refund_request_id") @db.Uuid
+  refundRequest BillingRefundRequest? @relation(fields: [refundRequestId], references: [id], onDelete: Restrict)
   id                     String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId            String              @map("workspace_id") @db.Uuid
   paymentId              String              @map("payment_id") @db.Uuid
@@ -971,6 +985,52 @@ model BillingRefund {
   @@index([workspaceId, createdAt])
   @@index([status, updatedAt])
   @@map("billing_refunds")
+}
+
+model BillingRefundRequest {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  paymentId String @map("payment_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  requestedAmountMinor BigInt @map("requested_amount_minor")
+  approvedAmountMinor BigInt? @map("approved_amount_minor")
+  reason String @db.VarChar(500)
+  status String @default("REQUESTED") @db.VarChar(24)
+  decisionReason String? @map("decision_reason") @db.VarChar(500)
+  decidedBy String? @map("decided_by") @db.Uuid
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(6)
+  heldPrepaidMinor BigInt @default(0) @map("held_prepaid_minor")
+  holdReleasedAt DateTime? @map("hold_released_at") @db.Timestamptz(6)
+  subscriptionAdjustment Json? @map("subscription_adjustment")
+  manualReference String? @map("manual_reference") @db.VarChar(180)
+  requestIdempotencyKey String @map("request_idempotency_key") @db.VarChar(180)
+  requestHash Bytes @map("request_hash")
+  version Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  payment BillingPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  refund BillingRefund?
+  @@unique([workspaceId, requestIdempotencyKey], map: "billing_refund_requests_idempotency_key")
+  @@index([status, createdAt, id], map: "billing_refund_requests_queue_idx")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "billing_refund_requests_workspace_idx")
+  @@map("billing_refund_requests")
+}
+
+model ProviderBalanceNotification {
+  accountId String @id @map("account_id") @db.Uuid
+  provider String @db.VarChar(16)
+  slot Int
+  low Boolean
+  pending Boolean
+  generation Int @default(0)
+  balanceMinor BigInt @map("balance_minor")
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseToken String? @map("lease_token") @db.Uuid
+  leaseExpiresAt DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@index([pending, nextAttemptAt], map: "provider_balance_notifications_pending_idx")
+  @@map("provider_balance_notifications")
 }
 
 model BillingLedgerAccount {
@@ -1030,6 +1090,9 @@ model BillingLedgerEntry {
 }
 
 model BillingUsageReservation {
+  providerStartedAt DateTime? @map("provider_started_at") @db.Timestamptz(6)
+  reviewDecision Json? @map("review_decision")
+  includedPeriodEnd DateTime? @map("included_period_end") @db.Timestamptz(6)
   id                       String                        @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId              String                        @map("workspace_id") @db.Uuid
   projectId                String                        @map("project_id") @db.Uuid
@@ -1070,6 +1133,22 @@ model BillingUsageReservation {
   @@map("billing_usage_reservations")
 }
 
+model BillingNotice {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  recipientUserId String @map("recipient_user_id") @db.Uuid
+  kind String @db.VarChar(40)
+  referenceId String @map("reference_id") @db.Uuid
+  referenceState String? @map("reference_state") @db.VarChar(24)
+  periodEnd DateTime? @map("period_end") @db.Timestamptz(6)
+  businessKey String @unique @map("business_key") @db.VarChar(180)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  @@index([workspaceId, createdAt], map: "billing_notices_workspace_idx")
+  @@map("billing_notices")
+}
+
 model BillingWebhookInbox {
   id               String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   provider         BillingPaymentProvider
@@ -1092,7 +1171,50 @@ model BillingWebhookInbox {
   @@map("billing_webhook_inbox")
 }
 
+model BillingOperationQuote {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  projectId String @map("project_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  kind String @db.VarChar(32)
+  provider String @db.VarChar(16)
+  routeSnapshot Json @map("route_snapshot")
+  commandHash Bytes @map("command_hash")
+  commandKey String? @map("command_key") @db.VarChar(180)
+  quantity Int
+  priceBookVersion String @map("price_book_version") @db.VarChar(64)
+  unitCostMicro BigInt @map("unit_cost_micro")
+  priceDenominatorBps Int @map("price_denominator_bps")
+  maximumProviderUnitsMilli BigInt @map("maximum_provider_units_milli")
+  maximumChargeMinor BigInt @map("maximum_charge_minor")
+  status String @default("QUOTED") @db.VarChar(16)
+  jobId String? @unique @map("job_id") @db.Uuid
+  includedMinor BigInt @default(0) @map("included_minor")
+  prepaidMinor BigInt @default(0) @map("prepaid_minor")
+  includedPeriodEnd DateTime? @map("included_period_end") @db.Timestamptz(6)
+  capturedMinor BigInt @default(0) @map("captured_minor")
+  releasedMinor BigInt @default(0) @map("released_minor")
+  acceptedProviderUnitsMilli BigInt @default(0) @map("accepted_provider_units_milli")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  createBefore DateTime? @map("create_before") @db.Timestamptz(6)
+  reservedAt DateTime? @map("reserved_at") @db.Timestamptz(6)
+  settledAt DateTime? @map("settled_at") @db.Timestamptz(6)
+  nextCheckAt DateTime @default(now()) @map("next_check_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, kind, commandKey], map: "billing_operation_quotes_command_key")
+  @@index([status, nextCheckAt, id], map: "billing_operation_quotes_reconcile_idx")
+  @@index([workspaceId, createdAt(sort: Desc)], map: "billing_operation_quotes_tenant_idx")
+  @@map("billing_operation_quotes")
+}
+
 model NpdReceiptObligation {
+  issueState String @default("PENDING") @map("issue_state") @db.VarChar(16)
+  issueLeaseToken String? @map("issue_lease_token") @db.Uuid
+  issueLeaseExpiresAt DateTime? @map("issue_lease_expires_at") @db.Timestamptz(6)
+  issueStartedAt DateTime? @map("issue_started_at") @db.Timestamptz(6)
+  issueErrorCode String? @map("issue_error_code") @db.VarChar(64)
   id                            String                     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   paymentId                     String                     @map("payment_id") @db.Uuid
   yookassaPaymentId             String                     @map("yookassa_payment_id") @db.VarChar(255)
@@ -1212,4 +1334,45 @@ model OutboxEvent {
   @@index([status, availableAt])
   @@index([aggregateType, aggregateId, aggregateVer])
   @@map("outbox_events")
+}
+
+model TelegramLoginChallenge {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  nonceHash Bytes @unique @map("nonce_hash")
+  browserHash Bytes @map("browser_hash")
+  intent String @db.VarChar(8)
+  status String @default("PENDING") @db.VarChar(16)
+  targetUserId String? @map("target_user_id") @db.Uuid
+  sessionFamilyId String? @map("session_family_id") @db.Uuid
+  telegramSubject String? @map("telegram_subject") @db.VarChar(24)
+  telegramUsername String? @map("telegram_username") @db.VarChar(32)
+  approvedUserVersion Int? @map("approved_user_version")
+  code String @db.Char(6)
+  locale String @db.VarChar(2)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([expiresAt])
+  @@map("telegram_login_challenges")
+}
+model TelegramWebhookReceipt {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  botId String @map("bot_id") @db.VarChar(24)
+  updateId BigInt @map("update_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@unique([botId, updateId])
+  @@map("telegram_webhook_receipts")
+}
+model TelegramBotOutbox {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  chatId String @map("chat_id") @db.VarChar(24)
+  kind String @db.VarChar(32)
+  challengeId String? @map("challenge_id") @db.Uuid
+  locale String @default("ru") @db.VarChar(2)
+  status String @default("PENDING") @db.VarChar(16)
+  attempts Int @default(0)
+  availableAt DateTime @default(now()) @map("available_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([status, availableAt])
+  @@map("telegram_bot_outbox")
 }

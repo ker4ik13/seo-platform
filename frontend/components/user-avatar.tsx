@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { AppUser } from "../lib/app-types";
+import { useUiLocale } from "./ui-locale";
+
 
 export function UserAvatar({
   className = "user-avatar",
@@ -12,6 +14,7 @@ export function UserAvatar({
   size?: number;
   user: Pick<AppUser, "displayName" | "avatarUpdatedAt">;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [failed, setFailed] = useState(false);
   const source = user.avatarUpdatedAt
     ? `/app/api/me/avatar?v=${encodeURIComponent(user.avatarUpdatedAt)}`
@@ -22,7 +25,7 @@ export function UserAvatar({
   if (!source || failed) {
     return (
       <span
-        aria-label={`Пользователь: ${user.displayName}`}
+        aria-label={uiText("Пользователь: {0}", [String(user.displayName)])}
         className={`${className} fallback`}
         role="img"
         style={{ height: size, width: size }}

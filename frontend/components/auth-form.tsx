@@ -1,5 +1,7 @@
 "use client";
+import { legalDocumentVersion } from "../lib/legal-versions";
 
+import { TelegramLogin } from "./telegram-login";
 import { CustomSelect } from "./custom-select";
 
 import { useState, type FormEvent } from "react";
@@ -8,6 +10,8 @@ import {
   BrowserApiError
 } from "../lib/browser-api";
 import { safeAppReturnTo } from "../lib/app-path";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface AuthenticationResult {
   readonly emailVerificationRequired: boolean;
@@ -31,6 +35,7 @@ export function AuthForm({
   sessionExpired?: boolean;
   sessionRevoked?: boolean;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [fieldErrors, setFieldErrors] = useState<
@@ -65,12 +70,12 @@ export function AuthForm({
                   Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                 termsVersion:
                   process.env.NEXT_PUBLIC_TERMS_VERSION ??
-                  "2026-07-28-draft",
+                  legalDocumentVersion,
                 privacyVersion:
                   process.env.NEXT_PUBLIC_PRIVACY_VERSION ??
-                  "2026-07-28-draft",
+                  legalDocumentVersion,
                 termsAccepted: form.get("termsAccepted") === "on",
-                privacyAccepted: form.get("termsAccepted") === "on",
+                privacyAccepted: form.get("privacyAccepted") === "on",
                 marketingAccepted: form.get("marketingAccepted") === "on",
                 marketingVersion:
                   process.env.NEXT_PUBLIC_MARKETING_VERSION ??
@@ -149,17 +154,15 @@ export function AuthForm({
     <form className="auth-form" noValidate onSubmit={submit}>
       {sessionExpired && (
         <div className="inline-alert warning" role="status">
-          Сессия истекла. Войдите снова — ваши проекты и результаты сохранены.
-        </div>
+          <UiText text="Сессия истекла. Войдите снова — ваши проекты и результаты сохранены." /></div>
       )}
       {sessionRevoked && (
         <div className="inline-alert success" role="status">
-          Сессия на этом устройстве завершена. Для продолжения войдите снова.
-        </div>
+          <UiText text="Сессия на этом устройстве завершена. Для продолжения войдите снова." /></div>
       )}
       {error && (
         <div className="inline-alert danger" role="alert">
-          {error}
+          {<UiText text={error ?? ""} />}
         </div>
       )}
 
@@ -167,9 +170,9 @@ export function AuthForm({
         <FormField
           autoComplete="name"
           error={fieldErrors.displayName}
-          label="Имя"
+          label={uiText("Имя")}
           name="displayName"
-          placeholder="Как к вам обращаться"
+          placeholder={uiText("Как к вам обращаться")}
           required
         />
       )}
@@ -185,8 +188,8 @@ export function AuthForm({
       <FormField
         autoComplete={isRegister ? "new-password" : "current-password"}
         error={fieldErrors.password}
-        hint={isRegister ? "Минимум 12 символов" : undefined}
-        label="Пароль"
+        hint={isRegister ? uiText("Минимум 12 символов") : undefined}
+        label={uiText("Пароль")}
         minLength={isRegister ? 12 : undefined}
         name="password"
         required
@@ -194,34 +197,37 @@ export function AuthForm({
       />
       {!isRegister && (
         <p className="auth-inline-link">
-          <a href="/app/forgot-password">Забыли пароль?</a>
+          <a href="/app/forgot-password"><UiText text="Забыли пароль?" /></a>
         </p>
       )}
 
       {isRegister && (
         <>
           <label className="form-field">
-            <span>Страна</span>
+            <span><UiText text="Страна" /></span>
             <CustomSelect defaultValue="" name="country">
-              <option value="">Не выбрана</option>
-              <option value="RU">Россия</option>
-              <option value="KZ">Казахстан</option>
-              <option value="US">США</option>
-              <option value="GB">Великобритания</option>
-              <option value="DE">Германия</option>
-              <option value="AE">ОАЭ</option>
+              <option value=""><UiText text="Не выбрана" /></option>
+              <option value="RU"><UiText text="Россия" /></option>
+              <option value="KZ"><UiText text="Казахстан" /></option>
+              <option value="US"><UiText text="США" /></option>
+              <option value="GB"><UiText text="Великобритания" /></option>
+              <option value="DE"><UiText text="Германия" /></option>
+              <option value="AE"><UiText text="ОАЭ" /></option>
             </CustomSelect>
           </label>
           <label className="checkbox-field">
             <input name="termsAccepted" required type="checkbox" />
             <span>
-              Принимаю <a href="/terms">Условия</a> и{" "}
-              <a href="/privacy">Политику конфиденциальности</a>
+              <UiText text="Принимаю" after=" " /><a href="/terms" target="_blank" rel="noopener noreferrer"><UiText text="Условия" /></a>
             </span>
           </label>
           <label className="checkbox-field">
+            <input name="privacyAccepted" required type="checkbox" />
+            <span><UiText text="Даю отдельное согласие на обработку данных" /> <a href="/data-consent" target="_blank" rel="noopener noreferrer"><UiText text="Текст согласия" /></a> · <a href="/privacy" target="_blank" rel="noopener noreferrer"><UiText text="Политика конфиденциальности" /></a></span>
+          </label>
+          <label className="checkbox-field">
             <input name="marketingAccepted" type="checkbox" />
-            <span>Получать полезные материалы и новости продукта</span>
+            <span><UiText text="Получать полезные материалы и новости продукта" /></span>
           </label>
         </>
       )}
@@ -229,14 +235,15 @@ export function AuthForm({
       <button className="primary-button auth-submit" disabled={busy} type="submit">
         {busy
           ? isRegister
-            ? "Создаём аккаунт…"
-            : "Входим…"
+            ? <UiText text="Создаём аккаунт…" />
+            : <UiText text="Входим…" />
           : isRegister
-            ? "Создать аккаунт"
-            : "Войти"}
+            ? <UiText text="Создать аккаунт" />
+            : <UiText text="Войти" />}
       </button>
+      {!isRegister && <TelegramLogin returnTo={returnTo} />}
       <p className="auth-switch">
-        {isRegister ? "Уже есть аккаунт?" : "Ещё нет аккаунта?"}{" "}
+        {isRegister ? <UiText text="Уже есть аккаунт?" /> : <UiText text="Ещё нет аккаунта?" />}{" "}
         <a
           href={
             isRegister
@@ -244,7 +251,7 @@ export function AuthForm({
               : `/app/register?returnTo=${encodeURIComponent(returnTo)}`
           }
         >
-          {isRegister ? "Войти" : "Зарегистрироваться"}
+          {isRegister ? <UiText text="Войти" /> : <UiText text="Зарегистрироваться" />}
         </a>
       </p>
     </form>
@@ -284,7 +291,7 @@ function FormField({
       />
       {error ? (
         <small className="field-error" id={`${name}-error`}>
-          {error}
+          {<UiText text={error ?? ""} />}
         </small>
       ) : hint ? (
         <small id={`${name}-hint`}>{hint}</small>

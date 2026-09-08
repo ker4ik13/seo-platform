@@ -1,4 +1,5 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import { parseSemanticRankDimensionKey, parseSemanticRankDimensionMetadata, parseSemanticRankColumnKey, parseSemanticRankDimensionCatalog, parseSemanticRankComparisonItems, type SemanticRankComparisonInput, type InternalSeoOverview } from "@seo-platform/contracts";
 import {
   projectPositionHistoryMaxPoints,
   semanticKeywordIntents,
@@ -331,8 +332,9 @@ export class SeoDataClient {
   ): Promise<KeywordPage> {
     const projectId = requiredProjectId(context.tenant);
     const { multiSearch, ...listQuery } = query;
+    const bodyList = !multiSearch && (listQuery.groupIds?.length ?? 0) > 20;
     const url = new URL(
-      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords${multiSearch ? "/search" : ""}`,
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords${multiSearch ? "/search" : bodyList ? "/list" : ""}`,
       this.config.services.seoData
     );
     if (multiSearch) {
@@ -342,6 +344,10 @@ export class SeoDataClient {
         context,
         { query: listQuery, search: multiSearch }
       );
+      return semanticKeywordPage(payload);
+    }
+    if (bodyList) {
+      const payload = await this.request("POST", url, context, { query: listQuery });
       return semanticKeywordPage(payload);
     }
     url.searchParams.set("limit", String(listQuery.limit));
@@ -365,6 +371,14 @@ export class SeoDataClient {
     }
     if (listQuery.priorityMax !== undefined) {
       url.searchParams.set("priorityMax", String(listQuery.priorityMax));
+    }
+    for (const field of [
+      "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+      "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
+    ] as const) {
+      const value = listQuery[field];
+      if (value !== undefined) url.searchParams.set(field, String(value));
     }
     if (listQuery.sort) url.searchParams.set("sort", listQuery.sort);
 
@@ -433,18 +447,31 @@ export class SeoDataClient {
 
   public async keywordInsights(
     context: InternalContext,
-    keywordId: string
+    keywordId: string,
+    dimensionKey?: string
   ): Promise<SemanticKeywordInsights> {
     const projectId = requiredProjectId(context.tenant);
     const payload = await this.request(
       "GET",
       new URL(
-        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/insights`,
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/insights${dimensionKey ? `?dimensionKey=${encodeURIComponent(dimensionKey)}` : ""}`,
         this.config.services.seoData
       ),
       context
     );
     return semanticKeywordInsights(responseData(payload), keywordId);
+  }
+
+  public async keywordRankDimensions(context: InternalContext) {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request("GET", new URL(`/internal/v1/projects/${encodeURIComponent(projectId)}/keyword-ranks/dimensions`, this.config.services.seoData), context);
+    try { return parseSemanticRankDimensionCatalog(responseData(payload)); } catch { throw invalidResponse(); }
+  }
+
+  public async keywordRankComparison(context: InternalContext, input: SemanticRankComparisonInput) {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request("POST", new URL(`/internal/v1/projects/${encodeURIComponent(projectId)}/keyword-ranks/comparison`, this.config.services.seoData), context, input);
+    try { return parseSemanticRankComparisonItems(responseData(payload), input); } catch { throw invalidResponse(); }
   }
 
   public async keywordAiAnswers(
@@ -1764,6 +1791,8 @@ export class SeoDataClient {
     );
     url.searchParams.set("observedFrom", query.observedFrom);
     url.searchParams.set("observedBefore", query.observedBefore);
+    if (query.dimensionKey) url.searchParams.set("dimensionKey", query.dimensionKey);
+    if (query.mode) url.searchParams.set("mode", query.mode);
     if (query.trackingContextId) {
       url.searchParams.set(
         "trackingContextId",
@@ -2357,6 +2386,14 @@ export class SeoDataClient {
     });
   }
 
+  public async adminOverview(actorId: string, requestId: string): Promise<InternalSeoOverview> {
+    const payload = await this.platformAdminRequest(new URL("/internal/v1/platform-admin/project-statistics/overview", this.config.services.seoData), actorId, requestId, {});
+    const data = objectValue(responseData(payload));
+    const fields = ["activeKeywords", "trashedKeywords", "activeFolders", "activatedWorkspaces"];
+    if (!data || Object.keys(data).length !== fields.length || fields.some(field => !Number.isSafeInteger(data[field]) || Number(data[field]) < 0)) throw invalidResponse();
+    return data as unknown as InternalSeoOverview;
+  }
+
   private async platformAdminRequest(
     url: URL,
     actorId: string,
@@ -2452,7 +2489,9 @@ export class SeoDataClient {
     const serializedBody =
       body === undefined ? undefined : JSON.stringify(body);
     const timeoutMs =
-      method === "GET"
+      method === "PUT" && /\/tracking-contexts\/[^/]+\/keywords\/?$/u.test(url.pathname)
+        ? Math.max(65_000, this.config.internalCommandTimeoutMs)
+        : method === "GET"
         ? this.config.dependencyTimeoutMs
         : this.config.internalCommandTimeoutMs;
     try {
@@ -2744,13 +2783,13 @@ export function semanticKeywordInsights(
     !Array.isArray(input.frequencies) ||
     input.frequencies.length > 100 ||
     !Array.isArray(input.positions) ||
-    input.positions.length > 50 ||
+    input.positions.length > 200 ||
     (input.note !== undefined &&
       (typeof input.note !== "string" || input.note.length > 4_000)) ||
     !Array.isArray(positionHistory) ||
     positionHistory.length > 240 ||
     !Array.isArray(competitorSnapshots) ||
-    competitorSnapshots.length > 2 ||
+    competitorSnapshots.length > 240 ||
     !Array.isArray(aiPositionHistory) ||
     aiPositionHistory.length > 240 ||
     !Array.isArray(aiCompetitorSnapshots) ||
@@ -2812,6 +2851,7 @@ export function semanticKeywordInsights(
         !validDate(item.observedAt)
       ) throw invalidResponse();
       return {
+        ...parseSemanticRankDimensionMetadata(item),
         trackingContextId: item.trackingContextId,
         contextName: item.contextName,
         searchEngine: item.searchEngine as "GOOGLE" | "YANDEX",
@@ -2852,7 +2892,7 @@ export function semanticKeywordInsights(
           (!Number.isSafeInteger(item.depth) ||
             Number(item.depth) < 1 ||
             Number(item.depth) > 1_000)) ||
-        !["XMLSTOCK", "ARSENKIN", "KEY_COLLECTOR"].includes(
+        !["XMLSTOCK", "ARSENKIN", "KEY_COLLECTOR", "MANUAL_IMPORT"].includes(
           String(item.provider)
         ) ||
         typeof item.found !== "boolean" ||
@@ -2862,6 +2902,7 @@ export function semanticKeywordInsights(
       ) throw invalidResponse();
       return {
         snapshotId: item.snapshotId,
+        ...parseSemanticRankDimensionMetadata(item),
         trackingContextId: item.trackingContextId,
         contextName: item.contextName,
         searchEngine: item.searchEngine as "GOOGLE" | "YANDEX",
@@ -2883,7 +2924,8 @@ export function semanticKeywordInsights(
         provider: item.provider as
           | "XMLSTOCK"
           | "ARSENKIN"
-          | "KEY_COLLECTOR",
+          | "KEY_COLLECTOR"
+          | "MANUAL_IMPORT",
         found: item.found,
         ...(typeof item.position === "number" ? { position: item.position } : {}),
         observedAt: item.observedAt
@@ -2936,6 +2978,7 @@ export function semanticKeywordInsights(
       });
       return {
         snapshotId: item.snapshotId,
+        ...parseSemanticRankDimensionMetadata(item),
         trackingContextId: item.trackingContextId,
         contextName: item.contextName,
         searchEngine: item.searchEngine as "GOOGLE" | "YANDEX",
@@ -3109,11 +3152,14 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
     throw invalidResponse();
   }
   let previousObservedAt = "";
+  let previousDate = "";
   const ids = new Set<string>();
+  const dates = new Set<string>();
   const points = input.points.map((value) => {
     const point = objectValue(value);
     const required = [
       "id",
+      "date",
       "observedAt",
       "measuredKeywordCount",
       "positionedKeywordCount",
@@ -3129,10 +3175,14 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
       required.some((key) => !Object.hasOwn(point, key)) ||
       !requiredString(point.id) ||
       ids.has(point.id) ||
+      !validUtcDateKey(point.date) ||
+      dates.has(point.date) ||
+      point.date < previousDate ||
       !requiredString(point.observedAt) ||
       Number.isNaN(new Date(point.observedAt).getTime()) ||
+      point.observedAt.slice(0, 10) !== point.date ||
       point.observedAt < previousObservedAt ||
-      required.slice(2).some((key) =>
+      required.slice(3).some((key) =>
         !Number.isSafeInteger(point[key]) || Number(point[key]) < 0
       ) ||
       Number(point.positionedKeywordCount) > Number(point.measuredKeywordCount) ||
@@ -3145,9 +3195,12 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
       throw invalidResponse();
     }
     ids.add(point.id);
+    dates.add(point.date);
+    previousDate = point.date;
     previousObservedAt = point.observedAt;
     return {
       id: point.id,
+      date: point.date,
       observedAt: point.observedAt,
       measuredKeywordCount: Number(point.measuredKeywordCount),
       positionedKeywordCount: Number(point.positionedKeywordCount),
@@ -3159,6 +3212,14 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
     };
   });
   return { points, truncated: input.truncated };
+}
+
+function validUtcDateKey(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 export function semanticKeywordItem(
@@ -5235,7 +5296,10 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     "isFavorite",
     "isTracked",
     "priorityMin",
-    "priorityMax"
+    "priorityMax",
+    "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+    "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
   ]);
   const filterKeys = Object.keys(filters);
   if (
@@ -5254,7 +5318,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     !config.columns.every(
       (column) =>
         typeof column === "string" &&
-        (semanticSystemColumnKeys.some((key) => key === column) ||
+        (semanticSystemColumnKeys.some((key) => key === column) || Boolean(parseSemanticRankColumnKey(column)) ||
           /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
             column
           ))
@@ -5285,7 +5349,8 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     (typeof filters.priorityMin === "number" &&
       typeof filters.priorityMax === "number" &&
       filters.priorityMin > filters.priorityMax) ||
-    filterKeys.length > 9 ||
+    !validAdvancedSavedViewFilters(filters) ||
+    filterKeys.length > 24 ||
     !validSavedViewColumnWidths(config.columnWidths, config.columns) ||
     !validSavedViewQueryIndicators(config.queryIndicators) ||
     (config.pageSize !== undefined &&
@@ -5295,7 +5360,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
         Number(config.groupSidebarWidth) < semanticSavedViewGroupSidebarWidthMin ||
         Number(config.groupSidebarWidth) > semanticSavedViewGroupSidebarWidthMax)) ||
     !validUuidArray(config.expandedGroupIds, 1_000) ||
-    !validUuidArray(config.selectedGroupIds, 100) ||
+    !validUuidArray(config.selectedGroupIds, 2_000) ||
     (config.appliedViewId !== undefined &&
       (typeof config.appliedViewId !== "string" ||
         !UUID_PATTERN.test(config.appliedViewId)))
@@ -5351,6 +5416,26 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
   };
 }
 
+function validAdvancedSavedViewFilters(filters: Readonly<Record<string, unknown>>): boolean {
+  const decimal = (value: unknown): value is string => typeof value === "string" && /^(?:0|[1-9]\d{0,18})$/u.test(value) && BigInt(value) <= 9_223_372_036_854_775_807n;
+  for (const [minName, maxName] of [["frequencyBaseMin", "frequencyBaseMax"], ["frequencyExactMin", "frequencyExactMax"], ["frequencyFixedMin", "frequencyFixedMax"]] as const) {
+    const min = filters[minName], max = filters[maxName];
+    if ((min !== undefined && !decimal(min)) || (max !== undefined && !decimal(max)) || (typeof min === "string" && typeof max === "string" && BigInt(min) > BigInt(max))) return false;
+  }
+  const bounded = (value: unknown, max: number) => value === undefined || (Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= max);
+  if (!bounded(filters.wordCountMin, 10_000) || !bounded(filters.wordCountMax, 10_000) || !bounded(filters.rankPositionMin, 100) || !bounded(filters.rankPositionMax, 100)) return false;
+  if ((typeof filters.wordCountMin === "number" && typeof filters.wordCountMax === "number" && filters.wordCountMin > filters.wordCountMax) || (typeof filters.rankPositionMin === "number" && typeof filters.rankPositionMax === "number" && filters.rankPositionMin > filters.rankPositionMax)) return false;
+  if (filters.targetUrlState !== undefined && filters.targetUrlState !== "SET" && filters.targetUrlState !== "EMPTY") return false;
+  if (filters.rankState !== undefined && !["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"].includes(String(filters.rankState))) return false;
+  if (filters.rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(filters.rankDimensionKey)) return false;
+  const instant = (value: unknown) => value === undefined || (typeof value === "string" && value.length === 24 && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value);
+  if (!instant(filters.rankCheckedFrom) || !instant(filters.rankCheckedBefore) || (typeof filters.rankCheckedFrom === "string" && typeof filters.rankCheckedBefore === "string" && filters.rankCheckedFrom >= filters.rankCheckedBefore)) return false;
+  const hasRankCondition = filters.rankState !== undefined || filters.rankPositionMin !== undefined || filters.rankPositionMax !== undefined || filters.rankCheckedFrom !== undefined || filters.rankCheckedBefore !== undefined;
+  if (hasRankCondition && filters.rankDimensionKey === undefined) return false;
+  if ((filters.rankState === "NOT_CHECKED" && (filters.rankPositionMin !== undefined || filters.rankPositionMax !== undefined || filters.rankCheckedFrom !== undefined || filters.rankCheckedBefore !== undefined)) || (filters.rankState === "NOT_FOUND" && (filters.rankPositionMin !== undefined || filters.rankPositionMax !== undefined))) return false;
+  return true;
+}
+
 function validSavedViewQueryIndicators(value: unknown): boolean {
   return value === undefined || (
     Array.isArray(value) &&
@@ -5375,7 +5460,7 @@ function validSavedViewColumnOrder(
     value.every(
       (column) =>
         typeof column === "string" &&
-        (semanticSystemColumnKeys.some((key) => key === column) ||
+        (semanticSystemColumnKeys.some((key) => key === column) || Boolean(parseSemanticRankColumnKey(column)) ||
           /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
             column
           ))

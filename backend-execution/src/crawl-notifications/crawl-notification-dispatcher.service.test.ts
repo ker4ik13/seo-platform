@@ -57,3 +57,19 @@ function outboxEvent(): OutboxEvent {
     createdAt: new Date()
   };
 }
+
+test("delivers the final notification for a full 5,000-page crawl", () => {
+  const event = outboxEvent();
+  for (const processedUrls of [1_001, 5_000]) {
+    assert.equal(crawlNotificationPayload({
+      ...event,
+      payload: { ...event.payload as object, processedUrls }
+    }).processedUrls, processedUrls);
+  }
+  for (const processedUrls of [-1, 5_001, 1.5]) {
+    assert.throws(() => crawlNotificationPayload({
+      ...event,
+      payload: { ...event.payload as object, processedUrls }
+    }));
+  }
+});

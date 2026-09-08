@@ -40,7 +40,7 @@ const configuration: TrackingContextConfigurationInput = {
   safeSearch: false
 };
 
-test("keeps Key Collector import contexts out of runnable settings", async () => {
+test("keeps imported rank contexts out of runnable settings", async () => {
   let observedWhere: unknown;
   const service = new TrackingContextService({
     trackingContext: {
@@ -58,7 +58,7 @@ test("keeps Key Collector import contexts out of runnable settings", async () =>
   assert.deepEqual(observedWhere, {
     workspaceId,
     projectId,
-    rankManifests: { none: { provider: "KEY_COLLECTOR" } }
+    rankManifests: { none: { provider: { in: ["KEY_COLLECTOR", "MANUAL_IMPORT"] } } }
   });
 });
 
@@ -400,8 +400,8 @@ test("bulk replacement is atomic, versioned and replay-safe without per-key even
       }
     },
     keyword: {
-      findMany: async () =>
-        replacementKeywordIds.map((id) => ({ id }))
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        replacementKeywordIds.filter(id => where.id.in.includes(id)).map((id) => ({ id }))
     },
     trackingContextKeywordAssignment: {
       findMany: async () => [

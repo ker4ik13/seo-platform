@@ -92,9 +92,11 @@ export class FrequencyCollectionController {
     @Query("limit") limit: unknown,
     @Query("cursor") cursor: unknown,
     @Headers() headers: HeadersRecord,
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
+    @Query("onlyFailed") onlyFailed?: string
   ): Promise<ApiResponse<InternalFrequencyOperationScope>> {
     const context = routeContext(workspaceId, projectId, headers);
+    if (onlyFailed !== undefined && onlyFailed !== "true" && onlyFailed !== "false") throw new BadRequestException("Invalid result filter");
     return response(
       request,
       await this.collections.resultScope(
@@ -102,7 +104,8 @@ export class FrequencyCollectionController {
         context.projectId,
         internalUuid(jobId, "jobId"),
         frequencyResultPageLimit(limit),
-        frequencyResultCursor(cursor)
+        frequencyResultCursor(cursor),
+        onlyFailed === "true"
       )
     );
   }

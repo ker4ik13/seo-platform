@@ -7,6 +7,7 @@ import type {
   SemanticFrequencyDevice,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
+import { frequencyCollectionKeywordLimit } from "@seo-platform/contracts";
 import type { Job } from "../generated/prisma/client.js";
 
 export type FrequencyJob = Job;
@@ -37,6 +38,7 @@ export function frequencyCollectionSummary(
     projectId: required(job.projectId),
     ...(job.actorId ? { actorId: job.actorId } : {}),
     provider: provider(job.provider),
+    ...(["BYOK_API_KEY", "PLATFORM_PAID"].includes(job.credentialMode) ? { credentialMode: job.credentialMode as "BYOK_API_KEY" | "PLATFORM_PAID" } : {}),
     ...(route.routingScope ? { routingScope: route.routingScope } : {}),
     ...(route.connectorAttempts.length > 0
       ? { connectorAttempts: route.connectorAttempts }
@@ -147,7 +149,7 @@ function connectorRoutingScope(value: unknown): ConnectorRoutingScope | undefine
 
 function boundedCount(value: bigint): number {
   const result = Number(value);
-  if (!Number.isSafeInteger(result) || result < 0 || result > 10_000) {
+  if (!Number.isSafeInteger(result) || result < 0 || result > frequencyCollectionKeywordLimit) {
     invalid();
   }
   return result;
@@ -155,7 +157,7 @@ function boundedCount(value: bigint): number {
 
 function failedCount(resultSummary: unknown, errorSummary: unknown): number {
   const value = record(resultSummary)?.failed ?? record(errorSummary)?.failed ?? 0;
-  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 10_000) {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > frequencyCollectionKeywordLimit) {
     invalid();
   }
   return Number(value);

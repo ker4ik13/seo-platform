@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { readBoundedRequestBody } from "./platform-api-proxy.ts";
 import type { NextRequest } from "next/server";
 import {
   platformApiInternalOrigin,
@@ -18,7 +19,11 @@ const ADMIN_ROOTS = new Set([
   "staff",
   "workspaces",
   "projects",
-  "operations"
+  "operations",
+  "refund-requests",
+  "provider-accounts",
+  "overview",
+  "usage-reviews"
 ]);
 const MAX_BODY_BYTES = 64 * 1_024;
 
@@ -51,19 +56,14 @@ export async function proxyAdminApi(
     );
   }
   const length = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(length) || length > MAX_BODY_BYTES) {
+  if (!Number.isSafeInteger(length) || length < 0 || length > MAX_BODY_BYTES) {
     return errorResponse(413, "FILE_TOO_LARGE", "Request body is too large");
   }
   let body: ArrayBuffer | undefined;
   if (request.method === "POST" && request.body) {
-    body = await request.arrayBuffer();
-    if (body.byteLength > MAX_BODY_BYTES) {
-      return errorResponse(
-        413,
-        "FILE_TOO_LARGE",
-        "Request body is too large"
-      );
-    }
+    const bounded = await readBoundedRequestBody(request, MAX_BODY_BYTES, 10_000);
+    if (!bounded.ok) return bounded.response;
+    body = bounded.body;
   }
 
   const headers = new Headers({ Accept: "application/json" });
@@ -146,6 +146,9 @@ export function adminUpstreamPath(
     return `/api/v1/${joined}`;
   }
   if (!ADMIN_ROOTS.has(segments[0] ?? "")) return undefined;
+  if (segments[0] === "provider-accounts" && segments.length !== 1) return undefined;
+  if (segments[0] === "overview" && segments.length !== 1) return undefined;
+  if (segments[0] === "refund-requests" && !(segments.length === 1 || segments.length === 3 && ["decision", "confirm-manual", "reconcile-provider"].includes(segments[2] ?? ""))) return undefined;
   if (segments[0] === "me" && segments.length !== 1) return undefined;
   if (
     segments[0] === "billing" &&

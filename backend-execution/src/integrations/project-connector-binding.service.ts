@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { credentialModeSupportsCapability } from "@seo-platform/contracts";
 import {
   ConflictException,
   Injectable,
@@ -666,7 +667,7 @@ function bindingAvailability(
   }
   if (
     credential.status !== "ACTIVE" ||
-    !credentialModeSupportsCapability(credential.mode, capability)
+    !credentialModeSupportsCapability(credential.mode, capability, credential.provider)
   ) {
     return "CREDENTIAL_UNAVAILABLE";
   }
@@ -845,7 +846,7 @@ async function assertCredentialAvailable(
   const provider = providerValue(credential.provider);
   if (
     credential.status !== "ACTIVE" ||
-    !credentialModeSupportsCapability(credential.mode, capability) ||
+    !credentialModeSupportsCapability(credential.mode, capability, credential.provider) ||
     !safeIntegrationCredentialCapabilities(
       provider,
       credential.capabilities
@@ -1150,15 +1151,6 @@ function projectConnectorRouteSnapshot(
   };
 }
 
-function credentialModeSupportsCapability(
-  mode: string,
-  capability: IntegrationCapability
-): boolean {
-  return (
-    mode === "BYOK_API_KEY" ||
-    (mode === "PLATFORM_PAID" && capability === "SERP_RANK_TRACKING")
-  );
-}
 
 function storedRouteList(value: unknown): readonly ProjectConnectorRoute[] {
   if (!Array.isArray(value)) throw invalidStoredReceipt();

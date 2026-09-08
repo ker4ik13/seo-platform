@@ -1,4 +1,8 @@
 "use client";
+import { prepareFrequencyRetry, type FrequencyRetryDraft } from "../lib/frequency-retry";
+import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
+import { SemanticPositionDialog } from "./semantic-position-dialog";
+import { prepareRankRetry, type RankRetryDraft } from "../lib/rank-retry";
 
 import type {
   AiAnswerCollectionSummary,
@@ -46,6 +50,8 @@ import { OperationStopConfirmation } from "./operation-stop-confirmation";
 import { ProviderLogo } from "./provider-logo";
 import { ProjectContextSelect } from "./project-context-select";
 import type { AppProject } from "../lib/app-types";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type TaskKind =
   | "FREQUENCY"
@@ -100,6 +106,12 @@ export function TaskCenter({
   projects: readonly AppProject[];
   workspaceId: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const [rankRetry, setRankRetry] = useState<RankRetryDraft>();
+  const [frequencyRetry, setFrequencyRetry] = useState<FrequencyRetryDraft>();
+  const frequencyRetryLoad = useRef<AbortController | undefined>(undefined);
+  useEffect(() => { setFrequencyRetry(undefined); setRankRetry(undefined); return () => frequencyRetryLoad.current?.abort(); }, [projectId]);
+  const { t: uiText } = useUiLocale();
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
   const [clusteringRuns, setClusteringRuns] = useState<readonly ClusteringRunSummary[]>([]);
@@ -193,13 +205,13 @@ export function TaskCenter({
   }, [load]);
 
   const tasks = useMemo(() => [
-    ...frequencies.map(frequencyTask),
-    ...aiAnswers.map(aiAnswerTask),
-    ...clusteringRuns.map(clusteringTask),
-    ...ranks.map(rankTask),
-    ...crawls.map(crawlTask),
-    ...research.map(researchTask),
-    ...semanticExports.map((value) => exportTask(value, projectId))
+    ...frequencies.map(value => frequencyTask(value, uiLocale)),
+    ...aiAnswers.map(value => aiAnswerTask(value, uiLocale)),
+    ...clusteringRuns.map(value => clusteringTask(value, uiLocale)),
+    ...ranks.map(value => rankTask(value, uiLocale)),
+    ...crawls.map(value => crawlTask(value, uiLocale)),
+    ...research.map(value => researchTask(value, uiLocale)),
+    ...semanticExports.map((value) => exportTask(value, projectId, uiLocale))
   ].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [
     aiAnswers,
     clusteringRuns,
@@ -208,7 +220,7 @@ export function TaskCenter({
     ranks,
     research,
     semanticExports,
-    projectId
+    projectId, uiLocale
   ]);
 
   const visibleTasks = useMemo(() => {
@@ -247,19 +259,15 @@ export function TaskCenter({
     try {
       if (action === "retry") {
         if (isRankTaskKind(current.kind)) {
-          await browserApiRequest(
-            `${base}/jobs/${encodeURIComponent(current.id)}/retry-missing`,
-            {
-              method: "POST",
-              body: {},
-              idempotencyKey: `rank-retry:${globalThis.crypto.randomUUID()}`
-            }
-          );
+          frequencyRetryLoad.current?.abort();
+          const controller = new AbortController(); frequencyRetryLoad.current = controller;
+          const draft = await prepareRankRetry(projectId, current.id, controller.signal);
+          if (!controller.signal.aborted) setRankRetry(draft);
         } else {
-          await browserApiRequest(
-            `${base}/frequency-collections/${encodeURIComponent(current.id)}/retry-failed`,
-            { method: "POST", body: { version: current.version } }
-          );
+          frequencyRetryLoad.current?.abort();
+          const controller = new AbortController(); frequencyRetryLoad.current = controller;
+          const draft = await prepareFrequencyRetry(projectId, current.id, controller.signal);
+          if (!controller.signal.aborted) setFrequencyRetry(draft);
         }
       } else if (current.kind === "FREQUENCY") {
         await browserApiRequest(
@@ -307,10 +315,12 @@ export function TaskCenter({
 
   return (
     <section className="task-center">
+      {rankRetry && <SemanticPositionDialog projectId={projectId} workspaceId={rankRetry.result.job.workspaceId} groups={rankRetry.groups} initialSelections={rankRetry.selections} initialRun={rankRetry.result} mode={rankRetry.result.execution.purpose === "COMPETITOR_SERP" ? "competitors" : "positions"} onClose={() => setRankRetry(undefined)} onStarted={() => { setRankRetry(undefined); void load(); }} />}
+      {frequencyRetry && <SemanticFrequencyDialog projectId={projectId} groups={frequencyRetry.groups} initialSelections={frequencyRetry.selections} initialConfiguration={frequencyRetry.collection} onClose={() => setFrequencyRetry(undefined)} onStarted={() => { setFrequencyRetry(undefined); void load(); }} />}
       <header className="task-center-header">
         <div>
           <div className="project-page-title-row">
-            <h1>История операций</h1>
+            <h1><UiText text="История операций" /></h1>
             <ProjectContextSelect
               canReorder={canReorderProjects}
               destination="tasks"
@@ -319,10 +329,10 @@ export function TaskCenter({
               workspaceId={workspaceId}
             />
           </div>
-          <p>Построчный журнал запусков с входными параметрами, прогрессом и результатом.</p>
+          <p><UiText text="Построчный журнал запусков с входными параметрами, прогрессом и результатом." /></p>
         </div>
         <div className="task-center-header-actions">
-          <a className="primary-button" href="/app/tools">Новая задача</a>
+          <a className="primary-button" href="/app/tools"><UiText text="Новая задача" /></a>
         </div>
       </header>
 
@@ -330,46 +340,46 @@ export function TaskCenter({
         <div className="task-center-tabs" role="tablist">
           {(["ALL", "ACTIVE", "ERRORS", "COMPLETED"] as const).map((value) => (
             <button aria-selected={tab === value} key={value} onClick={() => setTab(value)} role="tab" type="button">
-              {taskTabLabel(value)} <span>{counts[value]}</span>
+              {<UiText text={taskTabLabel(value) ?? ""} />} <span>{counts[value]}</span>
             </button>
           ))}
         </div>
         <label className="task-center-search">
-          <span className="visually-hidden">Поиск задачи</span>
-          <input onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Название, статус или ID" type="search" value={query} />
+          <span className="visually-hidden"><UiText text="Поиск задачи" /></span>
+          <input onChange={(event) => setQuery(event.currentTarget.value)} placeholder={uiText("Название, статус или ID")} type="search" value={query} />
         </label>
-        <CustomSelect aria-label="Тип операции" onChange={(event) => setKind(event.currentTarget.value as TaskKind | "ALL")} value={kind}>
-          <option value="ALL">Все операции</option>
-          <option value="FREQUENCY">Частотность</option>
-          <option value="AI_ANSWER">ИИ-ответы</option>
-          <option value="AI_COMPETITOR_SERP">ИИ-конкуренты</option>
-          <option value="CLUSTERING">Кластеризация</option>
-          <option value="RANK">Позиции</option>
-          <option value="COMPETITOR_SERP">Выдача конкурентов</option>
-          <option value="CRAWL">Аудиты</option>
-          <option value="RESEARCH">Сбор конкурентов</option>
-          <option value="EXPORT">Экспорт</option>
+        <CustomSelect aria-label={uiText("Тип операции")} onChange={(event) => setKind(event.currentTarget.value as TaskKind | "ALL")} value={kind}>
+          <option value="ALL"><UiText text="Все операции" /></option>
+          <option value="FREQUENCY"><UiText text="Частотность" /></option>
+          <option value="AI_ANSWER"><UiText text="ИИ-ответы" /></option>
+          <option value="AI_COMPETITOR_SERP"><UiText text="ИИ-конкуренты" /></option>
+          <option value="CLUSTERING"><UiText text="Кластеризация" /></option>
+          <option value="RANK"><UiText text="Позиции" /></option>
+          <option value="COMPETITOR_SERP"><UiText text="Выдача конкурентов" /></option>
+          <option value="CRAWL"><UiText text="Аудиты" /></option>
+          <option value="RESEARCH"><UiText text="Сбор конкурентов" /></option>
+          <option value="EXPORT"><UiText text="Экспорт" /></option>
         </CustomSelect>
       </div>
 
       {errors.length > 0 && (
         <div className="task-center-alert" role="alert">
-          <strong>Часть журнала временно недоступна</strong>
+          <strong><UiText text="Часть журнала временно недоступна" /></strong>
           <span>{errors.join(" · ")}</span>
-          <button aria-label="Закрыть сообщение" onClick={() => setErrors([])} type="button">×</button>
+          <button aria-label={uiText("Закрыть сообщение")} onClick={() => setErrors([])} type="button">×</button>
         </div>
       )}
 
       {loading ? (
-        <div className="task-center-loading" role="status">Загружаем операции проекта…</div>
+        <div className="task-center-loading" role="status"><UiText text="Загружаем операции проекта…" /></div>
       ) : (
         <div className="task-center-layout">
-          <section className="task-ledger" aria-label="Журнал операций">
+          <section className="task-ledger" aria-label={uiText("Журнал операций")}>
             <header className="task-ledger-header" aria-hidden="true">
-              <span>Операция</span>
-              <span>Статус</span>
-              <span>Результат</span>
-              <span>Время</span>
+              <span><UiText text="Операция" /></span>
+              <span><UiText text="Статус" /></span>
+              <span><UiText text="Результат" /></span>
+              <span><UiText text="Время" /></span>
             </header>
             {visibleTasks.length > 0 ? visibleTasks.map((task) => (
               <button
@@ -384,7 +394,7 @@ export function TaskCenter({
                     setResultId(task.id);
                   }
                 }}
-                title={task.downloadUrl ? "Скачать готовый файл" : undefined}
+                title={task.downloadUrl ? uiText("Скачать готовый файл") : undefined}
                 type="button"
               >
                 <span className="task-ledger-operation">
@@ -393,19 +403,19 @@ export function TaskCenter({
                 </span>
                 <span><span className={`task-status is-${task.column.toLowerCase()}`}>{task.statusLabel}</span></span>
                 <span className="task-ledger-result">
-                  <strong>{progressLabel(task)}</strong>
+                  <strong>{<UiText text={progressLabel(task, uiLocale) ?? ""} />}</strong>
                   {task.progressTotal > 0 && <span className="task-card-progress"><i style={{ width: `${taskPercent(task)}%` }} /></span>}
                 </span>
                 <span className="task-ledger-time">
-                  <time>{formatRelativeDate(task.createdAt)}</time>
-                  {operationDurationLabel(task) && <small>За {operationDurationLabel(task)}</small>}
+                  <time>{formatRelativeDate(task.createdAt, uiLocale)}</time>
+                  {operationDurationLabel(task) && <small><UiText text="За" after=" " />{<UiText text={operationDurationLabel(task) ?? ""} />}</small>}
                   <code>{shortId(task.id)}</code>
                 </span>
               </button>
             )) : (
               <div className="task-ledger-empty">
-                <strong>Операций по выбранным условиям нет</strong>
-                <span>Измените фильтр или запустите новую задачу.</span>
+                <strong><UiText text="Операций по выбранным условиям нет" /></strong>
+                <span><UiText text="Измените фильтр или запустите новую задачу." /></span>
               </div>
             )}
           </section>
@@ -417,11 +427,11 @@ export function TaskCenter({
             <>
               {resultTask.retryable && (
                 <button
-                  aria-label={busyId === resultTask.id ? "Повтор запускается" : resultTask.retryLabel}
+                  aria-label={busyId === resultTask.id ? uiText("Повтор запускается") : resultTask.retryLabel}
                   className="operation-result-header-action"
                   disabled={busyId === resultTask.id}
                   onClick={() => void mutate(resultTask, "retry")}
-                  title={busyId === resultTask.id ? "Повтор запускается…" : resultTask.retryLabel}
+                  title={busyId === resultTask.id ? uiText("Повтор запускается…") : resultTask.retryLabel}
                   type="button"
                 >
                   <OperationRetryIcon />
@@ -429,11 +439,11 @@ export function TaskCenter({
               )}
               {resultTask.cancellable && (
                 <button
-                  aria-label={busyId === resultTask.id ? "Операция останавливается" : "Остановить операцию"}
+                  aria-label={busyId === resultTask.id ? uiText("Операция останавливается") : uiText("Остановить операцию")}
                   className="operation-result-header-action is-danger"
                   disabled={busyId === resultTask.id}
                   onClick={() => setStopConfirmation(resultTask)}
-                  title={busyId === resultTask.id ? "Останавливаем…" : "Остановить операцию"}
+                  title={busyId === resultTask.id ? uiText("Останавливаем…") : uiText("Остановить операцию")}
                   type="button"
                 >
                   <OperationStopIcon />
@@ -441,7 +451,7 @@ export function TaskCenter({
               )}
             </>
           )}
-          description={`${resultTask.description} · ${formatDateTime(resultTask.createdAt)}`}
+          description={`${resultTask.description} · ${formatDateTime(resultTask.createdAt, uiLocale)}`}
           kind={resultTask.resultKind}
           onClose={() => setResultId(undefined)}
           operationId={resultTask.id}
@@ -466,7 +476,7 @@ export function TaskCenter({
   );
 }
 
-function frequencyTask(value: FrequencyCollectionSummary): ProjectTask {
+function frequencyTask(value: FrequencyCollectionSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const completed = value.completedKeywords + value.failedKeywords;
   const routeTrail = connectorRouteTrail(value.connectorAttempts);
   return {
@@ -479,28 +489,28 @@ function frequencyTask(value: FrequencyCollectionSummary): ProjectTask {
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
-    retryable: ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
+    retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
     retryLabel: "Повторить ошибки",
     inputFacts: [
       { label: "Источник", value: providerLabel(value.provider) },
       { label: "Виды частотности", value: value.types.map(frequencyTypeLabel).join(" · ") },
       { label: "Регион", value: value.regionCode },
       { label: "Устройство", value: frequencyDeviceLabel(value.device) },
-      { label: "Ключей", value: formatInteger(value.selectedKeywords) },
+      { label: "Ключей", value: formatInteger(value.selectedKeywords, uiLocale) },
       ...(value.routingScope
         ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
         : []),
       ...(routeTrail ? [{ label: "Попытки", value: routeTrail }] : [])
     ],
     resultFacts: [
-      { label: "Обработано", value: formatInteger(value.completedKeywords) },
-      { label: "С ошибкой", value: formatInteger(value.failedKeywords) },
+      { label: "Обработано", value: formatInteger(value.completedKeywords, uiLocale) },
+      { label: "С ошибкой", value: formatInteger(value.failedKeywords, uiLocale) },
       { label: "Этап", value: operationStageLabel(value.stage, value.status) }
     ]
   };
 }
 
-function aiAnswerTask(value: AiAnswerCollectionSummary): ProjectTask {
+function aiAnswerTask(value: AiAnswerCollectionSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const completed = value.completedKeywords + value.failedKeywords;
   const routeTrail = connectorRouteTrail(value.connectorAttempts);
   const competitorCollection = isCompetitorCollection(value);
@@ -533,21 +543,21 @@ function aiAnswerTask(value: AiAnswerCollectionSummary): ProjectTask {
       { label: "Поисковая система", value: value.searchEngine === "YANDEX" ? "Яндекс" : "Google" },
       { label: "Регион", value: value.regionCode },
       { label: "Устройство", value: frequencyDeviceLabel(value.device) },
-      { label: "Ключей", value: formatInteger(value.selectedKeywords) },
+      { label: "Ключей", value: formatInteger(value.selectedKeywords, uiLocale) },
       ...(value.routingScope
         ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
         : []),
       ...(routeTrail ? [{ label: "Попытки", value: routeTrail }] : [])
     ],
     resultFacts: [
-      { label: "Сохранено", value: formatInteger(value.completedKeywords) },
-      { label: "С ошибкой", value: formatInteger(value.failedKeywords) },
+      { label: "Сохранено", value: formatInteger(value.completedKeywords, uiLocale) },
+      { label: "С ошибкой", value: formatInteger(value.failedKeywords, uiLocale) },
       { label: "Этап", value: operationStageLabel(value.stage, value.status) }
     ]
   };
 }
 
-function clusteringTask(value: ClusteringRunSummary): ProjectTask {
+function clusteringTask(value: ClusteringRunSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const completed = value.completedKeywords + value.failedKeywords;
   const routeTrail = connectorRouteTrail(value.connectorAttempts);
   const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
@@ -586,24 +596,24 @@ function clusteringTask(value: ClusteringRunSummary): ProjectTask {
         ? value.frequencyTypes.map(clusteringFrequencyTypeLabel).join(", ")
         : "Не собирать" },
       { label: "Главные страницы", value: value.excludeMainPages ? "Исключать" : "Учитывать" },
-      { label: "Стоп-домены", value: formatInteger(value.stopDomains.length) },
+      { label: "Стоп-домены", value: formatInteger(value.stopDomains.length, uiLocale) },
       { label: "Перекластеризация", value: value.replaceExistingClusters ? "Разрешена" : "Не менять готовые кластеры" },
-      { label: "Запросов", value: formatInteger(value.selectedKeywords) },
+      { label: "Запросов", value: formatInteger(value.selectedKeywords, uiLocale) },
       ...(value.routingScope
         ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
         : []),
       ...(routeTrail ? [{ label: "Попытки", value: routeTrail }] : [])
     ],
     resultFacts: [
-      { label: "Обработано", value: formatInteger(value.completedKeywords) },
-      { label: "Кластеров", value: value.clusterCount === undefined ? "—" : formatInteger(value.clusterCount) },
-      { label: "Без кластера", value: value.unclusteredCount === undefined ? "—" : formatInteger(value.unclusteredCount) },
+      { label: "Обработано", value: formatInteger(value.completedKeywords, uiLocale) },
+      { label: "Кластеров", value: value.clusterCount === undefined ? "—" : formatInteger(value.clusterCount, uiLocale) },
+      { label: "Без кластера", value: value.unclusteredCount === undefined ? "—" : formatInteger(value.unclusteredCount, uiLocale) },
       { label: "Этап", value: operationStageLabel(value.stage, value.status) }
     ]
   };
 }
 
-function rankTask(value: RankJobSummary): ProjectTask {
+function rankTask(value: RankJobSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const result = value.result;
   const provider = providerLabel(value.provider);
   const searchContext = rankSearchContextLabel(value);
@@ -632,7 +642,7 @@ function rankTask(value: RankJobSummary): ProjectTask {
         : []),
       ...(depthLabel ? [{ label: "Глубина", value: depthLabel }] : []),
       { label: "Профиль съёма", value: value.trackingContextId },
-      { label: "Ключей", value: formatInteger(Number(value.progress.total)) },
+      { label: "Ключей", value: formatInteger(Number(value.progress.total), uiLocale) },
       { label: "Этап", value: rankStageLabel(value.stage) },
       ...(value.routingScope
         ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
@@ -640,21 +650,21 @@ function rankTask(value: RankJobSummary): ProjectTask {
       ...(routeTrail ? [{ label: "Попытки", value: routeTrail }] : [])
     ],
     resultFacts: result ? [
-      { label: "Сохранено", value: formatInteger(Number(result.persistedCount)) },
-      { label: "Найдено", value: formatInteger(Number(result.foundCount)) },
-      { label: "Не найдено", value: formatInteger(Number(result.notFoundCount)) },
-      { label: "Ошибок", value: formatInteger(Number(result.failedCount)) }
+      { label: "Сохранено", value: formatInteger(Number(result.persistedCount), uiLocale) },
+      { label: "Найдено", value: formatInteger(Number(result.foundCount), uiLocale) },
+      { label: "Не найдено", value: formatInteger(Number(result.notFoundCount), uiLocale) },
+      { label: "Ошибок", value: formatInteger(Number(result.failedCount), uiLocale) }
     ] : [
-      { label: "Обработано", value: `${formatInteger(Number(value.progress.current))} из ${formatInteger(Number(value.progress.total))}` }
+      { label: "Обработано", value: `${formatInteger(Number(value.progress.current), uiLocale)} из ${formatInteger(Number(value.progress.total), uiLocale)}` }
     ]
   };
 }
 
-function crawlTask(value: TechnicalCrawlSummary): ProjectTask {
+function crawlTask(value: TechnicalCrawlSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const httpStatusCheck = value.config.purpose === "HTTP_STATUS_CHECK";
   return {
     id: value.id, kind: "CRAWL", resultKind: "crawl", title: httpStatusCheck ? "Обход сайта" : "Технический аудит",
-    description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls)} страниц`,
+    description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls, uiLocale)} страниц`,
     statusLabel: operationStatusLabel(value.status), column: taskColumn(value.status), progressCurrent: value.processedUrls,
     progressTotal: Math.max(value.discoveredUrls, value.processedUrls), createdAt: value.createdAt,
     ...(value.startedAt ? { startedAt: value.startedAt } : {}),
@@ -664,23 +674,23 @@ function crawlTask(value: TechnicalCrawlSummary): ProjectTask {
     retryLabel: "Повторить",
     inputFacts: [
       { label: "Стартовые URL", value: crawlStartLabel(value.config.startUrls) },
-      { label: "Лимит страниц", value: formatInteger(value.config.maxUrls) },
+      { label: "Лимит страниц", value: formatInteger(value.config.maxUrls, uiLocale) },
       { label: "Глубина", value: String(value.config.maxDepth) },
-      { label: "Скорость", value: `${formatInteger(value.config.requestsPerMinute)} запросов/мин` }
+      { label: "Скорость", value: `${formatInteger(value.config.requestsPerMinute, uiLocale)} запросов/мин` }
     ],
     resultFacts: [
-      { label: "Обнаружено", value: formatInteger(value.discoveredUrls) },
-      { label: "Обработано", value: formatInteger(value.processedUrls) },
-      { label: "Успешно", value: formatInteger(value.successfulUrls) },
-      { label: "Ошибок загрузки", value: formatInteger(value.failedUrls) },
+      { label: "Обнаружено", value: formatInteger(value.discoveredUrls, uiLocale) },
+      { label: "Обработано", value: formatInteger(value.processedUrls, uiLocale) },
+      { label: "Успешно", value: formatInteger(value.successfulUrls, uiLocale) },
+      { label: "Ошибок загрузки", value: formatInteger(value.failedUrls, uiLocale) },
       ...(httpStatusCheck
         ? []
-        : [{ label: "SEO-проблем", value: formatInteger(value.issueCount) }])
+        : [{ label: "SEO-проблем", value: formatInteger(value.issueCount, uiLocale) }])
     ]
   };
 }
 
-function researchTask(value: KeywordResearchRunSummary): ProjectTask {
+function researchTask(value: KeywordResearchRunSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const keysSo = value.source === "KEYS_SO";
   const providerName = value.provider === "XMLSTOCK"
     ? "XMLStock"
@@ -706,23 +716,23 @@ function researchTask(value: KeywordResearchRunSummary): ProjectTask {
             { label: "База", value: (value.database ?? "msk").toUpperCase() }
           ]
         : [
-            { label: "Исходных фраз", value: formatInteger(value.seedCount ?? 0) },
+            { label: "Исходных фраз", value: formatInteger(value.seedCount ?? 0, uiLocale) },
             { label: "Регион", value: value.regionCode === "225" ? "Россия" : value.regionCode ?? "225" }
           ]),
-      { label: "Лимит ключей", value: formatInteger(value.maxKeywords) }
+      { label: "Лимит ключей", value: formatInteger(value.maxKeywords, uiLocale) }
     ],
     resultFacts: [
-      { label: "Найдено", value: formatInteger(value.collectedKeywords) },
-      { label: "Выбрано", value: formatInteger(value.selectedKeywords) },
-      { label: "Импортировано", value: formatInteger(value.importedKeywords) },
-      { label: "Доступно у источника", value: value.totalAvailable === undefined ? "—" : formatInteger(value.totalAvailable) }
+      { label: "Найдено", value: formatInteger(value.collectedKeywords, uiLocale) },
+      { label: "Выбрано", value: formatInteger(value.selectedKeywords, uiLocale) },
+      { label: "Импортировано", value: formatInteger(value.importedKeywords, uiLocale) },
+      { label: "Доступно у источника", value: value.totalAvailable === undefined ? "—" : formatInteger(value.totalAvailable, uiLocale) }
     ]
   };
 }
 
 function exportTask(
   value: SemanticExportJobSummary,
-  projectId: string
+  projectId: string, uiLocale: string = "ru-RU"
 ): ProjectTask {
   const complete = value.status === "COMPLETED";
   const total = value.totalRows ?? value.rowCount ?? value.processedRows;
@@ -754,7 +764,7 @@ function exportTask(
       { label: "Охват", value: exportScopeLabel(value.scope) }
     ],
     resultFacts: [
-      { label: "Строк", value: formatInteger(value.rowCount ?? value.processedRows) },
+      { label: "Строк", value: formatInteger(value.rowCount ?? value.processedRows, uiLocale) },
       ...(value.sizeBytes ? [{ label: "Размер", value: formatByteString(value.sizeBytes) }] : [])
     ]
   };
@@ -790,12 +800,12 @@ function clusteringFrequencyTypeLabel(type: string): string { return ({ BASE: "�
 function frequencyDeviceLabel(device: string): string { return ({ ALL: "Все устройства", DESKTOP: "Десктоп", MOBILE: "Мобильные", PHONE_ONLY: "Телефоны", TABLET_ONLY: "Планшеты" } as Readonly<Record<string, string>>)[device] ?? device; }
 function rankStageLabel(stage: string): string { return ({ PREPARING_SCOPE: "Подготовка ключей", WAITING_FOR_QUEUE: "Ожидает очереди", AUTHORIZING: "Проверка доступа", SUBMITTING: "Отправка провайдеру", POLLING: "Ожидание провайдера", FETCHING_RESULT: "Получение результата", STAGING_RESULT: "Обработка результата", PERSISTING_RESULT: "Сохранение позиций", SUBMIT_OUTCOME_UNKNOWN: "Требует проверки", FINISHED: "Завершено" } as Readonly<Record<string, string>>)[stage] ?? stage; }
 function crawlStartLabel(urls: readonly string[]): string { const first = urls[0] ?? "—"; return urls.length > 1 ? `${first} · ещё ${urls.length - 1}` : first; }
-function progressLabel(task: ProjectTask): string { return task.downloadUrl ? "Скачать файл" : task.progressTotal < 1 ? task.column === "COMPLETED" ? "Готово" : "Ожидает данных" : `${formatInteger(task.progressCurrent)} из ${formatInteger(task.progressTotal)}`; }
+function progressLabel(task: ProjectTask, uiLocale: string = "ru-RU"): string { return task.downloadUrl ? "Скачать файл" : task.progressTotal < 1 ? task.column === "COMPLETED" ? "Готово" : "Ожидает данных" : `${formatInteger(task.progressCurrent, uiLocale)} из ${formatInteger(task.progressTotal, uiLocale)}`; }
 function taskPercent(task: ProjectTask): number { return task.progressTotal < 1 ? 0 : Math.min(100, Math.round(task.progressCurrent / task.progressTotal * 100)); }
 function shortId(value: string): string { return value.slice(0, 8); }
-function formatInteger(value: number): string { return new Intl.NumberFormat("ru-RU").format(value); }
-function formatDateTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date); }
-function formatRelativeDate(value: string): string { const date = new Date(value); if (Number.isNaN(date.getTime())) return "—"; const difference = Date.now() - date.getTime(); if (difference < 60_000) return "только что"; if (difference < 3_600_000) return `${Math.floor(difference / 60_000)} мин назад`; if (difference < 86_400_000) return `${Math.floor(difference / 3_600_000)} ч назад`; return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short" }).format(date); }
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string { return new Intl.NumberFormat(uiLocale).format(value); }
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(uiLocale, { dateStyle: "medium", timeStyle: "short" }).format(date); }
+function formatRelativeDate(value: string, uiLocale: string = "ru-RU"): string { const date = new Date(value); if (Number.isNaN(date.getTime())) return "—"; const difference = Date.now() - date.getTime(); if (difference < 60_000) return "только что"; if (difference < 3_600_000) return `${Math.floor(difference / 60_000)} мин назад`; if (difference < 86_400_000) return `${Math.floor(difference / 3_600_000)} ч назад`; return new Intl.DateTimeFormat(uiLocale, { day: "2-digit", month: "short" }).format(date); }
 function taskError(error: unknown): string { return error instanceof BrowserApiError ? error.message : "Не удалось обновить один из источников задач."; }
 function exportFormatLabel(value: SemanticExportJobSummary["format"]): string { return value === "GOOGLE_CSV" ? "Google CSV" : value; }
 function exportScopeLabel(value: SemanticExportJobSummary["scope"]): string { return ({ SELECTED: "Выбранные строки", CURRENT_PAGE: "Текущая страница", CURRENT_FILTER: "Текущий фильтр", GROUP_SUBTREE: "Дерево папки", FOLDER_MAP: "Карта сайта по папкам", FULL_CORE: "Весь проект" } as const)[value]; }

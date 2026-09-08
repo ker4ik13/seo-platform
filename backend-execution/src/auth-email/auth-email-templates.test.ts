@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
+  internalAuthEmailMaterialDecision,
   transactionalEmailEventTypesV1,
   type InternalAuthEmailReadyReceiptDecisionV1,
   type InternalAuthEmailReadyMaterialDecisionV1
@@ -12,6 +13,22 @@ import {
 } from "./auth-email-templates.js";
 
 const eventId = "01900000-0000-7000-8000-000000000001";
+
+test("billing notices are localized, escape workspace content and reuse the delivery Message-ID", () => {
+  for (const locale of ["ru", "en"]) {
+    const input = { schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA, decision: "READY_NOTICE", eventId, eventType: transactionalEmailEventTypesV1.billingNoticeRequested, recipient: "person@example.test", locale, kind: "SUBSCRIPTION_ENDING_1D", workspaceName: '<script>alert("x")</script>', periodEnd: "2026-09-09T12:00:00.000Z", billingUrl: "https://app.example.test/app/settings/billing" };
+    const material = internalAuthEmailMaterialDecision(input);
+    assert.equal(material.decision, "READY_NOTICE");
+    if (material.decision !== "READY_NOTICE") throw new Error("Invalid material");
+    const first = renderAuthEmail(material, "mail.example.test"), replay = renderAuthEmail(material, "mail.example.test");
+    assert.deepEqual(first, replay);
+    assert.match(first.subject, locale === "ru" ? /меньше суток/u : /within 24 hours/u);
+    assert.ok(first.html?.includes("&lt;script&gt;")); assert.ok(!first.html?.includes("<script>"));
+    for (const billingUrl of ["javascript:alert(1)", "https://app.example.test/app/settings/billing#token=secret", "https://app.example.test/app/settings/billing?secret=x", "https://user:password@app.example.test/app/settings/billing"]) assert.throws(() => internalAuthEmailMaterialDecision({ ...input, billingUrl }));
+    assert.throws(() => internalAuthEmailMaterialDecision({ ...input, amountMinor: -1 }));
+    assert.throws(() => internalAuthEmailMaterialDecision({ ...input, periodEnd: "2026-99-99T00:00:00.000Z" }));
+  }
+});
 
 test("renders localized verification, reset and invite messages with one stable Message-ID", () => {
   for (const [eventType, locale, expectedSubject] of [

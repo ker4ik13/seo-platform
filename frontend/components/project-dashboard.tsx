@@ -26,6 +26,8 @@ import { Icon } from "./icon";
 import { OperationResultModal } from "./operation-result-modal";
 import { ProjectPositionHistoryChart } from "./project-position-history-chart";
 import { ProviderLogo } from "./provider-logo";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface DashboardJob {
   readonly id: string;
@@ -58,6 +60,8 @@ export function ProjectDashboard({
   projectName: string;
   userName: string;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const [data, setData] = useState<DashboardData>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -195,56 +199,55 @@ export function ProjectDashboard({
       <section className="dashboard-heading">
         <div>
           <p className="dashboard-context">{projectName}</p>
-          <h1>Добрый день, {firstName(userName)}</h1>
-          <p>Семантика, видимость и текущие операции проекта — в одной сводке.</p>
+          <h1><UiText text="Добрый день," after=" " />{firstName(userName)}</h1>
+          <p><UiText text="Семантика, видимость и текущие операции проекта — в одной сводке." /></p>
         </div>
         <div className="dashboard-heading-actions">
-          <a className="secondary-button" href="/app/tasks">Все операции</a>
+          <a className="secondary-button" href="/app/tasks"><UiText text="Все операции" /></a>
           <a className="primary-button" href="/app/semantics">
             <Icon name="plus" />
-            <span>Добавить запросы</span>
+            <span><UiText text="Добавить запросы" /></span>
           </a>
         </div>
       </section>
 
       {error && (
         <div className="dashboard-data-alert" role="alert">
-          <span>{error}</span>
-          <button aria-label="Повторить загрузку" onClick={() => void load()} type="button">
-            Повторить
-          </button>
+          <span>{<UiText text={error ?? ""} />}</span>
+          <button aria-label={uiText("Повторить загрузку")} onClick={() => void load()} type="button">
+            <UiText text="Повторить" /></button>
         </div>
       )}
 
-      <section className="metric-grid dashboard-live-metrics" aria-label="Ключевые показатели">
+      <section className="metric-grid dashboard-live-metrics" aria-label={uiText("Ключевые показатели")}>
         <DashboardMetric
-          label="Запросов"
-          value={data ? formatInteger(data.keywordCount) : loading ? "…" : "0"}
-          hint="В семантическом ядре"
+          label={uiText("Запросов")}
+          value={data ? formatInteger(data.keywordCount, uiLocale) : loading ? "…" : "0"}
+          hint={uiText("В семантическом ядре")}
           tone="violet"
         />
         <DashboardMetric
-          label="Отслеживается"
-          value={data ? formatInteger(data.trackedCount) : loading ? "…" : "0"}
-          hint={data ? `${trackedShare}% от всех запросов` : "Для съёма позиций"}
+          label={uiText("Отслеживается")}
+          value={data ? formatInteger(data.trackedCount, uiLocale) : loading ? "…" : "0"}
+          hint={data ? uiText("{0}% от всех запросов", [String(trackedShare)]) : uiText("Для съёма позиций")}
           tone="blue"
         />
         <DashboardMetric
-          label="Средняя позиция"
-          value={data?.positionSummary.averagePosition !== undefined ? formatPosition(data.positionSummary.averagePosition) : loading ? "…" : "—"}
-          hint={data?.positionSummary.positionedKeywordCount ? `По ${formatInteger(data.positionSummary.positionedKeywordCount)} запросам с позицией` : "Позиций пока нет"}
+          label={uiText("Средняя позиция")}
+          value={data?.positionSummary.averagePosition !== undefined ? formatPosition(data.positionSummary.averagePosition, uiLocale) : loading ? "…" : "—"}
+          hint={data?.positionSummary.positionedKeywordCount ? uiText("По {0} запросам с позицией", [String(formatInteger(data.positionSummary.positionedKeywordCount, uiLocale))]) : uiText("Позиций пока нет")}
           tone="green"
         />
         <DashboardMetric
-          label="В Топ-10"
-          value={data ? formatInteger(data.positionSummary.top10KeywordCount) : loading ? "…" : "0"}
-          hint={data ? `${percentage(data.positionSummary.top10KeywordCount, data.positionSummary.positionedKeywordCount)}% запросов с позицией` : "Текущие позиции"}
+          label={uiText("В Топ-10")}
+          value={data ? formatInteger(data.positionSummary.top10KeywordCount, uiLocale) : loading ? "…" : "0"}
+          hint={data ? uiText("{0}% запросов с позицией", [String(percentage(data.positionSummary.top10KeywordCount, data.positionSummary.positionedKeywordCount))]) : uiText("Текущие позиции")}
           tone="amber"
         />
         <DashboardMetric
-          label="В Топ-30"
-          value={data ? formatInteger(data.positionSummary.top30KeywordCount) : loading ? "…" : "0"}
-          hint={data ? `${percentage(data.positionSummary.top30KeywordCount, data.positionSummary.positionedKeywordCount)}% запросов с позицией` : "Текущие позиции"}
+          label={uiText("В Топ-30")}
+          value={data ? formatInteger(data.positionSummary.top30KeywordCount, uiLocale) : loading ? "…" : "0"}
+          hint={data ? uiText("{0}% запросов с позицией", [String(percentage(data.positionSummary.top30KeywordCount, data.positionSummary.positionedKeywordCount))]) : uiText("Текущие позиции")}
           tone="rose"
         />
       </section>
@@ -253,10 +256,10 @@ export function ProjectDashboard({
         <article className="panel dashboard-rank-panel dashboard-rank-panel-full">
           <header className="panel-header">
             <div>
-              <h2>Позиции по ТОПам</h2>
-              <p>Динамика запросов в Топ-3, 5, 10, 30 и 50 — до 30 срезов</p>
+              <h2><UiText text="Позиции по ТОПам" /></h2>
+              <p><UiText text="Динамика запросов в Топ-3, 5, 10, 30 и 50 — до 30 срезов" /></p>
             </div>
-            <a className="text-button" href="/app/semantics">Открыть семантику</a>
+            <a className="text-button" href="/app/semantics"><UiText text="Открыть семантику" /></a>
           </header>
           {data ? (
             <ProjectPositionHistoryChart
@@ -277,9 +280,9 @@ export function ProjectDashboard({
           ) : (
             <div className="panel-empty compact dashboard-panel-empty">
               <span className="state-icon"><Icon name="trend" /></span>
-              <strong>{loading ? "Загружаем историю позиций…" : "История позиций недоступна"}</strong>
-              <p>{loading ? "Подготавливаем данные графика." : "Повторите загрузку проектного обзора."}</p>
-              {!loading && <a className="secondary-button" href="/app/semantics">Запустить съём</a>}
+              <strong>{loading ? <UiText text="Загружаем историю позиций…" /> : <UiText text="История позиций недоступна" />}</strong>
+              <p>{loading ? <UiText text="Подготавливаем данные графика." /> : <UiText text="Повторите загрузку проектного обзора." />}</p>
+              {!loading && <a className="secondary-button" href="/app/semantics"><UiText text="Запустить съём" /></a>}
             </div>
           )}
         </article>
@@ -289,8 +292,8 @@ export function ProjectDashboard({
       <section className="dashboard-lower-grid">
         <article className="panel dashboard-jobs-panel">
           <header className="panel-header">
-            <div><h2>Последние операции</h2><p>Ход и результат фоновых задач проекта</p></div>
-            <a className="text-button" href="/app/tasks">Показать все</a>
+            <div><h2><UiText text="Последние операции" /></h2><p><UiText text="Ход и результат фоновых задач проекта" /></p></div>
+            <a className="text-button" href="/app/tasks"><UiText text="Показать все" /></a>
           </header>
           {jobs.length > 0 ? (
             <div className="dashboard-job-list">
@@ -307,40 +310,40 @@ export function ProjectDashboard({
                   )}
                   <span>
                     <strong>{job.title}</strong>
-                    <small>{formatDateTime(job.createdAt)}</small>
+                    <small>{formatDateTime(job.createdAt, uiLocale)}</small>
                   </span>
                   <span className={activeStatus(job.status) ? "dashboard-job-status active" : failureStatus(job.status) ? "dashboard-job-status error" : "dashboard-job-status"}>
-                    {operationStatusLabel(job.status, job.stage)}
+                    {<UiText text={operationStatusLabel(job.status, job.stage) ?? ""} />}
                   </span>
                 </button>
               ))}
             </div>
           ) : (
             <div className="panel-empty compact dashboard-panel-empty">
-              <strong>Операций пока нет</strong>
-              <p>Они появятся после первого сбора или проверки.</p>
+              <strong><UiText text="Операций пока нет" /></strong>
+              <p><UiText text="Они появятся после первого сбора или проверки." /></p>
             </div>
           )}
         </article>
 
         <article className="panel dashboard-work-panel">
           <header className="panel-header">
-            <div><h2>Работа проекта</h2><p>Состояние очереди и быстрый запуск</p></div>
+            <div><h2><UiText text="Работа проекта" /></h2><p><UiText text="Состояние очереди и быстрый запуск" /></p></div>
           </header>
-          <div className="dashboard-workload" aria-label="Состояние операций">
-            <WorkloadStat label="Активно" value={activeCount} tone="active" />
-            <WorkloadStat label="Завершено" value={completedCount} tone="success" />
-            <WorkloadStat label="С ошибкой" value={failedCount} tone="error" />
+          <div className="dashboard-workload" aria-label={uiText("Состояние операций")}>
+            <WorkloadStat label={uiText("Активно")} value={activeCount} tone="active" />
+            <WorkloadStat label={uiText("Завершено")} value={completedCount} tone="success" />
+            <WorkloadStat label={uiText("С ошибкой")} value={failedCount} tone="error" />
           </div>
           <div className="dashboard-quick-actions">
-            <QuickAction href="/app/semantics" icon="semantic" label="Добавить запросы" />
-            <QuickAction href="/app/semantics" icon="positions" label="Проверить позиции" />
+            <QuickAction href="/app/semantics" icon="semantic" label={uiText("Добавить запросы")} />
+            <QuickAction href="/app/semantics" icon="positions" label={uiText("Проверить позиции")} />
           </div>
         </article>
       </section>
       {selectedJob && (
         <OperationResultModal
-          description={`${selectedJob.provider ? dashboardProviderLabel(selectedJob.provider) : "SEOньорита"} · ${formatDateTime(selectedJob.createdAt)}`}
+          description={`${selectedJob.provider ? dashboardProviderLabel(selectedJob.provider) : "SEOньорита"} · ${formatDateTime(selectedJob.createdAt, uiLocale)}`}
           kind={selectedJob.resultKind}
           onClose={() => setSelectedJob(undefined)}
           operationId={selectedJob.id}
@@ -381,10 +384,11 @@ function WorkloadStat({
   value: number;
   tone: "active" | "success" | "error";
 }>) {
+  const uiLocale = useUiLocale().locale;
   return (
     <div className={`dashboard-workload-stat is-${tone}`}>
       <span>{label}</span>
-      <strong>{formatInteger(value)}</strong>
+      <strong>{formatInteger(value, uiLocale)}</strong>
     </div>
   );
 }
@@ -489,22 +493,22 @@ function percentage(value: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round(value / total * 100)));
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
-function formatPosition(value: number): string {
-  return new Intl.NumberFormat("ru-RU", {
+function formatPosition(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale, {
     minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
     maximumFractionDigits: 1
   }).format(value);
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date);
+    : new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
 function firstName(value: string): string {

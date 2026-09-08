@@ -1,0 +1,232 @@
+/* Shared settings surface: account, workspace and project. Keep this after
+   styles.css so screen-specific legacy rules cannot shrink the common UI. */
+.content.content-settings {
+  --settings-gap: 20px;
+  --settings-card-padding: 22px;
+  --settings-radius: 12px;
+  --muted: #626b80;
+  padding: 24px clamp(16px, 2vw, 32px) 48px !important;
+}
+.content.content-settings:has(> .settings-tabs) {
+  gap: 24px;
+  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-rows: max-content max-content;
+  grid-auto-rows: max-content;
+}
+.content.content-settings > .page-heading {
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  gap: 16px;
+  margin: 0;
+  min-height: 0;
+  padding: 0 0 2px;
+  position: static;
+}
+.content.content-settings > .page-heading h1 { font-size: 25px !important; line-height: 1.25; }
+.content.content-settings > .page-heading > div:first-child > p:last-child {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 7px;
+  max-width: 760px;
+}
+.content.content-settings > .settings-tabs {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: block;
+  margin: 0;
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 8px 0;
+  position: sticky;
+  scrollbar-width: thin;
+  top: 0;
+}
+.settings-navigation-toggle { display: none; }
+.settings-navigation-links { display: grid; gap: 4px; }
+.content.content-settings .settings-tabs a {
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  gap: 10px;
+  line-height: 1.4;
+  min-height: 42px;
+  padding: 9px 12px;
+  white-space: normal;
+}
+.content.content-settings .settings-tabs a svg { margin: 0; }
+.content.content-settings .settings-tabs a.active { background: #ece8ff; color: #5130cf; font-weight: 700; }
+.content.content-settings .settings-tabs-heading {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  margin: 16px 12px 5px;
+}
+.content.content-settings > :not(.page-heading):not(.settings-tabs):not(.app-breadcrumbs) { max-width: 1120px; }
+.content.content-settings :is(.settings-stack, .billing-stack, .integration-settings-stack, .project-settings-stack) {
+  align-content: start;
+  gap: var(--settings-gap);
+}
+.content.content-settings :is(.panel, .project-card, .settings-health-card, .settings-attention-panel) {
+  border-color: var(--line);
+  border-radius: var(--settings-radius);
+  box-shadow: none;
+  min-width: 0;
+}
+.content.content-settings .panel { padding: var(--settings-card-padding); }
+.content.content-settings .panel-empty { min-height: 180px; }
+.content.content-settings :is(.security-card, .security-flow) { align-content: start; gap: 18px; }
+/* aria-busy announces saving; it must not switch a populated card to two columns. */
+.content.content-settings .security-card[aria-busy="true"] { grid-template-columns: minmax(0, 1fr); }
+.content.content-settings .security-card-header { flex-wrap: wrap; gap: 12px; }
+.content.content-settings .security-card-header > div { flex: 1 1 auto; }
+.content.content-settings :is(h2, .security-card-header h2) { font-size: 17px; line-height: 1.4; }
+.content.content-settings :is(p, .inline-alert, .checkbox-field, .security-flow > p) { font-size: 13px; line-height: 1.6; }
+.content.content-settings :is(small, .billing-label, .settings-card-eyebrow, .security-status) { font-size: 11px; line-height: 1.5; }
+.content.content-settings :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
+.content.content-settings .custom-select-trigger {
+  border-radius: 8px;
+  font-size: 14px;
+  min-height: 42px;
+}
+.content.content-settings :is(.form-field, .billing-form-grid > label) { font-size: 13px; gap: 8px; min-width: 0; }
+.content.content-settings .form-row { gap: 16px; }
+.content.content-settings :is(.primary-button, .secondary-button, .danger-button) {
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  min-height: 40px;
+  padding: 9px 14px;
+}
+.content.content-settings .settings-savebar,
+.content.content-settings #project-settings-form .settings-savebar {
+  backdrop-filter: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 18px 0 0;
+  position: static;
+}
+.content.content-settings .account-security-grid { gap: var(--settings-gap); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.content.content-settings .account-security-grid > .security-card { min-height: 0; }
+.content.content-settings .account-profile-heading > div { flex-basis: 170px; }
+.content.content-settings .account-profile-identity { gap: 5px; }
+.content.content-settings :is(.account-profile-identity > span, .account-password-details > span, .account-password-details > small) { font-size: 12px; }
+.content.content-settings .workspace-avatar-card { min-height: 0; }
+.content.content-settings :is(.workspace-avatar-actions, .account-profile-actions) { justify-content: flex-start; margin: 0; }
+.content.content-settings .workspace-avatar-actions > label { width: auto; }
+.content.content-settings .session-row { gap: 12px; padding: 14px; }
+.content.content-settings .session-row-title > strong { font-size: 13px; }
+.content.content-settings .session-metadata { gap: 8px; }
+.content.content-settings .session-metadata dt { font-size: 11px; }
+.content.content-settings .session-metadata dd { font-size: 12px; }
+.content.content-settings .session-network-metadata { font-size: 11px; }
+.content.content-settings .session-privacy-note { padding: 12px; }
+.content.content-settings .billing-overview { gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.content.content-settings .billing-overview > .panel { min-height: 0; padding: var(--settings-card-padding); }
+.content.content-settings :is(.billing-current-plan h2, .billing-balance-card h2, .billing-payment-card h2) { font-size: 26px; }
+.content.content-settings :is(.billing-current-plan p, .billing-balance-card p, .billing-payment-card p, .billing-balance-note, .billing-usage-note) { font-size: 12px; line-height: 1.6; }
+.content.content-settings :is(.billing-usage-grid, .billing-entitlements-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.content.content-settings .billing-usage-meter { padding: 14px; gap: 8px; }
+.content.content-settings :is(.billing-usage-meter > span, .billing-usage-meter > small, .billing-entitlement small, .billing-status, .billing-server-check) { font-size: 11px; }
+.content.content-settings :is(.billing-usage-meter > strong, .billing-entitlement strong) { font-size: 13px; }
+.content.content-settings .billing-plan-grid { gap: 14px; }
+.content.content-settings .billing-checkout { gap: 20px; }
+.content.content-settings .billing-empty { font-size: 13px; line-height: 1.6; }
+.content.content-settings :is(.integration-routing-panel, .team-invite-card, .integration-list-card, .integration-provider-card) { padding: var(--settings-card-padding); }
+.content.content-settings .integration-routing-source-tabs label { font-size: 13px; }
+.content.content-settings .settings-health-card { min-height: 0; }
+.content.content-settings .settings-health-card > header { padding: 16px; }
+.content.content-settings .settings-health-card-body { padding: 16px; }
+.content.content-settings .settings-health-card :is(p, strong) { font-size: 13px; }
+.content.content-settings .settings-health-card :is(small, span) { font-size: 11px; }
+.content.content-settings .settings-attention-row { padding: 14px 16px; }
+.content.content-settings .settings-attention-row strong { font-size: 13px; }
+.content.content-settings .settings-attention-row small { font-size: 11px; }
+
+@media (max-width: 1180px) {
+  .content.content-settings:has(> .settings-tabs) { grid-template-columns: 200px minmax(0, 1fr); gap: 20px; }
+  .content.content-settings .account-security-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1000px) {
+  .content.content-settings { padding: 20px 20px 100px !important; }
+  .content.content-settings:has(> .settings-tabs) { display: flex; flex-direction: column; gap: 20px; }
+  .content.content-settings:has(> .settings-tabs) > * { width: 100%; }
+  .content.content-settings > .settings-tabs {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--settings-radius);
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    position: static;
+  }
+  .settings-navigation-toggle {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    min-height: 62px;
+    padding: 12px 16px;
+    text-align: left;
+    width: 100%;
+  }
+  .settings-navigation-toggle > span:first-child { display: grid; gap: 3px; min-width: 0; }
+  .settings-navigation-toggle small { color: var(--muted); }
+  .settings-navigation-toggle strong { font-size: 14px; line-height: 1.4; }
+  .settings-navigation-toggle > span:last-child { color: var(--brand); font-size: 24px; }
+  .settings-navigation-links { display: none; }
+  .settings-tabs[data-expanded="true"] .settings-navigation-links { border-top: 1px solid var(--line); display: grid; gap: 4px; padding: 8px; }
+  .content.content-settings .settings-tabs a { min-height: 44px; }
+  .content.content-settings .settings-tabs-heading { margin-top: 12px; }
+  .content.content-settings .account-security-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
+  .content.content-settings { --settings-card-padding: 18px; --settings-gap: 16px; padding: 18px 12px 100px !important; }
+  .content.content-settings > .page-heading h1 { font-size: 22px !important; }
+  .content.content-settings :is(.account-security-grid, .billing-overview, .billing-usage-grid, .billing-entitlements-grid, .billing-history, .billing-form-grid, .form-row) { grid-template-columns: minmax(0, 1fr); }
+  .content.content-settings .security-card-header > div { flex: 0 1 auto; }
+  .content.content-settings .settings-savebar { align-items: stretch; }
+  .content.content-settings :is(.primary-button, .secondary-button, .danger-button) { min-height: 44px !important; }
+  .content.content-settings input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
+  .content.content-settings textarea, .content.content-settings .custom-select-trigger { font-size: 16px; min-height: 44px; }
+  .content.content-settings .session-row { padding: 12px; }
+}
+
+.billing-provider-options { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.billing-provider-options > label { align-items: center; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; display: flex; gap: 12px; padding: 14px; }
+.billing-provider-options > label.selected { background: #f7f5ff; border-color: var(--brand); }
+.billing-provider-options > label:has(input:disabled) { cursor: not-allowed; opacity: .6; }
+.billing-provider-options > label > span { display: grid; gap: 5px; }
+.billing-provider-options strong { font-size: 13px; }
+.billing-provider-options small { color: var(--muted); font-size: 11px; }
+@media (max-width: 680px) { .billing-provider-options { grid-template-columns: minmax(0, 1fr); } }
+.telegram-login { display: grid; gap: 12px; }
+.telegram-login-button { width: 100%; }
+.telegram-login-challenge { background: #f7f5ff; border: 1px solid #ded8ff; border-radius: 12px; display: grid; gap: 12px; padding: 18px; text-align: center; }
+.telegram-login-challenge > strong { font-size: 28px; font-variant-numeric: tabular-nums; letter-spacing: .2em; }
+.telegram-login-challenge > span, .telegram-login-challenge > small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.telegram-login-disabled { color: var(--muted); }
+/* Shared paid-operation confirmation, including nested launch dialogs. */
+.operation-charge-card { display: grid; gap: 12px; border: 1px solid var(--line); border-radius: 16px; padding: 24px; background: var(--panel-muted); }
+.operation-charge-card > span { color: var(--muted); font-size: 14px; }
+.operation-charge-card > strong { color: var(--text); font-size: clamp(26px, 5vw, 36px); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.operation-charge-card > div { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.operation-charge-explanation { margin: 18px 0; line-height: 1.6; color: var(--muted); }
+.operation-charge-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; width: 100%; }
+@media (max-width: 520px) { .operation-charge-actions > button { width: 100%; } .operation-charge-card { padding: 18px; } }
+.ui-language-control label { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 13px; }
+.ui-language-control select { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; min-height: 36px; padding: 5px 10px; font: inherit; }
+.ui-language-control small { display: block; color: var(--muted); line-height: 1.4; margin-top: 6px; }
+.auth-language-switcher { position: absolute; right: 24px; top: 22px; z-index: 2; }

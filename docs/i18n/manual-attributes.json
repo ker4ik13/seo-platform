@@ -1,0 +1,14 @@
+[
+  {
+    "file": "frontend/app/app/(protected)/tools/page.tsx",
+    "tag": "ToolSection",
+    "attribute": "description",
+    "text": "Работают с выбранным сайтом, соблюдают его лимиты и сохраняют прогресс."
+  },
+  {
+    "file": "frontend/app/app/(protected)/tools/page.tsx",
+    "tag": "ToolSection",
+    "attribute": "title",
+    "text": "Внутри проекта"
+  }
+]

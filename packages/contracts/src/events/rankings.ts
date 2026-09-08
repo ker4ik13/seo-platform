@@ -2,7 +2,7 @@ import type {
   InternalRankCheckFinalizationReceipt,
   RankCheckFinalStatus
 } from "../api/rank-runs.js";
-import { rankProviderKeywordLimit } from "../api/rank-estimates.js";
+import { rankCommandKeywordLimit } from "../api/rank-policy.js";
 
 export type RankCheckCompletedStatus = Extract<
   RankCheckFinalStatus,
@@ -133,7 +133,7 @@ function assertRankCheckCompletedCounts(input: {
   const persistedCount = parseCount(input.persistedCount);
   const foundCount = parseCount(input.foundCount);
   const notFoundCount = parseCount(input.notFoundCount);
-  const maximumPairCount = BigInt(rankProviderKeywordLimit);
+  const maximumPairCount = BigInt(rankCommandKeywordLimit);
 
   if (
     pairCount === 0n ||

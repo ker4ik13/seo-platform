@@ -10,7 +10,8 @@ import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
   inspectRankScopeBounds,
-  MAX_RANK_SCOPE_ENTRIES,
+  withRankScopeReadPlan,
+  readRankScopeAssignments,
   rankScopeIsMaterializable
 } from "./rank-scope-bounds.js";
 import { semanticRankScopeHash } from "./rank-scope-hash.js";
@@ -45,18 +46,6 @@ const CONTEXT_SELECT = {
   }
 } satisfies Prisma.TrackingContextSelect;
 
-const ASSIGNMENT_SELECT = {
-  id: true,
-  keywordId: true,
-  keyword: {
-    select: {
-      version: true,
-      textOriginal: true,
-      language: true
-    }
-  }
-} satisfies Prisma.TrackingContextKeywordAssignmentSelect;
-
 type ContextRecord = Prisma.TrackingContextGetPayload<{
   select: typeof CONTEXT_SELECT;
 }>;
@@ -84,6 +73,9 @@ export class RankScopeService {
         const includeUntracked = trackingContextIncludesUntracked(
           context.launchProfile
         );
+        const { bounds, materializable, assignments } = await withRankScopeReadPlan(transaction, {
+          workspaceId: input.workspaceId, projectId: input.projectId, contextId: context.id, includeUntracked
+        }, async () => {
         const bounds = await inspectRankScopeBounds(transaction, {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
@@ -92,22 +84,10 @@ export class RankScopeService {
         });
         const materializable = rankScopeIsMaterializable(bounds);
         const assignments = materializable
-          ? await transaction.trackingContextKeywordAssignment.findMany({
-              where: {
-                workspaceId: input.workspaceId,
-                projectId: input.projectId,
-                contextId: context.id,
-                removedAt: null,
-                keyword: {
-                  status: "ACTIVE",
-                  ...(includeUntracked ? {} : { isTracked: true })
-                }
-              },
-              orderBy: { keywordId: "asc" },
-              take: MAX_RANK_SCOPE_ENTRIES + 1,
-              select: ASSIGNMENT_SELECT
-            })
+          ? await readRankScopeAssignments(transaction, { workspaceId: input.workspaceId, projectId: input.projectId, contextId: context.id, includeUntracked })
           : [];
+          return { bounds, materializable, assignments };
+        });
         if (
           materializable &&
           assignments.length !== bounds.assignmentCount
@@ -141,7 +121,7 @@ export class RankScopeService {
           calculatedAt: new Date().toISOString()
         };
       },
-      { isolationLevel: "RepeatableRead" }
+      { isolationLevel: "RepeatableRead", timeout: 30_000 }
     );
   }
 }

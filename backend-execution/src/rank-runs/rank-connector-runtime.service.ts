@@ -140,7 +140,7 @@ export class RankConnectorRuntimeService {
       claim.leaseExpiresAt,
       1,
       settlement.required && settlesOnAcceptedSubmit
-        ? this.config.platformApiCommandTimeoutMs
+        ? this.settlementTimeoutMs() * 2
         : 0
     );
     let quotaPermit: Extract<
@@ -163,6 +163,11 @@ export class RankConnectorRuntimeService {
       }
     }
     try {
+      // Persist the money hold BEFORE any possibly paid provider request.
+      // A crash or an ambiguous response must not expire this reservation.
+      if (settlement.required && settlesOnAcceptedSubmit) {
+        await this.settleUsage("HOLD", settlement, requestIntent, claim.executionId);
+      }
       const permit = await this.broker.authorizeSubmit(
         claim,
         connectorVersion(claim.provider)
@@ -197,6 +202,9 @@ export class RankConnectorRuntimeService {
           claim.executionId
         );
       }
+      if (settlement.required && settlesOnAcceptedSubmit && outcome.status === "REJECTED" && outcome.code !== "INVALID_PROVIDER_RESPONSE") {
+        await this.settleUsage("RELEASE", settlement, requestIntent, claim.executionId);
+      }
       await this.broker.completeSubmit(
         claim,
         permit,
@@ -228,7 +236,7 @@ export class RankConnectorRuntimeService {
       claim.leaseExpiresAt,
       claim.provider === "XMLSTOCK" ? 1 : 2,
       lateSettlement?.required
-        ? this.config.platformApiCommandTimeoutMs * 2
+        ? this.settlementTimeoutMs() * 2
         : 0
     );
     const secret = selectIntegrationCredentialSecret(
@@ -344,6 +352,9 @@ export class RankConnectorRuntimeService {
         });
         return "POLL_PENDING";
       case "REJECTED":
+        if (lateSettlement?.required && outcome.code !== "INVALID_PROVIDER_RESPONSE") {
+          await this.settleUsage("RELEASE", lateSettlement, claim.request, claim.executionId);
+        }
         await this.broker.completePoll(claim, {
           outcome: "REJECTED",
           errorCode: outcome.code
@@ -396,7 +407,7 @@ export class RankConnectorRuntimeService {
   }
 
   private settleUsage(
-    action: "HOLD" | "CAPTURE",
+    action: "HOLD" | "CAPTURE" | "RELEASE",
     settlement: {
       readonly grantId: string;
       readonly required: boolean;
@@ -418,6 +429,7 @@ export class RankConnectorRuntimeService {
     };
     return action === "HOLD"
       ? this.settlements.hold(command, context)
+      : action === "RELEASE" ? this.settlements.release(command, context)
       : this.settlements.capture(command, context);
   }
 
@@ -432,7 +444,7 @@ export class RankConnectorRuntimeService {
         Math.ceil(
           (this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS) /
             1_000 +
-            this.config.platformApiCommandTimeoutMs / 1_000
+            this.settlementTimeoutMs() * 2 / 1_000
         )
       )
     );
@@ -445,7 +457,7 @@ export class RankConnectorRuntimeService {
     const worstCasePollMs =
       this.providerRequestTimeoutMs() * 2 +
       RANK_CONNECTOR_LEASE_MARGIN_MS +
-      this.config.platformApiCommandTimeoutMs * 2;
+      this.settlementTimeoutMs() * 2;
     return Math.min(
       120,
       Math.max(
@@ -453,6 +465,10 @@ export class RankConnectorRuntimeService {
         Math.ceil(worstCasePollMs / 1_000)
       )
     );
+  }
+
+  private settlementTimeoutMs(): number {
+    return Math.min(this.config.platformApiCommandTimeoutMs, 5_000);
   }
 
   private providerRequestTimeoutMs(): number {

@@ -237,6 +237,7 @@ test(
       assert.match(restrictedRoleName, /^[a-z0-9_]+$/u);
       await setup.query(`CREATE ROLE "${restrictedRoleName}" NOLOGIN`);
       restrictedRoleCreated = true;
+      await setup.query(`GRANT USAGE ON SCHEMA public TO "${restrictedRoleName}"`);
       const publicExecute = await setup.query<{
         readonly authorizationPublicExecute: boolean;
         readonly settlementPublicExecute: boolean;
@@ -368,6 +369,7 @@ test(
       );
     } finally {
       if (restrictedRoleCreated) {
+        await setup.query(`REVOKE USAGE ON SCHEMA public FROM "${restrictedRoleName}"`).catch(() => undefined);
         await setup.query(
           `REVOKE ALL ON FUNCTION
              public.read_rank_connector_billing_settlement(
@@ -386,7 +388,7 @@ test(
       }
       await setControl(
         setup,
-        false,
+        true,
         cleanupKillSwitchVersion
       ).catch(() => undefined);
       await Promise.allSettled([

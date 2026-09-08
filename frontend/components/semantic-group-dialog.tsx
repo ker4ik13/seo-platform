@@ -15,6 +15,8 @@ import { SemanticModal } from "./semantic-modal";
 import { SemanticGroupPickerField } from "./semantic-group-picker";
 import { Icon } from "./icon";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export type SemanticGroupDialogState =
   | Readonly<{ mode: "create"; parentId?: string; position?: number }>
@@ -40,6 +42,7 @@ export function SemanticGroupDialog({
   projectId: string;
   state: SemanticGroupDialogState;
 }>) {
+  const { t: uiText } = useUiLocale();
   const initialGroup =
     state.mode === "rename" || state.mode === "duplicate"
       ? state.group
@@ -262,8 +265,7 @@ export function SemanticGroupDialog({
             onClick={onClose}
             type="button"
           >
-            Отмена
-          </button>
+            <UiText text="Отмена" /></button>
           <button
             className={state.mode === "delete" ? "danger-button" : "primary-button"}
             disabled={saving}
@@ -272,19 +274,19 @@ export function SemanticGroupDialog({
           >
             {saving
               ? state.mode === "duplicate"
-                ? "Дублируем…"
-                : "Сохраняем…"
+                ? <UiText text="Дублируем…" />
+                : <UiText text="Сохраняем…" />
               : state.mode === "delete"
-                ? "Удалить"
+                ? <UiText text="Удалить" />
                 : state.mode === "move"
-                  ? `Переместить (${state.groups.length})`
+                  ? <UiText text="Переместить ({0})" values={[String(state.groups.length)]} />
                   : state.mode === "duplicate"
-                    ? "Создать копию"
+                    ? <UiText text="Создать копию" />
                     : state.mode === "create"
                       ? pendingCreateCount > 1
-                        ? `Создать (${pendingCreateCount})`
-                        : "Создать"
-                      : "Сохранить"}
+                        ? <UiText text="Создать ({0})" values={[String(pendingCreateCount)]} />
+                        : <UiText text="Создать" />
+                      : <UiText text="Сохранить" />}
           </button>
         </div>
       }
@@ -301,10 +303,10 @@ export function SemanticGroupDialog({
             <label>
               <span>
                 {state.mode === "duplicate"
-                  ? "Название копии"
+                  ? <UiText text="Название копии" />
                   : state.mode === "create"
-                    ? "Названия папок"
-                    : "Название"}
+                    ? <UiText text="Названия папок" />
+                    : <UiText text="Название" />}
               </span>
               {state.mode === "create" ? (
                 <textarea
@@ -315,7 +317,7 @@ export function SemanticGroupDialog({
                     setName(event.target.value);
                     setError(undefined);
                   }}
-                  placeholder={"Москва\nСанкт-Петербург\nКазань"}
+                  placeholder={uiText("Москва Санкт-Петербург Казань")}
                   ref={namesTextareaRef}
                   required
                   rows={5}
@@ -336,16 +338,16 @@ export function SemanticGroupDialog({
                   className="semantic-group-name-hint"
                   id={`${formId}-group-names-hint`}
                 >
-                  <span>Каждая непустая строка станет отдельной папкой</span>
+                  <span><UiText text="Каждая непустая строка станет отдельной папкой" /></span>
                   <strong>
-                    {pendingCreateCount} из {semanticKeywordGroupBulkCreateMaxItems}
+                    {pendingCreateCount} <UiText text="из" before=" " after=" " />{semanticKeywordGroupBulkCreateMaxItems}
                   </strong>
                 </small>
               )}
             </label>
             <div className="semantic-dialog-field">
               <span>
-                {state.mode === "duplicate" ? "Создать копию в" : "Расположение"}
+                {state.mode === "duplicate" ? <UiText text="Создать копию в" /> : <UiText text="Расположение" />}
               </span>
               <SemanticGroupPickerField
                 groups={parentOptions}
@@ -358,12 +360,12 @@ export function SemanticGroupDialog({
               />
             </div>
             <fieldset className="semantic-dialog-color">
-              <legend>Цвет</legend>
+              <legend><UiText text="Цвет" /></legend>
               <div className="semantic-dialog-color-custom">
                 <label className="semantic-dialog-color-picker">
-                  <span className="visually-hidden">Выбрать цвет</span>
+                  <span className="visually-hidden"><UiText text="Выбрать цвет" /></span>
                   <input
-                    aria-label="Выбрать цвет"
+                    aria-label={uiText("Выбрать цвет")}
                     onChange={(event) => setColor(event.target.value.toUpperCase())}
                     type="color"
                     value={/^#[0-9a-f]{6}$/iu.test(color) ? color : semanticGroupDefaultColor}
@@ -371,9 +373,9 @@ export function SemanticGroupDialog({
                   <Icon name="edit" />
                 </label>
                 <label>
-                  <span className="visually-hidden">HEX-код цвета</span>
+                  <span className="visually-hidden"><UiText text="HEX-код цвета" /></span>
                   <input
-                    aria-label="HEX-код цвета"
+                    aria-label={uiText("HEX-код цвета")}
                     maxLength={7}
                     onChange={(event) => setColor(event.target.value.toUpperCase())}
                     pattern="#[0-9A-Fa-f]{6}"
@@ -385,7 +387,7 @@ export function SemanticGroupDialog({
                 </label>
               </div>
               <div
-                aria-label="Предложенные цвета группы"
+                aria-label={uiText("Предложенные цвета группы")}
                 className="semantic-dialog-color-palette"
                 role="group"
               >
@@ -411,10 +413,9 @@ export function SemanticGroupDialog({
                     type="checkbox"
                   />
                   <span>
-                    <strong>Скопировать запросы</strong>
+                    <strong><UiText text="Скопировать запросы" /></strong>
                     <small>
-                      Те же запросы будут добавлены в копии папок без создания дублей.
-                    </small>
+                      <UiText text="Те же запросы будут добавлены в копии папок без создания дублей." /></small>
                   </span>
                 </label>
                 <label className="semantic-dialog-checkbox">
@@ -424,8 +425,8 @@ export function SemanticGroupDialog({
                     type="checkbox"
                   />
                   <span>
-                    <strong>Скопировать вложенные папки</strong>
-                    <small>Структура и порядок подгрупп сохранятся.</small>
+                    <strong><UiText text="Скопировать вложенные папки" /></strong>
+                    <small><UiText text="Структура и порядок подгрупп сохранятся." /></small>
                   </span>
                 </label>
               </div>
@@ -440,7 +441,7 @@ export function SemanticGroupDialog({
               ))}
             </div>
             <div className="semantic-dialog-field">
-              <span>Куда переместить</span>
+              <span><UiText text="Куда переместить" /></span>
               <SemanticGroupPickerField
                 autoFocus
                 groups={parentOptions}
@@ -455,8 +456,8 @@ export function SemanticGroupDialog({
           <>
             <div className="inline-alert" role="status">
               {promoteChildren
-                ? "Вложенные папки и их запросы сохранятся. Удалится только выбранная папка."
-                : "Вложенные папки удалятся вместе с выбранной. По умолчанию запросы без другого размещения попадут в «Без группы»."}
+                ? <UiText text="Вложенные папки и их запросы сохранятся. Удалится только выбранная папка." />
+                : <UiText text="Вложенные папки удалятся вместе с выбранной. По умолчанию запросы без другого размещения попадут в «Без группы»." />}
             </div>
             {deletedGroup && directChildren.length > 0 && (
               <label className="semantic-dialog-checkbox">
@@ -468,12 +469,11 @@ export function SemanticGroupDialog({
                 <span>
                   <strong>
                     {deletedGroup.parentId
-                      ? `Перенести подгруппы на уровень выше (${directChildren.length})`
-                      : `Перенести подгруппы в корень (${directChildren.length})`}
+                      ? <UiText text="Перенести подгруппы на уровень выше ({0})" values={[String(directChildren.length)]} />
+                      : <UiText text="Перенести подгруппы в корень ({0})" values={[String(directChildren.length)]} />}
                   </strong>
                   <small>
-                    Сохранятся непосредственные подгруппы, вся их вложенность и запросы.
-                  </small>
+                    <UiText text="Сохранятся непосредственные подгруппы, вся их вложенность и запросы." /></small>
                 </span>
               </label>
             )}
@@ -484,17 +484,17 @@ export function SemanticGroupDialog({
                 type="checkbox"
               />
               <span>
-                <strong>Переместить запросы в корзину</strong>
+                <strong><UiText text="Переместить запросы в корзину" /></strong>
                 <small>
                   {promoteChildren
-                    ? "В корзину попадут запросы удаляемой папки, которые не размещены в сохраняемых или других папках."
-                    : "Выключено по умолчанию. В корзине запросы можно удалить навсегда."}
+                    ? <UiText text="В корзину попадут запросы удаляемой папки, которые не размещены в сохраняемых или других папках." />
+                    : <UiText text="Выключено по умолчанию. В корзине запросы можно удалить навсегда." />}
                 </small>
               </span>
             </label>
           </>
         )}
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
+        {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
       </form>
     </SemanticModal>
   );

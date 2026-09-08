@@ -76,6 +76,8 @@ function assertHistoryItems(
         item.trackingContextId !== query.trackingContextId) ||
       (query.keywordId !== undefined &&
         item.keywordId !== query.keywordId) ||
+      (query.dimensionKey !== undefined && item.dimensionKey !== query.dimensionKey) ||
+      (query.mode === "SERP" && !item.serpResults?.length) ||
       snapshotIds.has(item.snapshotId)
     ) {
       throw invalidResponse();

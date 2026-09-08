@@ -18,7 +18,18 @@ const PREFLIGHT_VARY_FIELDS = [
   "Access-Control-Request-Method"
 ] as const;
 
-export const TRUSTED_PROXY_HOPS = 1;
+// Caddy connects over loopback in VPS runtime; container ingress/BFF uses
+// the isolated private Docker network. Never trust a hop count alone.
+export const TRUSTED_PROXY_ADDRESSES = ["loopback", "uniquelocal"];
+
+// A URL may contain a public-note bearer token or a tenant search query.
+// Log the server-owned route template, never the raw path, query or headers.
+export function serializeRequestForLog(request: FastifyRequest): {
+  method: string;
+  route: string;
+} {
+  return { method: request.method, route: request.routeOptions?.url ?? "unmatched" };
+}
 
 export const STRICT_TRANSPORT_SECURITY =
   "max-age=31536000; includeSubDomains";

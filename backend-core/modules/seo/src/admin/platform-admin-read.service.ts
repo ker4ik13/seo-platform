@@ -1,10 +1,20 @@
 import { Injectable } from "@nestjs/common";
-import type { AdminProjectSemanticCounts } from "@seo-platform/contracts";
+import type { AdminProjectSemanticCounts, InternalSeoOverview } from "@seo-platform/contracts";
 import { PrismaService } from "../database/prisma.service.js";
 
 @Injectable()
 export class PlatformAdminReadService {
   public constructor(private readonly prisma: PrismaService) {}
+
+  public async overview(): Promise<InternalSeoOverview> {
+    const [activeKeywords, trashedKeywords, activeFolders, activated] = await Promise.all([
+      this.prisma.keyword.count({ where: { status: "ACTIVE", deletedAt: null } }),
+      this.prisma.keyword.count({ where: { status: "DELETED" } }),
+      this.prisma.keywordGroup.count({ where: { status: "ACTIVE", systemKind: null } }),
+      this.prisma.$queryRaw<{ count: bigint }[]>`SELECT count(DISTINCT workspace_id)::bigint AS count FROM keywords WHERE status = 'ACTIVE' AND deleted_at IS NULL`
+    ]);
+    return { activeKeywords, trashedKeywords, activeFolders, activatedWorkspaces: Number(activated[0]?.count ?? 0n) };
+  }
 
   public async projectCounts(
     projectIds: readonly string[]

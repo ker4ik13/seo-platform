@@ -7,6 +7,7 @@ import {
   type SemanticImportPositionValue,
   type SemanticImportPublishRow,
   type SemanticImportValidationSummary
+  , semanticPositionHistoryHeaderDate
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -21,6 +22,7 @@ import {
 } from "../seo-data/seo-data.client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeMapping } from "./semantic-import.service.js";
+import { importedPositionHistory, isPositionHistorySummary, positionHistoryDateColumns, positionHistoryMetadataHeader } from "./position-history-import.js";
 
 const TERMINAL_VALIDATION_CODES = new Set([
   "IMPORT_MAPPING_INVALID",
@@ -138,6 +140,9 @@ export class SemanticImportValidatorService {
     if (!keywordColumn || keywordColumn.sourceIndex >= headers.length) {
       throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
     }
+    if (mapping.positionHistory && positionHistoryDateColumns(headers).length === 0) {
+      throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
+    }
     await this.prisma.semanticImportValidatedRow.deleteMany({
       where: { importId: semanticImport.id }
     });
@@ -170,7 +175,9 @@ export class SemanticImportValidatorService {
         const values = stringArray(row.rawValues) ?? [];
         const keyword = values[keywordColumn.sourceIndex]?.trim() ?? "";
         const issues = new Set(stringArray(row.issues) ?? []);
-        if (!keyword) issues.add("KEYWORD_REQUIRED");
+        const skipSummary = Boolean(mapping.positionHistory && isPositionHistorySummary(keyword));
+        if (skipSummary) issues.add("POSITION_HISTORY_SUMMARY_SKIPPED");
+        else if (!keyword) issues.add("KEYWORD_REQUIRED");
         const language = importLanguage(
           languageColumn
             ? values[languageColumn.sourceIndex]
@@ -178,9 +185,9 @@ export class SemanticImportValidatorService {
           mapping.defaultLanguage,
           issues
         );
-        return { row, values, keyword, language, issues };
+        return { row, values, keyword, language, issues, skipSummary };
       });
-      const normalizable = pending.filter(({ keyword }) => keyword);
+      const normalizable = pending.filter(({ keyword, skipSummary }) => keyword && !skipSummary);
       const normalized =
         normalizable.length === 0
           ? { rows: [] }
@@ -475,15 +482,19 @@ export function canonicalImportRow(
   );
   const intent = optionalIntent(value("keyword.intent"), issues);
   const explicitPositions = mappedPositions(value, issues);
-  const positions = explicitPositions.length > 0
+  const positions = mapping.positionHistory ? [] : explicitPositions.length > 0
     ? explicitPositions
     : options.sourceFormat === "KC4" && value("ranking.position")
       ? kc4Positions(headers, values, issues)
       : legacyMappedPosition(value, issues);
+  const positionHistory = mapping.positionHistory
+    ? importedPositionHistory(headers, values, mapping.positionHistory, issues)
+    : [];
   const customValues: Record<string, string> = {};
   for (const column of mapping.columns) {
     const raw = values[column.sourceIndex]?.trim();
     if (!raw) continue;
+    if (mapping.positionHistory && (semanticPositionHistoryHeaderDate(headers[column.sourceIndex] ?? "") || positionHistoryMetadataHeader(headers[column.sourceIndex] ?? ""))) continue;
     if (
       options.sourceFormat === "KC4" &&
       KC4_NATIVE_POSITION_HEADERS.has(headers[column.sourceIndex] ?? "")
@@ -520,6 +531,7 @@ export function canonicalImportRow(
     ...(targetUrl ? { targetUrl } : {}),
     ...(frequencies.length > 0 ? { frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
+    ...(positionHistory.length > 0 ? { positionHistory } : {}),
     ...(observedAt ? { observedAt } : {}),
     ...(tags.length > 0 ? { tags } : {}),
     customValues
@@ -875,7 +887,9 @@ async function validationStats(
       COUNT(*) FILTER (
         WHERE "is_valid" AND jsonb_array_length("issues") > 0
       )::bigint AS warning_rows,
-      COUNT(*) FILTER (WHERE NOT "is_valid")::bigint AS error_rows,
+      COUNT(*) FILTER (
+        WHERE NOT "is_valid" AND NOT "issues" @> '["POSITION_HISTORY_SUMMARY_SKIPPED"]'::jsonb
+      )::bigint AS error_rows,
       (
         COUNT(*) FILTER (WHERE "is_valid") -
         COUNT(DISTINCT "normalized_hash") FILTER (WHERE "is_valid")

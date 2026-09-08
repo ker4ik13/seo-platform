@@ -4,6 +4,7 @@ import {
   type NestFastifyApplication
 } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module.js";
+import { PrivateExceptionFilter } from "./internal/private-exception.filter.js";
 import { installClusteringProposalBodyLimit } from "./clustering-proposals/clustering-proposal-body-limit.js";
 import { installPrivateHttpResponsePolicy } from "./internal/http-response-policy.js";
 import { installKeywordBulkBodyLimit } from "./keywords/keyword-bulk-body-limit.js";
@@ -22,6 +23,7 @@ export async function createSeoDataApplication(): Promise<NestFastifyApplication
   );
 
   installPrivateHttpResponsePolicy(adapter.getInstance());
+  app.useGlobalFilters(new PrivateExceptionFilter());
   app.enableShutdownHooks();
   return app;
 }

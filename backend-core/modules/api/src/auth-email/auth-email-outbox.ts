@@ -49,6 +49,12 @@ export function transactionalEmailEnvelopeFromOutbox(
     metadata: requestId ? { correlationId: requestId } : {}
   } as const;
 
+  if (row.event_type === transactionalEmailEventTypesV1.billingNoticeRequested) {
+    exactKeys(payload, ["noticeId", "workspaceId"], "payload");
+    if (row.aggregate_type !== "billingNotice" || row.aggregate_version !== 1 || row.aggregate_id !== payload.noticeId || row.workspace_id !== payload.workspaceId) return invalid("billing notice outbox");
+    return createTransactionalEmailEventEnvelopeV1({ ...common, eventType: row.event_type, noticeId: stringValue(payload.noticeId, "payload.noticeId"), workspaceId: stringValue(payload.workspaceId, "payload.workspaceId") });
+  }
+
   if (
     row.event_type ===
       transactionalEmailEventTypesV1.emailVerificationRequested ||

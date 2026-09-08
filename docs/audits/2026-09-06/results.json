@@ -1,0 +1,140 @@
+{
+  "date": "2026-09-06",
+  "publicUrl": "https://144.31.221.28:3000",
+  "quality": {
+    "typecheck": "passed",
+    "lint": "passed",
+    "prismaValidate": "passed",
+    "prismaGenerate": "passed",
+    "productionBuild": "passed",
+    "tests": {
+      "tests": 2665,
+      "pass": 2642,
+      "fail": 0,
+      "skipped": 23
+    },
+    "productionDependencyAudit": {
+      "critical": 0,
+      "high": 0,
+      "moderate": 0,
+      "low": 0
+    }
+  },
+  "runtimeSmoke": {
+    "status": "passed",
+    "flow": [
+      "register",
+      "workspace",
+      "trial/free",
+      "project",
+      "crawl",
+      "S3 relay",
+      "ClamAV",
+      "XLSX import",
+      "publish",
+      "duplicate review/apply",
+      "XLSX export"
+    ]
+  },
+  "publicApiSmoke": {
+    "status": "passed",
+    "scope": "tokens, tenant/project isolation, scopes, rotation grace and revoke; TLS verified"
+  },
+  "browser": {
+    "passedTests": 11,
+    "failedTests": 0,
+    "settingsScreens": 14,
+    "widths": [
+      320,
+      390,
+      768,
+      1440
+    ],
+    "mainAndPublicScreens": 12,
+    "mainWidths": [
+      390,
+      1440
+    ],
+    "clamavEicar": "REJECTED",
+    "faultInjection": "one client notification-preferences response 503, then retry with real backend",
+    "boundedLoad": {
+      "requests": 120,
+      "concurrency": 8,
+      "errors": 0,
+      "p50Ms": 63.72066300000006,
+      "p95Ms": 126.82306699999936,
+      "maximumMs": 201.21839499999987
+    }
+  },
+  "postgres": {
+    "version": 18,
+    "isolatedRunner": {
+      "pass": 26,
+      "fail": 0,
+      "skipped": 1
+    },
+    "historicalUpgradeFixture": "not run; requires old migration state",
+    "notificationRegression": {
+      "jobs": 457,
+      "replicas": 2,
+      "outboxDuplicates": 0
+    },
+    "runtimeNotificationBacklog": 0,
+    "restoreDrill": {
+      "status": "passed",
+      "databases": {
+        "platform_db": 42,
+        "seo_db": 52,
+        "jobs_db": 66,
+        "realtime_db": 15
+      },
+      "scope": "complete logical dumps with owners and constraints to a separate cluster; not an offsite/S3 recovery drill"
+    }
+  },
+  "redisLive": {
+    "version": 8,
+    "passedTests": 2,
+    "failedTests": 0
+  },
+  "secretScan": {
+    "knownSecretValues": 51,
+    "findings": 0,
+    "scope": "current tracked/new source files, frontend static chunks, last 2 MiB of each runtime log; not all Git history"
+  },
+  "maintenance": {
+    "schedule": "17 4 * * *",
+    "timezone": "server local time, Europe/Berlin at audit",
+    "activeScheduler": "cron",
+    "currentLogLimitBytes": 10485760,
+    "previousSegments": 1,
+    "archiveRetentionDays": 14,
+    "managedTemporaryRetentionDays": 7,
+    "scope": [
+      "logs",
+      "managed smoke/e2e temporary files"
+    ],
+    "excludes": [
+      "PostgreSQL business data",
+      "S3 objects",
+      "position history",
+      "ledger",
+      "backups"
+    ]
+  },
+  "publicRoutes": {
+    "/ru": 200,
+    "/en": 200,
+    "/app/login": 200,
+    "/docs/api": 200,
+    "/terms": 404,
+    "/privacy": 404,
+    "/pricing": 404
+  },
+  "limits": [
+    "No paid provider call or real charge/refund was initiated.",
+    "No production Docker/container build: Docker unavailable; YAML and infrastructure tests passed.",
+    "No million-row or multi-GB/SLA benchmark.",
+    "The complete PostgreSQL auth reset/MFA/rotation race matrix remains a release gate.",
+    "Local DB restore does not replace offsite backups or a storage/key recovery drill."
+  ]
+}

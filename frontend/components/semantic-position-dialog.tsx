@@ -1,6 +1,14 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { SemanticRankTargets } from "./semantic-rank-targets";
+import { clearRankTargetBatch, persistRankTargetBatch, readRankTargetBatch, readRankTargetPreference, writeRankTargetPreference } from "../lib/rank-target-storage";
+import { uniqueRankTargets, type RankTarget } from "../lib/rank-targets";
+import { createRankTargetBatch, launchRankTargetBatch, prepareRankTargetBatch, rankTargetBatchCharge, rankTargetBatchReady, rankTargetBatchSignature, type RankTargetBatch, type RankTargetBatchInput } from "../lib/rank-target-batch";
+import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
+import { rankRetryContextDraft } from "../lib/rank-retry";
+import { normalizedUiLocale, translateUi } from "../lib/ui-i18n";
+import type { RankOperationResult } from "@seo-platform/contracts";
 
 import {
   useCallback,
@@ -23,7 +31,7 @@ import type {
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import {
-  rankProviderKeywordLimit,
+  rankCommandKeywordLimit,
   trackingContextKeywordPageLimit
 } from "@seo-platform/contracts";
 import {
@@ -89,7 +97,6 @@ import type { ProjectSearchCity } from "@seo-platform/contracts";
 import { SemanticModal } from "./semantic-modal";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
-import { SearchableRegionSelect } from "./searchable-region-select";
 import { SearchEngineLogo } from "./search-engine-logo";
 import {
   SemanticOperationScope,
@@ -97,11 +104,14 @@ import {
   type SemanticOperationSelection,
   type SemanticOperationScopeState
 } from "./semantic-operation-scope";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function SemanticPositionDialog({
   activeGroupId,
   groups,
   initialSelections,
+  initialRun,
   mode = "positions",
   onClose,
   onStarted,
@@ -112,13 +122,15 @@ export function SemanticPositionDialog({
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
+  initialRun?: RankOperationResult;
   mode?: "positions" | "competitors";
   onClose: () => void;
-  onStarted: (job: RankJobSummary) => void;
+  onStarted: (job: RankJobSummary, batch?: readonly RankJobSummary[]) => void;
   projectSearchCity?: ProjectSearchCity | undefined;
   projectId: string;
   workspaceId: string;
 }>) {
+  const { t: uiText, locale: uiLocale } = useUiLocale();
   const competitorMode = mode === "competitors";
   const formId = useId();
   const [settings, setSettings] = useState<TrackingContextSettings>();
@@ -155,10 +167,17 @@ export function SemanticPositionDialog({
     SemanticRegionSources
   >({ YANDEX: "DEFAULT", GOOGLE: "DEFAULT" });
   const [contextDraft, setContextDraft] = useState(() =>
-    defaultContextDraft(undefined, competitorMode)
+    initialRun ? rankRetryContextDraft(initialRun) : defaultContextDraft(undefined, competitorMode, uiLocale)
   );
-  const [yandexLiveTurbo, setYandexLiveTurbo] = useState(false);
-  const [saveProjectPosition, setSaveProjectPosition] = useState(false);
+  const [yandexLiveTurbo, setYandexLiveTurbo] = useState(initialRun?.execution.providerMappingVersion === "xmlstock-yandex-live@3");
+  const [saveProjectPosition, setSaveProjectPosition] = useState(initialRun?.execution.saveProjectPosition === true);
+  const [additionalTargets, setAdditionalTargets] = useState<readonly RankTarget[]>([]);
+  const [, setBatchRevision] = useState(0);
+  const multiBatch = useRef<RankTargetBatch | undefined>(undefined);
+  const [recoverableBatch, setRecoverableBatch] = useState<RankTargetBatch>();
+  const [recoveringBatch, setRecoveringBatch] = useState(false);
+  const preferenceRestored = useRef(false);
+  const targets = useMemo(() => [{ regionCode: contextDraft.regionCode, regionLabel: contextDraft.regionLabel, device: contextDraft.device }, ...additionalTargets], [contextDraft.regionCode, contextDraft.regionLabel, contextDraft.device, additionalTargets]);
   const createContextCommand = useRef<IdempotentCommand | undefined>(
     undefined
   );
@@ -197,21 +216,40 @@ export function SemanticPositionDialog({
   const provider = selectedSource?.provider === "ARSENKIN"
     ? "ARSENKIN"
     : "XMLSTOCK";
+  const batchInput: RankTargetBatchInput | undefined = useMemo(() => selectedSource && contextDraft.regionCode.trim() ? {
+    projectId, workspaceId, base: contextDraft, targets, keywordIds: selections.map(({ id }) => id),
+    selectedKeywordCount: selections.filter(({ isTracked }) => contextDraft.includeUntracked || isTracked !== false).length,
+    source: selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, locale: uiLocale
+  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, uiLocale]);
+  const batchSignature = useMemo(() => batchInput ? rankTargetBatchSignature(batchInput) : undefined, [batchInput]);
+  const currentBatch = recoveringBatch || multiBatch.current?.signature === batchSignature ? multiBatch.current : undefined;
+  const batchReady = currentBatch ? rankTargetBatchReady(currentBatch) : false;
+  const batchStarted = currentBatch?.entries.filter(entry => entry.job).length ?? 0;
+  const batchCharge = currentBatch ? formatPlatformCharge(rankTargetBatchCharge(currentBatch), uiLocale) : undefined;
+  useEffect(() => { setRecoverableBatch(readRankTargetBatch(window.localStorage, workspaceId, projectId, competitorMode)); }, [workspaceId, projectId, competitorMode]);
+  useEffect(() => {
+    if (loading || initialRun || preferenceRestored.current) return;
+    preferenceRestored.current = true;
+    const preferred = readRankTargetPreference(window.localStorage, projectId, contextDraft.searchEngine, competitorMode);
+    if (!preferred?.length) return;
+    const [first, ...rest] = preferred;
+    setContextDraft(current => ({ ...current, ...first! })); setAdditionalTargets(rest);
+  }, [loading, initialRun, projectId, competitorMode, contextDraft.searchEngine]);
   const providerUsage = rankProviderUsageEstimate(
     selectedSource,
-    displayedKeywordCount,
+    displayedKeywordCount * targets.length,
     contextDraft.searchEngine,
     contextDraft.depth,
     contextDraft.searchSource,
     yandexLiveTurbo ? "TURBO" : undefined,
-    competitorMode ? "COMPETITOR_SERP" : "POSITION_TRACKING"
+    competitorMode ? "COMPETITOR_SERP" : "POSITION_TRACKING", uiLocale
   );
   const platformChargeConfirmation =
     estimate?.status === "READY" &&
     estimate.credentialMode === "PLATFORM_PAID" &&
     pendingRun.current?.estimate.id === estimate.id &&
     !rankEstimateExpired(estimate.expiresAt, Date.now())
-      ? formatPlatformCharge(estimate.platformChargeMicro)
+      ? formatPlatformCharge(estimate.platformChargeMicro, uiLocale)
       : undefined;
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
@@ -244,6 +282,8 @@ export function SemanticPositionDialog({
   );
 
   function selectContext(contextId: string): void {
+    setAdditionalTargets([]);
+    multiBatch.current = undefined;
     setYandexLiveTurbo(false);
     setSelectedContextId(contextId);
     const context = settings?.contexts.find(({ id }) => id === contextId);
@@ -264,7 +304,7 @@ export function SemanticPositionDialog({
       setScopeError(undefined);
       setContextAssignmentError(undefined);
       setContextDraft({
-        ...defaultContextDraft(preferredRegions.YANDEX, competitorMode),
+        ...defaultContextDraft(preferredRegions.YANDEX, competitorMode, uiLocale),
         scopeMode:
           initialSelections.length > 0
             ? "KEYWORDS"
@@ -283,19 +323,17 @@ export function SemanticPositionDialog({
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
+    const preparedSources = preparedProjectIntegrations(projectId, controller.signal);
     void Promise.all([
       browserApiRequest<TrackingContextSettings>(
         `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts`,
         { signal: controller.signal }
       ),
-      browserApiRequest<ProjectConnectorSettings>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-        { signal: controller.signal }
-      ),
-      browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      preparedSources,
+      preparedSources.then(() => browserApiRequest<WorkspaceConnectorRoutingSettings>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
         { signal: controller.signal }
-      ),
+      )),
       browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
         rankRunsApiPath(projectId),
         { signal: controller.signal }
@@ -334,6 +372,7 @@ export function SemanticPositionDialog({
           options.map(({ id }) => id)
         );
         const preferredSource =
+          (initialRun ? options.find((source) => source.provider === initialRun.job.provider && source.mode === initialRun.job.credentialMode) : undefined) ??
           options.find(({ id }) => id === exactCredentialId) ??
           options.find(({ provider: value }) => value === previousProvider) ??
           options.find(({ provider: value }) => value === "XMLSTOCK") ??
@@ -415,7 +454,9 @@ export function SemanticPositionDialog({
         setLastUsedCredentialId(exactCredentialId);
         setPreferredRegions(nextPreferredRegions);
         setPreferredRegionSources(nextPreferredRegionSources);
-        if (previousContext) {
+        if (initialRun) {
+          setContextDraft(rankRetryContextDraft(initialRun));
+        } else if (previousContext) {
           setSelectedContextId(previousContext.id);
           setScopeCount(previousContext.assignedKeywordCount);
           setContextDraft(trackingContextDraft(previousContext));
@@ -424,7 +465,8 @@ export function SemanticPositionDialog({
             ...contextDraftWithRegion(
               current,
               nextPreferredRegions[current.searchEngine],
-              competitorMode
+              competitorMode,
+              uiLocale
             ),
             scopeMode:
               initialSelections.length > 0
@@ -435,7 +477,7 @@ export function SemanticPositionDialog({
             groupIds: activeGroupId ? [activeGroupId] : []
           }));
         }
-        if (preferredSource?.provider === "ARSENKIN") {
+        if (!initialRun && preferredSource?.provider === "ARSENKIN") {
           setContextDraft((current) => ({ ...current, depth: 30 }));
         }
       })
@@ -446,7 +488,7 @@ export function SemanticPositionDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [activeGroupId, competitorMode, initialSelections.length, projectId, projectSearchCity, workspaceId]);
+  }, [activeGroupId, competitorMode, initialSelections.length, initialRun, projectId, projectSearchCity, uiLocale, workspaceId]);
 
   useEffect(() => {
     if (!selectedContextId) {
@@ -490,6 +532,38 @@ export function SemanticPositionDialog({
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (running) return;
+    if (targets.length > 1 || recoveringBatch) {
+      const effectiveInput = recoveringBatch ? multiBatch.current?.input : batchInput;
+      if (!effectiveInput || !settings || (!recoveringBatch && (resolvingScope || keywordIds.length === 0))) return;
+      setRunning(true); setError(undefined);
+      const changed = () => {
+        const batch = multiBatch.current;
+        if (batch?.entries.some(entry => entry.runKey || entry.job)) persistRankTargetBatch(window.localStorage, batch);
+        setBatchRevision(revision => revision + 1);
+      };
+      try {
+        let batch = multiBatch.current;
+        if (!batch || (!recoveringBatch && batch.signature !== batchSignature)) {
+          batch = createRankTargetBatch(effectiveInput);
+          multiBatch.current = batch;
+        }
+        writeRankTargetPreference(window.localStorage, projectId, effectiveInput.base.searchEngine, competitorMode, effectiveInput.targets);
+        if (!rankTargetBatchReady(batch)) {
+          await prepareRankTargetBatch(batch, settings, changed);
+          return;
+        }
+        await launchRankTargetBatch(batch, changed);
+        const jobs = batch.entries.flatMap(entry => entry.job ? [entry.job] : []);
+        if (jobs.length === batch.entries.length) {
+          clearRankTargetBatch(window.localStorage, workspaceId, projectId, competitorMode);
+          rememberCredential(projectId, effectiveInput.source.id, setLastUsedCredentialId);
+          rememberPositionRegion(projectId, contextDraft, setPreferredRegions);
+          onStarted(jobs[jobs.length - 1]!, jobs);
+        }
+      } catch (error) { setError(positionErrorMessage(error)); }
+      finally { setRunning(false); }
+      return;
+    }
     let stage: "PREPARE" | "ESTIMATE" | "RUN" = "PREPARE";
     setRunning(true);
     setError(undefined);
@@ -513,7 +587,7 @@ export function SemanticPositionDialog({
       const firstError = Object.values(draftErrors)[0];
       if (firstError) throw new Error(firstError);
       const contextName =
-        contextDraft.name.trim() || technicalContextName(contextDraft, competitorMode);
+        contextDraft.name.trim() || technicalContextName(contextDraft, competitorMode, uiLocale);
       const launchDraft = {
         ...contextDraft,
         name: contextName
@@ -822,7 +896,8 @@ export function SemanticPositionDialog({
 
   return (
     <SemanticModal
-      {...(competitorMode
+      {...(initialRun ? { description: uiText("Повтор создаст новую операцию только для запросов без результата. Проверьте параметры и новую стоимость.") } : {})}
+      {...(competitorMode && !initialRun
         ? {
             description:
               "Сохраняет Топ-10 обычной выдачи по каждому запросу. Arsenkin использует Check Top, XMLStock — выбранный тип выдачи."
@@ -831,44 +906,49 @@ export function SemanticPositionDialog({
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="semantic" /><div><dt>Запросов</dt><dd>{scopeCount === undefined && resolvingScope ? "Считаем…" : displayedKeywordCount}</dd></div></div>
+            <div><Icon name="semantic" /><div><dt><UiText text="Запросов" /></dt><dd>{scopeCount === undefined && resolvingScope ? <UiText text="Считаем…" /> : displayedKeywordCount}</dd></div></div>
             <div>
               <SearchEngineLogo engine={contextDraft.searchEngine} size="compact" />
-              <div><dt>Поисковик</dt><dd>{contextDraft.searchEngine === "YANDEX" ? "Яндекс" : "Google"}</dd></div>
+              <div><dt><UiText text="Поисковик" /></dt><dd>{contextDraft.searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</dd></div>
             </div>
             <div>
               <ProviderLogo provider={provider} size="compact" />
-              <div><dt>Провайдер</dt><dd>{selectedSource?.label ?? integrationProviderLabel(provider)}</dd></div>
+              <div><dt><UiText text="Провайдер" /></dt><dd>{selectedSource?.label ?? integrationProviderLabel(provider)}</dd></div>
             </div>
-            <div><Icon name="frequency" /><div><dt>Расход</dt><dd>{platformChargeConfirmation ?? providerUsage.usage}</dd></div></div>
-            <div><Icon name="checkDouble" /><div><dt>Доступно</dt><dd>{providerUsage.available}</dd></div></div>
+            <div><Icon name="frequency" /><div><dt><UiText text="Расход" /></dt><dd><UiText text={(targets.length > 1 && selectedSource?.mode === "PLATFORM_PAID" && batchReady ? batchCharge : undefined) ?? platformChargeConfirmation ?? providerUsage.usage} /></dd></div></div>
+            {targets.length > 1 && <div><Icon name="positions" /><div><dt><UiText text="Съёмов" /></dt><dd>{targets.length}</dd></div></div>}
+            <div><Icon name="checkDouble" /><div><dt><UiText text="Доступно" /></dt><dd><UiText text={providerUsage.available} /></dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
-            <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
+            <button className="secondary-button" disabled={running} onClick={onClose} type="button"><UiText text="Отмена" /></button>
             <button
               className="primary-button"
               disabled={
                 loading ||
-                resolvingScope ||
+                (!recoveringBatch && resolvingScope) ||
                 running ||
-                keywordIds.length === 0 ||
+                (!recoveringBatch && keywordIds.length === 0) ||
                 !contextDraft.regionCode.trim() ||
                 !settings ||
                 !connectorSettings ||
-                !selectedSource
+                (!recoveringBatch && !selectedSource)
               }
               form={formId}
               type="submit"
             >
               {resolvingScope
-                ? "Загружаем запросы…"
+                ? <UiText text="Загружаем запросы…" />
                 : running
-                ? competitorMode ? "Готовим сбор…" : "Проверяем и запускаем…"
+                ? competitorMode ? <UiText text="Готовим сбор…" /> : <UiText text="Проверяем и запускаем…" />
+                : targets.length > 1 || recoveringBatch
+                ? batchReady
+                  ? batchStarted > 0 ? <UiText text="Продолжить оставшиеся съёмы" /> : <UiText text="Подтвердить {0} съёмов" values={[String(targets.length)]} />
+                  : <UiText text="Рассчитать {0} съёмов" values={[String(targets.length)]} />
                 : platformChargeConfirmation
-                ? `Подтвердить списание ${platformChargeConfirmation}`
+                ? <UiText text="Подтвердить списание {0}" values={[String(platformChargeConfirmation)]} />
                 : competitorMode
-                  ? `Собрать конкурентов (${keywordIds.length})`
-                  : `Запустить съём (${keywordIds.length})`}
+                  ? <UiText text="Собрать конкурентов ({0})" values={[String(keywordIds.length)]} />
+                  : <UiText text="Запустить съём ({0})" values={[String(keywordIds.length)]} />}
             </button>
           </div>
         </div>
@@ -878,13 +958,16 @@ export function SemanticPositionDialog({
         ? "semantic-modal:competitors"
         : "semantic-modal:positions"}
       size="large"
-      title={competitorMode ? "Сбор конкурентов" : "Проверка позиций"}
+      title={competitorMode ? uiText("Сбор конкурентов") : uiText("Проверка позиций")}
     >
       <form className="semantic-position-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
+        {recoverableBatch && !recoveringBatch && <div className="inline-alert warning"><p><UiText text="Предыдущий запуск не завершён. Можно продолжить его с сохранёнными командами, не повторяя принятые задачи." /></p><button type="button" className="secondary-button" disabled={running} onClick={() => {
+          multiBatch.current = recoverableBatch; setRecoveringBatch(true); setContextDraft(recoverableBatch.input.base); setAdditionalTargets(recoverableBatch.input.targets.slice(1)); setCredentialId(recoverableBatch.input.source.id); setBatchRevision(value => value + 1);
+        }}><UiText text="Восстановить запуск" /></button></div>}
         {loading ? (
-          <div className="semantic-dialog-loading" role="status">Проверяем доступные подключения…</div>
+          <div className="semantic-dialog-loading" role="status"><UiText text="Проверяем доступные подключения…" /></div>
         ) : (
-          <>
+          <fieldset className="semantic-rank-parameters" disabled={running || batchStarted > 0 || recoveringBatch}>
             <PositionContextSelector
               contexts={settings?.contexts ?? []}
               draft={contextDraft}
@@ -897,7 +980,16 @@ export function SemanticPositionDialog({
             <PositionRunParameters
               draft={contextDraft}
               competitorMode={competitorMode}
-              onChange={setContextDraft}
+              onChange={draft => {
+                if (draft.searchEngine !== contextDraft.searchEngine) setAdditionalTargets([]);
+                setContextDraft(draft);
+              }}
+              targets={targets}
+              onTargetsChange={targets => {
+                const [first, ...others] = uniqueRankTargets(targets);
+                setContextDraft(current => ({ ...current, ...first!, name: contextDisplayName(current.searchEngine, first!.regionLabel, first!.device, competitorMode, uiLocale) }));
+                setAdditionalTargets(others);
+              }}
               credentialId={credentialId}
               lastUsedCredentialId={lastUsedCredentialId}
               yandexLiveTurbo={yandexLiveTurbo}
@@ -954,8 +1046,7 @@ export function SemanticPositionDialog({
               contextDraft.scopeMode === "KEYWORDS" &&
               assignedKeywordSelections === undefined ? (
                 <div className="semantic-dialog-loading" role="status">
-                  Загружаем запросы сохранённого контекста…
-                </div>
+                  <UiText text="Загружаем запросы сохранённого контекста…" /></div>
               ) : (
                 <SemanticOperationScope
                   activeGroupId={activeGroupId}
@@ -970,7 +1061,7 @@ export function SemanticPositionDialog({
                       : initialSelections
                   }
                   key={`${selectedContextId || "new-context"}:ready`}
-                  maxItems={rankProviderKeywordLimit}
+                  maxItems={rankCommandKeywordLimit}
                   onChange={resolveScope}
                   onCountChange={resolveScopeCount}
                   onScopeChange={resolveScopeState}
@@ -978,36 +1069,38 @@ export function SemanticPositionDialog({
                 />
               )}
             />
-          </>
+          </fieldset>
         )}
+        {currentBatch && <section className="semantic-rank-batch-review" aria-live="polite">
+          <header><strong><UiText text="План съёма по городам" /></strong><span><UiText text="Принято задач: {0} из {1}" values={[String(batchStarted), String(currentBatch.entries.length)]} /></span></header>
+          <p><UiText text="Каждое сочетание города и устройства создаёт отдельную задачу. Принятые задачи продолжат работу после закрытия окна." /></p>
+          {selectedSource?.mode === "PLATFORM_PAID" && <p><UiText text="Максимальный расход оставшихся съёмов: {0}" values={[batchCharge ?? "—"]} /></p>}
+          <ul>{currentBatch.entries.map(entry => <li key={`${entry.draft.regionCode}:${entry.draft.device}`}>
+            <span>{entry.draft.regionLabel || entry.draft.regionCode} · <UiText text={entry.draft.device === "DESKTOP" ? "ПК" : "Телефон"} /></span>
+            <strong className={entry.error ? "danger-text" : undefined}>{entry.job ? <UiText text="В очереди" /> : entry.error ? <UiText text={entry.error} /> : entry.estimate?.status === "READY" ? selectedSource?.mode === "PLATFORM_PAID" ? formatPlatformCharge(entry.estimate.platformChargeMicro, uiLocale) : <UiText text="Готов к запуску" /> : <UiText text="Подготовка…" />}</strong>
+          </li>)}</ul>
+        </section>}
         {(platformChargeConfirmation || estimate?.status === "BLOCKED" || error || scopeError || contextAssignmentError || addedSinceLastRun > 0) && <div className="semantic-workflow-feedback">
           {platformChargeConfirmation && (
             <div className="inline-alert info" role="status">
-              <strong>Подтвердите списание</strong>
+              <strong><UiText text="Подтвердите списание" /></strong>
               <p>
-                За этот съём будет списано ровно {platformChargeConfirmation} из
-                внутренних токенов workspace. Расчёт действует до истечения
-                показанной оценки; запуск произойдёт только после повторного
-                подтверждения.
-              </p>
+                <UiText text="Максимальная стоимость съёма:" after=" " />{platformChargeConfirmation} <UiText text="с баланса данных. Оплачиваются принятые запросы, неиспользованный резерв возвращается. Расчёт действует до истечения оценки." before=" " /></p>
             </div>
           )}
           {addedSinceLastRun > 0 && (
             <div className="inline-alert warning" role="status">
-              После прошлого запуска в выбранных папках появилось новых
-              запросов: <strong>{addedSinceLastRun}</strong>. Они будут включены
-              в этот съём после подтверждения запуска.
-            </div>
+              <UiText text="После прошлого запуска в выбранных папках появилось новых запросов:" after=" " /><strong>{addedSinceLastRun}</strong><UiText text=". Они будут включены в этот съём после подтверждения запуска." /></div>
           )}
           {estimate?.status === "BLOCKED" && (
             <div className="inline-alert warning" role="alert">
-              <strong>Запуск заблокирован</strong>
-              <ul>{estimate.blockers.map(({ code }) => <li key={code}>{rankEstimateBlockerLabel(code)}</li>)}</ul>
+              <strong><UiText text="Запуск заблокирован" /></strong>
+              <ul>{estimate.blockers.map(({ code }) => <li key={code}>{<UiText text={rankEstimateBlockerLabel(code) ?? ""} />}</li>)}</ul>
             </div>
           )}
-          {error && <div className="inline-alert danger" role="alert">{error}</div>}
-          {contextAssignmentError && <div className="inline-alert danger" role="alert">{contextAssignmentError}</div>}
-          {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
+          {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
+          {contextAssignmentError && <div className="inline-alert danger" role="alert">{<UiText text={contextAssignmentError ?? ""} />}</div>}
+          {scopeError && <div className="inline-alert warning" role="alert">{<UiText text={scopeError ?? ""} />}</div>}
         </div>}
       </form>
     </SemanticModal>
@@ -1032,6 +1125,7 @@ function PositionContextSelector({
   projectId: string;
   selectedContextId: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <section className="semantic-position-context-bar">
       <div>
@@ -1039,42 +1133,39 @@ function PositionContextSelector({
           <Icon name={competitorMode ? "competitors" : "positions"} />
         </span>
         <div>
-          <strong>{competitorMode ? "Контекст выдачи" : "Контекст съёма"}</strong>
+          <strong>{competitorMode ? <UiText text="Контекст выдачи" /> : <UiText text="Контекст съёма" />}</strong>
           <small>
             {competitorMode
-              ? "Хранит папки, поисковик, регион и устройство для Топ-10."
-              : "Хранит папки, поисковик, регион, устройство и глубину проверки."}
+              ? <UiText text="Хранит папки, поисковик, регион и устройство для Топ-10." />
+              : <UiText text="Хранит папки, поисковик, регион, устройство и глубину проверки." />}
           </small>
         </div>
       </div>
       <label>
-        <span>Сохранённый контекст</span>
+        <span><UiText text="Сохранённый контекст" /></span>
         <CustomSelect
           onChange={(event) => onSelect(event.target.value)}
           value={selectedContextId}
         >
           <option value="">
-            {competitorMode ? "Новый контекст конкурентов" : "Новый контекст"}
+            {competitorMode ? <UiText text="Новый контекст конкурентов" /> : <UiText text="Новый контекст" />}
           </option>
           {contexts
             .filter(({ status }) => status === "ACTIVE")
             .map((context) => (
               <option key={context.id} value={context.id}>
-                {context.name} · {context.assignedKeywordCount} запросов
-              </option>
+                {context.name} · {context.assignedKeywordCount} <UiText text="запросов" before=" " /></option>
             ))}
         </CustomSelect>
       </label>
       <label>
-        <span>Название</span>
+        <span><UiText text="Название" /></span>
         <input
           maxLength={160}
           onChange={(event) =>
             onDraftChange({ ...draft, name: event.target.value })
           }
-          placeholder={competitorMode
-            ? "Например, Конкуренты · Москва"
-            : "Например, Москва · десктоп"}
+          placeholder={competitorMode ? uiText("Например, Конкуренты · Москва") : uiText("Например, Москва · десктоп")}
           value={draft.name}
         />
       </label>
@@ -1082,8 +1173,7 @@ function PositionContextSelector({
         className="semantic-dialog-link"
         href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}
       >
-        Управлять контекстами
-      </a>
+        <UiText text="Управлять контекстами" /></a>
     </section>
   );
 }
@@ -1092,6 +1182,8 @@ function PositionRunParameters({
   competitorMode,
   draft,
   onChange,
+  targets,
+  onTargetsChange,
   credentialId,
   lastUsedCredentialId,
   yandexLiveTurbo,
@@ -1109,6 +1201,8 @@ function PositionRunParameters({
   competitorMode: boolean;
   draft: TrackingContextDraft;
   onChange: (draft: TrackingContextDraft) => void;
+  targets: readonly RankTarget[];
+  onTargetsChange: (targets: readonly RankTarget[]) => void;
   credentialId: string;
   lastUsedCredentialId: string | undefined;
   yandexLiveTurbo: boolean;
@@ -1123,6 +1217,7 @@ function PositionRunParameters({
   onSaveProjectPositionChange: (enabled: boolean) => void;
   scope: ReactNode;
 }>) {
+  const { t: uiText, locale: uiLocale } = useUiLocale();
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const provider = selectedSource?.provider === "ARSENKIN"
     ? "ARSENKIN"
@@ -1156,7 +1251,8 @@ function PositionRunParameters({
         searchEngine,
         region.label,
         draft.device,
-        competitorMode
+        competitorMode,
+        uiLocale
       )
     });
     onSearchSourceChange("LIVE");
@@ -1167,14 +1263,14 @@ function PositionRunParameters({
       <div className="semantic-workflow-grid semantic-position-workflow-grid">
         <section className="semantic-workflow-panel semantic-position-source-panel">
           <header>
-            <h3>Поисковые системы</h3>
+            <h3><UiText text="Поисковые системы" /></h3>
             <p>
               {competitorMode
-                ? "Выберите поисковик, тип выдачи и источник Топ-10."
-                : "Выберите поисковик, тип выдачи и подключение провайдера."}
+                ? <UiText text="Выберите поисковик, тип выдачи и источник Топ-10." />
+                : <UiText text="Выберите поисковик, тип выдачи и подключение провайдера." />}
             </p>
           </header>
-          <div aria-label="Поисковая система" className="semantic-engine-cards" role="group">
+          <div aria-label={uiText("Поисковая система")} className="semantic-engine-cards" role="group">
             {(["YANDEX", "GOOGLE"] as const).map((engine) => (
               <button
                 aria-pressed={draft.searchEngine === engine}
@@ -1184,13 +1280,13 @@ function PositionRunParameters({
                 type="button"
               >
                 <SearchEngineLogo engine={engine} />
-                <span>{engine === "YANDEX" ? "Яндекс" : "Google"}</span>
+                <span>{engine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</span>
                 <i aria-hidden="true" />
               </button>
             ))}
           </div>
           <label className="semantic-workflow-field">
-            <span>Источник выдачи</span>
+            <span><UiText text="Источник выдачи" /></span>
             <CustomSelect
               onChange={(event) =>
                 onSearchSourceChange(
@@ -1200,10 +1296,10 @@ function PositionRunParameters({
               value={searchSource}
             >
               {draft.searchEngine === "YANDEX" && (
-                <option value="SEARCH_API">Яндекс XML / Search API</option>
+                <option value="SEARCH_API"><UiText text="Яндекс XML / Search API" /></option>
               )}
               <option value="LIVE">
-                {draft.searchEngine === "YANDEX" ? "Яндекс Live" : "Google Live"}
+                {draft.searchEngine === "YANDEX" ? <UiText text="Яндекс Live" /> : "Google Live"}
               </option>
             </CustomSelect>
           </label>
@@ -1220,26 +1316,20 @@ function PositionRunParameters({
                   type="checkbox"
                 />
                 <span>
-                  <strong>Turbo режим XMLStock</strong>
+                  <strong><UiText text="Turbo режим XMLStock" /></strong>
                   <small>
-                    Передаёт tbm=turbo, не применяет обычный лимит потоков
-                    XMLStock и получает до 50 результатов за страницу.
-                    Для максимальной скорости выберите TOP-50 в кабинете
-                    XMLStock. Тарифицируется дороже стандартного Live.
-                  </small>
+                    <UiText text="Передаёт tbm=turbo, не применяет обычный лимит потоков XMLStock и получает до 50 результатов за страницу. Для максимальной скорости выберите TOP-50 в кабинете XMLStock. Тарифицируется дороже стандартного Live." /></small>
                 </span>
               </label>
             )}
           <div className="semantic-provider-field">
             <div className="semantic-provider-field-heading">
-              <h4>Источник данных</h4>
-              <a className="semantic-dialog-link" href="/app/settings/integrations">Управлять</a>
+              <h4><UiText text="Источник данных" /></h4>
+              <a className="semantic-dialog-link" href="/app/settings/integrations"><UiText text="Управлять" /></a>
             </div>
           {sources.length ? (
             <div
-              aria-label={competitorMode
-                ? "Источник сбора конкурентов"
-                : "Источник съёма позиций"}
+              aria-label={competitorMode ? uiText("Источник сбора конкурентов") : uiText("Источник съёма позиций")}
               className="semantic-provider-list"
               role="radiogroup"
             >
@@ -1254,12 +1344,11 @@ function PositionRunParameters({
                 >
                   <ProviderLogo provider={source.provider} />
                   <span className="semantic-provider-card-copy">
-                    <strong>{integrationProviderLabel(source.provider)}</strong>
-                    <small>{source.label} · ваш API</small>
+                    <strong>{<UiText text={integrationProviderLabel(source.provider) ?? ""} />}</strong>
+                    <small>{source.label} <UiText text="· ваш API" before=" " /></small>
                     <b>
-                      Подключено
-                      {source.id === lastUsedCredentialId
-                        ? " · использовался в прошлый раз"
+                      <UiText text="Подключено" />{source.id === lastUsedCredentialId
+                        ? <UiText text="· использовался в прошлый раз" before=" " />
                         : ""}
                     </b>
                   </span>
@@ -1270,83 +1359,37 @@ function PositionRunParameters({
           ) : (
             <div className="inline-alert warning">
               {competitorMode
-                ? "Нет проверенного подключения для сбора конкурентов."
-                : "Нет проверенного подключения для съёма позиций."}
+                ? <UiText text="Нет проверенного подключения для сбора конкурентов." />
+                : <UiText text="Нет проверенного подключения для съёма позиций." />}
             </div>
           )}
           </div>
         </section>
         <section className="semantic-workflow-panel semantic-position-geo-panel">
           <header>
-            <h3>География и устройство</h3>
+            <h3><UiText text="География и устройство" /></h3>
             <p>
               {competitorMode
-                ? "Эти параметры формируют отдельный срез выдачи конкурентов."
-                : "Эти параметры формируют отдельную историю позиций."}
+                ? <UiText text="Эти параметры формируют отдельный срез выдачи конкурентов." />
+                : <UiText text="Эти параметры формируют отдельную историю позиций." />}
             </p>
           </header>
-          <label className="semantic-workflow-field">
-            <span>Регион</span>
-            <SearchableRegionSelect
-              kind={draft.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
-              onChange={({ code, label }) => onChange({
-                ...draft,
-                name: contextDisplayName(
-                  draft.searchEngine,
-                  label,
-                  draft.device,
-                  competitorMode
-                ),
-                regionCode: code,
-                regionLabel: label
-              })}
-              value={draft.regionCode}
-              valueLabel={draft.regionLabel}
-            />
-            <small>
-              <span className={`semantic-region-source ${regionSource.toLowerCase()}`}>
-                {regionSourceLabel(regionSource)}
-              </span>
-              {regionSource === "LAST_RUN"
-                ? " Регион последнего съёма имеет приоритет над городом проекта."
-                : regionSource === "PROJECT"
-                  ? " Этот город задан в настройках проекта."
-                  : regionSource === "DEFAULT"
-                    ? " Город проекта не задан."
-                    : " Регион изменён только для этого запуска."}
-            </small>
-          </label>
-          <fieldset className="semantic-device-cards">
-            <legend>Устройство</legend>
-            <div>
-              {(["DESKTOP", "MOBILE"] as const).map((device) => (
-                <label className={draft.device === device ? "selected" : undefined} key={device}>
-                  <input
-                    checked={draft.device === device}
-                    onChange={() => onChange({ ...draft, device })}
-                    type="radio"
-                  />
-                  <Icon name={device === "DESKTOP" ? "desktop" : "mobile"} />
-                  <span>{device === "DESKTOP" ? "Десктоп" : "Мобильное"}</span>
-                  <i aria-hidden="true" />
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <SemanticRankTargets targets={targets} engine={draft.searchEngine} onChange={onTargetsChange} />
+          {targets.length === 1 && <small className={`semantic-region-source ${regionSource.toLowerCase()}`}><UiText text={regionSourceLabel(regionSource)} /></small>}
           {competitorMode ? (
             <fieldset className="semantic-segmented-field semantic-depth-field">
-              <legend>Глубина сбора</legend>
-              <div className="semantic-segmented-control" aria-label="Глубина сбора" role="group">
+              <legend><UiText text="Глубина сбора" /></legend>
+              <div className="semantic-segmented-control" aria-label={uiText("Глубина сбора")} role="group">
                 <label className="selected">
                   <input checked readOnly type="radio" />
-                  <span>Топ-10</span>
+                  <span><UiText text="Топ-10" /></span>
                 </label>
               </div>
             </fieldset>
           ) : (
             <fieldset className="semantic-segmented-field semantic-depth-field">
-              <legend>Глубина проверки</legend>
-              <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина проверки">
+              <legend><UiText text="Глубина проверки" /></legend>
+              <div className="semantic-segmented-control" role="radiogroup" aria-label={uiText("Глубина проверки")}>
                 {depthOptions.map((depth) => (
                   <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
                     <input
@@ -1354,7 +1397,7 @@ function PositionRunParameters({
                       onChange={() => onChange({ ...draft, depth })}
                       type="radio"
                     />
-                    <span>Топ-{depth}</span>
+                    <span><UiText text="Топ-" />{depth}</span>
                   </label>
                 ))}
               </div>
@@ -1362,18 +1405,18 @@ function PositionRunParameters({
           )}
           <div className="semantic-position-compact-fields">
             <label className="semantic-workflow-field">
-              <span>Страна</span>
+              <span><UiText text="Страна" /></span>
               <CustomSelect
                 onChange={(event) =>
                   onChange({ ...draft, countryCode: event.target.value })
                 }
                 value={draft.countryCode}
               >
-                <option value="RU">Россия · RU</option>
+                <option value="RU"><UiText text="Россия · RU" /></option>
               </CustomSelect>
             </label>
             <label className="semantic-workflow-field">
-              <span>Язык выдачи</span>
+              <span><UiText text="Язык выдачи" /></span>
               <CustomSelect
                 disabled={draft.searchEngine === "YANDEX"}
                 onChange={(event) =>
@@ -1381,7 +1424,7 @@ function PositionRunParameters({
                 }
                 value={draft.language}
               >
-                <option value="ru">Русский · ru</option>
+                <option value="ru"><UiText text="Русский · ru" /></option>
                 {draft.searchEngine === "GOOGLE" && (
                   <option value="en">English · en</option>
                 )}
@@ -1390,14 +1433,11 @@ function PositionRunParameters({
           </div>
           {!draft.regionCode.trim() && (
             <div className="inline-alert warning" role="alert">
-              Выберите регион — без него съём позиций запустить нельзя.
-            </div>
+              <UiText text="Выберите регион — без него съём позиций запустить нельзя." /></div>
           )}
           {!competitorMode && draft.searchEngine === "YANDEX" && provider === "ARSENKIN" && (
             <div className="inline-alert info" role="status">
-              Arsenkin для Яндекса выполняет съём с глубиной Топ-30. При
-              выборе этого подключения глубина переключается автоматически.
-            </div>
+              <UiText text="Arsenkin для Яндекса выполняет съём с глубиной Топ-30. При выборе этого подключения глубина переключается автоматически." /></div>
           )}
           <label className="semantic-toggle-line semantic-position-untracked-toggle">
             <input
@@ -1411,13 +1451,13 @@ function PositionRunParameters({
             <span>
               <strong>
                 {competitorMode
-                  ? "Собирать конкурентов по неотслеживаемым запросам"
-                  : "Снимать позиции по неотслеживаемым запросам"}
+                  ? <UiText text="Собирать конкурентов по неотслеживаемым запросам" />
+                  : <UiText text="Снимать позиции по неотслеживаемым запросам" />}
               </strong>
               <small>
                 {competitorMode
-                  ? "Включено по умолчанию: статус отслеживания не ограничивает исследование конкурентов."
-                  : "По умолчанию запросы с выключенным отслеживанием пропускаются."}
+                  ? <UiText text="Включено по умолчанию: статус отслеживания не ограничивает исследование конкурентов." />
+                  : <UiText text="По умолчанию запросы с выключенным отслеживанием пропускаются." />}
               </small>
             </span>
           </label>
@@ -1431,21 +1471,17 @@ function PositionRunParameters({
                 type="checkbox"
               />
               <span>
-                <strong>Сохранять позицию сайта из этой выдачи</strong>
+                <strong><UiText text="Сохранять позицию сайта из этой выдачи" /></strong>
                 <small>
-                  Если сайт проекта найден в собранном Топ-10, его позиция
-                  попадёт в текущие позиции и историю без отдельного запроса к
-                  провайдеру. При выключенной галочке сохраняются только
-                  конкуренты.
-                </small>
+                  <UiText text="Если сайт проекта найден в собранном Топ-10, его позиция попадёт в текущие позиции и историю без отдельного запроса к провайдеру. При выключенной галочке сохраняются только конкуренты." /></small>
               </span>
             </label>
           )}
         </section>
         <section className="semantic-workflow-panel semantic-position-scope-panel">
           <header>
-            <h3>{competitorMode ? "Охват сбора" : "Охват проверки"}</h3>
-            <p>Выберите все запросы, текущее выделение или папки.</p>
+            <h3>{competitorMode ? <UiText text="Охват сбора" /> : <UiText text="Охват проверки" />}</h3>
+            <p><UiText text="Выберите все запросы, текущее выделение или папки." /></p>
           </header>
           {scope}
         </section>
@@ -1469,7 +1505,8 @@ function regionSourceLabel(source: SemanticRegionSource): string {
 
 function defaultContextDraft(
   region = defaultSemanticSearchRegions().YANDEX,
-  competitorMode = false
+  competitorMode = false,
+  locale = "ru"
 ): TrackingContextDraft {
   return contextDraftWithRegion({
     ...emptyTrackingContextDraft(),
@@ -1479,13 +1516,14 @@ function defaultContextDraft(
     device: "DESKTOP",
     depth: 50,
     includeUntracked: competitorMode
-  }, region, competitorMode);
+  }, region, competitorMode, locale);
 }
 
 function contextDraftWithRegion(
   draft: TrackingContextDraft,
   region: Readonly<{ code: string; label: string }>,
-  competitorMode = false
+  competitorMode = false,
+  locale = "ru"
 ): TrackingContextDraft {
   return {
     ...draft,
@@ -1493,7 +1531,8 @@ function contextDraftWithRegion(
       draft.searchEngine,
       region.label,
       draft.device,
-      competitorMode
+      competitorMode,
+      locale
     ),
     regionCode: region.code,
     regionLabel: region.label
@@ -1512,12 +1551,14 @@ function matchingTechnicalContext(
 
 function technicalContextName(
   draft: TrackingContextDraft,
-  competitorMode = false
+  competitorMode = false,
+  locale = "ru"
 ): string {
-  const engine = draft.searchEngine === "YANDEX" ? "Яндекс" : "Google";
-  const region = draft.regionLabel.trim() || draft.regionCode.trim() || draft.countryCode.toUpperCase();
-  const device = draft.device === "MOBILE" ? "Мобайл" : "Десктоп";
-  const prefix = competitorMode ? "Конкуренты" : "Авто";
+  const currentLocale = normalizedUiLocale(locale);
+  const engine = translateUi(currentLocale, draft.searchEngine === "YANDEX" ? "Яндекс" : "Google");
+  const region = translateUi(currentLocale, draft.regionLabel.trim() || draft.regionCode.trim() || draft.countryCode.toUpperCase());
+  const device = translateUi(currentLocale, draft.device === "MOBILE" ? "Мобильное" : "Десктоп");
+  const prefix = translateUi(currentLocale, competitorMode ? "Конкуренты" : "Авто");
   return `${prefix} · ${engine} · ${region} · ${device}`.slice(0, 160);
 }
 
@@ -1525,11 +1566,15 @@ function contextDisplayName(
   searchEngine: TrackingContextDraft["searchEngine"],
   regionLabel: string,
   device: TrackingContextDraft["device"],
-  competitorMode: boolean
+  competitorMode: boolean,
+  locale = "ru"
 ): string {
-  const engine = searchEngine === "YANDEX" ? "Яндекс" : "Google";
-  const deviceLabel = device === "MOBILE" ? "Мобильное" : "Десктоп";
-  return `${competitorMode ? "Конкуренты · " : ""}${engine} · ${regionLabel} · ${deviceLabel}`;
+  const currentLocale = normalizedUiLocale(locale);
+  const engine = translateUi(currentLocale, searchEngine === "YANDEX" ? "Яндекс" : "Google");
+  const deviceLabel = translateUi(currentLocale, device === "MOBILE" ? "Мобильное" : "Десктоп");
+  const region = translateUi(currentLocale, regionLabel);
+  const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
+  return `${prefix}${engine} · ${region} · ${deviceLabel}`;
 }
 
 async function synchronizeContextAssignments(
@@ -1656,7 +1701,7 @@ function feedbackMessage(
   return requestId ? `${message} Код запроса: ${requestId}.` : message;
 }
 
-function formatPlatformCharge(microAmount: string): string {
+function formatPlatformCharge(microAmount: string, uiLocale: string = "ru-RU"): string {
   const amount = BigInt(microAmount);
   const rubles = amount / 1_000_000n;
   const fraction = (amount % 1_000_000n)
@@ -1666,7 +1711,7 @@ function formatPlatformCharge(microAmount: string): string {
   const decimal = fraction.length === 0
     ? "00"
     : fraction.padEnd(2, "0");
-  return `${new Intl.NumberFormat("ru-RU").format(rubles)},${decimal} ₽`;
+  return `${new Intl.NumberFormat(uiLocale).format(rubles)},${decimal} ₽`;
 }
 
 interface PendingSemanticRankRun {

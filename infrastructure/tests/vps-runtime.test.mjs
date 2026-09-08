@@ -18,6 +18,8 @@ const shellScripts = [
   "configure-yookassa.sh",
   "configure-web-push.sh",
   "migrate-runtime.sh",
+  "maintain-runtime.sh",
+  "install-maintenance.sh",
   "prepare-clamav.sh",
   "provision-object-storage.sh",
   "public-api-proxy.sh",
@@ -27,6 +29,8 @@ const shellScripts = [
   "runtime-lib.sh",
   "smoke-public-api.sh",
   "smoke-runtime.sh",
+  "test-browser.sh",
+  "test-postgres.sh",
   "start-runtime.sh",
   "status-runtime.sh",
   "stop-runtime.sh",
@@ -78,7 +82,7 @@ test("VPS runtime uses UTC for PostgreSQL and every Node process", async () => {
   const nodeRuntimeCount = [...source.matchAll(/NODE_ENV=production \\/gu)].length;
   const utcRuntimeCount = [...source.matchAll(/TZ=UTC \\/gu)].length;
 
-  assert.equal(nodeRuntimeCount, 13);
+  assert.equal(nodeRuntimeCount, 14);
   assert.equal(utcRuntimeCount, nodeRuntimeCount);
   assert.match(source, /postgres[\s\S]*-c timezone=UTC/);
 });
@@ -313,4 +317,26 @@ test("status includes external storage TLS and ClamAV readiness", async () => {
   assert.match(source, /zPING\\0/);
   assert.match(source, /9443/);
   assert.match(source, /3310/);
+});
+
+test("runtime stop targets only panes of its own tmux session", async () => {
+  const source = await readVpsFile("stop-runtime.sh");
+  const listPanes = source.match(/tmux list-panes[\s\S]*?-F '#\{pane_pid\}'/u)?.[0];
+  assert.ok(listPanes);
+  assert.match(listPanes, /-t "\$runtime_session"/u);
+  assert.match(listPanes, /-s \\/u);
+  assert.doesNotMatch(listPanes, /-a(?:\s|$)/u);
+});
+
+test("runtime bounds logs, suppresses database payloads and checks disk plus public HTTPS", async () => {
+  const supervisor = await readVpsFile("supervise-component.sh");
+  const component = await readVpsFile("run-component.sh");
+  const status = await readVpsFile("status-runtime.sh");
+  assert.match(supervisor, /bounded-log\.mjs/u);
+  assert.match(component, /log_error_verbosity=terse/u);
+  assert.match(component, /log_parameter_max_length_on_error=0/u);
+  assert.match(component, /log_min_error_statement=panic/u);
+  assert.match(status, /service=runtime-disk/u);
+  assert.match(status, /"\$SEO_PLATFORM_PUBLIC_URL\/ru"/u);
+  assert.match(status, /exit "\$runtime_status"/u);
 });

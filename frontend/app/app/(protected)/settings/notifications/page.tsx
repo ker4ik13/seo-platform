@@ -1,6 +1,8 @@
 import { NotificationSettings } from "../../../../../components/notification-settings";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +12,9 @@ export default async function NotificationSettingsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Настройки уведомлений</h1>
+          <h1><UiText text="Настройки уведомлений" /></h1>
           <p>
-            Выберите глобальные каналы, тихие часы, дайджесты и значения по
-            умолчанию для проектных работ.
-          </p>
+            <UiText text="Выберите глобальные каналы, тихие часы, дайджесты и значения по умолчанию для проектных работ." /></p>
         </div>
       </section>
       <SettingsTabs

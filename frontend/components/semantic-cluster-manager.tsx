@@ -19,6 +19,8 @@ import {
   applySemanticClusterPageMappingInBatches,
   previewSemanticClusterPageMappingInBatches
 } from "../lib/semantic-cluster-bulk";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type ClusterEditor =
   | Readonly<{
@@ -44,6 +46,7 @@ export function SemanticClusterManager({
   projectId,
   onChanged
 }: Readonly<{ projectId: string; onChanged: () => void }>) {
+  const { t: uiText } = useUiLocale();
   const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
   const [pages, setPages] = useState<readonly ProjectPageSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,8 +306,8 @@ export function SemanticClusterManager({
     <section className="panel semantic-groups" aria-busy={loading}>
       <header className="panel-header">
         <div>
-          <h2>Кластеры</h2>
-          <p>Поисковые интенты для назначения и массовой обработки запросов</p>
+          <h2><UiText text="Кластеры" /></h2>
+          <p><UiText text="Поисковые интенты для назначения и массовой обработки запросов" /></p>
         </div>
         <div className="semantic-cluster-header-actions">
           {clusters.length > 0 && (
@@ -314,7 +317,7 @@ export function SemanticClusterManager({
               onClick={toggleVisibleClusters}
               type="button"
             >
-              {selectedClusterIds.length > 0 ? "Снять выбор" : "Выбрать все"}
+              {selectedClusterIds.length > 0 ? <UiText text="Снять выбор" /> : <UiText text="Выбрать все" />}
             </button>
           )}
           <button
@@ -329,15 +332,14 @@ export function SemanticClusterManager({
             })}
             type="button"
           >
-            Новый кластер
-          </button>
+            <UiText text="Новый кластер" /></button>
         </div>
       </header>
 
       {editor && (
         <form className="semantic-cluster-editor" onSubmit={(event) => void save(event)}>
           <label>
-            <span>Название кластера</span>
+            <span><UiText text="Название кластера" /></span>
             <input
               autoFocus
               maxLength={255}
@@ -346,7 +348,7 @@ export function SemanticClusterManager({
                   current ? { ...current, name: event.target.value } : current
                 )
               }
-              placeholder="Например, Купить кондиционер"
+              placeholder={uiText("Например, Купить кондиционер")}
               required
               value={editor.name}
             />
@@ -362,7 +364,7 @@ export function SemanticClusterManager({
                 }
                 type="checkbox"
               />
-              <span>Зафиксировать кластер</span>
+              <span><UiText text="Зафиксировать кластер" /></span>
             </label>
             <label>
               <input
@@ -376,11 +378,11 @@ export function SemanticClusterManager({
                 }
                 type="checkbox"
               />
-              <span>Не включать в рекластеризацию</span>
+              <span><UiText text="Не включать в рекластеризацию" /></span>
             </label>
           </div>
           <label>
-            <span>Основная посадочная</span>
+            <span><UiText text="Основная посадочная" /></span>
             <CustomSelect
               onChange={(event) =>
                 setEditor((current) =>
@@ -391,7 +393,7 @@ export function SemanticClusterManager({
               }
               value={editor.primaryPageId}
             >
-              <option value="">Не назначена</option>
+              <option value=""><UiText text="Не назначена" /></option>
               {pages.map((page) => (
                 <option key={page.id} value={page.id}>
                   {page.title ? `${page.title} · ` : ""}{page.normalizedUrl}
@@ -400,7 +402,7 @@ export function SemanticClusterManager({
             </CustomSelect>
           </label>
           <label>
-            <span>Почему эта страница</span>
+            <span><UiText text="Почему эта страница" /></span>
             <input
               disabled={!editor.primaryPageId}
               maxLength={2_000}
@@ -411,16 +413,15 @@ export function SemanticClusterManager({
                     : current
                 )
               }
-              placeholder="Интент, SERP или ручное решение"
+              placeholder={uiText("Интент, SERP или ручное решение")}
               value={editor.pageMappingRationale}
             />
           </label>
           <div className="semantic-group-editor-actions">
             <button className="text-button" disabled={saving} onClick={() => setEditor(undefined)} type="button">
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
             <button className="primary-button" disabled={saving} type="submit">
-              {saving ? "Сохраняем…" : "Сохранить"}
+              {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
             </button>
           </div>
         </form>
@@ -428,15 +429,14 @@ export function SemanticClusterManager({
 
       {error && (
         <div className="inline-alert danger semantic-table-alert" role="alert">
-          <span>{error}</span>
+          <span>{<UiText text={error ?? ""} />}</span>
           <button className="text-button" onClick={() => setReloadVersion((value) => value + 1)} type="button">
-            Повторить
-          </button>
+            <UiText text="Повторить" /></button>
         </div>
       )}
 
       {bulkNotice && (
-        <div className="inline-alert success" role="status">{bulkNotice}</div>
+        <div className="inline-alert success" role="status">{<UiText text={bulkNotice ?? ""} />}</div>
       )}
 
       {selectedClusterIds.length > 0 && (
@@ -446,10 +446,9 @@ export function SemanticClusterManager({
         >
           <div className="semantic-bulk-heading">
             <div>
-              <strong>Действия с {selectedClusterIds.length} кластерами</strong>
+              <strong><UiText text="Действия с" after=" " />{selectedClusterIds.length} <UiText text="кластерами" before=" " /></strong>
               <span>
-                Сначала проверьте изменения. Конфликтующие версии не перезаписываются.
-              </span>
+                <UiText text="Сначала проверьте изменения. Конфликтующие версии не перезаписываются." /></span>
             </div>
             <button
               className="text-button"
@@ -461,15 +460,14 @@ export function SemanticClusterManager({
               }}
               type="button"
             >
-              Закрыть
-            </button>
+              <UiText text="Закрыть" /></button>
           </div>
           {selectedClusterIds.length >= 2 && selectedClusterIds.length <= 50 && (
             <details className="semantic-cluster-merge">
-              <summary>Объединить выбранные кластеры</summary>
+              <summary><UiText text="Объединить выбранные кластеры" /></summary>
               <div className="semantic-cluster-merge-controls">
                 <label>
-                  <span>Кластер-получатель</span>
+                  <span><UiText text="Кластер-получатель" /></span>
                   <CustomSelect
                     disabled={Boolean(mergeBusy)}
                     onChange={(event) => {
@@ -478,7 +476,7 @@ export function SemanticClusterManager({
                     }}
                     value={mergeTargetId}
                   >
-                    <option value="">Выберите кластер</option>
+                    <option value=""><UiText text="Выберите кластер" /></option>
                     {clusters
                       .filter(({ id }) => selectedClusterIds.includes(id))
                       .map((cluster) => (
@@ -488,23 +486,21 @@ export function SemanticClusterManager({
                 </label>
                 {mergePreview && (
                   <div className="semantic-cluster-bulk-preview" role="status">
-                    <span><strong>{mergePreview.movedKeywordCount}</strong> запросов</span>
-                    <span><strong>{mergePreview.sourceClusterCount}</strong> кластеров исчезнут</span>
+                    <span><strong>{mergePreview.movedKeywordCount}</strong> <UiText text="запросов" before=" " /></span>
+                    <span><strong>{mergePreview.sourceClusterCount}</strong> <UiText text="кластеров исчезнут" before=" " /></span>
                     {mergePreview.sourcePageConflictCount > 0 && (
                       <span className="warning">
-                        <strong>{mergePreview.sourcePageConflictCount}</strong> других посадочных
-                      </span>
+                        <strong>{mergePreview.sourcePageConflictCount}</strong> <UiText text="других посадочных" before=" " /></span>
                     )}
                     {mergePreview.lockedClusterCount > 0 && (
-                      <span><strong>{mergePreview.lockedClusterCount}</strong> зафиксировано</span>
+                      <span><strong>{mergePreview.lockedClusterCount}</strong> <UiText text="зафиксировано" before=" " /></span>
                     )}
                     {mergePreview.readiness === "CONFLICTED" && (
-                      <span className="danger">Список изменился — обновите данные</span>
+                      <span className="danger"><UiText text="Список изменился — обновите данные" /></span>
                     )}
                     {mergePreview.readiness === "BACKGROUND_REQUIRED" && (
                       <span className="warning">
-                        Больше {mergePreview.synchronousKeywordLimit} запросов — нужен фоновый merge
-                      </span>
+                        <UiText text="Больше" after=" " />{mergePreview.synchronousKeywordLimit} <UiText text="запросов — нужен фоновый merge" before=" " /></span>
                     )}
                   </div>
                 )}
@@ -515,7 +511,7 @@ export function SemanticClusterManager({
                     onClick={() => void previewMerge()}
                     type="button"
                   >
-                    {mergeBusy === "PREVIEW" ? "Проверяем…" : "Проверить merge"}
+                    {mergeBusy === "PREVIEW" ? <UiText text="Проверяем…" /> : <UiText text="Проверить merge" />}
                   </button>
                   {mergePreview?.readiness === "READY" && (
                     <button
@@ -524,7 +520,7 @@ export function SemanticClusterManager({
                       onClick={() => void applyMerge()}
                       type="button"
                     >
-                      {mergeBusy === "APPLY" ? "Объединяем…" : "Объединить"}
+                      {mergeBusy === "APPLY" ? <UiText text="Объединяем…" /> : <UiText text="Объединить" />}
                     </button>
                   )}
                 </div>
@@ -533,14 +529,14 @@ export function SemanticClusterManager({
           )}
           <div className="semantic-cluster-bulk-fields">
             <label>
-              <span>Действие</span>
+              <span><UiText text="Действие" /></span>
               <CustomSelect
                 disabled={Boolean(bulkBusy)}
                 onChange={(event) => changeBulkAction(event.target.value)}
                 value={bulkAction}
               >
-                <option value="">Выберите действие</option>
-                <option value="CLEAR">Снять основную посадочную</option>
+                <option value=""><UiText text="Выберите действие" /></option>
+                <option value="CLEAR"><UiText text="Снять основную посадочную" /></option>
                 {pages.map((page) => (
                   <option key={page.id} value={page.id}>
                     {page.title ? `${page.title} · ` : ""}{page.normalizedUrl}
@@ -549,23 +545,22 @@ export function SemanticClusterManager({
               </CustomSelect>
             </label>
             <label>
-              <span>Обоснование</span>
+              <span><UiText text="Обоснование" /></span>
               <input
                 disabled={!bulkAction || bulkAction === "CLEAR" || Boolean(bulkBusy)}
                 maxLength={2_000}
                 onChange={(event) => changeBulkRationale(event.target.value)}
-                placeholder="Интент, SERP или ручное решение"
+                placeholder={uiText("Интент, SERP или ручное решение")}
                 value={bulkRationale}
               />
             </label>
           </div>
           {bulkPreview && (
             <div className="semantic-cluster-bulk-preview" role="status">
-              <span><strong>{bulkPreview.applicable}</strong> будут изменены</span>
-              <span><strong>{bulkPreview.skipped}</strong> уже совпадают</span>
+              <span><strong>{bulkPreview.applicable}</strong> <UiText text="будут изменены" before=" " /></span>
+              <span><strong>{bulkPreview.skipped}</strong> <UiText text="уже совпадают" before=" " /></span>
               <span className={bulkPreview.conflicted > 0 ? "danger" : ""}>
-                <strong>{bulkPreview.conflicted}</strong> конфликтов
-              </span>
+                <strong>{bulkPreview.conflicted}</strong> <UiText text="конфликтов" before=" " /></span>
             </div>
           )}
           <div className="semantic-editor-actions">
@@ -575,7 +570,7 @@ export function SemanticClusterManager({
               onClick={() => void previewBulkPageMapping()}
               type="button"
             >
-              {bulkBusy === "PREVIEW" ? "Проверяем…" : "Проверить"}
+              {bulkBusy === "PREVIEW" ? <UiText text="Проверяем…" /> : <UiText text="Проверить" />}
             </button>
             {bulkPreview && (
               <button
@@ -585,8 +580,8 @@ export function SemanticClusterManager({
                 type="button"
               >
                 {bulkBusy === "APPLY"
-                  ? "Применяем…"
-                  : `Применить ${bulkPreview.applicable}`}
+                  ? <UiText text="Применяем…" />
+                  : <UiText text="Применить {0}" values={[String(bulkPreview.applicable)]} />}
               </button>
             )}
           </div>
@@ -594,11 +589,11 @@ export function SemanticClusterManager({
       )}
 
       {loading ? (
-        <div className="semantic-group-skeleton" role="status">Загружаем кластеры…</div>
+        <div className="semantic-group-skeleton" role="status"><UiText text="Загружаем кластеры…" /></div>
       ) : clusters.length === 0 ? (
         <div className="semantic-group-empty">
-          <strong>Кластеров пока нет</strong>
-          <span>Создайте первый поисковый интент и назначьте ему запросы.</span>
+          <strong><UiText text="Кластеров пока нет" /></strong>
+          <span><UiText text="Создайте первый поисковый интент и назначьте ему запросы." /></span>
         </div>
       ) : (
         <div className="semantic-group-list">
@@ -606,7 +601,7 @@ export function SemanticClusterManager({
             <div className="semantic-group-row semantic-cluster-row" key={cluster.id}>
               <label className="semantic-cluster-select">
                 <input
-                  aria-label={`Выбрать кластер «${cluster.name}»`}
+                  aria-label={uiText("Выбрать кластер «{0}»", [String(cluster.name)])}
                   checked={selectedClusterIds.includes(cluster.id)}
                   disabled={Boolean(bulkBusy)}
                   onChange={() => toggleCluster(cluster.id)}
@@ -621,25 +616,24 @@ export function SemanticClusterManager({
                   {" · "}
                   {cluster.primaryPage
                     ? cluster.primaryPage.normalizedUrl
-                    : "посадочная не назначена"}
+                    : <UiText text="посадочная не назначена" />}
                 </span>
                 <div className="semantic-cluster-diagnostics">
                   {cluster.pageDiagnostics.hasMissingLanding && (
-                    <small className="warning">Нет основной посадочной</small>
+                    <small className="warning"><UiText text="Нет основной посадочной" /></small>
                   )}
                   {cluster.pageDiagnostics.unmappedKeywordCount > 0 && (
                     <small>
-                      {cluster.pageDiagnostics.unmappedKeywordCount} без URL
-                    </small>
+                      {cluster.pageDiagnostics.unmappedKeywordCount} <UiText text="без URL" before=" " /></small>
                   )}
                   {cluster.pageDiagnostics.hasCannibalization && (
                     <small className="danger">
-                      Каннибализация: {cluster.pageDiagnostics.competingPageCount}
+                      <UiText text="Каннибализация:" after=" " />{cluster.pageDiagnostics.competingPageCount}
                     </small>
                   )}
-                  {cluster.isLocked && <small>Зафиксирован</small>}
+                  {cluster.isLocked && <small><UiText text="Зафиксирован" /></small>}
                   {cluster.excludeFromReclustering && (
-                    <small>Вне рекластеризации</small>
+                    <small><UiText text="Вне рекластеризации" /></small>
                   )}
                 </div>
               </div>
@@ -657,15 +651,13 @@ export function SemanticClusterManager({
                 })}
                 type="button"
               >
-                Изменить
-              </button>
+                <UiText text="Изменить" /></button>
               <button
                 className="text-button danger-text"
                 onClick={() => void deleteCluster(cluster)}
                 type="button"
               >
-                Удалить
-              </button>
+                <UiText text="Удалить" /></button>
             </div>
           ))}
         </div>

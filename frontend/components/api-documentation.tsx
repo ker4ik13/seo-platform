@@ -16,6 +16,8 @@ import {
 } from "../lib/api-docs";
 import { copyText } from "../lib/clipboard";
 import styles from "./api-documentation.module.css";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 export function ApiDocumentation({
   activeSection,
@@ -24,6 +26,7 @@ export function ApiDocumentation({
   activeSection: ApiDocSectionSlug;
   baseUrl: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [query, setQuery] = useState("");
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const normalizedQuery = normalizedSearch(query);
@@ -68,12 +71,12 @@ export function ApiDocumentation({
             src="/brand/seonorita-mark.svg"
             width={30}
           />
-          <strong>SEOньорита</strong>
-          <span>Документация API</span>
+          <strong><UiText text="SEOньорита" /></strong>
+          <span><UiText text="Документация API" /></span>
         </Link>
-        <nav aria-label="Ссылки документации">
+        <nav aria-label={uiText("Ссылки документации")}>
           <Link aria-current="page" href="/docs/api">API v1</Link>
-          <Link href="/app/settings/api">API-ключи</Link>
+          <Link href="/app/settings/api"><UiText text="API-ключи" /></Link>
         </nav>
       </header>
 
@@ -92,14 +95,14 @@ export function ApiDocumentation({
             className={`${styles.sidebarBody} ${mobileNavigationOpen ? styles.sidebarBodyOpen : ""}`}
           >
             <label className={styles.searchField}>
-              <span className={styles.visuallyHidden}>Поиск по документации API</span>
+              <span className={styles.visuallyHidden}><UiText text="Поиск по документации API" /></span>
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <circle cx="11" cy="11" r="7" />
                 <path d="m16.2 16.2 4 4" />
               </svg>
               <input
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Поиск по API"
+                placeholder={uiText("Поиск по API")}
                 type="search"
                 value={query}
               />
@@ -113,7 +116,7 @@ export function ApiDocumentation({
                 sections={searchResults.sections}
               />
             ) : (
-              <nav aria-label="Разделы API" className={styles.sectionNavigation}>
+              <nav aria-label={uiText("Разделы API")} className={styles.sectionNavigation}>
                 {apiDocSectionsByGroup().map((group) => (
                   <div key={group.group}>
                     <span>{group.group}</span>
@@ -134,7 +137,7 @@ export function ApiDocumentation({
             )}
 
             <div className={styles.sidebarMeta}>
-              <span>Версия</span>
+              <span><UiText text="Версия" /></span>
               <strong>Public API v1</strong>
               <small>JSON · UTF-8 · ISO 8601 UTC</small>
             </div>
@@ -148,16 +151,16 @@ export function ApiDocumentation({
             <span>{section.title}</span>
           </div>
           <DocumentationPage activeSection={activeSection} baseUrl={baseUrl} />
-          <nav aria-label="Постраничная навигация" className={styles.pageNavigation}>
+          <nav aria-label={uiText("Постраничная навигация")} className={styles.pageNavigation}>
             {previous ? (
               <Link href={apiDocHref(previous.slug)}>
-                <span>← Назад</span>
+                <span><UiText text="← Назад" /></span>
                 <strong>{previous.title}</strong>
               </Link>
             ) : <span />}
             {next ? (
               <Link href={apiDocHref(next.slug)}>
-                <span>Далее →</span>
+                <span><UiText text="Далее →" /></span>
                 <strong>{next.title}</strong>
               </Link>
             ) : <span />}
@@ -183,10 +186,10 @@ function SearchResults({
   return (
     <div aria-live="polite" className={styles.searchResults}>
       <div className={styles.searchResultHeading}>
-        <span>Результаты</span>
+        <span><UiText text="Результаты" /></span>
         <small>{sections.length + endpoints.length}</small>
       </div>
-      {empty && <p>По запросу «{query.trim()}» ничего не найдено.</p>}
+      {empty && <p><UiText text="По запросу «" />{query.trim()}<UiText text="» ничего не найдено." /></p>}
       {sections.map((section) => (
         <Link href={apiDocHref(section.slug)} key={section.slug} onClick={onNavigate}>
           <strong>{section.title}</strong>
@@ -244,29 +247,27 @@ function DocumentationPage({
 }
 
 function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Создайте отдельный ключ, выполните первый запрос и проверьте стандартную оболочку ответа."
-        title="Быстрый старт"
+        description={uiText("Создайте отдельный ключ, выполните первый запрос и проверьте стандартную оболочку ответа.")}
+        title={uiText("Быстрый старт")}
       />
-      <Callout title="Базовый URL">
-        Все пути в справочнике добавляются после <code>{baseUrl}</code>.
-        Домен берётся из настроек текущего окружения. Идентификаторы заранее
-        передавать агенту не нужно: первый запрос <code>GET /access</code>
-        вернёт доступную рабочую область, проекты и права ключа.
-      </Callout>
-      <Section title="1. Создайте ключ">
+      <Callout title={uiText("Базовый URL")}>
+        <UiText text="Все пути в справочнике добавляются после" after=" " /><code>{baseUrl}</code><UiText text=". Домен берётся из настроек текущего окружения. Идентификаторы заранее передавать агенту не нужно: первый запрос" after=" " /><code>GET /access</code>
+        <UiText text="вернёт доступную рабочую область, проекты и права ключа." /></Callout>
+      <Section title={uiText("1. Создайте ключ")}>
         <ol>
-          <li>Откройте экран API-ключей и задайте понятное имя интеграции.</li>
-          <li>Выберите только нужные scopes и проекты.</li>
-          <li>Скопируйте секрет сразу: повторно он не показывается.</li>
-          <li>Храните секрет в secret manager или переменной окружения.</li>
+          <li><UiText text="Откройте экран API-ключей и задайте понятное имя интеграции." /></li>
+          <li><UiText text="Выберите только нужные scopes и проекты." /></li>
+          <li><UiText text="Скопируйте секрет сразу: повторно он не показывается." /></li>
+          <li><UiText text="Храните секрет в secret manager или переменной окружения." /></li>
         </ol>
       </Section>
-      <Section title="2. Выполните первый запрос">
+      <Section title={uiText("2. Выполните первый запрос")}>
         <EndpointHeader
-          description="Возвращает контекст самого ключа без workspaceId или projectId в URL."
+          description={uiText("Возвращает контекст самого ключа без workspaceId или projectId в URL.")}
           method="GET"
           path="/access"
           scope="token:discover · встроено"
@@ -276,7 +277,7 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
   -H "Accept: application/json"`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -306,32 +307,27 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="200 · Ответ"
+          title={uiText("200 · Ответ")}
         />
       </Section>
-      <Section title="3. Используйте найденные идентификаторы">
+      <Section title={uiText("3. Используйте найденные идентификаторы")}>
         <p>
-          Подставляйте <code>data.workspace.id</code> и нужный
-          <code> data.projects[].id</code> в остальные маршруты. Коллекция уже
-          учитывает allowlist ключа и актуальные права создавшего его
-          пользователя. Один ключ всегда относится к одной рабочей области;
-          для другой рабочей области создайте отдельный ключ.
-        </p>
+          <UiText text="Подставляйте" after=" " /><code>data.workspace.id</code> <UiText text="и нужный" before=" " /><code> data.projects[].id</code> <UiText text="в остальные маршруты. Коллекция уже учитывает allowlist ключа и актуальные права создавшего его пользователя. Один ключ всегда относится к одной рабочей области; для другой рабочей области создайте отдельный ключ." before=" " /></p>
         <CodeBlock
           code={`curl "${baseUrl}/projects/<projectId>/keywords?limit=100" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
   -H "Accept: application/json"`}
           language="bash"
-          title="Следующий запрос"
+          title={uiText("Следующий запрос")}
         />
       </Section>
-      <Section title="4. Обрабатывайте ответ">
+      <Section title={uiText("4. Обрабатывайте ответ")}>
         <ul>
-          <li><code>data</code> содержит ресурс или массив ресурсов.</li>
-          <li><code>meta.requestId</code> сохраняйте для диагностики.</li>
-          <li>У постраничных списков читайте <code>page.hasNext</code> и <code>page.nextCursor</code>.</li>
-          <li>Денежные и потенциально большие целые значения передаются строками.</li>
-          <li>Все даты — ISO 8601 в UTC.</li>
+          <li><code>data</code> <UiText text="содержит ресурс или массив ресурсов." before=" " /></li>
+          <li><code>meta.requestId</code> <UiText text="сохраняйте для диагностики." before=" " /></li>
+          <li><UiText text="У постраничных списков читайте" after=" " /><code>page.hasNext</code> <UiText text="и" before=" " after=" " /><code>page.nextCursor</code>.</li>
+          <li><UiText text="Денежные и потенциально большие целые значения передаются строками." /></li>
+          <li><UiText text="Все даты — ISO 8601 в UTC." /></li>
         </ul>
       </Section>
     </article>
@@ -339,25 +335,24 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
 }
 
 function Authentication() {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="API использует Bearer-токены с ограниченными правами и списком проектов. Cookie-сессия для внешнего клиента не нужна."
-        title="Авторизация и права"
+        description={uiText("API использует Bearer-токены с ограниченными правами и списком проектов. Cookie-сессия для внешнего клиента не нужна.")}
+        title={uiText("Авторизация и права")}
       />
-      <Section title="Bearer-токен">
+      <Section title={uiText("Bearer-токен")}>
         <p>
-          Передавайте секрет только в HTTP-заголовке. Не добавляйте его в URL,
-          query string, JSON, логи или промпт агента.
-        </p>
+          <UiText text="Передавайте секрет только в HTTP-заголовке. Не добавляйте его в URL, query string, JSON, логи или промпт агента." /></p>
         <CodeBlock
           code={`Authorization: Bearer seo_pat_<secret>
 Accept: application/json`}
           language="http"
-          title="Обязательные заголовки"
+          title={uiText("Обязательные заголовки")}
         />
       </Section>
-      <Section title="Заголовки команд">
+      <Section title={uiText("Заголовки команд")}>
         <Table
           columns={["Заголовок", "Когда нужен", "Назначение"]}
           rows={[
@@ -371,10 +366,7 @@ Accept: application/json`}
       </Section>
       <Section title="Scopes">
         <p>
-          Итоговый доступ — пересечение текущих прав пользователя, scopes ключа
-          и allowlist проектов. Отзыв членства или архивация проекта действуют
-          сразу, без перевыпуска ключа.
-        </p>
+          <UiText text="Итоговый доступ — пересечение текущих прав пользователя, scopes ключа и allowlist проектов. Отзыв членства или архивация проекта действуют сразу, без перевыпуска ключа." /></p>
         <div className={styles.scopeTable}>
           {([
             ["projects", "Проекты"],
@@ -397,48 +389,38 @@ Accept: application/json`}
           ))}
         </div>
       </Section>
-      <Callout title="Discovery без отдельного scope">
-        Любой действующий ключ может вызвать <code>GET /access</code>. Endpoint
-        не расширяет доступ: он показывает только workspace, allowlisted
-        проекты и scopes самого ключа, повторно проверяя актуальное членство и
-        права пользователя.
-      </Callout>
-      <Callout title="Ротация">
-        При обычном перевыпуске старый секрет действует ещё 10 минут. Команда
-        отзыва отключает текущий и переходный секрет немедленно.
-      </Callout>
+      <Callout title={uiText("Discovery без отдельного scope")}>
+        <UiText text="Любой действующий ключ может вызвать" after=" " /><code>GET /access</code><UiText text=". Endpoint не расширяет доступ: он показывает только workspace, allowlisted проекты и scopes самого ключа, повторно проверяя актуальное членство и права пользователя." /></Callout>
+      <Callout title={uiText("Ротация")}>
+        <UiText text="При обычном перевыпуске старый секрет действует ещё 10 минут. Команда отзыва отключает текущий и переходный секрет немедленно." /></Callout>
     </article>
   );
 }
 
 function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Читайте список доступных проектов и изменяйте versioned-настройки с If-Match."
-        title="Проекты"
+        description={uiText("Читайте список доступных проектов и изменяйте versioned-настройки с If-Match.")}
+        title={uiText("Проекты")}
       />
       <RouteSummary section="projects" />
-      <Callout title="Сначала определите доступ">
-        Если клиент ещё не знает идентификаторы, вызовите <code>GET /access</code>
-        и возьмите workspaceId и projectId из ответа. Передавать их агенту
-        вручную не требуется.
-      </Callout>
-      <Section title="Список проектов">
+      <Callout title={uiText("Сначала определите доступ")}>
+        <UiText text="Если клиент ещё не знает идентификаторы, вызовите" after=" " /><code>GET /access</code>
+        <UiText text="и возьмите workspaceId и projectId из ответа. Передавать их агенту вручную не требуется." /></Callout>
+      <Section title={uiText("Список проектов")}>
         <EndpointHeader method="GET" path="/workspaces/{workspaceId}/projects" scope="projects:read" />
         <CodeBlock
           code={`curl "${baseUrl}/workspaces/<workspaceId>/projects" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <p>
-          Ответ — полная коллекция в общем сохранённом порядке. Для ключа с
-          выбранными проектами сервер отфильтрует остальные проекты до
-          формирования ответа.
-        </p>
+          <UiText text="Ответ — полная коллекция в общем сохранённом порядке. Для ключа с выбранными проектами сервер отфильтрует остальные проекты до формирования ответа." /></p>
       </Section>
-      <Section title="Изменение проекта">
+      <Section title={uiText("Изменение проекта")}>
         <EndpointHeader method="PATCH" path="/projects/{projectId}" scope="projects:write" />
         <CodeBlock
           code={`curl -X PATCH "${baseUrl}/projects/<projectId>" \\
@@ -450,7 +432,7 @@ function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "domain": "neurolub.ru"
   }'`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -465,26 +447,19 @@ function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J...", "version": 5 }
 }`}
           language="json"
-          title="200 · Ответ"
+          title={uiText("200 · Ответ")}
         />
         <p>
-          Новую версию также возвращает <code>ETag: &quot;v5&quot;</code>.
-          При устаревшем If-Match перечитайте проект и повторите осознанное изменение.
-        </p>
+          <UiText text="Новую версию также возвращает" after=" " /><code>ETag: &quot;v5&quot;</code><UiText text=". При устаревшем If-Match перечитайте проект и повторите осознанное изменение." /></p>
       </Section>
-      <Section title="Общий порядок проектов">
+      <Section title={uiText("Общий порядок проектов")}>
         <EndpointHeader
           method="PUT"
           path="/workspaces/{workspaceId}/projects/order"
           scope="projects:write"
         />
         <p>
-          Порядок общий для всей рабочей области. Передайте одновременно
-          последний увиденный список и новый полный список. Если другой
-          пользователь уже изменил порядок, API вернёт <code>412</code>.
-          Команда доступна только ключу со всеми проектами и пользователю с
-          полным доступом к рабочей области.
-        </p>
+          <UiText text="Порядок общий для всей рабочей области. Передайте одновременно последний увиденный список и новый полный список. Если другой пользователь уже изменил порядок, API вернёт" after=" " /><code>412</code><UiText text=". Команда доступна только ключу со всеми проектами и пользователю с полным доступом к рабочей области." /></p>
         <CodeBlock
           code={`curl -X PUT "${baseUrl}/workspaces/<workspaceId>/projects/order" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
@@ -494,7 +469,7 @@ function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "projectIds": ["01900000-0000-7000-8000-000000000102", "01900000-0000-7000-8000-000000000101"]
   }'`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -507,7 +482,7 @@ function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="200 · Ответ"
+          title={uiText("200 · Ответ")}
         />
       </Section>
     </article>
@@ -515,20 +490,21 @@ function Projects({ baseUrl }: Readonly<{ baseUrl: string }>) {
 }
 
 function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Работайте с папками и ключами через cursor-pagination; большие изменения отправляйте пакетными командами."
-        title="Семантика"
+        description={uiText("Работайте с папками и ключами через cursor-pagination; большие изменения отправляйте пакетными командами.")}
+        title={uiText("Семантика")}
       />
       <RouteSummary section="semantics" />
-      <Section title="Получить ключевые слова">
+      <Section title={uiText("Получить ключевые слова")}>
         <EndpointHeader method="GET" path="/projects/{projectId}/keywords" scope="semantics:read" />
         <CodeBlock
           code={`curl "${baseUrl}/projects/<projectId>/keywords?limit=100&search=холодильник" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -556,10 +532,10 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="200 · Сокращённый ответ"
+          title={uiText("200 · Сокращённый ответ")}
         />
       </Section>
-      <Section title="Пакетное создание">
+      <Section title={uiText("Пакетное создание")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/keywords/bulk" scope="semantics:write" />
         <CodeBlock
           code={`{
@@ -577,7 +553,7 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "duplicatePolicy": "SKIP_EXISTING"
 }`}
           language="json"
-          title="JSON · Тело запроса"
+          title={uiText("JSON · Тело запроса")}
         />
         <CodeBlock
           code={`{
@@ -596,34 +572,26 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="201 · Ответ"
+          title={uiText("201 · Ответ")}
         />
       </Section>
-      <Section title="Удалить запрос">
+      <Section title={uiText("Удалить запрос")}>
         <EndpointHeader
           method="DELETE"
           path="/projects/{projectId}/keywords/{keywordId}"
           scope="semantics:write"
         />
         <p>
-          Передайте актуальную версию запроса в <code>If-Match</code>. Без
-          тела запроса ключ перемещается в системную папку «Корзина», а API
-          возвращает <code>204 No Content</code> без JSON.
-        </p>
+          <UiText text="Передайте актуальную версию запроса в" after=" " /><code>If-Match</code><UiText text=". Без тела запроса ключ перемещается в системную папку «Корзина», а API возвращает" after=" " /><code>204 No Content</code> <UiText text="без JSON." before=" " /></p>
         <CodeBlock
           code={`curl -X DELETE "${baseUrl}/projects/<projectId>/keywords/<keywordId>" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
   -H 'If-Match: "v7"'`}
           language="bash"
-          title="Запрос · Переместить в корзину"
+          title={uiText("Запрос · Переместить в корзину")}
         />
         <p>
-          Окончательная очистка допускается только для запроса, который уже
-          находится в корзине. Получите его актуальную версию после первого
-          удаления и явно передайте <code>permanent: true</code>. Исторические
-          замеры остаются неизменяемыми, а пользовательские значения запроса
-          очищаются.
-        </p>
+          <UiText text="Окончательная очистка допускается только для запроса, который уже находится в корзине. Получите его актуальную версию после первого удаления и явно передайте" after=" " /><code>permanent: true</code><UiText text=". Исторические замеры остаются неизменяемыми, а пользовательские значения запроса очищаются." /></p>
         <CodeBlock
           code={`curl -X DELETE "${baseUrl}/projects/<projectId>/keywords/<keywordId>" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
@@ -631,27 +599,19 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
   -H "Content-Type: application/json" \\
   -d '{"permanent":true}'`}
           language="bash"
-          title="Запрос · Окончательная очистка"
+          title={uiText("Запрос · Окончательная очистка")}
         />
-        <Callout title="Защита от случайного удаления">
-          Попытка окончательно удалить активный запрос вернёт 409, а
-          устаревший If-Match — 412. Автоматически повторять такую команду с
-          новой версией нельзя.
-        </Callout>
+        <Callout title={uiText("Защита от случайного удаления")}>
+          <UiText text="Попытка окончательно удалить активный запрос вернёт 409, а устаревший If-Match — 412. Автоматически повторять такую команду с новой версией нельзя." /></Callout>
       </Section>
-      <Section title="Удалить папку">
+      <Section title={uiText("Удалить папку")}>
         <EndpointHeader
           method="DELETE"
           path="/projects/{projectId}/keyword-groups/{groupId}"
           scope="semantics:write"
         />
         <p>
-          Команда требует актуальный <code>If-Match</code> и возвращает
-          <code>204 No Content</code>. Системные папки «Без группы» и «Корзина»
-          удалить нельзя. Если тело отсутствует, удаляется всё поддерево,
-          запросы сохраняются, а оставшиеся без папки запросы переходят в
-          «Без группы».
-        </p>
+          <UiText text="Команда требует актуальный" after=" " /><code>If-Match</code> <UiText text="и возвращает" before=" " /><code>204 No Content</code><UiText text=". Системные папки «Без группы» и «Корзина» удалить нельзя. Если тело отсутствует, удаляется всё поддерево, запросы сохраняются, а оставшиеся без папки запросы переходят в «Без группы»." /></p>
         <CodeBlock
           code={`curl -X DELETE "${baseUrl}/projects/<projectId>/keyword-groups/<groupId>" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
@@ -662,7 +622,7 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "promoteChildren": true
   }'`}
           language="bash"
-          title="Запрос · Удалить папку и поднять дочерние"
+          title={uiText("Запрос · Удалить папку и поднять дочерние")}
         />
         <Table
           columns={["Поле", "По умолчанию", "Поведение при true"]}
@@ -680,29 +640,25 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
           ]}
         />
       </Section>
-      <Callout title="Большие выборки">
-        Не переносите тысячи идентификаторов в query string. Используйте
-        cursor-pagination и предусмотренные bulk/import/export маршруты.
-      </Callout>
+      <Callout title={uiText("Большие выборки")}>
+        <UiText text="Не переносите тысячи идентификаторов в query string. Используйте cursor-pagination и предусмотренные bulk/import/export маршруты." /></Callout>
     </article>
   );
 }
 
 function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Один estimate/run-контур собирает позиции либо обычную Топ-10 выдачу конкурентов."
-        title="Позиции и конкуренты"
+        description={uiText("Один estimate/run-контур собирает позиции либо обычную Топ-10 выдачу конкурентов.")}
+        title={uiText("Позиции и конкуренты")}
       />
       <RouteSummary section="positions" />
       <Flow steps={["Контекст", "Оценка", "Запуск", "Результат"]} />
-      <Section title="Сводка позиций проекта">
+      <Section title={uiText("Сводка позиций проекта")}>
         <p>
-          Главный экран читает текущие значения и отдельную append-only
-          историю. История возвращает до 100 последних срезов; клиент может
-          выбрать период и показать не более 30 точек без пересчёта данных.
-        </p>
+          <UiText text="Главный экран читает текущие значения и отдельную append-only историю. История возвращает до 100 последних срезов; клиент может выбрать период и показать не более 30 точек без пересчёта данных." /></p>
         <CodeBlock
           code={`curl "${baseUrl}/projects/<projectId>/keywords/position-summary" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"
@@ -714,10 +670,10 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history" \\
 curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked=true" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Текущая сводка и история ТОПов"
+          title={uiText("Текущая сводка и история ТОПов")}
         />
       </Section>
-      <Section title="1. Создать контекст">
+      <Section title={uiText("1. Создать контекст")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/tracking-contexts" scope="positions:run" />
         <CodeBlock
           code={`{
@@ -740,14 +696,12 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   }
 }`}
           language="json"
-          title="JSON · Тело запроса"
+          title={uiText("JSON · Тело запроса")}
         />
         <p>
-          Для создания обязателен уникальный <code>Idempotency-Key</code>.
-          Для изменения передавайте ETag контекста через If-Match.
-        </p>
+          <UiText text="Для создания обязателен уникальный" after=" " /><code>Idempotency-Key</code><UiText text=". Для изменения передавайте ETag контекста через If-Match." /></p>
       </Section>
-      <Section title="2. Получить оценку">
+      <Section title={uiText("2. Получить оценку")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/rank-estimates" scope="positions:run" />
         <CodeBlock
           code={`curl -X POST "${baseUrl}/projects/<projectId>/rank-estimates" \\
@@ -761,7 +715,7 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
     "searchSource": "LIVE"
   }'`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -789,10 +743,10 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="201 · Сокращённый ответ"
+          title={uiText("201 · Сокращённый ответ")}
         />
       </Section>
-      <Section title="3. Подтвердить запуск">
+      <Section title={uiText("3. Подтвердить запуск")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/rank-runs" scope="positions:run" />
         <CodeBlock
           code={`{
@@ -800,13 +754,10 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   "confirmedPlatformChargeMicro": "4260000"
 }`}
           language="json"
-          title="JSON · Тело запроса"
+          title={uiText("JSON · Тело запроса")}
         />
         <p>
-          Подтверждайте ровно <code>platformChargeMicro</code> из оценки. Для
-          BYOK запуска значение равно <code>&quot;0&quot;</code>. Ответ 202 содержит
-          задание, а не готовые позиции.
-        </p>
+          <UiText text="Подтверждайте ровно" after=" " /><code>platformChargeMicro</code> <UiText text="из оценки. Для BYOK запуска значение равно" before=" " after=" " /><code>&quot;0&quot;</code><UiText text=". Ответ 202 содержит задание, а не готовые позиции." /></p>
         <CodeBlock
           code={`{
   "data": {
@@ -823,15 +774,15 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="202 · Ответ"
+          title={uiText("202 · Ответ")}
         />
       </Section>
-      <Section title="4. Получить результат">
+      <Section title={uiText("4. Получить результат")}>
         <CodeBlock
           code={`curl "${baseUrl}/projects/<projectId>/jobs/<jobId>/result?limit=200" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -853,20 +804,14 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="200 · Сокращённый ответ"
+          title={uiText("200 · Сокращённый ответ")}
         />
         <Callout title="XMLStock">
-          Один ключ опрашивается максимум 50 фактических раз. Неснятые ключи
-          остаются в результате с errorCode и pollAttempts; успешные строки не теряются.
-        </Callout>
+          <UiText text="Один ключ опрашивается максимум 50 фактических раз. Неснятые ключи остаются в результате с errorCode и pollAttempts; успешные строки не теряются." /></Callout>
       </Section>
-      <Section title="5. Собрать обычную выдачу конкурентов">
+      <Section title={uiText("5. Собрать обычную выдачу конкурентов")}>
         <p>
-          Используйте тот же контекст, estimate и подтверждение, но передайте
-          <code> purpose: &quot;COMPETITOR_SERP&quot;</code>. Провайдер всегда
-          собирает Топ-10: Arsenkin запускает инструмент <code>check-top</code>,
-          XMLStock — соответствующую Yandex/Google SERP-выдачу.
-        </p>
+          <UiText text="Используйте тот же контекст, estimate и подтверждение, но передайте" /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". Провайдер всегда собирает Топ-10: Arsenkin запускает инструмент" after=" " /><code>check-top</code><UiText text=", XMLStock — соответствующую Yandex/Google SERP-выдачу." /></p>
         <CodeBlock
           code={`curl -X POST "${baseUrl}/projects/<projectId>/rank-estimates" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
@@ -880,16 +825,10 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
     "searchSource": "LIVE"
   }'`}
           language="bash"
-          title="Оценка сбора конкурентов"
+          title={uiText("Оценка сбора конкурентов")}
         />
-        <Callout title="Позиция сайта без второго запроса">
-          <code>saveProjectPosition</code> разрешён только при
-          <code> purpose: &quot;COMPETITOR_SERP&quot;</code>. Если флаг включён и
-          домен проекта найден в собранной Топ-10, эта позиция попадает в
-          текущую проекцию и историю. Если флаг выключен либо сайт не найден,
-          конкурентная выдача сохраняется, а позиционная история не меняется.
-          Отдельный платный запрос для позиции не выполняется.
-        </Callout>
+        <Callout title={uiText("Позиция сайта без второго запроса")}>
+          <code>saveProjectPosition</code> <UiText text="разрешён только при" before=" " /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". Если флаг включён и домен проекта найден в собранной Топ-10, эта позиция попадает в текущую проекцию и историю. Если флаг выключен либо сайт не найден, конкурентная выдача сохраняется, а позиционная история не меняется. Отдельный платный запрос для позиции не выполняется." /></Callout>
         <CodeBlock
           code={`{
   "data": {
@@ -909,7 +848,7 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   }
 }`}
           language="json"
-          title="200 · Отдельный результат выдачи Топ-10"
+          title={uiText("200 · Отдельный результат выдачи Топ-10")}
         />
       </Section>
     </article>
@@ -917,14 +856,15 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
 }
 
 function AiAnswers({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Один Arsenkin ai-serp workflow собирает ответ и источники; purpose определяет, обновлять ли позиционную проекцию."
-        title="ИИ-ответы и ИИ-выдача"
+        description={uiText("Один Arsenkin ai-serp workflow собирает ответ и источники; purpose определяет, обновлять ли позиционную проекцию.")}
+        title={uiText("ИИ-ответы и ИИ-выдача")}
       />
       <RouteSummary section="ai-answers" />
-      <Section title="Собрать ИИ-ответы и позицию">
+      <Section title={uiText("Собрать ИИ-ответы и позицию")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/ai-answer-collections" scope="ai:run" />
         <CodeBlock
           code={`curl -X POST "${baseUrl}/projects/<projectId>/ai-answer-collections" \\
@@ -942,18 +882,12 @@ function AiAnswers({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "purpose": "POSITION_TRACKING"
   }'`}
           language="bash"
-          title="Обычный ИИ-съём"
+          title={uiText("Обычный ИИ-съём")}
         />
       </Section>
-      <Section title="Собрать конкурентов ИИ">
+      <Section title={uiText("Собрать конкурентов ИИ")}>
         <p>
-          Для конкурентного режима передайте
-          <code> purpose: &quot;COMPETITOR_SERP&quot;</code>. В Web-интерфейсе
-          отдельного поля домена нет: он берётся из проекта автоматически.
-          В публичном API <code>host</code> остаётся обязательным, потому что
-          его требует Arsenkin <code>ai-serp</code>; передавайте домен того же
-          проекта.
-        </p>
+          <UiText text="Для конкурентного режима передайте" /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". В Web-интерфейсе отдельного поля домена нет: он берётся из проекта автоматически. В публичном API" after=" " /><code>host</code> <UiText text="остаётся обязательным, потому что его требует Arsenkin" before=" " after=" " /><code>ai-serp</code><UiText text="; передавайте домен того же проекта." /></p>
         <CodeBlock
           code={`{
   "items": [{ "id": "<keywordId>", "version": 7 }],
@@ -967,17 +901,12 @@ function AiAnswers({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "saveProjectPosition": false
 }`}
           language="json"
-          title="JSON · ИИ-конкуренты без сохранения позиции"
+          title={uiText("JSON · ИИ-конкуренты без сохранения позиции")}
         />
-        <Callout title="Что делает галочка">
-          При <code>saveProjectPosition: true</code> найденная среди источников
-          страница проекта обновляет ИИ-позицию и историю из этого же ответа.
-          При <code>false</code> ответ и источники конкурентов сохраняются, но
-          позиционная проекция не меняется. Второй запрос к Arsenkin не
-          создаётся. Поле допустимо только для конкурентного purpose.
-        </Callout>
+        <Callout title={uiText("Что делает галочка")}>
+          <UiText text="При" after=" " /><code>saveProjectPosition: true</code> <UiText text="найденная среди источников страница проекта обновляет ИИ-позицию и историю из этого же ответа. При" before=" " after=" " /><code>false</code> <UiText text="ответ и источники конкурентов сохраняются, но позиционная проекция не меняется. Второй запрос к Arsenkin не создаётся. Поле допустимо только для конкурентного purpose." before=" " /></Callout>
       </Section>
-      <Section title="Статус и результат">
+      <Section title={uiText("Статус и результат")}>
         <CodeBlock
           code={`curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"
@@ -985,14 +914,10 @@ function AiAnswers({ baseUrl }: Readonly<{ baseUrl: string }>) {
 curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>/result?limit=200" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Polling и постраничный результат"
+          title={uiText("Polling и постраничный результат")}
         />
         <p>
-          Для <code>COMPETITOR_SERP</code> каждая сохранённая строка содержит
-          упорядоченный массив <code>snapshot.sources</code> с позицией, URL,
-          title и description. В обычном результате ИИ-ответов этот массив не
-          передаётся.
-        </p>
+          <UiText text="Для" after=" " /><code>COMPETITOR_SERP</code> <UiText text="каждая сохранённая строка содержит упорядоченный массив" before=" " after=" " /><code>snapshot.sources</code> <UiText text="с позицией, URL, title и description. В обычном результате ИИ-ответов этот массив не передаётся." before=" " /></p>
         <CodeBlock
           code={`{
   "data": {
@@ -1012,7 +937,7 @@ curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>/result?limit
   }
 }`}
           language="json"
-          title="200 · Отдельный результат ИИ-конкурентов"
+          title={uiText("200 · Отдельный результат ИИ-конкурентов")}
         />
       </Section>
     </article>
@@ -1020,14 +945,15 @@ curl "${baseUrl}/projects/<projectId>/ai-answer-collections/<jobId>/result?limit
 }
 
 function Frequency({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Передайте UUID и актуальные версии ключей, затем читайте состояние и постраничный результат."
-        title="Частотность"
+        description={uiText("Передайте UUID и актуальные версии ключей, затем читайте состояние и постраничный результат.")}
+        title={uiText("Частотность")}
       />
       <RouteSummary section="frequency" />
-      <Section title="Создать съём">
+      <Section title={uiText("Создать съём")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/frequency-collections" scope="frequency:run" />
         <CodeBlock
           code={`curl -X POST "${baseUrl}/projects/<projectId>/frequency-collections" \\
@@ -1043,7 +969,7 @@ function Frequency({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "device": "ALL"
   }'`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -1064,15 +990,15 @@ function Frequency({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J...", "version": 1 }
 }`}
           language="json"
-          title="202 · Ответ"
+          title={uiText("202 · Ответ")}
         />
       </Section>
-      <Section title="Прочитать результат">
+      <Section title={uiText("Прочитать результат")}>
         <CodeBlock
           code={`curl "${baseUrl}/projects/<projectId>/frequency-collections/<jobId>/result?limit=200" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -1093,26 +1019,25 @@ function Frequency({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J..." }
 }`}
           language="json"
-          title="200 · Сокращённый ответ"
+          title={uiText("200 · Сокращённый ответ")}
         />
       </Section>
-      <Callout title="Повтор команды">
-        При сетевой неопределённости повторяйте запрос с тем же Idempotency-Key.
-        Новый ключ создаст новую платную команду.
-      </Callout>
+      <Callout title={uiText("Повтор команды")}>
+        <UiText text="При сетевой неопределённости повторяйте запрос с тем же Idempotency-Key. Новый ключ создаст новую платную команду." /></Callout>
     </article>
   );
 }
 
 function Automations({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Расписание хранит IANA timezone, контекст и предел списания для каждого запуска. В съём входит весь актуальный контекст."
-        title="Расписания"
+        description={uiText("Расписание хранит IANA timezone, контекст и предел списания для каждого запуска. В съём входит весь актуальный контекст.")}
+        title={uiText("Расписания")}
       />
       <RouteSummary section="automations" />
-      <Section title="Создать расписание">
+      <Section title={uiText("Создать расписание")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/automations" scope="automations:manage" />
         <CodeBlock
           code={`curl -X POST "${baseUrl}/projects/<projectId>/automations" \\
@@ -1134,7 +1059,7 @@ function Automations({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "enabled": true
   }'`}
           language="bash"
-          title="Запрос"
+          title={uiText("Запрос")}
         />
         <CodeBlock
           code={`{
@@ -1150,10 +1075,10 @@ function Automations({ baseUrl }: Readonly<{ baseUrl: string }>) {
   "meta": { "requestId": "01J...", "version": 1 }
 }`}
           language="json"
-          title="201 · Сокращённый ответ"
+          title={uiText("201 · Сокращённый ответ")}
         />
       </Section>
-      <Section title="Варианты schedule">
+      <Section title={uiText("Варианты schedule")}>
         <CodeBlock
           code={`{
   "once": {
@@ -1173,20 +1098,15 @@ function Automations({ baseUrl }: Readonly<{ baseUrl: string }>) {
   }
 }`}
           language="json"
-          title="JSON · Допустимые расписания"
+          title={uiText("JSON · Допустимые расписания")}
         />
         <p>
-          В WEEKLY дни недели нумеруются по ISO: 1 — понедельник, 7 — воскресенье.
-          ONCE выполняется один раз и после завершения остаётся в истории. Лимита
-          ключей в расписании нет: каждый запуск обрабатывает весь текущий список
-          запросов выбранного контекста.
-        </p>
+          <UiText text="В WEEKLY дни недели нумеруются по ISO: 1 — понедельник, 7 — воскресенье. ONCE выполняется один раз и после завершения остаётся в истории. Лимита ключей в расписании нет: каждый запуск обрабатывает весь текущий список запросов выбранного контекста." /></p>
       </Section>
-      <Section title="Пауза, запуск и изменение">
+      <Section title={uiText("Пауза, запуск и изменение")}>
         <p>
-          PATCH, pause, resume и ручной POST <code>/automations/{`{automationId}`}/runs</code>
-          требуют актуальный <code>If-Match</code>. Ручной запуск также требует
-          новый Idempotency-Key. Пустое тело передавайте как <code>{`{}`}</code>.
+          <UiText text="PATCH, pause, resume и ручной POST" after=" " /><code>/automations/{`{automationId}`}/runs</code>
+          <UiText text="требуют актуальный" after=" " /><code>If-Match</code><UiText text=". Ручной запуск также требует новый Idempotency-Key. Пустое тело передавайте как" after=" " /><code>{`{}`}</code>.
         </p>
       </Section>
     </article>
@@ -1194,13 +1114,14 @@ function Automations({ baseUrl }: Readonly<{ baseUrl: string }>) {
 }
 
 function Jobs({ baseUrl }: Readonly<{ baseUrl: string }>) {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Долгие операции возвращают 202. Клиент опрашивает статус с backoff и отдельно читает cursor-paginated результат."
-        title="Задания и пагинация"
+        description={uiText("Долгие операции возвращают 202. Клиент опрашивает статус с backoff и отдельно читает cursor-paginated результат.")}
+        title={uiText("Задания и пагинация")}
       />
-      <Section title="Жизненный цикл">
+      <Section title={uiText("Жизненный цикл")}>
         <div className={styles.statusFlow}>
           {[
             "PREPARING",
@@ -1210,9 +1131,7 @@ function Jobs({ baseUrl }: Readonly<{ baseUrl: string }>) {
           ].map((status) => <code key={status}>{status}</code>)}
         </div>
         <p>
-          Возможны также CANCEL_REQUESTED, CANCELLED, PARTIALLY_COMPLETED,
-          FAILED и ACTION_REQUIRED. Поле <code>stage</code> уточняет текущий этап,
-          но terminal определяется по <code>status</code>.
+          <UiText text="Возможны также CANCEL_REQUESTED, CANCELLED, PARTIALLY_COMPLETED, FAILED и ACTION_REQUIRED. Поле" after=" " /><code>stage</code> <UiText text="уточняет текущий этап, но terminal определяется по" before=" " after=" " /><code>status</code>.
         </p>
       </Section>
       <Section title="Polling">
@@ -1220,12 +1139,12 @@ function Jobs({ baseUrl }: Readonly<{ baseUrl: string }>) {
           code={`curl "${baseUrl}/projects/<projectId>/jobs/<jobId>" \\
   -H "Authorization: Bearer $SEO_API_TOKEN"`}
           language="bash"
-          title="Запрос статуса"
+          title={uiText("Запрос статуса")}
         />
         <ul>
-          <li>Используйте интервалы 1, 2, 4, затем 5–10 секунд.</li>
-          <li>Учитывайте Retry-After и <code>retryAt</code>, если они присутствуют.</li>
-          <li>Не запускайте новую команду только потому, что ответ задержался.</li>
+          <li><UiText text="Используйте интервалы 1, 2, 4, затем 5–10 секунд." /></li>
+          <li><UiText text="Учитывайте Retry-After и" after=" " /><code>retryAt</code><UiText text=", если они присутствуют." /></li>
+          <li><UiText text="Не запускайте новую команду только потому, что ответ задержался." /></li>
         </ul>
       </Section>
       <Section title="Cursor-pagination">
@@ -1233,33 +1152,28 @@ function Jobs({ baseUrl }: Readonly<{ baseUrl: string }>) {
           code={`GET /projects/<projectId>/jobs/<jobId>/result?limit=200
 GET /projects/<projectId>/jobs/<jobId>/result?limit=200&cursor=<nextCursor>`}
           language="http"
-          title="Следующая страница"
+          title={uiText("Следующая страница")}
         />
         <p>
-          Cursor непрозрачный: не декодируйте и не изменяйте его. Завершайте
-          чтение, когда <code>page.hasNext=false</code>. Не смешивайте cursors
-          разных заданий или фильтров.
-        </p>
+          <UiText text="Cursor непрозрачный: не декодируйте и не изменяйте его. Завершайте чтение, когда" after=" " /><code>page.hasNext=false</code><UiText text=". Не смешивайте cursors разных заданий или фильтров." /></p>
       </Section>
-      <Section title="Отмена и retry">
+      <Section title={uiText("Отмена и retry")}>
         <p>
-          Cancel cooperative: уже оплаченный запрос провайдера может завершиться
-          и сохраниться. Повторяйте только неуспешные элементы через специальный
-          retry endpoint, если он существует для операции.
-        </p>
+          <UiText text="Cancel cooperative: уже оплаченный запрос провайдера может завершиться и сохраниться. Повторяйте только неуспешные элементы через специальный retry endpoint, если он существует для операции." /></p>
       </Section>
     </article>
   );
 }
 
 function Errors() {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Каждая ошибка имеет стабильный machine-readable code, requestId и явный признак retryable."
-        title="Ошибки"
+        description={uiText("Каждая ошибка имеет стабильный machine-readable code, requestId и явный признак retryable.")}
+        title={uiText("Ошибки")}
       />
-      <Section title="Формат ошибки">
+      <Section title={uiText("Формат ошибки")}>
         <CodeBlock
           code={`{
   "error": {
@@ -1276,10 +1190,10 @@ function Errors() {
   }
 }`}
           language="json"
-          title="422 · Ответ"
+          title={uiText("422 · Ответ")}
         />
       </Section>
-      <Section title="HTTP-статусы">
+      <Section title={uiText("HTTP-статусы")}>
         <Table
           columns={["Статус", "Что означает", "Действие клиента"]}
           rows={[
@@ -1294,21 +1208,19 @@ function Errors() {
           ]}
         />
       </Section>
-      <Callout title="Неоднозначный сетевой исход">
-        Если соединение оборвалось после отправки POST, повторите тот же payload
-        с тем же Idempotency-Key. Не создавайте новый ключ до получения
-        однозначного ответа.
-      </Callout>
+      <Callout title={uiText("Неоднозначный сетевой исход")}>
+        <UiText text="Если соединение оборвалось после отправки POST, повторите тот же payload с тем же Idempotency-Key. Не создавайте новый ключ до получения однозначного ответа." /></Callout>
     </article>
   );
 }
 
 function Reference() {
+  const { t: uiText } = useUiLocale();
   return (
     <article className={styles.document}>
       <PageHeading
-        description="Пути указаны после /api/v1. Используйте поиск в левом сайдбаре, чтобы найти маршрут по методу, пути, scope или назначению."
-        title="Маршруты API"
+        description={uiText("Пути указаны после /api/v1. Используйте поиск в левом сайдбаре, чтобы найти маршрут по методу, пути, scope или назначению.")}
+        title={uiText("Маршруты API")}
       />
       <div className={styles.referenceGroups}>
         {apiDocSections
@@ -1322,7 +1234,7 @@ function Reference() {
               <section key={section.slug}>
                 <header>
                   <h2>{section.title}</h2>
-                  <Link href={apiDocHref(section.slug)}>Инструкция →</Link>
+                  <Link href={apiDocHref(section.slug)}><UiText text="Инструкция →" /></Link>
                 </header>
                 <div className={styles.endpointReferenceList}>
                   {endpoints.map((endpoint) => (
@@ -1408,10 +1320,10 @@ function CodeBlock({
         <small>{language}</small>
         <button onClick={() => void copy()} type="button">
           {copyState === "copied"
-            ? "Скопировано"
+            ? <UiText text="Скопировано" />
             : copyState === "failed"
-              ? "Выделите код"
-              : "Копировать"}
+              ? <UiText text="Выделите код" />
+              : <UiText text="Копировать" />}
         </button>
       </div>
       <pre><code>{code}</code></pre>

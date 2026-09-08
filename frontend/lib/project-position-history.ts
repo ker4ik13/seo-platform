@@ -27,11 +27,16 @@ export function visibleProjectPositionHistory(
   assertMaximumSlices(maximumSlices);
   const days = PERIOD_DAYS[period];
   const cutoff = days === undefined
-    ? Number.NEGATIVE_INFINITY
-    : now.getTime() - days * 24 * 60 * 60 * 1_000;
+    ? undefined
+    : projectPositionHistoryDateKey(
+        new Date(now.getTime() - days * 24 * 60 * 60 * 1_000).toISOString()
+      );
   const eligible = [...points]
-    .filter(({ observedAt }) => new Date(observedAt).getTime() >= cutoff)
-    .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+    .filter(({ date }) => cutoff === undefined || date >= cutoff)
+    .sort((left, right) =>
+      left.date.localeCompare(right.date) ||
+      left.observedAt.localeCompare(right.observedAt)
+    );
   return samplePositionHistory(eligible, maximumSlices);
 }
 
@@ -43,11 +48,11 @@ export function visibleProjectPositionHistoryInRange(
   assertMaximumSlices(maximumSlices);
   assertDateRange(range);
   const eligible = [...points]
-    .filter(({ observedAt }) => {
-      const date = projectPositionHistoryDateKey(observedAt);
-      return date >= range.from && date <= range.to;
-    })
-    .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+    .filter(({ date }) => date >= range.from && date <= range.to)
+    .sort((left, right) =>
+      left.date.localeCompare(right.date) ||
+      left.observedAt.localeCompare(right.observedAt)
+    );
   return samplePositionHistory(eligible, maximumSlices);
 }
 
@@ -55,9 +60,7 @@ export function projectPositionHistoryAvailableRange(
   points: readonly ProjectPositionHistoryPoint[]
 ): ProjectPositionHistoryDateRange | undefined {
   if (points.length === 0) return undefined;
-  const dates = points.map(({ observedAt }) =>
-    projectPositionHistoryDateKey(observedAt)
-  );
+  const dates = points.map(({ date }) => date);
   return {
     from: dates.reduce((earliest, value) => value < earliest ? value : earliest),
     to: dates.reduce((latest, value) => value > latest ? value : latest)
@@ -70,9 +73,9 @@ export function projectPositionHistoryDateKey(value: string): string {
     throw new RangeError("Position history date must be valid");
   }
   return [
-    String(date.getFullYear()).padStart(4, "0"),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0")
+    String(date.getUTCFullYear()).padStart(4, "0"),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0")
   ].join("-");
 }
 

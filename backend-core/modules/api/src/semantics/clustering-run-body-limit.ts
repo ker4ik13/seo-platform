@@ -14,9 +14,12 @@ export function applyClusteringRunBodyLimit(
   const methods = Array.isArray(options.method)
     ? options.method
     : [options.method];
+  if (methods.some(method => String(method).toUpperCase() === "PUT") && /^\/api\/v1\/projects\/[^/]+\/tracking-contexts\/[^/]+\/keywords\/?$/u.test(options.url)) {
+    options.bodyLimit = 16 * 1024 * 1024;
+  }
   if (
     methods.some((method) => String(method).toUpperCase() === "POST") &&
-    /^\/api\/v1\/projects\/[^/]+\/clustering-runs\/?$/u.test(options.url)
+    /^\/api\/v1\/projects\/[^/]+\/(?:clustering-runs|frequency-collections|ai-answer-collections|operation-estimates)\/?$/u.test(options.url)
   ) {
     options.bodyLimit = CLUSTERING_RUN_BODY_LIMIT_BYTES;
   }

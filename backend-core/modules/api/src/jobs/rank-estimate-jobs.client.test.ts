@@ -59,12 +59,17 @@ test("forwards rank estimate through the dedicated credential boundary", async (
 
 test("quotes a platform Arsenkin batch per keyword", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (): Promise<Response> =>
+  globalThis.fetch = (async (input: string | URL | Request): Promise<Response> =>
     new Response(
       JSON.stringify({
-        data: {
+        data: String(input).endsWith("/pricing-scope") ? {
+          estimateId: estimateResponse().id, workspaceId, projectId, actorId,
+          provider: "ARSENKIN", credentialMode: "PLATFORM_PAID", keywordCount: 3,
+          execution: { purpose: "POSITION_TRACKING", depth: 30, source: "YANDEX_SEARCH_API" }
+        } : {
           ...estimateResponse(),
           credentialMode: "PLATFORM_PAID",
+          status: "READY", executionAllowed: true, blockers: [],
           scope: {
             ...estimateResponse().scope,
             keywordCount: "3",
@@ -88,7 +93,7 @@ test("quotes a platform Arsenkin batch per keyword", async () => {
 
     assert.equal(result.workload.taskCount, "1");
     assert.equal(result.scope.keywordCount, "3");
-    assert.equal(result.platformChargeMicro, "750000");
+    assert.equal(result.platformChargeMicro, "480000", "The current cost book, not an old flat env price, prices the immutable workload");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -192,7 +197,7 @@ function estimateResponse() {
       { code: "PROVIDER_EXECUTION_DISABLED" }
     ],
     executionAllowed: false,
-    policyVersion: "arsenkin-positions@1",
+    policyVersion: "manual-arsenkin-positions@1.0.0",
     calculatedAt: "2026-07-29T12:00:00.000Z",
     expiresAt: "2026-07-29T12:05:00.000Z"
   };

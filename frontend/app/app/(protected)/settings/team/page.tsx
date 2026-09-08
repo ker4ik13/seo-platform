@@ -3,6 +3,8 @@ import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { TeamManagement } from "../../../../../components/team-management";
 import { canViewWorkspaceTeam } from "../../../../../lib/app-permissions";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
+import { UiText } from "../../../../../components/ui-locale";
+
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +21,9 @@ export default async function TeamSettingsPage() {
     <>
       <section className="page-heading">
         <div>
-          <h1>Команда</h1>
+          <h1><UiText text="Команда" /></h1>
           <p>
-            Управляйте участниками, системными ролями и ожидающими
-            приглашениями текущей рабочей области.
-          </p>
+            <UiText text="Управляйте участниками, системными ролями и ожидающими приглашениями текущей рабочей области." /></p>
         </div>
       </section>
       <SettingsTabs
@@ -41,25 +41,21 @@ export default async function TeamSettingsPage() {
           <span aria-hidden="true" className="state-icon">
             0
           </span>
-          <strong>Рабочая область ещё не создана</strong>
-          <p>Создайте её на обзорной странице, затем пригласите команду.</p>
+          <strong><UiText text="Рабочая область ещё не создана" /></strong>
+          <p><UiText text="Создайте её на обзорной странице, затем пригласите команду." /></p>
           <a className="primary-button" href="/app">
-            Перейти к созданию
-          </a>
+            <UiText text="Перейти к созданию" /></a>
         </section>
       ) : !canView ? (
         <section className="panel panel-empty compact" role="status">
           <span aria-hidden="true" className="state-icon">
             403
           </span>
-          <strong>Нет доступа к списку команды</strong>
+          <strong><UiText text="Нет доступа к списку команды" /></strong>
           <p>
-            Требуется разрешение member.view. Обратитесь к владельцу или
-            администратору рабочей области.
-          </p>
+            <UiText text="Требуется разрешение member.view. Обратитесь к владельцу или администратору рабочей области." /></p>
           <a className="primary-button" href="/app">
-            Вернуться к обзору
-          </a>
+            <UiText text="Вернуться к обзору" /></a>
         </section>
       ) : (
         <TeamManagement

@@ -37,6 +37,7 @@ interface AlertEnvelope extends OperationalAlertInput {
 interface AlertEnvelopeReporter {
   capture(envelope: AlertEnvelope): boolean;
   flush(): Promise<void>;
+  confirm?(envelope: AlertEnvelope): Promise<boolean>;
 }
 
 interface ReporterDependencies {
@@ -79,6 +80,18 @@ export function createOperationalAlertClient(
     },
     dependencies
   );
+}
+
+/** Business monitors retain a durable pending flag until Telegram delivery is acknowledged. */
+export async function sendConfirmedOperationalAlert(env: NodeJS.ProcessEnv, service: string, alert: OperationalAlertInput, dependencies: ReporterDependencies = {}): Promise<boolean> {
+  if (!enabled(env)) return false;
+  const origin = canonicalHttpOrigin(required(env, "OPERATIONAL_ALERTS_INTERNAL_URL"));
+  const token = secret(env, "OPERATIONAL_ALERT_TOKEN", TOKEN);
+  try {
+    const response = await (dependencies.fetch ?? fetch)(new URL("/internal/alerts/confirmed", origin), { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(alertEnvelope(service, alert)), redirect: "error", signal: AbortSignal.timeout(8_000) });
+    await response.body?.cancel();
+    return response.status === 200;
+  } catch { return false; }
 }
 
 export async function startOperationalAlertServer(
@@ -222,6 +235,8 @@ function telegramReporter(
 class TelegramEnvelopeReporter implements AlertEnvelopeReporter {
   private queue: Promise<void> = Promise.resolve();
   private readonly observed = new Map<string, number>();
+  private readonly confirmed = new Map<string, number>();
+  private readonly confirming = new Map<string, Promise<boolean>>();
   private windowStartedAt = 0;
   private sentInWindow = 0;
 
@@ -236,6 +251,7 @@ class TelegramEnvelopeReporter implements AlertEnvelopeReporter {
 
   public capture(envelope: AlertEnvelope): boolean {
     const now = (this.dependencies.now ?? Date.now)();
+    pruneObservations(this.observed, now);
     if (now - this.windowStartedAt >= RATE_WINDOW_MS) {
       this.windowStartedAt = now;
       this.sentInWindow = 0;
@@ -272,6 +288,24 @@ class TelegramEnvelopeReporter implements AlertEnvelopeReporter {
       await pending;
       if (pending === this.queue) return;
     }
+  }
+
+  public async confirm(envelope: AlertEnvelope): Promise<boolean> {
+    const now = (this.dependencies.now ?? Date.now)();
+    const key = [envelope.service, envelope.source, envelope.code, envelope.fingerprint ?? ""].join("\u0000");
+    const confirmedAt = this.confirmed.get(key);
+    if (confirmedAt !== undefined && now - confirmedAt < DEDUPE_WINDOW_MS) return true;
+    const existing = this.confirming.get(key); if (existing) return existing;
+    if (now - this.windowStartedAt >= RATE_WINDOW_MS) { this.windowStartedAt = now; this.sentInWindow = 0; }
+    if (this.sentInWindow >= RATE_LIMIT) return false;
+    this.sentInWindow++;
+    const pending = this.queue.then(async () => {
+      try { await this.deliver(envelope, now); pruneObservations(this.confirmed, now); this.confirmed.set(key, now); return true; }
+      catch { return false; }
+    });
+    this.queue = pending.then(() => {});
+    this.confirming.set(key, pending);
+    try { return await pending; } finally { this.confirming.delete(key); }
   }
 
   private async deliver(
@@ -323,11 +357,12 @@ async function handleRequest(
     response.end('{"status":"ok"}');
     return;
   }
-  if (request.url !== "/internal/alerts") return empty(response, 404);
+  if (request.url !== "/internal/alerts" && request.url !== "/internal/alerts/confirmed") return empty(response, 404);
   if (request.method !== "POST") return empty(response, 405);
   if (!authorized(request.headers.authorization, token)) return empty(response, 401);
   if (request.headers["content-type"] !== "application/json") return empty(response, 415);
   const envelope = parseEnvelope(await readBody(request));
+  if (request.url === "/internal/alerts/confirmed") return empty(response, await reporter.confirm?.(envelope) ? 200 : 503);
   reporter.capture(envelope);
   return empty(response, 202);
 }
@@ -398,6 +433,8 @@ function telegramMessage(
   serviceVersion: string,
   observedAt: Date
 ): string {
+  const balance = /^(XMLSTOCK|ARSENKIN)_LOW_BALANCE_([1-9][0-9]?)$/u.exec(envelope.code);
+  if (balance) return ["SEOньорита: пора пополнить API-аккаунт", `${balance[1] === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} #${balance[2]}: остаток ниже 500 ₽.`, ...(balance[1] === "ARSENKIN" ? ["Для Arsenkin это денежная оценка оставшихся лимитов."] : []), "Подробности — в разделе провайдеров административной панели.", `Среда: ${environment}`, `Время: ${observedAt.toISOString()}`].join("\n");
   return [
     "SEO Platform: внутренняя ошибка",
     `Среда: ${environment}`,
@@ -409,6 +446,12 @@ function telegramMessage(
     `Версия: ${serviceVersion}`,
     `Время: ${observedAt.toISOString()}`
   ].join("\n");
+}
+
+function pruneObservations(values: Map<string, number>, now: number): void {
+  if (values.size < 1024) return;
+  for (const [key, observedAt] of values) if (now - observedAt >= DEDUPE_WINDOW_MS) values.delete(key);
+  while (values.size >= 1024) { const key = values.keys().next().value; if (key === undefined) break; values.delete(key); }
 }
 
 function enabled(env: NodeJS.ProcessEnv): boolean {

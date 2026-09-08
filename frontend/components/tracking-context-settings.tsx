@@ -20,6 +20,8 @@ import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
 import { SemanticModal } from "./semantic-modal";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 interface ContextGroup {
   readonly id: string;
@@ -33,6 +35,7 @@ interface ContextGroup {
 export function TrackingContextSettingsPanel({
   projectId
 }: Readonly<{ projectId: string }>) {
+  const { t: uiText } = useUiLocale();
   const [settings, setSettings] = useState<TrackingContextSettings>();
   const [groups, setGroups] = useState<readonly ContextGroup[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -180,7 +183,7 @@ export function TrackingContextSettingsPanel({
   }
 
   if (loading) {
-    return <section className="panel tracking-context-settings-loading">Загружаем контексты…</section>;
+    return <section className="panel tracking-context-settings-loading"><UiText text="Загружаем контексты…" /></section>;
   }
 
   return (
@@ -189,10 +192,10 @@ export function TrackingContextSettingsPanel({
       <aside className="panel tracking-context-catalog">
         <header>
           <div>
-            <span>Профили запуска</span>
-            <h2>Контексты</h2>
+            <span><UiText text="Профили запуска" /></span>
+            <h2><UiText text="Контексты" /></h2>
           </div>
-          <button aria-label="Создать контекст" onClick={startNew} type="button">
+          <button aria-label={uiText("Создать контекст")} onClick={startNew} type="button">
             <Icon name="plus" />
           </button>
         </header>
@@ -208,13 +211,13 @@ export function TrackingContextSettingsPanel({
               <span>
                 <strong>{context.name}</strong>
                 <small>
-                  {context.assignedKeywordCount} запросов · {context.status === "ACTIVE" ? "активен" : "удалён из запусков"}
+                  {context.assignedKeywordCount} <UiText text="запросов ·" before=" " after=" " />{context.status === "ACTIVE" ? <UiText text="активен" /> : <UiText text="удалён из запусков" />}
                 </small>
               </span>
             </button>
           ))}
           {settings?.contexts.length === 0 && (
-            <p>Контекстов пока нет. Создайте первый профиль запуска.</p>
+            <p><UiText text="Контекстов пока нет. Создайте первый профиль запуска." /></p>
           )}
         </div>
       </aside>
@@ -222,19 +225,19 @@ export function TrackingContextSettingsPanel({
       <div className="panel tracking-context-editor">
         <header>
           <div>
-            <span>{selected ? "Редактирование" : "Новый профиль"}</span>
-            <h2>{selected?.name ?? "Новый контекст позиций"}</h2>
+            <span>{selected ? <UiText text="Редактирование" /> : <UiText text="Новый профиль" />}</span>
+            <h2>{selected?.name ?? <UiText text="Новый контекст позиций" />}</h2>
           </div>
           {selected && (
             <span className={`status-badge ${selected.status === "ACTIVE" ? "success" : "neutral"}`}>
-              {selected.status === "ACTIVE" ? "Активен" : "Удалён"}
+              {selected.status === "ACTIVE" ? <UiText text="Активен" /> : <UiText text="Удалён" />}
             </span>
           )}
         </header>
 
         <div className="tracking-context-form-grid">
           <label className="field-span-2">
-            <span>Название контекста</span>
+            <span><UiText text="Название контекста" /></span>
             <input
               maxLength={160}
               onChange={(event) => setDraft({ ...draft, name: event.target.value })}
@@ -242,7 +245,7 @@ export function TrackingContextSettingsPanel({
             />
           </label>
           <label>
-            <span>Поисковая система</span>
+            <span><UiText text="Поисковая система" /></span>
             <CustomSelect
               onChange={(event) =>
                 setDraft({
@@ -254,12 +257,12 @@ export function TrackingContextSettingsPanel({
               }
               value={draft.searchEngine}
             >
-              <option value="YANDEX">Яндекс</option>
+              <option value="YANDEX"><UiText text="Яндекс" /></option>
               <option value="GOOGLE">Google</option>
             </CustomSelect>
           </label>
           <label>
-            <span>Источник выдачи</span>
+            <span><UiText text="Источник выдачи" /></span>
             <CustomSelect
               onChange={(event) =>
                 setDraft({
@@ -270,15 +273,15 @@ export function TrackingContextSettingsPanel({
               value={draft.searchSource}
             >
               {draft.searchEngine === "YANDEX" && (
-                <option value="SEARCH_API">Яндекс XML / Search API</option>
+                <option value="SEARCH_API"><UiText text="Яндекс XML / Search API" /></option>
               )}
               <option value="LIVE">
-                {draft.searchEngine === "YANDEX" ? "Яндекс Live" : "Google Live"}
+                {draft.searchEngine === "YANDEX" ? <UiText text="Яндекс Live" /> : "Google Live"}
               </option>
             </CustomSelect>
           </label>
           <label className="field-span-2">
-            <span>Регион</span>
+            <span><UiText text="Регион" /></span>
             <SearchableRegionSelect
               kind={draft.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
               onChange={({ code, label }) =>
@@ -289,7 +292,7 @@ export function TrackingContextSettingsPanel({
             />
           </label>
           <fieldset>
-            <legend>Устройство</legend>
+            <legend><UiText text="Устройство" /></legend>
             <div className="tracking-context-segments">
               {(["DESKTOP", "MOBILE"] as const).map((device) => (
                 <button
@@ -298,13 +301,13 @@ export function TrackingContextSettingsPanel({
                   onClick={() => setDraft({ ...draft, device })}
                   type="button"
                 >
-                  {device === "DESKTOP" ? "Десктоп" : "Мобильное"}
+                  {device === "DESKTOP" ? <UiText text="Десктоп" /> : <UiText text="Мобильное" />}
                 </button>
               ))}
             </div>
           </fieldset>
           <fieldset>
-            <legend>Глубина</legend>
+            <legend><UiText text="Глубина" /></legend>
             <div className="tracking-context-segments">
               {([30, 50, 100] as const).map((depth) => (
                 <button
@@ -313,7 +316,7 @@ export function TrackingContextSettingsPanel({
                   onClick={() => setDraft({ ...draft, depth })}
                   type="button"
                 >
-                  Топ-{depth}
+                  <UiText text="Топ-" />{depth}
                 </button>
               ))}
             </div>
@@ -331,17 +334,16 @@ export function TrackingContextSettingsPanel({
             type="checkbox"
           />
           <span>
-            <strong>Включать неотслеживаемые запросы</strong>
+            <strong><UiText text="Включать неотслеживаемые запросы" /></strong>
             <small>
-              По умолчанию такие запросы остаются в контексте, но не попадают в съём позиций.
-            </small>
+              <UiText text="По умолчанию такие запросы остаются в контексте, но не попадают в съём позиций." /></small>
           </span>
         </label>
 
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
-        {notice && <div className="inline-alert success" role="status">{notice}</div>}
+        {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
+        {notice && <div className="inline-alert success" role="status">{<UiText text={notice ?? ""} />}</div>}
         {!settings?.access.canConfigure && (
-          <div className="inline-alert info">Доступен только просмотр контекстов.</div>
+          <div className="inline-alert info"><UiText text="Доступен только просмотр контекстов." /></div>
         )}
         <footer>
           {selected && (
@@ -358,7 +360,7 @@ export function TrackingContextSettingsPanel({
               }}
               type="button"
             >
-              {selected.status === "ACTIVE" ? "Удалить контекст" : "Восстановить"}
+              {selected.status === "ACTIVE" ? <UiText text="Удалить контекст" /> : <UiText text="Восстановить" />}
             </button>
           )}
           <button
@@ -367,7 +369,7 @@ export function TrackingContextSettingsPanel({
             onClick={() => void save()}
             type="button"
           >
-            {saving ? "Сохраняем…" : selected ? "Сохранить" : "Создать контекст"}
+            {saving ? <UiText text="Сохраняем…" /> : selected ? <UiText text="Сохранить" /> : <UiText text="Создать контекст" />}
           </button>
         </footer>
       </div>
@@ -375,7 +377,7 @@ export function TrackingContextSettingsPanel({
     {deleteConfirmationOpen && selected?.status === "ACTIVE" && (
       <SemanticModal
         className="tracking-context-delete-modal"
-        description={`Контекст «${selected.name}» больше нельзя будет выбрать для нового съёма.`}
+        description={uiText("Контекст «{0}» больше нельзя будет выбрать для нового съёма.", [String(selected.name)])}
         footer={
           <>
             <button
@@ -384,15 +386,14 @@ export function TrackingContextSettingsPanel({
               onClick={() => setDeleteConfirmationOpen(false)}
               type="button"
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
             <button
               className="danger-button"
               disabled={saving}
               onClick={() => void changeStatus()}
               type="button"
             >
-              {saving ? "Удаляем…" : "Удалить контекст"}
+              {saving ? <UiText text="Удаляем…" /> : <UiText text="Удалить контекст" />}
             </button>
           </>
         }
@@ -408,14 +409,12 @@ export function TrackingContextSettingsPanel({
           minHeight: 0,
           width: 420
         }}
-        title="Удалить контекст?"
+        title={uiText("Удалить контекст?")}
       >
         <div className="tracking-context-delete-copy">
           <div className="inline-alert info">
-            Результаты, история позиций и выполненные операции не удаляются.
-            Контекст останется доступен в истории и его можно будет восстановить.
-          </div>
-          {error && <div className="inline-alert danger" role="alert">{error}</div>}
+            <UiText text="Результаты, история позиций и выполненные операции не удаляются. Контекст останется доступен в истории и его можно будет восстановить." /></div>
+          {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
         </div>
       </SemanticModal>
     )}
@@ -451,8 +450,8 @@ function ContextScopeEditor({
     <section className="tracking-context-scope-editor">
       <header>
         <div>
-          <h3>Охват контекста</h3>
-          <p>Родительская папка автоматически включает все вложенные папки.</p>
+          <h3><UiText text="Охват контекста" /></h3>
+          <p><UiText text="Родительская папка автоматически включает все вложенные папки." /></p>
         </div>
         <div className="tracking-context-segments">
           <button
@@ -460,22 +459,19 @@ function ContextScopeEditor({
             onClick={() => onChange({ ...draft, scopeMode: "ALL", groupIds: [] })}
             type="button"
           >
-            Весь проект
-          </button>
+            <UiText text="Весь проект" /></button>
           <button
             className={draft.scopeMode === "GROUPS" ? "selected" : undefined}
             onClick={() => onChange({ ...draft, scopeMode: "GROUPS" })}
             type="button"
           >
-            Папки
-          </button>
+            <UiText text="Папки" /></button>
           <button
             className={draft.scopeMode === "KEYWORDS" ? "selected" : undefined}
             onClick={() => onChange({ ...draft, scopeMode: "KEYWORDS", groupIds: [] })}
             type="button"
           >
-            Запросы
-          </button>
+            <UiText text="Запросы" /></button>
         </div>
       </header>
       {draft.scopeMode === "GROUPS" ? (
@@ -520,8 +516,8 @@ function ContextScopeEditor({
       ) : (
         <div className="tracking-context-scope-note">
           {draft.scopeMode === "ALL"
-            ? "При каждом запуске будут выбраны все активные запросы проекта."
-            : "Точный список запросов задаётся в окне запуска и сохраняется после успешной подготовки."}
+            ? <UiText text="При каждом запуске будут выбраны все активные запросы проекта." />
+            : <UiText text="Точный список запросов задаётся в окне запуска и сохраняется после успешной подготовки." />}
         </div>
       )}
     </section>

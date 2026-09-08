@@ -95,6 +95,7 @@ test("authorizes once, submits once and durably records an accepted task", async
     }
   } as unknown as ArsenkinRankConnector;
   const settlements = {
+    async hold() { calls.push("hold"); },
     async capture(
       command: { readonly grantId: string },
       context: { readonly idempotencyKey: string }
@@ -129,6 +130,7 @@ test("authorizes once, submits once and durably records an accepted task", async
     "claim",
     "read",
     "billing",
+    "hold",
     "authorize",
     "provider",
     "settle",
@@ -181,6 +183,7 @@ test("does not persist an accepted platform-paid outcome when capture fails", as
     }
   } as unknown as ArsenkinRankConnector;
   const settlements = {
+    async hold() {},
     async capture() {
       throw new Error("settlement unavailable");
     }
@@ -551,7 +554,7 @@ test("claims a submit lease that fits inside the short execution grant", async (
     ),
     "SUBMITTED"
   );
-  assert.equal(claimedLeaseSeconds, 16);
+  assert.equal(claimedLeaseSeconds, 18);
 });
 
 test("treats an asynchronously lost submit lease as recoverable", async () => {
@@ -902,8 +905,10 @@ function service(
   );
 }
 
-function noBillingSettlement(): Pick<RankBillingSettlementClient, "capture"> {
+function noBillingSettlement(): Pick<RankBillingSettlementClient, "capture" | "hold" | "release"> {
   return {
+    async hold() { return { schemaVersion: "rank-execution-grant-settlement-result@1", grantId: ids.grant, status: "RESERVED" }; },
+    async release() { return { schemaVersion: "rank-execution-grant-settlement-result@1", grantId: ids.grant, status: "RELEASED" }; },
     async capture() {
       throw new Error("BYOK submit must not capture billing");
     }

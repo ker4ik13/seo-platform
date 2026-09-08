@@ -178,7 +178,7 @@ function frequencySnapshotValues(
     if (
       typeof snapshot.provider !== "string" ||
       !frequencyCollectionProviders.includes(snapshot.provider as never) ||
-      snapshot.sourceMode !== "BYOK"
+      (snapshot.sourceMode !== "BYOK" && snapshot.sourceMode !== "PLATFORM")
     ) {
       invalid(`${field}.${index}.provider`);
     }
@@ -199,7 +199,7 @@ function frequencySnapshotValues(
       ...(typeof snapshot.period === "string" ? { period: snapshot.period } : {}),
       value: snapshot.value,
       provider: snapshot.provider as (typeof frequencyCollectionProviders)[number],
-      sourceMode: "BYOK" as const,
+      sourceMode: snapshot.sourceMode as "BYOK" | "PLATFORM",
       qualityFlags: snapshot.qualityFlags as (typeof semanticFrequencyQualityFlags)[number][]
     };
   });

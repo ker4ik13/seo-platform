@@ -68,7 +68,7 @@ export default async function MarketingPage({ params }: PageProps) {
   const publicOrigin = webPublicOrigin();
   const pageUrl = `${publicOrigin}/${locale}`;
   const brandName = locale === "ru" ? "SEOньорита" : "SEOnorita";
-  const appUrl = "/app/register";
+  const appUrl = `/app/register?locale=${locale}`;
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
@@ -128,7 +128,7 @@ export default async function MarketingPage({ params }: PageProps) {
           <a className="locale" href={locale === "ru" ? "/en" : "/ru"} hrefLang={locale === "ru" ? "en" : "ru"}>
             {page.localeLabel}
           </a>
-          <a className="login" href="/app/login">{page.loginLabel}</a>
+          <a className="login" href={`/app/login?locale=${locale}`}>{page.loginLabel}</a>
         </div>
       </header>
 

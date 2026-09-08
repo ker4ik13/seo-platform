@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { parseSemanticRankDimensionMetadata, parseSemanticRankComparisonItems, parseSemanticRankDimensionCatalog, type SemanticRankComparisonInput } from "@seo-platform/contracts";
 import {
-  rankProviderOverflowCount,
+  rankCommandOverflowCount,
   type ApiCollectionResponse,
   type SemanticCompetitorExportKeyword,
   type SemanticCompetitorExportOptions,
@@ -374,8 +375,11 @@ export class SeoDataClient {
     if (query.isTracked !== undefined) url.searchParams.set("isTracked", String(query.isTracked));
     if (query.priorityMin !== undefined) url.searchParams.set("priorityMin", String(query.priorityMin));
     if (query.priorityMax !== undefined) url.searchParams.set("priorityMax", String(query.priorityMax));
+    appendAdvancedKeywordQuery(url, query);
     if (query.sort) url.searchParams.set("sort", query.sort);
-    const payload = await this.requestGetBounded(url, context, EXPORT_PAGE_RESPONSE_MAX_BYTES);
+    const payload = (query.groupIds?.length ?? 0) > 20
+      ? await this.requestBounded(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/keyword-query`, { workspaceId: context.workspaceId, projectId: context.projectId, actorId: context.actorId, query }, EXPORT_PAGE_RESPONSE_MAX_BYTES)
+      : await this.requestGetBounded(url, context, EXPORT_PAGE_RESPONSE_MAX_BYTES);
     const envelope = object(payload);
     if (!envelope || !Array.isArray(envelope.data) || !object(envelope.page)) {
       throw new SeoDataClientError("UNAVAILABLE", true);
@@ -401,6 +405,16 @@ export class SeoDataClient {
     };
   }
 
+  public async listExportRankDimensions(context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string }) {
+    const payload = await this.requestGetBounded(new URL(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/rank-dimensions`, this.config.services.seoData), context, EXPORT_METADATA_RESPONSE_MAX_BYTES);
+    try { return parseSemanticRankDimensionCatalog(object(payload)?.data); } catch { throw new SeoDataClientError("UNAVAILABLE", true); }
+  }
+
+  public async listExportRankComparison(context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string }, input: SemanticRankComparisonInput) {
+    const payload = await this.requestBounded(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/rank-comparison`, { workspaceId: context.workspaceId, projectId: context.projectId, actorId: context.actorId, ...input }, EXPORT_PAGE_RESPONSE_MAX_BYTES);
+    try { return parseSemanticRankComparisonItems(payload, input); } catch { throw new SeoDataClientError("UNAVAILABLE", true); }
+  }
+
   public async listExportCompetitors(
     context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
     query: KeywordListQuery,
@@ -422,13 +436,13 @@ export class SeoDataClient {
     if (query.isTracked !== undefined) url.searchParams.set("isTracked", String(query.isTracked));
     if (query.priorityMin !== undefined) url.searchParams.set("priorityMin", String(query.priorityMin));
     if (query.priorityMax !== undefined) url.searchParams.set("priorityMax", String(query.priorityMax));
+    appendAdvancedKeywordQuery(url, query);
     if (query.sort) url.searchParams.set("sort", query.sort);
     url.searchParams.set("sources", options.sources.join(","));
-    const payload = await this.requestGetBounded(
-      url,
-      context,
-      EXPORT_PAGE_RESPONSE_MAX_BYTES
-    );
+    if (options.dimensionKeys?.length) url.searchParams.set("dimensionKeys", options.dimensionKeys.join(","));
+    const payload = (query.groupIds?.length ?? 0) > 20
+      ? await this.requestBounded(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/competitor-query`, { workspaceId: context.workspaceId, projectId: context.projectId, actorId: context.actorId, query, options }, EXPORT_PAGE_RESPONSE_MAX_BYTES)
+      : await this.requestGetBounded(url, context, EXPORT_PAGE_RESPONSE_MAX_BYTES);
     return competitorExportPage(payload, query.limit);
   }
 
@@ -453,15 +467,16 @@ export class SeoDataClient {
     if (query.isTracked !== undefined) url.searchParams.set("isTracked", String(query.isTracked));
     if (query.priorityMin !== undefined) url.searchParams.set("priorityMin", String(query.priorityMin));
     if (query.priorityMax !== undefined) url.searchParams.set("priorityMax", String(query.priorityMax));
+    appendAdvancedKeywordQuery(url, query);
     if (query.sort) url.searchParams.set("sort", query.sort);
     url.searchParams.set("observedFrom", options.observedFrom);
     url.searchParams.set("observedBefore", options.observedBefore);
     url.searchParams.set("searchEngines", options.searchEngines.join(","));
-    const payload = await this.requestGetBounded(
-      url,
-      context,
-      EXPORT_PAGE_RESPONSE_MAX_BYTES
-    );
+    if (options.dimensionKeys?.length) url.searchParams.set("dimensionKeys", options.dimensionKeys.join(","));
+    if (options.storedBefore) url.searchParams.set("storedBefore", options.storedBefore);
+    const payload = (query.groupIds?.length ?? 0) > 20
+      ? await this.requestBounded(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/position-history-query`, { workspaceId: context.workspaceId, projectId: context.projectId, actorId: context.actorId, query, options }, EXPORT_PAGE_RESPONSE_MAX_BYTES)
+      : await this.requestGetBounded(url, context, EXPORT_PAGE_RESPONSE_MAX_BYTES);
     return positionHistoryExportPage(payload, query.limit);
   }
 
@@ -568,13 +583,13 @@ export class SeoDataClient {
     return payload.data;
   }
 
-  private async requestBounded(
+  private async requestBounded<Body extends {
+    readonly workspaceId: string;
+    readonly projectId: string;
+    readonly actorId: string;
+  }>(
     path: string,
-    body: {
-      readonly workspaceId: string;
-      readonly projectId: string;
-      readonly actorId: string;
-    },
+    body: Body,
     maximumBytes: number,
     timeoutMs?: number
   ): Promise<unknown> {
@@ -889,7 +904,7 @@ function rankEstimateScope(
     Number(payload.configurationVersion) > Number(payload.contextVersion) ||
     !sha256(payload.configurationHash) ||
     payload.contextCount !== "1" ||
-    !boundedDecimal(payload.keywordCount, rankProviderOverflowCount) ||
+    !boundedDecimal(payload.keywordCount, rankCommandOverflowCount) ||
     payload.pairCount !== payload.keywordCount ||
     !isoTimestamp(payload.calculatedAt)
   ) {
@@ -902,7 +917,7 @@ function rankEstimateScope(
     !semanticScopeHash ||
     (payload.keywordCount === "0" &&
       semanticScopeHash.availability === "UNAVAILABLE") ||
-    (payload.keywordCount === String(rankProviderOverflowCount) &&
+    (payload.keywordCount === String(rankCommandOverflowCount) &&
       semanticScopeHash.availability === "AVAILABLE")
   ) {
     return undefined;
@@ -1054,7 +1069,7 @@ function positionHistoryExportPage(
   if (
     !envelope ||
     !Array.isArray(envelope.data) ||
-    envelope.data.length > limit ||
+    envelope.data.length > limit * 4 ||
     !page ||
     typeof page.hasNext !== "boolean" ||
     (page.nextCursor !== undefined && typeof page.nextCursor !== "string") ||
@@ -1066,17 +1081,23 @@ function positionHistoryExportPage(
     const row = object(item);
     if (
       !row ||
-      Object.keys(row).some((field) => !["keywordId", "text", "createdAt", "groupPath", "snapshots"].includes(field)) ||
+      Object.keys(row).some((field) => !["keywordId", "text", "keywordLanguage", "createdAt", "groupPath", "dimension", "snapshots"].includes(field)) ||
       !uuid(row.keywordId) ||
       typeof row.text !== "string" ||
       row.text.length < 1 ||
       row.text.length > 2_000 ||
+      !canonicalLanguage(row.keywordLanguage) ||
       !isoTimestamp(row.createdAt) ||
       (row.groupPath !== undefined && (typeof row.groupPath !== "string" || row.groupPath.length > 4_096)) ||
       !Array.isArray(row.snapshots) ||
       row.snapshots.length > 2_200
     ) {
       throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    let dimension;
+    if (row.dimension !== undefined) {
+      try { dimension = parseSemanticRankDimensionCatalog({ dimensions: [row.dimension], truncated: false }).dimensions[0]; }
+      catch { throw new SeoDataClientError("UNAVAILABLE", true); }
     }
     const identities = new Set<string>();
     for (const itemSnapshot of row.snapshots) {
@@ -1085,6 +1106,7 @@ function positionHistoryExportPage(
         !snapshot ||
         Object.keys(snapshot).some((field) => !["searchEngine", "observedDate", "found", "position"].includes(field)) ||
         !["GOOGLE", "YANDEX"].includes(String(snapshot.searchEngine)) ||
+        (dimension !== undefined && snapshot.searchEngine !== dimension.searchEngine) ||
         !canonicalDate(snapshot.observedDate) ||
         typeof snapshot.found !== "boolean" ||
         (snapshot.found
@@ -1141,10 +1163,11 @@ function competitorExportPage(
     const identities = new Set<string>();
     for (const competitor of row.competitors) {
       const item = object(competitor);
+      const identity = item ? `${String(item.source)}:${String(item.searchEngine ?? "")}:${String(item.countryCode ?? "")}:${String(item.regionCode ?? "")}:${String(item.language ?? "")}:${String(item.device ?? "")}:${String(item.normalizedUrl)}` : "";
       if (
         !item ||
         Object.keys(item).some((field) =>
-          !["source", "url", "normalizedUrl", "title", "description"].includes(field)
+          !["source", "url", "normalizedUrl", "title", "description", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "dimensionKey", "position", "observedAt", "provider", "searchSource", "snapshotId", "trackingContextId", "configurationVersion"].includes(field)
         ) ||
         !["SERP", "AI"].includes(String(item.source)) ||
         !validHttpUrl(item.url) ||
@@ -1153,11 +1176,18 @@ function competitorExportPage(
           (typeof item.title !== "string" || item.title.length > 50_000)) ||
         (item.description !== undefined &&
           (typeof item.description !== "string" || item.description.length > 50_000)) ||
-        identities.has(`${String(item.source)}:${String(item.normalizedUrl)}`)
+        (item.position !== undefined && (!Number.isSafeInteger(item.position) || Number(item.position) < 1 || Number(item.position) > 100)) ||
+        (item.observedAt !== undefined && !isoTimestamp(item.observedAt)) ||
+        (item.searchEngine !== undefined && !["GOOGLE", "YANDEX"].includes(String(item.searchEngine))) ||
+        (item.device !== undefined && !["DESKTOP", "MOBILE"].includes(String(item.device))) ||
+        (item.snapshotId !== undefined && !uuid(item.snapshotId)) ||
+        (item.trackingContextId !== undefined && !uuid(item.trackingContextId)) ||
+        identities.has(identity)
       ) {
         throw new SeoDataClientError("UNAVAILABLE", true);
       }
-      identities.add(`${String(item.source)}:${String(item.normalizedUrl)}`);
+      try { parseSemanticRankDimensionMetadata(item); } catch { throw new SeoDataClientError("UNAVAILABLE", true); }
+      identities.add(identity);
     }
   }
   return {
@@ -1169,6 +1199,17 @@ function competitorExportPage(
     },
     meta: { requestId: "internal-semantic-competitor-export" }
   };
+}
+
+function appendAdvancedKeywordQuery(url: URL, query: KeywordListQuery): void {
+  for (const field of [
+    "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+    "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
+  ] as const) {
+    const value = query[field];
+    if (value !== undefined) url.searchParams.set(field, String(value));
+  }
 }
 
 function validHttpUrl(value: unknown): value is string {

@@ -22,7 +22,7 @@ import type {
   RankRuntimeDiagnostics,
   WorkspaceSummary
 } from "@seo-platform/contracts";
-import { rankProviderKeywordLimit } from "@seo-platform/contracts";
+import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
@@ -100,7 +100,7 @@ export class RankRunController {
     const page = operationResultPageQuery(
       limitValue,
       cursorValue,
-      rankProviderKeywordLimit - 1
+      rankCommandKeywordLimit - 1
     );
     if (!this.seoData) throw new Error("SEO data client is not available");
     const [job, result] = await Promise.all([

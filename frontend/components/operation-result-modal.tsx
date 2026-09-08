@@ -9,6 +9,8 @@ import {
 } from "./operation-result-workspace";
 import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function OperationResultModal({
   actions,
@@ -28,6 +30,7 @@ export function OperationResultModal({
   projectId: string;
   title: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [dirty, setDirty] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [rankRuntimeLogState, setRankRuntimeLogState] = useState<RankRuntimeLogState>();
@@ -65,11 +68,11 @@ export function OperationResultModal({
                 aria-haspopup="dialog"
                 className="operation-result-header-action operation-result-runtime-log-action"
                 onClick={() => setRankRuntimeLogOpen(true)}
-                title="Открыть логи XMLStock"
+                title={uiText("Открыть логи XMLStock")}
                 type="button"
               >
                 <span aria-hidden="true" className="operation-result-runtime-log-dot" />
-                <span className="operation-result-runtime-log-label">Логи</span>
+                <span className="operation-result-runtime-log-label"><UiText text="Логи" /></span>
               </button>
             )}
             {actions}
@@ -78,7 +81,7 @@ export function OperationResultModal({
         onClose={requestClose}
         presenceKey="semantic-modal:operation-result"
         size="fullscreen"
-        title={`Результат: ${title}`}
+        title={uiText("Результат: {0}", [String(title)])}
       >
         <OperationResultWorkspace
           embedded

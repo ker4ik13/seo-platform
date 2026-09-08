@@ -20,7 +20,8 @@ const FORWARDED_REQUEST_HEADERS = [
   "idempotency-key",
   "if-match",
   "user-agent",
-  "x-csrf-token"
+  "x-csrf-token",
+  "x-operation-estimate-id"
 ] as const;
 const FORWARDED_RESPONSE_HEADERS = [
   "cache-control",
@@ -113,7 +114,7 @@ export async function proxyPlatformApi(
   }
 
   const hasBody = !["GET", "HEAD"].includes(request.method);
-  const clusteringRunCreate = isClusteringRunCreatePath(upstreamPathSegments);
+  const clusteringRunCreate = isClusteringRunCreatePath(upstreamPathSegments) || isTrackingKeywordReplacementPath(upstreamPathSegments);
   const boundedBody = hasBody
     ? await readBoundedRequestBody(
         request,
@@ -229,7 +230,7 @@ export function canonicalSameOrigin(
   }
 }
 
-async function readBoundedRequestBody(
+export async function readBoundedRequestBody(
   request: NextRequest,
   maxBodyBytes: number,
   timeoutMs: number
@@ -303,6 +304,7 @@ async function readBoundedRequestBody(
 }
 
 function browserApiBodyLimit(pathSegments: readonly string[]): number {
+  if (isTrackingKeywordReplacementPath(pathSegments)) return 16 * 1024 * 1024;
   if (pathSegments[0] === "me" && pathSegments[1] === "push-subscriptions") {
     return MAX_PUSH_SUBSCRIPTION_BODY_BYTES;
   }
@@ -320,13 +322,17 @@ function browserApiBodyLimit(pathSegments: readonly string[]): number {
   return MAX_BROWSER_API_BODY_BYTES;
 }
 
+function isTrackingKeywordReplacementPath(segments: readonly string[]): boolean {
+  return segments.length === 5 && segments[0] === "projects" && segments[2] === "tracking-contexts" && segments[4] === "keywords";
+}
+
 function isClusteringRunCreatePath(
   pathSegments: readonly string[]
 ): boolean {
   return (
     pathSegments.length === 3 &&
     pathSegments[0] === "projects" &&
-    pathSegments[2] === "clustering-runs"
+    ["clustering-runs", "frequency-collections", "ai-answer-collections", "operation-estimates"].includes(pathSegments[2] ?? "")
   );
 }
 

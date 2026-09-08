@@ -1,3 +1,4 @@
+import type { SemanticRankDimension, SemanticRankDimensionMetadata } from "./rank-dimensions.js";
 import type {
   SemanticKeywordIntent,
   SemanticKeywordSort
@@ -45,6 +46,21 @@ export interface SemanticExportFilters {
   readonly isTracked?: boolean;
   readonly priorityMin?: number;
   readonly priorityMax?: number;
+  readonly frequencyBaseMin?: string;
+  readonly frequencyBaseMax?: string;
+  readonly frequencyExactMin?: string;
+  readonly frequencyExactMax?: string;
+  readonly frequencyFixedMin?: string;
+  readonly frequencyFixedMax?: string;
+  readonly wordCountMin?: number;
+  readonly wordCountMax?: number;
+  readonly targetUrlState?: "SET" | "EMPTY";
+  readonly rankDimensionKey?: string;
+  readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
+  readonly rankPositionMin?: number;
+  readonly rankPositionMax?: number;
+  readonly rankCheckedFrom?: string;
+  readonly rankCheckedBefore?: string;
 }
 
 export interface InternalCreateSemanticExportInput
@@ -130,6 +146,10 @@ export interface SemanticPositionHistoryExportOptions {
   readonly observedFrom: string;
   readonly observedBefore: string;
   readonly searchEngines: readonly SemanticPositionHistorySearchEngine[];
+  /** Internal read partition; the worker splits the geographic axes in batches. */
+  readonly dimensionKeys?: readonly string[];
+  /** Internal stable read cutoff owned by the export job. */
+  readonly storedBefore?: string;
 }
 
 /**
@@ -141,7 +161,7 @@ export interface SemanticFolderMapExportOptions {
   readonly includeDescendants: boolean;
 }
 
-export interface SemanticPositionHistoryExportSnapshot {
+export interface SemanticPositionHistoryExportSnapshot extends SemanticRankDimensionMetadata {
   readonly searchEngine: SemanticPositionHistorySearchEngine;
   readonly observedDate: string;
   readonly found: boolean;
@@ -151,9 +171,19 @@ export interface SemanticPositionHistoryExportSnapshot {
 export interface SemanticPositionHistoryExportRow {
   readonly keywordId: string;
   readonly text: string;
+  /** Keyword language is separate from the search-result language. */
+  readonly keywordLanguage: string;
   readonly createdAt: string;
   readonly groupPath?: string;
+  readonly dimension?: SemanticRankDimension;
   readonly snapshots: readonly SemanticPositionHistoryExportSnapshot[];
+}
+
+/** Bound one history response to roughly 20k daily values, independent of project size. */
+export function semanticPositionHistoryReadPageSize(options: SemanticPositionHistoryExportOptions): number {
+  const days = Math.max(1, Math.ceil((Date.parse(options.observedBefore) - Date.parse(options.observedFrom)) / 86_400_000));
+  const dimensions = Math.max(1, Math.min(4, options.dimensionKeys?.length ?? 4));
+  return Math.max(1, Math.min(100, Math.floor(20_000 / (days * dimensions))));
 }
 
 export const semanticCompetitorExportSources = ["SERP", "AI"] as const;
@@ -167,6 +197,10 @@ export const semanticCompetitorExportColumnKeys = [
   "aiCompetitorUrls",
   "aiCompetitorSerp"
 ] as const;
+export const semanticCompetitorRowColumnKeys = [
+  "competitorEngine", "competitorRegion", "competitorRegionCode", "competitorDevice", "competitorPosition",
+  "competitorUrl", "competitorTitle", "competitorDescription", "competitorObservedAt", "competitorProvider"
+] as const;
 
 export type SemanticCompetitorExportColumnKey =
   (typeof semanticCompetitorExportColumnKeys)[number];
@@ -174,7 +208,8 @@ export type SemanticCompetitorExportColumnKey =
 /** Export-only columns that do not become visible table or saved-view columns. */
 export type SemanticExportColumnKey =
   | SemanticSavedViewColumnKey
-  | SemanticCompetitorExportColumnKey;
+  | SemanticCompetitorExportColumnKey
+  | (typeof semanticCompetitorRowColumnKeys)[number];
 
 /**
  * Read the latest available competitor projection for every keyword and
@@ -183,15 +218,24 @@ export type SemanticExportColumnKey =
  */
 export interface SemanticCompetitorExportOptions {
   readonly sources: readonly SemanticCompetitorExportSource[];
+  readonly dimensionKeys?: readonly string[];
 }
 
 /** Internal SEO read projection consumed only by the export worker. */
-export interface SemanticCompetitorExportItem {
+export interface SemanticCompetitorExportItem extends SemanticRankDimensionMetadata {
   readonly source: SemanticCompetitorExportSource;
   readonly url: string;
   readonly normalizedUrl: string;
   readonly title?: string;
   readonly description?: string;
+  readonly searchEngine?: "YANDEX" | "GOOGLE";
+  readonly position?: number;
+  readonly observedAt?: string;
+  readonly provider?: string;
+  readonly searchSource?: "LIVE" | "SEARCH_API";
+  readonly snapshotId?: string;
+  readonly trackingContextId?: string;
+  readonly configurationVersion?: number;
 }
 
 /** One paginated keyword unit with its latest SERP/AI competitor rows. */
@@ -209,6 +253,8 @@ export interface CreateSemanticExportInput {
   readonly sort?: SemanticKeywordSort;
   readonly keywordIds?: readonly string[];
   readonly includeBom?: boolean;
+  /** One row per stored organic result, with its geographic provenance. */
+  readonly competitorRows?: boolean;
   /** When present, format must be XLSX and columns are ignored by the workbook layout. */
   readonly positionHistory?: SemanticPositionHistoryExportOptions;
   /** When present, format must be XLSX and scope must be FOLDER_MAP. */

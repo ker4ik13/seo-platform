@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { webPublicOrigin } from "../lib/server-runtime-origin";
 import "./styles.css";
 
@@ -19,11 +20,12 @@ export const viewport: Viewport = {
   themeColor: "#fafaf8"
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{ children: ReactNode }>) {
+  const locale = (await headers()).get("x-ui-locale") === "en" ? "en" : "ru";
   return (
-    <html lang="ru">
+    <html lang={locale}>
       <body>{children}</body>
     </html>
   );

@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { paidOperationAdmissionInput } from "../paid-operations/paid-operation-admission.js";
 import {
   arsenkinClusteringKeywordLimit,
   clusteringDepths,
@@ -24,6 +25,7 @@ export function internalCreateClusteringRunInput(
 ): InternalCreateClusteringRunInput {
   const input = record(value, [
     "workspaceId",
+    "billing",
     "projectId",
     "actorId",
     "idempotencyKey",
@@ -71,6 +73,7 @@ export function internalCreateClusteringRunInput(
   const capacity = record(input.jobCapacity, ["planCode", "planVersion", "concurrentJobs"]);
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
+    ...paidOperationAdmissionInput(input.billing),
     projectId: uuid(input.projectId, "projectId"),
     actorId: uuid(input.actorId, "actorId"),
     idempotencyKey: pattern(input.idempotencyKey, "idempotencyKey", KEY_PATTERN),

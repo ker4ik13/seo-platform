@@ -1,4 +1,5 @@
 "use client";
+import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 
 import {
   keysSoDatabases,
@@ -29,6 +30,7 @@ import {
   type FormEvent
 } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import {
   createProjectConnectorBindingInput,
@@ -56,6 +58,8 @@ import {
   type SemanticOperationSelection
 } from "./semantic-operation-scope";
 import { SemanticModal } from "./semantic-modal";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 const ACTIVE = new Set([
   "QUEUED",
@@ -84,6 +88,7 @@ export function KeywordResearchWorkspace({
   projectSearchCity?: ProjectSearchCity | undefined;
   workspaceId: string;
 }>) {
+  const { t: uiText } = useUiLocale();
   const [collection, setCollection] = useState<KeywordResearchCollection>();
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
   const [source, setSource] = useState<ResearchTab>("KEYS_SO");
@@ -99,7 +104,7 @@ export function KeywordResearchWorkspace({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const createCommand = useRef<
-    Readonly<{ signature: string; key: string }> | undefined
+    OperationAttempt | undefined
   >(undefined);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -163,16 +168,10 @@ export function KeywordResearchWorkspace({
     input: CreateKeywordResearchRunInput,
     prefix: "keyword-research" | "wordstat-expansion"
   ): Promise<KeywordResearchRunSummary> {
-    const signature = JSON.stringify(input);
-    if (createCommand.current?.signature !== signature) {
-      createCommand.current = {
-        signature,
-        key: `${prefix}:${crypto.randomUUID()}`
-      };
-    }
+    createCommand.current = prepareOperationAttempt(createCommand.current, path(projectId), input, input.source, prefix);
     const run = await browserApiRequest<KeywordResearchRunSummary>(path(projectId), {
       method: "POST",
-      idempotencyKey: createCommand.current.key,
+      operationAttempt: createCommand.current,
       body: input
     });
     createCommand.current = undefined;
@@ -273,35 +272,34 @@ export function KeywordResearchWorkspace({
   }
 
   if (loading && !collection) {
-    return <section className="panel panel-empty" aria-busy="true"><span className="spinner" /><p>Загружаем данные…</p></section>;
+    return <section className="panel panel-empty" aria-busy="true"><span className="spinner" /><p><UiText text="Загружаем данные…" /></p></section>;
   }
 
   return (
     <div className="keyword-research-workspace settings-stack">
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {notice && <div className="inline-success" role="status">{notice}</div>}
+      {error && <div className="inline-error" role="alert">{<UiText text={error ?? ""} />}</div>}
+      {notice && <div className="inline-success" role="status">{<UiText text={notice ?? ""} />}</div>}
 
-      <div className="keyword-research-source-tabs" role="tablist" aria-label="Источник данных">
+      <div className="keyword-research-source-tabs" role="tablist" aria-label={uiText("Источник данных")}>
         <button aria-selected={source === "KEYS_SO"} className={source === "KEYS_SO" ? "selected" : undefined} onClick={() => setSource("KEYS_SO")} role="tab" type="button">
           <ProviderLogo provider="KEYS_SO" size="compact" /> Keys.so
         </button>
         <button aria-selected={source === "WORDSTAT"} className={source === "WORDSTAT" ? "selected" : undefined} onClick={() => setSource("WORDSTAT")} role="tab" type="button">
-          <span className="keyword-research-provider-pair"><ProviderLogo provider="XMLSTOCK" size="compact" /><ProviderLogo provider="ARSENKIN" size="compact" /></span> Парсинг Wordstat
-        </button>
+          <span className="keyword-research-provider-pair"><ProviderLogo provider="XMLSTOCK" size="compact" /><ProviderLogo provider="ARSENKIN" size="compact" /></span> <UiText text="Парсинг Wordstat" before=" " /></button>
       </div>
 
       {source === "KEYS_SO" ? (
         <>
           <section className="panel keyword-research-launch-card">
             <div className="section-heading">
-              <div><p className="eyebrow">Аналитика домена</p><h2>Ключи и конкуренты из Keys.so</h2><p>Получите сводку по ТОПу, органические запросы и ближайших конкурентов.</p></div>
-              <a className="secondary-button" href="/app/settings/integrations">Настроить API</a>
+              <div><p className="eyebrow"><UiText text="Аналитика домена" /></p><h2><UiText text="Ключи и конкуренты из Keys.so" /></h2><p><UiText text="Получите сводку по ТОПу, органические запросы и ближайших конкурентов." /></p></div>
+              <a className="secondary-button" href="/app/settings/integrations"><UiText text="Настроить API" /></a>
             </div>
             <form className="keyword-research-launch-form" onSubmit={startKeys}>
-              <label className="form-field"><span>Домен</span><input autoComplete="off" onChange={(event) => setDomain(event.target.value)} placeholder="example.ru" required value={domain} /></label>
-              <label className="form-field"><span>База</span><CustomSelect onChange={(event) => setDatabase(event.target.value as KeysSoDatabase)} value={database}>{keysSoDatabases.map((code) => <option key={code} value={code}>{databaseLabel(code)}</option>)}</CustomSelect></label>
-              <label className="form-field"><span>Ключей</span><input max={500} min={25} onChange={(event) => setMaxKeywords(event.target.value)} required step={25} type="number" value={maxKeywords} /></label>
-              <button className="primary-button" disabled={busy || collection?.access.canRun !== true} type="submit">{busy ? "Запускаем…" : "Получить данные"}</button>
+              <label className="form-field"><span><UiText text="Домен" /></span><input autoComplete="off" onChange={(event) => setDomain(event.target.value)} placeholder="example.ru" required value={domain} /></label>
+              <label className="form-field"><span><UiText text="База" /></span><CustomSelect onChange={(event) => setDatabase(event.target.value as KeysSoDatabase)} value={database}>{keysSoDatabases.map((code) => <option key={code} value={code}>{<UiText text={databaseLabel(code) ?? ""} />}</option>)}</CustomSelect></label>
+              <label className="form-field"><span><UiText text="Ключей" /></span><input max={500} min={25} onChange={(event) => setMaxKeywords(event.target.value)} required step={25} type="number" value={maxKeywords} /></label>
+              <button className="primary-button" disabled={busy || collection?.access.canRun !== true} type="submit">{busy ? <UiText text="Запускаем…" /> : <UiText text="Получить данные" />}</button>
             </form>
           </section>
           {latestKeysRun?.overview && <KeysOverview run={latestKeysRun} />}
@@ -309,26 +307,26 @@ export function KeywordResearchWorkspace({
       ) : (
         <section className="panel keyword-research-wordstat-card">
           <div className="section-heading">
-            <div><p className="eyebrow">XMLStock · Arsenkin Tools</p><h2>Расширить семантику через Wordstat</h2><p>Выберите провайдера, вставьте до 500 исходных фраз или возьмите запросы проекта. Перед импортом результат можно проверить.</p></div>
+            <div><p className="eyebrow">XMLStock · Arsenkin Tools</p><h2><UiText text="Расширить семантику через Wordstat" /></h2><p><UiText text="Выберите провайдера, вставьте до 500 исходных фраз или возьмите запросы проекта. Перед импортом результат можно проверить." /></p></div>
             <div className="button-row">
-              <a className="secondary-button" href="/app/settings/integrations">Настроить провайдеров</a>
-              <button className="primary-button" disabled={collection?.access.canRun !== true} onClick={() => openWordstat()} type="button"><Icon name="plus" /> Запустить парсинг</button>
+              <a className="secondary-button" href="/app/settings/integrations"><UiText text="Настроить провайдеров" /></a>
+              <button className="primary-button" disabled={collection?.access.canRun !== true} onClick={() => openWordstat()} type="button"><Icon name="plus" /> <UiText text="Запустить парсинг" before=" " /></button>
             </div>
           </div>
         </section>
       )}
 
       <section className="panel">
-        <div className="section-heading"><div><p className="eyebrow">Операции</p><h2>{source === "KEYS_SO" ? "Сборы Keys.so" : "Парсинги Wordstat"}</h2></div>{visibleRuns.some(({ status }) => ACTIVE.has(status)) && <span className="status-badge">Выполняется</span>}</div>
+        <div className="section-heading"><div><p className="eyebrow"><UiText text="Операции" /></p><h2>{source === "KEYS_SO" ? <UiText text="Сборы Keys.so" /> : <UiText text="Парсинги Wordstat" />}</h2></div>{visibleRuns.some(({ status }) => ACTIVE.has(status)) && <span className="status-badge"><UiText text="Выполняется" /></span>}</div>
         {visibleRuns.length === 0 ? (
-          <div className="panel-empty"><strong>Операций пока нет</strong><p>Запустите первый сбор — он появится здесь.</p></div>
+          <div className="panel-empty"><strong><UiText text="Операций пока нет" /></strong><p><UiText text="Запустите первый сбор — он появится здесь." /></p></div>
         ) : (
           <div className="keyword-research-run-list">
             {visibleRuns.map((run) => (
               <article className="subpanel" key={run.id}>
                 <button className="semantic-row-button" onClick={() => setExpandedRunId(run.id)} type="button">
                   <span><strong>{runTitle(run)}</strong><small>{runMeta(run)}</small></span>
-                  <span className={`status-badge status-${run.status.toLowerCase()}`}>{statusLabel(run.status)}</span>
+                  <span className={`status-badge status-${run.status.toLowerCase()}`}>{<UiText text={statusLabel(run.status) ?? ""} />}</span>
                 </button>
                 {expanded?.id === run.id && (
                   <KeywordResearchRunPreview
@@ -371,6 +369,7 @@ export function KeywordResearchWorkspace({
 }
 
 function KeysOverview({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
+  const uiLocale = useUiLocale().locale;
   const [tab, setTab] = useState<"OVERVIEW" | "KEYWORDS" | "COMPETITORS">("OVERVIEW");
   const overview = run.overview;
   return (
@@ -378,7 +377,7 @@ function KeysOverview({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
       <div className="keyword-research-result-tabs" role="tablist">
         {([ ["OVERVIEW", "Обзор"], ["KEYWORDS", `Ключи · ${run.totalAvailable ?? run.collectedKeywords}`], ["COMPETITORS", `Конкуренты · ${run.competitors?.length ?? 0}`] ] as const).map(([value, label]) => <button className={tab === value ? "selected" : undefined} key={value} onClick={() => setTab(value)} role="tab" type="button">{label}</button>)}
       </div>
-      {tab === "OVERVIEW" && overview && <div className="keyword-research-metric-grid">{([ ["ТОП-1", overview.top1], ["ТОП-3", overview.top3], ["ТОП-5", overview.top5], ["ТОП-10", overview.top10], ["ТОП-50", overview.top50], ["Видимость", overview.visibility ?? "—"] ] as const).map(([label, value]) => <article key={label}><span>{label}</span><strong>{typeof value === "number" ? formatInteger(value) : value}</strong></article>)}</div>}
+      {tab === "OVERVIEW" && overview && <div className="keyword-research-metric-grid">{([ ["ТОП-1", overview.top1], ["ТОП-3", overview.top3], ["ТОП-5", overview.top5], ["ТОП-10", overview.top10], ["ТОП-50", overview.top50], ["Видимость", overview.visibility ?? "—"] ] as const).map(([label, value]) => <article key={label}><span>{label}</span><strong>{typeof value === "number" ? formatInteger(value, uiLocale) : value}</strong></article>)}</div>}
       {tab === "KEYWORDS" && <SimpleKeywordTable run={run} />}
       {tab === "COMPETITORS" && <CompetitorTable run={run} />}
     </section>
@@ -386,12 +385,13 @@ function KeysOverview({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
 }
 
 function SimpleKeywordTable({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
-  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Запрос</th><th>Позиция</th><th>Частотность</th><th>URL</th></tr></thead><tbody>{run.rows.map((row) => <tr key={row.id}><td><strong>{row.keyword}</strong></td><td>{row.position ?? "—"}</td><td>{row.frequencyBase ?? "—"}</td><td><span className="table-secondary">{row.url ?? "—"}</span></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th><UiText text="Запрос" /></th><th><UiText text="Позиция" /></th><th><UiText text="Частотность" /></th><th>URL</th></tr></thead><tbody>{run.rows.map((row) => <tr key={row.id}><td><strong>{row.keyword}</strong></td><td>{row.position ?? "—"}</td><td>{row.frequencyBase ?? "—"}</td><td><span className="table-secondary">{row.url ?? "—"}</span></td></tr>)}</tbody></table></div>;
 }
 
 function CompetitorTable({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
-  if (!run.competitors?.length) return <div className="panel-empty"><p>Keys.so не вернул конкурентов для этого домена.</p></div>;
-  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Домен</th><th>Общие ключи</th><th>Сходство</th><th>ТОП-10</th><th>Видимость</th></tr></thead><tbody>{run.competitors.map((item) => <tr key={item.domain}><td><strong>{item.domain}</strong></td><td>{formatInteger(item.commonKeywords)}</td><td>{item.similarity ?? "—"}</td><td>{item.top10 ?? "—"}</td><td>{item.visibility ?? "—"}</td></tr>)}</tbody></table></div>;
+  const uiLocale = useUiLocale().locale;
+  if (!run.competitors?.length) return <div className="panel-empty"><p><UiText text="Keys.so не вернул конкурентов для этого домена." /></p></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th><UiText text="Домен" /></th><th><UiText text="Общие ключи" /></th><th><UiText text="Сходство" /></th><th><UiText text="ТОП-10" /></th><th><UiText text="Видимость" /></th></tr></thead><tbody>{run.competitors.map((item) => <tr key={item.domain}><td><strong>{item.domain}</strong></td><td>{formatInteger(item.commonKeywords, uiLocale)}</td><td>{item.similarity ?? "—"}</td><td>{item.top10 ?? "—"}</td><td>{item.visibility ?? "—"}</td></tr>)}</tbody></table></div>;
 }
 
 export function KeywordResearchRunPreview({
@@ -421,6 +421,8 @@ export function KeywordResearchRunPreview({
   busy: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const ready = run.status === "READY_TO_IMPORT";
   const retryableImport =
     run.status === "FAILED" &&
@@ -436,7 +438,7 @@ export function KeywordResearchRunPreview({
   const [parentId, setParentId] = useState("");
   const [distributionMode, setDistributionMode] =
     useState<WordstatImportDistributionMode>("SINGLE_GROUP");
-  const initialNewName = `Wordstat · ${new Date(run.createdAt).toLocaleDateString("ru-RU")}`;
+  const initialNewName = `Wordstat · ${new Date(run.createdAt).toLocaleDateString(uiLocale)}`;
   const [newName, setNewName] = useState(initialNewName);
   const [rowGroupIds, setRowGroupIds] = useState<ReadonlyMap<string, string>>(
     new Map()
@@ -579,23 +581,23 @@ export function KeywordResearchRunPreview({
 
   return (
     <div className={`keyword-research-run-preview${ready ? " is-ready" : ""}`}>
-      {run.failureCode && <div className="inline-error keyword-research-preview-error">Ошибка: {run.failureCode}</div>}
+      {run.failureCode && <div className="inline-error keyword-research-preview-error"><UiText text="Ошибка:" after=" " />{run.failureCode}</div>}
       {retryableImport && (
         <div className="keyword-research-retry-import">
-          <span><strong>Сбор завершён, не прошёл только импорт.</strong><small>Запросы и выбранные папки сохранены — повторный парсинг не нужен.</small></span>
-          <button className="primary-button" disabled={!canImport || busy} onClick={onRetryImport} type="button">{busy ? "Перезапускаем…" : "Повторить импорт"}</button>
+          <span><strong><UiText text="Сбор завершён, не прошёл только импорт." /></strong><small><UiText text="Запросы и выбранные папки сохранены — повторный парсинг не нужен." /></small></span>
+          <button className="primary-button" disabled={!canImport || busy} onClick={onRetryImport} type="button">{busy ? <UiText text="Перезапускаем…" /> : <UiText text="Повторить импорт" />}</button>
         </div>
       )}
       <section className="keyword-research-results-pane">
         <header className="keyword-research-results-toolbar">
           <span className="keyword-research-results-heading">
-            <strong>Найденные запросы</strong>
+            <strong><UiText text="Найденные запросы" /></strong>
             <small>
               {visibleRows.length === loadedRows.length
-                ? `${formatInteger(loadedRows.length)} загружено`
-                : `${formatInteger(visibleRows.length)} из ${formatInteger(loadedRows.length)}`}
+                ? <UiText text="{0} загружено" values={[String(formatInteger(loadedRows.length, uiLocale))]} />
+                : <UiText text="{0} из {1}" values={[String(formatInteger(visibleRows.length, uiLocale)), String(formatInteger(loadedRows.length, uiLocale))]} />}
               {run.collectedKeywords > loadedRows.length
-                ? ` · всего ${formatInteger(run.collectedKeywords)}`
+                ? <UiText text="· всего {0}" values={[String(formatInteger(run.collectedKeywords, uiLocale))]} before=" " />
                 : ""}
             </small>
           </span>
@@ -603,21 +605,21 @@ export function KeywordResearchRunPreview({
             <label className="keyword-research-result-search">
               <Icon name="search" />
               <input
-                aria-label="Поиск по результатам Wordstat"
+                aria-label={uiText("Поиск по результатам Wordstat")}
                 onChange={(event) => setRowSearch(event.target.value)}
-                placeholder="Найти запрос или исходную фразу"
+                placeholder={uiText("Найти запрос или исходную фразу")}
                 type="search"
                 value={rowSearch}
               />
               {rowSearch && (
-                <button aria-label="Очистить поиск" onClick={() => setRowSearch("")} type="button">
+                <button aria-label={uiText("Очистить поиск")} onClick={() => setRowSearch("")} type="button">
                   <Icon name="close" />
                 </button>
               )}
             </label>
           )}
           <span className="keyword-research-selection-count">
-            Выбрано <strong>{formatInteger(selectedCount)}</strong>
+            <UiText text="Выбрано" after=" " /><strong>{formatInteger(selectedCount, uiLocale)}</strong>
           </span>
         </header>
         {loadedRows.length > 0 ? (
@@ -633,7 +635,7 @@ export function KeywordResearchRunPreview({
                 <tr>
                   <th>
                     <input
-                      aria-label="Выбрать все найденные запросы"
+                      aria-label={uiText("Выбрать все найденные запросы")}
                       checked={run.collectedKeywords > 0 && selectedCount === run.collectedKeywords}
                       onChange={(event) => {
                         setExcludedRowIds(new Set());
@@ -648,14 +650,14 @@ export function KeywordResearchRunPreview({
                       type="checkbox"
                     />
                   </th>
-                  <th>Запрос</th>
+                  <th><UiText text="Запрос" /></th>
                   {run.source !== "KEYS_SO" ? (
-                    <><th>Исходная фраза</th><th>Колонка</th></>
+                    <><th><UiText text="Исходная фраза" /></th><th><UiText text="Колонка" /></th></>
                   ) : (
-                    <><th>Позиция</th><th>URL</th></>
+                    <><th><UiText text="Позиция" /></th><th>URL</th></>
                   )}
-                  <th>Частотность</th>
-                  {run.source !== "KEYS_SO" && ready && <th>Папка</th>}
+                  <th><UiText text="Частотность" /></th>
+                  {run.source !== "KEYS_SO" && ready && <th><UiText text="Папка" /></th>}
                 </tr>
               </thead>
               <tbody>
@@ -663,7 +665,7 @@ export function KeywordResearchRunPreview({
                   <tr key={row.id}>
                     <td>
                       <input
-                        aria-label={`Отметить ${row.keyword}`}
+                        aria-label={uiText("Отметить {0}", [String(row.keyword)])}
                         checked={isRowSelected(row.id)}
                         onChange={(event) => {
                           if (selectionMode === "ALL") {
@@ -685,11 +687,11 @@ export function KeywordResearchRunPreview({
                     </td>
                     <td><strong>{row.keyword}</strong></td>
                     {run.source !== "KEYS_SO" ? (
-                      <><td><span className="table-secondary">{row.sourceQuery ?? "—"}</span></td><td>{row.sourceColumn === "RIGHT" ? "Справа" : "Слева"}</td></>
+                      <><td><span className="table-secondary">{row.sourceQuery ?? "—"}</span></td><td>{row.sourceColumn === "RIGHT" ? <UiText text="Справа" /> : <UiText text="Слева" />}</td></>
                     ) : (
                       <><td>{row.position ?? "—"}</td><td><span className="table-secondary">{row.url ?? "—"}</span></td></>
                     )}
-                    <td>{row.frequencyBase === undefined ? "—" : formatInteger(row.frequencyBase)}</td>
+                    <td>{row.frequencyBase === undefined ? "—" : formatInteger(row.frequencyBase, uiLocale)}</td>
                     {run.source !== "KEYS_SO" && ready && (
                       <td className="keyword-research-row-folder">
                         <SemanticGroupPickerField
@@ -707,7 +709,7 @@ export function KeywordResearchRunPreview({
                   </tr>
                 ))}
                 {visibleRows.length === 0 && (
-                  <tr><td className="keyword-research-filter-empty" colSpan={ready && run.source !== "KEYS_SO" ? 6 : 5}>Ничего не найдено. Измените запрос поиска.</td></tr>
+                  <tr><td className="keyword-research-filter-empty" colSpan={ready && run.source !== "KEYS_SO" ? 6 : 5}><UiText text="Ничего не найдено. Измените запрос поиска." /></td></tr>
                 )}
               </tbody>
             </table>
@@ -722,71 +724,67 @@ export function KeywordResearchRunPreview({
             )}
           </div>
         ) : (
-          <div className="keyword-research-results-empty">В результате пока нет запросов.</div>
+          <div className="keyword-research-results-empty"><UiText text="В результате пока нет запросов." /></div>
         )}
         {(nextCursor !== undefined || loadingMore || pageError) && (
           <p className="keyword-research-preview-limit">
             {pageError ? (
-              <><span>{pageError}</span> <button className="text-button" onClick={() => void loadMore()} type="button">Повторить</button></>
-            ) : loadingMore ? (
-              `Подгружаем следующие запросы · ${formatInteger(loadedRows.length)} из ${formatInteger(run.collectedKeywords)}`
-            ) : (
-              `Прокрутите ниже — запросы загрузятся автоматически · ${formatInteger(loadedRows.length)} из ${formatInteger(run.collectedKeywords)}`
-            )}
+              <><span>{<UiText text={pageError ?? ""} />}</span> <button className="text-button" onClick={() => void loadMore()} type="button"><UiText text="Повторить" /></button></>
+            ) : loadingMore ? <UiText text="Подгружаем следующие запросы · {0} из {1}" values={[String(formatInteger(loadedRows.length, uiLocale)), String(formatInteger(run.collectedKeywords, uiLocale))]} /> : <UiText text="Прокрутите ниже — запросы загрузятся автоматически · {0} из {1}" values={[String(formatInteger(loadedRows.length, uiLocale)), String(formatInteger(run.collectedKeywords, uiLocale))]} />}
           </p>
         )}
         {run.source === "KEYS_SO" && selected.size > 0 && onOpenWordstat && (
           <div className="keyword-research-inline-action">
-            <span>Выбрано для расширения: {selected.size}</span>
-            <button className="secondary-button" onClick={() => onOpenWordstat(loadedRows.filter(({ id }) => selected.has(id)).map(({ keyword }) => keyword))} type="button"><Icon name="search" /> Парсить в Wordstat</button>
+            <span><UiText text="Выбрано для расширения:" after=" " />{selected.size}</span>
+            <button className="secondary-button" onClick={() => onOpenWordstat(loadedRows.filter(({ id }) => selected.has(id)).map(({ keyword }) => keyword))} type="button"><Icon name="search" /> <UiText text="Парсить в Wordstat" before=" " /></button>
           </div>
         )}
       </section>
       {ready && (
         <aside className="keyword-research-import-panel">
           <header className="keyword-research-import-heading">
-            <span><strong>Добавление в семантику</strong><small>Настройте один раз, затем при необходимости переопределите папку у отдельных строк.</small></span>
-            <b>{formatInteger(selectedCount)}</b>
+            <span><strong><UiText text="Добавление в семантику" /></strong><small><UiText text="Настройте один раз, затем при необходимости переопределите папку у отдельных строк." /></small></span>
+            <b>{formatInteger(selectedCount, uiLocale)}</b>
           </header>
           <div className="keyword-research-import-scroll">
             <div className="keyword-research-import-settings">
-              <label className="form-field"><span>Что импортировать</span><CustomSelect onChange={(event) => {
+              <label className="form-field"><span><UiText text="Что импортировать" /></span><CustomSelect onChange={(event) => {
                 const mode = event.target.value as "ALL" | "SELECTED";
                 setSelectionMode(mode);
                 setExcludedRowIds(new Set());
                 if (mode === "ALL") onSelected(new Set());
-              }} value={selectionMode}><option value="ALL">Все найденные · {run.collectedKeywords}</option><option value="SELECTED">Только отмеченные · {selected.size}</option></CustomSelect></label>
-              <label className="form-field"><span>Если запрос уже есть</span><CustomSelect onChange={(event) => setDuplicatePolicy(event.target.value as SemanticImportDuplicatePolicy)} value={duplicatePolicy}><option value="SKIP_EXISTING">Не добавлять найденные дубли</option><option value="OVERWRITE_MAPPED">Перенести дубли в выбранную папку</option></CustomSelect></label>
+              }} value={selectionMode}><option value="ALL"><UiText text="Все найденные ·" after=" " />{run.collectedKeywords}</option><option value="SELECTED"><UiText text="Только отмеченные ·" after=" " />{selected.size}</option></CustomSelect></label>
+              <label className="form-field"><span><UiText text="Если запрос уже есть" /></span><CustomSelect onChange={(event) => setDuplicatePolicy(event.target.value as SemanticImportDuplicatePolicy)} value={duplicatePolicy}><option value="SKIP_EXISTING"><UiText text="Не добавлять найденные дубли" /></option><option value="OVERWRITE_MAPPED"><UiText text="Перенести дубли в выбранную папку" /></option></CustomSelect></label>
             </div>
             <p className="keyword-research-duplicate-hint">
               {duplicatePolicy === "SKIP_EXISTING"
-                ? "Существующие запросы останутся в своих папках, добавятся только новые."
-                : "Существующие запросы будут убраны из прежних папок и перенесены в папку, выбранную ниже."}
+                ? <UiText text="Существующие запросы останутся в своих папках, добавятся только новые." />
+                : <UiText text="Существующие запросы будут убраны из прежних папок и перенесены в папку, выбранную ниже." />}
             </p>
             {run.source !== "KEYS_SO" && (
               <div className="keyword-research-destination">
-                <div className="keyword-research-destination-switch"><button className={destination === "NEW" ? "selected" : undefined} onClick={() => setDestination("NEW")} type="button">Новая папка</button><button className={destination === "EXISTING" ? "selected" : undefined} onClick={() => setDestination("EXISTING")} type="button">Существующая</button></div>
+                <div className="keyword-research-destination-switch"><button className={destination === "NEW" ? "selected" : undefined} onClick={() => setDestination("NEW")} type="button"><UiText text="Новая папка" /></button><button className={destination === "EXISTING" ? "selected" : undefined} onClick={() => setDestination("EXISTING")} type="button"><UiText text="Существующая" /></button></div>
                 {destination === "NEW" ? (
                   <div className="keyword-research-new-folder">
-                    <label className="form-field"><span>Название новой папки</span><input maxLength={255} onChange={(event) => setNewName(event.target.value)} placeholder="Например, Идеи из Wordstat" value={newName} /></label>
-                    <label className="form-field"><span>Создать внутри</span><SemanticGroupPickerField groups={groups} onChange={setParentId} rootLabel="Корневая папка" value={parentId} /></label>
+                    <label className="form-field"><span><UiText text="Название новой папки" /></span><input maxLength={255} onChange={(event) => setNewName(event.target.value)} placeholder={uiText("Например, Идеи из Wordstat")} value={newName} /></label>
+                    <label className="form-field"><span><UiText text="Создать внутри" /></span><SemanticGroupPickerField groups={groups} onChange={setParentId} rootLabel="Корневая папка" value={parentId} /></label>
                   </div>
                 ) : (
-                  <label className="form-field"><span>Перенести в папку</span><SemanticGroupPickerField groups={groups} onChange={setGroupId} rootLabel="Выберите папку" value={groupId} /></label>
+                  <label className="form-field"><span><UiText text="Перенести в папку" /></span><SemanticGroupPickerField groups={groups} onChange={setGroupId} rootLabel="Выберите папку" value={groupId} /></label>
                 )}
                 {targetGroupPath && <p className="keyword-research-path-preview"><Icon name="projects" /> <span>{targetGroupPath}</span></p>}
-                <div className="keyword-research-distribution-mode" role="radiogroup" aria-label="Способ раскладки результатов"><span>Как разложить</span><div className="keyword-research-destination-switch"><button className={distributionMode === "SINGLE_GROUP" ? "selected" : undefined} onClick={() => setDistributionMode("SINGLE_GROUP")} role="radio" aria-checked={distributionMode === "SINGLE_GROUP"} type="button">В одну папку</button><button className={distributionMode === "BY_SOURCE_QUERY" ? "selected" : undefined} onClick={() => setDistributionMode("BY_SOURCE_QUERY")} role="radio" aria-checked={distributionMode === "BY_SOURCE_QUERY"} type="button">По фразам</button></div></div>
-                <p className="keyword-research-distribution-hint"><Icon name="semantic" /><span><strong>{distributionMode === "BY_SOURCE_QUERY" ? "Для каждой исходной фразы будет создана своя вложенная папка." : "Корневая папка применяется ко всем запросам."}</strong> Папку отдельной строки можно изменить прямо в таблице.</span></p>
+                <div className="keyword-research-distribution-mode" role="radiogroup" aria-label={uiText("Способ раскладки результатов")}><span><UiText text="Как разложить" /></span><div className="keyword-research-destination-switch"><button className={distributionMode === "SINGLE_GROUP" ? "selected" : undefined} onClick={() => setDistributionMode("SINGLE_GROUP")} role="radio" aria-checked={distributionMode === "SINGLE_GROUP"} type="button"><UiText text="В одну папку" /></button><button className={distributionMode === "BY_SOURCE_QUERY" ? "selected" : undefined} onClick={() => setDistributionMode("BY_SOURCE_QUERY")} role="radio" aria-checked={distributionMode === "BY_SOURCE_QUERY"} type="button"><UiText text="По фразам" /></button></div></div>
+                <p className="keyword-research-distribution-hint"><Icon name="semantic" /><span><strong>{distributionMode === "BY_SOURCE_QUERY" ? <UiText text="Для каждой исходной фразы будет создана своя вложенная папка." /> : <UiText text="Корневая папка применяется ко всем запросам." />}</strong> <UiText text="Папку отдельной строки можно изменить прямо в таблице." before=" " /></span></p>
               </div>
             )}
           </div>
           <footer className="keyword-research-import-actions">
-            {CANCELLABLE.has(run.status) && <button className="secondary-button keyword-research-cancel-button" disabled={!canCancel || busy} onClick={onCancel} type="button">Отклонить</button>}
-            <button className="primary-button" disabled={!canImport || busy || targetMissing || selectedCount < 1} onClick={confirmImport} type="button">{busy ? "Ставим в очередь…" : selectionMode === "ALL" ? `Импортировать (${selectedCount})` : `Импортировать (${selected.size})`}</button>
+            {CANCELLABLE.has(run.status) && <button className="secondary-button keyword-research-cancel-button" disabled={!canCancel || busy} onClick={onCancel} type="button"><UiText text="Отклонить" /></button>}
+            <button className="primary-button" disabled={!canImport || busy || targetMissing || selectedCount < 1} onClick={confirmImport} type="button">{busy ? <UiText text="Ставим в очередь…" /> : selectionMode === "ALL" ? <UiText text="Импортировать ({0})" values={[String(selectedCount)]} /> : <UiText text="Импортировать ({0})" values={[String(selected.size)]} />}</button>
           </footer>
         </aside>
       )}
-      {!ready && CANCELLABLE.has(run.status) && <button className="danger-button keyword-research-standalone-cancel" disabled={!canCancel || busy} onClick={onCancel} type="button">Отменить операцию</button>}
+      {!ready && CANCELLABLE.has(run.status) && <button className="danger-button keyword-research-standalone-cancel" disabled={!canCancel || busy} onClick={onCancel} type="button"><UiText text="Отменить операцию" /></button>}
     </div>
   );
 }
@@ -812,6 +810,8 @@ export function WordstatExpansionDialog({
   onClose: () => void;
   onSubmit: (input: CreateWordstatExpansionRunInput) => Promise<void>;
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const formId = useId();
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [workspaceRouting, setWorkspaceRouting] =
@@ -861,15 +861,13 @@ export function WordstatExpansionDialog({
     const controller = new AbortController();
     setLoadingProviders(true);
     setProviderError(undefined);
+    const preparedSources = preparedProjectIntegrations(projectId, controller.signal);
     void Promise.all([
-      browserApiRequest<ProjectConnectorSettings>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-        { signal: controller.signal }
-      ),
-      browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      preparedSources,
+      preparedSources.then(() => browserApiRequest<WorkspaceConnectorRoutingSettings>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
         { signal: controller.signal }
-      )
+      ))
     ])
       .then(([result, workspaceResult]) => {
         if (controller.signal.aborted) return;
@@ -976,23 +974,23 @@ export function WordstatExpansionDialog({
 
   return (
     <SemanticModal
-      description="До 500 исходных фраз. Результат сначала появится в предпросмотре и не изменит ядро без подтверждения."
+      description={uiText("До 500 исходных фраз. Результат сначала появится в предпросмотре и не изменит ядро без подтверждения.")}
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="semantic" /><div><dt>Исходных запросов</dt><dd>{queries.length}</dd></div></div>
-            <div><ProviderLogo provider={provider} /><div><dt>Подключение</dt><dd>{selectedSource ? `${selectedSource.label} · ${integrationProviderLabel(selectedSource.provider)}` : loadingProviders ? "Загружаем…" : "Не выбрано"}</dd></div></div>
-            <div><Icon name="operations" /><div><dt>Результат</dt><dd>{provider === "ARSENKIN" ? "Все данные Arsenkin" : maximumResultCountValid ? `до ${formatInteger(maximumResultCount)}` : "Укажите от 1 до 10 000"}</dd></div></div>
+            <div><Icon name="semantic" /><div><dt><UiText text="Исходных запросов" /></dt><dd>{queries.length}</dd></div></div>
+            <div><ProviderLogo provider={provider} /><div><dt><UiText text="Подключение" /></dt><dd>{selectedSource ? `${selectedSource.label} · ${integrationProviderLabel(selectedSource.provider)}` : loadingProviders ? <UiText text="Загружаем…" /> : <UiText text="Не выбрано" />}</dd></div></div>
+            <div><Icon name="operations" /><div><dt><UiText text="Результат" /></dt><dd>{provider === "ARSENKIN" ? <UiText text="Все данные Arsenkin" /> : maximumResultCountValid ? <UiText text="до {0}" values={[String(formatInteger(maximumResultCount, uiLocale))]} /> : <UiText text="Укажите от 1 до 10 000" />}</dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
-            <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Отмена</button>
+            <button className="secondary-button" disabled={busy} onClick={onClose} type="button"><UiText text="Отмена" /></button>
             <button
               className="primary-button"
               disabled={busy || loadingProviders || !selectedSource || projectScopeResolving || queries.length < 1 || queries.length > 500 || !maximumResultCountValid}
               form={formId}
               type="submit"
             >
-              {busy ? "Запускаем…" : `Запустить (${queries.length})`}
+              {busy ? <UiText text="Запускаем…" /> : <UiText text="Запустить ({0})" values={[String(queries.length)]} />}
             </button>
           </div>
         </div>
@@ -1000,7 +998,7 @@ export function WordstatExpansionDialog({
       onClose={busy ? () => undefined : onClose}
       presenceKey="semantic-modal:wordstat-expansion"
       size="large"
-      title="Парсинг Wordstat"
+      title={uiText("Парсинг Wordstat")}
     >
       <form
         className="keyword-research-wordstat-dialog semantic-workflow-dialog"
@@ -1010,19 +1008,18 @@ export function WordstatExpansionDialog({
         <div className="semantic-workflow-grid keyword-research-wordstat-workflow-grid">
           <section className="semantic-workflow-panel keyword-research-wordstat-source-panel">
             <header className="semantic-workflow-panel-heading">
-              <h3>Источник данных</h3>
+              <h3><UiText text="Источник данных" /></h3>
               <a
                 className="semantic-dialog-link"
                 href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}
               >
-                Управлять
-              </a>
-              <p>Выберите подключённый сервис, через который будет выполнен сбор Wordstat.</p>
+                <UiText text="Управлять" /></a>
+              <p><UiText text="Выберите подключённый сервис, через который будет выполнен сбор Wordstat." /></p>
             </header>
             {loadingProviders ? (
-              <div className="semantic-dialog-loading" role="status">Загружаем подключения…</div>
+              <div className="semantic-dialog-loading" role="status"><UiText text="Загружаем подключения…" /></div>
             ) : sources.length ? (
-              <div className="semantic-provider-list keyword-research-wordstat-provider-list" role="radiogroup" aria-label="Подключение Wordstat">
+              <div className="semantic-provider-list keyword-research-wordstat-provider-list" role="radiogroup" aria-label={uiText("Подключение Wordstat")}>
                 {sources.map((source) => (
                   <button
                     aria-checked={source.id === credentialId}
@@ -1034,35 +1031,34 @@ export function WordstatExpansionDialog({
                   >
                     <ProviderLogo provider={source.provider} />
                     <span className="semantic-provider-card-copy">
-                      <strong>{integrationProviderLabel(source.provider)}</strong>
+                      <strong>{<UiText text={integrationProviderLabel(source.provider) ?? ""} />}</strong>
                       <small>{source.label} · Wordstat API</small>
-                      <b>Подключено</b>
+                      <b><UiText text="Подключено" /></b>
                     </span>
                     <i aria-hidden="true" className="semantic-provider-radio" />
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="inline-alert warning">Нет доступного маршрута XMLStock или Arsenkin для парсинга Wordstat.</div>
+              <div className="inline-alert warning"><UiText text="Нет доступного маршрута XMLStock или Arsenkin для парсинга Wordstat." /></div>
             )}
             <div className="inline-alert info compact keyword-research-wordstat-preview-note">
-              Результат сначала попадёт в предпросмотр. Запросы появятся в ядре только после вашего подтверждения.
-            </div>
+              <UiText text="Результат сначала попадёт в предпросмотр. Запросы появятся в ядре только после вашего подтверждения." /></div>
           </section>
 
           <section className="semantic-workflow-panel keyword-research-wordstat-settings-panel">
             <header>
-              <h3>Настройки парсинга</h3>
-              <p>Россия выбрана по умолчанию. Уточните устройство и правила очистки.</p>
+              <h3><UiText text="Настройки парсинга" /></h3>
+              <p><UiText text="Россия выбрана по умолчанию. Уточните устройство и правила очистки." /></p>
             </header>
             <label className="semantic-workflow-field">
-              <span>Регион Wordstat</span>
+              <span><UiText text="Регион Wordstat" /></span>
               <SearchableRegionSelect kind="WORDSTAT" onChange={({ code, label }) => { setRegionCode(code); setRegionLabel(label); }} value={regionCode} valueLabel={regionLabel} />
-              {regionCode === "225" ? <small>По умолчанию · вся Россия</small> : projectSearchCity && regionCode === projectSearchCity.yandexRegionCode ? <small>Город проекта · {projectSearchCity.name}</small> : null}
+              {regionCode === "225" ? <small><UiText text="По умолчанию · вся Россия" /></small> : projectSearchCity && regionCode === projectSearchCity.yandexRegionCode ? <small><UiText text="Город проекта ·" after=" " />{projectSearchCity.name}</small> : null}
             </label>
             <fieldset className="semantic-segmented-field">
-              <legend>Устройство</legend>
-              <div className="semantic-segmented-control keyword-research-wordstat-device-control" role="radiogroup" aria-label="Устройство Wordstat">
+              <legend><UiText text="Устройство" /></legend>
+              <div className="semantic-segmented-control keyword-research-wordstat-device-control" role="radiogroup" aria-label={uiText("Устройство Wordstat")}>
                 {([
                   ["ALL", "Все"],
                   ["DESKTOP", "Десктоп"],
@@ -1079,39 +1075,39 @@ export function WordstatExpansionDialog({
             </fieldset>
             {provider === "XMLSTOCK" && (
               <label className="semantic-workflow-field">
-                <span>Максимум результатов</span>
+                <span><UiText text="Максимум результатов" /></span>
                 <input aria-invalid={!maximumResultCountValid} max={10_000} min={1} onChange={(event) => setMaxKeywords(event.target.value)} type="number" value={maxKeywords} />
-                <small>От 1 до 10 000 фраз.</small>
+                <small><UiText text="От 1 до 10 000 фраз." /></small>
               </label>
             )}
             <div className="keyword-research-wordstat-option-list">
-              <label className="semantic-check-row"><input checked={includeRightColumn} onChange={(event) => setIncludeRightColumn(event.target.checked)} type="checkbox" /><span><strong>Добавить правую колонку</strong><small>Связанные формулировки справа в Wordstat.</small></span></label>
-              <label className="semantic-check-row"><input checked={clearMinusPhrases} onChange={(event) => setClearMinusPhrases(event.target.checked)} type="checkbox" /><span><strong>Учитывать минус-слова</strong><small>Исключить фразы с указанными словами.</small></span></label>
-              <label className="semantic-check-row"><input checked={clearPlus} onChange={(event) => setClearPlus(event.target.checked)} type="checkbox" /><span><strong>Убирать оператор «+»</strong></span></label>
+              <label className="semantic-check-row"><input checked={includeRightColumn} onChange={(event) => setIncludeRightColumn(event.target.checked)} type="checkbox" /><span><strong><UiText text="Добавить правую колонку" /></strong><small><UiText text="Связанные формулировки справа в Wordstat." /></small></span></label>
+              <label className="semantic-check-row"><input checked={clearMinusPhrases} onChange={(event) => setClearMinusPhrases(event.target.checked)} type="checkbox" /><span><strong><UiText text="Учитывать минус-слова" /></strong><small><UiText text="Исключить фразы с указанными словами." /></small></span></label>
+              <label className="semantic-check-row"><input checked={clearPlus} onChange={(event) => setClearPlus(event.target.checked)} type="checkbox" /><span><strong><UiText text="Убирать оператор «+»" /></strong></span></label>
             </div>
             <label className="semantic-workflow-field keyword-research-wordstat-minus-field">
-              <span>Минус-слова · по одному на строке</span>
-              <textarea onChange={(event) => setMinusWords(event.target.value)} placeholder={'бесплатно\nскачать'} rows={3} value={minusWords} />
+              <span><UiText text="Минус-слова · по одному на строке" /></span>
+              <textarea onChange={(event) => setMinusWords(event.target.value)} placeholder={uiText("бесплатно скачать")} rows={3} value={minusWords} />
             </label>
           </section>
 
           <section className="semantic-workflow-panel semantic-wordstat-scope-panel keyword-research-wordstat-seeds-panel">
             <header>
-              <h3>Исходные запросы</h3>
-              <p>Вставьте свои фразы или выберите запросы и папки проекта.</p>
+              <h3><UiText text="Исходные запросы" /></h3>
+              <p><UiText text="Вставьте свои фразы или выберите запросы и папки проекта." /></p>
             </header>
             <fieldset className="semantic-segmented-field">
-              <legend className="sr-only">Источник исходных запросов</legend>
-              <div className="semantic-segmented-control keyword-research-wordstat-mode-control" role="radiogroup" aria-label="Источник исходных запросов">
-                <label className={mode === "TEXT" ? "selected" : undefined}><input checked={mode === "TEXT"} onChange={() => { setMode("TEXT"); setScopeError(undefined); }} type="radio" /><span>Вставить текст</span></label>
-                <label className={mode === "PROJECT" ? "selected" : undefined}><input checked={mode === "PROJECT"} onChange={() => setMode("PROJECT")} type="radio" /><span>Выбрать из проекта</span></label>
+              <legend className="sr-only"><UiText text="Источник исходных запросов" /></legend>
+              <div className="semantic-segmented-control keyword-research-wordstat-mode-control" role="radiogroup" aria-label={uiText("Источник исходных запросов")}>
+                <label className={mode === "TEXT" ? "selected" : undefined}><input checked={mode === "TEXT"} onChange={() => { setMode("TEXT"); setScopeError(undefined); }} type="radio" /><span><UiText text="Вставить текст" /></span></label>
+                <label className={mode === "PROJECT" ? "selected" : undefined}><input checked={mode === "PROJECT"} onChange={() => setMode("PROJECT")} type="radio" /><span><UiText text="Выбрать из проекта" /></span></label>
               </div>
             </fieldset>
             {mode === "TEXT" ? (
               <label className="semantic-workflow-field keyword-research-wordstat-query-field">
-                <span>По одному запросу на строке</span>
-                <textarea autoFocus onChange={(event) => setText(event.target.value)} placeholder={'ремонт холодильников\nкупить морозильную камеру'} value={text} />
-                <small>{ownQueries.length} из 500 уникальных фраз</small>
+                <span><UiText text="По одному запросу на строке" /></span>
+                <textarea autoFocus onChange={(event) => setText(event.target.value)} placeholder={uiText("ремонт холодильников купить морозильную камеру")} value={text} />
+                <small>{ownQueries.length} <UiText text="из 500 уникальных фраз" before=" " /></small>
               </label>
             ) : (
               <SemanticOperationScope activeGroupId={activeGroupId} groups={groups} initialSelections={initialSelections} maxItems={500} onChange={(next, resolving, nextError) => { setSelections(next); setScopeResolving(resolving); setScopeError(nextError); }} projectId={projectId} />
@@ -1120,9 +1116,9 @@ export function WordstatExpansionDialog({
         </div>
         {(scopeError || providerError || error) && (
           <div className="semantic-workflow-feedback">
-            {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
-            {providerError && <div className="inline-alert warning" role="alert">{providerError}</div>}
-            {error && <div className="inline-alert danger" role="alert">{error}</div>}
+            {scopeError && <div className="inline-alert warning" role="alert">{<UiText text={scopeError ?? ""} />}</div>}
+            {providerError && <div className="inline-alert warning" role="alert">{<UiText text={providerError ?? ""} />}</div>}
+            {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
           </div>
         )}
       </form>
@@ -1194,8 +1190,8 @@ function databaseLabel(database: KeysSoDatabase): string {
   return known[database] ?? `Регион ${database.toUpperCase()}`;
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }
 
 function message(error: unknown, fallback: string): string {

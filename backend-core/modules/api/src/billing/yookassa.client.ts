@@ -320,15 +320,20 @@ async function boundedText(response: Response): Promise<string> {
       response.status
     );
   }
-  const text = await response.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) {
-    throw new YookassaProviderError(
-      "PAYMENT_PROVIDER_INVALID_RESPONSE",
-      true,
-      response.status
-    );
-  }
-  return text;
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    while (true) {
+      const item = await reader.read(); if (item.done) break;
+      size += item.value.length;
+      if (size > MAX_RESPONSE_BYTES) { await reader.cancel(); throw new YookassaProviderError("PAYMENT_PROVIDER_INVALID_RESPONSE", true, response.status); }
+      chunks.push(item.value);
+    }
+  } catch { throw new YookassaProviderError("PAYMENT_PROVIDER_INVALID_RESPONSE", true, response.status); }
+  finally { reader.releaseLock(); }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function parseJson(value: string): unknown {

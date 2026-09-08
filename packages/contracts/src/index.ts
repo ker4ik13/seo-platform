@@ -18,6 +18,11 @@ export * from "./api/notes.js";
 export * from "./api/operation-results.js";
 export * from "./api/pages.js";
 export * from "./api/rank-estimates.js";
+export * from "./api/paid-operations.js";
+export * from "./api/refund-requests.js";
+export * from "./api/system-connectors.js";
+export * from "./api/provider-accounts.js";
+export * from "./api/admin-overview.js";
 export * from "./api/rank-execution-grants.js";
 export * from "./api/rank-history.js";
 export * from "./api/rank-runs.js";
@@ -44,3 +49,12 @@ export * from "./health.js";
 export * from "./http/errors.js";
 export * from "./http/responses.js";
 export * from "./identifiers.js";
+
+export * from "./api/workspace-usage.js";
+
+export * from "./api/npd-processing.js";
+
+export * from "./api/telegram-login.js";
+export * from "./api/rank-policy.js";
+export * from "./api/paid-operation-review.js";
+export * from "./api/rank-dimensions.js";

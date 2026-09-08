@@ -11,6 +11,7 @@ import {
   semanticImportDelimiters,
   semanticImportEncodings,
   semanticImportTargets,
+  parseSemanticPositionHistoryImportOptions,
   type InternalCancelSemanticImportInput,
   type InternalConfigureSemanticImportInput,
   type InternalConfirmSemanticImportInput,
@@ -174,7 +175,8 @@ export class SemanticImportService {
       defaultLanguage: input.defaultLanguage,
       groupSeparator: input.groupSeparator,
       duplicatePolicy: input.duplicatePolicy,
-      createMissingKeywords: input.createMissingKeywords
+      createMissingKeywords: input.createMissingKeywords,
+      ...(input.positionHistory ? { positionHistory: input.positionHistory } : {})
     };
     const updated = await this.prisma.semanticImport.updateMany({
       where: {
@@ -522,6 +524,10 @@ export function safeMapping(
       ...(customName ? { customName } : {})
     });
   }
+  const positionHistory = record.positionHistory === undefined
+    ? undefined
+    : safePositionHistory(record.positionHistory);
+  if (record.positionHistory !== undefined && !positionHistory) return undefined;
   return {
     columns,
     defaultLanguage: record.defaultLanguage,
@@ -533,8 +539,14 @@ export function safeMapping(
     createMissingKeywords:
       typeof record.createMissingKeywords === "boolean"
         ? record.createMissingKeywords
-        : true
+        : true,
+    ...(positionHistory ? { positionHistory } : {})
   };
+}
+
+function safePositionHistory(value: unknown) {
+  try { return parseSemanticPositionHistoryImportOptions(value); }
+  catch { return undefined; }
 }
 
 export function safeValidation(

@@ -1,3 +1,5 @@
+import { parseSemanticRankDimensionKey, semanticRankDimensionKey } from "@seo-platform/contracts";
+import { rankHistorySearchSource } from "../rank-results/rank-serp-projection.js";
 import { Injectable } from "@nestjs/common";
 import type {
   ApiCollectionResponse,
@@ -20,6 +22,12 @@ interface StoredCompetitorCandidate {
   readonly title: string | null;
   readonly description: string | null;
   readonly projectDomain: string;
+  readonly searchEngine?: "YANDEX" | "GOOGLE";
+  readonly countryCode?: string | null; readonly regionCode?: string | null; readonly regionLabel?: string | null;
+  readonly language?: string | null; readonly device?: "DESKTOP" | "MOBILE" | null;
+  readonly position?: number; readonly observedAt?: Date; readonly provider?: string;
+  readonly snapshotId?: string; readonly trackingContextId?: string; readonly configurationVersion?: number;
+  readonly execution?: unknown;
 }
 
 @Injectable()
@@ -46,7 +54,7 @@ export class SemanticCompetitorExportService {
       ? []
       : [
           ...(options.sources.includes("SERP")
-            ? await this.latestSerpCandidates(context, keywordIds)
+            ? await this.latestSerpCandidates(context, keywordIds, options.dimensionKeys)
             : []),
           ...(options.sources.includes("AI")
             ? await this.latestAiCandidates(context, keywordIds)
@@ -65,19 +73,30 @@ export class SemanticCompetitorExportService {
 
   private latestSerpCandidates(
     context: Readonly<{ workspaceId: string; projectId: string }>,
-    keywordIds: readonly string[]
+    keywordIds: readonly string[],
+    dimensionKeys?: readonly string[]
   ): Promise<StoredCompetitorCandidate[]> {
     const ids = keywordSqlList(keywordIds);
+    const dimensions = dimensionKeys?.map(key => {
+      const dimension = parseSemanticRankDimensionKey(key);
+      if (!dimension) throw new Error("Invalid competitor export dimension");
+      return Prisma.sql`(configuration.search_engine::text = ${dimension.searchEngine} AND configuration.country_code = ${dimension.countryCode}
+        AND COALESCE(configuration.region_code, configuration.country_code) = ${dimension.regionCode}
+        AND configuration.language = ${dimension.language} AND configuration.device::text = ${dimension.device})`;
+    });
+    if (dimensions && (dimensions.length < 1 || dimensions.length > 4)) throw new Error("Invalid competitor dimension batch");
     return this.prisma.$queryRaw<StoredCompetitorCandidate[]>(Prisma.sql`
       WITH latest_snapshots AS (
         SELECT
           rs.keyword_id,
           rs.id AS snapshot_id,
           rs.observed_at AS snapshot_observed_at,
-          configuration.search_engine,
+          configuration.search_engine, configuration.country_code, configuration.region_code, configuration.region_label,
+          configuration.language, configuration.device, rs.provider, rs.tracking_context_id, rs.configuration_version, manifest.execution,
           manifest.project_domain,
           ROW_NUMBER() OVER (
-            PARTITION BY rs.keyword_id, configuration.search_engine
+            PARTITION BY rs.keyword_id, configuration.search_engine, configuration.country_code,
+              COALESCE(configuration.region_code, configuration.country_code), configuration.language, configuration.device
             ORDER BY rs.observed_at DESC, rs.id DESC
           ) AS latest_rank
         FROM rank_snapshots AS rs
@@ -95,6 +114,7 @@ export class SemanticCompetitorExportService {
           AND rs.project_id = ${context.projectId}::uuid
           AND rs.keyword_id IN (${ids})
           AND rs.provider IN ('ARSENKIN', 'XMLSTOCK')
+          ${dimensions ? Prisma.sql`AND (${Prisma.join(dimensions, ' OR ')})` : Prisma.empty}
           AND EXISTS (
             SELECT 1
             FROM rank_serp_results AS available_result
@@ -103,7 +123,11 @@ export class SemanticCompetitorExportService {
           )
       )
       SELECT
-        latest.keyword_id AS "keywordId",
+        latest.keyword_id AS "keywordId", latest.search_engine AS "searchEngine", latest.country_code AS "countryCode",
+        COALESCE(latest.region_code, latest.country_code) AS "regionCode", latest.region_label AS "regionLabel", latest.language,
+        latest.device, latest.provider, latest.snapshot_observed_at AS "observedAt", latest.snapshot_id AS "snapshotId",
+        latest.tracking_context_id AS "trackingContextId", latest.configuration_version AS "configurationVersion", latest.execution,
+        result.position,
         'SERP'::text AS "source",
         result.ranking_url AS "url",
         result.normalized_ranking_url AS "normalizedUrl",
@@ -131,9 +155,9 @@ export class SemanticCompetitorExportService {
           snapshot.id,
           snapshot.keyword_id,
           snapshot.host,
-          snapshot.search_engine,
+          snapshot.search_engine, snapshot.region_code, snapshot.device, snapshot.observed_at,
           ROW_NUMBER() OVER (
-            PARTITION BY snapshot.keyword_id, snapshot.search_engine
+            PARTITION BY snapshot.keyword_id, snapshot.search_engine, snapshot.region_code, snapshot.device
             ORDER BY snapshot.observed_at DESC, snapshot.id DESC
           ) AS latest_rank
         FROM ai_answer_snapshots AS snapshot
@@ -147,7 +171,8 @@ export class SemanticCompetitorExportService {
           )
       )
       SELECT
-        latest.keyword_id AS "keywordId",
+        latest.keyword_id AS "keywordId", latest.search_engine AS "searchEngine", latest.region_code AS "regionCode",
+        latest.device, latest.observed_at AS "observedAt", latest.id AS "snapshotId", 'ARSENKIN'::text AS provider, source.position,
         'AI'::text AS "source",
         source.url AS "url",
         NULL::text AS "normalizedUrl",
@@ -187,15 +212,30 @@ function projectCandidates(
     const normalizedUrl = canonicalHttpUrl(candidate.normalizedUrl ?? url);
     if (projectUrlBelongsToDomain(url, candidate.projectDomain)) continue;
     const seen = seenByKeyword.get(candidate.keywordId) ?? new Set<string>();
-    const identity = `${candidate.source}:${normalizedUrl}`;
+    const identity = `${candidate.source}:${candidate.searchEngine ?? ""}:${candidate.countryCode ?? ""}:${candidate.regionCode ?? ""}:${candidate.language ?? ""}:${candidate.device ?? ""}:${normalizedUrl}`;
     if (seen.has(identity)) continue;
     seen.add(identity);
     seenByKeyword.set(candidate.keywordId, seen);
     const items = competitors.get(candidate.keywordId) ?? [];
     const title = optionalText(candidate.title);
     const description = optionalText(candidate.description);
+    const dimension = candidate.searchEngine && candidate.countryCode && candidate.regionCode && candidate.language && candidate.device
+      ? { searchEngine: candidate.searchEngine, countryCode: candidate.countryCode, regionCode: candidate.regionCode, language: candidate.language, device: candidate.device } : undefined;
+    const searchSource = candidate.execution && candidate.searchEngine ? rankHistorySearchSource(candidate.execution, candidate.searchEngine) : undefined;
     items.push({
       source: candidate.source,
+      ...(dimension ? { ...dimension, dimensionKey: semanticRankDimensionKey(dimension) } : {}),
+      ...(candidate.searchEngine ? { searchEngine: candidate.searchEngine } : {}),
+      ...(candidate.regionCode ? { regionCode: candidate.regionCode } : {}),
+      ...(candidate.regionLabel ? { regionLabel: candidate.regionLabel } : {}),
+      ...(candidate.device ? { device: candidate.device } : {}),
+      ...(candidate.position === undefined ? {} : { position: candidate.position }),
+      ...(candidate.observedAt ? { observedAt: candidate.observedAt.toISOString() } : {}),
+      ...(candidate.provider ? { provider: candidate.provider } : {}),
+      ...(candidate.snapshotId ? { snapshotId: candidate.snapshotId } : {}),
+      ...(candidate.trackingContextId ? { trackingContextId: candidate.trackingContextId } : {}),
+      ...(candidate.configurationVersion ? { configurationVersion: candidate.configurationVersion } : {}),
+      ...(searchSource ? { searchSource } : {}),
       url,
       normalizedUrl,
       ...(title === undefined ? {} : { title }),

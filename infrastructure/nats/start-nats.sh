@@ -229,6 +229,7 @@ while IFS= read -r line || [ -n "$line" ]; do
       ;;
     '            "__NATS_NPD_RECEIPT_EVENT_SUBJECT__",')
       printf '            "%s",\n' "$npd_receipt_subject"
+      printf '            "%s",\n' "${npd_receipt_environment}.email.billing.notice.requested.v1"
       ;;
     '      user: "__NATS_REALTIME_CONSUMER_USER__"')
       printf '      user: "%s"\n' "$NATS_REALTIME_CONSUMER_USER"

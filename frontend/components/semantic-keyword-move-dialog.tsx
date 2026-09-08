@@ -8,6 +8,8 @@ import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import { SemanticModal } from "./semantic-modal";
 import { Icon } from "./icon";
 import { SemanticGroupPicker } from "./semantic-group-picker";
+import { useUiLocale, UiText } from "./ui-locale";
+
 
 export function SemanticKeywordMoveDialog({
   groups,
@@ -29,6 +31,7 @@ export function SemanticKeywordMoveDialog({
     currentGroupPath?: string;
   }>[];
 }>) {
+  const { t: uiText } = useUiLocale();
   const availableGroups = useMemo(
     () => groups.filter(({ systemKind }) => !systemKind),
     [groups]
@@ -63,17 +66,17 @@ export function SemanticKeywordMoveDialog({
 
   return (
     <SemanticModal
-      description={`Выбрано запросов: ${selections.length}. Выберите папку в дереве — вложенность и путь сохранятся.`}
+      description={uiText("Выбрано запросов: {0}. Выберите папку в дереве — вложенность и путь сохранятся.", [String(selections.length)])}
       onClose={saving ? () => undefined : onClose}
       presenceKey="semantic-modal:move-keywords"
       size="medium"
-      title="Перенести запросы"
+      title={uiText("Перенести запросы")}
     >
       <form className="semantic-dialog-form semantic-move-dialog" onSubmit={(event) => void submit(event)}>
         <div className="semantic-move-current-summary">
           <span className="semantic-move-current-icon"><Icon name="inbox" /></span>
           <span>
-            <small>{selections.length === 1 ? "Текущая группа" : "Сейчас находятся"}</small>
+            <small>{selections.length === 1 ? <UiText text="Текущая группа" /> : <UiText text="Сейчас находятся" />}</small>
             <strong title={currentLocation.title}>{currentLocation.label}</strong>
           </span>
           {currentLocation.detail && <b>{currentLocation.detail}</b>}
@@ -81,8 +84,8 @@ export function SemanticKeywordMoveDialog({
         <div className="semantic-move-target-summary">
           <span className="semantic-move-target-icon"><Icon name="move" /></span>
           <span>
-            <small>Целевая группа</small>
-            <strong>{selectedGroup?.path ?? "Без группы"}</strong>
+            <small><UiText text="Целевая группа" /></small>
+            <strong>{selectedGroup?.path ?? <UiText text="Без группы" />}</strong>
           </span>
           <b>{selections.length}</b>
         </div>
@@ -95,20 +98,20 @@ export function SemanticKeywordMoveDialog({
         />
 
         <details className="semantic-move-selection">
-          <summary>Переносимые запросы · {selections.length}</summary>
+          <summary><UiText text="Переносимые запросы ·" after=" " />{selections.length}</summary>
           <div className="semantic-dialog-selection">
             {selections.slice(0, 30).map((selection) => (
               <span key={selection.id}>{selection.text}</span>
             ))}
-            {selections.length > 30 && <span>Ещё {selections.length - 30}</span>}
+            {selections.length > 30 && <span><UiText text="Ещё" after=" " />{selections.length - 30}</span>}
           </div>
         </details>
 
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
+        {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
         <div className="semantic-modal-actions">
-          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">Отмена</button>
+          <button className="secondary-button" disabled={saving} onClick={onClose} type="button"><UiText text="Отмена" /></button>
           <button className="primary-button" disabled={saving} type="submit">
-            {saving ? "Переносим…" : `Перенести (${selections.length})`}
+            {saving ? <UiText text="Переносим…" /> : <UiText text="Перенести ({0})" values={[String(selections.length)]} />}
           </button>
         </div>
       </form>

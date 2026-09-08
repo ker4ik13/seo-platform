@@ -4,8 +4,13 @@ import type { PublicProjectNote } from "@seo-platform/contracts";
 import { useEffect, useState } from "react";
 import { browserApiRequest } from "../lib/browser-api";
 import { MarkdownDocument } from "./project-notes";
+import { UiText } from "./ui-locale";
+import { useUiLocale } from "./ui-locale";
+
+
 
 export function PublicProjectNoteView({ token }: Readonly<{ token: string }>) {
+  const uiLocale = useUiLocale().locale;
   const [note, setNote] = useState<PublicProjectNote>();
   const [error, setError] = useState(false);
 
@@ -26,14 +31,14 @@ export function PublicProjectNoteView({ token }: Readonly<{ token: string }>) {
     return (
       <main className="public-note-shell">
         <section className="panel project-notes-state">
-          <strong>Заметка недоступна</strong>
-          <span>Ссылка закрыта, удалена или указана неверно.</span>
+          <strong><UiText text="Заметка недоступна" /></strong>
+          <span><UiText text="Ссылка закрыта, удалена или указана неверно." /></span>
         </section>
       </main>
     );
   }
   if (!note) {
-    return <main className="public-note-shell"><div className="panel project-notes-state">Загружаем заметку…</div></main>;
+    return <main className="public-note-shell"><div className="panel project-notes-state"><UiText text="Загружаем заметку…" /></div></main>;
   }
   return (
     <main className="public-note-shell">
@@ -41,10 +46,10 @@ export function PublicProjectNoteView({ token }: Readonly<{ token: string }>) {
         <header>
           <img alt="" aria-hidden="true" height={36} src="/brand/seonorita-mark.svg" width={36} />
           <div>
-            <small>Публичная заметка</small>
+            <small><UiText text="Публичная заметка" /></small>
             <h1>{note.title}</h1>
             <time dateTime={note.updatedAt}>
-              Обновлено {new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short" }).format(new Date(note.updatedAt))}
+              <UiText text="Обновлено" after=" " />{new Intl.DateTimeFormat(uiLocale, { dateStyle: "long", timeStyle: "short" }).format(new Date(note.updatedAt))}
             </time>
           </div>
         </header>

@@ -1,3 +1,4 @@
+import type { SemanticRankDimensionMetadata } from "./rank-dimensions.js";
 import type { JobCapacityEntitlement } from "./billing.js";
 import type { SemanticKeywordBulkSelection } from "./keywords.js";
 import type {
@@ -17,7 +18,9 @@ export const frequencyCollectionProviders = ["XMLSTOCK", "ARSENKIN"] as const;
 export type FrequencyCollectionProvider =
   (typeof frequencyCollectionProviders)[number];
 
-/** Platform command boundary; provider-specific calls may use smaller chunks. */
+/** Platform selection boundary; workers split independent keywords into provider batches. */
+export const frequencyCollectionKeywordLimit = 300_000 as const;
+/** Physical Arsenkin batch limit, independent of the complete operation size. */
 export const arsenkinWordstatKeywordLimit = 10_000 as const;
 
 /** XMLStock has no 200-keyword command limit; execution stays one keyword per call. */
@@ -74,6 +77,7 @@ export interface CreateFrequencyCollectionInput {
 
 export interface InternalCreateFrequencyCollectionInput
   extends CreateFrequencyCollectionInput {
+  readonly billing?: import("./paid-operations.js").InternalPaidOperationAdmission;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
@@ -94,6 +98,8 @@ export interface InternalRetryFrequencyCollectionInput
 }
 
 export interface FrequencyCollectionSummary {
+  readonly credentialMode?: "BYOK_API_KEY" | "PLATFORM_PAID";
+  readonly requiresUsageReview?: boolean;
   readonly id: string;
   readonly workspaceId: string;
   readonly projectId: string;
@@ -174,7 +180,7 @@ export interface InternalFrequencySnapshotValue {
   readonly period?: string;
   readonly value: string;
   readonly provider: FrequencyCollectionProvider;
-  readonly sourceMode: "BYOK";
+  readonly sourceMode: "BYOK" | "PLATFORM";
   readonly qualityFlags: readonly SemanticFrequencyQualityFlag[];
 }
 
@@ -204,7 +210,7 @@ export interface SemanticKeywordInsights {
   readonly aiCompetitorSnapshots?: readonly SemanticAiAnswerCompetitorSnapshot[];
 }
 
-export interface SemanticKeywordCompetitorSnapshot {
+export interface SemanticKeywordCompetitorSnapshot extends SemanticRankDimensionMetadata {
   readonly snapshotId: string;
   readonly trackingContextId: string;
   readonly contextName: string;
@@ -223,7 +229,7 @@ export interface SemanticKeywordCompetitorResult {
   readonly snippet?: string;
 }
 
-export interface SemanticKeywordPositionSummary {
+export interface SemanticKeywordPositionSummary extends SemanticRankDimensionMetadata {
   readonly trackingContextId: string;
   readonly contextName: string;
   readonly searchEngine: "GOOGLE" | "YANDEX";
@@ -238,9 +244,10 @@ export interface SemanticKeywordPositionSummary {
 
 export type SemanticKeywordPositionHistoryProvider =
   | RankEstimateProvider
-  | "KEY_COLLECTOR";
+  | "KEY_COLLECTOR"
+  | "MANUAL_IMPORT";
 
-export interface SemanticKeywordPositionHistoryPoint {
+export interface SemanticKeywordPositionHistoryPoint extends SemanticRankDimensionMetadata {
   readonly snapshotId: string;
   readonly trackingContextId: string;
   readonly contextName: string;

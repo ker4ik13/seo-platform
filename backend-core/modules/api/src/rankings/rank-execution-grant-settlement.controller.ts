@@ -46,7 +46,7 @@ export class RankExecutionGrantSettlementController {
   ): Promise<ApiResponse<InternalRankExecutionGrantSettlementResultV1>> {
     reply.header("Cache-Control", "no-store");
     const headers = requiredRankExecutionGrantHeaders(request);
-    let action: "HOLD" | "CAPTURE";
+    let action: "HOLD" | "CAPTURE" | "RELEASE";
     try {
       action = internalSettleRankExecutionGrantInput(body).action;
     } catch {
@@ -75,6 +75,7 @@ export class RankExecutionGrantSettlementController {
     return {
       data: action === "HOLD"
         ? await this.settlements.hold(scope)
+        : action === "RELEASE" ? await this.settlements.release(scope)
         : await this.settlements.capture(scope),
       meta: { requestId: headers.requestId }
     };

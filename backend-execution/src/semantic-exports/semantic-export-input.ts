@@ -1,3 +1,4 @@
+import { parseSemanticRankColumnKey, parseSemanticRankDimensionKey, semanticCompetitorRowColumnKeys } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticCompetitorExportColumnKeys,
@@ -19,7 +20,8 @@ const KEY = /^[A-Za-z0-9._:-]{8,180}$/u;
 const CUSTOM_COLUMN = /^custom:[0-9a-f-]{36}$/iu;
 const EXPORT_COLUMNS = new Set<string>([
   ...semanticSystemColumnKeys,
-  ...semanticCompetitorExportColumnKeys
+  ...semanticCompetitorExportColumnKeys,
+  ...semanticCompetitorRowColumnKeys
 ]);
 const CREATE_FIELDS = new Set([
   "workspaceId",
@@ -36,6 +38,7 @@ const CREATE_FIELDS = new Set([
   "sort",
   "keywordIds",
   "includeBom",
+  "competitorRows",
   "positionHistory",
   "folderMap"
 ]);
@@ -60,7 +63,10 @@ const FILTER_FIELDS = new Set([
   "isFavorite",
   "isTracked",
   "priorityMin",
-  "priorityMax"
+  "priorityMax",
+  "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
+  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+  "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
 ]);
 
 export function internalCreateSemanticExportInput(value: unknown): InternalCreateSemanticExportInput {
@@ -70,7 +76,7 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
   const locale = enumValue(input.locale, semanticExportLocales, "locale");
   if (!Array.isArray(input.columns) || input.columns.length < 1 || input.columns.length > 112) invalid("columns");
   const columns = input.columns.map((column) => {
-    if (typeof column !== "string" || (!EXPORT_COLUMNS.has(column) && !CUSTOM_COLUMN.test(column))) invalid("columns");
+    if (typeof column !== "string" || (!EXPORT_COLUMNS.has(column) && !CUSTOM_COLUMN.test(column) && !parseSemanticRankColumnKey(column))) invalid("columns");
     return (column.startsWith("custom:")
       ? `custom:${column.slice("custom:".length).toLowerCase()}`
       : column) as SemanticExportColumnKey;
@@ -92,6 +98,7 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
   if (folderMap && format !== "XLSX") invalid("format");
   if (folderMap && (filters || positionHistory)) invalid("folderMap");
   if (folderMap && !columns.includes("query")) invalid("columns");
+  if (input.competitorRows === true && (folderMap || positionHistory)) invalid("competitorRows");
   const capacity = exactRecord(input.jobCapacity, CAPACITY_FIELDS, "jobCapacity");
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
@@ -112,6 +119,7 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
     ...(input.sort === undefined ? {} : { sort: enumValue(input.sort, semanticKeywordSorts, "sort") }),
     ...(keywordIds ? { keywordIds } : {}),
     ...(input.includeBom === undefined ? {} : { includeBom: booleanValue(input.includeBom, "includeBom") }),
+    ...(input.competitorRows === undefined ? {} : { competitorRows: booleanValue(input.competitorRows, "competitorRows") }),
     ...(positionHistory ? { positionHistory } : {}),
     ...(folderMap ? { folderMap } : {})
   };
@@ -207,10 +215,11 @@ function exportFilters(value: unknown): NonNullable<InternalCreateSemanticExport
     : uuid(input.groupId, "filters.groupId");
   const groupIds = input.groupIds === undefined
     ? undefined
-    : uuidList(input.groupIds, "filters.groupIds", 200);
+    : uuidList(input.groupIds, "filters.groupIds", 2_000);
   if (groupIds && groupIds.length < 2) invalid("filters.groupIds");
   if (groupId && groupIds) invalid("filters.groupIds");
   if (priorityMin !== undefined && priorityMax !== undefined && priorityMin > priorityMax) invalid("filters.priorityMin");
+  const advanced = advancedExportFilters(input);
   return {
     ...(search ? { search } : {}),
     ...(tag ? { tag: tag.toLocaleLowerCase() } : {}),
@@ -221,8 +230,28 @@ function exportFilters(value: unknown): NonNullable<InternalCreateSemanticExport
     ...(input.isFavorite === undefined ? {} : { isFavorite: booleanValue(input.isFavorite, "filters.isFavorite") }),
     ...(input.isTracked === undefined ? {} : { isTracked: booleanValue(input.isTracked, "filters.isTracked") }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
-    ...(priorityMax === undefined ? {} : { priorityMax })
+    ...(priorityMax === undefined ? {} : { priorityMax }),
+    ...advanced
   };
+}
+
+function advancedExportFilters(input: Readonly<Record<string, unknown>>) {
+  const decimal = (name: string): string | undefined => { const value = input[name]; if (value === undefined) return undefined; if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,18})$/u.test(value) || BigInt(value) > 9_223_372_036_854_775_807n) invalid(`filters.${name}`); return value; };
+  const number = (name: string, max: number): number | undefined => { const value = input[name]; if (value === undefined) return undefined; if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > max) invalid(`filters.${name}`); return Number(value); };
+  const baseMin = decimal("frequencyBaseMin"), baseMax = decimal("frequencyBaseMax"), exactMin = decimal("frequencyExactMin"), exactMax = decimal("frequencyExactMax"), fixedMin = decimal("frequencyFixedMin"), fixedMax = decimal("frequencyFixedMax");
+  for (const [min, max, name] of [[baseMin, baseMax, "frequencyBaseMin"], [exactMin, exactMax, "frequencyExactMin"], [fixedMin, fixedMax, "frequencyFixedMin"]] as const) if (min && max && BigInt(min) > BigInt(max)) invalid(`filters.${name}`);
+  const wordCountMin = number("wordCountMin", 10_000), wordCountMax = number("wordCountMax", 10_000), rankPositionMin = number("rankPositionMin", 100), rankPositionMax = number("rankPositionMax", 100);
+  if ((wordCountMin && wordCountMax && wordCountMin > wordCountMax) || (rankPositionMin && rankPositionMax && rankPositionMin > rankPositionMax)) invalid("filters.range");
+  const targetUrlState = input.targetUrlState === undefined ? undefined : enumValue(input.targetUrlState, ["SET", "EMPTY"] as const, "filters.targetUrlState");
+  const rankState = input.rankState === undefined ? undefined : enumValue(input.rankState, ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const, "filters.rankState");
+  const rankDimensionKey = input.rankDimensionKey;
+  if (rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid("filters.rankDimensionKey");
+  const rankCheckedFrom = input.rankCheckedFrom === undefined ? undefined : canonicalInstant(input.rankCheckedFrom, "filters.rankCheckedFrom");
+  const rankCheckedBefore = input.rankCheckedBefore === undefined ? undefined : canonicalInstant(input.rankCheckedBefore, "filters.rankCheckedBefore");
+  if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) invalid("filters.rankCheckedFrom");
+  if (!rankDimensionKey && (rankState || rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) invalid("filters.rankDimensionKey");
+  if ((rankState === "NOT_CHECKED" && (rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) || (rankState === "NOT_FOUND" && (rankPositionMin || rankPositionMax))) invalid("filters.rankState");
+  return { ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}), ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}), ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}), ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}), ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}), ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {}) };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

@@ -1,6 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
+import type { InternalPaidUsageReview, PaidUsageReviewTicket, ResolvePaidUsageInput } from "@seo-platform/contracts";
+import type { InternalWorkspaceExecutionUsage, InternalRankEstimatePricingScope } from "@seo-platform/contracts";
+import type { PrepareSystemConnectorsResult } from "@seo-platform/contracts";
+import type { PlatformProviderAccountSnapshot } from "@seo-platform/contracts";
+import type { InternalExecutionOverview } from "@seo-platform/contracts";
+import type { InternalOperationRoute, InternalPaidOperationUsage, InternalPaidOperationProof, InternalPaidOperationAdmission, PaidOperationKind } from "@seo-platform/contracts";
+import { priceOperation } from "../billing/provider-pricing.js";
 import {
   connectorFallbackModes,
+  credentialModeSupportsCapability,
   connectorFallbackReasons,
   connectorRoutingScopes,
   type ConnectorFallbackReason,
@@ -177,7 +185,7 @@ import {
 } from "./ai-answer-collection-response.js";
 import { scopedClusteringRun } from "./clustering-run-response.js";
 
-interface InternalContext {
+export interface InternalContext {
   readonly tenant: TenantAuthorization;
   readonly actorId: string;
   readonly requestId: string;
@@ -217,7 +225,7 @@ const MAX_PROJECT_CREDENTIAL_OPTIONS = 500;
  * misconfigured dependency from making Platform API buffer unbounded JSON.
  */
 const MAX_JOBS_RESPONSE_BYTES = 2 * 1024 * 1024;
-const CLUSTERING_RUN_CREATE_TIMEOUT_MS = 120_000;
+const BULK_COLLECTION_CREATE_TIMEOUT_MS = 120_000;
 const ADMIN_OPERATION_STATUSES = new Set<string>(adminOperationStatuses);
 
 @Injectable()
@@ -377,6 +385,17 @@ export class JobsClient {
     ));
   }
 
+  public async workspaceUsage(context: InternalContext): Promise<InternalWorkspaceExecutionUsage> {
+    const value = await this.request<unknown>("GET", `${workspaceOperationActivityPath(context.tenant.workspaceId)}/usage`, context);
+    const input = exactRecord(value, ["workspaceId", "concurrentJobs", "automations", "storageBytes"]);
+    if (input.workspaceId !== context.tenant.workspaceId ||
+      !Number.isSafeInteger(input.concurrentJobs) || Number(input.concurrentJobs) < 0 ||
+      !Number.isSafeInteger(input.automations) || Number(input.automations) < 0 ||
+      typeof input.storageBytes !== "string" || !/^(0|[1-9][0-9]{0,18})$/u.test(input.storageBytes)
+    ) throw invalidJobsResponse();
+    return { workspaceId: context.tenant.workspaceId, concurrentJobs: Number(input.concurrentJobs), automations: Number(input.automations), storageBytes: input.storageBytes };
+  }
+
   public async listProjectOperationActivity(
     context: InternalContext
   ): Promise<ReadonlyMap<string, number>> {
@@ -436,11 +455,13 @@ export class JobsClient {
     context: InternalContext,
     input: CreateFrequencyCollectionInput,
     idempotencyKey: string,
-    jobCapacity: InternalCreateFrequencyCollectionInput["jobCapacity"]
+    jobCapacity: InternalCreateFrequencyCollectionInput["jobCapacity"],
+    billing?: InternalPaidOperationAdmission
   ): Promise<FrequencyCollectionSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateFrequencyCollectionInput = {
       ...input,
+      ...(billing ? { billing } : {}),
       workspaceId: context.tenant.workspaceId,
       projectId,
       actorId: context.actorId,
@@ -454,7 +475,8 @@ export class JobsClient {
       context,
       body,
       "shared",
-      idempotencyKey
+      idempotencyKey,
+      BULK_COLLECTION_CREATE_TIMEOUT_MS
     );
     return scopedFrequencyCollection(
       value,
@@ -463,15 +485,64 @@ export class JobsClient {
     );
   }
 
+  public async operationRoute(context: InternalContext, kind: PaidOperationKind, source?: string): Promise<InternalOperationRoute> {
+    const value = await this.requestIntegration<unknown>("POST", "/internal/v1/paid-operations/route", context, { kind, ...(source ? { source } : {}) });
+    const input = exactRecord(value, ["workspaceId", "projectId", "actorId", "provider", "credentialMode", "credentialId", "bindingId", "bindingVersion", "routeId"]);
+    if (input.workspaceId !== context.tenant.workspaceId || input.projectId !== context.tenant.projectId || input.actorId !== context.actorId || !["XMLSTOCK", "ARSENKIN", "KEYS_SO"].includes(String(input.provider)) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(String(input.credentialMode)) || !Number.isSafeInteger(input.bindingVersion) || Number(input.bindingVersion) < 1) throw invalidJobsResponse();
+    for (const key of ["credentialId", "bindingId", "routeId"] as const) uuidValue(input[key]);
+    return input as unknown as InternalOperationRoute;
+  }
+
+  public async paidOperationUsage(context: InternalContext, scope: { quoteId: string; jobId: string; commandHash: string }): Promise<InternalPaidOperationUsage> {
+    const value = await this.request<unknown>("POST", "/internal/v1/paid-operations/usage", context, scope);
+    const input = exactRecord(value, ["quoteId", "jobId", "workspaceId", "projectId", "actorId", "commandHash", "exists", "terminal", "acceptedProviderUnitsMilli", "unresolvedProviderUnitsMilli", "lastUpdatedAt"]);
+    assertPaidScope(input, context, scope);
+    if (typeof input.exists !== "boolean" || typeof input.terminal !== "boolean" || !validUsageUnits(input.acceptedProviderUnitsMilli) || !validUsageUnits(input.unresolvedProviderUnitsMilli) || !Number.isFinite(Date.parse(String(input.lastUpdatedAt)))) throw invalidJobsResponse();
+    return input as unknown as InternalPaidOperationUsage;
+  }
+
+  public async paidOperationReview(context: InternalContext, scope: { quoteId: string; jobId: string; commandHash: string }): Promise<InternalPaidUsageReview> {
+    const value = await this.request<unknown>("POST", "/internal/v1/paid-operations/review", context, scope);
+    const input = exactRecord(value, ["quoteId", "jobId", "workspaceId", "projectId", "actorId", "commandHash", "terminal", "tickets"]);
+    assertPaidScope(input, context, scope);
+    if (typeof input.terminal !== "boolean" || !Array.isArray(input.tickets) || input.tickets.length > 100) throw invalidJobsResponse();
+    const tickets = input.tickets.map(paidReviewTicket);
+    if (new Set(tickets.map(ticket => ticket.id)).size !== tickets.length) throw invalidJobsResponse();
+    return { ...scope, workspaceId: context.tenant.workspaceId, projectId: context.tenant.projectId!, actorId: context.actorId, terminal: input.terminal, tickets };
+  }
+
+  public async resolvePaidOperationReview(context: InternalContext, scope: { quoteId: string; jobId: string; commandHash: string }, ticketId: string, input: ResolvePaidUsageInput, decidedBy: string, resolutionKey: string): Promise<PaidUsageReviewTicket> {
+    const value = await this.request<unknown>("POST", "/internal/v1/paid-operations/resolve-review", context, { ...scope, ticketId, ...input, decidedBy, resolutionKey });
+    const ticket = paidReviewTicket(value);
+    if (ticket.id !== ticketId || ticket.resolution !== input.resolution) throw invalidJobsResponse();
+    return ticket;
+  }
+
+  public async paidOperationProof(context: InternalContext, scope: { quoteId: string; jobId: string; commandHash: string; ticketId: string; ticketToken: string }): Promise<InternalPaidOperationProof> {
+    const value = await this.request<unknown>("POST", "/internal/v1/paid-operations/proof", context, scope);
+    const input = exactRecord(value, ["quoteId", "jobId", "workspaceId", "projectId", "actorId", "commandHash", "ticketId", "ticketToken", "leaseExpiresAt", "unitsMilli", "permitted"]);
+    assertPaidScope(input, context, scope);
+    if (input.ticketId !== scope.ticketId || input.ticketToken !== scope.ticketToken || typeof input.permitted !== "boolean" || !validUsageUnits(input.unitsMilli) || !Number.isFinite(Date.parse(String(input.leaseExpiresAt)))) throw invalidJobsResponse();
+    return input as unknown as InternalPaidOperationProof;
+  }
+
+  public async authorizePaidOperationTicket(context: InternalContext, scope: { quoteId: string; jobId: string; commandHash: string; ticketId: string; ticketToken: string }): Promise<void> {
+    const value = await this.request<unknown>("POST", "/internal/v1/paid-operations/authorize", context, scope);
+    const input = exactRecord(value, ["permitted"]);
+    if (input.permitted !== true) throw invalidJobsResponse();
+  }
+
   public async createAiAnswerCollection(
     context: InternalContext,
     input: CreateAiAnswerCollectionInput,
     idempotencyKey: string,
-    jobCapacity: InternalCreateAiAnswerCollectionInput["jobCapacity"]
+    jobCapacity: InternalCreateAiAnswerCollectionInput["jobCapacity"],
+    billing?: InternalPaidOperationAdmission
   ): Promise<AiAnswerCollectionSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateAiAnswerCollectionInput = {
       ...input,
+      ...(billing ? { billing } : {}),
       workspaceId: context.tenant.workspaceId,
       projectId,
       actorId: context.actorId,
@@ -485,7 +556,8 @@ export class JobsClient {
       context,
       body,
       "shared",
-      idempotencyKey
+      idempotencyKey,
+      BULK_COLLECTION_CREATE_TIMEOUT_MS
     );
     return scopedAiAnswerCollection(value, context.tenant.workspaceId, projectId);
   }
@@ -494,11 +566,13 @@ export class JobsClient {
     context: InternalContext,
     input: CreateClusteringRunInput,
     idempotencyKey: string,
-    jobCapacity: InternalCreateClusteringRunInput["jobCapacity"]
+    jobCapacity: InternalCreateClusteringRunInput["jobCapacity"],
+    billing?: InternalPaidOperationAdmission
   ): Promise<ClusteringRunSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateClusteringRunInput = {
       ...input,
+      ...(billing ? { billing } : {}),
       workspaceId: context.tenant.workspaceId,
       projectId,
       actorId: context.actorId,
@@ -513,7 +587,7 @@ export class JobsClient {
       body,
       "shared",
       idempotencyKey,
-      CLUSTERING_RUN_CREATE_TIMEOUT_MS
+      BULK_COLLECTION_CREATE_TIMEOUT_MS
     );
     return scopedClusteringRun(value, context.tenant.workspaceId, projectId);
   }
@@ -631,7 +705,8 @@ export class JobsClient {
     context: InternalContext,
     jobId: string,
     limit: number,
-    cursor?: string
+    cursor?: string,
+    onlyFailed = false
   ): Promise<InternalFrequencyOperationScope> {
     const projectId = requiredProjectId(context.tenant);
     const url = new URL(
@@ -642,6 +717,7 @@ export class JobsClient {
       this.config.services.jobs
     );
     url.searchParams.set("limit", String(limit));
+    if (onlyFailed) url.searchParams.set("onlyFailed", "true");
     if (cursor !== undefined) url.searchParams.set("cursor", cursor);
     const value = await this.request<unknown>(
       "GET",
@@ -712,11 +788,13 @@ export class JobsClient {
     context: InternalContext,
     input: CreateKeywordResearchRunInput,
     idempotencyKey: string,
-    jobCapacity: InternalCreateKeywordResearchRunInput["jobCapacity"]
+    jobCapacity: InternalCreateKeywordResearchRunInput["jobCapacity"],
+    billing?: InternalPaidOperationAdmission
   ): Promise<KeywordResearchRunSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateKeywordResearchRunInput = {
       ...input,
+      ...(billing ? { billing } : {}),
       workspaceId: context.tenant.workspaceId,
       projectId,
       actorId: context.actorId,
@@ -1788,15 +1866,55 @@ export class JobsClient {
       input,
       idempotencyKey
     );
-    return platformRankEstimateCharge(
-      scopedRankEstimate(
+    const estimate = scopedRankEstimate(
         value,
         context.tenant.workspaceId,
         projectId,
         input.trackingContextId
-      ),
-      this.config
-    );
+      );
+    if (estimate.credentialMode !== "PLATFORM_PAID" || !estimate.executionAllowed) return estimate;
+    const scope = await this.rankPricingScope(context, estimate.id);
+    if (scope.provider !== estimate.provider || scope.keywordCount !== Number(estimate.scope.keywordCount) || scope.credentialMode !== estimate.credentialMode) throw invalidJobsResponse();
+    const unitPrice = rankWorkloadPriceMinor(scope, this.config);
+    return { ...estimate, platformChargeMicro: (BigInt(unitPrice) * BigInt(scope.keywordCount) * 10_000n).toString() };
+  }
+
+  public async prepareSystemConnectors(context: InternalContext): Promise<PrepareSystemConnectorsResult> {
+    const projectId = requiredProjectId(context.tenant);
+    const result = exactRecord(await this.requestIntegration<unknown>("POST", `/internal/v1/workspaces/${context.tenant.workspaceId}/projects/${projectId}/integration-settings/prepare-system`, context, {}), ["configured", "pending", "readyProviders"]);
+    if (typeof result.configured !== "boolean" || typeof result.pending !== "boolean" || !Array.isArray(result.readyProviders) || result.readyProviders.length > 2 || result.readyProviders.some(provider => provider !== "XMLSTOCK" && provider !== "ARSENKIN")) throw invalidJobsResponse();
+    return result as unknown as PrepareSystemConnectorsResult;
+  }
+
+  public async platformProviderAccounts(actorId: string, requestId: string): Promise<readonly PlatformProviderAccountSnapshot[]> {
+    const value = await this.requestAdmin<unknown>("/internal/v1/platform-admin/provider-accounts", actorId, requestId);
+    if (!Array.isArray(value) || value.length > 128) throw invalidJobsResponse();
+    return value.map(row => {
+      const input = exactRecord(row, ["id", "provider", "slot", "enabled", "remaining", "unit", "checkedAt", "errorCode"]);
+      uuidValue(input.id);
+      if ((input.provider !== "XMLSTOCK" && input.provider !== "ARSENKIN") || !Number.isSafeInteger(input.slot) || Number(input.slot) < 1 || Number(input.slot) > 64 || typeof input.enabled !== "boolean" || input.unit !== (input.provider === "XMLSTOCK" ? "RUB" : "ARSENKIN_LIMITS") || input.remaining !== null && (typeof input.remaining !== "string" || !/^(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?$/u.test(input.remaining)) || input.checkedAt !== null && !Number.isFinite(Date.parse(String(input.checkedAt))) || input.errorCode !== null && (typeof input.errorCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(input.errorCode))) throw invalidJobsResponse();
+      return input as unknown as PlatformProviderAccountSnapshot;
+    });
+  }
+
+  public async executionOverview(actorId: string, requestId: string): Promise<InternalExecutionOverview> {
+    const result = exactRecord(await this.requestAdmin<unknown>("/internal/v1/platform-admin/operations/overview", actorId, requestId), ["active", "queued", "attention", "failed24h", "completed30d", "byType30d"]);
+    for (const field of ["active", "queued", "attention", "failed24h", "completed30d"]) if (!Number.isSafeInteger(result[field]) || Number(result[field]) < 0) throw invalidJobsResponse();
+    if (!Array.isArray(result.byType30d) || result.byType30d.length > 50) throw invalidJobsResponse();
+    for (const row of result.byType30d) { const item = exactRecord(row, ["type", "count"]); if (typeof item.type !== "string" || !/^[A-Z][A-Z0-9_]{0,99}$/u.test(item.type) || !Number.isSafeInteger(item.count) || Number(item.count) < 0) throw invalidJobsResponse(); }
+    return result as unknown as InternalExecutionOverview;
+  }
+
+  private async rankPricingScope(context: InternalContext, estimateId: string): Promise<InternalRankEstimatePricingScope> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>("GET", `/internal/v1/workspaces/${encodeURIComponent(context.tenant.workspaceId)}/projects/${encodeURIComponent(projectId)}/rank-estimates/${encodeURIComponent(estimateId)}/pricing-scope`, context);
+    const input = exactRecord(value, ["estimateId", "workspaceId", "projectId", "actorId", "provider", "credentialMode", "keywordCount", "execution"]);
+    if (input.estimateId !== estimateId || input.workspaceId !== context.tenant.workspaceId || input.projectId !== projectId || input.actorId !== context.actorId || !["ARSENKIN", "XMLSTOCK"].includes(String(input.provider)) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(String(input.credentialMode)) || !Number.isSafeInteger(input.keywordCount) || Number(input.keywordCount) < 0 || Number(input.keywordCount) > 300_000) throw invalidJobsResponse();
+    if (input.execution !== null) {
+      const execution = exactRecord(input.execution, ["purpose", "depth", "source"]);
+      if (!["POSITION_TRACKING", "COMPETITOR_SERP"].includes(String(execution.purpose)) || ![30, 50, 100].includes(Number(execution.depth)) || !["GOOGLE_LIVE", "YANDEX_LIVE", "YANDEX_TURBO", "YANDEX_SEARCH_API"].includes(String(execution.source))) throw invalidJobsResponse();
+    }
+    return input as unknown as InternalRankEstimatePricingScope;
   }
 
   public async createRankRun(
@@ -1805,9 +1923,15 @@ export class JobsClient {
     idempotencyKey: string
   ): Promise<RankJobSummary> {
     const projectId = requiredProjectId(context.tenant);
+    let prices = platformProviderPricesMinor(this.config);
+    if (input.confirmedPlatformChargeMicro !== "0") {
+      const scope = await this.rankPricingScope(context, input.estimateId);
+      if (scope.credentialMode !== "PLATFORM_PAID") throw invalidJobsResponse();
+      prices = { ...prices, [scope.provider]: String(rankWorkloadPriceMinor(scope, this.config)) };
+    }
     const command: InternalCreateRankRunInput = {
       ...input,
-      providerPricesMinor: platformProviderPricesMinor(this.config)
+      providerPricesMinor: prices
     };
     const value = await this.requestIntegration<unknown>(
       "POST",
@@ -2901,6 +3025,11 @@ function requiredProjectId(tenant: TenantAuthorization): string {
   return tenant.projectId;
 }
 
+function validUsageUnits(value: unknown): value is string { return typeof value === "string" && /^(0|[1-9][0-9]{0,12})$/u.test(value); }
+function assertPaidScope(input: Readonly<Record<string, unknown>>, context: InternalContext, scope: { quoteId: string; jobId: string; commandHash: string }): void {
+  if (input.quoteId !== scope.quoteId || input.jobId !== scope.jobId || input.commandHash !== scope.commandHash || input.workspaceId !== context.tenant.workspaceId || input.projectId !== context.tenant.projectId || input.actorId !== context.actorId) throw invalidJobsResponse();
+}
+
 function dependencyUnavailable(): DomainError {
   return new DomainError({
     statusCode: 503,
@@ -2919,35 +3048,11 @@ function invalidJobsResponse(): DomainError {
   });
 }
 
-function platformRankEstimateCharge(
-  estimate: RankEstimate,
-  config: AppConfig
-): RankEstimate {
-  if (estimate.credentialMode === "BYOK_API_KEY") return estimate;
-  return {
-    ...estimate,
-    platformChargeMicro: platformRankChargeMicro(
-      estimate.provider,
-      BigInt(estimate.scope.keywordCount),
-      config
-    )
-  };
-}
-
-function platformRankChargeMicro(
-  provider: "ARSENKIN" | "XMLSTOCK",
-  keywordCount: bigint,
-  config: AppConfig
-): string {
-  const pricing = config.billing.providerUsage[provider];
-  if (!pricing.enabled || pricing.rankKeywordPriceMinor === undefined) {
-    throw invalidJobsResponse();
-  }
-  return (
-    BigInt(pricing.rankKeywordPriceMinor) *
-    10_000n *
-    keywordCount
-  ).toString();
+function rankWorkloadPriceMinor(scope: InternalRankEstimatePricingScope, config: AppConfig): number {
+  if (!config.billing.providerUsage[scope.provider].enabled || !scope.execution || scope.keywordCount < 1) throw invalidJobsResponse();
+  // The existing rank ledger settles one provider task at a time. Seal the
+  // same rounded per-key price into estimate and run; never trust browser cost.
+  return priceOperation({ provider: scope.provider, operation: scope.execution.purpose === "COMPETITOR_SERP" ? "COMPETITOR_SERP" : "POSITIONS", keywordCount: 1, depth: scope.execution.depth, searchSource: scope.execution.source }).customerChargeMinor;
 }
 
 function platformProviderPricesMinor(
@@ -3333,7 +3438,7 @@ function routeAvailability(
   }
   if (
     credential.status !== "ACTIVE" ||
-    credential.mode !== "BYOK_API_KEY"
+    !credentialModeSupportsCapability(credential.mode, capability, credential.provider)
   ) {
     return "CREDENTIAL_UNAVAILABLE";
   }
@@ -4080,4 +4185,13 @@ function unknownRecord(
     !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
+}
+
+function paidReviewTicket(value: unknown): PaidUsageReviewTicket {
+  const input = exactRecord(value, ["id", "part", "unitsMilli", "startedAt", "finishedAt", "resolution", "resolvedAt", "resolutionReason", "providerReference", "eligibleAt"]);
+  uuidValue(input.id);
+  if (typeof input.part !== "string" || input.part.length > 32 || !validUsageUnits(input.unitsMilli) || BigInt(String(input.unitsMilli)) < 1n || ![null, "CHARGE", "RELEASE"].includes(input.resolution as null) || !Number.isFinite(Date.parse(String(input.startedAt))) || !Number.isFinite(Date.parse(String(input.eligibleAt)))) throw invalidJobsResponse();
+  for (const key of ["finishedAt", "resolvedAt"] as const) if (input[key] !== null && (typeof input[key] !== "string" || !Number.isFinite(Date.parse(input[key])))) throw invalidJobsResponse();
+  if ((input.resolution === null) !== (input.resolvedAt === null) || input.resolutionReason !== null && (typeof input.resolutionReason !== "string" || input.resolutionReason.length > 500) || input.providerReference !== null && (typeof input.providerReference !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{4,127}$/u.test(input.providerReference))) throw invalidJobsResponse();
+  return input as unknown as PaidUsageReviewTicket;
 }

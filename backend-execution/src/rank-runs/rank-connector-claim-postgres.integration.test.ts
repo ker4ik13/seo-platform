@@ -221,7 +221,7 @@ test(
          ) VALUES ($1, 'TEST_CAPABILITY', false, $2, $3, $4)`,
         [
           futureProvider,
-          CONNECTOR_VERSION,
+          `${CONNECTOR_VERSION}-${suffix}`,
           POLICY_VERSION,
           initialFutureVersion
         ]
@@ -275,6 +275,7 @@ test(
       assert.match(restrictedRoleName, /^[a-z0-9_]+$/u);
       await setup.query(`CREATE ROLE "${restrictedRoleName}" NOLOGIN`);
       restrictedRoleCreated = true;
+      await setup.query(`GRANT USAGE ON SCHEMA public TO "${restrictedRoleName}"`);
       await setup.query(
         `GRANT EXECUTE ON FUNCTION
            public.claim_rank_connector_execution(text, integer, text)
@@ -325,6 +326,7 @@ test(
       });
     } finally {
       if (restrictedRoleCreated) {
+        await setup.query(`REVOKE USAGE ON SCHEMA public FROM "${restrictedRoleName}"`).catch(() => undefined);
         await setup.query(
           `REVOKE ALL ON FUNCTION
              public.claim_rank_connector_execution(text, integer, text)

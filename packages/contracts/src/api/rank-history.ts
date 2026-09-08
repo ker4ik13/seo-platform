@@ -3,6 +3,7 @@ import type {
   RankManifestHash
 } from "./rank-runs.js";
 import type { SemanticKeywordListSiteResult } from "./keywords.js";
+import { parseSemanticRankDimensionMetadata, type SemanticRankDimensionMetadata } from "./rank-dimensions.js";
 
 export const rankHistoryMaxPageSize = 200 as const;
 
@@ -20,6 +21,9 @@ export interface RankHistoryQuery {
   readonly observedBefore: string;
   readonly trackingContextId?: string;
   readonly keywordId?: string;
+  readonly dimensionKey?: string;
+  /** SERP includes competitor-only runs and their complete stored organic results. */
+  readonly mode?: "SERP";
   readonly limit: number;
   readonly cursor?: string;
 }
@@ -35,12 +39,14 @@ export interface InternalRankHistoryQuery extends RankHistoryQuery {
   readonly actorId: string;
 }
 
-interface RankHistoryItemBase {
+export type RankHistoryDataQualityFlag = NormalizedRankDataQualityFlag | "IMPORTED_KC4" | "IMPORTED_MANUAL_HISTORY";
+
+interface RankHistoryItemBase extends SemanticRankDimensionMetadata {
   readonly snapshotId: string;
   readonly keywordId: string;
   readonly trackingContextId: string;
   readonly configurationVersion: number;
-  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly provider: "ARSENKIN" | "XMLSTOCK" | "MANUAL_IMPORT";
   readonly connectorVersion: string;
   readonly contextName?: string;
   readonly searchEngine?: "GOOGLE" | "YANDEX";
@@ -49,12 +55,15 @@ interface RankHistoryItemBase {
   readonly observedAt: string;
   readonly storedAt: string;
   readonly jobId: string;
-  readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
+  readonly dataQualityFlags: readonly RankHistoryDataQualityFlag[];
   /** All pages of the tracked project found in this immutable SERP, with safe SERP metadata. */
   readonly siteResults?: readonly SemanticKeywordListSiteResult[];
+  readonly serpResults?: readonly SemanticKeywordListSiteResult[];
+  readonly depth?: number;
 }
 
-export interface RankHistoryFoundItem extends RankHistoryItemBase {
+export interface RankHistoryProviderFoundItem extends RankHistoryItemBase {
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly found: true;
   readonly position: number;
   readonly absolutePosition?: number;
@@ -66,6 +75,25 @@ export interface RankHistoryFoundItem extends RankHistoryItemBase {
   readonly resultType: "ORGANIC";
   readonly serpFeatures: readonly [];
 }
+
+/** A manually imported position has no observed result URL or SERP payload. */
+export interface RankHistoryManualFoundItem extends RankHistoryItemBase {
+  readonly provider: "MANUAL_IMPORT";
+  readonly found: true;
+  readonly position: number;
+  readonly absolutePosition?: never;
+  readonly pixelPosition?: never;
+  readonly rankingUrl?: never;
+  readonly normalizedRankingUrl?: never;
+  readonly title?: never;
+  readonly snippet?: never;
+  readonly resultType?: never;
+  readonly serpFeatures?: never;
+}
+
+export type RankHistoryFoundItem =
+  | RankHistoryProviderFoundItem
+  | RankHistoryManualFoundItem;
 
 export interface RankHistoryNotFoundItem extends RankHistoryItemBase {
   readonly found: false;
@@ -120,6 +148,8 @@ export interface InternalRankHistoryFilterHashPreimage {
   readonly observedBefore: string;
   readonly trackingContextId: string | null;
   readonly keywordId: string | null;
+  readonly dimensionKey?: string;
+  readonly mode?: "SERP";
 }
 
 /**
@@ -141,10 +171,14 @@ const QUALITY_FLAGS: ReadonlySet<string> = new Set([
   "ABSOLUTE_POSITION_UNAVAILABLE",
   "PIXEL_POSITION_UNAVAILABLE",
   "TITLE_UNAVAILABLE",
-  "SNIPPET_UNAVAILABLE"
+  "SNIPPET_UNAVAILABLE",
+  "IMPORTED_KC4",
+  "IMPORTED_MANUAL_HISTORY"
 ]);
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CONNECTOR_VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,63}$/u;
 const MAX_URL_LENGTH = 4_096;
 const MAX_TITLE_LENGTH = 2_048;
@@ -170,16 +204,19 @@ const NOT_FOUND_ONLY_FORBIDDEN_KEYS = [
 export function redactRankHistoryItem(
   input: RankHistoryItem
 ): RankHistoryItem {
+  const technicalIdPattern = input.provider === "MANUAL_IMPORT"
+    ? UUID_PATTERN
+    : UUID_V7_PATTERN;
   if (
-    !["ARSENKIN", "XMLSTOCK"].includes(input.provider) ||
+    !["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"].includes(input.provider) ||
     typeof input.snapshotId !== "string" ||
-    !UUID_V7_PATTERN.test(input.snapshotId) ||
+    !technicalIdPattern.test(input.snapshotId) ||
     typeof input.keywordId !== "string" ||
     !UUID_V7_PATTERN.test(input.keywordId) ||
     typeof input.trackingContextId !== "string" ||
-    !UUID_V7_PATTERN.test(input.trackingContextId) ||
+    !technicalIdPattern.test(input.trackingContextId) ||
     typeof input.jobId !== "string" ||
-    !UUID_V7_PATTERN.test(input.jobId) ||
+    !technicalIdPattern.test(input.jobId) ||
     typeof input.connectorVersion !== "string" ||
     !CONNECTOR_VERSION_PATTERN.test(input.connectorVersion) ||
     !isCanonicalIsoInstant(input.observedAt) ||
@@ -192,6 +229,11 @@ export function redactRankHistoryItem(
   }
 
   const dataQualityFlags = copyQualityFlags(input.dataQualityFlags);
+  if (input.provider === "MANUAL_IMPORT"
+    ? dataQualityFlags.length !== 1 || dataQualityFlags[0] !== "IMPORTED_MANUAL_HISTORY"
+    : dataQualityFlags.some(flag => flag === "IMPORTED_KC4" || flag === "IMPORTED_MANUAL_HISTORY")) {
+    return invalidRankHistoryItem();
+  }
   assertOptionalBoundedString(input.contextName, 160);
   assertOptionalBoundedString(input.regionLabel, 160);
   if (
@@ -208,7 +250,10 @@ export function redactRankHistoryItem(
     return invalidRankHistoryItem();
   }
   const siteResults = copySiteResults(input.siteResults);
+  const serpResults = copySiteResults(input.serpResults, true);
+  if (input.depth !== undefined && (!Number.isSafeInteger(input.depth) || input.depth < 1 || input.depth > 100)) return invalidRankHistoryItem();
   const base: RankHistoryItemBase = {
+    ...parseSemanticRankDimensionMetadata(input),
     snapshotId: input.snapshotId,
     keywordId: input.keywordId,
     trackingContextId: input.trackingContextId,
@@ -231,16 +276,18 @@ export function redactRankHistoryItem(
     storedAt: input.storedAt,
     jobId: input.jobId,
     dataQualityFlags,
-    ...(siteResults === undefined ? {} : { siteResults })
+    ...(siteResults === undefined ? {} : { siteResults }),
+    ...(serpResults === undefined ? {} : { serpResults }),
+    ...(input.depth === undefined ? {} : { depth: input.depth })
   };
 
   if (input.found === false) {
     if (
       input.position !== null ||
       NOT_FOUND_ONLY_FORBIDDEN_KEYS.some((key) => key in input) ||
-      dataQualityFlags.some(
+      (input.provider !== "MANUAL_IMPORT" && dataQualityFlags.some(
         (flag) => flag !== "PROVIDER_OBSERVED_AT_UNAVAILABLE"
-      )
+      ))
     ) {
       return invalidRankHistoryItem();
     }
@@ -248,6 +295,24 @@ export function redactRankHistoryItem(
       ...base,
       found: false,
       position: null
+    };
+  }
+
+  if (input.provider === "MANUAL_IMPORT") {
+    if (
+      input.found !== true ||
+      !Number.isSafeInteger(input.position) ||
+      input.position < 1 ||
+      input.position > 100 ||
+      ["absolutePosition", "pixelPosition", "rankingUrl", "normalizedRankingUrl", "title", "snippet", "resultType", "serpFeatures"].some((key) => key in input)
+    ) {
+      return invalidRankHistoryItem();
+    }
+    return {
+      ...base,
+      provider: "MANUAL_IMPORT",
+      found: true,
+      position: input.position
     };
   }
 
@@ -268,29 +333,14 @@ export function redactRankHistoryItem(
   assertUrl(input.normalizedRankingUrl);
   assertOptionalBoundedString(input.title, MAX_TITLE_LENGTH);
   assertOptionalBoundedString(input.snippet, MAX_SNIPPET_LENGTH);
-  assertAvailabilityFlag(
-    dataQualityFlags,
-    "ABSOLUTE_POSITION_UNAVAILABLE",
-    input.absolutePosition === undefined
-  );
-  assertAvailabilityFlag(
-    dataQualityFlags,
-    "PIXEL_POSITION_UNAVAILABLE",
-    input.pixelPosition === undefined
-  );
-  assertAvailabilityFlag(
-    dataQualityFlags,
-    "TITLE_UNAVAILABLE",
-    input.title === undefined
-  );
-  assertAvailabilityFlag(
-    dataQualityFlags,
-    "SNIPPET_UNAVAILABLE",
-    input.snippet === undefined
-  );
+  assertAvailabilityFlag(dataQualityFlags, "ABSOLUTE_POSITION_UNAVAILABLE", input.absolutePosition === undefined);
+  assertAvailabilityFlag(dataQualityFlags, "PIXEL_POSITION_UNAVAILABLE", input.pixelPosition === undefined);
+  assertAvailabilityFlag(dataQualityFlags, "TITLE_UNAVAILABLE", input.title === undefined);
+  assertAvailabilityFlag(dataQualityFlags, "SNIPPET_UNAVAILABLE", input.snippet === undefined);
 
   return {
     ...base,
+    provider: input.provider,
     found: true,
     position: input.position,
     ...(input.absolutePosition === undefined
@@ -309,7 +359,8 @@ export function redactRankHistoryItem(
 }
 
 function copySiteResults(
-  values: readonly SemanticKeywordListSiteResult[] | undefined
+  values: readonly SemanticKeywordListSiteResult[] | undefined,
+  allowRepeatedUrls = false
 ): readonly SemanticKeywordListSiteResult[] | undefined {
   if (values === undefined) return undefined;
   if (!Array.isArray(values) || values.length < 1 || values.length > 100) {
@@ -325,7 +376,7 @@ function copySiteResults(
       value.position < 1 ||
       value.position > 100 ||
       value.position <= previousPosition ||
-      urls.has(value.rankingUrl)
+      (!allowRepeatedUrls && urls.has(value.rankingUrl))
     ) {
       return invalidRankHistoryItem();
     }
@@ -348,13 +399,13 @@ function copySiteResults(
 }
 
 function copyQualityFlags(
-  flags: readonly NormalizedRankDataQualityFlag[]
-): readonly NormalizedRankDataQualityFlag[] {
+  flags: readonly RankHistoryDataQualityFlag[]
+): readonly RankHistoryDataQualityFlag[] {
   if (flags.length > QUALITY_FLAGS.size) {
     return invalidRankHistoryItem();
   }
   const seen = new Set<string>();
-  const copied: NormalizedRankDataQualityFlag[] = [];
+  const copied: RankHistoryDataQualityFlag[] = [];
   for (const flag of flags) {
     if (!QUALITY_FLAGS.has(flag) || seen.has(flag)) {
       return invalidRankHistoryItem();
@@ -412,7 +463,7 @@ function assertOptionalBoundedString(
 }
 
 function assertAvailabilityFlag(
-  flags: readonly NormalizedRankDataQualityFlag[],
+  flags: readonly RankHistoryDataQualityFlag[],
   flag: NormalizedRankDataQualityFlag,
   expectedUnavailable: boolean
 ): void {

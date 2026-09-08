@@ -16,9 +16,12 @@ script_dir=$(
 load_runtime_environment
 
 api_base="$(public_api_endpoint)/api/v1"
-test_root=$(mktemp -d)
+mkdir -p "$runtime_root/tmp"
+chmod 700 "$runtime_root/tmp"
+test_root=$(mktemp -d "$runtime_root/tmp/smoke-public-api.XXXXXXXX")
+printf '%s\n' "$$" > "$test_root/owner.pid"
 case "$test_root" in
-  /tmp/tmp.*) ;;
+  "$runtime_root"/tmp/smoke-public-api.*) ;;
   *) runtime_fail "mktemp returned an unexpected path" ;;
 esac
 trap 'rm -rf -- "$test_root"' EXIT INT TERM
@@ -57,7 +60,6 @@ session_call() {
   local entity_version=${4:-}
   local idempotency_key=${5:-}
   local request_arguments=(
-    --insecure
     --silent
     --show-error
     --max-time 30
@@ -103,7 +105,6 @@ token_call() {
   local idempotency_key=${4:-}
   local bearer=${5:-$api_token}
   local request_arguments=(
-    --insecure
     --silent
     --show-error
     --max-time 30

@@ -64,7 +64,8 @@ test("readiness resolves the exact configured stream dynamically", async () => {
                     "prod.email.identity.email-verification.requested.v1",
                     "prod.email.identity.password-reset.requested.v1",
                     "prod.email.workspace.invite.requested.v1",
-                    "prod.email.billing.npd-receipt.delivery-requested.v1"
+                    "prod.email.billing.npd-receipt.delivery-requested.v1",
+                    "prod.email.billing.notice.requested.v1"
                   ]
           }
         };

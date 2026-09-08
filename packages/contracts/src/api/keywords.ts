@@ -116,6 +116,21 @@ export interface KeywordListQuery {
   readonly isTracked?: boolean;
   readonly priorityMin?: number;
   readonly priorityMax?: number;
+  readonly frequencyBaseMin?: string;
+  readonly frequencyBaseMax?: string;
+  readonly frequencyExactMin?: string;
+  readonly frequencyExactMax?: string;
+  readonly frequencyFixedMin?: string;
+  readonly frequencyFixedMax?: string;
+  readonly wordCountMin?: number;
+  readonly wordCountMax?: number;
+  readonly targetUrlState?: "SET" | "EMPTY";
+  readonly rankDimensionKey?: string;
+  readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
+  readonly rankPositionMin?: number;
+  readonly rankPositionMax?: number;
+  readonly rankCheckedFrom?: string;
+  readonly rankCheckedBefore?: string;
   readonly sort?: SemanticKeywordSort;
   /** Body-only multiline search. It is never serialized into a URL. */
   readonly multiSearch?: SemanticKeywordMultiSearch;
@@ -217,8 +232,11 @@ export interface ProjectPositionSummary extends ProjectPositionTopCounts {
 }
 
 export interface ProjectPositionHistoryPoint extends ProjectPositionTopCounts {
-  /** Opaque identity of the immutable measurement slice. */
+  /** Stable UTC calendar day represented by this aggregate. */
   readonly id: string;
+  /** YYYY-MM-DD in the server's UTC reporting calendar. */
+  readonly date: string;
+  /** Latest source observation included in this daily aggregate. */
   readonly observedAt: string;
   readonly measuredKeywordCount: number;
   readonly positionedKeywordCount: number;
@@ -347,6 +365,9 @@ export interface UpdateSemanticKeywordInput {
   readonly clusterId?: string | null;
   readonly targetUrl?: string | null;
   readonly tagNames?: readonly string[];
+  /** Explicit tag deltas preserve every other existing membership. */
+  readonly addTagNames?: readonly string[];
+  readonly removeTagNames?: readonly string[];
   readonly note?: string | null;
 }
 
@@ -565,6 +586,10 @@ export interface SemanticKeywordBulkPatch {
   readonly clusterId?: string | null;
   readonly targetUrl?: string | null;
   readonly tagNames?: readonly string[];
+  /** Safe additive bulk edit; does not replace the tags already on each row. */
+  readonly addTagNames?: readonly string[];
+  /** Removes only these explicitly selected tags, preserving all other tags. */
+  readonly removeTagNames?: readonly string[];
 }
 
 export interface SemanticKeywordBulkInput {

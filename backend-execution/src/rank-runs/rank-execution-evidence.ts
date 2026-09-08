@@ -1,3 +1,4 @@
+import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import type { RankManifestHash } from "@seo-platform/contracts";
 import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
 
@@ -133,7 +134,7 @@ export function rankExecutionEvidence(
     providerRequestIntent.schemaVersion !==
       "rank-provider-request-intent@1" ||
     !boundedInteger(input.executionAttempt, 1, 1_000) ||
-    !boundedInteger(manifest.chunkIndex, 0, 14_999) ||
+    !boundedInteger(manifest.chunkIndex, 0, rankCommandKeywordLimit - 1) ||
     typeof input.executionConnectorVersion !== "string" ||
     !VERSION_PATTERN.test(input.executionConnectorVersion) ||
     typeof input.providerPolicyVersion !== "string" ||

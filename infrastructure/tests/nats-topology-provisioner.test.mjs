@@ -27,7 +27,8 @@ test("topology is exact, bounded and compatible with app-level retry/DLQ", () =>
     "prod-eu1.email.identity.email-verification.requested.v1",
     "prod-eu1.email.identity.password-reset.requested.v1",
     "prod-eu1.email.workspace.invite.requested.v1",
-    "prod-eu1.email.billing.npd-receipt.delivery-requested.v1"
+    "prod-eu1.email.billing.npd-receipt.delivery-requested.v1",
+    "prod-eu1.email.billing.notice.requested.v1"
   ]);
   assert.equal(topology.authEmailFilterSubject, "prod-eu1.email.>");
   assert.equal(
@@ -208,6 +209,24 @@ test("provisioner reconciles only allowlisted mutable drift", async () => {
     "consumer.update:IDENTITY_EVENTS:realtime_session_family_revoked_v1",
     "consumer.info:AUTH_EMAIL_EVENTS:jobs_auth_email_v1"
   ]);
+});
+
+test("billing notice upgrade preserves the existing stream and consumer and rejects arbitrary old subjects", async () => {
+  const manager = fakeManager();
+  await provisionNatsTopology({ manager, environment });
+  const stream = manager.streamRecords.get("AUTH_EMAIL_EVENTS");
+  stream.subjects = buildNatsTopology(environment).authEmailSubjects.slice(0, 4);
+  manager.calls.length = 0;
+  const result = await provisionNatsTopology({ manager, environment });
+  assert.equal(result.authEmailStream, "updated");
+  assert.equal(result.authEmailConsumer, "unchanged");
+  assert.equal(manager.calls.filter(call => call.startsWith("stream.add:")).length, 0);
+  assert.deepEqual(manager.streamRecords.get("AUTH_EMAIL_EVENTS").subjects, buildNatsTopology(environment).authEmailSubjects);
+  assert.equal((await provisionNatsTopology({ manager, environment })).authEmailStream, "unchanged");
+  for (const subjects of [[`${environment}.email.>`], buildNatsTopology(environment).authEmailSubjects.slice(1), ["foreign.email.identity.email-verification.requested.v1", ...buildNatsTopology(environment).authEmailSubjects.slice(1, 4)]]) {
+    manager.streamRecords.get("AUTH_EMAIL_EVENTS").subjects = subjects;
+    await assert.rejects(() => provisionNatsTopology({ manager, environment }), /UNSAFE_STREAM_DRIFT/u);
+  }
 });
 
 test("provisioner permits only the known additive DLQ subject migration", async () => {

@@ -1,4 +1,5 @@
 "use client";
+import { semanticColumnPresenceKey } from "../lib/semantic-column-presence";
 
 import type {
   AriaAttributes,
@@ -9,6 +10,8 @@ import type {
   ReactNode
 } from "react";
 import { useEffect, useState } from "react";
+import { useUiLocale } from "./ui-locale";
+
 
 export interface KeywordDataGridColumn<Row> {
   readonly key: string;
@@ -89,6 +92,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   tableClassName?: string;
   toggleAllDisabled?: boolean;
 }>) {
+  const { t: uiText } = useUiLocale();
   const allSelected =
     allRowsSelected ??
     (rows.length > 0 && rows.every(({ id }) => selectedIds.has(id)));
@@ -195,7 +199,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
         <tr>
           {showRowNumbers && (
             <th
-              aria-label="Позиция строки"
+              aria-label={uiText("Позиция строки")}
               className="semantic-row-number-cell"
               scope="col"
             >
@@ -205,25 +209,21 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
           <th className="semantic-select-cell semantic-select-header">
             <span className="semantic-header-selection-controls">
               <input
-                aria-label="Выбрать все запросы текущего фильтра"
+                aria-label={uiText("Выбрать все запросы текущего фильтра")}
                 checked={allSelected}
                 disabled={toggleAllDisabled}
                 onChange={onToggleAll}
-                title={
-                  toggleAllDisabled
-                    ? "Загружаем все запросы для выбора"
-                    : "Выбрать все запросы текущего фильтра"
-                }
+                title={toggleAllDisabled ? uiText("Загружаем все запросы для выбора") : uiText("Выбрать все запросы текущего фильтра")}
                 type="checkbox"
               />
               {onToggleHighlighted && (
                 <input
-                  aria-label={`Выбрать подсвеченные запросы (${highlightedIds.size})`}
+                  aria-label={uiText("Выбрать подсвеченные запросы ({0})", [String(highlightedIds.size)])}
                   checked={allHighlightedSelected}
                   className="semantic-highlight-selector"
                   disabled={highlightedIds.size === 0}
                   onChange={onToggleHighlighted}
-                  title="Перенести подсвеченные строки в массовый выбор"
+                  title={uiText("Перенести подсвеченные строки в массовый выбор")}
                   type="checkbox"
                 />
               )}
@@ -238,7 +238,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
               {column.header}
               {column.width !== undefined && column.onResize && (
                 <span
-                  aria-label={`Изменить ширину колонки ${column.resizeLabel ?? plainHeader(column.header, column.key)}`}
+                  aria-label={uiText("Изменить ширину колонки {0}", [String(column.resizeLabel ?? plainHeader(column.header, column.key))])}
                   aria-orientation="vertical"
                   aria-valuemax={column.maxWidth}
                   aria-valuemin={column.minWidth}
@@ -248,12 +248,12 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                   onPointerDown={(event) => startColumnResize(event, column)}
                   role="separator"
                   tabIndex={0}
-                  title="Потяните для изменения ширины. Стрелки — с клавиатуры"
+                  title={uiText("Потяните для изменения ширины. Стрелки — с клавиатуры")}
                 />
               )}
             </th>
           ))}
-          {actions && <th aria-label="Действия" />}
+          {actions && <th aria-label={uiText("Действия")} />}
         </tr>
       </thead>
       <tbody>
@@ -320,7 +320,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
             >
               {showRowNumbers && (
                 <td
-                  aria-label={`Позиция строки ${rowNumberOffset + index + 1}`}
+                  aria-label={uiText("Позиция строки {0}", [String(rowNumberOffset + index + 1)])}
                   className="semantic-row-number-cell"
                   data-presence-cursor-anchor="true"
                   data-presence-key={`keyword:${row.id}:column:position`}
@@ -335,7 +335,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                 data-presence-key={`keyword:${row.id}:column:selection`}
               >
                 <input
-                  aria-label={`Выбрать запрос ${row.id}`}
+                  aria-label={uiText("Выбрать запрос {0}", [String(row.id)])}
                   checked={selected}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -354,7 +354,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                   }
                   data-presence-cursor-anchor="true"
                   data-presence-column-id={column.key}
-                  data-presence-key={`keyword:${row.id}:column:${column.key}`}
+                  data-presence-key={`keyword:${row.id}:column:${semanticColumnPresenceKey(column.key)}`}
                   data-presence-row-id={row.id}
                   key={column.key}
                 >

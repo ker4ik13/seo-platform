@@ -40,6 +40,8 @@ import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
 import type { SemanticOperationGroup } from "./semantic-operation-scope";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 type ScopeKind = SemanticNegativeKeywordScope["kind"];
 const NEGATIVE_PREVIEW_PAGE_SIZE = 100;
@@ -59,6 +61,8 @@ export function SemanticNegativeKeywordsDialog({
   projectId: string;
   selections: readonly Readonly<SemanticKeywordBulkSelection & { label: string }>[];
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const initialScopeKind: ScopeKind = selections.length > 0
     ? "SELECTION"
     : activeGroup
@@ -233,7 +237,7 @@ export function SemanticNegativeKeywordsDialog({
     }
   }
 
-  async function requestPreview(page = 1, append = false): Promise<void> {
+  async function requestPreview(page = 1, append = false, uiLocale: string = "ru-RU"): Promise<void> {
     if (previewRequestInFlight.current || applying) return;
     const command = commandInput(
       words,
@@ -251,7 +255,7 @@ export function SemanticNegativeKeywordsDialog({
         ignorePunctuation,
         scopeKind,
         resolvedGroupIds,
-        selections
+        selections, uiLocale
       ));
       return;
     }
@@ -293,7 +297,7 @@ export function SemanticNegativeKeywordsDialog({
   }
 
   function loadNextPreviewPage(
-    event: UIEvent<HTMLUListElement>
+    event: UIEvent<HTMLUListElement>, uiLocale: string = "ru-RU"
   ): void {
     if (
       !preview ||
@@ -307,11 +311,11 @@ export function SemanticNegativeKeywordsDialog({
     const list = event.currentTarget;
     const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
     if (remaining <= 160) {
-      void requestPreview(preview.page + 1, true);
+      void requestPreview(preview.page + 1, true, uiLocale);
     }
   }
 
-  async function applyPreview(): Promise<void> {
+  async function applyPreview(uiLocale: string = "ru-RU"): Promise<void> {
     const initialCommand = commandInput(
       words,
       matchMode,
@@ -366,7 +370,7 @@ export function SemanticNegativeKeywordsDialog({
       }
       onCompleted(
         deleted > 0
-          ? `${formatInteger(deleted)} запросов перемещено в корзину. Действие можно отменить в истории.`
+          ? `${formatInteger(deleted, uiLocale)} запросов перемещено в корзину. Действие можно отменить в истории.`
           : "Совпадений для удаления больше нет."
       );
     } catch (requestError) {
@@ -435,31 +439,31 @@ export function SemanticNegativeKeywordsDialog({
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate semantic-negative-estimate">
             <div>
               <Icon name="semantic" />
-              <div><dt>Минус-слов</dt><dd>{formatInteger(words.length)}</dd></div>
+              <div><dt><UiText text="Минус-слов" /></dt><dd>{formatInteger(words.length, uiLocale)}</dd></div>
             </div>
             <div>
               <Icon name="projects" />
               <div>
-                <dt>Область</dt>
+                <dt><UiText text="Область" /></dt>
                 <dd>
                   {scopeKind === "SELECTION"
-                    ? `${formatInteger(selections.length)} выбранных`
+                    ? <UiText text="{0} выбранных" values={[String(formatInteger(selections.length, uiLocale))]} />
                     : scopeKind === "GROUP"
                       ? selectedGroupIds.size > 0
-                        ? `${formatInteger(selectedGroupIds.size)} папок`
-                        : "Папки не выбраны"
-                      : "Весь проект"}
+                        ? <UiText text="{0} папок" values={[String(formatInteger(selectedGroupIds.size, uiLocale))]} />
+                        : <UiText text="Папки не выбраны" />
+                      : <UiText text="Весь проект" />}
                 </dd>
               </div>
             </div>
             <div>
               <Icon name="search" />
               <div>
-                <dt>К удалению</dt>
+                <dt><UiText text="К удалению" /></dt>
                 <dd>
                   {preview
-                    ? formatInteger(selectedMatchCount)
-                    : "Не рассчитано"}
+                    ? formatInteger(selectedMatchCount, uiLocale)
+                    : <UiText text="Не рассчитано" />}
                 </dd>
               </div>
             </div>
@@ -467,7 +471,7 @@ export function SemanticNegativeKeywordsDialog({
           <div className="semantic-modal-actions semantic-negative-actions">
             {applying && (
               <span aria-live="polite">
-                Перемещено: {formatInteger(deletedProgress)}
+                <UiText text="Перемещено:" after=" " />{formatInteger(deletedProgress, uiLocale)}
               </span>
             )}
             <button
@@ -476,8 +480,7 @@ export function SemanticNegativeKeywordsDialog({
               onClick={requestClose}
               type="button"
             >
-              Отмена
-            </button>
+              <UiText text="Отмена" /></button>
             <button
               className="danger-button"
               disabled={
@@ -487,12 +490,12 @@ export function SemanticNegativeKeywordsDialog({
                 previewing ||
                 loadingMore
               }
-              onClick={() => void applyPreview()}
+              onClick={() => void applyPreview(uiLocale)}
               type="button"
             >
               {applying
-                ? "Перемещаем…"
-                : `В корзину${preview ? ` (${formatInteger(selectedMatchCount)})` : ""}`}
+                ? <UiText text="Перемещаем…" />
+                : <UiText text="В корзину{0}" values={[String(preview ? ` (${formatInteger(selectedMatchCount, uiLocale)})` : "")]} />}
             </button>
           </div>
         </div>
@@ -500,113 +503,110 @@ export function SemanticNegativeKeywordsDialog({
       onClose={requestClose}
       presenceKey="semantic-modal:negative-keywords"
       size="large"
-      title="Минус-слова"
+      title={uiText("Минус-слова")}
     >
       <div className="semantic-negative-dialog semantic-workflow-dialog">
         <div className="semantic-workflow-grid semantic-negative-workflow-grid">
           <section className="semantic-workflow-panel semantic-negative-editor">
             <header>
-              <h3>Набор и правила</h3>
+              <h3><UiText text="Набор и правила" /></h3>
               <p>
-                Добавьте до {formatInteger(semanticNegativeKeywordWordLimit)} слов или фраз — по одной на строку.
-              </p>
+                <UiText text="Добавьте до" after=" " />{formatInteger(semanticNegativeKeywordWordLimit, uiLocale)} <UiText text="слов или фраз — по одной на строку." before=" " /></p>
             </header>
             <label>
-              <span>Готовый набор или мой пресет</span>
+              <span><UiText text="Готовый набор или мой пресет" /></span>
               <CustomSelect
                 disabled={loadingPresets || applying}
                 onChange={(event) => selectPreset(event.target.value)}
                 searchable
-                searchPlaceholder="Найти набор"
+                searchPlaceholder={uiText("Найти набор")}
                 value={selectedPresetId}
               >
-                <option value="">Новый набор</option>
-                <option disabled value="builtin-heading">Готовые наборы · сначала проверьте</option>
+                <option value=""><UiText text="Новый набор" /></option>
+                <option disabled value="builtin-heading"><UiText text="Готовые наборы · сначала проверьте" /></option>
                 {builtInNegativeKeywordPresets.map((preset) => (
                   <option key={preset.id} value={preset.id}>
-                    {`${preset.name} · ${formatInteger(preset.rules.words.length)}`}
+                    {`${preset.name} · ${formatInteger(preset.rules.words.length, uiLocale)}`}
                   </option>
                 ))}
-                {presets.length > 0 && <option disabled value="project-heading">Мои пресеты проекта</option>}
+                {presets.length > 0 && <option disabled value="project-heading"><UiText text="Мои пресеты проекта" /></option>}
                 {presets.map((preset) => (
                   <option key={preset.id} value={preset.id}>{preset.name}</option>
                 ))}
               </CustomSelect>
               {selectedBuiltInPreset ? (
                 <small className="semantic-negative-preset-hint">
-                  {selectedBuiltInPreset.description} Это шаблон: проверьте совпадения перед применением.
-                </small>
+                  {selectedBuiltInPreset.description} <UiText text="Это шаблон: проверьте совпадения перед применением." before=" " /></small>
               ) : (
                 <small className="semantic-negative-preset-hint">
-                  Готовые наборы не применяются автоматически — их можно изменить и сохранить в проект.
-                </small>
+                  <UiText text="Готовые наборы не применяются автоматически — их можно изменить и сохранить в проект." /></small>
               )}
             </label>
             <label>
-              <span>Минус-слова</span>
+              <span><UiText text="Минус-слова" /></span>
               <textarea
                 autoFocus
                 disabled={applying}
                 onChange={(event) => { setWordsText(event.target.value); invalidatePreview(); }}
-                placeholder={"купить\nмосква\nбесплатно"}
+                placeholder={uiText("купить москва бесплатно")}
                 rows={7}
                 value={wordsText}
               />
               <small>
-                {formatInteger(words.length)} из {formatInteger(semanticNegativeKeywordWordLimit)}
+                {formatInteger(words.length, uiLocale)} <UiText text="из" before=" " after=" " />{formatInteger(semanticNegativeKeywordWordLimit, uiLocale)}
               </small>
             </label>
             <div className="semantic-negative-options">
               <label>
-                <span>Тип поиска</span>
+                <span><UiText text="Тип поиска" /></span>
                 <CustomSelect disabled={applying} onChange={(event) => { setMatchMode(event.target.value as SemanticNegativeKeywordMatchMode); invalidatePreview(); }} value={matchMode}>
-                  <option value="WORD_FORM_FAST">Независимый от словоформы · быстрый</option>
-                  <option value="WORD_FORM_PRECISE">Независимый от словоформы · улучшенный</option>
-                  <option value="WHOLE_WORD">Зависимый от словоформы · полное слово</option>
-                  <option value="CONTAINS">Зависимый от словоформы · частичное вхождение</option>
-                  <option value="EXACT_PHRASE">Зависимый от словоформы · вся фраза целиком</option>
+                  <option value="WORD_FORM_FAST"><UiText text="Независимый от словоформы · быстрый" /></option>
+                  <option value="WORD_FORM_PRECISE"><UiText text="Независимый от словоформы · улучшенный" /></option>
+                  <option value="WHOLE_WORD"><UiText text="Зависимый от словоформы · полное слово" /></option>
+                  <option value="CONTAINS"><UiText text="Зависимый от словоформы · частичное вхождение" /></option>
+                  <option value="EXACT_PHRASE"><UiText text="Зависимый от словоформы · вся фраза целиком" /></option>
                 </CustomSelect>
                 <small className="semantic-negative-match-hint">{matchModeHint(matchMode)}</small>
               </label>
             </div>
             <form className="semantic-negative-preset-form" onSubmit={(event) => void savePreset(event)}>
               <label>
-                <span>Название пресета</span>
-                <input disabled={applying} maxLength={160} onChange={(event) => setPresetName(event.target.value)} placeholder="Например, Города" value={presetName} />
+                <span><UiText text="Название пресета" /></span>
+                <input disabled={applying} maxLength={160} onChange={(event) => setPresetName(event.target.value)} placeholder={uiText("Например, Города")} value={presetName} />
               </label>
               <div className="semantic-negative-preset-actions">
                 <button className="secondary-button" disabled={savingPreset || words.length === 0} type="submit">
                   {savingPreset
-                    ? "Сохраняем…"
+                    ? <UiText text="Сохраняем…" />
                     : selectedPreset
-                      ? "Обновить пресет"
+                      ? <UiText text="Обновить пресет" />
                       : selectedBuiltInPreset
-                        ? "Сохранить в проект"
-                        : "Сохранить пресет"}
+                        ? <UiText text="Сохранить в проект" />
+                        : <UiText text="Сохранить пресет" />}
                 </button>
-                {selectedPreset && <button className="text-button danger-text" disabled={savingPreset} onClick={() => void deletePreset()} type="button"><Icon name="trash" />Удалить</button>}
+                {selectedPreset && <button className="text-button danger-text" disabled={savingPreset} onClick={() => void deletePreset()} type="button"><Icon name="trash" /><UiText text="Удалить" /></button>}
               </div>
             </form>
           </section>
 
           <section className="semantic-workflow-panel semantic-negative-scope">
             <header>
-              <h3>Область поиска</h3>
-              <p>Совпадения считаются только среди активных запросов.</p>
+              <h3><UiText text="Область поиска" /></h3>
+              <p><UiText text="Совпадения считаются только среди активных запросов." /></p>
             </header>
             <div className="semantic-negative-scope-cards">
-              <ScopeCard checked={scopeKind === "PROJECT"} label="Все запросы проекта" onSelect={() => { setScopeKind("PROJECT"); invalidatePreview(); }} />
+              <ScopeCard checked={scopeKind === "PROJECT"} label={uiText("Все запросы проекта")} onSelect={() => { setScopeKind("PROJECT"); invalidatePreview(); }} />
               {selections.length > 0 && (
-                <ScopeCard checked={scopeKind === "SELECTION"} count={selections.length} label="Выбранные запросы" onSelect={() => { setScopeKind("SELECTION"); invalidatePreview(); }} />
+                <ScopeCard checked={scopeKind === "SELECTION"} count={selections.length} label={uiText("Выбранные запросы")} onSelect={() => { setScopeKind("SELECTION"); invalidatePreview(); }} />
               )}
               {availableGroups.length > 0 && (
-                <ScopeCard checked={scopeKind === "GROUP"} count={selectedGroupIds.size} label="Конкретные папки" onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
+                <ScopeCard checked={scopeKind === "GROUP"} count={selectedGroupIds.size} label={uiText("Конкретные папки")} onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
               )}
             </div>
             {scopeKind === "GROUP" && (
               <div className="semantic-duplicate-folder-scope semantic-negative-folder-scope">
                 <div className="semantic-duplicate-folder-toolbar">
-                  <span>Выбрано папок: {formatInteger(selectedGroupIds.size)}</span>
+                  <span><UiText text="Выбрано папок:" after=" " />{formatInteger(selectedGroupIds.size, uiLocale)}</span>
                   <div>
                     {activeGroup && (
                       <button
@@ -618,8 +618,7 @@ export function SemanticNegativeKeywordsDialog({
                         }}
                         type="button"
                       >
-                        Только текущая
-                      </button>
+                        <UiText text="Только текущая" /></button>
                     )}
                     <button
                       disabled={applying || selectedGroupIds.size === 0}
@@ -629,12 +628,11 @@ export function SemanticNegativeKeywordsDialog({
                       }}
                       type="button"
                     >
-                      Очистить
-                    </button>
+                      <UiText text="Очистить" /></button>
                   </div>
                 </div>
                 <div
-                  aria-label="Папки для поиска минус-слов"
+                  aria-label={uiText("Папки для поиска минус-слов")}
                   className="semantic-operation-folder-list semantic-duplicate-folder-list"
                 >
                   {visibleGroups.map(({ group, depth, hasChildren }) => (
@@ -647,7 +645,7 @@ export function SemanticNegativeKeywordsDialog({
                       {hasChildren ? (
                         <button
                           aria-expanded={expandedGroupIds.has(group.id)}
-                          aria-label={expandedGroupIds.has(group.id) ? "Свернуть папку" : "Развернуть папку"}
+                          aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
                           className="semantic-operation-folder-toggle"
                           disabled={applying}
                           onClick={() => toggleExpanded(group.id)}
@@ -671,60 +669,59 @@ export function SemanticNegativeKeywordsDialog({
                           style={{ background: group.color ?? "#a8a5b8" }}
                         />
                         <span>{group.name}</span>
-                        <b>{formatInteger(group.keywordCount)}</b>
+                        <b>{formatInteger(group.keywordCount, uiLocale)}</b>
                       </label>
                     </div>
                   ))}
                 </div>
                 <small>
-                  Родительская папка включает все вложенные. Запросы из нескольких выбранных папок проверяются один раз.
-                </small>
+                  <UiText text="Родительская папка включает все вложенные. Запросы из нескольких выбранных папок проверяются один раз." /></small>
               </div>
             )}
             <div className="semantic-negative-checkbox-options">
-              <h4>Настройки поиска</h4>
+              <h4><UiText text="Настройки поиска" /></h4>
               <label className="semantic-toggle-line">
                 <input checked={caseSensitive} disabled={applying} onChange={(event) => { setCaseSensitive(event.target.checked); invalidatePreview(); }} type="checkbox" />
-                <span><strong>Учитывать регистр</strong><small>«Москва» и «москва» будут разными.</small></span>
+                <span><strong><UiText text="Учитывать регистр" /></strong><small><UiText text="«Москва» и «москва» будут разными." /></small></span>
               </label>
               <fieldset className="semantic-negative-phrase-options">
-                <legend>Стоп-фразы из двух и более слов</legend>
+                <legend><UiText text="Стоп-фразы из двух и более слов" /></legend>
                 <label className="semantic-toggle-line">
                   <input checked={ignoreWordOrder} disabled={applying} onChange={(event) => { setIgnoreWordOrder(event.target.checked); invalidatePreview(); }} type="checkbox" />
-                  <span><strong>Игнорировать порядок слов</strong><small>«купить ёлку» найдёт и «ёлку купить».</small></span>
+                  <span><strong><UiText text="Игнорировать порядок слов" /></strong><small><UiText text="«купить ёлку» найдёт и «ёлку купить»." /></small></span>
                 </label>
                 <label className="semantic-toggle-line">
                   <input checked={ignorePunctuation} disabled={applying} onChange={(event) => { setIgnorePunctuation(event.target.checked); invalidatePreview(); }} type="checkbox" />
-                  <span><strong>Игнорировать знаки и спецсимволы</strong><small>Дефисы, запятые и другие символы считаются разделителями.</small></span>
+                  <span><strong><UiText text="Игнорировать знаки и спецсимволы" /></strong><small><UiText text="Дефисы, запятые и другие символы считаются разделителями." /></small></span>
                 </label>
               </fieldset>
             </div>
             <div className="semantic-negative-scope-note">
               <Icon name="warning" />
-              <span><strong>Сначала предпросмотр</strong><small>Ни один запрос не попадёт в корзину без отдельного подтверждения.</small></span>
+              <span><strong><UiText text="Сначала предпросмотр" /></strong><small><UiText text="Ни один запрос не попадёт в корзину без отдельного подтверждения." /></small></span>
             </div>
           </section>
 
           <section className="semantic-workflow-panel semantic-negative-preview-panel">
             <header>
-              <h3>Предпросмотр</h3>
-              <p>Все совпадения отмечены для удаления. Снимите галочку, чтобы оставить запрос.</p>
+              <h3><UiText text="Предпросмотр" /></h3>
+              <p><UiText text="Все совпадения отмечены для удаления. Снимите галочку, чтобы оставить запрос." /></p>
             </header>
             <div className="semantic-negative-preview">
-              <button className="secondary-button semantic-negative-preview-button" disabled={previewing || loadingMore || applying} onClick={() => void requestPreview()} type="button">
+              <button className="secondary-button semantic-negative-preview-button" disabled={previewing || loadingMore || applying} onClick={() => void requestPreview(undefined, undefined, uiLocale)} type="button">
                 <Icon name="search" />
-                {previewing ? "Проверяем…" : preview ? "Пересчитать совпадения" : "Найти совпадения"}
+                {previewing ? <UiText text="Проверяем…" /> : preview ? <UiText text="Пересчитать совпадения" /> : <UiText text="Найти совпадения" />}
               </button>
-              {!preview && !previewing && <div className="semantic-negative-empty"><Icon name="search" /><span>Добавьте слова и запустите проверку.</span></div>}
+              {!preview && !previewing && <div className="semantic-negative-empty"><Icon name="search" /><span><UiText text="Добавьте слова и запустите проверку." /></span></div>}
               {preview && (
                 <>
                   <dl>
-                    <div><dt>Проверено</dt><dd>{formatInteger(preview.scannedCount)}</dd></div>
-                    <div><dt>Найдено</dt><dd>{formatInteger(preview.matchedCount)}</dd></div>
-                    <div><dt>К удалению</dt><dd>{formatInteger(selectedMatchCount)}</dd></div>
+                    <div><dt><UiText text="Проверено" /></dt><dd>{formatInteger(preview.scannedCount, uiLocale)}</dd></div>
+                    <div><dt><UiText text="Найдено" /></dt><dd>{formatInteger(preview.matchedCount, uiLocale)}</dd></div>
+                    <div><dt><UiText text="К удалению" /></dt><dd>{formatInteger(selectedMatchCount, uiLocale)}</dd></div>
                   </dl>
                   {previewMatches.length === 0 ? (
-                    <div className="inline-alert success">Совпадений нет — перемещать нечего.</div>
+                    <div className="inline-alert success"><UiText text="Совпадений нет — перемещать нечего." /></div>
                   ) : (
                     <ul
                       aria-busy={loadingMore}
@@ -736,7 +733,7 @@ export function SemanticNegativeKeywordsDialog({
                           <li className={selected ? "selected" : "kept"} key={match.keywordId}>
                             <label className="semantic-negative-match-row">
                               <input
-                                aria-label={`Переместить запрос «${match.text}» в корзину`}
+                                aria-label={uiText("Переместить запрос «{0}» в корзину", [String(match.text)])}
                                 checked={selected}
                                 disabled={applying}
                                 onChange={(event) => toggleDeletion(match.keywordId, event.target.checked)}
@@ -744,7 +741,7 @@ export function SemanticNegativeKeywordsDialog({
                               />
                               <span className="semantic-negative-match-content">
                                 <HighlightedNegativeKeyword match={match} />
-                                <small>{selected ? "В корзину" : "Оставить"}</small>
+                                <small>{selected ? <UiText text="В корзину" /> : <UiText text="Оставить" />}</small>
                               </span>
                             </label>
                           </li>
@@ -758,15 +755,15 @@ export function SemanticNegativeKeywordsDialog({
                       className="semantic-negative-scroll-status"
                     >
                       <span>
-                        Показано {formatInteger(previewMatches.length)} из{" "}
-                        {formatInteger(preview.matchedCount)}
+                        <UiText text="Показано" after=" " />{formatInteger(previewMatches.length, uiLocale)} <UiText text="из" before=" " />{" "}
+                        {formatInteger(preview.matchedCount, uiLocale)}
                       </span>
                       {preview.page < preview.pageCount && (
                         <span>
                           {loadingMore && <span className="spinner" />}
                           {loadingMore
-                            ? "Загружаем ещё…"
-                            : "Прокрутите список вниз — следующие 100 загрузятся автоматически"}
+                            ? <UiText text="Загружаем ещё…" />
+                            : <UiText text="Прокрутите список вниз — следующие 100 загрузятся автоматически" />}
                         </span>
                       )}
                     </div>
@@ -777,7 +774,7 @@ export function SemanticNegativeKeywordsDialog({
           </section>
         </div>
 
-        {error && <div className="semantic-workflow-feedback"><div className="inline-alert danger" role="alert">{error}</div></div>}
+        {error && <div className="semantic-workflow-feedback"><div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div></div>}
       </div>
     </SemanticModal>
     {confirmClose && (
@@ -796,10 +793,11 @@ function ScopeCard({
   label,
   onSelect
 }: Readonly<{ checked: boolean; count?: number; label: string; onSelect: () => void }>) {
+  const uiLocale = useUiLocale().locale;
   return (
     <label className={checked ? "selected" : undefined}>
       <input checked={checked} onChange={onSelect} type="radio" />
-      <span><strong>{label}</strong>{count !== undefined && <small>{formatInteger(count)} шт.</small>}</span>
+      <span><strong>{label}</strong>{count !== undefined && <small>{formatInteger(count, uiLocale)} <UiText text="шт." before=" " /></small>}</span>
     </label>
   );
 }
@@ -932,11 +930,11 @@ function commandValidationMessage(
   ignorePunctuation: boolean,
   scopeKind: ScopeKind,
   groupIds: readonly string[],
-  selections: readonly SemanticKeywordBulkSelection[]
+  selections: readonly SemanticKeywordBulkSelection[], uiLocale: string = "ru-RU"
 ): string {
   if (words.length === 0) return "Добавьте хотя бы одно минус-слово.";
   if (words.length > semanticNegativeKeywordWordLimit) {
-    return `В одном наборе может быть не больше ${formatInteger(semanticNegativeKeywordWordLimit)} минус-слов.`;
+    return `В одном наборе может быть не больше ${formatInteger(semanticNegativeKeywordWordLimit, uiLocale)} минус-слов.`;
   }
   if (words.some((word) => word.length > 160)) return "Одно минус-слово не может быть длиннее 160 символов.";
   if (ignorePunctuation && words.some((word) => !/[\p{L}\p{N}]/u.test(word))) {
@@ -944,7 +942,7 @@ function commandValidationMessage(
   }
   if (scopeKind === "GROUP" && groupIds.length === 0) return "Выберите хотя бы одну папку для проверки.";
   if (scopeKind === "GROUP" && groupIds.length > semanticNegativeKeywordGroupScopeLimit) {
-    return `За один раз можно выбрать не больше ${formatInteger(semanticNegativeKeywordGroupScopeLimit)} папок.`;
+    return `За один раз можно выбрать не больше ${formatInteger(semanticNegativeKeywordGroupScopeLimit, uiLocale)} папок.`;
   }
   if (scopeKind === "SELECTION" && selections.length === 0) return "Выберите хотя бы один запрос.";
   return "Проверьте параметры минус-слов.";
@@ -969,6 +967,6 @@ function negativeKeywordError(error: unknown): string {
   return error.message;
 }
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+function formatInteger(value: number, uiLocale: string = "ru-RU"): string {
+  return new Intl.NumberFormat(uiLocale).format(value);
 }

@@ -51,8 +51,8 @@ test("rejects duplicate keywords, unknown fields and blind retries", () => {
   assert.throws(() => semanticFrequencyContextRoute("BASE", "213", "TV"));
 });
 
-test("accepts one 10,000-keyword Arsenkin batch and rejects overflow", () => {
-  const items = Array.from({ length: 10_000 }, (_, index) => ({
+test("accepts a 50,000-keyword operation and rejects command overflow", () => {
+  const items = Array.from({ length: 50_000 }, (_, index) => ({
     id: keywordIdAt(index),
     version: 1
   }));
@@ -64,11 +64,11 @@ test("accepts one 10,000-keyword Arsenkin batch and rejects overflow", () => {
       regionCode: "213",
       device: "ALL"
     }).items.length,
-    10_000
+    50_000
   );
   assert.throws(() =>
     createFrequencyCollectionInput({
-      items: [...items, { id: keywordIdAt(10_000), version: 1 }],
+      items: Array.from({ length: 300_001 }),
       types: ["BASE"],
       regionCode: "213",
       device: "ALL"

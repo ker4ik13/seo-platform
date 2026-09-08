@@ -19,6 +19,8 @@ import {
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { UiText, useUiLocale } from "./ui-locale";
+
 
 const WIDTH = 380;
 const HEIGHT = 170;
@@ -46,6 +48,8 @@ export function SemanticRankHistoryChart({
 }: Readonly<{
   points: readonly SemanticKeywordPositionHistoryPoint[];
 }>) {
+  const uiLocale = useUiLocale().locale;
+  const { t: uiText } = useUiLocale();
   const series = useMemo(() => rankSeries(points), [points]);
   const [hoveredSnapshotId, setHoveredSnapshotId] = useState<string>();
   const [focusedSnapshotId, setFocusedSnapshotId] = useState<string>();
@@ -57,8 +61,8 @@ export function SemanticRankHistoryChart({
   if (timelinePoints.length === 0) {
     return (
       <div className="semantic-rank-chart-empty">
-        <strong>История пока не накоплена</strong>
-        <span>График появится после первого сохранённого замера позиции.</span>
+        <strong><UiText text="История пока не накоплена" /></strong>
+        <span><UiText text="График появится после первого сохранённого замера позиции." /></span>
       </div>
     );
   }
@@ -132,7 +136,7 @@ export function SemanticRankHistoryChart({
     <div className="semantic-rank-chart">
       <div className="semantic-rank-chart-canvas">
         <svg
-          aria-label="Интерактивный график истории позиций. Чем выше линия, тем лучше позиция. Наведите курсор или перейдите по точкам клавишей Tab, чтобы узнать детали съёма."
+          aria-label={uiText("Интерактивный график истории позиций. Чем выше линия, тем лучше позиция. Наведите курсор или перейдите по точкам клавишей Tab, чтобы узнать детали съёма.")}
           onPointerLeave={() => setHoveredSnapshotId(undefined)}
           onPointerMove={snapToNearestPoint}
           preserveAspectRatio="xMidYMid meet"
@@ -159,7 +163,7 @@ export function SemanticRankHistoryChart({
             y1={MISSING_Y}
             y2={MISSING_Y}
           />
-          <text className="semantic-rank-chart-axis missing" x={PADDING.left - 7} y={MISSING_Y + 3}>нет</text>
+          <text className="semantic-rank-chart-axis missing" x={PADDING.left - 7} y={MISSING_Y + 3}><UiText text="нет" /></text>
           {series.map((entry) => {
             const positioned = entry.points.filter(isPositionPoint);
             const color = seriesColor(entry.searchEngine);
@@ -222,7 +226,7 @@ export function SemanticRankHistoryChart({
           )}
           {plottedPoints.map((plotted) => (
             <circle
-              aria-label={pointAriaLabel(plotted)}
+              aria-label={pointAriaLabel(plotted, uiLocale)}
               className="semantic-rank-chart-hit"
               cx={plotted.x}
               cy={plotted.y}
@@ -235,8 +239,8 @@ export function SemanticRankHistoryChart({
               tabIndex={0}
             />
           ))}
-          <text className="semantic-rank-chart-date" x={PADDING.left} y={HEIGHT - 6}>{formatDate(new Date(minTime).toISOString())}</text>
-          <text className="semantic-rank-chart-date end" x={WIDTH - PADDING.right} y={HEIGHT - 6}>{formatDate(new Date(maxTime).toISOString())}</text>
+          <text className="semantic-rank-chart-date" x={PADDING.left} y={HEIGHT - 6}>{formatDate(new Date(minTime).toISOString(), uiLocale)}</text>
+          <text className="semantic-rank-chart-date end" x={WIDTH - PADDING.right} y={HEIGHT - 6}>{formatDate(new Date(maxTime).toISOString(), uiLocale)}</text>
         </svg>
         {activePoint && <RankPointTooltip plotted={activePoint} svgRef={svgRef} />}
       </div>
@@ -248,7 +252,7 @@ export function SemanticRankHistoryChart({
             <span>{entry.label}</span>
           </span>
         ))}
-        <span className="missing"><b>×</b><span>Позиция не найдена</span></span>
+        <span className="missing"><b>×</b><span><UiText text="Позиция не найдена" /></span></span>
       </div>
     </div>
   );
@@ -261,6 +265,7 @@ function RankPointTooltip({
   plotted: PlottedRankPoint;
   svgRef: RefObject<SVGSVGElement | null>;
 }>) {
+  const uiLocale = useUiLocale().locale;
   const { point, series, x, y } = plotted;
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [viewportPosition, setViewportPosition] = useState<Readonly<{
@@ -320,14 +325,14 @@ function RankPointTooltip({
     >
       <header>
         <SearchEngineLogo engine={series.searchEngine} size="compact" />
-        <strong>{rankSearchSystemLabel(series.searchEngine, point.searchSource)}</strong>
+        <strong>{<UiText text={rankSearchSystemLabel(series.searchEngine, point.searchSource) ?? ""} />}</strong>
         <span>{position}</span>
       </header>
       <dl>
         <div>
-          <dt>Провайдер</dt>
+          <dt><UiText text="Провайдер" /></dt>
           <dd>
-            {point.provider === "KEY_COLLECTOR" ? (
+            {point.provider === "KEY_COLLECTOR" || point.provider === "MANUAL_IMPORT" ? (
               <span
                 aria-label="Key Collector"
                 className="semantic-rank-import-provider-icon"
@@ -338,20 +343,20 @@ function RankPointTooltip({
             ) : (
               <ProviderLogo provider={point.provider} size="compact" />
             )}
-            {rankHistoryProviderLabel(point.provider)}
+            {<UiText text={rankHistoryProviderLabel(point.provider) ?? ""} />}
           </dd>
         </div>
         <div>
-          <dt>Дата и время</dt>
-          <dd><time dateTime={point.observedAt}>{formatDateTime(point.observedAt)}</time></dd>
+          <dt><UiText text="Дата и время" /></dt>
+          <dd><time dateTime={point.observedAt}>{formatDateTime(point.observedAt, uiLocale)}</time></dd>
         </div>
         <div>
-          <dt>Регион</dt>
+          <dt><UiText text="Регион" /></dt>
           <dd>{region}</dd>
         </div>
         <div>
-          <dt>Устройство</dt>
-          <dd>{deviceLabel(point.device)}{point.depth ? ` · Топ-${point.depth}` : ""}</dd>
+          <dt><UiText text="Устройство" /></dt>
+          <dd>{<UiText text={deviceLabel(point.device) ?? ""} />}{point.depth ? <UiText text="· Топ-{0}" values={[String(point.depth)]} before=" " /> : ""}</dd>
         </div>
       </dl>
       <small>{point.contextName}</small>
@@ -426,32 +431,32 @@ function pointDistance(
   return (plotted.x - x) ** 2 + (plotted.y - y) ** 2;
 }
 
-function pointAriaLabel({ point, series }: PlottedRankPoint): string {
+function pointAriaLabel({ point, series }: PlottedRankPoint, uiLocale: string = "ru-RU"): string {
   const status = isPositionPoint(point)
     ? `позиция ${point.position}`
     : "позиция не найдена";
-  return `${rankSearchSystemLabel(series.searchEngine, point.searchSource)}, ${status}, ${rankHistoryProviderLabel(point.provider)}, ${formatDateTime(point.observedAt)}`;
+  return `${rankSearchSystemLabel(series.searchEngine, point.searchSource)}, ${status}, ${rankHistoryProviderLabel(point.provider)}, ${formatDateTime(point.observedAt, uiLocale)}`;
 }
 
 function deviceLabel(device: "DESKTOP" | "MOBILE"): string {
   return device === "DESKTOP" ? "Десктоп" : "Мобильное";
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         day: "2-digit",
         month: "2-digit"
       }).format(date);
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
+    : new Intl.DateTimeFormat(uiLocale, {
         day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",

@@ -1,3 +1,4 @@
+import { rankCommandKeywordLimit } from "./rank-policy.js";
 import type { RankManifestHash } from "./rank-runs.js";
 
 export const rankExecutionGrantRequestSchemaVersion =
@@ -198,13 +199,13 @@ export type InternalRankExecutionGrantDecisionV1 =
 
 export interface InternalSettleRankExecutionGrantInputV1 {
   readonly schemaVersion: "rank-execution-grant-settlement-request@1";
-  readonly action: "HOLD" | "CAPTURE";
+  readonly action: "HOLD" | "CAPTURE" | "RELEASE";
 }
 
 export interface InternalRankExecutionGrantSettlementResultV1 {
   readonly schemaVersion: "rank-execution-grant-settlement-result@1";
   readonly grantId: string;
-  readonly status: "RESERVED" | "CAPTURED" | "NOT_APPLICABLE";
+  readonly status: "RESERVED" | "CAPTURED" | "RELEASED" | "NOT_APPLICABLE";
 }
 
 const UUID_V7_LOWERCASE_PATTERN =
@@ -216,7 +217,7 @@ const DENIAL_REASONS: ReadonlySet<string> = new Set(
 );
 const GRANT_TTL_MILLISECONDS = 30_000;
 const MAX_EXECUTION_ATTEMPT = 1_000;
-const MAX_MANIFEST_CHUNK_INDEX = 14_999;
+const MAX_MANIFEST_CHUNK_INDEX = rankCommandKeywordLimit - 1;
 
 const REQUEST_FIELDS = [
   "schemaVersion",
@@ -434,7 +435,7 @@ export function internalSettleRankExecutionGrantInput(
     input.schemaVersion !==
       rankExecutionGrantSettlementRequestSchemaVersion ||
     input.action !== "HOLD" &&
-    input.action !== "CAPTURE"
+    input.action !== "CAPTURE" && input.action !== "RELEASE"
   ) {
     throw invalid("settlement request");
   }
@@ -457,6 +458,7 @@ export function internalRankExecutionGrantSettlementResult(
       rankExecutionGrantSettlementResultSchemaVersion ||
     (input.status !== "RESERVED" &&
       input.status !== "CAPTURED" &&
+      input.status !== "RELEASED" &&
       input.status !== "NOT_APPLICABLE")
   ) {
     throw invalid("settlement result");

@@ -10,6 +10,12 @@ const PREFLIGHT_VARY_FIELDS = [
   "Access-Control-Request-Method"
 ] as const;
 
+export function serializeRequestForLog(request: FastifyRequest): { method: string; route: string } {
+  // Private URL paths and query strings can contain tenant data or capability
+  // references. Only server-defined route templates belong in access logs.
+  return { method: request.method, route: request.routeOptions?.url ?? "unmatched" };
+}
+
 function headerParts(
   value: number | string | readonly string[] | undefined
 ): string[] {

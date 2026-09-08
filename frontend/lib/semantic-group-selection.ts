@@ -63,10 +63,10 @@ export function semanticKeywordSearchPlaceholder({
   }>;
   activeGroupId?: string;
   multiGroupIds: readonly string[];
-}>): string {
+}>, uiLocale: string = "ru-RU"): string {
   const selectedGroupCount = new Set(multiGroupIds).size;
   if (selectedGroupCount > 1) {
-    return `Поиск по: ${formatRussianGroupCount(selectedGroupCount)}`;
+    return `Поиск по: ${formatRussianGroupCount(selectedGroupCount, uiLocale)}`;
   }
   if (activeGroup?.systemKind === "TRASH") return "Поиск по: Корзина";
   if (activeGroup?.systemKind === "UNGROUPED") return "Поиск по: Без группы";
@@ -75,7 +75,7 @@ export function semanticKeywordSearchPlaceholder({
   return "Поиск по: Весь проект";
 }
 
-function formatRussianGroupCount(value: number): string {
+function formatRussianGroupCount(value: number, uiLocale: string = "ru-RU"): string {
   const mod100 = value % 100;
   const mod10 = value % 10;
   const suffix =
@@ -86,7 +86,7 @@ function formatRussianGroupCount(value: number): string {
         : mod10 >= 2 && mod10 <= 4
           ? "группы"
           : "групп";
-  return `${value.toLocaleString("ru-RU")} ${suffix}`;
+  return `${value.toLocaleString(uiLocale)} ${suffix}`;
 }
 
 /**

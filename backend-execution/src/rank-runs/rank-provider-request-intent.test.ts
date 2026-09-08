@@ -82,6 +82,60 @@ test("builds the exact secret-free adapter command and a JCS golden hash", () =>
   );
 });
 
+test("accepts the large XMLStock policy used by city and device batches", () => {
+  const source = buildInput();
+  const command: InternalSealRankManifestInput = {
+    ...source.command,
+    providerPolicyVersion: "manual-xmlstock-serp@2.0.0",
+    provider: "XMLSTOCK",
+    execution: {
+      ...source.command.execution,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      language: "ru",
+      device: "MOBILE",
+      providerMappingVersion: "xmlstock-yandex-live@2"
+    }
+  };
+  const firstEntry = source.chunk.entries[0];
+  assert.ok(firstEntry);
+  const chunk = rehashChunk({
+    ...source.chunk,
+    entries: [firstEntry]
+  });
+  const intent = buildRankProviderRequestIntent({
+    ...source,
+    command,
+    chunk,
+    executionConnectorVersion: "xmlstock-serp@1.0.0",
+    providerPolicyVersion: "manual-xmlstock-serp@2.0.0"
+  });
+
+  assert.equal(intent.provider, "XMLSTOCK");
+  assert.equal(intent.execution.device, "MOBILE");
+  assert.equal(intent.keywords.length, 1);
+  assert.deepEqual(
+    rankProviderRequestIntent(
+      JSON.parse(rankProviderRequestIntentCanonicalJson(intent))
+    ),
+    intent
+  );
+  assert.throws(
+    () => buildRankProviderRequestIntent({
+      ...source,
+      command: {
+        ...command,
+        providerPolicyVersion: "manual-arsenkin-positions@3.0.0"
+      },
+      chunk,
+      executionConnectorVersion: "xmlstock-serp@1.0.0",
+      providerPolicyVersion: "manual-xmlstock-serp@2.0.0"
+    }),
+    TypeError
+  );
+});
+
 test("canonical hash changes for every provider-significant projection", () => {
   const intent = buildRankProviderRequestIntent(buildInput());
   const baseline = rankProviderRequestIntentHash(intent).value;

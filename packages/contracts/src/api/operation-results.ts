@@ -66,6 +66,9 @@ export interface InternalFrequencyOperationResultInput {
 }
 
 export interface InternalFrequencyOperationResultRow {
+  /** Current editable version, omitted for removed/inactive keywords. */
+  readonly keywordVersion?: number;
+  readonly keywordAvailable?: boolean;
   readonly keywordId: string;
   readonly keyword: string;
   readonly snapshots: readonly FrequencySnapshotSummary[];
@@ -184,6 +187,9 @@ export interface RankOperationResultRow {
   readonly keywordId: string;
   /** Current tenant-visible keyword label, not the secret-bearing manifest field. */
   readonly keyword: string;
+  /** Current version for an explicit new run; never changes the sealed manifest. */
+  readonly keywordVersion?: number;
+  readonly keywordAvailable?: boolean;
   readonly state: "PENDING" | "FOUND" | "NOT_FOUND";
   /** Present for one-key-per-task providers such as XMLStock. */
   readonly status?: OperationResultItemStatus;
@@ -210,6 +216,12 @@ export interface RankOperationSerpResult {
   readonly snippet?: string;
 }
 
+/** Current persisted outcomes across the complete immutable rank manifest. */
+export interface RankOperationResultCounts {
+  readonly foundCount: number;
+  readonly notFoundCount: number;
+}
+
 export interface InternalRankOperationResult {
   readonly workspaceId: string;
   readonly projectId: string;
@@ -217,6 +229,8 @@ export interface InternalRankOperationResult {
   readonly trackingContextId: string;
   readonly contextName: string;
   readonly execution: InternalRankExecutionParameters;
+  /** Independent from the cursor-paginated rows below. */
+  readonly counts: RankOperationResultCounts;
   readonly rows: readonly RankOperationResultRow[];
   readonly page: OperationResultPageInfo;
 }
