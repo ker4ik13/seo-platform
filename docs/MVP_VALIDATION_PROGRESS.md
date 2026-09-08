@@ -74,3 +74,9 @@ S3/ClamAV, HTTPS, browser и backup restore находится в `mvp-audit-202
   ширину/scroll/header/value и не отправила повторных rank-read запросов.
 - Четыре запуска XMLStock из пользовательского UI (Москва/Санкт-Петербург ×
   ПК/телефон) получили execution grants и завершились без failed keyword.
+- Первый clean Dokploy build обнаружил отсутствующую предварительную сборку
+  workspace dependency `operational-alerts` в isolated Core API image. После
+  исправления отдельно воспроизведены Prisma generate → Core API TypeScript
+  build → `pnpm deploy --prod` с предварительно убранными локальными `dist`;
+  финальный deploy artifact содержит скомпилированную зависимость. Статический
+  infrastructure regression закрепляет порядок clean Docker build.

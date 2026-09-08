@@ -15,6 +15,7 @@ ARG PACKAGE_NAME
 ENV TARGET_PACKAGE=$PACKAGE_NAME
 
 RUN pnpm --filter @seo-platform/contracts build \
+  && pnpm --filter @seo-platform/operational-alerts build \
   && pnpm --filter "$TARGET_PACKAGE" prisma:generate \
   && pnpm --filter "$TARGET_PACKAGE" build \
   && pnpm --filter "$TARGET_PACKAGE" deploy --prod /deploy

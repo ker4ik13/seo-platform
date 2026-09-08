@@ -935,6 +935,11 @@ Frontend запрашивает только ключи из виртуальн�
 отдельный SERP-history, поэтому город и устройство не теряются при сравнении.
 Select и строки используют логотип поисковика и отдельный значок ПК/телефона,
 а позиция и дельта увеличены для быстрого визуального сравнения.
+
+Clean `infrastructure/docker/backend.Dockerfile` перед каждым isolated backend
+target компилирует не только contracts, но и экспортируемый workspace package
+`operational-alerts`. Поэтому migration/NATS provisioner image не зависит от
+оставшегося локального `dist` и повторяет результат чистого Dokploy clone.
 Execution-side provider-intent parser принимает опциональный
 `providerPolicyVersion` из нового immutable manifest command и требует его
 точного совпадения с policy оценки. Это сохраняет legacy-команды без поля и не

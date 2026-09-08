@@ -104,6 +104,25 @@ test("only three application deployables are present", async () => {
   );
 });
 
+test("clean backend images compile exported workspace dependencies before targets", async () => {
+  const dockerfile = await infrastructureFile("docker/backend.Dockerfile");
+  const targetBuild = dockerfile.indexOf('pnpm --filter "$TARGET_PACKAGE" build');
+  assert.notEqual(targetBuild, -1);
+  for (const dependency of [
+    "@seo-platform/contracts",
+    "@seo-platform/operational-alerts"
+  ]) {
+    const dependencyBuild = dockerfile.indexOf(
+      `pnpm --filter ${dependency} build`
+    );
+    assert.notEqual(dependencyBuild, -1, `${dependency} build must exist`);
+    assert.ok(
+      dependencyBuild < targetBuild,
+      `${dependency} must be built before an isolated backend target`
+    );
+  }
+});
+
 test("public frontend URLs come only from the canonical runtime origin", async () => {
   const sources = await Promise.all([
     workspaceFile("frontend/app/layout.tsx"),
