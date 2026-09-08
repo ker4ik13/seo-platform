@@ -229,6 +229,9 @@ function exportInputSnapshot(
     columns: [...input.columns],
     ...(input.filters ? { filters: input.filters as Prisma.InputJsonObject } : {}),
     ...(input.sort ? { sort: input.sort } : {}),
+    ...(input.rankSortDimensionKey
+      ? { rankSortDimensionKey: input.rankSortDimensionKey }
+      : {}),
     ...(input.keywordIds ? { keywordIds: [...input.keywordIds] } : {}),
     ...(input.includeBom === undefined ? {} : { includeBom: input.includeBom }),
     ...(input.competitorRows === undefined ? {} : { competitorRows: input.competitorRows }),

@@ -35,6 +35,7 @@ import {
 } from "./operation-result-modal";
 import { OperationStopConfirmation } from "./operation-stop-confirmation";
 import { ProviderLogo } from "./provider-logo";
+import { SemanticRankContext } from "./semantic-rank-context";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
@@ -322,6 +323,11 @@ export function SemanticOperationsDrawer({
               </strong>
               <span className="semantic-operation-status">{operation.statusLabel}</span>
             </header>
+            {operation.rankContext && (
+              <div className="semantic-operation-rank-context">
+                <SemanticRankContext {...operation.rankContext} />
+              </div>
+            )}
             <div className="semantic-operation-progress-head">
               <strong>{operation.percent}%</strong>
               <span>{operation.progressLabel}</span>
@@ -477,6 +483,11 @@ interface Operation {
   readonly durationLabel?: string;
   readonly resultLabel?: string;
   readonly competitorCollection?: boolean;
+  readonly rankContext?: Readonly<{
+    searchEngine: "GOOGLE" | "YANDEX";
+    regionCode: string;
+    device: "DESKTOP" | "MOBILE";
+  }>;
 }
 
 function frequencyOperation(value: FrequencyCollectionSummary): Operation {
@@ -545,6 +556,15 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
     downloadable: false,
     version: 1,
     ...(competitorCollection ? { competitorCollection: true } : {}),
+    ...(value.searchEngine && value.regionCode && value.device
+      ? {
+          rankContext: {
+            searchEngine: value.searchEngine,
+            regionCode: value.regionCode,
+            device: value.device
+          }
+        }
+      : {}),
     ...(value.routingScope
       ? {
           routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`

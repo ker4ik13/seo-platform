@@ -5,7 +5,8 @@ import {
   projectPositionTopThresholds,
   type ProjectPositionHistory,
   type ProjectPositionHistoryPoint,
-  type ProjectPositionTopThreshold
+  type ProjectPositionTopThreshold,
+  type SemanticRankDimension
 } from "@seo-platform/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
@@ -19,7 +20,9 @@ import {
   type ProjectPositionHistoryPeriod
 } from "../lib/project-position-history";
 import { ProjectPositionDateRangePicker } from "./project-position-date-range-picker";
+import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { SemanticRankContext } from "./semantic-rank-context";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
@@ -41,15 +44,21 @@ const PADDING = { top: 22, right: 24, bottom: 42, left: 54 } as const;
 type SelectedPeriod = ProjectPositionHistoryPeriod | "CUSTOM";
 
 export function ProjectPositionHistoryChart({
+  dimensions,
   history,
   includeUntracked,
   onIncludeUntrackedChange,
+  onRankDimensionChange,
+  rankDimensionKey,
   scopeError,
   scopeLoading
 }: Readonly<{
+  dimensions: readonly SemanticRankDimension[];
   history: ProjectPositionHistory;
   includeUntracked: boolean;
   onIncludeUntrackedChange: (includeUntracked: boolean) => void;
+  onRankDimensionChange: (rankDimensionKey: string) => void;
+  rankDimensionKey: string;
   scopeError?: string;
   scopeLoading: boolean;
 }>) {
@@ -126,6 +135,30 @@ export function ProjectPositionHistoryChart({
 
   return (
     <div className="dashboard-position-chart">
+      <label className="dashboard-rank-dimension-filter">
+        <span><UiText text="Поисковик, город и устройство" /></span>
+        <CustomSelect
+          disabled={scopeLoading}
+          onChange={(event) => onRankDimensionChange(event.target.value)}
+          searchable
+          searchPlaceholder={uiText("Найти город или устройство")}
+          value={rankDimensionKey}
+        >
+          <option value=""><UiText text="Все города и устройства" /></option>
+          {dimensions.map((dimension) => (
+            <option key={dimension.key} value={dimension.key}>
+              <SemanticRankContext
+                device={dimension.device}
+                regionCode={dimension.regionCode}
+                {...(dimension.regionLabel
+                  ? { regionLabel: dimension.regionLabel }
+                  : {})}
+                searchEngine={dimension.searchEngine}
+              />
+            </option>
+          ))}
+        </CustomSelect>
+      </label>
       <div className="dashboard-position-controls">
         <div aria-label={uiText("Период графика")} className="dashboard-chart-button-group" role="group">
           {projectPositionHistoryPeriods.map((value) => (
@@ -197,7 +230,9 @@ export function ProjectPositionHistoryChart({
         <div className="dashboard-chart-scope-error" role="alert">
           <span>{<UiText text={scopeError ?? ""} />}</span>
           <button
-            onClick={() => onIncludeUntrackedChange(true)}
+            onClick={() => rankDimensionKey
+              ? onRankDimensionChange(rankDimensionKey)
+              : onIncludeUntrackedChange(true)}
             type="button"
           >
             <UiText text="Повторить" /></button>

@@ -13354,3 +13354,152 @@ svg { display: block; }
     z-index: 30;
   }
 }
+
+/* Rank values and URLs share one presentation in standard and geographic columns. */
+.semantic-position-value > strong {
+  font-weight: 700;
+}
+
+.semantic-table .semantic-ranking-url-link {
+  color: var(--brand);
+}
+
+.semantic-regional-rank-row .semantic-position-value {
+  gap: 5px;
+}
+
+.semantic-regional-rank-row .semantic-position-value > strong {
+  font-size: 16px;
+}
+
+.semantic-regional-rank-row .semantic-position-value > small {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.semantic-rank-context {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.semantic-rank-context > .search-engine-logo {
+  flex: 0 0 auto;
+}
+
+.semantic-rank-context-engine {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.semantic-rank-context-region {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-operation-rank-context {
+  background: #f8f7ff;
+  border: 1px solid #e6e2ff;
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.semantic-operation-rank-context .semantic-rank-context-region,
+.semantic-operation-rank-context .semantic-rank-context-engine {
+  font-size: 10px;
+}
+
+.semantic-competitor-snapshot > header h3 {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.semantic-competitor-snapshot > header small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.semantic-competitor-result > strong {
+  font-size: 13px;
+}
+
+.semantic-competitor-result > small {
+  font-size: 11px;
+}
+
+.semantic-competitor-result > a {
+  font-size: 11.5px;
+}
+
+.semantic-site-results-modal > section > header strong,
+.semantic-site-results-modal > section > header .semantic-rank-context-engine,
+.semantic-site-results-modal > section > header .semantic-rank-context-region {
+  font-size: 14px;
+}
+
+.semantic-site-results-modal > section > header time {
+  font-size: 12px;
+}
+
+.semantic-site-results-modal .semantic-project-serp-results > li {
+  min-height: 86px;
+  padding-block: 12px;
+}
+
+.semantic-site-results-modal .semantic-project-serp-position {
+  font-size: 12px;
+}
+
+.semantic-site-results-modal .semantic-project-serp-result > strong {
+  font-size: 14px;
+}
+
+.semantic-site-results-modal .semantic-project-serp-result > small,
+.semantic-site-results-modal .semantic-project-serp-result > a {
+  font-size: 12px;
+}
+
+.semantic-competitor-result > a,
+.semantic-project-serp-result > a,
+.semantic-competitor-url,
+.semantic-competitor-url b,
+.semantic-competitor-snapshot > ol > li.is-project-site .semantic-competitor-url b,
+.semantic-project-serp-result .semantic-competitor-url b {
+  color: var(--brand) !important;
+}
+
+.dashboard-rank-dimension-filter {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(260px, 430px);
+  justify-content: start;
+}
+
+.dashboard-rank-dimension-filter > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.dashboard-rank-dimension-filter .custom-select-trigger {
+  min-height: 40px;
+}
+
+@media (max-width: 720px) {
+  .dashboard-rank-dimension-filter {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-rank-dimension-filter .custom-select-trigger {
+    min-height: 44px;
+  }
+}

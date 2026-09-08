@@ -251,6 +251,7 @@ export interface CreateSemanticExportInput {
   readonly columns: readonly SemanticExportColumnKey[];
   readonly filters?: SemanticExportFilters;
   readonly sort?: SemanticKeywordSort;
+  readonly rankSortDimensionKey?: string;
   readonly keywordIds?: readonly string[];
   readonly includeBom?: boolean;
   /** One row per stored organic result, with its geographic provenance. */

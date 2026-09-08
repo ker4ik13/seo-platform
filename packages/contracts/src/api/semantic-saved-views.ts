@@ -32,8 +32,8 @@ export const semanticSavedViewQueryIndicators = [
 export type SemanticSavedViewQueryIndicator =
   (typeof semanticSavedViewQueryIndicators)[number];
 
-export const semanticSavedViewSchemaVersions = [1, 2, 3] as const;
-export const semanticSavedViewCurrentSchemaVersion = 3 as const;
+export const semanticSavedViewSchemaVersions = [1, 2, 3, 4] as const;
+export const semanticSavedViewCurrentSchemaVersion = 4 as const;
 export type SemanticSavedViewSchemaVersion =
   (typeof semanticSavedViewSchemaVersions)[number];
 
@@ -105,6 +105,8 @@ export interface SemanticSavedViewConfig {
   readonly schemaVersion: SemanticSavedViewSchemaVersion;
   readonly filters: SemanticSavedViewFilters;
   readonly sort: SemanticKeywordSort;
+  /** Exact dimension used by RANK_POSITION_* and RANK_CHECKED_AT_* sorts. */
+  readonly rankSortDimensionKey?: string;
   /** Visible columns in their table order. */
   readonly columns: readonly SemanticSavedViewColumnKey[];
   /** Full drawer order, including columns currently hidden by the user. */

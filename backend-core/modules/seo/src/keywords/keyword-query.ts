@@ -6,6 +6,7 @@ import {
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
+  isSemanticRankDimensionSort,
   parseSemanticRankDimensionKey,
   type KeywordListQuery,
   type ProjectPositionHistoryQuery,
@@ -18,7 +19,8 @@ const BODY_QUERY_FIELDS = [
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
   , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
   "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
-  "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
+  "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore",
+  "rankSortDimensionKey"
 ] as const;
 
 export function keywordMultiSearchInput(value: unknown): KeywordListQuery {
@@ -72,12 +74,22 @@ export function projectPositionHistoryQuery(
     typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Readonly<Record<string, unknown>>)
       : {};
-  if (Object.keys(query).some((key) => key !== "includeUntracked")) {
+  if (Object.keys(query).some((key) =>
+    key !== "includeUntracked" && key !== "rankDimensionKey"
+  )) {
     invalid("query");
+  }
+  const rankDimensionKey = optionalSingleString(
+    query.rankDimensionKey,
+    "rankDimensionKey"
+  );
+  if (rankDimensionKey && !parseSemanticRankDimensionKey(rankDimensionKey)) {
+    invalid("rankDimensionKey");
   }
   return {
     includeUntracked:
-      optionalBoolean(query.includeUntracked, "includeUntracked") ?? false
+      optionalBoolean(query.includeUntracked, "includeUntracked") ?? false,
+    ...(rankDimensionKey ? { rankDimensionKey } : {})
   };
 }
 
@@ -126,6 +138,16 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const sort =
     optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
     "CREATED_DESC";
+  const rankSortDimensionKey = optionalSingleString(
+    query.rankSortDimensionKey,
+    "rankSortDimensionKey"
+  );
+  if (
+    rankSortDimensionKey &&
+    !parseSemanticRankDimensionKey(rankSortDimensionKey)
+  ) {
+    invalid("rankSortDimensionKey");
+  }
   const parsedLimit =
     limit === undefined ? semanticKeywordDefaultPageSize : Number(limit);
   if (
@@ -153,6 +175,9 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   if (!rankDimensionKey && (rankState || rankPositionMin !== undefined || rankPositionMax !== undefined || rankCheckedFrom || rankCheckedBefore)) invalid("rankDimensionKey");
   if ((rankState === "NOT_CHECKED" && (rankPositionMin !== undefined || rankPositionMax !== undefined || rankCheckedFrom || rankCheckedBefore)) ||
     (rankState === "NOT_FOUND" && (rankPositionMin !== undefined || rankPositionMax !== undefined))) invalid("rankState");
+  if (isSemanticRankDimensionSort(sort) !== Boolean(rankSortDimensionKey)) {
+    invalid("rankSortDimensionKey");
+  }
   if (groupId && groupIds.length > 0) invalid("groupIds");
   if (
     priorityMax !== undefined &&
@@ -188,6 +213,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(rankState ? { rankState } : {}), ...(rankPositionMin === undefined ? {} : { rankPositionMin }),
     ...(rankPositionMax === undefined ? {} : { rankPositionMax }), ...(rankCheckedFrom ? { rankCheckedFrom } : {}),
     ...(rankCheckedBefore ? { rankCheckedBefore } : {}),
+    ...(rankSortDimensionKey ? { rankSortDimensionKey } : {}),
     sort
   };
 }

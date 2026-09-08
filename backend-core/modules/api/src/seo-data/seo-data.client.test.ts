@@ -1553,7 +1553,8 @@ test("forwards the optional untracked scope for project position history", async
   try {
     assert.deepEqual(
       await client().projectPositionHistory(internalContext(), {
-        includeUntracked: true
+        includeUntracked: true,
+        rankDimensionKey: "GOOGLE|RU|1011973|ru|MOBILE"
       }),
       { points: [], truncated: false }
     );
@@ -1562,6 +1563,10 @@ test("forwards the optional untracked scope for project position history", async
       `/internal/v1/projects/${projectId}/keywords/position-history`
     );
     assert.equal(capturedUrl?.searchParams.get("includeUntracked"), "true");
+    assert.equal(
+      capturedUrl?.searchParams.get("rankDimensionKey"),
+      "GOOGLE|RU|1011973|ru|MOBILE"
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   defaultSemanticViewConfig,
   isInternalSemanticViewName,
+  semanticFolderSortConfigFor,
   semanticFolderSortFor,
   semanticFolderSortViewName,
   type SemanticSavedView,
@@ -61,4 +62,25 @@ test("hides technical layout and folder preferences from named saved views", () 
     true
   );
   assert.equal(isInternalSemanticViewName("Мой рабочий вид"), false);
+});
+
+test("restores the exact city and device used by a folder rank sort", () => {
+  const groupId = crypto.randomUUID();
+  const dimension = "GOOGLE|RU|1011973|ru|MOBILE";
+  const view = baseView(
+    semanticFolderSortViewName(groupId),
+    "RANK_POSITION_ASC"
+  );
+  const views = [{
+    ...view,
+    config: {
+      ...view.config,
+      schemaVersion: 4 as const,
+      rankSortDimensionKey: dimension
+    }
+  }];
+  assert.deepEqual(semanticFolderSortConfigFor(groupId, views), {
+    sort: "RANK_POSITION_ASC",
+    rankSortDimensionKey: dimension
+  });
 });

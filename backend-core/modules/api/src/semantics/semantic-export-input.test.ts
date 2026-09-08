@@ -54,6 +54,23 @@ test("accepts XLSX and a multi-group current filter", () => {
   assert.deepEqual(input.filters?.groupIds, [groupId, secondGroupId]);
 });
 
+test("keeps an exact geographic rank sort in exported row order", () => {
+  const dimension = "GOOGLE|RU|1011973|ru|MOBILE";
+  const input = createSemanticExportInput({
+    format: "XLSX",
+    scope: "CURRENT_FILTER",
+    locale: "ru",
+    columns: ["query"],
+    sort: "RANK_CHECKED_AT_DESC",
+    rankSortDimensionKey: dimension
+  });
+  assert.equal(input.rankSortDimensionKey, dimension);
+  assert.throws(
+    () => createSemanticExportInput({ ...input, rankSortDimensionKey: undefined }),
+    DomainError
+  );
+});
+
 test("accepts only a dedicated XLSX folder-map export", () => {
   const input = createSemanticExportInput({
     format: "XLSX",

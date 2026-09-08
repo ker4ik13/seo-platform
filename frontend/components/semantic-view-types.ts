@@ -82,6 +82,7 @@ export interface SemanticViewConfig {
   readonly schemaVersion: import("@seo-platform/contracts").SemanticSavedViewSchemaVersion;
   readonly filters: SemanticViewFilters;
   readonly sort: SemanticKeywordSort;
+  readonly rankSortDimensionKey?: string;
   readonly columns: readonly SemanticViewColumn[];
   readonly columnOrder?: readonly SemanticViewColumn[];
   readonly density: "COMFORTABLE" | "COMPACT";
@@ -126,13 +127,28 @@ export function semanticFolderSortFor(
   views: readonly SemanticSavedView[],
   fallback: SemanticKeywordSort = defaultSemanticViewConfig.sort
 ): SemanticKeywordSort {
-  return (
-    views.find(
-      ({ name, scope }) =>
-        scope === "PRIVATE" &&
-        name === semanticFolderSortViewName(groupId)
-    )?.config.sort ?? fallback
-  );
+  return semanticFolderSortConfigFor(groupId, views, { sort: fallback }).sort;
+}
+
+export function semanticFolderSortConfigFor(
+  groupId: string | undefined,
+  views: readonly SemanticSavedView[],
+  fallback: Readonly<Pick<SemanticViewConfig, "sort" | "rankSortDimensionKey">> = {
+    sort: defaultSemanticViewConfig.sort
+  }
+): Readonly<Pick<SemanticViewConfig, "sort" | "rankSortDimensionKey">> {
+  const config = views.find(
+    ({ name, scope }) =>
+      scope === "PRIVATE" &&
+      name === semanticFolderSortViewName(groupId)
+  )?.config;
+  const source = config ?? fallback;
+  return {
+    sort: source.sort,
+    ...(source.rankSortDimensionKey
+      ? { rankSortDimensionKey: source.rankSortDimensionKey }
+      : {})
+  };
 }
 
 export const defaultSemanticViewConfig: SemanticViewConfig = {
@@ -176,18 +192,22 @@ export function semanticViewConfigForCurrentSchema(
   if (config.schemaVersion === semanticSavedViewCurrentSchemaVersion) {
     return config;
   }
-  const columns = withAiAnswerRankingUrls(
-    config.schemaVersion === 1
-      ? withCapturedRankingUrls(config.columns)
-      : config.columns
-  );
-  const columnOrder = config.columnOrder === undefined
-    ? undefined
+  const columns = config.schemaVersion >= 3
+    ? config.columns
     : withAiAnswerRankingUrls(
         config.schemaVersion === 1
-          ? withCapturedRankingUrls(config.columnOrder)
-          : config.columnOrder
+          ? withCapturedRankingUrls(config.columns)
+          : config.columns
       );
+  const columnOrder = config.columnOrder === undefined
+    ? undefined
+    : config.schemaVersion >= 3
+      ? config.columnOrder
+      : withAiAnswerRankingUrls(
+          config.schemaVersion === 1
+            ? withCapturedRankingUrls(config.columnOrder)
+            : config.columnOrder
+        );
   return {
     ...config,
     schemaVersion: semanticSavedViewCurrentSchemaVersion,

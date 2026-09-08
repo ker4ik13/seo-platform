@@ -6,6 +6,7 @@ import { SemanticRankComparisonCell } from "./semantic-rank-comparison-cell";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { SemanticRankDeviceBadge } from "./semantic-rank-context";
 import { UiText, useUiLocale } from "./ui-locale";
 
 export function SemanticKeywordRegionalRanks({ projectId, keywordId, dimensionKey, onDimensionChange, onHistory, onSerpHistory, revision }: {
@@ -35,7 +36,7 @@ export function SemanticKeywordRegionalRanks({ projectId, keywordId, dimensionKe
             <span>
               <span className="semantic-regional-rank-title">
                 {dimension ? rankDimensionRegionLabel(dimension) : row.dimensionKey}
-                {dimension && <DeviceBadge device={dimension.device} />}
+                {dimension && <SemanticRankDeviceBadge device={dimension.device} />}
               </span>
               <small>{new Date(row.observedAt).toLocaleString(locale)} · {row.provider} · {row.searchSource ?? ""}</small>
             </span>
@@ -61,19 +62,8 @@ function RankDimensionOption({
     <span className="semantic-rank-dimension-option">
       <SearchEngineLogo engine={dimension.searchEngine} size="compact" />
       <span>{rankDimensionRegionLabel(dimension)}</span>
-      <DeviceBadge device={dimension.device} />
+      <SemanticRankDeviceBadge device={dimension.device} />
       <span className="visually-hidden">{rankDimensionLabel(dimension, locale)}</span>
-    </span>
-  );
-}
-
-function DeviceBadge({
-  device
-}: Readonly<{ device: SemanticRankDimension["device"] }>) {
-  return (
-    <span className="semantic-rank-device-badge">
-      <Icon name={device === "DESKTOP" ? "desktop" : "mobile"} />
-      <UiText text={device === "DESKTOP" ? "ПК" : "Телефон"} />
     </span>
   );
 }

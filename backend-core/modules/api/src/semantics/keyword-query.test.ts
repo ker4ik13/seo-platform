@@ -68,6 +68,21 @@ test("accepts a large body-only folder union and advanced metric filters", () =>
   } });
   assert.equal(result.groupIds?.length, 250);
   assert.equal(result.rankDimensionKey, dimension);
+  assert.deepEqual(
+    keywordListQuery({
+      sort: "RANK_POSITION_ASC",
+      rankSortDimensionKey: dimension
+    }),
+    { limit: 100, sort: "RANK_POSITION_ASC", rankSortDimensionKey: dimension }
+  );
+  assert.throws(
+    () => keywordListQuery({ sort: "RANK_POSITION_ASC" }),
+    DomainError
+  );
+  assert.throws(
+    () => keywordListQuery({ sort: "TEXT_ASC", rankSortDimensionKey: dimension }),
+    DomainError
+  );
   assert.throws(() => keywordBodyListInput({ query: { groupIds: Array.from({ length: 2_001 }, (_, index) => `01900000-0000-7000-8000-${index.toString().padStart(12, "0")}`) } }), DomainError);
   assert.throws(() => keywordListQuery({ rankState: "FOUND" }), DomainError);
 });
@@ -77,8 +92,14 @@ test("parses the project position history tracking scope", () => {
     includeUntracked: false
   });
   assert.deepEqual(
-    projectPositionHistoryQuery({ includeUntracked: "true" }),
-    { includeUntracked: true }
+    projectPositionHistoryQuery({
+      includeUntracked: "true",
+      rankDimensionKey: "GOOGLE|RU|1011969|ru|MOBILE"
+    }),
+    {
+      includeUntracked: true,
+      rankDimensionKey: "GOOGLE|RU|1011969|ru|MOBILE"
+    }
   );
   assert.throws(
     () => projectPositionHistoryQuery({ includeUntracked: "yes" }),

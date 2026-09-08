@@ -66,10 +66,29 @@ test("normalizes an exact versioned semantic saved view", () => {
     }).config.schemaVersion,
     3
   );
+  const dimension = "GOOGLE|RU|1011973|ru|MOBILE";
+  assert.equal(
+    createSemanticSavedViewInput({
+      name: "Санкт-Петербург · телефон",
+      scope: "PRIVATE",
+      config: {
+        ...config,
+        schemaVersion: 4,
+        sort: "RANK_POSITION_ASC",
+        rankSortDimensionKey: dimension
+      }
+    }).config.rankSortDimensionKey,
+    dimension
+  );
+  assert.throws(() => createSemanticSavedViewInput({
+    name: "Нет среза",
+    scope: "PRIVATE",
+    config: { ...config, schemaVersion: 4, sort: "RANK_POSITION_ASC" }
+  }));
   assert.throws(() => createSemanticSavedViewInput({
     name: "Будущая схема",
     scope: "PRIVATE",
-    config: { ...config, schemaVersion: 4 }
+    config: { ...config, schemaVersion: 5 }
   }));
 });
 

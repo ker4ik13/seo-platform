@@ -10,6 +10,7 @@ import {
 import {
   projectPositionHistoryMaxPoints,
   parseSemanticRankDimensionKey,
+  semanticRankDimensionKey,
   semanticKeywordBulkCreatePreviewMaxGroups,
   type ApiCollectionResponse,
   type InternalCreateSemanticKeywordInput,
@@ -197,6 +198,20 @@ export class KeywordService {
     projectId: string,
     query: ProjectPositionHistoryQuery = { includeUntracked: false }
   ): Promise<ProjectPositionHistory> {
+    const dimension = query.rankDimensionKey
+      ? parseSemanticRankDimensionKey(query.rankDimensionKey)
+      : undefined;
+    if (query.rankDimensionKey && !dimension) {
+      throw new BadRequestException("Invalid rank dimension");
+    }
+    const dimensionFilter = dimension
+      ? Prisma.sql`
+          AND configuration.search_engine::text = ${dimension.searchEngine}
+          AND configuration.country_code = ${dimension.countryCode}
+          AND COALESCE(configuration.region_code, configuration.country_code) = ${dimension.regionCode}
+          AND configuration.language = ${dimension.language}
+          AND configuration.device::text = ${dimension.device}`
+      : Prisma.empty;
     const rows = await this.prisma.$queryRaw<
       readonly ProjectPositionHistoryDayRow[]
     >(Prisma.sql`
@@ -221,11 +236,17 @@ export class KeywordService {
           ON keyword.workspace_id = snapshot.workspace_id
          AND keyword.project_id = snapshot.project_id
          AND keyword.id = snapshot.keyword_id
+        INNER JOIN tracking_context_versions configuration
+          ON configuration.workspace_id = snapshot.workspace_id
+         AND configuration.project_id = snapshot.project_id
+         AND configuration.context_id = snapshot.tracking_context_id
+         AND configuration.configuration_version = snapshot.configuration_version
         WHERE snapshot.workspace_id = ${workspaceId}::uuid
           AND snapshot.project_id = ${projectId}::uuid
           AND snapshot.position_tracking_enabled = TRUE
           AND keyword.status = 'ACTIVE'
           AND (${query.includeUntracked}::boolean OR keyword.is_tracked = TRUE)
+          ${dimensionFilter}
       ),
       daily_aggregates AS (
         SELECT
@@ -604,7 +625,12 @@ export class KeywordService {
           select: {
             contextId: true,
             configurationVersion: true,
-            searchEngine: true
+            searchEngine: true,
+            countryCode: true,
+            regionCode: true,
+            regionLabel: true,
+            language: true,
+            device: true
           }
         });
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
@@ -749,6 +775,10 @@ export class KeywordService {
       Map<SemanticKeywordListPosition["searchEngine"], SemanticKeywordListPosition>
     >();
     for (const { rank, searchEngine } of latestRankByKeywordEngine.values()) {
+      const configuration = configurationById.get(
+        `${rank.trackingContextId}:${rank.configurationVersion}`
+      );
+      if (!configuration) continue;
       const positions = positionsByKeywordId.get(rank.keywordId) ?? new Map();
       const previousPosition = previousPositions.get(
         previousFoundPositionKey(
@@ -759,8 +789,33 @@ export class KeywordService {
         )
       ) ?? rank.previousPosition ?? undefined;
       const siteResults = siteResultsBySnapshotId.get(rank.snapshotId) ?? [];
+      const regionCode = configuration.regionCode ?? configuration.countryCode;
+      const dimension =
+        configuration.countryCode &&
+        regionCode &&
+        configuration.language &&
+        (configuration.device === "DESKTOP" || configuration.device === "MOBILE")
+          ? {
+              key: semanticRankDimensionKey({
+                searchEngine,
+                countryCode: configuration.countryCode,
+                regionCode,
+                language: configuration.language,
+                device: configuration.device
+              }),
+              searchEngine,
+              countryCode: configuration.countryCode,
+              regionCode,
+              ...(configuration.regionLabel
+                ? { regionLabel: configuration.regionLabel }
+                : {}),
+              language: configuration.language,
+              device: configuration.device
+            }
+          : undefined;
       positions.set(searchEngine, {
         searchEngine,
+        ...(dimension ? { dimension } : {}),
         found: rank.found,
         ...(rank.position === null ? {} : { position: rank.position }),
         ...(previousPosition === undefined ? {} : { previousPosition }),
@@ -3028,6 +3083,7 @@ function keywordFilterHash(
       rankPositionMax: query.rankPositionMax ?? null,
       rankCheckedFrom: query.rankCheckedFrom ?? null,
       rankCheckedBefore: query.rankCheckedBefore ?? null,
+      rankSortDimensionKey: query.rankSortDimensionKey ?? null,
       multiSearch: query.multiSearch ?? null
     })
   );
@@ -3082,6 +3138,10 @@ function keywordOrderBy(
     case "YANDEX_AI_CHECKED_AT_DESC":
     case "GOOGLE_AI_CHECKED_AT_ASC":
     case "GOOGLE_AI_CHECKED_AT_DESC":
+    case "RANK_POSITION_ASC":
+    case "RANK_POSITION_DESC":
+    case "RANK_CHECKED_AT_ASC":
+    case "RANK_CHECKED_AT_DESC":
       throw new Error("Metric keyword sorts are resolved by metricSortedKeywordPage");
   }
 }
@@ -3131,6 +3191,10 @@ function cursorValue(
     case "YANDEX_AI_CHECKED_AT_DESC":
     case "GOOGLE_AI_CHECKED_AT_ASC":
     case "GOOGLE_AI_CHECKED_AT_DESC":
+    case "RANK_POSITION_ASC":
+    case "RANK_POSITION_DESC":
+    case "RANK_CHECKED_AT_ASC":
+    case "RANK_CHECKED_AT_DESC":
       throw new Error("Metric cursor value is provided by metricSortedKeywordPage");
   }
 }
@@ -3177,7 +3241,9 @@ function isMetricKeywordSort(sort: SemanticKeywordSort): boolean {
     sort.startsWith("YANDEX_AI_POSITION_") ||
     sort.startsWith("GOOGLE_AI_POSITION_") ||
     sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
-    sort.startsWith("GOOGLE_AI_CHECKED_AT_")
+    sort.startsWith("GOOGLE_AI_CHECKED_AT_") ||
+    sort.startsWith("RANK_POSITION_") ||
+    sort.startsWith("RANK_CHECKED_AT_")
   );
 }
 
@@ -3359,13 +3425,23 @@ async function metricSortedKeywordPage(
   const ascending = sort.endsWith("_ASC");
   const rankPositionSort =
     sort.startsWith("YANDEX_POSITION_") ||
-    sort.startsWith("GOOGLE_POSITION_");
+    sort.startsWith("GOOGLE_POSITION_") ||
+    sort.startsWith("RANK_POSITION_");
   const aiPositionSort =
     sort.startsWith("YANDEX_AI_POSITION_") ||
     sort.startsWith("GOOGLE_AI_POSITION_");
   const aiCheckedAtSort =
     sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
     sort.startsWith("GOOGLE_AI_CHECKED_AT_");
+  const rankSortDimension = query.rankSortDimensionKey
+    ? parseSemanticRankDimensionKey(query.rankSortDimensionKey)
+    : undefined;
+  if (
+    (sort.startsWith("RANK_POSITION_") || sort.startsWith("RANK_CHECKED_AT_")) &&
+    !rankSortDimension
+  ) {
+    throw new Error("Validated rank sort dimension is invalid");
+  }
   const positionBucket = 1_000_000n;
   const absentAiAnswerMetric = ascending ? positionBucket * 3n : -1n;
   const nullSentinel = aiPositionSort
@@ -3377,7 +3453,22 @@ async function metricSortedKeywordPage(
       : ascending
         ? 9_223_372_036_854_775_807n
         : -1n;
-  const rankEngine = sort.startsWith("YANDEX_") ? "YANDEX" : "GOOGLE";
+  const rankEngine = rankSortDimension?.searchEngine ??
+    (sort.startsWith("YANDEX_") ? "YANDEX" : "GOOGLE");
+  const currentRankDimensionFilter = rankSortDimension
+    ? Prisma.sql`
+        AND tcv.country_code = ${rankSortDimension.countryCode}
+        AND COALESCE(tcv.region_code, tcv.country_code) = ${rankSortDimension.regionCode}
+        AND tcv.language = ${rankSortDimension.language}
+        AND tcv.device::text = ${rankSortDimension.device}`
+    : Prisma.empty;
+  const previousRankDimensionFilter = rankSortDimension
+    ? Prisma.sql`
+        AND previous_tcv.country_code = ${rankSortDimension.countryCode}
+        AND COALESCE(previous_tcv.region_code, previous_tcv.country_code) = ${rankSortDimension.regionCode}
+        AND previous_tcv.language = ${rankSortDimension.language}
+        AND previous_tcv.device::text = ${rankSortDimension.device}`
+    : Prisma.empty;
   const positionMetric = ascending
     ? Prisma.sql`CASE
         WHEN latest_rank.found THEN latest_rank.position::bigint
@@ -3492,6 +3583,7 @@ async function metricSortedKeywordPage(
                     AND previous.position_tracking_enabled = TRUE
                     AND previous.position IS NOT NULL
                     AND previous_tcv.search_engine::text = ${rankEngine}
+                    ${previousRankDimensionFilter}
                     AND (previous.observed_at, previous.id) <
                         (cr.observed_at, cr.snapshot_id)
                   ORDER BY previous.observed_at DESC, previous.id DESC
@@ -3509,6 +3601,7 @@ async function metricSortedKeywordPage(
               AND cr.project_id = k.project_id
               AND cr.keyword_id = k.id
               AND tcv.search_engine::text = ${rankEngine}
+              ${currentRankDimensionFilter}
             ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
                      cr.tracking_context_id DESC
             LIMIT 1
@@ -3527,6 +3620,7 @@ async function metricSortedKeywordPage(
             AND cr.project_id = k.project_id
             AND cr.keyword_id = k.id
             AND tcv.search_engine::text = ${rankEngine}
+            ${currentRankDimensionFilter}
           ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
                    cr.tracking_context_id DESC
           LIMIT 1

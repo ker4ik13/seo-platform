@@ -30,6 +30,10 @@ const RESPONSE_FIELDS = [
   "saveProjectPosition",
   "searchEngine",
   "searchSource",
+  "countryCode",
+  "regionCode",
+  "language",
+  "device",
   "depth",
   "routingScope",
   "connectorAttempts",
@@ -105,6 +109,12 @@ export function scopedRankJobSummary(
     input.searchSource === undefined
       ? undefined
       : member(input.searchSource, ["SEARCH_API", "LIVE"] as const);
+  const countryCode = input.countryCode;
+  const regionCode = input.regionCode;
+  const language = input.language;
+  const device = input.device;
+  const geographicValues = [countryCode, regionCode, language, device];
+  const hasGeography = geographicValues.some(value => value !== undefined);
   const depth =
     input.depth === undefined
       ? undefined
@@ -140,6 +150,15 @@ export function scopedRankJobSummary(
       platformChargeMicro === "0") ||
     (searchSource !== undefined && searchEngine === undefined) ||
     (searchEngine === "GOOGLE" && searchSource === "SEARCH_API") ||
+    (hasGeography && geographicValues.some(value => value === undefined)) ||
+    (hasGeography && searchEngine === undefined) ||
+    (countryCode !== undefined &&
+      (typeof countryCode !== "string" || !/^[A-Z]{2}$/u.test(countryCode))) ||
+    (regionCode !== undefined &&
+      (typeof regionCode !== "string" || regionCode.length < 1 || regionCode.length > 100)) ||
+    (language !== undefined &&
+      (typeof language !== "string" || language.length < 2 || language.length > 16)) ||
+    (device !== undefined && device !== "DESKTOP" && device !== "MOBILE") ||
     typeof input.status !== "string" ||
     typeof input.stage !== "string"
   ) {
@@ -161,6 +180,12 @@ export function scopedRankJobSummary(
       : { purpose, saveProjectPosition: saveProjectPosition as boolean }),
     ...(searchEngine === undefined ? {} : { searchEngine }),
     ...(searchSource === undefined ? {} : { searchSource }),
+    ...(typeof countryCode === "string" ? { countryCode } : {}),
+    ...(typeof regionCode === "string" ? { regionCode } : {}),
+    ...(typeof language === "string" ? { language } : {}),
+    ...(device === "DESKTOP" || device === "MOBILE"
+      ? { device: device as "DESKTOP" | "MOBILE" }
+      : {}),
     ...(depth === undefined ? {} : { depth }),
     ...routing,
     operation: "POSITIONS",

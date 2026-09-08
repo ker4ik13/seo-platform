@@ -69,6 +69,10 @@ test("projects only safe search system and depth presentation fields", () => {
       scopeSnapshot: {
         searchEngine: "YANDEX",
         searchSource: "LIVE",
+        countryCode: "RU",
+        regionCode: "2",
+        language: "ru",
+        device: "MOBILE",
         depth: 100,
         workspaceId,
         projectId,
@@ -78,6 +82,10 @@ test("projects only safe search system and depth presentation fields", () => {
   );
   assert.equal(summary.searchEngine, "YANDEX");
   assert.equal(summary.searchSource, "LIVE");
+  assert.equal(summary.countryCode, "RU");
+  assert.equal(summary.regionCode, "2");
+  assert.equal(summary.language, "ru");
+  assert.equal(summary.device, "MOBILE");
   assert.equal(summary.depth, 100);
   assert.equal("workspaceId" in summary, true);
   assert.equal(JSON.stringify(summary).includes("trackingContextId"), true);
@@ -100,6 +108,10 @@ test("projects legacy presentation fields from the immutable manifest", () => {
         manifestCommand: {
           execution: {
             searchEngine: "GOOGLE",
+            countryCode: "RU",
+            regionCode: "1011973",
+            language: "ru",
+            device: "DESKTOP",
             depth: 50,
             providerMappingVersion: "xmlstock-google-live@2",
             credentialId: "must-not-leak"
@@ -111,6 +123,8 @@ test("projects legacy presentation fields from the immutable manifest", () => {
 
   assert.equal(summary.searchEngine, "GOOGLE");
   assert.equal(summary.searchSource, "LIVE");
+  assert.equal(summary.regionCode, "1011973");
+  assert.equal(summary.device, "DESKTOP");
   assert.equal(summary.depth, 50);
   assert.equal(JSON.stringify(summary).includes("must-not-leak"), false);
 });
@@ -305,6 +319,10 @@ test("persists only bounded audit and scope snapshots in the generic Job", () =>
   });
   assert.deepEqual(rankJobScopeJson(input, trackingContextId, {
     searchEngine: "GOOGLE",
+    countryCode: "RU",
+    regionCode: "1011973",
+    language: "ru",
+    device: "DESKTOP",
     depth: 30,
     providerMappingVersion: "xmlstock-google-live@2"
   }), {
@@ -313,6 +331,10 @@ test("persists only bounded audit and scope snapshots in the generic Job", () =>
     projectId,
     trackingContextId,
     searchEngine: "GOOGLE",
+    countryCode: "RU",
+    regionCode: "1011973",
+    language: "ru",
+    device: "DESKTOP",
     searchSource: "LIVE",
     depth: 30
   });

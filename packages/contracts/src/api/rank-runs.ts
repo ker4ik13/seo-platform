@@ -322,6 +322,10 @@ interface RankJobSummaryBase {
    */
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
+  readonly countryCode?: string;
+  readonly regionCode?: string;
+  readonly language?: string;
+  readonly device?: "DESKTOP" | "MOBILE";
   readonly depth?: 30 | 50 | 100;
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
@@ -431,6 +435,13 @@ export type RankJobSummary =
  * service's duty.
  */
 export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
+  const geographicValues = [
+    input.countryCode,
+    input.regionCode,
+    input.language,
+    input.device
+  ];
+  const hasGeography = geographicValues.some(value => value !== undefined);
   if (
     input.type !== "MANUAL_RANK_CHECK" ||
     !["ARSENKIN", "XMLSTOCK"].includes(input.provider) ||
@@ -446,6 +457,15 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
       input.searchSource !== "LIVE") ||
     (input.searchSource !== undefined && input.searchEngine === undefined) ||
     (input.searchEngine === "GOOGLE" && input.searchSource === "SEARCH_API") ||
+    (hasGeography && geographicValues.some(value => value === undefined)) ||
+    (hasGeography && input.searchEngine === undefined) ||
+    (input.countryCode !== undefined && !/^[A-Z]{2}$/u.test(input.countryCode)) ||
+    (input.regionCode !== undefined &&
+      (input.regionCode.length < 1 || input.regionCode.length > 100)) ||
+    (input.language !== undefined &&
+      (input.language.length < 2 || input.language.length > 16)) ||
+    (input.device !== undefined &&
+      input.device !== "DESKTOP" && input.device !== "MOBILE") ||
     (input.purpose !== undefined &&
       input.purpose !== "POSITION_TRACKING" &&
       input.purpose !== "COMPETITOR_SERP") ||
@@ -469,6 +489,10 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
       : { saveProjectPosition: input.saveProjectPosition }),
     ...(input.searchEngine ? { searchEngine: input.searchEngine } : {}),
     ...(input.searchSource ? { searchSource: input.searchSource } : {}),
+    ...(input.countryCode ? { countryCode: input.countryCode } : {}),
+    ...(input.regionCode ? { regionCode: input.regionCode } : {}),
+    ...(input.language ? { language: input.language } : {}),
+    ...(input.device ? { device: input.device } : {}),
     ...(input.depth ? { depth: input.depth } : {}),
     ...(input.routingScope ? { routingScope: input.routingScope } : {}),
     ...(input.connectorAttempts

@@ -27,6 +27,20 @@ test("accepts a canonical internal semantic export command", () => {
   assert.deepEqual(internalCreateSemanticExportInput(validCreate), validCreate);
 });
 
+test("accepts only a complete geographic rank sort", () => {
+  const input = {
+    ...validCreate,
+    sort: "RANK_POSITION_ASC",
+    rankSortDimensionKey: "YANDEX|RU|2|ru|DESKTOP"
+  } as const;
+  assert.deepEqual(internalCreateSemanticExportInput(input), input);
+  const { rankSortDimensionKey: _dimension, ...missingDimension } = input;
+  assert.throws(
+    () => internalCreateSemanticExportInput(missingDimension),
+    /Invalid semantic export rankSortDimensionKey/u
+  );
+});
+
 test("accepts a canonical internal position-history export", () => {
   const input = {
     ...validCreate,

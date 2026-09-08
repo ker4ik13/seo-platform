@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { parseSemanticRankDimensionKey, parseSemanticRankDimensionMetadata, parseSemanticRankColumnKey, parseSemanticRankDimensionCatalog, parseSemanticRankComparisonItems, type SemanticRankComparisonInput, type InternalSeoOverview } from "@seo-platform/contracts";
+import { isSemanticRankDimensionSort, parseSemanticRankDimensionKey, parseSemanticRankDimensionMetadata, parseSemanticRankColumnKey, parseSemanticRankDimensionCatalog, parseSemanticRankComparisonItems, type SemanticRankComparisonInput, type InternalSeoOverview } from "@seo-platform/contracts";
 import {
   projectPositionHistoryMaxPoints,
   semanticKeywordIntents,
@@ -375,7 +375,8 @@ export class SeoDataClient {
     for (const field of [
       "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
       "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
-      "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
+      "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore",
+      "rankSortDimensionKey"
     ] as const) {
       const value = listQuery[field];
       if (value !== undefined) url.searchParams.set(field, String(value));
@@ -436,6 +437,9 @@ export class SeoDataClient {
     );
     if (query.includeUntracked) {
       url.searchParams.set("includeUntracked", "true");
+    }
+    if (query.rankDimensionKey) {
+      url.searchParams.set("rankDimensionKey", query.rankDimensionKey);
     }
     const payload = await this.request(
       "GET",
@@ -3412,6 +3416,7 @@ function semanticKeywordListPositions(
   const positions = value.map((entry) => {
     const position = exactRecord(entry, [
       "searchEngine",
+      "dimension",
       "found",
       "position",
       "previousPosition",
@@ -3419,9 +3424,17 @@ function semanticKeywordListPositions(
       "siteResults",
       "observedAt"
     ]);
+    const dimension = position.dimension === undefined
+      ? undefined
+      : parseSemanticRankDimensionCatalog({
+          dimensions: [position.dimension],
+          truncated: false
+        }).dimensions[0];
     const siteResults = semanticKeywordListSiteResults(position.siteResults);
     if (
       !["GOOGLE", "YANDEX"].includes(String(position.searchEngine)) ||
+      (dimension !== undefined &&
+        dimension.searchEngine !== position.searchEngine) ||
       typeof position.found !== "boolean" ||
       !validOptionalPositivePosition(position.position) ||
       !validOptionalPositivePosition(position.previousPosition) ||
@@ -3433,6 +3446,7 @@ function semanticKeywordListPositions(
     }
     return {
       searchEngine: position.searchEngine as "GOOGLE" | "YANDEX",
+      ...(dimension ? { dimension } : {}),
       found: position.found,
       ...(typeof position.position === "number"
         ? { position: position.position }
@@ -5276,6 +5290,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     "schemaVersion",
     "filters",
     "sort",
+    "rankSortDimensionKey",
     "columns",
     "columnOrder",
     "density",
@@ -5308,6 +5323,11 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     ) ||
     typeof config.sort !== "string" ||
     !semanticKeywordSorts.some((sort) => sort === config.sort) ||
+    (config.rankSortDimensionKey !== undefined &&
+      !parseSemanticRankDimensionKey(config.rankSortDimensionKey)) ||
+    (isSemanticRankDimensionSort(config.sort as SemanticSavedViewConfig["sort"]) !==
+      (config.rankSortDimensionKey !== undefined)) ||
+    (config.rankSortDimensionKey !== undefined && config.schemaVersion !== 4) ||
     typeof config.density !== "string" ||
     !semanticSavedViewDensities.some(
       (density) => density === config.density
@@ -5371,6 +5391,9 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     schemaVersion: config.schemaVersion as SemanticSavedViewConfig["schemaVersion"],
     filters: filters as SemanticSavedViewConfig["filters"],
     sort: config.sort as SemanticSavedViewConfig["sort"],
+    ...(typeof config.rankSortDimensionKey === "string"
+      ? { rankSortDimensionKey: config.rankSortDimensionKey }
+      : {}),
     columns: config.columns as SemanticSavedViewConfig["columns"],
     ...(config.columnOrder === undefined
       ? {}

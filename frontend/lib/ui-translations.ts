@@ -4732,6 +4732,7 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Включено колонок: {0} из 128.": "Columns enabled: {0} of 128.",
   "Восстановить запуск": "Restore run",
   "Все города и устройства": "All cities and devices",
+  "Поисковик, город и устройство": "Search engine, city and device",
   "Все сохранённые снимки выдачи выбранного среза. В каждом — исходные позиции, URL, заголовки и описания.": "All saved SERP snapshots for the selected segment. Each snapshot contains the original positions, URLs, titles and descriptions.",
   "Выберите город и устройство для каждого съёма.": "Choose a city and device for every rank check.",
   "Выберите срез, чтобы увидеть его график и историю отдельно.": "Select a segment to view its chart and history separately.",

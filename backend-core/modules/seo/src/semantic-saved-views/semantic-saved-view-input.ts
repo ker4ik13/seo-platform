@@ -1,4 +1,4 @@
-import { parseSemanticRankColumnKey, parseSemanticRankDimensionKey } from "@seo-platform/contracts";
+import { isSemanticRankDimensionSort, parseSemanticRankColumnKey, parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticKeywordIntents,
@@ -86,6 +86,7 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     "schemaVersion",
     "filters",
     "sort",
+    "rankSortDimensionKey",
     "columns",
     "columnOrder",
     "density",
@@ -115,13 +116,30 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
   );
   const expandedGroupIds = optionalUuidArray(input.expandedGroupIds, 1_000);
   const selectedGroupIds = optionalUuidArray(input.selectedGroupIds, 2_000);
+  const sort = requiredEnum(input.sort, semanticKeywordSorts, "config.sort");
+  const rankSortDimensionKey = input.rankSortDimensionKey;
+  if (
+    rankSortDimensionKey !== undefined &&
+    !parseSemanticRankDimensionKey(rankSortDimensionKey)
+  ) {
+    invalid("config.rankSortDimensionKey");
+  }
+  if (
+    isSemanticRankDimensionSort(sort) !== Boolean(rankSortDimensionKey) ||
+    (rankSortDimensionKey !== undefined && input.schemaVersion !== 4)
+  ) {
+    invalid("config.rankSortDimensionKey");
+  }
   const appliedViewId = input.appliedViewId === undefined
     ? undefined
     : uuid(input.appliedViewId, "config.appliedViewId");
   return {
     schemaVersion: input.schemaVersion as SemanticSavedViewConfig["schemaVersion"],
     filters: savedViewFilters(input.filters),
-    sort: requiredEnum(input.sort, semanticKeywordSorts, "config.sort"),
+    sort,
+    ...(typeof rankSortDimensionKey === "string"
+      ? { rankSortDimensionKey }
+      : {}),
     columns,
     ...(columnOrder === undefined ? {} : { columnOrder }),
     density: requiredEnum(

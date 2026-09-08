@@ -64,6 +64,22 @@ test("accepts exact tenant-scoped saved-view commands", () => {
     }).config.schemaVersion,
     3
   );
+  const dimension = "YANDEX|RU|2|ru|DESKTOP";
+  assert.equal(
+    internalCreateSemanticSavedViewInput({
+      ...scope,
+      ...authority,
+      name: "Санкт-Петербург",
+      scope: "PRIVATE",
+      config: {
+        ...config,
+        schemaVersion: 4,
+        sort: "RANK_CHECKED_AT_DESC",
+        rankSortDimensionKey: dimension
+      }
+    }).config.rankSortDimensionKey,
+    dimension
+  );
 });
 
 test("rejects authority drift and malformed versioned config", () => {

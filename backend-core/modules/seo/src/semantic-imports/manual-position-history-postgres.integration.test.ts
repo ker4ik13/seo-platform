@@ -87,6 +87,23 @@ test("PostgreSQL imports dated manual history idempotently and updates only the 
       ],
       truncated: false
     });
+    const mobileDaily = await keywords.positionHistory(
+      ids.workspaceId,
+      ids.projectId,
+      { includeUntracked: true, rankDimensionKey: dimension.key }
+    );
+    assert.deepEqual(
+      mobileDaily.points.map(point => ({
+        date: point.date,
+        measured: point.measuredKeywordCount,
+        positioned: point.positionedKeywordCount,
+        top10: point.top10KeywordCount
+      })),
+      [
+        { date: "2026-08-01", measured: 1, positioned: 1, top10: 1 },
+        { date: "2026-08-08", measured: 1, positioned: 0, top10: 0 }
+      ]
+    );
     const filtered = await keywords.list(ids.workspaceId, ids.projectId, { limit: 100, rankDimensionKey: dimension.key, rankState: "NOT_FOUND" }, "manual-history-filter");
     assert.deepEqual(filtered.data.map(item => item.id), [current.keywordId]);
     const exported = await new SemanticPositionHistoryExportService(prisma, keywords).list(ids, { limit: 100 }, { observedFrom: "2026-08-01T00:00:00.000Z", observedBefore: "2026-09-01T00:00:00.000Z", searchEngines: ["GOOGLE"], dimensionKeys: [dimension.key] }, "manual-history-export");

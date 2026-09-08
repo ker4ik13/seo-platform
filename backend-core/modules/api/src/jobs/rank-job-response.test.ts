@@ -128,6 +128,10 @@ test("accepts and preserves safe rank execution presentation", () => {
       ...preparing,
       searchEngine: "YANDEX",
       searchSource: "LIVE",
+      countryCode: "RU",
+      regionCode: "2",
+      language: "ru",
+      device: "MOBILE",
       depth: 100
     },
     workspaceId,
@@ -137,6 +141,10 @@ test("accepts and preserves safe rank execution presentation", () => {
 
   assert.equal(mapped.searchEngine, "YANDEX");
   assert.equal(mapped.searchSource, "LIVE");
+  assert.equal(mapped.countryCode, "RU");
+  assert.equal(mapped.regionCode, "2");
+  assert.equal(mapped.language, "ru");
+  assert.equal(mapped.device, "MOBILE");
   assert.equal(mapped.depth, 100);
 });
 
@@ -177,7 +185,8 @@ test("rejects unsupported rank execution presentation", () => {
       ...preparing,
       searchEngine: "GOOGLE",
       searchSource: "SEARCH_API"
-    }
+    },
+    { ...preparing, searchEngine: "GOOGLE", countryCode: "RU" }
   ]) {
     assert.throws(
       () => scopedRankJobSummary(value, workspaceId, projectId, jobId),

@@ -61,6 +61,6 @@ export SEO_DATA_KEYWORD_SORT_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_UR
 export SEO_DATA_LARGE_RANK_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
 export SEO_DATA_MANUAL_HISTORY_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
 pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/rank-manifests/large-rank-postgres.integration.test.ts > "${test_root}/large-rank-postgres.log" 2>&1
-pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test --test-concurrency=1 src/crawls/crawl-snapshot-postgres.integration.test.ts src/keywords/keyword-ai-position-sort-postgres.integration.test.ts src/semantic-imports/manual-position-history-postgres.integration.test.ts > "${test_root}/seo-postgres-races.log" 2>&1
+pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test --test-concurrency=1 src/crawls/crawl-snapshot-postgres.integration.test.ts src/keywords/keyword-ai-position-sort-postgres.integration.test.ts src/keywords/keyword-rank-dimension-sort-postgres.integration.test.ts src/semantic-imports/manual-position-history-postgres.integration.test.ts > "${test_root}/seo-postgres-races.log" 2>&1
 
 printf '%s\n' 'postgres-tests result=passed (isolation, notifications, core, execution, SEO); historical pre-upgrade fixture is separate'

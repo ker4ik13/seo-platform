@@ -42,6 +42,16 @@ export const semanticKeywordCreateOutcomes = [
 export type SemanticKeywordCreateOutcome =
   (typeof semanticKeywordCreateOutcomes)[number];
 
+export const semanticRankDimensionSorts = [
+  "RANK_POSITION_ASC",
+  "RANK_POSITION_DESC",
+  "RANK_CHECKED_AT_ASC",
+  "RANK_CHECKED_AT_DESC"
+] as const;
+
+export type SemanticRankDimensionSort =
+  (typeof semanticRankDimensionSorts)[number];
+
 export const semanticKeywordSorts = [
   "CREATED_DESC",
   "CREATED_ASC",
@@ -76,11 +86,18 @@ export const semanticKeywordSorts = [
   "YANDEX_AI_CHECKED_AT_ASC",
   "YANDEX_AI_CHECKED_AT_DESC",
   "GOOGLE_AI_CHECKED_AT_ASC",
-  "GOOGLE_AI_CHECKED_AT_DESC"
+  "GOOGLE_AI_CHECKED_AT_DESC",
+  ...semanticRankDimensionSorts
 ] as const;
 
 export type SemanticKeywordSort =
   (typeof semanticKeywordSorts)[number];
+
+export function isSemanticRankDimensionSort(
+  sort: SemanticKeywordSort
+): sort is SemanticRankDimensionSort {
+  return semanticRankDimensionSorts.some((value) => value === sort);
+}
 
 export const semanticKeywordPageSizes = [100, 200, 500, 1_000] as const;
 export const semanticKeywordDefaultPageSize = semanticKeywordPageSizes[0];
@@ -131,6 +148,8 @@ export interface KeywordListQuery {
   readonly rankPositionMax?: number;
   readonly rankCheckedFrom?: string;
   readonly rankCheckedBefore?: string;
+  /** Required only when sort addresses one exact geographic rank dimension. */
+  readonly rankSortDimensionKey?: string;
   readonly sort?: SemanticKeywordSort;
   /** Body-only multiline search. It is never serialized into a URL. */
   readonly multiSearch?: SemanticKeywordMultiSearch;
@@ -194,6 +213,8 @@ export interface SemanticKeywordListFrequencyValue
 
 export interface SemanticKeywordListPosition {
   readonly searchEngine: "GOOGLE" | "YANDEX";
+  /** Exact city/device slice that supplied this engine-level latest value. */
+  readonly dimension?: import("./rank-dimensions.js").SemanticRankDimension;
   readonly found: boolean;
   readonly position?: number;
   readonly previousPosition?: number;
@@ -251,6 +272,8 @@ export interface ProjectPositionHistory {
 export interface ProjectPositionHistoryQuery {
   /** Include active keywords that are currently excluded from rank tracking. */
   readonly includeUntracked: boolean;
+  /** Optional exact search engine, city, language and device slice. */
+  readonly rankDimensionKey?: string;
 }
 
 export interface CreateSemanticKeywordInput {

@@ -1,4 +1,4 @@
-import { parseSemanticRankColumnKey, semanticCompetitorRowColumnKeys } from "@seo-platform/contracts";
+import { isSemanticRankDimensionSort, parseSemanticRankColumnKey, parseSemanticRankDimensionKey, semanticCompetitorRowColumnKeys } from "@seo-platform/contracts";
 import {
   semanticCompetitorExportColumnKeys,
   semanticExportFormats,
@@ -34,6 +34,7 @@ export function createSemanticExportInput(
       "columns",
       "filters",
       "sort",
+      "rankSortDimensionKey",
       "keywordIds",
       "includeBom",
       "competitorRows",
@@ -59,6 +60,25 @@ export function createSemanticExportInput(
   const folderMap = input.folderMap === undefined
     ? undefined
     : folderMapOptions(input.folderMap);
+  const sort = input.sort === undefined
+    ? undefined
+    : requiredEnum(input.sort, semanticKeywordSorts, "sort");
+  const rankSortDimensionKey = input.rankSortDimensionKey;
+  if (
+    rankSortDimensionKey !== undefined &&
+    !parseSemanticRankDimensionKey(rankSortDimensionKey)
+  ) {
+    invalid("rankSortDimensionKey", "Must identify a known rank dimension");
+  }
+  if (
+    (sort !== undefined && isSemanticRankDimensionSort(sort)) !==
+    Boolean(rankSortDimensionKey)
+  ) {
+    invalid(
+      "rankSortDimensionKey",
+      "Geographic rank sorting requires exactly one rank dimension"
+    );
+  }
 
   if (
     (scope === "SELECTED" || scope === "CURRENT_PAGE") &&
@@ -105,11 +125,10 @@ export function createSemanticExportInput(
     locale: requiredEnum(input.locale, semanticExportLocales, "locale"),
     columns,
     ...(filters ? { filters } : {}),
-    ...(input.sort === undefined
-      ? {}
-      : {
-          sort: requiredEnum(input.sort, semanticKeywordSorts, "sort")
-        }),
+    ...(sort === undefined ? {} : { sort }),
+    ...(typeof rankSortDimensionKey === "string"
+      ? { rankSortDimensionKey }
+      : {}),
     ...(keywordIds ? { keywordIds } : {}),
     ...(input.includeBom === undefined
       ? {}

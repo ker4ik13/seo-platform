@@ -1,4 +1,4 @@
-import { parseSemanticRankColumnKey, parseSemanticRankDimensionKey } from "@seo-platform/contracts";
+import { isSemanticRankDimensionSort, parseSemanticRankColumnKey, parseSemanticRankDimensionKey } from "@seo-platform/contracts";
 import {
   semanticKeywordIntents,
   semanticKeywordPageSizes,
@@ -57,6 +57,7 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
       "schemaVersion",
       "filters",
       "sort",
+      "rankSortDimensionKey",
       "columns",
       "columnOrder",
       "density",
@@ -98,6 +99,26 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     "config.selectedGroupIds",
     2_000
   );
+  const sort = requiredEnum(input.sort, semanticKeywordSorts, "config.sort");
+  const rankSortDimensionKey = input.rankSortDimensionKey;
+  if (
+    rankSortDimensionKey !== undefined &&
+    !parseSemanticRankDimensionKey(rankSortDimensionKey)
+  ) {
+    invalid(
+      "config.rankSortDimensionKey",
+      "Must identify a known rank dimension"
+    );
+  }
+  if (
+    isSemanticRankDimensionSort(sort) !== Boolean(rankSortDimensionKey) ||
+    (rankSortDimensionKey !== undefined && input.schemaVersion !== 4)
+  ) {
+    invalid(
+      "config.rankSortDimensionKey",
+      "Schema v4 geographic sorting requires exactly one rank dimension"
+    );
+  }
   const appliedViewId = optionalUuid(
     input.appliedViewId,
     "config.appliedViewId"
@@ -105,7 +126,10 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
   return {
     schemaVersion: input.schemaVersion as SemanticSavedViewConfig["schemaVersion"],
     filters: savedViewFilters(input.filters),
-    sort: requiredEnum(input.sort, semanticKeywordSorts, "config.sort"),
+    sort,
+    ...(typeof rankSortDimensionKey === "string"
+      ? { rankSortDimensionKey }
+      : {}),
     columns,
     ...(columnOrder === undefined ? {} : { columnOrder }),
     density: requiredEnum(

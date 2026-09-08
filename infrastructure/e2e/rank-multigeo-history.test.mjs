@@ -247,8 +247,13 @@ test("multi-geo ranks, dated XLSX round trip, advanced filters and large group u
   await page.getByRole("button", { name: "Колонки и представления", exact: true }).click();
   const layout = page.locator("aside.semantic-layout-drawer");
   const positionColumn = layout.locator(".semantic-layout-column-row").filter({ hasText: "Google · Москва · Телефон · Позиция" });
+  const desktopPositionColumn = layout.locator(".semantic-layout-column-row").filter({ hasText: "Google · Санкт-Петербург · ПК · en · Позиция" });
+  const urlColumn = layout.locator(".semantic-layout-column-row").filter({ hasText: "Google · Москва · Телефон · Найденный URL" });
+  const checkedAtColumn = layout.locator(".semantic-layout-column-row").filter({ hasText: "Google · Москва · Телефон · Дата съёма" });
   await positionColumn.waitFor();
-  await positionColumn.locator('input[type="checkbox"]').check();
+  for (const column of [positionColumn, desktopPositionColumn, urlColumn, checkedAtColumn]) {
+    await column.locator('input[type="checkbox"]').check();
+  }
   const comparisonLoaded = page.waitForResponse(response =>
     response.request().method() === "POST" &&
     new URL(response.url()).pathname.endsWith(`/projects/${firstProject.id}/keyword-ranks/comparison`)
@@ -256,13 +261,52 @@ test("multi-geo ranks, dated XLSX round trip, advanced filters and large group u
   await layout.getByRole("button", { name: "Применить", exact: true }).click();
   await comparisonLoaded;
   const dynamicHeader = page.locator('th:has(.semantic-rank-column-header[title="Google · Москва · Телефон · Позиция"])');
+  const desktopDynamicHeader = page.locator('th:has(.semantic-rank-column-header[title="Google · Санкт-Петербург · ПК · en · Позиция"])');
+  const dynamicUrlHeader = page.locator('th:has(.semantic-rank-column-header[title="Google · Москва · Телефон · Найденный URL"])');
+  const dynamicCheckedAtHeader = page.locator('th:has(.semantic-rank-column-header[title="Google · Москва · Телефон · Дата съёма"])');
   await dynamicHeader.waitFor({ state: "attached" });
+  await desktopDynamicHeader.waitFor({ state: "attached" });
+  await dynamicUrlHeader.waitFor({ state: "attached" });
+  await dynamicCheckedAtHeader.waitFor({ state: "attached" });
   await layout.getByRole("button", { name: "Закрыть настройки таблицы" }).click();
   await page.locator(".semantic-table-wrap").evaluate(element => { element.scrollLeft = element.scrollWidth; });
   await dynamicHeader.waitFor();
   const dynamicColumnIndex = await dynamicHeader.evaluate(element => element.cellIndex);
   const russianRankCell = page.locator(`tr[data-presence-key="keyword:${russian.id}"] td`).nth(dynamicColumnIndex);
   await russianRankCell.getByText("×", { exact: true }).waitFor();
+  const desktopDynamicColumnIndex = await desktopDynamicHeader.evaluate(element => element.cellIndex);
+  const standardPositionCell = page.locator(`tr[data-presence-key="keyword:${english.id}"] td.semantic-column-googlePosition`);
+  const desktopDynamicPositionCell = page.locator(`tr[data-presence-key="keyword:${english.id}"] td`).nth(desktopDynamicColumnIndex);
+  await standardPositionCell.locator(".semantic-position-value").waitFor();
+  await desktopDynamicPositionCell.locator(".semantic-position-value").waitFor();
+  assert.equal(
+    await standardPositionCell.locator(".semantic-position-value > strong").evaluate(element => getComputedStyle(element).fontWeight),
+    await desktopDynamicPositionCell.locator(".semantic-position-value > strong").evaluate(element => getComputedStyle(element).fontWeight),
+    "standard and geographic position values must share the same weight"
+  );
+  const positionSortRequest = page.waitForRequest(requestValue => {
+    const url = new URL(requestValue.url());
+    return requestValue.method() === "GET" &&
+      url.pathname.endsWith(`/projects/${firstProject.id}/keywords`) &&
+      url.searchParams.get("sort") === "RANK_POSITION_ASC" &&
+      url.searchParams.get("rankSortDimensionKey") === mobile.key;
+  });
+  await dynamicHeader.getByRole("button").click();
+  await positionSortRequest;
+  await dynamicHeader.waitFor();
+  assert.equal(await dynamicHeader.getAttribute("aria-sort"), "ascending");
+  const checkedAtSortRequest = page.waitForRequest(requestValue => {
+    const url = new URL(requestValue.url());
+    return requestValue.method() === "GET" &&
+      url.pathname.endsWith(`/projects/${firstProject.id}/keywords`) &&
+      url.searchParams.get("sort") === "RANK_CHECKED_AT_DESC" &&
+      url.searchParams.get("rankSortDimensionKey") === mobile.key;
+  });
+  await dynamicCheckedAtHeader.getByRole("button").click();
+  await checkedAtSortRequest;
+  await dynamicCheckedAtHeader.waitFor();
+  assert.equal(await dynamicCheckedAtHeader.getAttribute("aria-sort"), "descending");
+  assert.equal(await dynamicUrlHeader.getAttribute("aria-sort"), null);
   await page.waitForTimeout(350);
   const tableBeforeLayout = await tablePresentation(page, dynamicHeader, russianRankCell);
   const rankReadCountBeforeLayout = rankReadRequests.length;
@@ -284,17 +328,46 @@ test("multi-geo ranks, dated XLSX round trip, advanced filters and large group u
   await mobileMoscowOption.click();
   await regional.locator(".custom-select-trigger .search-engine-logo.google").waitFor();
   await regional.locator(".custom-select-trigger .semantic-rank-device-badge svg").waitFor();
-  const declinedDelta = regional.locator(".semantic-regional-rank-row .semantic-rank-comparison-position .declined");
+  const declinedDelta = regional.locator(".semantic-regional-rank-row .semantic-position-value.not-found > small");
   await declinedDelta.waitFor();
+  const regionalDeltaFontSize = Number.parseFloat(
+    await declinedDelta.evaluate(element => getComputedStyle(element).fontSize)
+  );
   assert.ok(
-    Number.parseFloat(await declinedDelta.evaluate(element => getComputedStyle(element).fontSize)) >= 14,
-    "regional position delta is too small"
+    regionalDeltaFontSize >= 12 && regionalDeltaFontSize <= 14,
+    "regional position delta must stay readable without overpowering the position"
   );
   await regional.getByRole("button", { name: "История", exact: true }).click();
   const historyDialog = page.locator("dialog[open].semantic-modal");
   await historyDialog.getByText("URL не сохранён", { exact: true }).waitFor();
   await page.screenshot({ path: path.join(output, "manual-history-sidebar.png") });
   await historyDialog.locator(".semantic-modal-close").click();
+
+  await page.goto(`${base}/app`, { waitUntil: "networkidle" });
+  const dashboardDimension = page.locator(".dashboard-rank-dimension-filter");
+  await dashboardDimension.getByText("Поисковик, город и устройство", { exact: true }).waitFor();
+  await dashboardDimension.locator(".custom-select-trigger").click();
+  const dashboardMobileOption = page.locator(".custom-select-option").filter({
+    has: page.locator(".semantic-rank-context-region", { hasText: "Москва" })
+  }).filter({ has: page.locator(".semantic-rank-device-badge", { hasText: "Телефон" }) });
+  await dashboardMobileOption.locator(".search-engine-logo.google").waitFor();
+  await dashboardMobileOption.locator(".semantic-rank-device-badge svg").waitFor();
+  const dimensionHistoryRequest = page.waitForRequest(requestValue => {
+    const url = new URL(requestValue.url());
+    return requestValue.method() === "GET" &&
+      url.pathname.endsWith(`/projects/${firstProject.id}/keywords/position-history`) &&
+      url.searchParams.get("rankDimensionKey") === mobile.key;
+  });
+  await dashboardMobileOption.click();
+  await dimensionHistoryRequest;
+  await dashboardDimension.locator(".custom-select-trigger .search-engine-logo.google").waitFor();
+  await page.screenshot({ path: path.join(output, "dashboard-rank-dimension.png") });
+  await page.setViewportSize({ width: 390, height: 900 });
+  await dashboardDimension.scrollIntoViewIfNeeded();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "dashboard rank selector overflows at 390px");
+  await page.screenshot({ path: path.join(output, "dashboard-rank-dimension-390.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${base}/app/semantics`, { waitUntil: "networkidle" });
 
   const tree = page.locator("nav.semantic-group-tree");
   const firstRegularGroup = tree.locator(".semantic-group-tree-row:not(.system)").first();

@@ -118,13 +118,26 @@ export function rankJobScopeJson(
     | "searchEngine"
     | "depth"
     | "providerMappingVersion"
-  >,
+  > & Partial<Pick<
+    InternalRankExecutionParameters,
+    "countryCode" | "regionCode" | "language" | "device"
+  >>,
   estimate?: Pick<RankEstimate, "routingScope" | "connectorAttempts">
 ): Prisma.InputJsonValue {
   const searchSource = rankSearchSourceFromProviderMappingVersion(
     execution.searchEngine,
     execution.providerMappingVersion
   );
+  const geography = execution.countryCode &&
+    execution.language &&
+    execution.device
+    ? {
+        countryCode: execution.countryCode,
+        regionCode: execution.regionCode ?? execution.countryCode,
+        language: execution.language,
+        device: execution.device
+      }
+    : {};
   return json({
     schemaVersion: RANK_JOB_INPUT_SCHEMA,
     workspaceId: input.workspaceId,
@@ -135,6 +148,7 @@ export function rankJobScopeJson(
       ? {}
       : { saveProjectPosition: execution.saveProjectPosition }),
     searchEngine: execution.searchEngine,
+    ...geography,
     ...(searchSource ? { searchSource } : {}),
     depth: execution.depth,
     ...(estimate?.routingScope ? { routingScope: estimate.routingScope } : {}),
@@ -366,16 +380,23 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
   }
 }
 
+interface RankExecutionPresentation {
+  readonly searchEngine?: "GOOGLE" | "YANDEX";
+  readonly searchSource?: "SEARCH_API" | "LIVE";
+  readonly countryCode?: string;
+  readonly regionCode?: string;
+  readonly language?: string;
+  readonly device?: "DESKTOP" | "MOBILE";
+  readonly depth?: 30 | 50 | 100;
+  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
+  readonly saveProjectPosition?: boolean;
+}
+
 function rankScopeSummary(
   value: unknown,
   status: string,
   manifestCommand: unknown
-): {
-  readonly searchEngine?: "GOOGLE" | "YANDEX";
-  readonly searchSource?: "SEARCH_API" | "LIVE";
-  readonly depth?: 30 | 50 | 100;
-  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
-  readonly saveProjectPosition?: boolean;
+): RankExecutionPresentation & {
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
 } {
@@ -426,28 +447,46 @@ function rankScopeSummary(
 function rankExecutionPresentation(
   input: Readonly<Record<string, unknown>>,
   manifestCommand: unknown
-): {
-  readonly searchEngine?: "GOOGLE" | "YANDEX";
-  readonly searchSource?: "SEARCH_API" | "LIVE";
-  readonly depth?: 30 | 50 | 100;
-  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
-  readonly saveProjectPosition?: boolean;
-} {
+): RankExecutionPresentation {
   const searchEngine = input.searchEngine;
   const searchSource = input.searchSource;
   const depth = input.depth;
   const purpose = input.purpose;
   const saveProjectPosition = input.saveProjectPosition;
   const manifestPresentation = manifestExecutionPresentation(manifestCommand);
+  const inputGeography = [
+    input.countryCode,
+    input.regionCode,
+    input.language,
+    input.device
+  ];
+  const hasInputGeography = inputGeography.some(value => value !== undefined);
+  if (hasInputGeography && inputGeography.some(value => value === undefined)) {
+    invalid();
+  }
   if (
     searchEngine === undefined &&
     searchSource === undefined &&
     depth === undefined &&
     purpose === undefined &&
-    saveProjectPosition === undefined
+    saveProjectPosition === undefined &&
+    !hasInputGeography
   ) {
     return manifestPresentation;
   }
+  const countryCode = hasInputGeography
+    ? input.countryCode
+    : manifestPresentation.countryCode;
+  const regionCode = hasInputGeography
+    ? input.regionCode
+    : manifestPresentation.regionCode;
+  const language = hasInputGeography
+    ? input.language
+    : manifestPresentation.language;
+  const device = hasInputGeography
+    ? input.device
+    : manifestPresentation.device;
+  const geography = [countryCode, regionCode, language, device];
   if (
     (searchEngine !== "GOOGLE" && searchEngine !== "YANDEX") ||
     (depth !== 30 && depth !== 50 && depth !== 100) ||
@@ -459,7 +498,20 @@ function rankExecutionPresentation(
       purpose !== "POSITION_TRACKING" &&
       purpose !== "COMPETITOR_SERP") ||
     (saveProjectPosition !== undefined &&
-      typeof saveProjectPosition !== "boolean")
+      typeof saveProjectPosition !== "boolean") ||
+    (geography.some(value => value !== undefined) &&
+      geography.some(value => value === undefined)) ||
+    (countryCode !== undefined &&
+      (typeof countryCode !== "string" || !/^[A-Z]{2}$/u.test(countryCode))) ||
+    (regionCode !== undefined &&
+      (typeof regionCode !== "string" ||
+        regionCode.length < 1 ||
+        regionCode.length > 100)) ||
+    (language !== undefined &&
+      (typeof language !== "string" ||
+        language.length < 2 ||
+        language.length > 16)) ||
+    (device !== undefined && device !== "DESKTOP" && device !== "MOBILE")
   ) {
     invalid();
   }
@@ -472,6 +524,10 @@ function rankExecutionPresentation(
           manifestPresentation.searchSource
         ? { searchSource: manifestPresentation.searchSource }
         : {}),
+    ...(typeof countryCode === "string" ? { countryCode } : {}),
+    ...(typeof regionCode === "string" ? { regionCode } : {}),
+    ...(typeof language === "string" ? { language } : {}),
+    ...(device === "DESKTOP" || device === "MOBILE" ? { device } : {}),
     depth,
     ...(purpose === undefined
       ? manifestPresentation.purpose
@@ -488,13 +544,7 @@ function rankExecutionPresentation(
 
 function manifestExecutionPresentation(
   value: unknown
-): {
-  readonly searchEngine?: "GOOGLE" | "YANDEX";
-  readonly searchSource?: "SEARCH_API" | "LIVE";
-  readonly depth?: 30 | 50 | 100;
-  readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
-  readonly saveProjectPosition?: boolean;
-} {
+): RankExecutionPresentation {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {};
   }
@@ -511,6 +561,10 @@ function manifestExecutionPresentation(
   const depth = stored.depth;
   const purpose = stored.purpose;
   const saveProjectPosition = stored.saveProjectPosition;
+  const countryCode = stored.countryCode;
+  const regionCode = stored.regionCode ?? countryCode;
+  const language = stored.language;
+  const device = stored.device;
   if (
     (searchEngine !== "GOOGLE" && searchEngine !== "YANDEX") ||
     (depth !== 30 && depth !== 50 && depth !== 100) ||
@@ -518,7 +572,16 @@ function manifestExecutionPresentation(
       purpose !== "POSITION_TRACKING" &&
       purpose !== "COMPETITOR_SERP") ||
     (saveProjectPosition !== undefined &&
-      typeof saveProjectPosition !== "boolean")
+      typeof saveProjectPosition !== "boolean") ||
+    typeof countryCode !== "string" ||
+    !/^[A-Z]{2}$/u.test(countryCode) ||
+    typeof regionCode !== "string" ||
+    regionCode.length < 1 ||
+    regionCode.length > 100 ||
+    typeof language !== "string" ||
+    language.length < 2 ||
+    language.length > 16 ||
+    (device !== "DESKTOP" && device !== "MOBILE")
   ) {
     return {};
   }
@@ -532,6 +595,10 @@ function manifestExecutionPresentation(
       : undefined;
   return {
     searchEngine,
+    countryCode,
+    regionCode,
+    language,
+    device,
     ...(purpose === undefined ? {} : { purpose }),
     ...(saveProjectPosition === undefined
       ? {}

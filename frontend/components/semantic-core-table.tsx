@@ -6,12 +6,20 @@ import { KeywordTagPicker } from "./keyword-tag-picker";
 import { uniqueKeywordTags } from "../lib/keyword-tags";
 import { rankColumnLabel, rankDimensionColumns, rankDimensionLabel } from "../lib/rank-dimension-presentation";
 import { useSemanticRankComparison } from "./use-semantic-rank-comparison";
-import { SemanticRankComparisonCell } from "./semantic-rank-comparison-cell";
+import {
+  SemanticRankCheckedAtCell,
+  SemanticRankComparisonCell,
+  SemanticRankPositionCell,
+  SemanticRankUrlCell
+} from "./semantic-rank-comparison-cell";
+import { SemanticRankContext } from "./semantic-rank-context";
 
 import {
   semanticKeywordDefaultPageSize,
   semanticCompetitorRowColumnKeys,
+  isSemanticRankDimensionSort,
   parseSemanticRankColumnKey,
+  parseSemanticRankDimensionKey,
   type SemanticRankDimension,
   semanticKeywordPageSizes,
   semanticSavedViewQueryIndicators,
@@ -50,10 +58,7 @@ import {
   browserApiRequest,
   type BrowserCursorPage
 } from "../lib/browser-api";
-import {
-  externalPageUrlPresentation,
-  semanticExportFileUrl
-} from "../lib/app-path";
+import { semanticExportFileUrl } from "../lib/app-path";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import {
   manualKeywordDuplicateCanApply,
@@ -162,7 +167,7 @@ import {
   isInternalSemanticViewName,
   semanticColumnOrderFor,
   semanticQueryIndicatorsFor,
-  semanticFolderSortFor,
+  semanticFolderSortConfigFor,
   semanticFolderSortViewName,
   semanticFolderSortViewPrefix,
   semanticProjectTableViewName,
@@ -214,6 +219,7 @@ interface SemanticKeyword {
   }>[];
   readonly positions?: readonly Readonly<{
     searchEngine: "GOOGLE" | "YANDEX";
+    dimension?: SemanticRankDimension;
     found: boolean;
     position?: number;
     previousPosition?: number;
@@ -545,10 +551,13 @@ export function SemanticCoreTable({
     () => ({
       filters: viewConfig.filters,
       sort: viewConfig.sort,
+      ...(viewConfig.rankSortDimensionKey
+        ? { rankSortDimensionKey: viewConfig.rankSortDimensionKey }
+        : {}),
       ...(multiSearch ? { multiSearch } : {}),
       ...(multiGroupIds.length > 1 ? { groupIds: multiGroupIds } : {})
     }),
-    [multiGroupIds, multiSearch, viewConfig.filters, viewConfig.sort]
+    [multiGroupIds, multiSearch, viewConfig.filters, viewConfig.rankSortDimensionKey, viewConfig.sort]
   );
   const selectionScopeSignature = semanticSelectionScopeSignature({
     projectId,
@@ -1319,10 +1328,11 @@ export function SemanticCoreTable({
         );
         const nextConfig = appliedView || projectView
           ? storedConfig
-          : {
-              ...storedConfig,
-              sort: folderSortFor(storedConfig.filters.groupId, sortViews)
-            };
+          : withFolderSort(
+              storedConfig,
+              storedConfig.filters.groupId,
+              sortViews
+            );
         if (appliedView || projectView) {
           const nextPageSize = nextConfig.pageSize ?? layoutPreferencesRef.current.pageSize;
           const nextGroupSidebarWidth = nextConfig.groupSidebarWidth ??
@@ -1437,14 +1447,13 @@ export function SemanticCoreTable({
     const { search: draftSearch, ...otherFilters } = draftConfig.filters;
     if (otherFilters.groupId) setMultiGroupIds([]);
     const search = draftSearch?.trim();
-    setViewConfig({
+    setViewConfig(withFolderSort({
       ...draftConfig,
-      sort: folderSortFor(otherFilters.groupId),
       filters: {
         ...otherFilters,
         ...(search ? { search } : {})
       }
-    });
+    }, otherFilters.groupId));
   }
 
   function submitSearch(event: FormEvent<HTMLFormElement>): void {
@@ -1478,11 +1487,10 @@ export function SemanticCoreTable({
     setMultiSearch(undefined);
     const currentGroupId = viewConfig.filters.groupId;
     const reset = (current: SemanticViewConfig): SemanticViewConfig => {
-      return {
+      return withFolderSort({
         ...current,
-        filters: currentGroupId ? { groupId: currentGroupId } : {},
-        sort: folderSortFor(currentGroupId)
-      };
+        filters: currentGroupId ? { groupId: currentGroupId } : {}
+      }, currentGroupId);
     };
     setDraftConfig((current) => reset(current));
     setViewConfig((current) => reset(current));
@@ -1533,11 +1541,10 @@ export function SemanticCoreTable({
     const apply = (current: SemanticViewConfig): SemanticViewConfig => {
       const { groupId: ignored, ...filters } = current.filters;
       void ignored;
-      return {
+      return withFolderSort({
         ...current,
-        sort: folderSortFor(groupId),
         filters: groupId ? { ...filters, groupId } : filters
-      };
+      }, groupId);
     };
     setDraftConfig((current) => apply(current));
     setViewConfig((current) => apply(current));
@@ -1552,11 +1559,10 @@ export function SemanticCoreTable({
     const apply = (current: SemanticViewConfig): SemanticViewConfig => {
       const { groupId: ignored, ...filters } = current.filters;
       void ignored;
-      return {
+      return withFolderSort({
         ...current,
-        sort: folderSortFor(undefined),
         filters
-      };
+      }, undefined);
     };
     setDraftConfig((current) => apply(current));
     setViewConfig((current) => apply(current));
@@ -1567,24 +1573,61 @@ export function SemanticCoreTable({
     setBulkNotice(`Открыто групп: ${formatInteger(uniqueGroupIds.length, uiLocale)}`);
   }
 
-  function folderSortFor(
+  function folderSortConfigFor(
     groupId?: string,
     views: readonly SemanticSavedView[] = folderSortViews
-  ): SemanticKeywordSort {
-    return semanticFolderSortFor(groupId, views);
+  ): Readonly<Pick<SemanticViewConfig, "sort" | "rankSortDimensionKey">> {
+    return semanticFolderSortConfigFor(groupId, views);
   }
 
-  async function changeFolderSort(sort: SemanticKeywordSort): Promise<void> {
-    if (savingFolderSort || sort === viewConfig.sort) return;
+  function applySortConfig(
+    current: SemanticViewConfig,
+    sortConfig: Readonly<Pick<SemanticViewConfig, "sort" | "rankSortDimensionKey">>
+  ): SemanticViewConfig {
+    const { rankSortDimensionKey: ignored, ...rest } = current;
+    void ignored;
+    return { ...rest, ...sortConfig };
+  }
+
+  function withFolderSort(
+    current: SemanticViewConfig,
+    groupId?: string,
+    views: readonly SemanticSavedView[] = folderSortViews
+  ): SemanticViewConfig {
+    return applySortConfig(current, folderSortConfigFor(groupId, views));
+  }
+
+  async function changeFolderSort(
+    sort: SemanticKeywordSort,
+    rankSortDimensionKey?: string
+  ): Promise<void> {
+    const nextSort: Readonly<Pick<
+      SemanticViewConfig,
+      "sort" | "rankSortDimensionKey"
+    >> = isSemanticRankDimensionSort(sort)
+      ? { sort, rankSortDimensionKey: rankSortDimensionKey! }
+      : { sort };
+    if (
+      isSemanticRankDimensionSort(sort) &&
+      !rankSortDimensionKey
+    ) {
+      setMutationError("Не удалось определить город и устройство для сортировки.");
+      return;
+    }
+    if (
+      savingFolderSort ||
+      (sort === viewConfig.sort &&
+        nextSort.rankSortDimensionKey === viewConfig.rankSortDimensionKey)
+    ) return;
     const groupId = viewConfig.filters.groupId;
     const viewName = semanticFolderSortViewName(groupId);
     const config: SemanticViewConfig = {
       ...defaultSemanticViewConfig,
       filters: groupId ? { groupId } : {},
-      sort
+      ...nextSort
     };
-    setDraftConfig((current) => ({ ...current, sort }));
-    setViewConfig((current) => ({ ...current, sort }));
+    setDraftConfig((current) => applySortConfig(current, nextSort));
+    setViewConfig((current) => applySortConfig(current, nextSort));
     setSavingFolderSort(true);
     setMutationError(undefined);
     try {
@@ -1643,9 +1686,9 @@ export function SemanticCoreTable({
           : "Сортировка сохранена для корневого уровня"
       );
     } catch (requestError) {
-      const previousSort = folderSortFor(groupId);
-      setDraftConfig((current) => ({ ...current, sort: previousSort }));
-      setViewConfig((current) => ({ ...current, sort: previousSort }));
+      const previousSort = folderSortConfigFor(groupId);
+      setDraftConfig((current) => applySortConfig(current, previousSort));
+      setViewConfig((current) => applySortConfig(current, previousSort));
       setMutationError(savedViewMutationErrorMessage(requestError));
     } finally {
       setSavingFolderSort(false);
@@ -2695,6 +2738,9 @@ export function SemanticCoreTable({
                   }
                 }),
             sort: viewConfig.sort,
+            ...(viewConfig.rankSortDimensionKey
+              ? { rankSortDimensionKey: viewConfig.rankSortDimensionKey }
+              : {}),
             ...(exportContent === "SEMANTIC" || exportContent === "COMPETITORS" ? { includeBom: exportBom } : {}),
             ...(exportContent === "POSITION_HISTORY"
               ? {
@@ -3855,6 +3901,16 @@ export function SemanticCoreTable({
             }
             value={viewConfig.sort}
           >
+            {isSemanticRankDimensionSort(viewConfig.sort) &&
+              viewConfig.rankSortDimensionKey && (
+                <option value={viewConfig.sort}>
+                  {semanticRankSortLabel(
+                    viewConfig,
+                    rankComparison.dimensions,
+                    uiLocale
+                  )}
+                </option>
+              )}
             <option value="CREATED_DESC"><UiText text="Сначала новые" /></option>
             <option value="CREATED_ASC"><UiText text="Сначала старые" /></option>
             <option value="UPDATED_DESC"><UiText text="Недавно изменённые" /></option>
@@ -4734,8 +4790,16 @@ export function SemanticCoreTable({
               }
               ariaLabel={uiText("Таблица семантического ядра")}
               columns={tableColumns.map((column) => {
-                const nextSort = nextSemanticColumnSort(column, viewConfig.sort);
-                const direction = semanticColumnSortDirection(column, viewConfig.sort);
+                const nextSort = nextSemanticColumnSort(
+                  column,
+                  viewConfig.sort,
+                  viewConfig.rankSortDimensionKey
+                );
+                const direction = semanticColumnSortDirection(
+                  column,
+                  viewConfig.sort,
+                  viewConfig.rankSortDimensionKey
+                );
                 return {
                   key: column,
                   ariaSort: direction,
@@ -4752,10 +4816,13 @@ export function SemanticCoreTable({
                     resizeSemanticColumn(column, width, true),
                   header: nextSort ? (
                     <button
-                      aria-label={`${columnLabel(column, customColumns, rankComparison.dimensions, uiLocale)}. ${sortActionLabel(nextSort)}`}
+                      aria-label={`${columnLabel(column, customColumns, rankComparison.dimensions, uiLocale)}. ${sortActionLabel(nextSort.sort)}`}
                       className={direction ? "active" : undefined}
                       disabled={savingFolderSort}
-                      onClick={() => void changeFolderSort(nextSort)}
+                      onClick={() => void changeFolderSort(
+                        nextSort.sort,
+                        nextSort.rankSortDimensionKey
+                      )}
                       type="button"
                     >
                       <span>{columnHeader(column, customColumns, rankComparison.dimensions, uiLocale)}</span>
@@ -4764,7 +4831,7 @@ export function SemanticCoreTable({
                       </i>
                     </button>
                   ) : columnHeader(column, customColumns, rankComparison.dimensions, uiLocale),
-                  cell: (item: SemanticKeyword) => parseSemanticRankColumnKey(column) ? <SemanticRankComparisonCell item={rankComparison.items.get(`${item.id}:${parseSemanticRankColumnKey(column)!.dimension.key}`)} metric={parseSemanticRankColumnKey(column)!.metric} loading={rankComparison.loading} error={rankComparison.error} /> : keywordColumn(
+                  cell: (item: SemanticKeyword) => parseSemanticRankColumnKey(column) ? <SemanticRankComparisonCell item={rankComparison.items.get(`${item.id}:${parseSemanticRankColumnKey(column)!.dimension.key}`)} metric={parseSemanticRankColumnKey(column)!.metric} loading={rankComparison.loading} {...(rankComparison.error ? { error: rankComparison.error } : {})} /> : keywordColumn(
                     item,
                     column,
                     customColumns,
@@ -5327,7 +5394,7 @@ function semanticVirtualRows(
 
 type SemanticKeywordLoadConfig = Pick<
   SemanticViewConfig,
-  "filters" | "sort"
+  "filters" | "sort" | "rankSortDimensionKey"
 > & Readonly<{
   groupIds?: readonly string[];
   multiSearch?: SemanticKeywordMultiSearch;
@@ -5371,11 +5438,17 @@ async function loadKeywordPage(
     if (value !== undefined) query.set(field, String(value));
   }
   query.set("sort", config.sort);
+  if (config.rankSortDimensionKey) {
+    query.set("rankSortDimensionKey", config.rankSortDimensionKey);
+  }
   if (cursor) query.set("cursor", cursor);
   if (config.multiSearch || (config.groupIds?.length ?? 0) > 20) {
     const bodyQuery: Record<string, unknown> = {
       limit,
       sort: config.sort,
+      ...(config.rankSortDimensionKey
+        ? { rankSortDimensionKey: config.rankSortDimensionKey }
+        : {}),
       ...(cursor ? { cursor } : {}),
       ...(filters.search ? { search: filters.search } : {}),
       ...(filters.tag ? { tag: filters.tag } : {}),
@@ -5473,41 +5546,67 @@ function semanticExportColumnsWithRankingUrls(
 
 function nextSemanticColumnSort(
   column: SemanticViewColumn,
-  current: SemanticKeywordSort
-): SemanticKeywordSort | undefined {
+  current: SemanticKeywordSort,
+  currentRankDimensionKey?: string
+): Readonly<{
+  sort: SemanticKeywordSort;
+  rankSortDimensionKey?: string;
+}> | undefined {
+  const rank = parseSemanticRankColumnKey(column);
+  if (rank?.metric === "position") {
+    return {
+      sort:
+        currentRankDimensionKey === rank.dimension.key &&
+        current === "RANK_POSITION_ASC"
+          ? "RANK_POSITION_DESC"
+          : "RANK_POSITION_ASC",
+      rankSortDimensionKey: rank.dimension.key
+    };
+  }
+  if (rank?.metric === "checkedAt") {
+    return {
+      sort:
+        currentRankDimensionKey === rank.dimension.key &&
+        current === "RANK_CHECKED_AT_DESC"
+          ? "RANK_CHECKED_AT_ASC"
+          : "RANK_CHECKED_AT_DESC",
+      rankSortDimensionKey: rank.dimension.key
+    };
+  }
+  const target = (sort: SemanticKeywordSort) => ({ sort });
   switch (column) {
     case "query":
-      return current === "TEXT_ASC" ? "TEXT_DESC" : "TEXT_ASC";
+      return target(current === "TEXT_ASC" ? "TEXT_DESC" : "TEXT_ASC");
     case "priority":
-      return current === "PRIORITY_DESC" ? "PRIORITY_ASC" : "PRIORITY_DESC";
+      return target(current === "PRIORITY_DESC" ? "PRIORITY_ASC" : "PRIORITY_DESC");
     case "source":
-      return current === "SOURCE_ASC" ? "SOURCE_DESC" : "SOURCE_ASC";
+      return target(current === "SOURCE_ASC" ? "SOURCE_DESC" : "SOURCE_ASC");
     case "tags":
-      return current === "TAGS_ASC" ? "TAGS_DESC" : "TAGS_ASC";
+      return target(current === "TAGS_ASC" ? "TAGS_DESC" : "TAGS_ASC");
     case "updatedAt":
-      return current === "UPDATED_DESC" ? "UPDATED_ASC" : "UPDATED_DESC";
+      return target(current === "UPDATED_DESC" ? "UPDATED_ASC" : "UPDATED_DESC");
     case "frequency":
-      return current === "FREQUENCY_BASE_DESC" ? "FREQUENCY_BASE_ASC" : "FREQUENCY_BASE_DESC";
+      return target(current === "FREQUENCY_BASE_DESC" ? "FREQUENCY_BASE_ASC" : "FREQUENCY_BASE_DESC");
     case "frequencyExact":
-      return current === "FREQUENCY_EXACT_DESC" ? "FREQUENCY_EXACT_ASC" : "FREQUENCY_EXACT_DESC";
+      return target(current === "FREQUENCY_EXACT_DESC" ? "FREQUENCY_EXACT_ASC" : "FREQUENCY_EXACT_DESC");
     case "frequencyFixed":
-      return current === "FREQUENCY_FIXED_DESC" ? "FREQUENCY_FIXED_ASC" : "FREQUENCY_FIXED_DESC";
+      return target(current === "FREQUENCY_FIXED_DESC" ? "FREQUENCY_FIXED_ASC" : "FREQUENCY_FIXED_DESC");
     case "yandexPosition":
-      return current === "YANDEX_POSITION_ASC" ? "YANDEX_POSITION_DESC" : "YANDEX_POSITION_ASC";
+      return target(current === "YANDEX_POSITION_ASC" ? "YANDEX_POSITION_DESC" : "YANDEX_POSITION_ASC");
     case "googlePosition":
-      return current === "GOOGLE_POSITION_ASC" ? "GOOGLE_POSITION_DESC" : "GOOGLE_POSITION_ASC";
+      return target(current === "GOOGLE_POSITION_ASC" ? "GOOGLE_POSITION_DESC" : "GOOGLE_POSITION_ASC");
     case "yandexCheckedAt":
-      return current === "YANDEX_CHECKED_AT_DESC" ? "YANDEX_CHECKED_AT_ASC" : "YANDEX_CHECKED_AT_DESC";
+      return target(current === "YANDEX_CHECKED_AT_DESC" ? "YANDEX_CHECKED_AT_ASC" : "YANDEX_CHECKED_AT_DESC");
     case "googleCheckedAt":
-      return current === "GOOGLE_CHECKED_AT_DESC" ? "GOOGLE_CHECKED_AT_ASC" : "GOOGLE_CHECKED_AT_DESC";
+      return target(current === "GOOGLE_CHECKED_AT_DESC" ? "GOOGLE_CHECKED_AT_ASC" : "GOOGLE_CHECKED_AT_DESC");
     case "yandexAiPosition":
-      return current === "YANDEX_AI_POSITION_ASC" ? "YANDEX_AI_POSITION_DESC" : "YANDEX_AI_POSITION_ASC";
+      return target(current === "YANDEX_AI_POSITION_ASC" ? "YANDEX_AI_POSITION_DESC" : "YANDEX_AI_POSITION_ASC");
     case "googleAiPosition":
-      return current === "GOOGLE_AI_POSITION_ASC" ? "GOOGLE_AI_POSITION_DESC" : "GOOGLE_AI_POSITION_ASC";
+      return target(current === "GOOGLE_AI_POSITION_ASC" ? "GOOGLE_AI_POSITION_DESC" : "GOOGLE_AI_POSITION_ASC");
     case "yandexAiCheckedAt":
-      return current === "YANDEX_AI_CHECKED_AT_DESC" ? "YANDEX_AI_CHECKED_AT_ASC" : "YANDEX_AI_CHECKED_AT_DESC";
+      return target(current === "YANDEX_AI_CHECKED_AT_DESC" ? "YANDEX_AI_CHECKED_AT_ASC" : "YANDEX_AI_CHECKED_AT_DESC");
     case "googleAiCheckedAt":
-      return current === "GOOGLE_AI_CHECKED_AT_DESC" ? "GOOGLE_AI_CHECKED_AT_ASC" : "GOOGLE_AI_CHECKED_AT_DESC";
+      return target(current === "GOOGLE_AI_CHECKED_AT_DESC" ? "GOOGLE_AI_CHECKED_AT_ASC" : "GOOGLE_AI_CHECKED_AT_DESC");
     default:
       return undefined;
   }
@@ -5515,8 +5614,18 @@ function nextSemanticColumnSort(
 
 function semanticColumnSortDirection(
   column: SemanticViewColumn,
-  current: SemanticKeywordSort
+  current: SemanticKeywordSort,
+  currentRankDimensionKey?: string
 ): "ascending" | "descending" | undefined {
+  const rank = parseSemanticRankColumnKey(column);
+  if (
+    rank &&
+    currentRankDimensionKey === rank.dimension.key &&
+    ((rank.metric === "position" && current.startsWith("RANK_POSITION_")) ||
+      (rank.metric === "checkedAt" && current.startsWith("RANK_CHECKED_AT_")))
+  ) {
+    return current.endsWith("_ASC") ? "ascending" : "descending";
+  }
   const activeColumn =
     (column === "query" && current.startsWith("TEXT_")) ||
     (column === "priority" && current.startsWith("PRIORITY_")) ||
@@ -5542,6 +5651,20 @@ function sortActionLabel(sort: SemanticKeywordSort): string {
   return sort.endsWith("_ASC")
     ? "Сортировать по возрастанию"
     : "Сортировать по убыванию";
+}
+
+function semanticRankSortLabel(
+  config: Pick<SemanticViewConfig, "sort" | "rankSortDimensionKey">,
+  dimensions: readonly SemanticRankDimension[],
+  locale: string
+): string {
+  const dimension = config.rankSortDimensionKey
+    ? dimensions.find(({ key }) => key === config.rankSortDimensionKey) ??
+      parseSemanticRankDimensionKey(config.rankSortDimensionKey)
+    : undefined;
+  return dimension
+    ? `${rankDimensionLabel(dimension, locale)} · ${config.sort.endsWith("_ASC") ? "↑" : "↓"}`
+    : config.sort;
 }
 
 function columnLabel(
@@ -5648,14 +5771,25 @@ function SemanticSiteResultsModal({
             <UiText text="Актуальная выдача изменилась. Повторно откройте список из строки запроса." /></div>
         )}
         {positions.map((position) => (
-          <section key={`${position.searchEngine}:${position.observedAt}`}>
+          <section key={`${position.searchEngine}:${position.dimension?.key ?? "legacy"}:${position.observedAt}`}>
             <header>
-              <span>
-                <SearchEngineLogo engine={position.searchEngine} size="compact" />
-                <strong>
-                  {position.searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}
-                </strong>
-              </span>
+              {position.dimension ? (
+                <SemanticRankContext
+                  device={position.dimension.device}
+                  regionCode={position.dimension.regionCode}
+                  {...(position.dimension.regionLabel
+                    ? { regionLabel: position.dimension.regionLabel }
+                    : {})}
+                  searchEngine={position.dimension.searchEngine}
+                />
+              ) : (
+                <span>
+                  <SearchEngineLogo engine={position.searchEngine} size="compact" />
+                  <strong>
+                    {position.searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}
+                  </strong>
+                </span>
+              )}
               <time
                 dateTime={position.observedAt}
                 title={formatSemanticDateTime(position.observedAt, uiLocale)}
@@ -5823,9 +5957,9 @@ function keywordColumn(
     case "wordCount":
       return countKeywordWords(item.textOriginal);
     case "yandexPosition":
-      return keywordPosition(item, "YANDEX");
+      return keywordPosition(item, "YANDEX", uiLocale);
     case "googlePosition":
-      return keywordPosition(item, "GOOGLE");
+      return keywordPosition(item, "GOOGLE", uiLocale);
     case "yandexRelevantUrl":
       return keywordRelevantUrl(item, "YANDEX");
     case "googleRelevantUrl":
@@ -5835,9 +5969,9 @@ function keywordColumn(
     case "googleAiRelevantUrl":
       return keywordAiRelevantUrl(item, "GOOGLE");
     case "yandexCheckedAt":
-      return keywordCheckedAt(item, "YANDEX", uiLocale);
+      return keywordCheckedAt(item, "YANDEX");
     case "googleCheckedAt":
-      return keywordCheckedAt(item, "GOOGLE", uiLocale);
+      return keywordCheckedAt(item, "GOOGLE");
     case "yandexAiPosition":
       return keywordAiPosition(item, "YANDEX");
     case "googleAiPosition":
@@ -5894,7 +6028,7 @@ function keywordRelevantUrl(
     (candidate) => candidate.searchEngine === searchEngine
   );
   if (position && !position.found) return keywordNotFoundMark(searchEngine);
-  return keywordRankingUrl(position?.rankingUrl);
+  return <SemanticRankUrlCell url={position?.rankingUrl} />;
 }
 
 function keywordAiRelevantUrl(
@@ -5905,42 +6039,19 @@ function keywordAiRelevantUrl(
     (candidate) => candidate.searchEngine === searchEngine
   );
   if (answer && !answer.siteFound) return keywordNotFoundMark(searchEngine, "AI");
-  return keywordRankingUrl(answer?.rankingUrl);
-}
-
-function keywordRankingUrl(url: string | undefined) {
-  const presentation = url
-    ? externalPageUrlPresentation(url, Number.MAX_SAFE_INTEGER)
-    : undefined;
-  if (!presentation || !url) {
-    return <span className="semantic-metric-empty">—</span>;
-  }
-  return (
-    <a
-      className="semantic-ranking-url-link"
-      href={presentation.href}
-      onClick={(event) => event.stopPropagation()}
-      rel="noreferrer noopener"
-      target="_blank"
-      title={presentation.href}
-    >
-      {presentation.label}
-    </a>
-  );
+  return <SemanticRankUrlCell url={answer?.rankingUrl} />;
 }
 
 function keywordCheckedAt(
   item: SemanticKeyword,
-  searchEngine: "GOOGLE" | "YANDEX", uiLocale: string = "ru-RU"
+  searchEngine: "GOOGLE" | "YANDEX"
 ) {
   const position = item.positions?.find(
     (candidate) => candidate.searchEngine === searchEngine
   );
-  return position ? (
-    <time dateTime={position.observedAt} title={new Date(position.observedAt).toLocaleString(uiLocale)}>
-      {formatDate(position.observedAt, uiLocale)}
-    </time>
-  ) : <span className="semantic-metric-empty">—</span>;
+  return position
+    ? <SemanticRankCheckedAtCell observedAt={position.observedAt} />
+    : <span className="semantic-metric-empty">—</span>;
 }
 
 function keywordAiPosition(
@@ -6059,40 +6170,25 @@ function compareGroupTreeOrder(
 
 function keywordPosition(
   item: SemanticKeyword,
-  searchEngine: "GOOGLE" | "YANDEX"
+  searchEngine: "GOOGLE" | "YANDEX",
+  locale: string
 ) {
   const position = item.positions?.find(
     (candidate) => candidate.searchEngine === searchEngine
   );
-  if (position && !position.found) {
-    const description = position.previousPosition === undefined
-      ? `${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: позиция не найдена`
-      : `${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: позиция не найдена. Была ${position.previousPosition}`;
-    return (
-      <span aria-label={description} className="semantic-position-value not-found" title={description}>
-        {keywordNotFoundMark(searchEngine)}
-        {position.previousPosition !== undefined && (
-          <small aria-hidden="true"><UiText text="Была" after=" " />{position.previousPosition}</small>
-        )}
-      </span>
-    );
-  }
-  if (!position || position.position === undefined) {
+  if (!position) {
     return <span className="semantic-metric-empty">—</span>;
   }
-  const change = rankChangePresentation(
-    position.position,
-    position.previousPosition
-  );
   return (
-    <span
-      aria-label={change.ariaLabel}
-      className={`semantic-position-value ${change.tone}`}
-      title={change.title}
-    >
-      <strong aria-hidden="true">{position.position}</strong>
-      <small aria-hidden="true">{change.label}</small>
-    </span>
+    <SemanticRankPositionCell
+      item={position}
+      searchEngine={searchEngine}
+      {...(position.dimension
+        ? {
+            titleSuffix: `${rankDimensionLabel(position.dimension, locale)} · ${new Date(position.observedAt).toLocaleString(locale)}`
+          }
+        : {})}
+    />
   );
 }
 
@@ -6312,6 +6408,7 @@ function semanticViewConfigSignature(config: SemanticViewConfig): string {
     schemaVersion: layout.schemaVersion,
     filters: layout.filters,
     sort: layout.sort,
+    rankSortDimensionKey: layout.rankSortDimensionKey ?? null,
     columns: layout.columns,
     columnOrder: layout.columnOrder ?? null,
     density: layout.density,

@@ -564,7 +564,9 @@ versions; preset mutations требуют `semantic.update` и `If-Match`.
   последнего включённого наблюдения, measured/positioned и теми же
   TOP-счётчиками. Внутри дня выбирается последний snapshot каждого keyword.
   Необязательный `includeUntracked=true` включает active keywords, которые
-  сейчас не отслеживаются; без параметра они исключены.
+  сейчас не отслеживаются; без параметра они исключены. Необязательный
+  `rankDimensionKey` ограничивает агрегацию точным сочетанием поисковика,
+  страны, региона, языка выдачи и устройства.
 
 Оба маршрута требуют `semantic.view` или token scope `semantics:read`, а Core
 SEO применяет workspace/project и active keyword scope до агрегации; история

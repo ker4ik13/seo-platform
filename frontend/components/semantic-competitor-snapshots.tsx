@@ -14,6 +14,7 @@ import {
 } from "../lib/semantic-rank-presentation";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
+import { SemanticRankContext } from "./semantic-rank-context";
 import { UiText, useUiLocale } from "./ui-locale";
 
 
@@ -61,7 +62,20 @@ export function SemanticCompetitorSnapshots({
                 <small>
                   {<UiText text={competitorSourceLabel(snapshot) ?? ""} />} · {formatDateTime(snapshot.observedAt, uiLocale)}
                 </small>
-                {"regionCode" in snapshot && snapshot.regionCode && <small className="semantic-competitor-geography">{"regionLabel" in snapshot && snapshot.regionLabel ? snapshot.regionLabel : snapshot.regionCode} · <UiText text={snapshot.device === "MOBILE" ? "Телефон" : "ПК"} /></small>}
+                {"regionCode" in snapshot && snapshot.regionCode &&
+                  "device" in snapshot &&
+                  (snapshot.device === "DESKTOP" || snapshot.device === "MOBILE") && (
+                    <small className="semantic-competitor-geography">
+                      <SemanticRankContext
+                        device={snapshot.device}
+                        regionCode={snapshot.regionCode}
+                        {...("regionLabel" in snapshot && snapshot.regionLabel
+                          ? { regionLabel: snapshot.regionLabel }
+                          : {})}
+                        searchEngine={snapshot.searchEngine}
+                      />
+                    </small>
+                  )}
               </div>
               <ProviderLogo provider={snapshot.provider} size="compact" />
             </header>

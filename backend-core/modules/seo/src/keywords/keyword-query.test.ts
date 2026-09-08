@@ -69,6 +69,21 @@ test("trusted body list keeps a large group union and exact rank filter", () => 
   const result = keywordBodyListInput({ query: { groupIds, rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP", rankState: "NOT_FOUND", frequencyExactMax: "0" } });
   assert.equal(result.groupIds?.length, 250);
   assert.equal(result.rankState, "NOT_FOUND");
+  assert.deepEqual(
+    keywordListQuery({
+      sort: "RANK_CHECKED_AT_DESC",
+      rankSortDimensionKey: "YANDEX|RU|213|ru|DESKTOP"
+    }),
+    {
+      limit: 100,
+      sort: "RANK_CHECKED_AT_DESC",
+      rankSortDimensionKey: "YANDEX|RU|213|ru|DESKTOP"
+    }
+  );
+  assert.throws(
+    () => keywordListQuery({ sort: "RANK_CHECKED_AT_DESC" }),
+    BadRequestException
+  );
   assert.throws(() => keywordListQuery({ rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP", rankState: "NOT_FOUND", rankPositionMin: "1" }), BadRequestException);
 });
 
@@ -77,8 +92,14 @@ test("parses the internal project position history tracking scope", () => {
     includeUntracked: false
   });
   assert.deepEqual(
-    projectPositionHistoryQuery({ includeUntracked: "true" }),
-    { includeUntracked: true }
+    projectPositionHistoryQuery({
+      includeUntracked: "true",
+      rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP"
+    }),
+    {
+      includeUntracked: true,
+      rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP"
+    }
   );
   assert.throws(
     () => projectPositionHistoryQuery({ includeUntracked: ["true"] }),

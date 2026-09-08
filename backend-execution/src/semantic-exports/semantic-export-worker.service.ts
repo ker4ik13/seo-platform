@@ -357,7 +357,10 @@ export class SemanticExportWorkerService {
     const query: KeywordListQuery = {
       groupId,
       limit: competitorSources.length > 0 ? COMPETITOR_PAGE_SIZE : PAGE_SIZE,
-      sort: input.sort ?? "CREATED_ASC"
+      sort: input.sort ?? "CREATED_ASC",
+      ...(input.rankSortDimensionKey
+        ? { rankSortDimensionKey: input.rankSortDimensionKey }
+        : {})
     };
     let cursor: string | undefined;
     const observedCursors = new Set<string>();
@@ -555,7 +558,10 @@ export class SemanticExportWorkerService {
     const base: KeywordListQuery = {
       limit: pageSize,
       ...input.filters,
-      sort: input.sort ?? "CREATED_DESC"
+      sort: input.sort ?? "CREATED_DESC",
+      ...(input.rankSortDimensionKey
+        ? { rankSortDimensionKey: input.rankSortDimensionKey }
+        : {})
     };
     if (input.scope !== "GROUP_SUBTREE") return base;
 
@@ -572,7 +578,10 @@ export class SemanticExportWorkerService {
       ...(descendants.length === 1
         ? { groupId: rootId }
         : { groupIds: descendants }),
-      sort: input.sort ?? "CREATED_DESC"
+      sort: input.sort ?? "CREATED_DESC",
+      ...(input.rankSortDimensionKey
+        ? { rankSortDimensionKey: input.rankSortDimensionKey }
+        : {})
     };
   }
 

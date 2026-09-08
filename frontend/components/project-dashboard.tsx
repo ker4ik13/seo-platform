@@ -7,6 +7,7 @@ import type {
   ProjectPositionHistory,
   ProjectPositionSummary,
   RankJobSummary,
+  SemanticRankDimensionCatalog,
   SemanticKeywordListItem,
   TechnicalCrawlSettings
 } from "@seo-platform/contracts";
@@ -49,6 +50,7 @@ interface DashboardData {
   readonly research: KeywordResearchCollection;
   readonly positionSummary: ProjectPositionSummary;
   readonly positionHistory: ProjectPositionHistory;
+  readonly rankDimensions: SemanticRankDimensionCatalog;
 }
 
 export function ProjectDashboard({
@@ -67,7 +69,9 @@ export function ProjectDashboard({
   const [error, setError] = useState<string>();
   const [selectedJob, setSelectedJob] = useState<DashboardJob>();
   const [includeUntrackedHistory, setIncludeUntrackedHistory] = useState(false);
-  const [untrackedPositionHistory, setUntrackedPositionHistory] =
+  const [positionHistoryDimensionKey, setPositionHistoryDimensionKey] =
+    useState("");
+  const [scopedPositionHistory, setScopedPositionHistory] =
     useState<ProjectPositionHistory>();
   const [positionHistoryScopeLoading, setPositionHistoryScopeLoading] =
     useState(false);
@@ -80,7 +84,7 @@ export function ProjectDashboard({
   const load = useCallback(async (signal?: AbortSignal) => {
     const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
-      const [keywords, tracked, frequencies, aiAnswers, ranks, crawls, research, positionSummary, positionHistory] =
+      const [keywords, tracked, frequencies, aiAnswers, ranks, crawls, research, positionSummary, positionHistory, rankDimensions] =
         await Promise.all([
           browserApiCollectionRequest<SemanticKeywordListItem>(
             `${base}/keywords?limit=1&sort=CREATED_DESC`,
@@ -115,6 +119,10 @@ export function ProjectDashboard({
           browserApiRequest<ProjectPositionHistory>(
             `${base}/keywords/position-history`,
             signal ? { signal } : {}
+          ),
+          browserApiRequest<SemanticRankDimensionCatalog>(
+            `${base}/keyword-ranks/dimensions`,
+            signal ? { signal } : {}
           )
         ]);
       if (signal?.aborted) return;
@@ -127,10 +135,12 @@ export function ProjectDashboard({
         crawls,
         research,
         positionSummary,
-        positionHistory
+        positionHistory,
+        rankDimensions
       });
       setIncludeUntrackedHistory(false);
-      setUntrackedPositionHistory(undefined);
+      setPositionHistoryDimensionKey("");
+      setScopedPositionHistory(undefined);
       setPositionHistoryScopeLoading(false);
       setPositionHistoryScopeError(undefined);
       setError(undefined);
@@ -151,34 +161,35 @@ export function ProjectDashboard({
   }, [load]);
 
   const changePositionHistoryScope = useCallback(async (
-    includeUntracked: boolean
+    includeUntracked: boolean,
+    rankDimensionKey: string
   ) => {
-    if (!includeUntracked) {
-      positionHistoryScopeRequest.current?.abort();
+    positionHistoryScopeRequest.current?.abort();
+    if (!includeUntracked && !rankDimensionKey) {
       setIncludeUntrackedHistory(false);
+      setPositionHistoryDimensionKey("");
+      setScopedPositionHistory(undefined);
       setPositionHistoryScopeLoading(false);
       setPositionHistoryScopeError(undefined);
       return;
     }
-    if (untrackedPositionHistory) {
-      setIncludeUntrackedHistory(true);
-      setPositionHistoryScopeError(undefined);
-      return;
-    }
 
-    positionHistoryScopeRequest.current?.abort();
     const controller = new AbortController();
     positionHistoryScopeRequest.current = controller;
     setPositionHistoryScopeLoading(true);
     setPositionHistoryScopeError(undefined);
+    const query = new URLSearchParams();
+    if (includeUntracked) query.set("includeUntracked", "true");
+    if (rankDimensionKey) query.set("rankDimensionKey", rankDimensionKey);
     try {
       const history = await browserApiRequest<ProjectPositionHistory>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/position-history?includeUntracked=true`,
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/position-history?${query.toString()}`,
         { signal: controller.signal }
       );
       if (controller.signal.aborted) return;
-      setUntrackedPositionHistory(history);
-      setIncludeUntrackedHistory(true);
+      setScopedPositionHistory(history);
+      setIncludeUntrackedHistory(includeUntracked);
+      setPositionHistoryDimensionKey(rankDimensionKey);
     } catch (requestError) {
       if (!controller.signal.aborted) {
         setPositionHistoryScopeError(dashboardError(requestError));
@@ -186,7 +197,7 @@ export function ProjectDashboard({
     } finally {
       if (!controller.signal.aborted) setPositionHistoryScopeLoading(false);
     }
-  }, [projectId, untrackedPositionHistory]);
+  }, [projectId]);
 
   const jobs = useMemo(() => data ? dashboardJobs(data) : [], [data]);
   const activeCount = jobs.filter(({ status }) => activeStatus(status)).length;
@@ -263,14 +274,21 @@ export function ProjectDashboard({
           </header>
           {data ? (
             <ProjectPositionHistoryChart
-              history={
-                includeUntrackedHistory && untrackedPositionHistory
-                  ? untrackedPositionHistory
-                  : data.positionHistory
-              }
+              dimensions={data.rankDimensions.dimensions}
+              history={scopedPositionHistory ?? data.positionHistory}
               includeUntracked={includeUntrackedHistory}
+              rankDimensionKey={positionHistoryDimensionKey}
+              onRankDimensionChange={(value) => {
+                void changePositionHistoryScope(
+                  includeUntrackedHistory,
+                  value
+                );
+              }}
               onIncludeUntrackedChange={(value) => {
-                void changePositionHistoryScope(value);
+                void changePositionHistoryScope(
+                  value,
+                  positionHistoryDimensionKey
+                );
               }}
               scopeLoading={positionHistoryScopeLoading}
               {...(positionHistoryScopeError

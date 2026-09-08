@@ -103,7 +103,7 @@ test("migrates v1 saved layouts to regular and AI result URL columns", () => {
     ],
     density: "COMFORTABLE"
   });
-  assert.equal(migrated.schemaVersion, 3);
+  assert.equal(migrated.schemaVersion, 4);
   assert.deepEqual(migrated.columns, [
     "query",
     "yandexPosition",
@@ -136,8 +136,10 @@ test("migrates v2 layouts only to AI result URLs and respects v3 visibility", ()
   ]);
   const current = semanticViewConfigForCurrentSchema({
     ...migrated,
+    schemaVersion: 3,
     columns: ["query"]
   });
+  assert.equal(current.schemaVersion, 4);
   assert.deepEqual(current.columns, ["query"]);
 });
 

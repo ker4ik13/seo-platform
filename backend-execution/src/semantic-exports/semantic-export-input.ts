@@ -1,4 +1,4 @@
-import { parseSemanticRankColumnKey, parseSemanticRankDimensionKey, semanticCompetitorRowColumnKeys } from "@seo-platform/contracts";
+import { isSemanticRankDimensionSort, parseSemanticRankColumnKey, parseSemanticRankDimensionKey, semanticCompetitorRowColumnKeys } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticCompetitorExportColumnKeys,
@@ -36,6 +36,7 @@ const CREATE_FIELDS = new Set([
   "columns",
   "filters",
   "sort",
+  "rankSortDimensionKey",
   "keywordIds",
   "includeBom",
   "competitorRows",
@@ -90,6 +91,22 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
   const folderMap = input.folderMap === undefined
     ? undefined
     : folderMapOptions(input.folderMap);
+  const sort = input.sort === undefined
+    ? undefined
+    : enumValue(input.sort, semanticKeywordSorts, "sort");
+  const rankSortDimensionKey = input.rankSortDimensionKey;
+  if (
+    rankSortDimensionKey !== undefined &&
+    !parseSemanticRankDimensionKey(rankSortDimensionKey)
+  ) {
+    invalid("rankSortDimensionKey");
+  }
+  if (
+    (sort !== undefined && isSemanticRankDimensionSort(sort)) !==
+    Boolean(rankSortDimensionKey)
+  ) {
+    invalid("rankSortDimensionKey");
+  }
   if ((scope === "SELECTED" || scope === "CURRENT_PAGE") !== Boolean(keywordIds)) invalid("keywordIds");
   if (scope === "GROUP_SUBTREE" && !filters?.groupId) invalid("filters.groupId");
   if (scope === "FULL_CORE" && filters) invalid("filters");
@@ -116,7 +133,10 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
     locale,
     columns,
     ...(filters ? { filters } : {}),
-    ...(input.sort === undefined ? {} : { sort: enumValue(input.sort, semanticKeywordSorts, "sort") }),
+    ...(sort === undefined ? {} : { sort }),
+    ...(typeof rankSortDimensionKey === "string"
+      ? { rankSortDimensionKey }
+      : {}),
     ...(keywordIds ? { keywordIds } : {}),
     ...(input.includeBom === undefined ? {} : { includeBom: booleanValue(input.includeBom, "includeBom") }),
     ...(input.competitorRows === undefined ? {} : { competitorRows: booleanValue(input.competitorRows, "competitorRows") }),
