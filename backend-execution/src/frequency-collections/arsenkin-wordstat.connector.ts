@@ -374,10 +374,14 @@ export function arsenkinSeasonalityBatchValues(
   if (
     body?.code !== "TASK_RESULT" ||
     taskIdFromUnknown(body.task_id) !== taskId ||
-    !providerFinishedAt(body.finished_at)
+    (body.finished_at !== undefined && !providerFinishedAt(body.finished_at))
   ) return undefined;
   const envelope = record(body.result);
-  if (envelope?.type !== 3 || taskIdFromUnknown(envelope.task_id) !== taskId) {
+  if (
+    (envelope?.type !== 3 && envelope?.type !== "3") ||
+    (envelope.task_id !== undefined &&
+      taskIdFromUnknown(envelope.task_id) !== taskId)
+  ) {
     return undefined;
   }
   let queries: readonly string[];
@@ -386,9 +390,10 @@ export function arsenkinSeasonalityBatchValues(
   } catch {
     return undefined;
   }
-  if (Array.isArray(envelope.data)) {
+  const arrayRows = seasonalityResultRows(envelope.data, queries);
+  if (arrayRows) {
     return arraySeasonalityResults(
-      envelope.data,
+      arrayRows,
       envelope.dates,
       queries,
       seasonality,
@@ -442,7 +447,7 @@ function arraySeasonalityResults(
   seasonality: FrequencySeasonalityRequest,
   regionCode: string
 ): readonly ArsenkinSeasonalityQueryResult[] | undefined {
-  if (value.length !== queries.length) return undefined;
+  if (value.length > queries.length) return undefined;
   const expectedDates = seasonalityDates(
     datesValue,
     seasonality.granularity,
@@ -458,22 +463,97 @@ function arraySeasonalityResults(
       ? normalizedQuery(row.query)
       : undefined;
     if (!query || !requested.has(query) || rows.has(query)) return undefined;
-    const points = seasonalityPoints(
+    const parsedPoints = seasonalityPoints(
       row?.data,
       regionCode,
       seasonality.granularity,
       seasonality.observedFrom,
       seasonality.observedThrough
     );
-    if (
-      !points ||
-      (expectedDates &&
-        (points.length !== expectedDates.length ||
-          points.some((point, index) => point.periodStart !== expectedDates[index])))
-    ) return undefined;
+    const points = expectedDates
+      ? completeSeasonalityPoints(
+          row?.data,
+          parsedPoints,
+          expectedDates,
+          regionCode
+        )
+      : parsedPoints;
+    if (!points) return undefined;
     rows.set(query, points);
   }
+  if (rows.size !== queries.length) {
+    if (!expectedDates) return undefined;
+    for (const query of queries) {
+      if (!rows.has(query)) rows.set(query, zeroSeasonalityPoints(expectedDates));
+    }
+  }
   return orderedSeasonalityResults(queries, rows);
+}
+
+function seasonalityResultRows(
+  value: unknown,
+  queries: readonly string[]
+): readonly unknown[] | undefined {
+  if (Array.isArray(value)) return value;
+  const input = record(value);
+  if (!input) return undefined;
+  const entries = Object.entries(input);
+  if (entries.length === 0) return undefined;
+  if (entries.every(([key]) => /^(?:0|[1-9]\d{0,4})$/u.test(key))) {
+    return entries
+      .sort(([left], [right]) => Number(left) - Number(right))
+      .map(([, row]) => row);
+  }
+  const requested = new Set(queries);
+  if (
+    entries.length <= queries.length &&
+    entries.every(([query]) => {
+      const normalized = normalizedQuery(query);
+      return normalized !== undefined && requested.has(normalized);
+    })
+  ) {
+    return entries.map(([query, data]) => ({ query, data }));
+  }
+  return undefined;
+}
+
+function completeSeasonalityPoints(
+  source: unknown,
+  parsed: readonly SeasonalityPoint[] | undefined,
+  expectedDates: readonly string[],
+  regionCode: string
+): readonly SeasonalityPoint[] | undefined {
+  if (!parsed) {
+    return emptySeasonalitySource(source, regionCode)
+      ? zeroSeasonalityPoints(expectedDates)
+      : undefined;
+  }
+  const byDate = new Map(parsed.map((point) => [point.periodStart, point]));
+  if ([...byDate.keys()].some((date) => !expectedDates.includes(date))) {
+    return undefined;
+  }
+  return expectedDates.map((periodStart) =>
+    byDate.get(periodStart) ?? { periodStart, value: "0" }
+  );
+}
+
+function zeroSeasonalityPoints(
+  dates: readonly string[]
+): readonly SeasonalityPoint[] {
+  return dates.map((periodStart) => ({ periodStart, value: "0" }));
+}
+
+function emptySeasonalitySource(value: unknown, regionCode: string): boolean {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  const input = record(value);
+  if (!input) return false;
+  const keys = Object.keys(input);
+  if (keys.length === 0) return true;
+  return keys.length === 1 &&
+    (keys[0] === regionCode || keys[0] === "data" || keys[0] === "dynamics")
+    ? emptySeasonalitySource(input[keys[0]], regionCode)
+    : false;
 }
 
 function seasonalityDates(

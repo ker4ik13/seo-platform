@@ -424,6 +424,11 @@ test("manual retry resets only failed items and preserves completed progress", a
     (itemUpdate as { where: unknown }).where,
     { jobId, status: "FAILED_FINAL" }
   );
+  assert.equal(
+    Object.hasOwn((itemUpdate as { data: object }).data, "providerRequestId"),
+    false,
+    "retry must reuse the paid Arsenkin task id"
+  );
   assert.deepEqual(
     (jobUpdate as { data: { status: string; progressCurrent: bigint } }).data.status,
     "QUEUED"

@@ -143,6 +143,160 @@ test("normalizes the observed Arsenkin type-3 array response", () => {
   );
 });
 
+test("recovers a large sparse Arsenkin seasonality payload without losing paid rows", () => {
+  assert.deepEqual(
+    arsenkinSeasonalityBatchValues(
+      {
+        code: "TASK_RESULT",
+        task_id: 42,
+        result: {
+          type: "3",
+          data: {
+            "0": {
+              query: "ремонт киа",
+              data: {
+                "2026-01-01": { frequency: 1200 },
+                "2026-03-01": { frequency: 900 }
+              }
+            },
+            "2": {
+              query: "seo аудит",
+              data: {}
+            }
+          },
+          dates: ["2026-01-01", "2026-02-01", "2026-03-01"]
+        }
+      },
+      "42",
+      ["ремонт киа", "пропущенная строка", "seo аудит"],
+      monthlySeasonality,
+      "213"
+    ),
+    [
+      {
+        query: "ремонт киа",
+        points: [
+          { periodStart: "2026-01-01", value: "1200" },
+          { periodStart: "2026-02-01", value: "0" },
+          { periodStart: "2026-03-01", value: "900" }
+        ]
+      },
+      {
+        query: "пропущенная строка",
+        points: [
+          { periodStart: "2026-01-01", value: "0" },
+          { periodStart: "2026-02-01", value: "0" },
+          { periodStart: "2026-03-01", value: "0" }
+        ]
+      },
+      {
+        query: "seo аудит",
+        points: [
+          { periodStart: "2026-01-01", value: "0" },
+          { periodStart: "2026-02-01", value: "0" },
+          { periodStart: "2026-03-01", value: "0" }
+        ]
+      }
+    ]
+  );
+});
+
+test("normalizes the production-sized 3,066-key sparse seasonality result", () => {
+  const keywords = Array.from(
+    { length: 3_066 },
+    (_, index) => `морозильный ларь запрос ${index + 1}`
+  );
+  const dates = Array.from({ length: 24 }, (_, index) => {
+    const date = new Date(Date.UTC(2024, 8 + index, 1));
+    return date.toISOString().slice(0, 10);
+  });
+  const data = Object.fromEntries(
+    keywords.flatMap((query, index) =>
+      index % 97 === 0
+        ? []
+        : [[String(index), {
+            query,
+            data: index % 13 === 0
+              ? {}
+              : { [dates.at(-1)!]: { frequency: index + 1 } }
+          }]]
+    )
+  );
+  const result = arsenkinSeasonalityBatchValues(
+    {
+      code: "TASK_RESULT",
+      task_id: 42,
+      result: { type: 3, task_id: 42, data, dates },
+      finished_at: "2026-09-09 08:25:50"
+    },
+    "42",
+    keywords,
+    {
+      granularity: "MONTH",
+      observedFrom: "2024-09-01",
+      observedThrough: "2026-08-31"
+    },
+    "225"
+  );
+
+  assert.equal(result?.length, 3_066);
+  assert.ok(result?.every(({ points }) => points.length === 24));
+  assert.ok(result?.every(({ points }) => points[0]?.value === "0"));
+  assert.equal(result?.[0]?.points.at(-1)?.value, "0");
+  assert.equal(result?.[1]?.points.at(-1)?.value, "2");
+});
+
+test("accepts a query-keyed seasonality payload but rejects corrupt non-empty rows", () => {
+  const base = {
+    code: "TASK_RESULT",
+    task_id: "42",
+    finished_at: "2026-09-09 08:25:50",
+    result: {
+      type: 3,
+      task_id: 42,
+      dates: ["2026-01-01", "2026-02-01", "2026-03-01"]
+    }
+  };
+  assert.deepEqual(
+    arsenkinSeasonalityBatchValues(
+      {
+        ...base,
+        result: {
+          ...base.result,
+          data: {
+            "ремонт киа": {
+              "2026-01-01": { frequency: 10 },
+              "2026-02-01": { frequency: 20 },
+              "2026-03-01": { frequency: 30 }
+            }
+          }
+        }
+      },
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213"
+    )?.[0]?.points.map(({ value }) => value),
+    ["10", "20", "30"]
+  );
+  assert.equal(
+    arsenkinSeasonalityBatchValues(
+      {
+        ...base,
+        result: {
+          ...base.result,
+          data: [{ query: "ремонт киа", data: { invalid: "payload" } }]
+        }
+      },
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213"
+    ),
+    undefined
+  );
+});
+
 test("rejects mismatched or duplicate Arsenkin seasonality periods", () => {
   assert.equal(
     arsenkinSeasonalityBatchValues(

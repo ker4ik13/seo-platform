@@ -594,6 +594,9 @@ test("multi-geo ranks, dated XLSX round trip, advanced filters and large group u
   });
   await expectedRankingRow.waitFor();
   await page.locator(".rankings-cell.lost").first().waitFor();
+  const importedPositionRow = page.locator(".rankings-matrix tbody tr").filter({ hasText: russian.textOriginal });
+  await importedPositionRow.locator(".rankings-cell-value").first().waitFor();
+  assert.equal(await importedPositionRow.locator(".rankings-cell-value[href]").count(), 0, "imported positions without URLs must render as plain values");
   const initialDateColumns = page.locator(".rankings-date-column-heading");
   const initialDateColumnCount = await initialDateColumns.count();
   assert.ok(initialDateColumnCount > 1);

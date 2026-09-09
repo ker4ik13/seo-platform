@@ -372,6 +372,9 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
       const aiAnswer = cell.aiAnswer === undefined
         ? undefined
         : rankReportAiAnswer(cell.aiAnswer);
+      const rankingUrl = cell.rankingUrl === undefined || cell.rankingUrl === null
+        ? undefined
+        : httpUrl(cell.rankingUrl);
       return {
         date,
         snapshotId: uuid(cell.snapshotId),
@@ -381,9 +384,7 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
         ...(cell.previousPosition === undefined
           ? {}
           : { previousPosition: integer(cell.previousPosition, 1, 100_000) }),
-        ...(cell.rankingUrl === undefined
-          ? {}
-          : { rankingUrl: httpUrl(cell.rankingUrl) }),
+        ...(rankingUrl === undefined ? {} : { rankingUrl }),
         siteResultCount: integer(cell.siteResultCount, 0, 100),
         ...(aiAnswer ? { aiAnswer } : {})
       };
@@ -407,8 +408,12 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
       query: boundedText(row.query, 20_000),
       language: locale(row.language),
       createdAt: instant(row.createdAt),
-      ...(row.groupPath === undefined ? {} : { groupPath: boundedText(row.groupPath, 4_096) }),
-      ...(row.targetUrl === undefined ? {} : { targetUrl: httpUrl(row.targetUrl) }),
+      ...(row.groupPath === undefined || row.groupPath === null
+        ? {}
+        : { groupPath: boundedText(row.groupPath, 4_096) }),
+      ...(row.targetUrl === undefined || row.targetUrl === null
+        ? {}
+        : { targetUrl: httpUrl(row.targetUrl) }),
       frequencies,
       cells
     };
@@ -429,7 +434,7 @@ function rankReportAiAnswer(value: unknown): NonNullable<RankPositionReportCell[
   const position = item.position === undefined
     ? undefined
     : integer(item.position, 1, 100_000);
-  const rankingUrl = item.rankingUrl === undefined
+  const rankingUrl = item.rankingUrl === undefined || item.rankingUrl === null
     ? undefined
     : httpUrl(item.rankingUrl);
   if (

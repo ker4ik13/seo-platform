@@ -129,6 +129,17 @@ test("validates every position report cell and its date scope", () => {
   assert.equal(report.rows[0]?.cells[0]?.position, 2);
   assert.deepEqual(report.rows[0]?.frequencies.map(({ type }) => type), ["BASE", "EXACT", "FIXED"]);
   assert.deepEqual(report.dates, ["2026-08-31", "2026-08-30"]);
+  const importedWithoutUrl = parseRankPositionReport({
+    ...report,
+    rows: [{
+      ...report.rows[0],
+      groupPath: null,
+      targetUrl: null,
+      cells: [{ ...report.rows[0]!.cells[0], rankingUrl: null }]
+    }]
+  });
+  assert.equal(importedWithoutUrl.rows[0]?.cells[0]?.position, 2);
+  assert.equal(importedWithoutUrl.rows[0]?.cells[0]?.rankingUrl, undefined);
   assert.throws(() => parseRankPositionReport({
     ...report,
     rows: [{ ...report.rows[0], cells: [{ ...report.rows[0]!.cells[0], date: "2026-08-29" }] }]

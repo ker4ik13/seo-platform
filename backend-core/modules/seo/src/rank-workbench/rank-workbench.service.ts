@@ -551,18 +551,37 @@ export class RankWorkbenchService {
           ON latest.keyword_id = keyword.id AND latest.sequence = 1
         LEFT JOIN candidates previous
           ON previous.keyword_id = keyword.id AND previous.sequence = 2
-      ), enriched AS (
+      ), paged AS MATERIALIZED (
         SELECT projected.*,
+          count(*) OVER ()::bigint AS total_count,
+          count(latest_snapshot_id) OVER ()::bigint AS measured_count,
+          count(*) FILTER (WHERE latest_found) OVER ()::bigint AS found_count,
+          count(*) FILTER (WHERE latest_snapshot_id IS NOT NULL AND NOT latest_found) OVER ()::bigint AS not_found_count,
+          count(*) FILTER (WHERE latest_position < previous_position) OVER ()::bigint AS improved_count,
+          count(*) FILTER (WHERE latest_position > previous_position) OVER ()::bigint AS declined_count,
+          count(*) FILTER (WHERE latest_position = previous_position) OVER ()::bigint AS unchanged_count,
+          count(*) FILTER (WHERE latest_position IS NOT NULL AND previous_position IS NULL) OVER ()::bigint AS new_count,
+          count(*) FILTER (WHERE latest_position IS NULL AND previous_position IS NOT NULL) OVER ()::bigint AS lost_count,
+          count(*) FILTER (WHERE latest_position <= 3) OVER ()::bigint AS top3_count,
+          count(*) FILTER (WHERE latest_position <= 10) OVER ()::bigint AS top10_count,
+          count(*) FILTER (WHERE latest_position <= 30) OVER ()::bigint AS top30_count,
+          avg(latest_position) FILTER (WHERE latest_position IS NOT NULL) OVER ()::float8 AS average_position
+        FROM projected
+        ORDER BY ${order}
+        OFFSET ${offset}
+        LIMIT ${input.limit + 1}
+      ), enriched AS (
+        SELECT paged.*,
           target.url AS target_url,
           group_row.path AS group_path,
           frequency.base_value AS frequency_base,
           frequency.exact_value AS frequency_exact,
           frequency.fixed_value AS frequency_fixed
-        FROM projected
+        FROM paged
         LEFT JOIN pages target
           ON target.workspace_id = ${scope.workspaceId}::uuid
          AND target.project_id = ${scope.projectId}::uuid
-         AND target.id = projected.target_page_id
+         AND target.id = paged.target_page_id
          AND target.status::text = 'ACTIVE'
         LEFT JOIN LATERAL (
           SELECT group_value.path
@@ -571,7 +590,7 @@ export class RankWorkbenchService {
             ON group_value.id = membership.group_id
            AND group_value.project_id = membership.project_id
           WHERE membership.project_id = ${scope.projectId}::uuid
-            AND membership.keyword_id = projected.id
+            AND membership.keyword_id = paged.id
             AND group_value.status::text = 'ACTIVE'
             AND group_value.system_kind IS NULL
           ORDER BY membership.created_at ASC, group_value.id ASC
@@ -587,7 +606,7 @@ export class RankWorkbenchService {
             FROM frequency_snapshots snapshot
             WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
               AND snapshot.project_id = ${scope.projectId}::uuid
-              AND snapshot.keyword_id = projected.id
+              AND snapshot.keyword_id = paged.id
               AND snapshot.type IN ('BASE', 'EXACT', 'FIXED')
             ORDER BY snapshot.type, snapshot.observed_at DESC, snapshot.id DESC
           ) latest
@@ -602,23 +621,15 @@ export class RankWorkbenchService {
         latest_found AS "latestFound", latest_position AS "latestPosition",
         previous_snapshot_id AS "previousSnapshotId",
         previous_position AS "previousPosition",
-        count(*) OVER ()::bigint AS "totalCount",
-        count(latest_snapshot_id) OVER ()::bigint AS "measuredCount",
-        count(*) FILTER (WHERE latest_found) OVER ()::bigint AS "foundCount",
-        count(*) FILTER (WHERE latest_snapshot_id IS NOT NULL AND NOT latest_found) OVER ()::bigint AS "notFoundCount",
-        count(*) FILTER (WHERE latest_position < previous_position) OVER ()::bigint AS "improvedCount",
-        count(*) FILTER (WHERE latest_position > previous_position) OVER ()::bigint AS "declinedCount",
-        count(*) FILTER (WHERE latest_position = previous_position) OVER ()::bigint AS "unchangedCount",
-        count(*) FILTER (WHERE latest_position IS NOT NULL AND previous_position IS NULL) OVER ()::bigint AS "newCount",
-        count(*) FILTER (WHERE latest_position IS NULL AND previous_position IS NOT NULL) OVER ()::bigint AS "lostCount",
-        count(*) FILTER (WHERE latest_position <= 3) OVER ()::bigint AS "top3Count",
-        count(*) FILTER (WHERE latest_position <= 10) OVER ()::bigint AS "top10Count",
-        count(*) FILTER (WHERE latest_position <= 30) OVER ()::bigint AS "top30Count",
-        avg(latest_position) FILTER (WHERE latest_position IS NOT NULL) OVER ()::float8 AS "averagePosition"
+        total_count AS "totalCount", measured_count AS "measuredCount",
+        found_count AS "foundCount", not_found_count AS "notFoundCount",
+        improved_count AS "improvedCount", declined_count AS "declinedCount",
+        unchanged_count AS "unchangedCount", new_count AS "newCount",
+        lost_count AS "lostCount", top3_count AS "top3Count",
+        top10_count AS "top10Count", top30_count AS "top30Count",
+        average_position AS "averagePosition"
       FROM enriched
       ORDER BY ${order}
-      OFFSET ${offset}
-      LIMIT ${input.limit + 1}
     `);
   }
 
@@ -674,7 +685,11 @@ export class RankWorkbenchService {
         ) AS "previousPosition",
         latest_daily.ranking_url AS "rankingUrl",
         greatest(
-          CASE WHEN latest_daily.found THEN 1 ELSE 0 END,
+          CASE
+            WHEN latest_daily.found AND latest_daily.ranking_url IS NOT NULL
+              THEN 1
+            ELSE 0
+          END,
           coalesce(site_results.result_count, 0)
         )::bigint AS "siteResultCount"
       FROM latest_daily
