@@ -46,7 +46,7 @@ test("estimates XMLStock Google pages by selected depth", () => {
   );
 });
 
-test("estimates one XMLStock Top-10 request per competitor keyword", () => {
+test("shows the selected XMLStock competitor depth", () => {
   assert.match(
     rankProviderUsageEstimate(
       xmlStock,
@@ -57,7 +57,7 @@ test("estimates one XMLStock Top-10 request per competitor keyword", () => {
       undefined,
       "COMPETITOR_SERP"
     ).usage,
-    /^до 12 запросов XMLStock · Топ-10 · от 0,30\s₽$/u
+    /^до 12 запросов XMLStock · Топ-100 · от 0,30\s₽$/u
   );
   assert.match(
     rankProviderUsageEstimate(
@@ -69,7 +69,7 @@ test("estimates one XMLStock Top-10 request per competitor keyword", () => {
       undefined,
       "COMPETITOR_SERP"
     ).usage,
-    /^до 12 запросов XMLStock · Топ-10 · от 0,34\s₽$/u
+    /^до 12 запросов XMLStock · Топ-100 · от 0,34\s₽$/u
   );
 });
 

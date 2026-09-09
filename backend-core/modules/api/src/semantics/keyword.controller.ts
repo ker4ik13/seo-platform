@@ -324,6 +324,7 @@ export class KeywordController {
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async aiAnswers(
     @Param("keywordId") keywordId: string,
+    @Query("dimensionKey") dimensionKey: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<readonly SemanticAiAnswerDetail[]>> {
@@ -333,7 +334,8 @@ export class KeywordController {
       request,
       await this.seoData.keywordAiAnswers(
         internalProjectContext(request, principal, tenant),
-        canonicalKeywordId
+        canonicalKeywordId,
+        typeof dimensionKey === "string" ? dimensionKey : undefined
       )
     );
   }

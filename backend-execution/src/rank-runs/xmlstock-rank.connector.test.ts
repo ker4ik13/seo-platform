@@ -179,13 +179,13 @@ test("builds a secret-free one-key wire request", () => {
   });
 });
 
-test("collects only TOP-10 competitors and saves project position only on request", () => {
+test("collects the selected competitor depth and saves project position only on request", () => {
   const collectOnly = intent(
     "YANDEX",
     "xmlstock-yandex-search-api@2",
     { purpose: "COMPETITOR_SERP", saveProjectPosition: false, depth: 100 }
   );
-  assert.equal(buildXmlStockRankWireRequest(collectOnly).depth, 10);
+  assert.equal(buildXmlStockRankWireRequest(collectOnly).depth, 100);
   const providerResult = {
     schemaVersion: "xmlstock-rank-wire-result@1",
     engine: "YANDEX",

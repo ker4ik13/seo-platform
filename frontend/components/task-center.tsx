@@ -1,6 +1,7 @@
 "use client";
 import { prepareFrequencyRetry, type FrequencyRetryDraft } from "../lib/frequency-retry";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
+import { frequencyCollectionParameters, frequencyCollectionTitle } from "../lib/frequency-operation-presentation";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { prepareRankRetry, type RankRetryDraft } from "../lib/rank-retry";
 
@@ -479,9 +480,12 @@ export function TaskCenter({
 function frequencyTask(value: FrequencyCollectionSummary, uiLocale: string = "ru-RU"): ProjectTask {
   const completed = value.completedKeywords + value.failedKeywords;
   const routeTrail = connectorRouteTrail(value.connectorAttempts);
+  const seasonality = value.mode === "SEASONALITY";
   return {
-    id: value.id, kind: "FREQUENCY", resultKind: "frequency", provider: value.provider, title: "Сбор частотности",
-    description: `${providerLabel(value.provider)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback" : ""} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
+    id: value.id, kind: "FREQUENCY", resultKind: "frequency", provider: value.provider, title: frequencyCollectionTitle(value),
+    description: seasonality
+      ? `${providerLabel(value.provider)} · ${frequencyCollectionParameters(value)}`
+      : `${providerLabel(value.provider)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback" : ""} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
     statusLabel: operationStatusLabel(value.status, value.stage), column: taskColumn(value.status), progressCurrent: completed,
     progressTotal: value.selectedKeywords, createdAt: value.createdAt,
     ...(value.startedAt ? { startedAt: value.startedAt } : {}),
@@ -493,7 +497,10 @@ function frequencyTask(value: FrequencyCollectionSummary, uiLocale: string = "ru
     retryLabel: "Повторить ошибки",
     inputFacts: [
       { label: "Источник", value: providerLabel(value.provider) },
-      { label: "Виды частотности", value: value.types.map(frequencyTypeLabel).join(" · ") },
+      { label: seasonality ? "Детализация" : "Виды частотности", value: seasonality ? value.seasonality?.granularity ?? "—" : value.types.map(frequencyTypeLabel).join(" · ") },
+      ...(seasonality && value.seasonality
+        ? [{ label: "Период", value: `${value.seasonality.observedFrom} — ${value.seasonality.observedThrough}` }]
+        : []),
       { label: "Регион", value: value.regionCode },
       { label: "Устройство", value: frequencyDeviceLabel(value.device) },
       { label: "Ключей", value: formatInteger(value.selectedKeywords, uiLocale) },

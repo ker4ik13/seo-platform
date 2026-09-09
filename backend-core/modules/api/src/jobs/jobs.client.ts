@@ -1912,7 +1912,7 @@ export class JobsClient {
     if (input.estimateId !== estimateId || input.workspaceId !== context.tenant.workspaceId || input.projectId !== projectId || input.actorId !== context.actorId || !["ARSENKIN", "XMLSTOCK"].includes(String(input.provider)) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(String(input.credentialMode)) || !Number.isSafeInteger(input.keywordCount) || Number(input.keywordCount) < 0 || Number(input.keywordCount) > 300_000) throw invalidJobsResponse();
     if (input.execution !== null) {
       const execution = exactRecord(input.execution, ["purpose", "depth", "source"]);
-      if (!["POSITION_TRACKING", "COMPETITOR_SERP"].includes(String(execution.purpose)) || ![30, 50, 100].includes(Number(execution.depth)) || !["GOOGLE_LIVE", "YANDEX_LIVE", "YANDEX_TURBO", "YANDEX_SEARCH_API"].includes(String(execution.source))) throw invalidJobsResponse();
+      if (!["POSITION_TRACKING", "COMPETITOR_SERP"].includes(String(execution.purpose)) || ![10, 20, 30, 50, 100].includes(Number(execution.depth)) || !["GOOGLE_LIVE", "YANDEX_LIVE", "YANDEX_TURBO", "YANDEX_SEARCH_API"].includes(String(execution.source))) throw invalidJobsResponse();
     }
     return input as unknown as InternalRankEstimatePricingScope;
   }

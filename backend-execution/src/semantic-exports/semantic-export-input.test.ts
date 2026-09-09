@@ -47,7 +47,11 @@ test("accepts a canonical internal position-history export", () => {
     positionHistory: {
       observedFrom: "2026-08-01T00:00:00.000Z",
       observedBefore: "2026-08-20T00:00:00.000Z",
-      searchEngines: ["YANDEX", "GOOGLE"]
+      searchEngines: ["YANDEX", "GOOGLE"],
+      dimensionKeys: [
+        "YANDEX|RU|213|ru|DESKTOP",
+        "GOOGLE|RU|1011969|ru|MOBILE"
+      ]
     }
   } as const;
   assert.deepEqual(internalCreateSemanticExportInput(input), input);

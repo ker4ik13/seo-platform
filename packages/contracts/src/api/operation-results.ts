@@ -5,6 +5,7 @@ import type {
 import type { PageIndexability } from "./pages.js";
 import type {
   FrequencyCollectionSummary,
+  FrequencySeasonalityPointSummary,
   FrequencySnapshotSummary
 } from "./frequency-collections.js";
 import type { AiAnswerCollectionSummary } from "./ai-answer-collections.js";
@@ -15,7 +16,7 @@ import type {
 } from "./rank-runs.js";
 
 /** Product depth of one immutable competitor SERP shown in operation results. */
-export const competitorSerpOperationResultDepth = 10 as const;
+export const competitorSerpOperationResultDepth = 100 as const;
 
 export const operationResultItemStatuses = [
   "PENDING",
@@ -72,6 +73,7 @@ export interface InternalFrequencyOperationResultRow {
   readonly keywordId: string;
   readonly keyword: string;
   readonly snapshots: readonly FrequencySnapshotSummary[];
+  readonly seasonality: readonly FrequencySeasonalityPointSummary[];
 }
 
 export interface InternalFrequencyOperationResult {
@@ -203,7 +205,7 @@ export interface RankOperationResultRow {
   readonly title?: string;
   readonly snippet?: string;
   readonly observedAt?: string;
-  /** Included only for COMPETITOR_SERP; one bounded organic Top-10. */
+  /** Included only for COMPETITOR_SERP; bounded by the selected depth, at most Top-100. */
   readonly serpResults?: readonly RankOperationSerpResult[];
   readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
 }

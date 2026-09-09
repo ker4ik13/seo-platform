@@ -35,7 +35,13 @@ export function parseSemanticRankDimensionMetadata(value: unknown): SemanticRank
   return { dimensionKey: key, ...metadata, ...(regionLabel === undefined ? {} : { regionLabel }) };
 }
 
-export type SemanticRankColumnMetric = "position" | "url" | "checkedAt";
+export type SemanticRankColumnMetric =
+  | "position"
+  | "url"
+  | "checkedAt"
+  | "aiPosition"
+  | "aiUrl"
+  | "aiCheckedAt";
 export type SemanticRankColumnKey = `rank:${string}:${SemanticRankColumnMetric}`;
 export const semanticRankComparisonMaxDimensions = 24;
 export const semanticRankComparisonMaxKeywords = 1_000;
@@ -56,8 +62,21 @@ export interface SemanticRankComparisonItem extends SemanticKeywordListPosition 
   readonly provider: string;
   readonly searchSource?: "LIVE" | "SEARCH_API";
   readonly depth: number;
+  /** Number of distinct project pages in this exact latest snapshot. */
+  readonly siteResultCount: number;
   readonly title?: string;
   readonly snippet?: string;
+  readonly aiAnswer?: Readonly<{
+    snapshotId: string;
+    answerPresent: boolean;
+    siteFound: boolean;
+    position?: number;
+    previousPosition?: number;
+    rankingUrl?: string;
+    brandFound: boolean;
+    observedAt: string;
+    provider: "ARSENKIN";
+  }>;
 }
 
 export function semanticRankDimensionKey(value: Omit<SemanticRankDimension, "key">): string {
@@ -86,9 +105,9 @@ export function semanticRankColumnKey(dimensionKey: string, metric: SemanticRank
 export function parseSemanticRankColumnKey(value: unknown): Readonly<{ dimension: SemanticRankDimension; metric: SemanticRankColumnMetric }> | undefined {
   if (typeof value !== "string" || !value.startsWith("rank:")) return undefined;
   const delimiter = value.lastIndexOf(":"), metric = value.slice(delimiter + 1);
-  if (metric !== "position" && metric !== "url" && metric !== "checkedAt") return undefined;
+  if (!["position", "url", "checkedAt", "aiPosition", "aiUrl", "aiCheckedAt"].includes(metric)) return undefined;
   const dimension = parseSemanticRankDimensionKey(value.slice(5, delimiter));
-  return dimension ? { dimension, metric } : undefined;
+  return dimension ? { dimension, metric: metric as SemanticRankColumnMetric } : undefined;
 }
 
 export function parseSemanticRankComparisonInput(value: unknown): SemanticRankComparisonInput {
@@ -137,16 +156,66 @@ export function parseSemanticRankComparisonItems(value: unknown, scope: Semantic
     const source = item.searchSource;
     if (source !== undefined && source !== "LIVE" && source !== "SEARCH_API") throw new TypeError("Invalid search source");
     const title = optionalText(item.title, 2_048), snippet = optionalText(item.snippet, 8_192);
+    const aiAnswer = item.aiAnswer === undefined
+      ? undefined
+      : parsedAiAnswer(item.aiAnswer);
     return {
       keywordId, dimensionKey, searchEngine: dimension.searchEngine, found: item.found,
       ...(position === undefined ? {} : { position }), ...(previousPosition === undefined ? {} : { previousPosition }),
       ...(rankingUrl === undefined ? {} : { rankingUrl }), observedAt,
       snapshotId: identifier(item.snapshotId), trackingContextId: identifier(item.trackingContextId),
       configurationVersion: integer(item.configurationVersion, 1, 2_147_483_647), jobId: identifier(item.jobId),
-      provider, depth: integer(item.depth, 1, 100), ...(source === undefined ? {} : { searchSource: source }),
-      ...(title === undefined ? {} : { title }), ...(snippet === undefined ? {} : { snippet })
+      provider, depth: integer(item.depth, 1, 100),
+      siteResultCount: integer(item.siteResultCount, 0, 100),
+      ...(source === undefined ? {} : { searchSource: source }),
+      ...(title === undefined ? {} : { title }), ...(snippet === undefined ? {} : { snippet }),
+      ...(aiAnswer === undefined ? {} : { aiAnswer })
     };
   });
+}
+
+function parsedAiAnswer(
+  value: unknown
+): NonNullable<SemanticRankComparisonItem["aiAnswer"]> {
+  const item = record(value);
+  if (
+    typeof item.answerPresent !== "boolean" ||
+    typeof item.siteFound !== "boolean" ||
+    typeof item.brandFound !== "boolean" ||
+    item.provider !== "ARSENKIN"
+  ) throw new TypeError("Invalid AI answer comparison");
+  const position = item.position === undefined
+    ? undefined
+    : integer(item.position, 1, 100_000);
+  const previousPosition = item.previousPosition === undefined
+    ? undefined
+    : integer(item.previousPosition, 1, 100_000);
+  const rankingUrl = optionalText(item.rankingUrl, 4_096);
+  if (
+    item.siteFound !== (position !== undefined && rankingUrl !== undefined) ||
+    (!item.answerPresent && (item.siteFound || item.brandFound))
+  ) throw new TypeError("Invalid AI answer comparison");
+  if (rankingUrl !== undefined) {
+    const url = new URL(rankingUrl);
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+      throw new TypeError("Invalid AI answer URL");
+    }
+  }
+  const observedAt = requiredText(item.observedAt, 24);
+  if (new Date(observedAt).toISOString() !== observedAt) {
+    throw new TypeError("Invalid AI answer time");
+  }
+  return {
+    snapshotId: identifier(item.snapshotId),
+    answerPresent: item.answerPresent,
+    siteFound: item.siteFound,
+    ...(position === undefined ? {} : { position }),
+    ...(previousPosition === undefined ? {} : { previousPosition }),
+    ...(rankingUrl === undefined ? {} : { rankingUrl }),
+    brandFound: item.brandFound,
+    observedAt,
+    provider: "ARSENKIN"
+  };
 }
 
 function record(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid record"); return value as Record<string, unknown>; }

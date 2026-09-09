@@ -133,13 +133,28 @@ export interface ManualKeywordTrashCandidate {
 
 export const MANUAL_KEYWORD_BULK_CHUNK_SIZE = 100;
 
+export interface ManualKeywordBulkProgress {
+  readonly processed: number;
+  readonly total: number;
+}
+
+export interface ManualKeywordBulkApplyProgress extends ManualKeywordBulkProgress {
+  readonly created: number;
+  readonly restored: number;
+  readonly linked: number;
+  readonly skipped: number;
+  readonly rejected: number;
+  readonly failed: number;
+}
+
 export async function runManualKeywordBulkPreviewChunks(
   submittedRows: readonly string[],
   submitChunk: (
     rows: readonly string[],
     offset: number
   ) => Promise<SemanticKeywordBulkCreatePreviewResult>,
-  chunkSize = MANUAL_KEYWORD_BULK_CHUNK_SIZE
+  chunkSize = MANUAL_KEYWORD_BULK_CHUNK_SIZE,
+  onProgress?: (progress: ManualKeywordBulkProgress) => void
 ): Promise<SemanticKeywordBulkCreatePreviewResult> {
   assertManualKeywordChunkSize(chunkSize);
   const summary = {
@@ -162,6 +177,7 @@ export async function runManualKeywordBulkPreviewChunks(
     rows.push(
       ...result.rows.map((row) => ({ ...row, index: offset + row.index }))
     );
+    onProgress?.({ processed: summary.selected, total: submittedRows.length });
   }
   return { ...summary, rows };
 }
@@ -185,7 +201,8 @@ export async function runManualKeywordBulkChunks(
     rows: readonly string[],
     offset: number
   ) => Promise<ManualKeywordBulkChunkResult>,
-  chunkSize = MANUAL_KEYWORD_BULK_CHUNK_SIZE
+  chunkSize = MANUAL_KEYWORD_BULK_CHUNK_SIZE,
+  onProgress?: (progress: ManualKeywordBulkApplyProgress) => void
 ): Promise<ManualKeywordBulkRunResult> {
   assertManualKeywordChunkSize(chunkSize);
 
@@ -248,6 +265,11 @@ export async function runManualKeywordBulkChunks(
         }
       }
     }
+    onProgress?.({
+      ...summary,
+      processed: summary.selected,
+      total: submittedRows.length
+    });
   }
 
   return {

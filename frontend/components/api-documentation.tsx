@@ -811,7 +811,7 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
       </Section>
       <Section title={uiText("5. Собрать обычную выдачу конкурентов")}>
         <p>
-          <UiText text="Используйте тот же контекст, estimate и подтверждение, но передайте" /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". Провайдер всегда собирает Топ-10: Arsenkin запускает инструмент" after=" " /><code>check-top</code><UiText text=", XMLStock — соответствующую Yandex/Google SERP-выдачу." /></p>
+          <UiText text="Используйте тот же контекст, estimate и подтверждение, но передайте" /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". Провайдер собирает выбранную глубину Топ-10/20/30/50/100: Arsenkin запускает инструмент" after=" " /><code>check-top</code><UiText text=", XMLStock — соответствующую Yandex/Google SERP-выдачу." /></p>
         <CodeBlock
           code={`curl -X POST "${baseUrl}/projects/<projectId>/rank-estimates" \\
   -H "Authorization: Bearer $SEO_API_TOKEN" \\
@@ -828,7 +828,7 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
           title={uiText("Оценка сбора конкурентов")}
         />
         <Callout title={uiText("Позиция сайта без второго запроса")}>
-          <code>saveProjectPosition</code> <UiText text="разрешён только при" before=" " /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". Если флаг включён и домен проекта найден в собранной Топ-10, эта позиция попадает в текущую проекцию и историю. Если флаг выключен либо сайт не найден, конкурентная выдача сохраняется, а позиционная история не меняется. Отдельный платный запрос для позиции не выполняется." /></Callout>
+          <code>saveProjectPosition</code> <UiText text="разрешён только при" before=" " /><code> purpose: &quot;COMPETITOR_SERP&quot;</code><UiText text=". Если флаг включён и домен проекта найден в собранной выдаче, эта позиция попадает в текущую проекцию и историю. Если флаг выключен либо сайт не найден, конкурентная выдача сохраняется, а позиционная история не меняется. Отдельный платный запрос для позиции не выполняется." /></Callout>
         <CodeBlock
           code={`{
   "data": {

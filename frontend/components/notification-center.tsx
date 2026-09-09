@@ -4,7 +4,7 @@ import type {
   PendingWorkspaceInviteSummary,
   ProjectTransferRequestSummary
 } from "@seo-platform/contracts";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   browserApiCollectionRequest,
   browserApiRequest,
@@ -85,6 +85,8 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
   const [error, setError] = useState<string>();
   const [retryVersion, setRetryVersion] = useState(0);
   const [selectedOperation, setSelectedOperation] = useState<NotificationOperation>();
+  const loadMoreRef = useRef<HTMLButtonElement>(null);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -161,8 +163,9 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
     };
   }, [unreadOnly]);
 
-  async function loadMore(): Promise<void> {
-    if (!page.nextCursor || loadingMore) return;
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (!page.nextCursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     setError(undefined);
     try {
@@ -173,9 +176,23 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
     } catch (requestError) {
       setError(notificationCenterError(requestError));
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }
+  }, [page.nextCursor, unreadOnly]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !page.hasNext) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) void loadMore();
+      },
+      { rootMargin: "280px 0px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadMore, page.hasNext]);
 
   async function markRead(id: string): Promise<void> {
     if (markingId) return;
@@ -455,6 +472,7 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
           className="secondary-button notification-load-more"
           disabled={loadingMore}
           onClick={() => void loadMore()}
+          ref={loadMoreRef}
           type="button"
         >
           {loadingMore ? <UiText text="Загружаем…" /> : <UiText text="Показать ещё" />}

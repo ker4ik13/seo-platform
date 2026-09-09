@@ -11,12 +11,16 @@ import { semanticQueryIndicatorsFor } from "../components/semantic-view-types.ts
 export const semanticGroupSidebarMinWidth = semanticSavedViewGroupSidebarWidthMin;
 export const semanticGroupSidebarMaxWidth = semanticSavedViewGroupSidebarWidthMax;
 export const semanticGroupSidebarDefaultWidth = 230;
+export const semanticInspectorMinWidth = 300;
+export const semanticInspectorMaxWidth = 620;
+export const semanticInspectorDefaultWidth = 360;
 
 export const semanticColumnMinWidth = 64;
 export const semanticColumnMaxWidth = 640;
 
 export interface SemanticLayoutPreferences {
   readonly groupSidebarWidth: number;
+  readonly inspectorWidth: number;
   readonly columnWidths: Readonly<Record<string, number>>;
   readonly pageSize: SemanticKeywordPageSize;
   readonly expandedGroupIds: readonly string[] | null;
@@ -27,7 +31,7 @@ interface StorageLike {
   setItem(key: string, value: string): void;
 }
 
-const semanticLayoutStoragePrefix = "seonorita:semantic-layout:v1:";
+const semanticLayoutStoragePrefix = "seonorita:semantic-layout:v2:";
 
 const defaultColumnWidths: Readonly<Record<string, number>> = {
   query: 260,
@@ -68,6 +72,15 @@ export function clampSemanticGroupSidebarWidth(width: number): number {
     semanticGroupSidebarMinWidth,
     semanticGroupSidebarMaxWidth,
     semanticGroupSidebarDefaultWidth
+  );
+}
+
+export function clampSemanticInspectorWidth(width: number): number {
+  return clampRounded(
+    width,
+    semanticInspectorMinWidth,
+    semanticInspectorMaxWidth,
+    semanticInspectorDefaultWidth
   );
 }
 
@@ -138,19 +151,22 @@ export function semanticAppliedTableLayoutConfig(
 
 export function readSemanticLayoutPreferences(
   projectId: string,
+  userId: string,
   storage: StorageLike
 ): SemanticLayoutPreferences {
   const fallback: SemanticLayoutPreferences = {
     groupSidebarWidth: semanticGroupSidebarDefaultWidth,
+    inspectorWidth: semanticInspectorDefaultWidth,
     columnWidths: {},
     pageSize: semanticKeywordDefaultPageSize,
     expandedGroupIds: null
   };
   try {
-    const raw = storage.getItem(semanticLayoutStorageKey(projectId));
+    const raw = storage.getItem(semanticLayoutStorageKey(projectId, userId));
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as {
       groupSidebarWidth?: unknown;
+      inspectorWidth?: unknown;
       columnWidths?: unknown;
       pageSize?: unknown;
       expandedGroupIds?: unknown;
@@ -159,6 +175,10 @@ export function readSemanticLayoutPreferences(
       typeof parsed.groupSidebarWidth === "number"
         ? clampSemanticGroupSidebarWidth(parsed.groupSidebarWidth)
         : semanticGroupSidebarDefaultWidth;
+    const inspectorWidth =
+      typeof parsed.inspectorWidth === "number"
+        ? clampSemanticInspectorWidth(parsed.inspectorWidth)
+        : semanticInspectorDefaultWidth;
     const columnWidths: Record<string, number> = {};
     if (isRecord(parsed.columnWidths)) {
       for (const [column, width] of Object.entries(parsed.columnWidths)) {
@@ -169,6 +189,7 @@ export function readSemanticLayoutPreferences(
     }
     return {
       groupSidebarWidth,
+      inspectorWidth,
       columnWidths,
       pageSize: normalizeSemanticKeywordPageSize(parsed.pageSize),
       expandedGroupIds: normalizeExpandedGroupIds(parsed.expandedGroupIds)
@@ -180,16 +201,18 @@ export function readSemanticLayoutPreferences(
 
 export function writeSemanticLayoutPreferences(
   projectId: string,
+  userId: string,
   preferences: SemanticLayoutPreferences,
   storage: StorageLike
 ): void {
   try {
     storage.setItem(
-      semanticLayoutStorageKey(projectId),
+      semanticLayoutStorageKey(projectId, userId),
       JSON.stringify({
         groupSidebarWidth: clampSemanticGroupSidebarWidth(
           preferences.groupSidebarWidth
         ),
+        inspectorWidth: clampSemanticInspectorWidth(preferences.inspectorWidth),
         columnWidths: Object.fromEntries(
           Object.entries(preferences.columnWidths).map(([column, width]) => [
             column,
@@ -216,8 +239,8 @@ export function normalizeSemanticKeywordPageSize(
     : semanticKeywordDefaultPageSize;
 }
 
-function semanticLayoutStorageKey(projectId: string): string {
-  return `${semanticLayoutStoragePrefix}${projectId}`;
+function semanticLayoutStorageKey(projectId: string, userId: string): string {
+  return `${semanticLayoutStoragePrefix}${userId}:${projectId}`;
 }
 
 function clampRounded(

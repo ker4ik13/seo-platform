@@ -1,5 +1,6 @@
 import {
   competitorSerpOperationResultDepth,
+  frequencySeasonalityPointLimit,
   normalizedRankDataQualityFlags,
   operationResultItemStatuses,
   rankCommandKeywordLimit,
@@ -118,7 +119,7 @@ export function scopedInternalFrequencyOperationResult(
   ) invalid();
   const seen = new Set<string>();
   const rows = input.rows.map((value) => {
-    const row = exact(value, ["keywordId", "keyword", "snapshots"], ["keywordVersion", "keywordAvailable"]);
+    const row = exact(value, ["keywordId", "keyword", "snapshots", "seasonality"], ["keywordVersion", "keywordAvailable"]);
     const keywordId = uuid(row.keywordId);
     if (
       !expectedKeywordIds.includes(keywordId) ||
@@ -128,7 +129,9 @@ export function scopedInternalFrequencyOperationResult(
       (row.keywordAvailable !== undefined && typeof row.keywordAvailable !== "boolean") ||
       row.keyword.length > 2_000 ||
       !Array.isArray(row.snapshots) ||
-      row.snapshots.length > 3
+      row.snapshots.length > 3 ||
+      !Array.isArray(row.seasonality) ||
+      row.seasonality.length > frequencySeasonalityPointLimit
     ) invalid();
     seen.add(keywordId);
     const types = new Set<string>();
@@ -194,6 +197,43 @@ export function scopedInternalFrequencyOperationResult(
           jobId,
           qualityFlags,
           observedAt: timestamp(snapshot.observedAt)
+        };
+      }),
+      seasonality: row.seasonality.map((value) => {
+        const point = exact(value, [
+          "type", "granularity", "periodStart", "value", "regionCode", "device",
+          "provider", "sourceMode", "jobId", "observedAt"
+        ], ["share"]);
+        if (
+          !["BASE", "EXACT", "FIXED"].includes(String(point.type)) ||
+          !["MONTH", "WEEK", "DAY"].includes(String(point.granularity)) ||
+          typeof point.periodStart !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}$/u.test(point.periodStart) ||
+          new Date(`${point.periodStart}T00:00:00.000Z`).toISOString().slice(0, 10) !== point.periodStart ||
+          typeof point.value !== "string" ||
+          !/^(?:0|[1-9]\d{0,18})$/u.test(point.value) ||
+          (point.share !== undefined &&
+            (typeof point.share !== "string" ||
+              !/^(?:0(?:\.\d{1,18})?|1(?:\.0{1,18})?)$/u.test(point.share))) ||
+          typeof point.regionCode !== "string" ||
+          point.regionCode.length < 1 ||
+          point.regionCode.length > 100 ||
+          (point.provider !== "XMLSTOCK" && point.provider !== "ARSENKIN") ||
+          (point.sourceMode !== "BYOK" && point.sourceMode !== "PLATFORM") ||
+          point.jobId !== jobId
+        ) invalid();
+        return {
+          type: point.type as "BASE" | "EXACT" | "FIXED",
+          granularity: point.granularity as "MONTH" | "WEEK" | "DAY",
+          periodStart: point.periodStart,
+          value: point.value,
+          ...(typeof point.share === "string" ? { share: point.share } : {}),
+          regionCode: point.regionCode,
+          device: member(point.device, semanticFrequencyDevices),
+          provider: member(point.provider, ["XMLSTOCK", "ARSENKIN"] as const),
+          sourceMode: member(point.sourceMode, ["BYOK", "PLATFORM"] as const),
+          jobId,
+          observedAt: timestamp(point.observedAt)
         };
       })
     };
@@ -524,7 +564,7 @@ function rankExecution(value: unknown): InternalRankExecutionParameters {
     typeof input.language !== "string" ||
     (input.regionCode !== undefined && typeof input.regionCode !== "string") ||
     !["DESKTOP", "MOBILE"].includes(String(input.device)) ||
-    ![30, 50, 100].includes(Number(input.depth)) ||
+    ![10, 20, 30, 50, 100].includes(Number(input.depth)) ||
     typeof input.safeSearch !== "boolean" ||
     input.format !== "SIMPLE" ||
     input.rawSerp !== false ||
@@ -554,7 +594,7 @@ function rankExecution(value: unknown): InternalRankExecutionParameters {
       : {}),
     language: input.language,
     device: input.device as "DESKTOP" | "MOBILE",
-    depth: input.depth as 30 | 50 | 100,
+    depth: input.depth as 10 | 20 | 30 | 50 | 100,
     domainMatchRule:
       mode === "SPECIFIC_URL" || mode === "URL_PREFIX"
         ? { mode, value: rule.value as string }

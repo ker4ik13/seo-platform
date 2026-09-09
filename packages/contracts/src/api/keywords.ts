@@ -181,6 +181,8 @@ export interface SemanticKeywordListItem {
   readonly tagsTruncated: boolean;
   /** The list never exposes the note body, only its presence. */
   readonly hasNote?: boolean;
+  /** At least one current city/device snapshot contains several project URLs. */
+  readonly hasMultipleRankingUrls?: boolean;
   readonly customValues?: readonly import("./semantic-custom-columns.js").SemanticKeywordCustomValue[];
   readonly frequency?: SemanticKeywordListFrequency;
   readonly frequencies?: readonly SemanticKeywordListFrequencyValue[];
@@ -232,7 +234,7 @@ export interface SemanticKeywordListSiteResult {
   readonly snippet?: string;
 }
 
-export const projectPositionTopThresholds = [3, 5, 10, 30, 50] as const;
+export const projectPositionTopThresholds = [1, 3, 5, 10, 30, 50] as const;
 export type ProjectPositionTopThreshold =
   (typeof projectPositionTopThresholds)[number];
 
@@ -240,6 +242,7 @@ export const projectPositionHistoryDefaultSlices = 30 as const;
 export const projectPositionHistoryMaxPoints = 100 as const;
 
 export interface ProjectPositionTopCounts {
+  readonly top1KeywordCount: number;
   readonly top3KeywordCount: number;
   readonly top5KeywordCount: number;
   readonly top10KeywordCount: number;

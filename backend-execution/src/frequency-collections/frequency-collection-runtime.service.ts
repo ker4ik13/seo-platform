@@ -5,17 +5,23 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   arsenkinWordstatKeywordLimit,
   internalFrequencyPersistBatchLimit,
+  internalFrequencySeasonalityPersistBatchLimit,
   internalFrequencyResolveBatchLimit,
+  type InternalFrequencySeasonalityPoint,
   type InternalFrequencyKeyword
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
+import {
+  IntegrationCredentialCryptoService,
+  type IntegrationCredentialSecret
+} from "../integrations/integration-credential-crypto.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
 import { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
 import { SeoDataClient, SeoDataClientError } from "../seo-data/seo-data.client.js";
 import {
   ArsenkinWordstatConnector,
+  type ArsenkinSeasonalityFetchResult,
   type ArsenkinWordstatFetchResult,
   type ArsenkinWordstatSubmitResult
 } from "./arsenkin-wordstat.connector.js";
@@ -79,6 +85,24 @@ export class FrequencyCollectionRuntimeService {
     if (!claimed) return "IDLE";
     let activeClaim: FrequencyCollectionClaim = claimed;
     try {
+      if (activeClaim.items.some((item) => item.attempt > activeClaim.maxAttempts)) {
+        await this.broker.fail(activeClaim, {
+          code: "PROVIDER_TIMEOUT",
+          retryable: false
+        });
+        return "FAILED_ITEM";
+      }
+      if (
+        activeClaim.mode === "SEASONALITY" &&
+        activeClaim.provider === "ARSENKIN" &&
+        (activeClaim.types.length !== 1 || activeClaim.types[0] !== "BASE")
+      ) {
+        await this.broker.fail(activeClaim, {
+          code: "PROVIDER_INVALID_RESPONSE",
+          retryable: false
+        });
+        return "FAILED_ITEM";
+      }
       this.assertLease(
         activeClaim,
         this.requiredExecutionBudgetMs(activeClaim)
@@ -89,7 +113,11 @@ export class FrequencyCollectionRuntimeService {
         existingTaskId !== undefined &&
         isSubmitMarker(existingTaskId)
       ) {
-        const acceptedTaskId = await this.billing?.acceptedTaskId(activeClaim, activeClaim.items.map(item => item.jobItemId));
+        const acceptedTaskId = await this.billing?.acceptedTaskId(
+          activeClaim,
+          activeClaim.items.map(item => item.jobItemId),
+          activeClaim.mode === "SEASONALITY" ? "SEASONALITY_TASK" : "TASK"
+        );
         if (acceptedTaskId) { await this.broker.defer(activeClaim, acceptedTaskId, 5); return "RETRY_SCHEDULED"; }
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
@@ -112,6 +140,118 @@ export class FrequencyCollectionRuntimeService {
         );
         return keywords.map((keyword) => keyword.text);
       };
+      if (activeClaim.mode === "SEASONALITY") {
+        const seasonality = activeClaim.seasonality;
+        if (!seasonality) {
+          throw new TypeError("Seasonality collection is missing its range");
+        }
+        if (activeClaim.provider === "XMLSTOCK") {
+          return await this.processXmlStockSeasonality(
+            activeClaim,
+            secret,
+            seasonality,
+            sourceMode,
+            timeoutMs,
+            leaseSeconds
+          );
+        }
+        const taskId = sharedProviderRequestId(activeClaim.items);
+        if (!taskId) await resolveKeywords();
+        const outcome = taskId
+          ? await this.arsenkin.fetchSeasonalityResult(
+              taskId,
+              resolveKeywords,
+              seasonality,
+              activeClaim.regionCode,
+              secret,
+              timeoutMs
+            )
+          : await this.runPaid(
+              activeClaim,
+              "SEASONALITY_TASK",
+              () => this.arsenkin.submitSeasonality(
+              {
+                keywords: (keywords ?? []).map((keyword) => keyword.text),
+                regionCode: activeClaim.regionCode,
+                device: activeClaim.device,
+                seasonality
+              },
+              secret,
+              timeoutMs,
+              async () => {
+                this.assertLease(
+                  activeClaim,
+                  timeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS
+                );
+                const marker = `submitting:${randomUUID()}`;
+                const marked = await this.broker.markSubmitting(
+                  activeClaim,
+                  marker,
+                  leaseSeconds
+                );
+                if (!marked) return false;
+                activeClaim = marked;
+                return true;
+              }
+            )
+          );
+        if (
+          isSubmitMarker(sharedProviderRequestId(activeClaim.items)) &&
+          (outcome.status === "OUTCOME_UNKNOWN" ||
+            outcome.status === "RETRYABLE_FAILURE")
+        ) {
+          await this.broker.quarantineAmbiguousSubmit(activeClaim);
+          return "ACTION_REQUIRED";
+        }
+        const deferred = await this.handleArsenkinOutcome(activeClaim, outcome);
+        if (deferred) return deferred;
+        if (outcome.status !== "READY") {
+          throw new Error("Unexpected Arsenkin seasonality outcome");
+        }
+        if (!keywords || keywords.length !== activeClaim.items.length) {
+          throw new TypeError("Incomplete seasonality keyword resolution");
+        }
+        const resultsByQuery = new Map(
+          outcome.results.map((result) => [normalizedQuery(result.query), result.points])
+        );
+        const pointsByItem = new Map<string, readonly InternalFrequencySeasonalityPoint[]>();
+        for (const [index, item] of activeClaim.items.entries()) {
+          const keyword = keywords[index];
+          const points = keyword
+            ? resultsByQuery.get(normalizedQuery(keyword.text))
+            : undefined;
+          if (!points) {
+            await this.broker.fail(activeClaim, {
+              code: "PROVIDER_INVALID_RESPONSE",
+              retryable: false
+            });
+            return "FAILED_BATCH";
+          }
+          pointsByItem.set(item.jobItemId, points.map((point) => ({
+            type: "BASE" as const,
+            granularity: seasonality.granularity,
+            periodStart: point.periodStart,
+            value: point.value,
+            ...(point.share ? { share: point.share } : {}),
+            regionCode: activeClaim.regionCode,
+            device: activeClaim.device,
+            provider: "ARSENKIN" as const,
+            sourceMode
+          })));
+        }
+        const observedAt = new Date().toISOString();
+        activeClaim = await this.persistSeasonalityPoints(
+          activeClaim,
+          pointsByItem,
+          observedAt,
+          leaseSeconds
+        );
+        this.assertLease(activeClaim, FREQUENCY_PERSISTENCE_MARGIN_MS);
+        await this.broker.complete(activeClaim, 1);
+        return activeClaim.items.length === 1
+          ? "COMPLETED_ITEM"
+          : "COMPLETED_BATCH";
+      }
       type Snapshot = {
         readonly type: (typeof activeClaim.types)[number];
         readonly regionCode: string;
@@ -334,6 +474,97 @@ export class FrequencyCollectionRuntimeService {
     }
   }
 
+  private async processXmlStockSeasonality(
+    claim: FrequencyCollectionClaim,
+    secret: IntegrationCredentialSecret,
+    seasonality: NonNullable<FrequencyCollectionClaim["seasonality"]>,
+    sourceMode: "BYOK" | "PLATFORM",
+    timeoutMs: number,
+    leaseSeconds: number
+  ): Promise<string> {
+    let activeClaim = claim;
+    const resolved = await this.resolveKeywords(activeClaim, leaseSeconds);
+    activeClaim = resolved.claim;
+    const item = activeClaim.items[0];
+    const keyword = resolved.keywords[0];
+    if (!item || !keyword || activeClaim.items.length !== 1) {
+      throw new TypeError("Invalid XMLStock seasonality claim");
+    }
+    const acquired = await this.xmlStockQuota.tryAcquire({
+      credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
+      product: "WORDSTAT",
+      requestCost: activeClaim.types.length,
+      leaseMs: timeoutMs * activeClaim.types.length + FREQUENCY_PERSISTENCE_MARGIN_MS
+    });
+    if (!acquired.allowed) {
+      await this.broker.releaseForProviderCapacity(
+        activeClaim,
+        Math.max(5, acquired.retryAfterSeconds)
+      );
+      return "RETRY_SCHEDULED";
+    }
+    try {
+      const points: InternalFrequencySeasonalityPoint[] = [];
+      for (const type of activeClaim.types) {
+        this.assertLease(
+          activeClaim,
+          timeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS
+        );
+        const outcome = await this.runPaid(
+          activeClaim,
+          `SEASONALITY_${type}`,
+          () => this.xmlStock.collectSeasonality(
+            {
+              keyword: keyword.text,
+              type,
+              regionCode: activeClaim.regionCode,
+              device: activeClaim.device,
+              seasonality
+            },
+            secret,
+            timeoutMs
+          )
+        );
+        if (!outcome.ok) {
+          if (outcome.code === "PROVIDER_RATE_LIMITED") {
+            await this.xmlStockQuota.penalize({
+              credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
+              product: "WORDSTAT"
+            });
+          }
+          await this.broker.fail(activeClaim, outcome);
+          return outcome.retryable ? "RETRY_SCHEDULED" : "FAILED_ITEM";
+        }
+        points.push(...outcome.points.map((point) => ({
+          type,
+          granularity: seasonality.granularity,
+          periodStart: point.periodStart,
+          value: point.value,
+          ...(point.share ? { share: point.share } : {}),
+          regionCode: activeClaim.regionCode,
+          device: activeClaim.device,
+          provider: "XMLSTOCK" as const,
+          sourceMode
+        })));
+      }
+      await this.xmlStockQuota.recordSuccess({
+        credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
+        product: "WORDSTAT"
+      });
+      activeClaim = await this.persistSeasonalityPoints(
+        activeClaim,
+        new Map([[item.jobItemId, points]]),
+        new Date().toISOString(),
+        leaseSeconds
+      );
+      this.assertLease(activeClaim, FREQUENCY_PERSISTENCE_MARGIN_MS);
+      await this.broker.complete(activeClaim, activeClaim.types.length);
+      return "COMPLETED_ITEM";
+    } finally {
+      await this.xmlStockQuota.release(acquired);
+    }
+  }
+
   private async runPaid<T extends object>(claim: FrequencyCollectionClaim, part: string, network: () => Promise<T>): Promise<T> {
     return this.billing ? this.billing.execute(claim, part, claim.items.map(item => item.jobItemId), network) : network();
   }
@@ -438,9 +669,58 @@ export class FrequencyCollectionRuntimeService {
     return activeClaim;
   }
 
+  private async persistSeasonalityPoints(
+    claim: Parameters<FrequencyCollectionRuntimeBrokerService["complete"]>[0],
+    pointsByItem: ReadonlyMap<
+      string,
+      readonly InternalFrequencySeasonalityPoint[]
+    >,
+    observedAt: string,
+    leaseSeconds: number
+  ): Promise<Parameters<FrequencyCollectionRuntimeBrokerService["complete"]>[0]> {
+    let activeClaim = claim;
+    const chunks = chunked(
+      activeClaim.items,
+      internalFrequencySeasonalityPersistBatchLimit
+    );
+    for (const window of chunked(chunks, INTERNAL_FREQUENCY_BATCH_CONCURRENCY)) {
+      activeClaim = await this.broker.renew(activeClaim, leaseSeconds);
+      this.assertLease(
+        activeClaim,
+        this.config.internalCommandTimeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS
+      );
+      await Promise.all(
+        window.map((items) =>
+          this.seoData.persistFrequencySeasonalityBatch({
+            workspaceId: activeClaim.workspaceId,
+            projectId: activeClaim.projectId,
+            actorId: activeClaim.actorId,
+            jobId: activeClaim.jobId,
+            observedAt,
+            items: items.map((item) => {
+              const points = pointsByItem.get(item.jobItemId);
+              if (!points) {
+                throw new TypeError("Incomplete seasonality normalization");
+              }
+              return {
+                keywordId: item.keywordId,
+                keywordVersion: item.keywordVersion,
+                points
+              };
+            })
+          })
+        )
+      );
+       }
+    return activeClaim;
+  }
+
   private async handleArsenkinOutcome(
     claim: Parameters<FrequencyCollectionRuntimeBrokerService["complete"]>[0],
-    outcome: ArsenkinWordstatSubmitResult | ArsenkinWordstatFetchResult
+    outcome:
+      | ArsenkinWordstatSubmitResult
+      | ArsenkinWordstatFetchResult
+      | ArsenkinSeasonalityFetchResult
   ): Promise<string | undefined> {
     if (outcome.status === "ACCEPTED") {
       await this.broker.defer(claim, outcome.taskId, 5);

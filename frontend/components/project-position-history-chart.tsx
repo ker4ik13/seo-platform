@@ -30,6 +30,7 @@ const SERIES: Readonly<Record<
   ProjectPositionTopThreshold,
   Readonly<{ color: string; label: string }>
 >> = {
+  1: { color: "#8b5cf6", label: "Топ-1" },
   3: { color: "#6847f5", label: "Топ-3" },
   5: { color: "#2f6fed", label: "Топ-5" },
   10: { color: "#0b94aa", label: "Топ-10" },
@@ -94,7 +95,7 @@ export function ProjectPositionHistoryChart({
   const selectedSeries = projectPositionTopThresholds.filter((top) =>
     visibleTops.has(top)
   );
-  const activePoint = points.find(({ id }) => id === activePointId) ?? points.at(-1);
+  const activePoint = points.find(({ id }) => id === activePointId);
   const maximum = Math.max(
     1,
     ...points.flatMap((point) =>

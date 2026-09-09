@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
-  competitorSerpOperationResultDepth,
+  frequencySeasonalityPointLimit,
   normalizedRankDataQualityFlags,
   rankExecutionPurpose,
   semanticFrequencyTypes,
@@ -90,7 +90,7 @@ export class OperationResultService {
   public async frequency(
     input: InternalFrequencyOperationResultInput
   ): Promise<InternalFrequencyOperationResult> {
-    const [keywords, snapshots] = await Promise.all([
+    const [keywords, snapshots, seasonalityPoints] = await Promise.all([
       this.prisma.keyword.findMany({
         where: {
           workspaceId: input.workspaceId,
@@ -114,18 +114,44 @@ export class OperationResultService {
         take:
           input.keywordIds.length * semanticFrequencyTypes.length + 1,
         select: frequencySelect
+      }),
+      this.prisma.frequencySeasonalityPoint.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          jobId: input.jobId,
+          keywordId: { in: [...input.keywordIds] }
+        },
+        orderBy: [
+          { keywordId: "asc" },
+          { periodStart: "asc" },
+          { id: "asc" }
+        ],
+        take: input.keywordIds.length * frequencySeasonalityPointLimit + 1
       })
     ]);
     if (
       snapshots.length >
       input.keywordIds.length * semanticFrequencyTypes.length
     ) invalidStored("frequency result is oversized");
+    if (
+      seasonalityPoints.length >
+      input.keywordIds.length * frequencySeasonalityPointLimit
+    ) {
+      invalidStored("seasonality result is oversized");
+    }
     const keywordById = new Map(keywords.map((row) => [row.id, row]));
     const snapshotsById = new Map<string, typeof snapshots>();
     for (const snapshot of snapshots) {
       const current = snapshotsById.get(snapshot.keywordId) ?? [];
       current.push(snapshot);
       snapshotsById.set(snapshot.keywordId, current);
+    }
+    const seasonalityById = new Map<string, typeof seasonalityPoints>();
+    for (const point of seasonalityPoints) {
+      const current = seasonalityById.get(point.keywordId) ?? [];
+      current.push(point);
+      seasonalityById.set(point.keywordId, current);
     }
     return {
       workspaceId: input.workspaceId,
@@ -149,6 +175,22 @@ export class OperationResultService {
             jobId: snapshot.jobId,
             qualityFlags: frequencyQualityFlags(snapshot.qualityFlags),
             observedAt: snapshot.observedAt.toISOString()
+          })),
+          seasonality: (seasonalityById.get(keywordId) ?? []).map((point) => ({
+            type: frequencyType(point.type),
+            granularity: seasonalityGranularity(point.granularity),
+            periodStart: point.periodStart.toISOString().slice(0, 10),
+            value: point.value.toString(),
+            // Keep DECIMAL(24, 18) in the plain-string format required by the
+            // internal/public contract; Decimal.toString() uses an exponent
+            // for the small shares commonly returned by XMLStock.
+            ...(point.share === null ? {} : { share: point.share.toFixed() }),
+            regionCode: point.regionCode,
+            device: frequencyDevice(point.device),
+            provider: seasonalityProvider(point.provider),
+            sourceMode: seasonalitySourceMode(point.sourceMode),
+            jobId: point.jobId,
+            observedAt: point.observedAt.toISOString()
           }))
         };
       })
@@ -322,7 +364,7 @@ export class OperationResultService {
       ? await this.prisma.rankSerpResult.findMany({
           where: {
             snapshotId: { in: snapshotIds },
-            position: { lte: competitorSerpOperationResultDepth },
+            position: { lte: execution.depth },
             snapshot: {
               workspaceId: context.workspaceId,
               projectId: context.projectId,
@@ -342,7 +384,7 @@ export class OperationResultService {
       : [];
     if (
       serpResults.length >
-      snapshotIds.length * competitorSerpOperationResultDepth
+      snapshotIds.length * execution.depth
     ) {
       invalidStored("competitor SERP result is oversized");
     }
@@ -531,7 +573,7 @@ function rankExecution(value: Prisma.JsonValue): InternalRankExecutionParameters
     typeof input.language !== "string" ||
     (input.regionCode !== undefined && typeof input.regionCode !== "string") ||
     (input.device !== "DESKTOP" && input.device !== "MOBILE") ||
-    (input.depth !== 30 && input.depth !== 50 && input.depth !== 100) ||
+    ![10, 20, 30, 50, 100].includes(Number(input.depth)) ||
     typeof input.safeSearch !== "boolean" ||
     input.format !== "SIMPLE" ||
     input.rawSerp !== false ||
@@ -562,7 +604,7 @@ function rankExecution(value: Prisma.JsonValue): InternalRankExecutionParameters
       : {}),
     language: input.language,
     device: input.device,
-    depth: input.depth,
+    depth: Number(input.depth) as InternalRankExecutionParameters["depth"],
     domainMatchRule:
       mode === "SPECIFIC_URL" || mode === "URL_PREFIX"
         ? { mode, value: rule.value as string }
@@ -603,6 +645,21 @@ function frequencySourceMode(
     invalidStored("frequency source mode is invalid");
   }
   return value as "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL";
+}
+
+function seasonalityGranularity(value: string): "MONTH" | "WEEK" | "DAY" {
+  if (value === "MONTH" || value === "WEEK" || value === "DAY") return value;
+  invalidStored("seasonality granularity is invalid");
+}
+
+function seasonalityProvider(value: string): "XMLSTOCK" | "ARSENKIN" {
+  if (value === "XMLSTOCK" || value === "ARSENKIN") return value;
+  invalidStored("seasonality provider is invalid");
+}
+
+function seasonalitySourceMode(value: string): "BYOK" | "PLATFORM" {
+  if (value === "BYOK" || value === "PLATFORM") return value;
+  invalidStored("seasonality source mode is invalid");
 }
 
 function frequencyQualityFlags(value: Prisma.JsonValue): readonly SemanticFrequencyQualityFlag[] {

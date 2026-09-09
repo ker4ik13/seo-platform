@@ -138,7 +138,18 @@ test("background worker builds the position history report in two bounded passes
     }
   ];
   const seoData = {
-    listExportRankDimensions: async () => ({ dimensions: [], truncated: false }),
+    listExportRankDimensions: async () => ({
+      dimensions: [{
+        key: "YANDEX|RU|213|ru|DESKTOP",
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP"
+      }],
+      truncated: false
+    }),
     listExportCustomColumns: async () => {
       throw new Error("Position report must not load custom columns");
     },

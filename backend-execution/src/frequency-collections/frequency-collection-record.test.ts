@@ -44,6 +44,30 @@ test("projects the selected provider as failed with the persisted failure code",
   );
 });
 
+test("keeps historical multi-type XMLStock seasonality jobs readable", () => {
+  const summary = frequencyCollectionSummary(job({
+    provider: "XMLSTOCK",
+    inputSnapshot: {
+      mode: "SEASONALITY",
+      types: ["BASE", "EXACT", "FIXED"],
+      regionCode: "225",
+      device: "ALL",
+      seasonality: {
+        granularity: "MONTH",
+        observedFrom: "2024-09-01",
+        observedThrough: "2026-08-31"
+      }
+    }
+  }));
+  assert.equal(summary.mode, "SEASONALITY");
+  assert.deepEqual(summary.types, ["BASE", "EXACT", "FIXED"]);
+  assert.deepEqual(summary.seasonality, {
+    granularity: "MONTH",
+    observedFrom: "2024-09-01",
+    observedThrough: "2026-08-31"
+  });
+});
+
 test("rejects incomplete or non-contiguous connector provenance", () => {
   assert.throws(() =>
     frequencyCollectionSummary(

@@ -127,6 +127,37 @@ test("pending Arsenkin polling becomes a terminal timeout at the bounded horizon
   });
 });
 
+test("terminally closes an over-attempt legacy seasonality claim before provider HTTP", async () => {
+  const failures: unknown[][] = [];
+  let providerCalls = 0;
+  const legacyClaim = seasonalityClaim(1);
+  const runtime = runtimeWith({
+    claims: [{
+      ...legacyClaim,
+      provider: "XMLSTOCK",
+      maxAttempts: 8,
+      types: ["BASE", "EXACT", "FIXED"],
+      items: legacyClaim.items.map((item) => ({ ...item, attempt: 123 }))
+    }],
+    xmlStock: {
+      collectSeasonality: async () => {
+        providerCalls += 1;
+        return { ok: true, points: [] };
+      }
+    },
+    fail: async (...args) => {
+      failures.push(args);
+    }
+  });
+
+  assert.equal(await runtime.processOne("connector-123456"), "FAILED_ITEM");
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(failures[0]?.[1], {
+    code: "PROVIDER_TIMEOUT",
+    retryable: false
+  });
+});
+
 test("ready 10,000-keyword result persists in twenty bounded calls with lease renewal", async () => {
   const persistSizes: number[] = [];
   const resolveSizes: number[] = [];
@@ -218,6 +249,82 @@ test("keeps XMLStock as one keyword claim while collecting every requested type"
 
   assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_ITEM");
   assert.deepEqual(keywords, ["query 1:BASE", "query 1:EXACT"]);
+});
+
+test("Arsenkin seasonality persists every keyword in bounded batches", async () => {
+  const persistSizes: number[] = [];
+  const persistedProviders: string[] = [];
+  let completionUnits: number | undefined;
+  const runtime = runtimeWith({
+    claims: [seasonalityClaim(250, "seasonality-task")],
+    arsenkin: {
+      fetchSeasonalityResult: async (_taskId, resolver) => {
+        if (typeof resolver !== "function") {
+          throw new TypeError("Expected lazy keyword resolver");
+        }
+        const keywords = await (resolver as () => Promise<readonly string[]>)();
+        return {
+          status: "READY",
+          results: keywords.map((query) => ({
+            query,
+            points: [
+              { periodStart: "2026-01-01", value: "10" },
+              { periodStart: "2026-02-01", value: "20" },
+              { periodStart: "2026-03-01", value: "15" }
+            ]
+          }))
+        };
+      }
+    },
+    persistSeasonality: async (request) => {
+      persistSizes.push(request.items.length);
+      persistedProviders.push(...request.items.flatMap((item) =>
+        (item as { points: readonly { provider: string }[] }).points.map(({ provider }) => provider)
+      ));
+    },
+    complete: async (_claim, units) => {
+      completionUnits = units as number;
+    }
+  });
+
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_BATCH");
+  assert.deepEqual(persistSizes, [100, 100, 50]);
+  assert.equal(persistedProviders.length, 250 * 3);
+  assert.ok(persistedProviders.every((provider) => provider === "ARSENKIN"));
+  assert.equal(completionUnits, 1);
+});
+
+test("XMLStock persists each requested seasonality frequency type", async () => {
+  const persistedTypes: string[] = [];
+  let completionUnits: number | undefined;
+  const runtime = runtimeWith({
+    claims: [{
+      ...seasonalityClaim(1),
+      provider: "XMLSTOCK",
+      maxAttempts: 8,
+      types: ["BASE", "EXACT"]
+    }],
+    xmlStock: {
+      collectSeasonality: async (request) => ({
+        ok: true,
+        points: [{
+          periodStart: "2026-01-01",
+          value: request.type === "BASE" ? "100" : "25"
+        }]
+      })
+    },
+    persistSeasonality: async (request) => {
+      persistedTypes.push(...request.items.flatMap((item) =>
+        (item as { points: readonly { type: string }[] }).points.map(({ type }) => type)
+      ));
+    },
+    complete: async (_claim, units) => {
+      completionUnits = units as number;
+    }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_ITEM");
+  assert.deepEqual(persistedTypes, ["BASE", "EXACT"]);
+  assert.equal(completionUnits, 2);
 });
 
 test("caps provider timeout and claims the 120-second, 10,000-item runtime lease", async () => {
@@ -382,13 +489,21 @@ function runtimeWith(input: {
   readonly claims: Array<FrequencyCollectionClaim | undefined>;
   readonly timeoutMs?: number;
   readonly claimCalls?: unknown[][];
-  readonly arsenkin?: { readonly submit?: Submit; readonly fetchResult?: FetchResult };
+  readonly arsenkin?: {
+    readonly submit?: Submit;
+    readonly submitSeasonality?: Submit;
+    readonly fetchResult?: FetchResult;
+    readonly fetchSeasonalityResult?: FetchResult;
+  };
   readonly xmlStock?: {
     readonly collect?: (input: { readonly keyword: string; readonly type: string }) =>
       Promise<{ readonly ok: true; readonly value: string }>;
+    readonly collectSeasonality?: (input: { readonly keyword: string; readonly type: string }) =>
+      Promise<{ readonly ok: true; readonly points: readonly { readonly periodStart: string; readonly value: string }[] }>;
   };
   readonly resolve?: (request: ResolveRequest) => Promise<void>;
   readonly persist?: (request: PersistRequest) => Promise<void>;
+  readonly persistSeasonality?: (request: PersistRequest) => Promise<void>;
   readonly defer?: (...args: unknown[]) => Promise<void>;
   readonly fail?: (...args: unknown[]) => Promise<void>;
   readonly complete?: (...args: unknown[]) => Promise<void>;
@@ -438,15 +553,20 @@ function runtimeWith(input: {
           }))
         };
       },
-      persistFrequencySnapshotBatch: input.persist ?? (async () => undefined)
+      persistFrequencySnapshotBatch: input.persist ?? (async () => undefined),
+      persistFrequencySeasonalityBatch:
+        input.persistSeasonality ?? (async () => undefined)
     } as never,
     {
       collect: async () => ({ ok: true, value: "1" }),
+      collectSeasonality: async () => ({ ok: true, points: [] }),
       ...input.xmlStock
     } as never,
     {
       submit: async () => ({ status: "ACCEPTED", taskId: "task-batch" }),
+      submitSeasonality: async () => ({ status: "ACCEPTED", taskId: "seasonality-task" }),
       fetchResult: async () => ({ status: "PENDING", retryAfterSeconds: 5 }),
+      fetchSeasonalityResult: async () => ({ status: "PENDING", retryAfterSeconds: 5 }),
       ...input.arsenkin
     } as never,
     {
@@ -502,6 +622,7 @@ function frequencyClaim(
       keywordVersion: 1,
       attempt
     })),
+    mode: "FREQUENCY",
     types: ["BASE", "EXACT"],
     regionCode: "213",
     device: "ALL",
@@ -516,6 +637,22 @@ function frequencyClaim(
       dataKeyNonce: Buffer.from("e"),
       dataKeyAuthTag: Buffer.from("f"),
       keyVersion: 1
+    }
+  };
+}
+
+function seasonalityClaim(
+  count: number,
+  providerRequestId?: string
+): FrequencyCollectionClaim {
+  return {
+    ...frequencyClaim(count, providerRequestId),
+    mode: "SEASONALITY",
+    types: ["BASE"],
+    seasonality: {
+      granularity: "MONTH",
+      observedFrom: "2026-01-01",
+      observedThrough: "2026-03-31"
     }
   };
 }

@@ -477,7 +477,7 @@ export function SemanticPositionDialog({
             groupIds: activeGroupId ? [activeGroupId] : []
           }));
         }
-        if (!initialRun && preferredSource?.provider === "ARSENKIN") {
+        if (!initialRun && !competitorMode && preferredSource?.provider === "ARSENKIN") {
           setContextDraft((current) => ({ ...current, depth: 30 }));
         }
       })
@@ -900,7 +900,7 @@ export function SemanticPositionDialog({
       {...(competitorMode && !initialRun
         ? {
             description:
-              "Сохраняет Топ-10 обычной выдачи по каждому запросу. Arsenkin использует Check Top, XMLStock — выбранный тип выдачи."
+              `Сохраняет Топ-${contextDraft.depth} обычной выдачи по каждому запросу. Arsenkin использует Check Top, XMLStock — выбранный тип выдачи.`
           }
         : {})}
       footer={(
@@ -1003,7 +1003,7 @@ export function SemanticPositionDialog({
                   ...(current.searchEngine === "GOOGLE"
                     ? { searchSource: "LIVE" as const }
                     : {}),
-                  ...(next?.provider === "ARSENKIN" &&
+                  ...(!competitorMode && next?.provider === "ARSENKIN" &&
                   current.searchEngine === "YANDEX"
                     ? { depth: 30 as const }
                     : {})
@@ -1136,7 +1136,7 @@ function PositionContextSelector({
           <strong>{competitorMode ? <UiText text="Контекст выдачи" /> : <UiText text="Контекст съёма" />}</strong>
           <small>
             {competitorMode
-              ? <UiText text="Хранит папки, поисковик, регион и устройство для Топ-10." />
+              ? <UiText text="Хранит папки, поисковик, регион, устройство и глубину выдачи." />
               : <UiText text="Хранит папки, поисковик, регион, устройство и глубину проверки." />}
           </small>
         </div>
@@ -1222,8 +1222,9 @@ function PositionRunParameters({
   const provider = selectedSource?.provider === "ARSENKIN"
     ? "ARSENKIN"
     : "XMLSTOCK";
-  const depthOptions: readonly TrackingContextDraft["depth"][] =
-    draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
+  const depthOptions: readonly TrackingContextDraft["depth"][] = competitorMode
+    ? [10, 20, 30, 50, 100]
+    : draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
       ? [30]
       : [30, 50, 100];
   const preferredRegion = preferredRegions[draft.searchEngine];
@@ -1240,7 +1241,7 @@ function PositionRunParameters({
       ...draft,
       countryCode: "RU",
       depth:
-        searchEngine === "YANDEX" && provider === "ARSENKIN"
+        !competitorMode && searchEngine === "YANDEX" && provider === "ARSENKIN"
           ? 30
           : draft.depth,
       language: "ru",
@@ -1266,7 +1267,7 @@ function PositionRunParameters({
             <h3><UiText text="Поисковые системы" /></h3>
             <p>
               {competitorMode
-                ? <UiText text="Выберите поисковик, тип выдачи и источник Топ-10." />
+                ? <UiText text="Выберите поисковик, тип выдачи, глубину и источник." />
                 : <UiText text="Выберите поисковик, тип выдачи и подключение провайдера." />}
             </p>
           </header>
@@ -1376,19 +1377,8 @@ function PositionRunParameters({
           </header>
           <SemanticRankTargets targets={targets} engine={draft.searchEngine} onChange={onTargetsChange} />
           {targets.length === 1 && <small className={`semantic-region-source ${regionSource.toLowerCase()}`}><UiText text={regionSourceLabel(regionSource)} /></small>}
-          {competitorMode ? (
-            <fieldset className="semantic-segmented-field semantic-depth-field">
-              <legend><UiText text="Глубина сбора" /></legend>
-              <div className="semantic-segmented-control" aria-label={uiText("Глубина сбора")} role="group">
-                <label className="selected">
-                  <input checked readOnly type="radio" />
-                  <span><UiText text="Топ-10" /></span>
-                </label>
-              </div>
-            </fieldset>
-          ) : (
-            <fieldset className="semantic-segmented-field semantic-depth-field">
-              <legend><UiText text="Глубина проверки" /></legend>
+          <fieldset className="semantic-segmented-field semantic-depth-field">
+              <legend><UiText text={competitorMode ? "Глубина сбора" : "Глубина проверки"} /></legend>
               <div className="semantic-segmented-control" role="radiogroup" aria-label={uiText("Глубина проверки")}>
                 {depthOptions.map((depth) => (
                   <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
@@ -1401,8 +1391,7 @@ function PositionRunParameters({
                   </label>
                 ))}
               </div>
-            </fieldset>
-          )}
+          </fieldset>
           <div className="semantic-position-compact-fields">
             <label className="semantic-workflow-field">
               <span><UiText text="Страна" /></span>
@@ -1473,7 +1462,7 @@ function PositionRunParameters({
               <span>
                 <strong><UiText text="Сохранять позицию сайта из этой выдачи" /></strong>
                 <small>
-                  <UiText text="Если сайт проекта найден в собранном Топ-10, его позиция попадёт в текущие позиции и историю без отдельного запроса к провайдеру. При выключенной галочке сохраняются только конкуренты." /></small>
+                  <UiText text="Если сайт проекта найден в собранной выдаче, его позиция попадёт в текущие позиции и историю без отдельного запроса к провайдеру. При выключенной галочке сохраняются только конкуренты." /></small>
               </span>
             </label>
           )}
@@ -1514,7 +1503,7 @@ function defaultContextDraft(
     countryCode: "RU",
     language: "ru",
     device: "DESKTOP",
-    depth: 50,
+    depth: competitorMode ? 10 : 50,
     includeUntracked: competitorMode
   }, region, competitorMode, locale);
 }

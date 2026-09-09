@@ -93,6 +93,7 @@ export class AiAnswerReadController {
   public async latest(
     @Param("projectId") projectId: string,
     @Param("keywordId") keywordId: string,
+    @Query("dimensionKey") dimensionKey: unknown,
     @Headers() headers: HeadersRecord,
     @Req() request: FastifyRequest
   ): Promise<ApiResponse<readonly SemanticAiAnswerDetail[]>> {
@@ -102,7 +103,8 @@ export class AiAnswerReadController {
       await this.answers.latest(
         context.workspaceId,
         context.projectId,
-        internalUuid(keywordId, "keywordId")
+        internalUuid(keywordId, "keywordId"),
+        typeof dimensionKey === "string" ? dimensionKey : undefined
       )
     );
   }

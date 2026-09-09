@@ -47,6 +47,47 @@ test("accepts a public 50,000-keyword frequency summary and rejects overflow", (
   );
 });
 
+test("accepts historical multi-type XMLStock seasonality without widening Arsenkin", () => {
+  const summary = {
+    id: jobId,
+    workspaceId,
+    projectId,
+    provider: "XMLSTOCK",
+    status: "FAILED_FINAL",
+    stage: "FINISHED",
+    selectedKeywords: 1,
+    completedKeywords: 0,
+    failedKeywords: 1,
+    mode: "SEASONALITY",
+    types: ["BASE", "EXACT", "FIXED"],
+    regionCode: "225",
+    device: "ALL",
+    seasonality: {
+      granularity: "MONTH",
+      observedFrom: "2024-09-01",
+      observedThrough: "2026-08-31"
+    },
+    version: 3,
+    createdAt: "2026-09-09T13:19:00.000Z",
+    updatedAt: "2026-09-09T20:00:00.000Z",
+    finishedAt: "2026-09-09T20:00:00.000Z"
+  };
+
+  assert.deepEqual(
+    scopedFrequencyCollection(summary, workspaceId, projectId, jobId).types,
+    ["BASE", "EXACT", "FIXED"]
+  );
+  assert.throws(
+    () => scopedFrequencyCollection(
+      { ...summary, provider: "ARSENKIN" },
+      workspaceId,
+      projectId,
+      jobId
+    ),
+    invalidDependencyResponse
+  );
+});
+
 test("accepts one ordered operation result page and rejects page overflow", () => {
   const items = Array.from({ length: 200 }, (_, sequence) => ({
     sequence,

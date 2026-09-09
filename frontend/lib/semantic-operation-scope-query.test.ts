@@ -11,6 +11,7 @@ test("builds one bounded union query for multiple operation folders", () => {
 
   assert.equal(query.get("limit"), String(semanticOperationScopeCountPageSize));
   assert.equal(query.get("sort"), "CREATED_ASC");
+  assert.equal(query.get("includeUntracked"), "true");
   assert.equal(query.get("groupId"), null);
   assert.equal(query.get("groupIds"), "folder-a,folder-b");
 });
@@ -22,6 +23,7 @@ test("uses the canonical single-folder filter and keeps pagination cursor", () =
   assert.equal(query.get("groupIds"), null);
   assert.equal(query.get("cursor"), "cursor-value");
   assert.equal(query.get("limit"), String(semanticOperationScopePageSize));
+  assert.equal(query.get("includeUntracked"), "true");
 });
 
 test("builds the project-wide query without a folder filter", () => {
@@ -29,4 +31,5 @@ test("builds the project-wide query without a folder filter", () => {
 
   assert.equal(query.get("groupId"), null);
   assert.equal(query.get("groupIds"), null);
+  assert.equal(query.get("includeUntracked"), "true");
 });

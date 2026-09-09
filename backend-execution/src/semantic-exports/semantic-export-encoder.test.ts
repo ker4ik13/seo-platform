@@ -269,7 +269,7 @@ test("builds a position-history workbook with formulas and comparison colors", a
       positionHistory: {
         observedFrom: "2026-08-01T00:00:00.000Z",
         observedBefore: "2026-08-20T00:00:00.000Z",
-        searchEngines: ["YANDEX"]
+        searchEngines: ["YANDEX", "GOOGLE"]
       }
     },
     {
@@ -288,26 +288,27 @@ test("builds a position-history workbook with formulas and comparison colors", a
   const yandex = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
   const workbook = new TextDecoder().decode(archive["xl/workbook.xml"]);
   assert.match(workbook, /<sheet name="Яндекс"/u);
-  assert.doesNotMatch(workbook, /<sheet name="Google"/u);
+  assert.match(workbook, /<sheet name="Google"/u);
+  assert.ok(archive["xl/worksheets/sheet2.xml"]);
   assert.match(yandex, /<pane xSplit="1" ySplit="4"/u);
   assert.match(
     yandex,
-    /<f>COUNTIFS\(J\$5:INDEX\(J:J,MAX\(5,COUNTA\(\$A:\$A\)\)\),&quot;&gt;=1&quot;,J\$5:INDEX\(J:J,MAX\(5,COUNTA\(\$A:\$A\)\)\),&quot;&lt;=5&quot;\)<\/f>/u
+    /<f>COUNTIFS\(E\$5:INDEX\(E:E,MAX\(5,COUNTA\(\$A:\$A\)\)\),&quot;&gt;=1&quot;,E\$5:INDEX\(E:E,MAX\(5,COUNTA\(\$A:\$A\)\)\),&quot;&lt;=5&quot;\)<\/f>/u
   );
-  assert.match(yandex, /<c r="J5" s="7"><v>5<\/v><\/c>/u);
-  assert.match(yandex, /<c r="K5" s="7"><v>7<\/v><\/c>/u);
-  assert.match(yandex, /<c r="J6" s="8"><v>9<\/v><\/c>/u);
+  assert.match(yandex, /<c r="E5" s="7"><v>5<\/v><\/c>/u);
+  assert.match(yandex, /<c r="F5" s="7"><v>7<\/v><\/c>/u);
+  assert.match(yandex, /<c r="E6" s="8"><v>9<\/v><\/c>/u);
   assert.match(
     yandex,
-    /<c r="J7" s="8" t="inlineStr"><is><t xml:space="preserve">—<\/t><\/is><\/c>/u
+    /<c r="E7" s="8" t="inlineStr"><is><t xml:space="preserve">—<\/t><\/is><\/c>/u
   );
-  assert.match(yandex, /<c r="J8" s="9"\/>/u);
-  assert.doesNotMatch(yandex, /<c r="J5"[^>]*t="inlineStr"/u);
+  assert.match(yandex, /<c r="E8" s="9"\/>/u);
+  assert.doesNotMatch(yandex, /<c r="E5"[^>]*t="inlineStr"/u);
+  assert.doesNotMatch(yandex, /Город|Код региона|Страна|Язык запроса|>ru</u);
 
   const parsed: (readonly string[])[] = [];
   for await (const row of parseXlsxRows(oneChunk(bytes), BigInt(bytes.byteLength))) parsed.push(row);
-  assert.equal(parsed[0]?.[8], "Язык запроса");
-  assert.equal(parsed[4]?.[8], "ru");
+  assert.deepEqual(parsed[0]?.slice(0, 4), ["Фраза", "Добавлен", "Поисковик", "Устройство"]);
   const defaults = {
     searchEngine: "YANDEX" as const,
     countryCode: "RU",

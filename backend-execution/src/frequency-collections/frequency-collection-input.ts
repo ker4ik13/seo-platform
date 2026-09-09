@@ -2,9 +2,12 @@ import { BadRequestException } from "@nestjs/common";
 import { paidOperationAdmissionInput } from "../paid-operations/paid-operation-admission.js";
 import {
   frequencyCollectionKeywordLimit,
+  frequencyCollectionModes,
+  parseFrequencySeasonalityRequest,
   operationResultDefaultPageSize,
   operationResultPageSizes,
   semanticFrequencyDevices,
+  semanticSeasonalityFrequencyTypes,
   semanticFrequencyTypes,
   type InternalCancelFrequencyCollectionInput,
   type InternalCreateFrequencyCollectionInput,
@@ -58,7 +61,9 @@ export function internalCreateFrequencyCollectionInput(
     "items",
     "types",
     "regionCode",
-    "device"
+    "device",
+    "mode",
+    "seasonality"
   ]);
   if (
     !Array.isArray(input.items) ||
@@ -80,6 +85,21 @@ export function internalCreateFrequencyCollectionInput(
   }
   const types = input.types.map(frequencyType);
   if (new Set(types).size !== types.length) invalid("types");
+  const mode = input.mode === undefined ? "FREQUENCY" : input.mode;
+  if (!frequencyCollectionModes.includes(mode as never)) invalid("mode");
+  let seasonality;
+  if (mode === "SEASONALITY") {
+    if (types.some((type) => !semanticSeasonalityFrequencyTypes.includes(type as "BASE"))) {
+      invalid("types");
+    }
+    try {
+      seasonality = parseFrequencySeasonalityRequest(input.seasonality);
+    } catch {
+      invalid("seasonality");
+    }
+  } else if (input.seasonality !== undefined) {
+    invalid("seasonality");
+  }
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
     ...paidOperationAdmissionInput(input.billing),
@@ -91,7 +111,9 @@ export function internalCreateFrequencyCollectionInput(
     items,
     types,
     regionCode: pattern(input.regionCode, "regionCode", REGION_PATTERN),
-    device: frequencyDevice(input.device)
+    device: frequencyDevice(input.device),
+    mode: mode as "FREQUENCY" | "SEASONALITY",
+    ...(seasonality ? { seasonality } : {})
   };
 }
 

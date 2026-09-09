@@ -377,6 +377,7 @@ h1, h2, p { margin: 0; }
 .admin-usage-form fieldset { border:1px solid var(--border,#e2e8f0); border-radius:10px; padding:12px; margin:0; display:grid; gap:12px; min-width:0; }
 .admin-usage-form fieldset label,.admin-usage-confirm { display:flex!important; align-items:flex-start; gap:10px; }
 .admin-usage-form input[type=radio],.admin-usage-form input[type=checkbox] { width:16px; min-width:16px; height:16px; margin:2px 0 0; }
+.admin-usage-form input[type=checkbox] { aspect-ratio:1/1; max-height:16px; max-width:16px; }
 .admin-usage-form label { display:grid; gap:7px; font-size:13px; line-height:1.5; }
 .admin-usage-form textarea,.admin-usage-form input:not([type=radio]):not([type=checkbox]) { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--border,#d9deea); border-radius:8px; background:var(--surface,#fff); color:inherit; }
 @media(max-width:760px) { .admin-usage-ticket { grid-template-columns:1fr; gap:16px; }.admin-usage-totals { width:100%; }.admin-usage-form .primary { width:100%; } }

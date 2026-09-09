@@ -146,7 +146,7 @@ export interface SemanticPositionHistoryExportOptions {
   readonly observedFrom: string;
   readonly observedBefore: string;
   readonly searchEngines: readonly SemanticPositionHistorySearchEngine[];
-  /** Internal read partition; the worker splits the geographic axes in batches. */
+  /** One explicit city/device slice per selected engine; worker reads it in bounded batches. */
   readonly dimensionKeys?: readonly string[];
   /** Internal stable read cutoff owned by the export job. */
   readonly storedBefore?: string;

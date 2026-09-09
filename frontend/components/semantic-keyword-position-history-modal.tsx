@@ -12,6 +12,7 @@ import {
 import {
   rankHistoryProviderLabel,
   semanticDisplayUrl,
+  semanticUrlBelongsToProject,
   type SemanticRankEngine
 } from "../lib/semantic-rank-presentation";
 import { Icon } from "./icon";
@@ -33,25 +34,36 @@ interface HistoryContextPresentation {
 export function SemanticKeywordPositionHistoryModal({
   contextPoints,
   createdAt,
+  initialObservedAt,
   keywordId,
   keywordText,
+  initialSiteResultsSnapshotId,
   onClose,
   projectId,
+  showUrlComparison = false,
   targetUrl,
   dimensionKey
 }: Readonly<{
   contextPoints: readonly SemanticKeywordPositionHistoryPoint[];
   createdAt: string;
+  initialObservedAt?: string;
   keywordId: string;
   keywordText: string;
+  initialSiteResultsSnapshotId?: string;
   onClose: () => void;
   projectId: string;
+  showUrlComparison?: boolean;
   targetUrl?: string;
   dimensionKey?: string | undefined;
 }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
-  const [range] = useState(() => historyRange(createdAt));
+  const range = useMemo(
+    () => showUrlComparison && initialObservedAt
+      ? snapshotHistoryRange(initialObservedAt)
+      : historyRange(createdAt),
+    [createdAt, initialObservedAt, showUrlComparison]
+  );
   const [items, setItems] = useState<readonly RankHistoryItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [hasNext, setHasNext] = useState(false);
@@ -72,6 +84,7 @@ export function SemanticKeywordPositionHistoryModal({
     setNextCursor(undefined);
     setHasNext(false);
     setError(undefined);
+    setSelectedSnapshot(undefined);
     setLoading(true);
     void requestHistoryPage(
       projectId,
@@ -79,11 +92,18 @@ export function SemanticKeywordPositionHistoryModal({
       range,
       undefined,
       controller.signal,
-      dimensionKey
+      dimensionKey,
+      showUrlComparison
     )
       .then((page) => {
         if (controller.signal.aborted) return;
         setItems(page.data);
+        if (initialSiteResultsSnapshotId) {
+          setSelectedSnapshot(
+            page.data.find(({ snapshotId }) => snapshotId === initialSiteResultsSnapshotId) ??
+            (showUrlComparison ? page.data[0] : undefined)
+          );
+        }
         setHasNext(page.page.hasNext);
         setNextCursor(page.page.nextCursor);
       })
@@ -96,7 +116,7 @@ export function SemanticKeywordPositionHistoryModal({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [keywordId, projectId, range, dimensionKey]);
+  }, [dimensionKey, initialSiteResultsSnapshotId, keywordId, projectId, range, showUrlComparison]);
 
   const loadMore = useCallback(async (): Promise<void> => {
     if (!hasNext || !nextCursor || loadingMoreRef.current) return;
@@ -110,7 +130,8 @@ export function SemanticKeywordPositionHistoryModal({
         range,
         nextCursor,
         undefined,
-        dimensionKey
+        dimensionKey,
+        showUrlComparison
       );
       setItems((current) => mergeHistoryItems(current, page.data));
       setHasNext(page.page.hasNext);
@@ -121,7 +142,7 @@ export function SemanticKeywordPositionHistoryModal({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasNext, keywordId, nextCursor, projectId, range, dimensionKey]);
+  }, [hasNext, keywordId, nextCursor, projectId, range, dimensionKey, showUrlComparison]);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -138,9 +159,37 @@ export function SemanticKeywordPositionHistoryModal({
     return () => observer.disconnect();
   }, [hasNext, loadMore]);
 
+  if (initialSiteResultsSnapshotId) {
+    return (
+      <HistorySiteResultsModal
+        {...(selectedSnapshot ? historyContextProps(selectedSnapshot, contextById) : {})}
+        {...(error ? { error } : {})}
+        {...(selectedSnapshot ? { item: selectedSnapshot } : {})}
+        keywordText={keywordText}
+        loading={loading}
+        onClose={onClose}
+        showUrlComparison={showUrlComparison}
+        {...(targetUrl ? { targetUrl } : {})}
+      />
+    );
+  }
+
+  if (selectedSnapshot) {
+    return (
+      <HistorySiteResultsModal
+        {...historyContextProps(selectedSnapshot, contextById)}
+        item={selectedSnapshot}
+        keywordText={keywordText}
+        onClose={() => setSelectedSnapshot(undefined)}
+        showUrlComparison={showUrlComparison}
+        {...(targetUrl ? { targetUrl } : {})}
+      />
+    );
+  }
+
   return (
-    <>
-      <SemanticModal
+    <SemanticModal
+      bodyLayout="edge"
       description={uiText(dimensionKey ? "Сохранённые позиции выбранного города и устройства. История загружается блоками по 200 записей." : "Все сохранённые съёмы этого запроса во всех контекстах. История загружается блоками по 200 записей и не обрезается последними датами.")}
       onClose={onClose}
       size="large"
@@ -184,17 +233,7 @@ export function SemanticKeywordPositionHistoryModal({
           </button>
         )}
       </div>
-      </SemanticModal>
-      {selectedSnapshot && (
-        <HistorySiteResultsModal
-          {...historyContextProps(selectedSnapshot, contextById)}
-          item={selectedSnapshot}
-          keywordText={keywordText}
-          onClose={() => setSelectedSnapshot(undefined)}
-          {...(targetUrl ? { targetUrl } : {})}
-        />
-      )}
-    </>
+    </SemanticModal>
   );
 }
 
@@ -267,28 +306,53 @@ function HistoryRow({
 
 function HistorySiteResultsModal({
   context,
+  error,
   item,
   keywordText,
+  loading = false,
   onClose,
+  showUrlComparison,
   targetUrl
 }: Readonly<{
   context?: HistoryContextPresentation;
-  item: RankHistoryItem;
+  error?: string;
+  item?: RankHistoryItem;
   keywordText: string;
+  loading?: boolean;
   onClose: () => void;
+  showUrlComparison: boolean;
   targetUrl?: string;
 }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
+  const [showDifferences, setShowDifferences] = useState(false);
+  const results = item
+    ? showUrlComparison
+      ? targetUrl
+        ? (item.serpResults ?? item.siteResults ?? []).filter(({ rankingUrl }) =>
+            semanticUrlBelongsToProject(rankingUrl, targetUrl)
+          )
+        : item.siteResults ?? []
+      : item.siteResults ?? []
+    : [];
   return (
     <SemanticModal
-      description={uiText("Страницы проекта и их сохранённые SERP-данные относятся именно к выбранному историческому съёму.")}
+      bodyLayout="edge"
+      description={uiText(showUrlComparison
+        ? "Страницы домена из сохранённой выдачи относятся именно к выбранному историческому съёму."
+        : "Страницы проекта и их сохранённые SERP-данные относятся именно к выбранному историческому съёму.")}
       onClose={onClose}
       size="large"
-      title={uiText("Страницы сайта в выдаче · {0}", [String(keywordText)])}
+      title={uiText(showUrlComparison ? "Нерелевантный URL · {0}" : "Страницы сайта в выдаче · {0}", [String(keywordText)])}
     >
       <div className="semantic-site-results-modal">
-        <section>
+        {showUrlComparison && (
+          <div className="semantic-url-comparison-toolbar">
+            <div><span><UiText text="Целевой URL" /></span><strong>{targetUrl ?? <UiText text="Не задан" />}</strong></div>
+            <label><input checked={showDifferences} disabled={!targetUrl} onChange={(event) => setShowDifferences(event.target.checked)} type="checkbox" /><UiText text="Показать различия" /></label>
+          </div>
+        )}
+        {item ? <section>
           <header>
             <span>
               {context && (
@@ -301,10 +365,19 @@ function HistorySiteResultsModal({
             </time>
           </header>
           <SemanticProjectSerpResults
-            results={item.siteResults ?? []}
+            results={results}
+            showUrlDifferences={showDifferences}
             {...(targetUrl ? { targetUrl } : {})}
           />
-        </section>
+        </section> : (
+          <div className="semantic-site-results-empty" role={error ? "alert" : loading ? "status" : undefined}>
+            {loading
+              ? <><i className="spinner compact" /><UiText text="Загружаем сохранённую выдачу…" /></>
+              : error
+                ? <UiText text={error} />
+                : <UiText text="Сохранённая выдача для этой позиции недоступна." />}
+          </div>
+        )}
       </div>
     </SemanticModal>
   );
@@ -361,22 +434,37 @@ function historyRange(createdAt: string): Readonly<{
   };
 }
 
+function snapshotHistoryRange(observedAt: string): Readonly<{
+  observedFrom: string;
+  observedBefore: string;
+}> {
+  const timestamp = Date.parse(observedAt);
+  return Number.isNaN(timestamp)
+    ? historyRange(observedAt)
+    : {
+        observedFrom: new Date(timestamp - 1_000).toISOString(),
+        observedBefore: new Date(timestamp + 1_000).toISOString()
+      };
+}
+
 function requestHistoryPage(
   projectId: string,
   keywordId: string,
   range: Readonly<{ observedFrom: string; observedBefore: string }>,
   cursor?: string,
   signal?: AbortSignal,
-  dimensionKey?: string
+  dimensionKey?: string,
+  fullSerp = false
 ) {
   const query = new URLSearchParams({
     observedFrom: range.observedFrom,
     observedBefore: range.observedBefore,
     keywordId,
-    limit: "200"
+    limit: fullSerp ? "10" : "200"
   });
   if (cursor) query.set("cursor", cursor);
   if (dimensionKey) query.set("dimensionKey", dimensionKey);
+  if (fullSerp) query.set("mode", "SERP");
   return browserApiCollectionRequest<RankHistoryItem>(
     `/app/api/projects/${encodeURIComponent(projectId)}/rank-history?${query.toString()}`,
     signal ? { signal } : undefined

@@ -67,6 +67,14 @@ export class FrequencyCollectionService {
     if (route.provider !== "XMLSTOCK" && route.provider !== "ARSENKIN") {
       throw new Error("Resolved Wordstat provider is unsupported");
     }
+    if (
+      (input.mode ?? "FREQUENCY") === "SEASONALITY" &&
+      (input.types.length !== 1 || input.types[0] !== "BASE")
+    ) {
+      throw new BadRequestException(
+        "Seasonality currently supports only base frequency"
+      );
+    }
     const providerKeywordLimit = frequencyCollectionKeywordLimit;
     if (input.items.length > providerKeywordLimit) {
       throw new BadRequestException(
@@ -97,7 +105,11 @@ export class FrequencyCollectionService {
               inputSnapshot: {
                 types: [...input.types],
                 regionCode: input.regionCode,
-                device: input.device
+                device: input.device,
+                mode: input.mode ?? "FREQUENCY",
+                ...(input.seasonality
+                  ? { seasonality: { ...input.seasonality } }
+                  : {})
               },
               scopeSnapshot: {
                 workspaceId: input.workspaceId,
@@ -428,7 +440,9 @@ function requestHash(input: InternalCreateFrequencyCollectionInput): string {
         items: input.items,
         types: input.types,
         regionCode: input.regionCode,
-        device: input.device
+        device: input.device,
+        mode: input.mode ?? "FREQUENCY",
+        seasonality: input.seasonality ?? null
       }),
       "utf8"
     )

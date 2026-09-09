@@ -923,7 +923,7 @@ function ScopeCard({
   );
 }
 
-function DuplicateFrequency({
+export function DuplicateFrequency({
   label,
   title,
   value

@@ -161,7 +161,7 @@ test("persists 15k rank snapshots in bounded createMany batches", async () => {
   assert.equal(harness.receiptWrites, 1);
 });
 
-test("persists normalized SERP evidence with its immutable snapshot", async () => {
+test("persists normalized XMLStock SERP evidence with its immutable snapshot", async () => {
   const base = command();
   const found = base.results[0]!;
   const value = command({
@@ -195,6 +195,63 @@ test("persists normalized SERP evidence with its immutable snapshot", async () =
     normalizedRankingUrl: "https://competitor.example/",
     faviconUrl: "https://search-assets.example/competitor.png",
     title: "Competitor",
+    createdAt: appliedAt
+  });
+});
+
+test("persists Arsenkin Check Top competitors when position projection is disabled", async () => {
+  const base = command();
+  const item = base.results[0]!;
+  const value = command({
+    provider: "ARSENKIN",
+    connectorVersion: "arsenkin-positions@2.0.0",
+    results: [{
+      manifestEntryId: item.manifestEntryId,
+      keywordId: item.keywordId,
+      found: false,
+      position: null,
+      serpResults: [
+        {
+          position: 1,
+          rankingUrl: "https://first-competitor.example/",
+          normalizedRankingUrl: "https://first-competitor.example/",
+          title: "First competitor",
+          snippet: "First description"
+        },
+        {
+          position: 10,
+          rankingUrl: "https://tenth-competitor.example/",
+          normalizedRankingUrl: "https://tenth-competitor.example/",
+          title: "Tenth competitor",
+          snippet: "Tenth description"
+        }
+      ],
+      dataQualityFlags: []
+    }]
+  });
+  const input: InternalIngestRankChunkInput = {
+    ...value,
+    ingestEnvelopeHash: rankChunkIngestHash(value, sealedChunk())
+  };
+  const harness = resultHarness(
+    1,
+    "ARSENKIN",
+    competitorExecution(false)
+  );
+
+  const result = await new RankResultService(harness.prisma).ingest(input);
+
+  assert.equal(result.persistedCount, "1");
+  assert.equal(result.currentUpdatedCount, "0");
+  assert.equal(harness.serpWrites, 1);
+  assert.deepEqual(harness.persistedSerpResult, {
+    snapshotObservedAt: new Date(observedAt),
+    snapshotId,
+    position: 1,
+    rankingUrl: "https://first-competitor.example/",
+    normalizedRankingUrl: "https://first-competitor.example/",
+    title: "First competitor",
+    snippet: "First description",
     createdAt: appliedAt
   });
 });

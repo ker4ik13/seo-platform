@@ -13,7 +13,7 @@ const keywordId = "01900000-0000-7000-8000-000000000004";
 const firstSnapshotId = "01900000-0000-7000-8000-000000000006";
 const secondSnapshotId = "01900000-0000-7000-8000-000000000005";
 
-test("returns context-independent AI position history with an authenticated cursor", async () => {
+test("returns dimension-specific AI position history with an authenticated cursor", async () => {
   const harness = historyHarness();
   const service = new AiAnswerService(harness.prisma, config());
   const first = await service.history(query());
@@ -32,6 +32,7 @@ test("returns context-independent AI position history with an authenticated curs
     rankingUrl: "https://example.com/current",
     brandFound: true,
     provider: "ARSENKIN",
+    results: [],
     observedAt: "2026-08-19T12:00:00.000Z"
   });
   assert.equal(first.page.hasNext, true);
@@ -114,6 +115,8 @@ function historyHarness() {
       return [{
         keywordId,
         searchEngine: "YANDEX",
+        regionCode: row.regionCode,
+        device: row.device,
         observedAt: row.observedAt,
         snapshotId: row.id,
         previousPosition: previousCalls === 1 ? 7 : 11
@@ -142,6 +145,7 @@ function foundRow() {
     brandFound: true,
     provider: "ARSENKIN",
     sourceMode: "BYOK",
+    sources: [],
     observedAt: new Date("2026-08-19T12:00:00.000Z")
   };
 }
@@ -160,6 +164,7 @@ function missingRow() {
     brandFound: false,
     provider: "ARSENKIN",
     sourceMode: "BYOK",
+    sources: [],
     observedAt: new Date("2026-08-18T12:00:00.000Z")
   };
 }

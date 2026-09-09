@@ -29,9 +29,96 @@ export const xmlStockWordstatKeywordLimit = 10_000 as const;
 /** Bounded internal transport chunks; these are not provider task limits. */
 export const internalFrequencyResolveBatchLimit = 1_000 as const;
 export const internalFrequencyPersistBatchLimit = 500 as const;
+export const internalFrequencySeasonalityPersistBatchLimit = 100 as const;
 
 export const semanticFrequencyTypes = ["BASE", "EXACT", "FIXED"] as const;
 export type SemanticFrequencyType = (typeof semanticFrequencyTypes)[number];
+/** Live XMLStock history returns one base series; quoted phrases are ignored and `!` is rejected. */
+export const semanticSeasonalityFrequencyTypes = ["BASE"] as const;
+
+export const frequencyCollectionModes = ["FREQUENCY", "SEASONALITY"] as const;
+export type FrequencyCollectionMode = (typeof frequencyCollectionModes)[number];
+
+export const frequencySeasonalityGranularities = ["MONTH", "WEEK", "DAY"] as const;
+export type FrequencySeasonalityGranularity =
+  (typeof frequencySeasonalityGranularities)[number];
+export const frequencySeasonalitySeriesPointLimit = 240 as const;
+export const frequencySeasonalityPointLimit = 720 as const;
+
+export interface FrequencySeasonalityRequest {
+  readonly granularity: FrequencySeasonalityGranularity;
+  /** Inclusive canonical UTC calendar date. */
+  readonly observedFrom: string;
+  /** Inclusive canonical UTC calendar date. */
+  readonly observedThrough: string;
+}
+
+export function parseFrequencySeasonalityRequest(
+  value: unknown
+): FrequencySeasonalityRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Invalid frequency seasonality request");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (
+    Object.keys(input).some((key) =>
+      key !== "granularity" &&
+      key !== "observedFrom" &&
+      key !== "observedThrough"
+    ) ||
+    !frequencySeasonalityGranularities.includes(
+      input.granularity as FrequencySeasonalityGranularity
+    ) ||
+    typeof input.observedFrom !== "string" ||
+    typeof input.observedThrough !== "string" ||
+    !canonicalCalendarDate(input.observedFrom) ||
+    !canonicalCalendarDate(input.observedThrough)
+  ) {
+    throw new TypeError("Invalid frequency seasonality request");
+  }
+  const from = new Date(`${input.observedFrom}T00:00:00.000Z`);
+  const through = new Date(`${input.observedThrough}T00:00:00.000Z`);
+  const days = Math.round((through.getTime() - from.getTime()) / 86_400_000) + 1;
+  const granularity = input.granularity as FrequencySeasonalityGranularity;
+  if (
+    !Number.isSafeInteger(days) ||
+    days < 3 ||
+    (granularity === "DAY" && days > 60) ||
+    (granularity === "WEEK" &&
+      (days < 21 || days > 2 * 366 || from.getUTCDay() !== 1 || through.getUTCDay() !== 0)) ||
+    (granularity === "MONTH" &&
+      (days > 12 * 366 ||
+        from.getUTCDate() !== 1 ||
+        new Date(Date.UTC(
+          through.getUTCFullYear(),
+          through.getUTCMonth() + 1,
+          0
+        )).getUTCDate() !== through.getUTCDate() ||
+        monthSpan(from, through) < 3))
+  ) {
+    throw new TypeError("Invalid frequency seasonality request");
+  }
+  return {
+    granularity,
+    observedFrom: input.observedFrom,
+    observedThrough: input.observedThrough
+  };
+}
+
+function canonicalCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function monthSpan(from: Date, through: Date): number {
+  return (
+    (through.getUTCFullYear() - from.getUTCFullYear()) * 12 +
+    through.getUTCMonth() -
+    from.getUTCMonth() +
+    1
+  );
+}
 
 export const semanticFrequencyDevices = [
   "ALL",
@@ -73,6 +160,9 @@ export interface CreateFrequencyCollectionInput {
   readonly types: readonly SemanticFrequencyType[];
   readonly regionCode: string;
   readonly device: SemanticFrequencyDevice;
+  /** Missing legacy values mean an ordinary frequency collection. */
+  readonly mode?: FrequencyCollectionMode;
+  readonly seasonality?: FrequencySeasonalityRequest;
 }
 
 export interface InternalCreateFrequencyCollectionInput
@@ -112,9 +202,11 @@ export interface FrequencyCollectionSummary {
   readonly selectedKeywords: number;
   readonly completedKeywords: number;
   readonly failedKeywords: number;
+  readonly mode: FrequencyCollectionMode;
   readonly types: readonly SemanticFrequencyType[];
   readonly regionCode: string;
   readonly device: SemanticFrequencyDevice;
+  readonly seasonality?: FrequencySeasonalityRequest;
   readonly retryAt?: string;
   readonly failureCode?: string;
   readonly version: number;
@@ -134,6 +226,20 @@ export interface FrequencySnapshotSummary {
   readonly sourceMode: "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL";
   readonly jobId: string;
   readonly qualityFlags: readonly SemanticFrequencyQualityFlag[];
+  readonly observedAt: string;
+}
+
+export interface FrequencySeasonalityPointSummary {
+  readonly type: SemanticFrequencyType;
+  readonly granularity: FrequencySeasonalityGranularity;
+  readonly periodStart: string;
+  readonly value: string;
+  readonly share?: string;
+  readonly regionCode: string;
+  readonly device: SemanticFrequencyDevice;
+  readonly provider: FrequencyCollectionProvider;
+  readonly sourceMode: "BYOK" | "PLATFORM";
+  readonly jobId: string;
   readonly observedAt: string;
 }
 
@@ -199,10 +305,38 @@ export interface InternalPersistFrequencySnapshotBatchInput {
   readonly items: readonly InternalPersistFrequencySnapshotBatchItem[];
 }
 
+export interface InternalFrequencySeasonalityPoint {
+  readonly type: SemanticFrequencyType;
+  readonly granularity: FrequencySeasonalityGranularity;
+  readonly periodStart: string;
+  readonly value: string;
+  readonly share?: string;
+  readonly regionCode: string;
+  readonly device: SemanticFrequencyDevice;
+  readonly provider: FrequencyCollectionProvider;
+  readonly sourceMode: "BYOK" | "PLATFORM";
+}
+
+export interface InternalPersistFrequencySeasonalityBatchItem {
+  readonly keywordId: string;
+  readonly keywordVersion: number;
+  readonly points: readonly InternalFrequencySeasonalityPoint[];
+}
+
+export interface InternalPersistFrequencySeasonalityBatchInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly jobId: string;
+  readonly observedAt: string;
+  readonly items: readonly InternalPersistFrequencySeasonalityBatchItem[];
+}
+
 export interface SemanticKeywordInsights {
   readonly keywordId: string;
   readonly note?: string;
   readonly frequencies: readonly FrequencySnapshotSummary[];
+  readonly seasonality?: readonly FrequencySeasonalityPointSummary[];
   readonly positions: readonly SemanticKeywordPositionSummary[];
   readonly positionHistory: readonly SemanticKeywordPositionHistoryPoint[];
   readonly competitorSnapshots?: readonly SemanticKeywordCompetitorSnapshot[];

@@ -187,7 +187,8 @@ test("reads the rank-dimension envelope and validates comparison rows", async ()
             configurationVersion: 1,
             jobId,
             provider: "MANUAL_IMPORT",
-            depth: 100
+            depth: 100,
+            siteResultCount: 0
           }],
           meta: { requestId: "comparison" }
         });

@@ -1,5 +1,5 @@
 export type ToolAccess = "project";
-export type ProjectToolWorkflow = "HTTP_STATUS_CHECK";
+export type ProjectToolWorkflow = "HTTP_STATUS_CHECK" | "SERP_WORKBENCH";
 
 export interface ToolRuntime {
   readonly kind: "PROJECT_WORKFLOW";
@@ -11,7 +11,7 @@ export interface ToolCapability {
   readonly slug: string;
   readonly title: string;
   readonly description: string;
-  readonly category: "technical";
+  readonly category: "technical" | "research";
   readonly access: ToolAccess;
   readonly asynchronous: boolean;
   readonly projectHistory: boolean;
@@ -30,6 +30,18 @@ export const toolCapabilities: readonly ToolCapability[] = [
     asynchronous: true,
     projectHistory: true,
     runtime: { kind: "PROJECT_WORKFLOW", workflow: "HTTP_STATUS_CHECK" }
+  },
+  {
+    code: "serp.comparison.v1",
+    slug: "serp",
+    title: "Выдача из поиска",
+    description:
+      "Сравнение сохранённой выдачи по городам, поисковикам и устройствам с подсветкой доменов.",
+    category: "research",
+    access: "project",
+    asynchronous: false,
+    projectHistory: false,
+    runtime: { kind: "PROJECT_WORKFLOW", workflow: "SERP_WORKBENCH" }
   }
 ] as const;
 

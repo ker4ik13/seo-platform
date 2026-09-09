@@ -7,6 +7,7 @@ import type {
   InternalFrequencyKeyword,
   InternalFrequencyKeywords,
   InternalPersistFrequencySnapshotBatchInput,
+  InternalPersistFrequencySeasonalityBatchInput,
   InternalPersistFrequencySnapshotsInput,
   InternalResolveFrequencyKeywordsInput,
   InternalResolveFrequencyKeywordInput
@@ -156,6 +157,61 @@ export class FrequencyService {
             sourceMode: snapshot.sourceMode,
             jobId: input.jobId,
             qualityFlags: [...snapshot.qualityFlags]
+          }))
+        ),
+        skipDuplicates: true
+      });
+      return { created: result.count };
+    });
+  }
+
+  public async persistSeasonalityBatch(
+    input: InternalPersistFrequencySeasonalityBatchInput
+  ): Promise<{ readonly created: number }> {
+    return this.prisma.$transaction(async (transaction) => {
+      const keywords = await transaction.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          id: { in: input.items.map((item) => item.keywordId) }
+        },
+        select: { id: true, version: true }
+      });
+      if (keywords.length !== input.items.length) {
+        throw new NotFoundException(
+          "One or more seasonality keywords were not found"
+        );
+      }
+      const versions = new Map(
+        keywords.map((keyword) => [keyword.id, keyword.version])
+      );
+      if (
+        input.items.some(
+          (item) => versions.get(item.keywordId) !== item.keywordVersion
+        )
+      ) {
+        throw new ConflictException(
+          "One or more keywords changed before seasonality persistence"
+        );
+      }
+      const result = await transaction.frequencySeasonalityPoint.createMany({
+        data: input.items.flatMap((item) =>
+          item.points.map((point) => ({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            keywordId: item.keywordId,
+            type: point.type,
+            granularity: point.granularity,
+            periodStart: new Date(`${point.periodStart}T00:00:00.000Z`),
+            value: BigInt(point.value),
+            ...(point.share ? { share: point.share } : {}),
+            regionCode: point.regionCode,
+            device: point.device,
+            provider: point.provider,
+            sourceMode: point.sourceMode,
+            jobId: input.jobId,
+            observedAt: new Date(input.observedAt)
           }))
         ),
         skipDuplicates: true

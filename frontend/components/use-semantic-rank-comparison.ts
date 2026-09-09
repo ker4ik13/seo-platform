@@ -14,11 +14,13 @@ const emptyComparisonItems: ReadonlyMap<string, SemanticRankComparisonItem> = ne
 type CatalogState = Readonly<{
   projectId: string;
   dimensions: readonly SemanticRankDimension[];
+  loading: boolean;
   error?: string;
 }>;
 
 type ComparisonState = Readonly<{
   projectId: string;
+  requestKey: string;
   items: ReadonlyMap<string, SemanticRankComparisonItem>;
   loading: boolean;
   error?: string;
@@ -33,10 +35,12 @@ export function useSemanticRankComparison(
 ) {
   const [catalog, setCatalog] = useState<CatalogState>({
     projectId,
-    dimensions: []
+    dimensions: [],
+    loading: true
   });
   const [comparison, setComparison] = useState<ComparisonState>({
     projectId,
+    requestKey: "",
     items: emptyComparisonItems,
     loading: false
   });
@@ -45,12 +49,20 @@ export function useSemanticRankComparison(
   const effectiveDimensionSignature = dimensionSignature === "ALL"
     ? JSON.stringify(dimensions.map(dimension => dimension.key))
     : dimensionSignature;
+  const comparisonRequestKey = JSON.stringify([
+    projectId,
+    keywordSignature,
+    effectiveDimensionSignature,
+    refreshKey,
+    revision
+  ]);
 
   useEffect(() => {
     const controller = new AbortController();
     setCatalog(current => ({
       projectId,
-      dimensions: current.projectId === projectId ? current.dimensions : []
+      dimensions: current.projectId === projectId ? current.dimensions : [],
+      loading: true
     }));
     void browserApiRequest<unknown>(
       `/app/api/projects/${encodeURIComponent(projectId)}/keyword-ranks/dimensions`,
@@ -62,6 +74,7 @@ export function useSemanticRankComparison(
           setCatalog({
             projectId,
             dimensions: result.dimensions,
+            loading: false,
             ...(result.truncated
               ? { error: "Список срезов очень большой. Часть параметров доступна в истории профилей." }
               : {})
@@ -73,6 +86,7 @@ export function useSemanticRankComparison(
           setCatalog(current => ({
             projectId,
             dimensions: current.projectId === projectId ? current.dimensions : [],
+            loading: false,
             error: "Не удалось загрузить города и устройства. Повторите загрузку."
           }));
         }
@@ -87,6 +101,7 @@ export function useSemanticRankComparison(
     if (!keywordIds.length || !dimensionKeys.length) {
       setComparison({
         projectId,
+        requestKey: comparisonRequestKey,
         items: emptyComparisonItems,
         loading: false
       });
@@ -94,7 +109,10 @@ export function useSemanticRankComparison(
     }
     setComparison(current => ({
       projectId,
-      items: current.projectId === projectId ? current.items : emptyComparisonItems,
+      requestKey: comparisonRequestKey,
+      items: current.projectId === projectId && current.requestKey === comparisonRequestKey
+        ? current.items
+        : emptyComparisonItems,
       loading: true
     }));
     const timer = setTimeout(() => {
@@ -126,14 +144,15 @@ export function useSemanticRankComparison(
           }
         }
         if (!controller.signal.aborted) {
-          setComparison({ projectId, items: next, loading: false });
+          setComparison({ projectId, requestKey: comparisonRequestKey, items: next, loading: false });
         }
       })()
         .catch(() => {
           if (!controller.signal.aborted) {
             setComparison(current => ({
               projectId,
-              items: current.projectId === projectId
+              requestKey: comparisonRequestKey,
+              items: current.projectId === projectId && current.requestKey === comparisonRequestKey
                 ? current.items
                 : emptyComparisonItems,
               loading: false,
@@ -146,15 +165,16 @@ export function useSemanticRankComparison(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [projectId, keywordSignature, effectiveDimensionSignature, refreshKey, revision]);
+  }, [comparisonRequestKey, effectiveDimensionSignature, keywordSignature, projectId, refreshKey, revision]);
 
-  const currentComparison = comparison.projectId === projectId
+  const currentComparison = comparison.projectId === projectId &&
+    comparison.requestKey === comparisonRequestKey
     ? comparison
-    : { projectId, items: emptyComparisonItems, loading: false };
+    : { projectId, requestKey: comparisonRequestKey, items: emptyComparisonItems, loading: true };
   return {
     dimensions,
     items: currentComparison.items,
-    loading: currentComparison.loading,
+    loading: catalog.loading || currentComparison.loading,
     error: currentComparison.error,
     catalogError: catalog.projectId === projectId ? catalog.error : undefined,
     refresh: () => setRevision(value => value + 1)

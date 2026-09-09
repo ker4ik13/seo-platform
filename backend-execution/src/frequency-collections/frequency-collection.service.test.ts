@@ -193,6 +193,71 @@ test("accepts 10,000 XMLStock keywords at the collection boundary", async () => 
   );
 });
 
+test("seasonality accepts both providers only with the reliable base series", async () => {
+  const reachedTransaction = new Error("seasonality transaction reached");
+  const input = {
+    workspaceId,
+    projectId,
+    actorId,
+    idempotencyKey: "arsenkin-seasonality-create",
+    correlationId: "arsenkin-seasonality-correlation",
+    jobCapacity: {
+      planCode: "TEAM",
+      planVersion: 3,
+      concurrentJobs: 10
+    },
+    items: [{ id: jobId, version: 1 }],
+    mode: "SEASONALITY" as const,
+    types: ["BASE" as const],
+    regionCode: "213",
+    device: "ALL" as const,
+    seasonality: {
+      granularity: "MONTH" as const,
+      observedFrom: "2026-01-01",
+      observedThrough: "2026-03-31"
+    }
+  };
+  const prisma = {
+    job: { findUnique: async () => null },
+    $transaction: async () => {
+      throw reachedTransaction;
+    }
+  };
+  await assert.rejects(
+    new FrequencyCollectionService(prisma as never, route as never).create(input),
+    (error) => error === reachedTransaction
+  );
+  const xmlStockRoute = {
+    resolve: async () => ({
+      ...(await route.resolve()),
+      provider: "XMLSTOCK" as const
+    })
+  };
+  await assert.rejects(
+    new FrequencyCollectionService(prisma as never, xmlStockRoute as never).create({
+      ...input,
+      idempotencyKey: "xmlstock-seasonality-create"
+    }),
+    (error) => error === reachedTransaction
+  );
+  await assert.rejects(
+    new FrequencyCollectionService(prisma as never, route as never).create({
+      ...input,
+      idempotencyKey: "arsenkin-seasonality-types",
+      types: ["BASE", "EXACT"]
+    }),
+    /supports only base frequency/u
+  );
+  await assert.rejects(
+    new FrequencyCollectionService(prisma as never, xmlStockRoute as never).create({
+      ...input,
+      idempotencyKey: "xmlstock-seasonality-types",
+      types: ["BASE", "EXACT"]
+    }),
+    /supports only base frequency/u
+  );
+});
+
 test("returns an exact tenant-scoped result scope without provider payloads", async () => {
   let observedWhere: unknown;
   const prisma = {
@@ -412,6 +477,7 @@ class RetryHarness extends FrequencyCollectionService {
       selectedKeywords: 5,
       completedKeywords: 3,
       failedKeywords: 0,
+      mode: "FREQUENCY",
       types: ["BASE"],
       regionCode: "213",
       device: "ALL",
@@ -433,6 +499,7 @@ class CancelHarness extends FrequencyCollectionService {
       selectedKeywords: 5,
       completedKeywords: 1,
       failedKeywords: 0,
+      mode: "FREQUENCY",
       types: ["BASE"],
       regionCode: "213",
       device: "ALL",

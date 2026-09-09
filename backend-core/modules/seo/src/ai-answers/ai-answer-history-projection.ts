@@ -5,6 +5,8 @@ import type { PrismaService } from "../database/prisma.service.js";
 export interface PreviousAiAnswerPositionAnchor {
   readonly keywordId: string;
   readonly searchEngine: AiAnswerSearchEngine;
+  readonly regionCode: string;
+  readonly device: "DESKTOP" | "MOBILE";
   readonly observedAt: Date;
   readonly snapshotId: string;
 }
@@ -16,10 +18,12 @@ interface PreviousAiAnswerPositionRow extends PreviousAiAnswerPositionAnchor {
 export function previousAiAnswerPositionKey(
   keywordId: string,
   searchEngine: AiAnswerSearchEngine,
+  regionCode: string,
+  device: "DESKTOP" | "MOBILE",
   observedAt: Date,
   snapshotId: string
 ): string {
-  return `${keywordId}:${searchEngine}:${observedAt.toISOString()}:${snapshotId}`;
+  return `${keywordId}:${searchEngine}:${regionCode}:${device}:${observedAt.toISOString()}:${snapshotId}`;
 }
 
 /**
@@ -36,6 +40,8 @@ export async function previousAiAnswerPositions(
   const serializedAnchors = anchors.map((anchor) => ({
     keyword_id: anchor.keywordId,
     search_engine: anchor.searchEngine,
+    region_code: anchor.regionCode,
+    device: anchor.device,
     observed_at: anchor.observedAt.toISOString(),
     snapshot_id: anchor.snapshotId
   }));
@@ -44,11 +50,15 @@ export async function previousAiAnswerPositions(
       SELECT
         anchor.keyword_id,
         anchor.search_engine,
+        anchor.region_code,
+        anchor.device,
         anchor.observed_at,
         anchor.snapshot_id
       FROM jsonb_to_recordset(${JSON.stringify(serializedAnchors)}::jsonb) AS anchor(
         keyword_id uuid,
         search_engine text,
+        region_code text,
+        device text,
         observed_at timestamptz,
         snapshot_id uuid
       )
@@ -56,6 +66,8 @@ export async function previousAiAnswerPositions(
     SELECT
       anchors.keyword_id::text AS "keywordId",
       anchors.search_engine AS "searchEngine",
+      anchors.region_code AS "regionCode",
+      anchors.device AS device,
       anchors.observed_at AS "observedAt",
       anchors.snapshot_id::text AS "snapshotId",
       previous.position AS "previousPosition"
@@ -67,6 +79,8 @@ export async function previousAiAnswerPositions(
         AND snapshot.project_id = ${projectId}::uuid
         AND snapshot.keyword_id = anchors.keyword_id
         AND snapshot.search_engine = anchors.search_engine
+        AND snapshot.region_code = anchors.region_code
+        AND snapshot.device::text = anchors.device
         AND snapshot.site_found = TRUE
         AND snapshot.position_tracking_enabled = TRUE
         AND snapshot.position IS NOT NULL
@@ -81,6 +95,8 @@ export async function previousAiAnswerPositions(
       previousAiAnswerPositionKey(
         anchor.keywordId,
         anchor.searchEngine,
+        anchor.regionCode,
+        anchor.device,
         anchor.observedAt,
         anchor.snapshotId
       )
@@ -91,6 +107,8 @@ export async function previousAiAnswerPositions(
     const key = previousAiAnswerPositionKey(
       row.keywordId,
       row.searchEngine,
+      row.regionCode,
+      row.device,
       row.observedAt,
       row.snapshotId
     );

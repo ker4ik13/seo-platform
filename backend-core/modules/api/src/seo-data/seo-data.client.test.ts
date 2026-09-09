@@ -43,6 +43,7 @@ test("validates ordered bounded project TOP history", () => {
     observedAt: "2026-09-01T10:00:00.000Z",
     measuredKeywordCount: 20,
     positionedKeywordCount: 16,
+    top1KeywordCount: 1,
     top3KeywordCount: 2,
     top5KeywordCount: 4,
     top10KeywordCount: 8,
@@ -374,6 +375,7 @@ test("validates safe interactive rank history metadata", () => {
       rankingUrl: "https://example.com/ai-source",
       brandFound: true,
       provider: "ARSENKIN",
+      results: [],
       observedAt: "2026-08-19T11:45:00.000Z"
     }],
     aiCompetitorSnapshots: [{
@@ -432,6 +434,7 @@ test("validates a tenant-bound, ordered AI position history page", () => {
       previousPosition: 3,
       brandFound: false,
       provider: "ARSENKIN",
+      results: [],
       observedAt: "2026-08-19T11:45:00.000Z"
     }],
     page: { hasNext: true, nextCursor: "opaque_cursor-1" }

@@ -4,6 +4,7 @@ import {
   XmlStockWordstatConnector,
   WordstatQueryError,
   wordstatQuery,
+  xmlStockSeasonalityResult,
   xmlStockWordstatExpansionResult,
   xmlStockWordstatResult
 } from "./xmlstock-wordstat.connector.js";
@@ -39,6 +40,123 @@ test("collects frequency without exposing credentials outside the request URL", 
   assert.equal(url?.searchParams.get("groupby"), "1");
   assert.equal(url?.searchParams.get("regions"), "213");
   assert.equal(url?.searchParams.get("device"), "all");
+});
+
+test("collects XMLStock monthly seasonality with explicit operators and range", async () => {
+  let url: URL | undefined;
+  const connector = new XmlStockWordstatConnector(async (input) => {
+    url = new URL(String(input));
+    return Response.json({
+      results: [
+        { date: "2025-01-01T00:00:00Z", count: "120", share: "0.00012" },
+        { date: "2025-02-01T00:00:00Z", count: "80", share: "0.00008" }
+      ]
+    });
+  });
+  assert.deepEqual(await connector.collectSeasonality({
+    keyword: "купить слона",
+    type: "FIXED",
+    regionCode: "225",
+    device: "DESKTOP",
+    seasonality: {
+      granularity: "MONTH",
+      observedFrom: "2025-01-01",
+      observedThrough: "2025-02-28"
+    }
+  }, { apiKey: "secret", accountIdentifier: "42" }, 1_000), {
+    ok: true,
+    points: [
+      { periodStart: "2025-01-01", value: "120", share: "0.00012" },
+      { periodStart: "2025-02-01", value: "80", share: "0.00008" }
+    ]
+  });
+  assert.equal(url?.searchParams.get("query"), '"!купить !слона"');
+  assert.equal(url?.searchParams.get("pagetype"), "history");
+  assert.equal(url?.searchParams.get("period"), "month");
+  assert.equal(url?.searchParams.get("start"), "01.01.2025");
+  assert.equal(url?.searchParams.get("end"), "28.02.2025");
+  assert.equal(url?.searchParams.get("regions"), "225");
+  assert.equal(url?.searchParams.get("device"), "desktop");
+});
+
+test("accepts the numeric share currently returned by the live history endpoint", () => {
+  assert.deepEqual(xmlStockSeasonalityResult(200, {
+    results: [{
+      date: "2025-01-01T00:00:00Z",
+      count: "120",
+      share: 0.00012
+    }]
+  }, {
+    granularity: "MONTH",
+    observedFrom: "2025-01-01",
+    observedThrough: "2025-01-31"
+  }), {
+    ok: true,
+    points: [{ periodStart: "2025-01-01", value: "120", share: "0.00012" }]
+  });
+});
+
+test("projects XMLStock date-only history periods as zero demand", () => {
+  assert.deepEqual(xmlStockSeasonalityResult(200, {
+    results: [
+      { date: "2025-09-01T00:00:00Z" },
+      { date: "2025-10-01T00:00:00Z" },
+      {
+        date: "2025-11-01T00:00:00Z",
+        count: "16",
+        share: 1.507019066431582e-7
+      }
+    ]
+  }, {
+    granularity: "MONTH",
+    observedFrom: "2025-09-01",
+    observedThrough: "2025-11-30"
+  }), {
+    ok: true,
+    points: [
+      { periodStart: "2025-09-01", value: "0" },
+      { periodStart: "2025-10-01", value: "0" },
+      {
+        periodStart: "2025-11-01",
+        value: "16",
+        share: "0.000000150701906643"
+      }
+    ]
+  });
+});
+
+test("rejects a history period with share but no count", () => {
+  assert.deepEqual(xmlStockSeasonalityResult(200, {
+    results: [{
+      date: "2025-09-01T00:00:00Z",
+      share: "0.00012"
+    }]
+  }, {
+    granularity: "MONTH",
+    observedFrom: "2025-09-01",
+    observedThrough: "2025-09-30"
+  }), {
+    ok: false,
+    code: "PROVIDER_INVALID_RESPONSE",
+    retryable: true
+  });
+});
+
+test("rejects malformed or unordered XMLStock seasonality", () => {
+  assert.deepEqual(xmlStockSeasonalityResult(200, {
+    results: [
+      { date: "2025-02-01T00:00:00Z", count: "80" },
+      { date: "2025-01-01T00:00:00Z", count: "120" }
+    ]
+  }, {
+    granularity: "MONTH",
+    observedFrom: "2025-01-01",
+    observedThrough: "2025-02-28"
+  }), {
+    ok: false,
+    code: "PROVIDER_INVALID_RESPONSE",
+    retryable: true
+  });
 });
 
 test("accepts the live XMLStock grouped operator response without totalCount", async () => {

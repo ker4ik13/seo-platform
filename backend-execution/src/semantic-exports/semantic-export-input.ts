@@ -167,7 +167,7 @@ function positionHistoryOptions(
 ): NonNullable<InternalCreateSemanticExportInput["positionHistory"]> {
   const input = exactRecord(
     value,
-    new Set(["observedFrom", "observedBefore", "searchEngines"]),
+    new Set(["observedFrom", "observedBefore", "searchEngines", "dimensionKeys"]),
     "positionHistory"
   );
   const observedFrom = canonicalInstant(input.observedFrom, "positionHistory.observedFrom");
@@ -189,7 +189,32 @@ function positionHistoryOptions(
   if (new Set(searchEngines).size !== searchEngines.length) {
     invalid("positionHistory.searchEngines");
   }
-  return { observedFrom, observedBefore, searchEngines };
+  let dimensionKeys: readonly string[] | undefined;
+  if (input.dimensionKeys !== undefined) {
+    if (!Array.isArray(input.dimensionKeys) || input.dimensionKeys.length !== searchEngines.length) {
+      invalid("positionHistory.dimensionKeys");
+    }
+    const dimensions = input.dimensionKeys.map((key) => {
+      const dimension = parseSemanticRankDimensionKey(key);
+      if (!dimension || !searchEngines.includes(dimension.searchEngine)) {
+        invalid("positionHistory.dimensionKeys");
+      }
+      return dimension;
+    });
+    if (
+      new Set(dimensions.map(({ key }) => key)).size !== dimensions.length ||
+      new Set(dimensions.map(({ searchEngine }) => searchEngine)).size !== searchEngines.length
+    ) {
+      invalid("positionHistory.dimensionKeys");
+    }
+    dimensionKeys = dimensions.map(({ key }) => key);
+  }
+  return {
+    observedFrom,
+    observedBefore,
+    searchEngines,
+    ...(dimensionKeys ? { dimensionKeys } : {})
+  };
 }
 
 export function internalCancelSemanticExportInput(value: unknown): InternalCancelSemanticExportInput {

@@ -1,8 +1,13 @@
 import type {
+  FrequencySeasonalityGranularity,
+  FrequencySeasonalityRequest,
   SemanticFrequencyDevice,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
-import { arsenkinWordstatKeywordLimit } from "@seo-platform/contracts";
+import {
+  arsenkinWordstatKeywordLimit,
+  frequencySeasonalitySeriesPointLimit
+} from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
@@ -33,13 +38,31 @@ export type ArsenkinWordstatFetchResult =
   | { readonly status: "RETRYABLE_FAILURE"; readonly code: string; readonly retryAfterSeconds?: number }
   | { readonly status: "REJECTED"; readonly code: string };
 
+export type ArsenkinSeasonalityFetchResult =
+  | {
+      readonly status: "READY";
+      readonly results: readonly ArsenkinSeasonalityQueryResult[];
+    }
+  | { readonly status: "PENDING"; readonly retryAfterSeconds: number }
+  | { readonly status: "RETRYABLE_FAILURE"; readonly code: string; readonly retryAfterSeconds?: number }
+  | { readonly status: "REJECTED"; readonly code: string };
+
 export interface ArsenkinWordstatQueryResult {
   readonly query: string;
   readonly values: Readonly<Record<SemanticFrequencyType, string>>;
 }
 
+export interface ArsenkinSeasonalityQueryResult {
+  readonly query: string;
+  readonly points: readonly Readonly<{
+    periodStart: string;
+    value: string;
+    share?: string;
+  }>[];
+}
+
 export class ArsenkinWordstatConnector {
-  public readonly version = "arsenkin-wordstat@2.0.0";
+  public readonly version = "arsenkin-wordstat@3.0.0";
 
   public constructor(
     private readonly rateLimiter: ArsenkinHttpRateLimitGate,
@@ -57,7 +80,39 @@ export class ArsenkinWordstatConnector {
     timeoutMs: number,
     beforeRequest?: () => Promise<boolean>
   ): Promise<ArsenkinWordstatSubmitResult> {
-    const request = arsenkinWordstatRequest(input);
+    return this.submitRequest(
+      arsenkinWordstatRequest(input),
+      secret,
+      timeoutMs,
+      beforeRequest
+    );
+  }
+
+  public async submitSeasonality(
+    input: {
+      readonly keywords: readonly string[];
+      readonly regionCode: string;
+      readonly device: SemanticFrequencyDevice;
+      readonly seasonality: FrequencySeasonalityRequest;
+    },
+    secret: IntegrationCredentialSecret,
+    timeoutMs: number,
+    beforeRequest?: () => Promise<boolean>
+  ): Promise<ArsenkinWordstatSubmitResult> {
+    return this.submitRequest(
+      arsenkinSeasonalityRequest(input),
+      secret,
+      timeoutMs,
+      beforeRequest
+    );
+  }
+
+  private async submitRequest(
+    request: unknown,
+    secret: IntegrationCredentialSecret,
+    timeoutMs: number,
+    beforeRequest?: () => Promise<boolean>
+  ): Promise<ArsenkinWordstatSubmitResult> {
     const permit = await this.rateLimiter.tryAcquire();
     if (!permit.allowed) return rateLimited(permit.retryAfterSeconds);
     if (beforeRequest && !(await beforeRequest())) {
@@ -170,6 +225,75 @@ export class ArsenkinWordstatConnector {
       throw error;
     }
   }
+
+  public async fetchSeasonalityResult(
+    taskIdInput: string,
+    keywords: readonly string[] | (() => Promise<readonly string[]>),
+    seasonality: FrequencySeasonalityRequest,
+    regionCodeInput: string,
+    secret: IntegrationCredentialSecret,
+    timeoutMs: number
+  ): Promise<ArsenkinSeasonalityFetchResult> {
+    const taskId = taskIdValue(taskIdInput);
+    const regionCode = providerRegionCode(regionCodeInput);
+    const checkPermit = await this.rateLimiter.tryAcquire();
+    if (!checkPermit.allowed) return rateLimited(checkPermit.retryAfterSeconds);
+    try {
+      const checkResponse = await providerJsonRequest(
+        ARSENKIN_CHECK_URL,
+        requestInit(secret, { task_id: taskId }),
+        timeoutMs,
+        this.fetcher
+      );
+      const checkFailure = providerFailure(
+        checkResponse.status,
+        checkResponse.value,
+        checkResponse.retryAfterSeconds
+      );
+      if (checkFailure) return checkFailure;
+      const taskStatus = arsenkinTaskStatus(checkResponse.value, taskId);
+      if (taskStatus === "PENDING") {
+        return { status: "PENDING", retryAfterSeconds: 5 };
+      }
+      if (taskStatus !== "FINISHED") {
+        return { status: "REJECTED", code: "PROVIDER_INVALID_RESPONSE" };
+      }
+      const resolvedKeywords = typeof keywords === "function"
+        ? await keywords()
+        : keywords;
+      const getPermit = await this.rateLimiter.tryAcquire();
+      if (!getPermit.allowed) return rateLimited(getPermit.retryAfterSeconds);
+      const resultResponse = await providerJsonRequest(
+        ARSENKIN_GET_URL,
+        requestInit(secret, { task_id: taskId }),
+        timeoutMs,
+        this.fetcher,
+        Date.now,
+        ARSENKIN_WORDSTAT_RESULT_MAX_BYTES
+      );
+      const failure = providerFailure(
+        resultResponse.status,
+        resultResponse.value,
+        resultResponse.retryAfterSeconds
+      );
+      if (failure) return failure;
+      const results = arsenkinSeasonalityBatchValues(
+        resultResponse.value,
+        taskId,
+        resolvedKeywords,
+        seasonality,
+        regionCode
+      );
+      return results
+        ? { status: "READY", results }
+        : { status: "REJECTED", code: "PROVIDER_INVALID_RESPONSE" };
+    } catch (error) {
+      if (error instanceof ProviderTransportError) {
+        return { status: "RETRYABLE_FAILURE", code: "PROVIDER_UNAVAILABLE" };
+      }
+      throw error;
+    }
+  }
 }
 
 function rateLimited(retryAfterSeconds: number): {
@@ -212,6 +336,295 @@ export function arsenkinWordstatRequest(input: {
       ws: types.map(arsenkinType)
     }
   };
+}
+
+export function arsenkinSeasonalityRequest(input: {
+  readonly keywords: readonly string[];
+  readonly regionCode: string;
+  readonly device: SemanticFrequencyDevice;
+  readonly seasonality: FrequencySeasonalityRequest;
+}) {
+  const keywords = normalizedQueries(input.keywords);
+  const regionCode = providerRegionCode(input.regionCode);
+  return {
+    tools_name: "wordstat" as const,
+    data: {
+      type: 3 as const,
+      queries: keywords,
+      device: arsenkinDevice(input.device),
+      region: Number(regionCode),
+      group: arsenkinSeasonalityGroup(input.seasonality.granularity),
+      startdate: input.seasonality.observedFrom,
+      enddate: input.seasonality.observedThrough,
+      correct_dates: true
+    }
+  };
+}
+
+export function arsenkinSeasonalityBatchValues(
+  value: unknown,
+  taskIdInput: string,
+  keywords: readonly string[],
+  seasonality: FrequencySeasonalityRequest,
+  regionCodeInput: string
+): readonly ArsenkinSeasonalityQueryResult[] | undefined {
+  const taskId = taskIdValue(taskIdInput);
+  const regionCode = providerRegionCode(regionCodeInput);
+  const body = record(value);
+  if (
+    body?.code !== "TASK_RESULT" ||
+    taskIdFromUnknown(body.task_id) !== taskId ||
+    !providerFinishedAt(body.finished_at)
+  ) return undefined;
+  const envelope = record(body.result);
+  if (envelope?.type !== 3 || taskIdFromUnknown(envelope.task_id) !== taskId) {
+    return undefined;
+  }
+  let queries: readonly string[];
+  try {
+    queries = normalizedQueries(keywords);
+  } catch {
+    return undefined;
+  }
+  if (Array.isArray(envelope.data)) {
+    return arraySeasonalityResults(
+      envelope.data,
+      envelope.dates,
+      queries,
+      seasonality,
+      regionCode
+    );
+  }
+  const data = record(envelope.data);
+  if (taskIdFromUnknown(data?.task_id) !== taskId) return undefined;
+  if (!sameQueries(data?.queries, queries)) return undefined;
+  const expectedGroup = arsenkinSeasonalityGroup(seasonality.granularity);
+  if (data?.group !== undefined && data.group !== expectedGroup) return undefined;
+  if (!compatibleSeasonalityRange(
+    data?.startdate,
+    data?.enddate,
+    seasonality.observedFrom,
+    seasonality.observedThrough
+  )) {
+    return undefined;
+  }
+  const responseRegion = data?.region;
+  if (
+    responseRegion !== undefined &&
+    String(responseRegion) !== regionCode
+  ) return undefined;
+  const regions = record(data?.regions);
+  if (regions && !(regionCode in regions)) return undefined;
+  const providerResults = record(data?.result);
+  if (!providerResults) return undefined;
+  const requested = new Set(queries);
+  const rows = new Map<string, readonly SeasonalityPoint[]>();
+  for (const [rawQuery, rawValue] of Object.entries(providerResults)) {
+    const query = normalizedQuery(rawQuery);
+    if (!query || !requested.has(query) || rows.has(query)) return undefined;
+    const points = seasonalityPoints(
+      rawValue,
+      regionCode,
+      seasonality.granularity,
+      seasonality.observedFrom,
+      seasonality.observedThrough
+    );
+    if (!points) return undefined;
+    rows.set(query, points);
+  }
+  return orderedSeasonalityResults(queries, rows);
+}
+
+function arraySeasonalityResults(
+  value: readonly unknown[],
+  datesValue: unknown,
+  queries: readonly string[],
+  seasonality: FrequencySeasonalityRequest,
+  regionCode: string
+): readonly ArsenkinSeasonalityQueryResult[] | undefined {
+  if (value.length !== queries.length) return undefined;
+  const expectedDates = seasonalityDates(
+    datesValue,
+    seasonality.granularity,
+    seasonality.observedFrom,
+    seasonality.observedThrough
+  );
+  if (datesValue !== undefined && !expectedDates) return undefined;
+  const requested = new Set(queries);
+  const rows = new Map<string, readonly SeasonalityPoint[]>();
+  for (const candidate of value) {
+    const row = record(candidate);
+    const query = typeof row?.query === "string"
+      ? normalizedQuery(row.query)
+      : undefined;
+    if (!query || !requested.has(query) || rows.has(query)) return undefined;
+    const points = seasonalityPoints(
+      row?.data,
+      regionCode,
+      seasonality.granularity,
+      seasonality.observedFrom,
+      seasonality.observedThrough
+    );
+    if (
+      !points ||
+      (expectedDates &&
+        (points.length !== expectedDates.length ||
+          points.some((point, index) => point.periodStart !== expectedDates[index])))
+    ) return undefined;
+    rows.set(query, points);
+  }
+  return orderedSeasonalityResults(queries, rows);
+}
+
+function seasonalityDates(
+  value: unknown,
+  granularity: FrequencySeasonalityGranularity,
+  from: string,
+  through: string
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > frequencySeasonalitySeriesPointLimit
+  ) {
+    return undefined;
+  }
+  const dates = value.map((candidate) => seasonalityDate(candidate, granularity));
+  if (dates.some((candidate) => !candidate)) return undefined;
+  const filtered = (dates as string[]).filter((date) => date >= from && date <= through);
+  if (
+    filtered.length === 0 ||
+    new Set(dates).size !== dates.length ||
+    dates.some((date, index) => index > 0 && date! <= dates[index - 1]!)
+  ) return undefined;
+  return filtered;
+}
+
+function orderedSeasonalityResults(
+  queries: readonly string[],
+  rows: ReadonlyMap<string, readonly SeasonalityPoint[]>
+): readonly ArsenkinSeasonalityQueryResult[] | undefined {
+  if (rows.size !== queries.length) return undefined;
+  return queries.map((query) => ({ query, points: rows.get(query)! }));
+}
+
+interface SeasonalityPoint {
+  readonly periodStart: string;
+  readonly value: string;
+  readonly share?: string;
+}
+
+function seasonalityPoints(
+  value: unknown,
+  regionCode: string,
+  granularity: FrequencySeasonalityGranularity,
+  from: string,
+  through: string
+): readonly SeasonalityPoint[] | undefined {
+  const regionEnvelope = record(value);
+  const scoped = regionEnvelope && regionCode in regionEnvelope
+    ? regionEnvelope[regionCode]
+    : value;
+  const scopedRecord = record(scoped);
+  const source = Array.isArray(scoped)
+    ? scoped
+    : Array.isArray(scopedRecord?.data)
+      ? scopedRecord.data
+      : Array.isArray(scopedRecord?.dynamics)
+        ? scopedRecord.dynamics
+        : scoped;
+  const candidates: readonly [unknown, unknown][] = Array.isArray(source)
+    ? source.map((row) => [undefined, row] as const)
+    : record(source)
+      ? Object.entries(record(source)!)
+      : [];
+  if (
+    candidates.length === 0 ||
+    candidates.length > frequencySeasonalitySeriesPointLimit
+  ) return undefined;
+  const points = new Map<string, SeasonalityPoint>();
+  for (const [dateKey, raw] of candidates) {
+    const row = record(raw);
+    const tuple = Array.isArray(raw) ? raw : undefined;
+    const periodStart = seasonalityDate(
+      row?.date ?? row?.period ?? row?.period_start ?? row?.start ?? tuple?.[0] ?? dateKey,
+      granularity
+    );
+    const count = decimal(
+      row?.value ?? row?.count ?? row?.shows ?? row?.frequency ?? row?.ws ?? tuple?.[1] ?? raw
+    );
+    const share = seasonalityShare(
+      row?.share ?? row?.ratio ?? tuple?.[2]
+    );
+    if (!periodStart || !count || share === null) return undefined;
+    if (periodStart < from || periodStart > through) continue;
+    if (points.has(periodStart)) return undefined;
+    points.set(periodStart, {
+      periodStart,
+      value: count,
+      ...(share === undefined ? {} : { share })
+    });
+  }
+  if (points.size === 0) return undefined;
+  return [...points.values()].sort((left, right) =>
+    left.periodStart.localeCompare(right.periodStart)
+  );
+}
+
+function compatibleSeasonalityRange(
+  providerFrom: unknown,
+  providerThrough: unknown,
+  requestedFrom: string,
+  requestedThrough: string
+): boolean {
+  if (providerFrom === undefined && providerThrough === undefined) return true;
+  const from = canonicalProviderDate(providerFrom);
+  const through = canonicalProviderDate(providerThrough);
+  return Boolean(
+    from &&
+    through &&
+    from <= through &&
+    from <= requestedThrough &&
+    through >= requestedFrom
+  );
+}
+
+function canonicalProviderDate(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return undefined;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return parsed.toISOString().slice(0, 10) === value ? value : undefined;
+}
+
+function seasonalityDate(
+  value: unknown,
+  granularity: FrequencySeasonalityGranularity
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const candidate = /^\d{4}-\d{2}$/u.test(value)
+    ? `${value}-01`
+    : /^\d{2}\.\d{2}\.\d{4}$/u.test(value)
+      ? `${value.slice(6)}-${value.slice(3, 5)}-${value.slice(0, 2)}`
+      : value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(candidate)) return undefined;
+  const date = new Date(`${candidate}T00:00:00.000Z`);
+  if (date.toISOString().slice(0, 10) !== candidate) return undefined;
+  if (granularity === "MONTH" && date.getUTCDate() !== 1) return undefined;
+  if (granularity === "WEEK" && date.getUTCDay() !== 1) return undefined;
+  return candidate;
+}
+
+function seasonalityShare(value: unknown): string | undefined | null {
+  if (value === undefined || value === null || value === "") return undefined;
+  const candidate = typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : typeof value === "string" ? value : undefined;
+  if (!candidate || !/^(?:0(?:\.\d{1,18})?|1(?:\.0{1,18})?)$/u.test(candidate)) {
+    return null;
+  }
+  return candidate;
 }
 
 export function arsenkinWordstatBatchValues(
@@ -423,6 +836,14 @@ function arsenkinDevice(device: SemanticFrequencyDevice): "" | "desktop" | "mobi
   if (device === "MOBILE") return "mobile";
   if (device === "PHONE_ONLY") return "phone";
   return "tablet";
+}
+
+function arsenkinSeasonalityGroup(
+  granularity: FrequencySeasonalityGranularity
+): "month" | "week" | "day" {
+  if (granularity === "MONTH") return "month";
+  if (granularity === "WEEK") return "week";
+  return "day";
 }
 
 function providerRegionCode(value: string): string {

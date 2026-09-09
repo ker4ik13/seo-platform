@@ -121,6 +121,7 @@ test("returns an imported manual position without inventing a result URL", async
     }
   };
   const service = new RankHistoryService({
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
     rankSnapshot: { findMany: async () => [row] }
   } as unknown as PrismaService, config());
 
@@ -166,6 +167,7 @@ function historyHarness() {
   let calls = 0;
   const wheres: Array<Readonly<Record<string, unknown>>> = [];
   const prisma = {
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
     rankSnapshot: {
       findMany: async ({
         where

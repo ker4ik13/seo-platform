@@ -112,26 +112,12 @@ test("previews existing keyword memberships without mutating them", async () => 
 });
 
 test("averages the latest found position once per active keyword", async () => {
-  const firstKeywordId = "01900000-0000-7000-8000-000000000010";
-  const secondKeywordId = "01900000-0000-7000-8000-000000000011";
+  let summaryQuery: Prisma.Sql | undefined;
   const service = new KeywordService(
     {
-      keyword: {
-        findMany: async () => [
-          { id: firstKeywordId },
-          { id: secondKeywordId }
-        ]
-      },
-      currentRank: {
-        findMany: async () => [
-          { keywordId: firstKeywordId, position: 10 },
-          { keywordId: firstKeywordId, position: 30 },
-          { keywordId: secondKeywordId, position: 20 },
-          {
-            keywordId: "01900000-0000-7000-8000-000000000099",
-            position: 1
-          }
-        ]
+      $queryRaw: async (query: Prisma.Sql) => {
+        summaryQuery = query;
+        return [{ position: 10 }, { position: 20 }];
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -140,15 +126,17 @@ test("averages the latest found position once per active keyword", async () => {
   assert.deepEqual(await service.positionSummary(workspaceId, projectId), {
     positionedKeywordCount: 2,
     averagePosition: 15,
+    top1KeywordCount: 0,
     top3KeywordCount: 0,
     top5KeywordCount: 0,
     top10KeywordCount: 1,
     top30KeywordCount: 2,
     top50KeywordCount: 2
   });
+  assert.match(summaryQuery?.sql ?? "", /rank_dimension_history_deletions/u);
 });
 
-test("returns one latest-per-keyword aggregate for each UTC calendar day", async () => {
+test("carries every keyword's latest known position through later capture days", async () => {
   const queries: Prisma.Sql[] = [];
   const service = new KeywordService(
     {
@@ -160,6 +148,7 @@ test("returns one latest-per-keyword aggregate for each UTC calendar day", async
             observedAt: new Date("2026-09-01T18:00:00.000Z"),
             measuredKeywordCount: 4n,
             positionedKeywordCount: 3n,
+            top1KeywordCount: 1n,
             top3KeywordCount: 1n,
             top5KeywordCount: 1n,
             top10KeywordCount: 3n,
@@ -169,8 +158,9 @@ test("returns one latest-per-keyword aggregate for each UTC calendar day", async
           {
             dayKey: "2026-09-02",
             observedAt: new Date("2026-09-02T20:00:00.000Z"),
-            measuredKeywordCount: 3n,
+            measuredKeywordCount: 4n,
             positionedKeywordCount: 3n,
+            top1KeywordCount: 0n,
             top3KeywordCount: 0n,
             top5KeywordCount: 2n,
             top10KeywordCount: 2n,
@@ -191,6 +181,7 @@ test("returns one latest-per-keyword aggregate for each UTC calendar day", async
         observedAt: "2026-09-01T18:00:00.000Z",
         measuredKeywordCount: 4,
         positionedKeywordCount: 3,
+        top1KeywordCount: 1,
         top3KeywordCount: 1,
         top5KeywordCount: 1,
         top10KeywordCount: 3,
@@ -201,8 +192,9 @@ test("returns one latest-per-keyword aggregate for each UTC calendar day", async
         id: "day:2026-09-02",
         date: "2026-09-02",
         observedAt: "2026-09-02T20:00:00.000Z",
-        measuredKeywordCount: 3,
+        measuredKeywordCount: 4,
         positionedKeywordCount: 3,
+        top1KeywordCount: 0,
         top3KeywordCount: 0,
         top5KeywordCount: 2,
         top10KeywordCount: 2,
@@ -214,6 +206,8 @@ test("returns one latest-per-keyword aggregate for each UTC calendar day", async
   });
   assert.equal(queries.length, 1);
   assert.match(queries[0]?.sql ?? "", /ROW_NUMBER\(\) OVER/u);
+  assert.match(queries[0]?.sql ?? "", /LAG\(found\) OVER/u);
+  assert.match(queries[0]?.sql ?? "", /UNBOUNDED PRECEDING AND CURRENT ROW/u);
   assert.match(queries[0]?.sql ?? "", /snapshot\.keyword_id/u);
   assert.match(queries[0]?.sql ?? "", /keyword\.is_tracked = TRUE/u);
   assert.equal(queries[0]?.values.includes(false), true);
@@ -309,6 +303,7 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         }
       ]
     },
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
     currentRank: {
       findMany: async () => [
         {
@@ -470,6 +465,7 @@ test("keeps position deltas across tracking contexts", async () => {
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
       currentRank: {
         findMany: async () => [
           {
@@ -574,6 +570,7 @@ test("projects AI position changes across collection contexts", async () => {
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: {
         findMany: async ({ where }: {
@@ -628,6 +625,8 @@ test("keeps competitor SERP evidence out of position history when projection is 
       keyword: {
         findFirst: async () => ({ id: keywordId, note: null })
       },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      frequencySeasonalityPoint: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: { findMany: async () => [] },
@@ -717,6 +716,56 @@ test("keeps competitor SERP evidence out of position history when projection is 
   }]);
 });
 
+test("serializes a small seasonality share without exponent notation", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000074";
+  const jobId = "01900000-0000-7000-8000-000000000075";
+  const service = new KeywordService(
+    {
+      keyword: {
+        findFirst: async () => ({ id: keywordId, note: null })
+      },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      frequencySeasonalityPoint: {
+        findMany: async () => [{
+          id: "01900000-0000-7000-8000-000000000076",
+          type: "BASE",
+          granularity: "MONTH",
+          periodStart: new Date("2026-08-01T00:00:00.000Z"),
+          value: 3n,
+          share: new Prisma.Decimal("0.000000257707063906"),
+          regionCode: "213",
+          device: "ALL",
+          provider: "XMLSTOCK",
+          sourceMode: "BYOK",
+          jobId,
+          observedAt: new Date("2026-09-09T19:18:16.790Z")
+        }]
+      },
+      currentRank: { findMany: async () => [] },
+      rankSnapshot: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.insights(workspaceId, projectId, keywordId);
+
+  assert.deepEqual(result.seasonality, [{
+    type: "BASE",
+    granularity: "MONTH",
+    periodStart: "2026-08-01",
+    value: "3",
+    share: "0.000000257707063906",
+    regionCode: "213",
+    device: "ALL",
+    provider: "XMLSTOCK",
+    sourceMode: "BYOK",
+    jobId,
+    observedAt: "2026-09-09T19:18:16.790Z"
+  }]);
+});
+
 test("projects immutable AI history and latest source competitors into insights", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000021";
   const snapshotId = "01900000-0000-7000-8000-000000000022";
@@ -732,12 +781,15 @@ test("projects immutable AI history and latest source competitors into insights"
     position: 2,
     rankingUrl: "https://example.com/answer",
     brandFound: true,
+    sources: [],
     observedAt
   };
   const aiQueries: Readonly<Record<string, unknown>>[] = [];
   const service = new KeywordService(
     {
       keyword: { findFirst: async () => ({ id: keywordId, note: null }) },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      frequencySeasonalityPoint: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       rankSnapshot: { findMany: async () => [] },
@@ -779,6 +831,7 @@ test("projects immutable AI history and latest source competitors into insights"
     rankingUrl: "https://example.com/answer",
     brandFound: true,
     provider: "ARSENKIN",
+    results: [],
     observedAt: "2026-08-19T15:00:00.000Z"
   }]);
   assert.deepEqual(result.aiCompetitorSnapshots, [{
@@ -882,6 +935,8 @@ test("projects context-independent previous positions into keyword insights", as
       keyword: {
         findFirst: async () => ({ id: keywordId, note: null })
       },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      frequencySeasonalityPoint: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: {
         findMany: async () => [{
@@ -1039,6 +1094,7 @@ test("projects a shared canonical keyword through the currently opened group", a
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: { findMany: async () => [] },
       keywordGroupMembership: {
@@ -1078,6 +1134,8 @@ test("projects imported Key Collector positions without poisoning keyword insigh
       keyword: {
         findFirst: async () => ({ id: keywordId, note: null })
       },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      frequencySeasonalityPoint: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: { findMany: async () => [] },
@@ -1258,6 +1316,7 @@ test("sorts tags by the first normalized active tag on the server", async () => 
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: { findMany: async () => [] }
     } as unknown as PrismaService,
@@ -1323,6 +1382,7 @@ test("sorts by the latest engine result and keeps missing positions last", async
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
       currentRank: {
         findMany: async ({ orderBy }: { orderBy: unknown }) => {
           observedRankOrderBy = orderBy;
@@ -1451,6 +1511,7 @@ test("sorts current and historical AI positions before absent answers", async ()
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: { findMany: async () => [] }
     } as unknown as PrismaService,

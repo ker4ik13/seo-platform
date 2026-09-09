@@ -155,8 +155,11 @@ Scope materializer работает с каноническими keyword ID, а
 
 ### 3.1. Manual BYOK slice Arsenkin
 
-По ADR-2026-034 и ADR-2026-043 execution slice использует Arsenkin `positions`
-после provider contract, entitlement, credential freshness и compatibility
+По ADR-2026-034 и ADR-2026-043 legacy execution slice использует Arsenkin
+`positions`. Новые estimate для обычного снятия позиций используют
+документированный `check-top` с `is_snippet=true`: из одной выдачи вычисляется
+позиция домена проекта и сохраняется полный SERP с title/snippet. Оба пути
+проходят provider contract, entitlement, credential freshness и compatibility
 gates.
 Context, assignment, binding, estimate и compatibility UI не делают сетевой
 запрос; live submit выполняет только isolated connector-worker под новой
@@ -164,19 +167,17 @@ kill-switch generation.
 
 Исполняемый scope поддерживает Google Live Desktop/Mobile с глубиной TOP-30,
 TOP-50 или TOP-100 и Яндекс Search API/Live с канонической внутренней
-глубиной TOP-30, simple format, одним context на provider task и до 15 000
-keywords в одном provider command. Публичный contract `positions` не
-принимает `depth` для Яндекса: поле не отправляется провайдеру, а значения
-TOP-50/TOP-100 блокируются на estimate вместо молчаливого отбрасывания.
-Adapter отображает профили в зафиксированные Arsenkin `positions` search
-types: Яндекс Search API — `1`, Яндекс Live Desktop/Mobile — `2/3`, Google
+глубиной TOP-30, одним context на provider task и пакетами до 5 000 keywords.
+Для новых запусков выбранная глубина передаётся `check-top`; Яндекс
+TOP-50/TOP-100 блокируется на estimate. Adapter отображает профили в
+зафиксированные Arsenkin search types: Яндекс Search API — `1`, Яндекс Live Desktop/Mobile — `2/3`, Google
 Live Desktop/Mobile — `11/12`; регион передаётся только как проверенный
 числовой provider ID. Выбранный `SEARCH_API`/`LIVE` является частью immutable
 estimate и не может быть заменён при запуске. Raw SERP и platform-paid route
 в этот slice не входят; fallback выполняется только через явно настроенный
 connector route.
 Каждый sealed provider task является одним provider batch: connector вызывает
-Arsenkin `set` ровно один раз с массивом `queries` до 15 000 элементов, затем
+Arsenkin `set` ровно один раз с массивом `queries` до 5 000 элементов, затем
 poll-ит один task ID и нормализует весь task. Делить task на последовательные
 paid submit по одному keyword запрещено.
 Country, language, safe search и domain rule запрещено молча отбрасывать:
@@ -193,18 +194,18 @@ configuration versions, credential freshness, provider limits, BYOK allowance
 Ручной конкурентный workflow переиспользует estimate/run/manifest pipeline, но
 фиксирует в immutable execution `purpose=COMPETITOR_SERP`. Arsenkin connector
 вместо `positions` вызывает документированный `check-top`: один batch содержит
-массив запросов, один выбранный поисковик и регион, `depth=10`,
+массив запросов, один выбранный поисковик и регион, выбранный
+`depth=10|20|30|50|100`,
 `is_snippet=true`, `noreask=false`. Зафиксированные mapping versions
 `arsenkin-check-top-yandex-xml@1`, `arsenkin-check-top-yandex-live@1` и
 `arsenkin-check-top-google-live@1` однозначно отображают source/device в типы
 `1|2|3|11|12`. XMLStock использует существующие Yandex Search API, Yandex Live
-и Google Live connectors, но для конкурентного purpose всегда запрашивает
-ровно Топ-10, независимо от глубины сохранённого tracking context.
+и Google Live connectors и запрашивает ту же явно выбранную глубину до Топ-100.
 
 Оба варианта нормализуют и сохраняют упорядоченные `rank_serp_results` с URL и
 доступными title/snippet для каждого keyword. Флаг `saveProjectPosition`
 допустим только при `COMPETITOR_SERP`. При `true` connector ищет домен проекта
-в уже полученной Топ-10 по зафиксированному `domainMatchRule`; найденная строка
+в уже полученной выдаче по зафиксированному `domainMatchRule`; найденная строка
 становится обычным found snapshot. При `false` либо отсутствии сайта snapshot
 всё равно сохраняет конкурентную выдачу, но получает
 `position_tracking_enabled=false` и не меняет `current_ranks`, историю,
@@ -214,8 +215,8 @@ configuration versions, credential freshness, provider limits, BYOK allowance
 gate к `rank_snapshots` и `ai_answer_snapshots`; старые снимки сохраняют
 значение `true`. Migration
 `20260902194500_competitor_rank_estimate_counts` обновляет CHECK оценки:
-XMLStock Live при конкурентном purpose считает один фактически запрашиваемый
-Топ-10 page на keyword, даже если tracking context хранит глубину 30/50/100;
+Legacy XMLStock Live receipts при конкурентном purpose сохраняют прежний
+расчёт Топ-10; новые запуски передают и тарифицируют выбранную глубину;
 для обычного снятия позиций ограничение по-прежнему использует полную глубину.
 
 ### 3.2. Реализованный provider-free estimate
@@ -291,15 +292,15 @@ replay снова проверяет authoritative SEO Data chunk, поэтом�
 encrypted credential projection. `PUBLIC` execute отозван, а authorize
 повторно проверяет graph/lease/control fence и атомарно фиксирует
 `SUBMITTING` до возможных network bytes. Isolated connector-worker затем
-отправляет documented Arsenkin `positions`, durable хранит exact wire
+отправляет для новых estimate documented Arsenkin `check-top`, durable хранит exact wire
 snapshot/hash и task ID, опрашивает `check` и вызывает `get` только после
 `TASK_STATUS/finish` с progress 100. Provider adapter канонизирует обе
 допустимые формы progress — JSON number и числовую строку
 с необязательным `%`; остальные значения и противоречивые status/progress
-комбинации остаются fail-closed. Финальный `format=0` ответ
-нормализуется из `result.table`: exact query set связывается с sealed manifest,
-`position=[1001]` означает not-found, а найденная позиция обязана находиться
-в диапазоне 1..sealed depth и иметь URL в разрешённом scope проекта.
+комбинации остаются fail-closed. Финальный `check-top` ответ нормализуется из
+упорядоченных `collect` и `snippets`; домен проекта ищется в диапазоне
+1..sealed depth. Legacy `format=0` ответы продолжают читаться из
+`result.table`, где `position=[1001]` означает not-found.
 Сохраняется только normalized found/not-found output без raw provider body.
 Premature `get`, неполный/лишний query set и неизвестные row layouts
 завершаются fail-closed.
@@ -455,7 +456,10 @@ browser не выдаются. Последний XMLStock или Arsenkin snaps
 URL отмечается оранжевым индикатором, а несколько страниц проекта — кнопкой,
 которая открывает в modal только страницы проекта как SERP-карточки с
 позицией, favicon, title, description и URL; конкурентский Top-10 остаётся
-отдельным блоком карточки запроса и в этот modal не подмешивается.
+отдельным блоком карточки запроса и в этот modal не подмешивается. Эти два
+состояния независимы: если у запроса одновременно есть нецелевой URL и хотя бы
+один текущий срез с несколькими страницами проекта, рядом с запросом видны обе
+иконки и каждая открывает свой режим modal.
 Визуальный текст всех SERP-ссылок не содержит транспортный префикс
 `http://`/`https://`; полный безопасный URL сохраняется в `href` и tooltip.
 Незашифрованный исходный `http://` отмечается рядом с URL небольшим оранжевым
@@ -544,9 +548,8 @@ Google: ИИ-позицию, URL найденной страницы проек�
 сравниваются с целевой страницей по той же безопасной нормализации, что и
 обычные ranking URL, но не выводят текстовый статус совпадения внутри ячейки и
 доступны в обычном экспорте. Для каждого последнего снимка Core
-SEO находит предыдущую найденную позицию того же canonical keyword/engine по
-всей append-only истории независимо от региона и устройства: смена контекста
-не превращает старый запрос в «новый». Таблица показывает «Новая», рост,
+SEO находит предыдущую найденную позицию того же canonical keyword/engine в
+том же регионе и устройстве. Таблица показывает «Новая», рост,
 падение, отсутствие изменений или «Была N», если сайт пропал из источников.
 При наличии любого сохранённого ИИ-снимка у запроса появляется компактная
 кнопка с AI-иконкой, даже если provider вернул `answerPresent=false` или не
@@ -570,10 +573,10 @@ server-side сортировку до cursor pagination, отдельно для
 запрос в последнюю группу даже при известной исторической позиции.
 Направление ASC/DESC действует внутри первых двух групп и не меняет порядок
 самих групп; правило сохраняется при cursor pagination.
-Keyword insights отдают до 240 последних ИИ-снимков; sidebar строит график из
-14 последних снимков canonical keyword по обоим engine внутри отдельного блока
-ИИ-позиций; обычный rank-график остаётся в обычном блоке и не склеивается с
-ИИ-историей. Кнопка `История`
+Keyword insights отдают до 240 последних ИИ-снимков выбранного dimension;
+sidebar строит график из 14 последних снимков и размещает ИИ-блок вслед за
+обычными позициями. Затем идут ИИ-конкуренты и общая кнопка истории ИИ-выдачи.
+Кнопка `История`
 загружает полный tenant-scoped журнал keyset-страницами по 200 строк через
 аутентифицированный opaque cursor. Последний снимок каждого engine, в котором
 были источники, формирует отдельный `Топ конкурентов ИИ`: позиция источника,
@@ -591,10 +594,9 @@ provider payload и не выполняет повторный submit.
 Purpose проходит через все trusted response boundaries без восстановления в
 браузере. Для `POSITION_TRACKING` result modal показывает позицию и страницу
 домена проекта. Для `COMPETITOR_SERP` тот же modal shell получает отдельный
-заголовок «Выдача конкурентов · Топ-10» и разворачивает сохранённые
+заголовок с выбранной глубиной и разворачивает сохранённые
 `rank_serp_results` в строки `запрос / место / URL конкурента / title /
-description / время`; configured depth технического контекста не выдаётся за
-глубину конкурентного результата. ИИ-конкуренты аналогично отображаются как
+description / время` до этой глубины. ИИ-конкуренты аналогично отображаются как
 отдельная операция «ИИ-выдача конкурентов» со строками сохранённых
 `ai_answer_sources`: позиция источника, URL, title, description и время.
 Обычный ИИ-operation result не запрашивает массив источников, поэтому его
@@ -637,7 +639,9 @@ canonical/mirror rules и нечисловой регион блокируютс
 нормализованные organic результаты того же provider response до фактической
 глубины, но не более Top-100. Для Arsenkin сохраняются доступная в result
 `top20` проекция и найденная страница проекта; title/snippet остаются
-optional, если provider их не передал. Это отдельные дочерние immutable строки,
+optional, если provider их не передал. Отдельный Arsenkin `check-top` сохраняет
+тот же упорядоченный SERP до выбранной глубины и переданные провайдером
+title/snippet. Это отдельные дочерние immutable строки,
 связанные составным ключом snapshot; они записываются пакетно, не содержат
 credential, provider request ID или raw XML/JSON и не переписывают
 существующую историю. Провайдеры без доступной SERP-проекции поле не создают.
@@ -1220,3 +1224,117 @@ search engine, регион, устройство, SERP position, URL, title/des
 partitioning. Partition maintenance/retention и representative history load
 test не выполнены и остаются release gates, даже при готовом public read
 API/UI.
+
+## 24. Дневной отчёт позиций
+
+`POST /projects/{projectId}/rank-workbench/positions` принимает один точный
+dimension key, период, папки, поиск, sort и bounded page. Core SEO выбирает
+последний immutable snapshot каждого фактического UTC-дня съёма и возвращает
+максимум 31 столбец. Дни без единого snapshot не добавляются; длинный диапазон
+равномерно выбирает наблюдавшиеся дни, сохраняя первую и последнюю точки.
+Столбцы идут от самого нового съёма слева к более старым справа.
+Сводка и trend считаются по всему фильтру; строки выдаются по 50/100/200 без
+загрузки 50 000 ключей в браузер. Пустая ячейка означает отсутствие съёма,
+`×` — выполненный съём без позиции, цвет и delta сравнивают соседние доступные
+дни. Найденная позиция открывает сохранённый ranking URL. История позиций,
+история выдачи и ссылка на поиск находятся у запроса. Если ranking URL не
+совпадает с целевым, ячейка показывает жёлтое действие «Нерелевантный URL»;
+оно открывает только страницы домена из organic SERP именно этого immutable
+snapshot, сохраняя исходную позицию каждого URL. Прямое открытие страниц
+snapshot закрывается в матрицу и не оставляет под собой modal истории. Рабочая область
+прокручивается внутри viewport, а cursor-страницы автоматически добавляются
+при приближении к концу таблицы. Фильтры и actions образуют две компактные
+верхние строки. Управление видимостью дат перенесено туда же, счётчик запросов
+около него и отдельная шапка «История позиций по дням» не выводятся. Все даты в
+trigger периода, заголовках матрицы и списке колонок содержат год. Действия
+ячейки стоят вертикально справа, а delta позиции имеет увеличенный кегль.
+
+## 25. Сравнение сохранённой выдачи
+
+`POST /projects/{projectId}/rank-workbench/serp` принимает до пяти точных
+dimensions и возвращает последние сохранённые XMLStock/Arsenkin snapshots и
+ИИ-источники того же engine/region/device по странице ключей. UI показывает
+обычную и ИИ-выдачу в взаимоисключающих режимах: ИИ-источники не попадают в
+обычный режим, а checkbox «ИИ-выдача» переключает таблицу и мастер сбора на
+ИИ-конкурентов. Выбранные dimensions, папка и режим сохраняются в браузере с
+ключом пользователя и проекта; недоступный после перезагрузки dimension или
+удалённая папка безопасно заменяются доступным значением. Каждый результат сохраняет position, URL, favicon, title и
+snippet. UI подсвечивает домен проекта, одинаковые домены внутри запроса и
+персональный список наблюдения, причём каждому домену назначается стабильный
+отдельный цвет; одинаковые домены включаются персональным checkbox, а список наблюдения является presentation preference и
+не меняет provider evidence. Кнопка сбора использует обычный
+`COMPETITOR_SERP` wizard, поэтому новые данные остаются в общей семантике,
+истории и экспорте. Экран полноширинный, без повторного page heading и заголовка
+«Результаты по запросам», с теми же боковыми полями, что экран позиций. Папка выбирается общим
+иерархическим picker. Один выбранный dimension показывает до трёх карточек
+ключей в строке desktop. Несколько dimensions показывают один ключ в строке и
+распределяют все срезы по доступной ширине, с горизонтальной прокруткой только
+когда минимальная читаемая ширина уже не помещается. В ячейке по умолчанию
+виден Top-10, полный snapshot раскрывается явно, следующие страницы ключей
+загружаются бесконечной прокруткой.
+
+История SERP ключа может включать «Показать движение». При наличии минимум двух
+snapshot текущий URL сравнивается с лучшей позицией того же домена в предыдущем съёме;
+рядом с позицией показывается рост, падение, отсутствие изменения или новый
+домен. Смена конкретного URL того же домена выделяется жёлтым. Старейший
+загруженный snapshot без предыдущего сравнения не получает
+придуманную дельту. При одном snapshot checkbox disabled. Выбор хранится
+локально отдельно для пользователя.
+
+## 26. Сезонность частотности
+
+`FREQUENCY_COLLECTION` имеет режимы `FREQUENCY` и `SEASONALITY`. Legacy input
+без режима остаётся обычной частотностью. Arsenkin-сезонность использует
+официальный `wordstat` `type=3`: `MONTH` требует полные месяцы, `WEEK` —
+понедельник-воскресенье и минимум три недели, `DAY` — до 60 дней. Регион,
+устройство, `group`, `startdate` и `enddate` передаются явно. До 10 000 фраз
+объединяются в одну provider task, но учёт расхода остаётся по ключам: одна
+фраза в одном регионе равна одному лимиту. Этот маршрут сохраняет тип `BASE`.
+
+XMLStock-сезонность вызывает документированный GET `pagetype=history` с
+`period=month|week|day`, `start/end`, `regions` и `device`. Документация
+разрешает Wordstat-операторы в `query`, но live-проверка трёх фраз за два года
+вернула для кавычек ту же серию, что и без операторов, а запрос с `!` отклонила.
+Поэтому новые XMLStock и Arsenkin seasonality-команды принимают только `BASE`.
+Ответ `results[{date,count,share}]` валидируется, сортируется по началу периода
+и сохраняется с этим типом. В live-ответе XMLStock допустима строка только с
+`date`: она обозначает отсутствие наблюдений за период и нормализуется в
+`count=0`; наличие `share` без `count` по-прежнему отклоняется. При чтении
+Core SEO обязан отдавать малую `share` обычной десятичной строкой без
+экспоненты, независимо от представления Prisma Decimal. Сохранённые до сужения
+XMLStock jobs с несколькими
+типами остаются читаемыми; claim, уже превысивший исторический лимит попыток,
+завершается локально без нового provider HTTP.
+
+Estimate/reservation/settlement не умножают стоимость на число возвращённых
+периодов; для XMLStock один keyword создаёт один базовый history-запрос.
+Arsenkin получает `correct_dates=true`, а Core SEO для обоих маршрутов
+сохраняет только периоды исходного подтверждённого диапазона, поэтому текущий
+неполный месяц или неделя не расширяют выбор пользователя.
+
+## 27. Удаление ошибочного среза
+
+Удаление dimension создаёт append-only exclusion до PostgreSQL clock time.
+Immutable provider, current projection и billing evidence физически не
+удаляются. Все пользовательские чтения,
+включая catalog, comparison, dashboard, history и exports, исключают старые
+snapshots; будущий съём того же dimension виден. Команда требует
+`ranking.configure`, CSRF, `Idempotency-Key` и audit.
+
+
+## 28. Объединение исторических срезов
+
+`rank_dimension_merges` хранит обратимое правило source → target в границе
+workspace/project. Разрешается объединять только срезы с одинаковыми
+поисковиком, страной, языком и устройством; регион может различаться. Target не
+может одновременно быть source, цепочки и циклы запрещены, несколько source
+могут указывать на один target.
+
+Правило не изменяет immutable `rank_snapshots`, manifests или provider
+evidence. Catalog скрывает source, а comparison, dashboard, rank-workbench,
+rank-history, keyword insights и position export расширяют target всеми его
+source. Повторный snapshot одного keyword в один UTC-день схлопывается до
+самого нового. Удаление правила возвращает отдельный source без копирования
+данных. Создание защищено `ranking.configure`, CSRF, `Idempotency-Key` и audit;
+SEO project-transfer routine переносит правило между workspace вместе с
+проектом.

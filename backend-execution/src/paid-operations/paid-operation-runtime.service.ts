@@ -56,9 +56,13 @@ export class PaidOperationRuntimeService {
     return result;
   }
 
-  public async acceptedTaskId(scope: PaidOperationClaimScope, items: readonly string[]): Promise<string | undefined> {
+  public async acceptedTaskId(
+    scope: PaidOperationClaimScope,
+    items: readonly string[],
+    part = "TASK"
+  ): Promise<string | undefined> {
     if (await this.mode(scope) === "BYOK_API_KEY") return undefined;
-    const ticket = await this.prepare(scope, "TASK", items);
+    const ticket = await this.prepare(scope, part, items);
     const taskId = ticket.result?.taskId;
     return ticket.state === "ACCEPTED" && ticket.result?.status === "ACCEPTED" && typeof taskId === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(taskId) ? taskId : undefined;
   }

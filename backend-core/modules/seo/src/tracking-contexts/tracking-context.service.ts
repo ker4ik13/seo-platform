@@ -899,7 +899,7 @@ function configurationSnapshot(
       : {}),
     language: configuration.language,
     device: configuration.device,
-    depth: configuration.depth as 30 | 50 | 100,
+    depth: configuration.depth as 10 | 20 | 30 | 50 | 100,
     domainMatchRule: domainRule(configuration),
     safeSearch: configuration.safeSearch,
     configurationVersion: configuration.configurationVersion,

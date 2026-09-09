@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import {
   normalizedRankDataQualityFlags,
+  parseSemanticRankDimensionKey,
   redactRankHistoryItem,
   type InternalRankHistoryCollection,
   type InternalRankHistoryCursorV1,
@@ -24,7 +25,11 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { rankDimensionConfigurationWhere, rankDimensionMetadata } from "./rank-dimension.js";
+import { rankDimensionMetadata } from "./rank-dimension.js";
+import {
+  rankDimensionConfigurationWhereAny,
+  rankDimensionSources
+} from "./rank-dimension-merge.js";
 import {
   projectSiteResults,
   rankHistorySearchSource
@@ -120,10 +125,35 @@ export class RankHistoryService {
   public async list(
     query: InternalRankHistoryQuery
   ): Promise<InternalRankHistoryCollection> {
+    const selectedDimension = query.dimensionKey
+      ? parseSemanticRankDimensionKey(query.dimensionKey)
+      : undefined;
+    if (query.dimensionKey && !selectedDimension) {
+      throw new BadRequestException("Invalid rank dimension");
+    }
+    const sourceDimensions = selectedDimension
+      ? await rankDimensionSources(this.prisma, query, selectedDimension)
+      : undefined;
     const filterHash = rankHistoryFilterHash(query);
     const cursor = query.cursor
       ? this.decodeCursor(query.cursor, query, filterHash)
       : undefined;
+    const deletions = await this.prisma.rankDimensionHistoryDeletion.findMany({
+      where: {
+        workspaceId: query.workspaceId,
+        projectId: query.projectId
+      },
+      orderBy: { excludedThrough: "desc" },
+      take: 2_000,
+      select: {
+        searchEngine: true,
+        countryCode: true,
+        regionCode: true,
+        language: true,
+        device: true,
+        excludedThrough: true
+      }
+    });
     const rows = await this.prisma.rankSnapshot.findMany({
       where: {
         workspaceId: query.workspaceId,
@@ -131,7 +161,15 @@ export class RankHistoryService {
         sourceMode: { in: ["BYOK", "PLATFORM", "IMPORT"] },
         provider: { in: ["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"] },
         ...(query.mode === "SERP" ? { serpResults: { some: {} } } : { positionTrackingEnabled: true }),
-        ...(query.dimensionKey ? { manifest: { configuration: rankDimensionConfigurationWhere(query.dimensionKey) } } : {}),
+        ...(sourceDimensions
+          ? {
+              manifest: {
+                configuration: rankDimensionConfigurationWhereAny(
+                  sourceDimensions
+                )
+              }
+            }
+          : {}),
         observedAt: {
           gte: new Date(query.observedFrom),
           lt: new Date(query.observedBefore)
@@ -140,6 +178,9 @@ export class RankHistoryService {
           ? { trackingContextId: query.trackingContextId }
           : {}),
         ...(query.keywordId ? { keywordId: query.keywordId } : {}),
+        ...(deletions.length === 0
+          ? {}
+          : { AND: deletions.map(rankDeletionExclusionWhere) }),
         ...(cursor
           ? {
               OR: [
@@ -163,7 +204,7 @@ export class RankHistoryService {
       workspaceId: query.workspaceId,
       projectId: query.projectId,
       items: pageRows.map((row) =>
-        storedHistoryItem(row, query)
+        storedHistoryItem(row, query, selectedDimension)
       ),
       page: {
         hasNext,
@@ -267,7 +308,8 @@ export class RankHistoryService {
 
 function storedHistoryItem(
   record: RankHistoryRecord,
-  query: InternalRankHistoryQuery
+  query: InternalRankHistoryQuery,
+  resolvedDimension?: ReturnType<typeof parseSemanticRankDimensionKey>
 ): RankHistoryItem {
   const technicalIdPattern = record.provider === "MANUAL_IMPORT"
     ? UUID_PATTERN
@@ -295,13 +337,22 @@ function storedHistoryItem(
     record.serpResults,
     record.manifest.projectDomain
   );
-  const searchEngine = record.manifest.configuration.searchEngine;
+  const searchEngine = resolvedDimension?.searchEngine ??
+    record.manifest.configuration.searchEngine;
   const searchSource = rankHistorySearchSource(
     record.manifest.execution,
     searchEngine
   );
   const common = {
-    ...rankDimensionMetadata(record.manifest.configuration),
+    ...(resolvedDimension
+      ? {
+          dimensionKey: resolvedDimension.key,
+          countryCode: resolvedDimension.countryCode,
+          regionCode: resolvedDimension.regionCode,
+          language: resolvedDimension.language,
+          device: resolvedDimension.device
+        }
+      : rankDimensionMetadata(record.manifest.configuration)),
     depth: record.manifest.configuration.depth,
     snapshotId: record.id,
     keywordId: record.keywordId,
@@ -312,9 +363,11 @@ function storedHistoryItem(
     contextName: record.manifest.context.name,
     searchEngine,
     ...(searchSource ? { searchSource } : {}),
-    ...(record.manifest.configuration.regionLabel === null
-      ? {}
-      : { regionLabel: record.manifest.configuration.regionLabel }),
+    ...(resolvedDimension?.regionLabel
+      ? { regionLabel: resolvedDimension.regionLabel }
+      : record.manifest.configuration.regionLabel === null
+        ? {}
+        : { regionLabel: record.manifest.configuration.regionLabel }),
     observedAt: record.observedAt.toISOString(),
     storedAt: record.createdAt.toISOString(),
     jobId: record.jobId,
@@ -426,6 +479,49 @@ function storedQualityFlags(
 
 function emptyJsonArray(value: Prisma.JsonValue): boolean {
   return Array.isArray(value) && value.length === 0;
+}
+
+function rankDeletionExclusionWhere(
+  deletion: Readonly<{
+    searchEngine: string;
+    countryCode: string;
+    regionCode: string;
+    language: string;
+    device: string;
+    excludedThrough: Date;
+  }>
+): Prisma.RankSnapshotWhereInput {
+  const searchEngine = storedDeletionSearchEngine(deletion.searchEngine);
+  const device = storedDeletionDevice(deletion.device);
+  return {
+    NOT: {
+      observedAt: { lte: deletion.excludedThrough },
+      manifest: {
+        configuration: {
+          searchEngine,
+          countryCode: deletion.countryCode,
+          language: deletion.language,
+          device,
+          OR: [
+            { regionCode: deletion.regionCode },
+            ...(deletion.regionCode === deletion.countryCode
+              ? [{ regionCode: null }]
+              : [])
+          ]
+        }
+      }
+    }
+  };
+}
+
+function storedDeletionSearchEngine(value: string): "YANDEX" | "GOOGLE" {
+  if (value === "YANDEX" || value === "GOOGLE") return value;
+  throw new Error("Stored rank deletion search engine is unsupported");
+}
+
+function storedDeletionDevice(value: string): "DESKTOP" | "MOBILE" {
+  if (value === "DESKTOP" || value === "MOBILE") return value;
+  throw new Error("Stored rank deletion device is unsupported");
 }
 
 function cursorMac(

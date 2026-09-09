@@ -19,6 +19,7 @@ import {
   sameSemanticRankingUrl
 } from "../lib/semantic-rank-presentation";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
+import { seoRegionOptions } from "../lib/seo-regions";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
@@ -28,6 +29,7 @@ import { SemanticKeywordSerpHistory } from "./semantic-keyword-serp-history";
 import { SemanticKeywordAiPositionHistoryModal } from "./semantic-keyword-ai-position-history-modal";
 import { SemanticModal } from "./semantic-modal";
 import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
+import { SemanticSeasonalityCharts } from "./semantic-seasonality-chart";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
@@ -54,6 +56,7 @@ export interface SemanticKeywordInspectorItem {
 }
 
 export function SemanticKeywordInspector({
+  currentUserId,
   item,
   onClose,
   onEdit,
@@ -61,16 +64,19 @@ export function SemanticKeywordInspector({
   onOpenAiAnswer,
   onUpdated,
   projectDomain,
-  projectId
+  projectId,
+  rankDimensionPreferenceScope
 }: Readonly<{
+  currentUserId: string;
   item: SemanticKeywordInspectorItem;
   onClose: () => void;
   onEdit: () => void;
   onFrequencyDeleted: () => void;
-  onOpenAiAnswer: () => void;
+  onOpenAiAnswer: (dimensionKey?: string) => void;
   onUpdated: (item: SemanticKeywordListItem) => void;
   projectDomain: string;
   projectId: string;
+  rankDimensionPreferenceScope: string;
 }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
@@ -106,7 +112,30 @@ export function SemanticKeywordInspector({
   useEffect(() => {
     noteDirtyRef.current = noteDirty;
   }, [noteDirty]);
-  useEffect(() => { setRankDimensionKey(""); setSerpHistoryOpen(false); }, [item.id]);
+  useEffect(() => {
+    setRankDimensionKey(readRankDimensionPreference(
+      currentUserId,
+      projectId,
+      rankDimensionPreferenceScope
+    ));
+  }, [currentUserId, item.id, projectId, rankDimensionPreferenceScope]);
+  useEffect(() => { setSerpHistoryOpen(false); }, [item.id]);
+
+  function selectRankDimension(key: string): void {
+    setRankDimensionKey(key);
+    if (key) {
+      writeRankDimensionPreference(
+        currentUserId,
+        projectId,
+        rankDimensionPreferenceScope,
+        key
+      );
+    }
+  }
+
+  function fallbackRankDimension(key: string): void {
+    setRankDimensionKey(key);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -194,9 +223,9 @@ export function SemanticKeywordInspector({
   const currentAiAnswers = useMemo(
     () => latestAiAnswerSummaries(
       insights?.aiPositionHistory ?? [],
-      item.aiAnswers ?? []
+      rankDimensionKey ? [] : item.aiAnswers ?? []
     ),
-    [insights, item.aiAnswers]
+    [insights, item.aiAnswers, rankDimensionKey]
   );
   const positionChanges = useMemo(
     () => rankHistoryByDate(visibleHistory),
@@ -204,6 +233,10 @@ export function SemanticKeywordInspector({
   );
   const competitorSnapshots = insights?.competitorSnapshots ?? [];
   const aiCompetitorSnapshots = insights?.aiCompetitorSnapshots ?? [];
+  const hasAnyAiSnapshot =
+    (item.aiAnswers?.length ?? 0) > 0 ||
+    (insights?.aiPositionHistory?.length ?? 0) > 0 ||
+    aiCompetitorSnapshots.length > 0;
   const targetMismatches = useMemo(
     () => item.targetUrl
       ? [
@@ -476,7 +509,7 @@ export function SemanticKeywordInspector({
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:ranks`}
       >
-        <SemanticKeywordRegionalRanks projectId={projectId} keywordId={item.id} dimensionKey={rankDimensionKey} onDimensionChange={setRankDimensionKey} onHistory={() => setHistoryOpen(true)} onSerpHistory={() => setSerpHistoryOpen(true)} revision={(insights?.positions ?? []).map(position => position.observedAt).join(":")} />
+        <SemanticKeywordRegionalRanks projectId={projectId} keywordId={item.id} dimensionKey={rankDimensionKey} onDimensionChange={selectRankDimension} onDimensionFallback={fallbackRankDimension} onHistory={() => setHistoryOpen(true)} revision={(insights?.positions ?? []).map(position => position.observedAt).join(":")} />
         {rankDimensionKey && !loading && <>
         <div className="semantic-normal-rank-chart">
           <SemanticRankHistoryChart points={visibleHistory} />
@@ -490,6 +523,21 @@ export function SemanticKeywordInspector({
           </div>
         )}
         </>}
+        <SemanticCompetitorSnapshots
+          presenceKeyPrefix={`${presenceKeyPrefix}:competitors`}
+          projectDomain={projectDomain}
+          showEmpty={!loading}
+          snapshots={competitorSnapshots}
+        />
+        <button
+          className="secondary-button semantic-serp-history-button"
+          disabled={!rankDimensionKey}
+          onClick={() => setSerpHistoryOpen(true)}
+          type="button"
+        >
+          <Icon name="history" /><UiText text="История выдачи и конкурентов" />
+        </button>
+        {hasAnyAiSnapshot && (
         <div className="semantic-inspector-ai-ranks">
           <header>
             <span>
@@ -497,13 +545,8 @@ export function SemanticKeywordInspector({
               <UiText text="ИИ-позиции" /></span>
             <div>
               {hasSavedAiAnswer && (
-                <button onClick={onOpenAiAnswer} type="button">
+                <button onClick={() => onOpenAiAnswer(rankDimensionKey || undefined)} type="button">
                   <UiText text="Открыть ответ" /></button>
-              )}
-              {(insights?.aiPositionHistory?.length ?? 0) > 0 && (
-                <button onClick={() => setAiHistoryOpen(true)} type="button">
-                  <Icon name="history" />
-                  <UiText text="История" /></button>
               )}
             </div>
           </header>
@@ -547,26 +590,28 @@ export function SemanticKeywordInspector({
               <SemanticRankHistoryChart points={aiChartHistory} />
             </div>
           )}
+          <SemanticCompetitorSnapshots
+            emptyText="После первого ИИ-съёма с источниками здесь появятся сайты, на которые ссылается ИИ-ответ."
+            emptyTitle="Источники ИИ-ответов ещё не сохранены"
+            heading="Топ конкурентов ИИ"
+            presenceKeyPrefix={`${presenceKeyPrefix}:ai-competitors`}
+            projectDomain={projectDomain}
+            showEmpty={!loading}
+            snapshots={aiCompetitorSnapshots}
+          />
+          <button
+            className="secondary-button semantic-serp-history-button"
+            disabled={(insights?.aiPositionHistory?.length ?? 0) === 0}
+            onClick={() => setAiHistoryOpen(true)}
+            type="button"
+          >
+            <Icon name="history" /><UiText text="История ИИ-выдачи и конкурентов" />
+          </button>
         </div>
+        )}
       </section>
 
       {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
-
-      <SemanticCompetitorSnapshots
-        presenceKeyPrefix={`${presenceKeyPrefix}:competitors`}
-        projectDomain={projectDomain}
-        showEmpty={!loading}
-        snapshots={competitorSnapshots}
-      />
-      <SemanticCompetitorSnapshots
-        emptyText="После первого ИИ-съёма с источниками здесь появятся сайты, на которые ссылается ИИ-ответ."
-        emptyTitle="Источники ИИ-ответов ещё не сохранены"
-        heading="Топ конкурентов ИИ"
-        presenceKeyPrefix={`${presenceKeyPrefix}:ai-competitors`}
-        projectDomain={projectDomain}
-        showEmpty={false}
-        snapshots={aiCompetitorSnapshots}
-      />
 
       <section
         data-presence-cursor-anchor="true"
@@ -582,11 +627,11 @@ export function SemanticKeywordInspector({
                 <div className="semantic-frequency-context">
                   <SearchEngineLogo engine="YANDEX" size="compact" />
                   <span>{<UiText text={frequencyTypeLabel(frequency.type) ?? ""} />}</span>
-                  <small>{frequency.regionCode} · {<UiText text={frequencyDeviceLabel(frequency.device) ?? ""} />}</small>
+                  <small><UiText text={frequencyRegionLabel(frequency.regionCode)} /> · {<UiText text={frequencyDeviceLabel(frequency.device) ?? ""} />}</small>
                 </div>
                 <div className="semantic-frequency-value">
                   <strong>{frequency.value ? formatInteger(frequency.value, uiLocale) : "—"}</strong>
-                  <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt, uiLocale)}</small>
+                  <small>{frequency.period ? <><UiText text={frequencyPeriodLabel(frequency.period)} after=" · " /></> : null}{formatDateTime(frequency.observedAt, uiLocale)}</small>
                 </div>
                 {!item.trashed && (
                   <button
@@ -612,6 +657,21 @@ export function SemanticKeywordInspector({
       </section>
 
       <section
+        className="semantic-inspector-seasonality"
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:seasonality`}
+      >
+        <h3><UiText text="Сезонность" /></h3>
+        {loading ? (
+          <span className="semantic-inspector-muted"><UiText text="Загружаем динамику…" /></span>
+        ) : (insights?.seasonality?.length ?? 0) > 0 ? (
+          <SemanticSeasonalityCharts points={insights?.seasonality ?? []} />
+        ) : (
+          <InspectorEmpty title={uiText("Сезонность ещё не собрана")} text="Запустите сбор истории Wordstat для этого запроса." />
+        )}
+      </section>
+
+      <section
         className="semantic-keyword-note"
         data-presence-cursor-anchor="true"
         data-presence-key={`${presenceKeyPrefix}:note`}
@@ -620,7 +680,6 @@ export function SemanticKeywordInspector({
         <form onSubmit={(event) => void saveNote(event)}>
           <textarea
             disabled={item.trashed || savingNote}
-            maxLength={4_000}
             onChange={(event) => {
               setNote(event.target.value);
               setNoteDirty(true);
@@ -631,7 +690,7 @@ export function SemanticKeywordInspector({
             value={note}
           />
           <div>
-            <small>{note.length.toLocaleString(uiLocale)} / 4 000</small>
+            <small><UiText text="Символов:" after=" " />{note.length.toLocaleString(uiLocale)}</small>
             {!item.trashed && (
               <button className="secondary-button" disabled={!noteDirty || savingNote} type="submit">
                 {savingNote ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
@@ -651,7 +710,7 @@ export function SemanticKeywordInspector({
         <small><UiText text="Обновлён:" after=" " />{formatDateTime(item.updatedAt, uiLocale)}</small>
         <small><UiText text="Источник:" after=" " />{<UiText text={sourceLabel(item.sourceMode) ?? ""} />}</small>
       </section>
-      {serpHistoryOpen && <SemanticKeywordSerpHistory projectId={projectId} keywordId={item.id} keywordText={item.textOriginal} createdAt={item.createdAt} projectDomain={projectDomain} dimensionKey={rankDimensionKey || undefined} onClose={() => setSerpHistoryOpen(false)} />}
+      {serpHistoryOpen && <SemanticKeywordSerpHistory currentUserId={currentUserId} projectId={projectId} keywordId={item.id} keywordText={item.textOriginal} createdAt={item.createdAt} projectDomain={projectDomain} dimensionKey={rankDimensionKey || undefined} onClose={() => setSerpHistoryOpen(false)} />}
       {historyOpen && (
         <SemanticKeywordPositionHistoryModal
           dimensionKey={rankDimensionKey || undefined}
@@ -666,9 +725,13 @@ export function SemanticKeywordInspector({
       )}
       {aiHistoryOpen && (
         <SemanticKeywordAiPositionHistoryModal
+          currentUserId={currentUserId}
+          {...(rankDimensionKey ? { dimensionKey: rankDimensionKey } : {})}
           keywordId={item.id}
           keywordText={item.textOriginal}
           onClose={() => setAiHistoryOpen(false)}
+          onOpenAiAnswer={() => onOpenAiAnswer(rankDimensionKey || undefined)}
+          projectDomain={projectDomain}
           projectId={projectId}
         />
       )}
@@ -991,6 +1054,15 @@ function frequencyDeviceLabel(device: string): string {
   }[device] ?? device;
 }
 
+function frequencyRegionLabel(regionCode: string): string {
+  if (regionCode === "ALL" || regionCode === "0") return "Все регионы";
+  return seoRegionOptions("WORDSTAT").find(({ code }) => code === regionCode)?.label ?? regionCode;
+}
+
+function frequencyPeriodLabel(period: string): string {
+  return period === "LAST_30_DAYS" ? "Последние 30 дней" : period;
+}
+
 function sameFrequencyContext(
   left: Pick<FrequencySnapshotSummary, "type" | "regionCode" | "device">,
   right: Pick<FrequencySnapshotSummary, "type" | "regionCode" | "device">
@@ -1100,4 +1172,42 @@ function formatDate(value: string, uiLocale: string = "ru-RU"): string {
         month: "2-digit",
         year: "numeric"
       }).format(date);
+}
+
+function rankDimensionPreferenceKey(
+  currentUserId: string,
+  projectId: string,
+  viewScope: string
+): string {
+  return `seonorita:semantic-rank-dimension:v1:${currentUserId}:${projectId}:${viewScope}`;
+}
+
+function readRankDimensionPreference(
+  currentUserId: string,
+  projectId: string,
+  viewScope: string
+): string {
+  try {
+    return localStorage.getItem(
+      rankDimensionPreferenceKey(currentUserId, projectId, viewScope)
+    ) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeRankDimensionPreference(
+  currentUserId: string,
+  projectId: string,
+  viewScope: string,
+  dimensionKey: string
+): void {
+  try {
+    localStorage.setItem(
+      rankDimensionPreferenceKey(currentUserId, projectId, viewScope),
+      dimensionKey
+    );
+  } catch {
+    // Browser storage is optional; the current sidebar keeps its local state.
+  }
 }

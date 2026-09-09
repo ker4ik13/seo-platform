@@ -1,5 +1,21 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { isSemanticRankDimensionSort, parseSemanticRankDimensionKey, parseSemanticRankDimensionMetadata, parseSemanticRankColumnKey, parseSemanticRankDimensionCatalog, parseSemanticRankComparisonItems, type SemanticRankComparisonInput, type InternalSeoOverview } from "@seo-platform/contracts";
+import {
+  isSemanticRankDimensionSort,
+  parseRankDimensionHistoryDeletion,
+  parseRankDimensionMergeSettings,
+  parseRankPositionReport,
+  parseSemanticRankColumnKey,
+  parseSemanticRankComparisonItems,
+  parseSemanticRankDimensionCatalog,
+  parseSemanticRankDimensionKey,
+  parseSemanticRankDimensionMetadata,
+  parseSerpWorkbenchReport,
+  type InternalSeoOverview,
+  type CreateRankDimensionMergeInput,
+  type RankDimensionMergeSettings,
+  type RankDimensionMergeSummary,
+  type SemanticRankComparisonInput
+} from "@seo-platform/contracts";
 import {
   projectPositionHistoryMaxPoints,
   semanticKeywordIntents,
@@ -190,7 +206,13 @@ import {
   type InternalApplyClusteringProposalInput,
   type ClusteringProposalApplyResult,
   type ClusteringProposalSummary,
-  type InternalRejectClusteringProposalInput
+  type InternalRejectClusteringProposalInput,
+  type RankPositionReportInput,
+  type RankPositionReport,
+  type SerpWorkbenchInput,
+  type SerpWorkbenchReport,
+  type DeleteRankDimensionHistoryInput,
+  type RankDimensionHistoryDeletion
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { hasEffectiveProjectPermission } from "../authorization/permissions.js";
@@ -472,23 +494,168 @@ export class SeoDataClient {
     try { return parseSemanticRankDimensionCatalog(responseData(payload)); } catch { throw invalidResponse(); }
   }
 
+  public async rankDimensionMergeSettings(
+    context: InternalContext
+  ): Promise<RankDimensionMergeSettings> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keyword-ranks/dimension-merges`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    try {
+      return parseRankDimensionMergeSettings(responseData(payload));
+    } catch {
+      throw invalidResponse();
+    }
+  }
+
+  public async createRankDimensionMerge(
+    context: InternalContext,
+    input: CreateRankDimensionMergeInput,
+    idempotencyKey: string
+  ): Promise<RankDimensionMergeSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const settings = await this.rankDimensionMergeSettings(context);
+    const source = settings.dimensions.find(({ key }) => key === input.sourceDimensionKey);
+    const target = settings.dimensions.find(({ key }) => key === input.targetDimensionKey);
+    if (!source || !target) throw invalidResponse();
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keyword-ranks/dimension-merges`,
+        this.config.services.seoData
+      ),
+      context,
+      input,
+      { "Idempotency-Key": idempotencyKey }
+    );
+    try {
+      const parsed = parseRankDimensionMergeSettings({
+        dimensions: [source, target],
+        merges: [responseData(payload)]
+      });
+      return parsed.merges[0]!;
+    } catch {
+      throw invalidResponse();
+    }
+  }
+
+  public async removeRankDimensionMerge(
+    context: InternalContext,
+    mergeId: string,
+    version: number
+  ): Promise<Readonly<{ id: string; removed: true }>> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keyword-ranks/dimension-merges/${encodeURIComponent(mergeId)}/remove`,
+        this.config.services.seoData
+      ),
+      context,
+      { version }
+    );
+    const value = responseData(payload);
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.keys(value).some((key) => key !== "id" && key !== "removed") ||
+      (value as Record<string, unknown>).id !== mergeId ||
+      (value as Record<string, unknown>).removed !== true
+    ) throw invalidResponse();
+    return { id: mergeId, removed: true };
+  }
+
   public async keywordRankComparison(context: InternalContext, input: SemanticRankComparisonInput) {
     const projectId = requiredProjectId(context.tenant);
     const payload = await this.request("POST", new URL(`/internal/v1/projects/${encodeURIComponent(projectId)}/keyword-ranks/comparison`, this.config.services.seoData), context, input);
     try { return parseSemanticRankComparisonItems(responseData(payload), input); } catch { throw invalidResponse(); }
   }
 
-  public async keywordAiAnswers(
+  public async rankPositionReport(
     context: InternalContext,
-    keywordId: string
-  ): Promise<readonly SemanticAiAnswerDetail[]> {
+    input: RankPositionReportInput
+  ): Promise<RankPositionReport> {
     const projectId = requiredProjectId(context.tenant);
     const payload = await this.request(
-      "GET",
+      "POST",
       new URL(
-        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers`,
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/rank-workbench/positions`,
         this.config.services.seoData
       ),
+      context,
+      input
+    );
+    try {
+      return parseRankPositionReport(responseData(payload));
+    } catch {
+      throw invalidResponse();
+    }
+  }
+
+  public async serpWorkbenchReport(
+    context: InternalContext,
+    input: SerpWorkbenchInput
+  ): Promise<SerpWorkbenchReport> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/rank-workbench/serp`,
+        this.config.services.seoData
+      ),
+      context,
+      input
+    );
+    try {
+      return parseSerpWorkbenchReport(responseData(payload));
+    } catch {
+      throw invalidResponse();
+    }
+  }
+
+  public async deleteRankDimensionHistory(
+    context: InternalContext,
+    input: DeleteRankDimensionHistoryInput,
+    idempotencyKey: string
+  ): Promise<RankDimensionHistoryDeletion> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/rank-workbench/delete-dimension-history`,
+        this.config.services.seoData
+      ),
+      context,
+      input,
+      { "Idempotency-Key": idempotencyKey }
+    );
+    try {
+      return parseRankDimensionHistoryDeletion(responseData(payload));
+    } catch {
+      throw invalidResponse();
+    }
+  }
+
+  public async keywordAiAnswers(
+    context: InternalContext,
+    keywordId: string,
+    dimensionKey?: string
+  ): Promise<readonly SemanticAiAnswerDetail[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers`,
+      this.config.services.seoData
+    );
+    if (dimensionKey) url.searchParams.set("dimensionKey", dimensionKey);
+    const payload = await this.request(
+      "GET",
+      url,
       context
     );
     return semanticAiAnswerDetails(responseData(payload), keywordId);
@@ -2474,7 +2641,8 @@ export class SeoDataClient {
     method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     url: URL,
     context: InternalContext,
-    body?: unknown
+    body?: unknown,
+    extraHeaders?: Readonly<Record<string, string>>
   ): Promise<unknown> {
     const token = this.config.seoDataApiToken;
     if (!token) throw dependencyUnavailable();
@@ -2488,6 +2656,9 @@ export class SeoDataClient {
       "X-Actor-Id": context.actorId
     });
     if (body !== undefined) headers.set("Content-Type", "application/json");
+    for (const [name, value] of Object.entries(extraHeaders ?? {})) {
+      headers.set(name, value);
+    }
 
     let response: SeoDataTransportResponse;
     const serializedBody =
@@ -2629,6 +2800,7 @@ function semanticAiAnswerHistoryItems(
       "rankingUrl",
       "brandFound",
       "provider",
+      "results",
       "observedAt"
     ]);
     if (
@@ -2646,6 +2818,8 @@ function semanticAiAnswerHistoryItems(
       (item.rankingUrl !== undefined && !validHttpUrl(item.rankingUrl)) ||
       typeof item.brandFound !== "boolean" ||
       item.provider !== "ARSENKIN" ||
+      !Array.isArray(item.results) ||
+      item.results.length > 100 ||
       !validDate(item.observedAt) ||
       (!item.answerPresent && (item.siteFound || item.brandFound)) ||
       (item.siteFound !==
@@ -2653,6 +2827,23 @@ function semanticAiAnswerHistoryItems(
     ) {
       throw invalidResponse();
     }
+    const results = item.results.map((candidate) => {
+      const source = exactRecord(candidate, ["position", "url", "title", "snippet"]);
+      if (
+        !Number.isSafeInteger(source.position) ||
+        Number(source.position) < 1 ||
+        Number(source.position) > 100 ||
+        !validHttpUrl(source.url) ||
+        (source.title !== undefined && typeof source.title !== "string") ||
+        (source.snippet !== undefined && typeof source.snippet !== "string")
+      ) throw invalidResponse();
+      return {
+        position: Number(source.position),
+        url: source.url as string,
+        ...(typeof source.title === "string" ? { title: source.title } : {}),
+        ...(typeof source.snippet === "string" ? { snippet: source.snippet } : {})
+      };
+    });
     const result: SemanticAiAnswerHistoryItem = {
       snapshotId: item.snapshotId,
       keywordId,
@@ -2668,6 +2859,7 @@ function semanticAiAnswerHistoryItems(
       ...(typeof item.rankingUrl === "string" ? { rankingUrl: item.rankingUrl } : {}),
       brandFound: item.brandFound,
       provider: "ARSENKIN",
+      results,
       observedAt: item.observedAt
     };
     if (previous) {
@@ -2777,6 +2969,7 @@ export function semanticKeywordInsights(
   keywordId: string
 ): SemanticKeywordInsights {
   const input = objectValue(value);
+  const seasonality = input?.seasonality ?? [];
   const positionHistory = input?.positionHistory ?? [];
   const competitorSnapshots = input?.competitorSnapshots ?? [];
   const aiPositionHistory = input?.aiPositionHistory ?? [];
@@ -2786,10 +2979,11 @@ export function semanticKeywordInsights(
     input.keywordId !== keywordId ||
     !Array.isArray(input.frequencies) ||
     input.frequencies.length > 100 ||
+    !Array.isArray(seasonality) ||
+    seasonality.length > 1_000 ||
     !Array.isArray(input.positions) ||
     input.positions.length > 200 ||
-    (input.note !== undefined &&
-      (typeof input.note !== "string" || input.note.length > 4_000)) ||
+    (input.note !== undefined && typeof input.note !== "string") ||
     !Array.isArray(positionHistory) ||
     positionHistory.length > 240 ||
     !Array.isArray(competitorSnapshots) ||
@@ -2836,6 +3030,49 @@ export function semanticKeywordInsights(
         sourceMode: item.sourceMode as "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL",
         jobId: item.jobId,
         qualityFlags: item.qualityFlags as Array<"CONTEXT_INCOMPLETE" | "STALE" | "PARTIAL" | "ESTIMATED">,
+        observedAt: item.observedAt
+      };
+    }),
+    seasonality: seasonality.map((value) => {
+      const item = objectValue(value);
+      if (
+        !item ||
+        !["BASE", "EXACT", "FIXED"].includes(String(item.type)) ||
+        !["MONTH", "WEEK", "DAY"].includes(String(item.granularity)) ||
+        typeof item.periodStart !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(item.periodStart) ||
+        new Date(`${item.periodStart}T00:00:00.000Z`).toISOString().slice(0, 10) !==
+          item.periodStart ||
+        typeof item.value !== "string" ||
+        !/^(?:0|[1-9]\d{0,18})$/u.test(item.value) ||
+        (item.share !== undefined &&
+          (typeof item.share !== "string" ||
+            !/^(?:0(?:\.\d{1,18})?|1(?:\.0{1,18})?)$/u.test(item.share))) ||
+        !requiredString(item.regionCode) ||
+        !["ALL", "DESKTOP", "MOBILE", "PHONE_ONLY", "TABLET_ONLY"].includes(
+          String(item.device)
+        ) ||
+        !["XMLSTOCK", "ARSENKIN"].includes(String(item.provider)) ||
+        !["BYOK", "PLATFORM"].includes(String(item.sourceMode)) ||
+        !requiredString(item.jobId) ||
+        !validDate(item.observedAt)
+      ) throw invalidResponse();
+      return {
+        type: item.type as "BASE" | "EXACT" | "FIXED",
+        granularity: item.granularity as "MONTH" | "WEEK" | "DAY",
+        periodStart: item.periodStart,
+        value: item.value,
+        ...(typeof item.share === "string" ? { share: item.share } : {}),
+        regionCode: item.regionCode,
+        device: item.device as
+          | "ALL"
+          | "DESKTOP"
+          | "MOBILE"
+          | "PHONE_ONLY"
+          | "TABLET_ONLY",
+        provider: item.provider as "XMLSTOCK" | "ARSENKIN",
+        sourceMode: item.sourceMode as "BYOK" | "PLATFORM",
+        jobId: item.jobId,
         observedAt: item.observedAt
       };
     }),
@@ -3098,6 +3335,7 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
   const keys = Object.keys(input);
   const countKeys = [
     "positionedKeywordCount",
+    "top1KeywordCount",
     "top3KeywordCount",
     "top5KeywordCount",
     "top10KeywordCount",
@@ -3115,6 +3353,7 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
       Number(input[key]) < 0 ||
       Number(input[key]) > Number(input.positionedKeywordCount)
     ) ||
+    Number(input.top1KeywordCount) > Number(input.top3KeywordCount) ||
     Number(input.top3KeywordCount) > Number(input.top5KeywordCount) ||
     Number(input.top5KeywordCount) > Number(input.top10KeywordCount) ||
     Number(input.top10KeywordCount) > Number(input.top30KeywordCount) ||
@@ -3131,6 +3370,7 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
   }
   return {
     positionedKeywordCount: Number(input.positionedKeywordCount),
+    top1KeywordCount: Number(input.top1KeywordCount),
     top3KeywordCount: Number(input.top3KeywordCount),
     top5KeywordCount: Number(input.top5KeywordCount),
     top10KeywordCount: Number(input.top10KeywordCount),
@@ -3167,6 +3407,7 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
       "observedAt",
       "measuredKeywordCount",
       "positionedKeywordCount",
+      "top1KeywordCount",
       "top3KeywordCount",
       "top5KeywordCount",
       "top10KeywordCount",
@@ -3190,6 +3431,7 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
         !Number.isSafeInteger(point[key]) || Number(point[key]) < 0
       ) ||
       Number(point.positionedKeywordCount) > Number(point.measuredKeywordCount) ||
+      Number(point.top1KeywordCount) > Number(point.top3KeywordCount) ||
       Number(point.top3KeywordCount) > Number(point.top5KeywordCount) ||
       Number(point.top5KeywordCount) > Number(point.top10KeywordCount) ||
       Number(point.top10KeywordCount) > Number(point.top30KeywordCount) ||
@@ -3208,6 +3450,7 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
       observedAt: point.observedAt,
       measuredKeywordCount: Number(point.measuredKeywordCount),
       positionedKeywordCount: Number(point.positionedKeywordCount),
+      top1KeywordCount: Number(point.top1KeywordCount),
       top3KeywordCount: Number(point.top3KeywordCount),
       top5KeywordCount: Number(point.top5KeywordCount),
       top10KeywordCount: Number(point.top10KeywordCount),
@@ -3249,6 +3492,7 @@ export function semanticKeywordItem(
     typeof item.isTracked !== "boolean" ||
     typeof item.showAiAnswerButton !== "boolean" ||
     (item.hasNote !== undefined && typeof item.hasNote !== "boolean") ||
+    (item.hasMultipleRankingUrls !== undefined && typeof item.hasMultipleRankingUrls !== "boolean") ||
     (item.intent !== undefined &&
       (typeof item.intent !== "string" ||
         !semanticKeywordIntents.some((intent) => intent === item.intent))) ||
@@ -3292,6 +3536,7 @@ export function semanticKeywordItem(
     isTracked: item.isTracked,
     showAiAnswerButton: item.showAiAnswerButton,
     hasNote: item.hasNote === true,
+    ...(item.hasMultipleRankingUrls === true ? { hasMultipleRankingUrls: true } : {}),
     ...(typeof item.intent === "string"
       ? {
           intent: item.intent as SemanticKeywordIntent

@@ -18,11 +18,13 @@ import { useUiLocale, UiText } from "./ui-locale";
 
 
 export function SemanticAiAnswerDetailsModal({
+  dimensionKey,
   keywordId,
   keywordText,
   onClose,
   projectId
 }: Readonly<{
+  dimensionKey?: string;
   keywordId: string;
   keywordText: string;
   onClose: () => void;
@@ -39,7 +41,7 @@ export function SemanticAiAnswerDetailsModal({
     setLoading(true);
     setError(undefined);
     void browserApiRequest<readonly SemanticAiAnswerDetail[]>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers`,
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers${dimensionKey ? `?dimensionKey=${encodeURIComponent(dimensionKey)}` : ""}`,
       { signal: controller.signal }
     )
       .then((result) => {
@@ -55,7 +57,7 @@ export function SemanticAiAnswerDetailsModal({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [keywordId, projectId]);
+  }, [dimensionKey, keywordId, projectId]);
 
   const active = useMemo(
     () => items.find(({ searchEngine }) => searchEngine === activeEngine) ?? items[0],
@@ -70,6 +72,7 @@ export function SemanticAiAnswerDetailsModal({
 
   return (
     <SemanticModal
+      bodyLayout="edge"
       bodyClassName="semantic-ai-answer-modal-body"
       className="semantic-ai-answer-modal"
       description={uiText("Последний сохранённый ИИ-ответ, источники и позиция сайта для выбранного поисковика.")}

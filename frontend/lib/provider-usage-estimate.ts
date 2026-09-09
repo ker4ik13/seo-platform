@@ -37,7 +37,7 @@ export function rankProviderUsageEstimate(
   source: ProjectConnectorCredentialOption | undefined,
   keywordCount: number,
   searchEngine: TrackingSearchEngine,
-  depth: 30 | 50 | 100,
+  depth: 10 | 20 | 30 | 50 | 100,
   searchSource: "SEARCH_API" | "LIVE",
   yandexLiveMode?: "TURBO",
   purpose: RankCollectionPurpose = "POSITION_TRACKING", uiLocale: string = "ru-RU"
@@ -52,7 +52,7 @@ export function rankProviderUsageEstimate(
       const pricePerThousand =
         searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 28 : 25;
       return {
-        usage: `до ${formatInteger(requestCount, uiLocale)} запросов XMLStock · Топ-10 · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB", uiLocale)}`,
+        usage: `до ${formatInteger(requestCount, uiLocale)} запросов XMLStock · Топ-${depth} · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB", uiLocale)}`,
         available: providerQuotaLabel(source, uiLocale)
       };
     }

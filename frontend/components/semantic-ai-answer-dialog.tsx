@@ -4,7 +4,6 @@ import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation
 import {
   aiAnswerCollectionKeywordLimit,
   type AiAnswerCollectionSummary,
-  type AiAnswerDevice,
   type AiAnswerSearchEngine,
   type ProjectConnectorBinding,
   type ProjectConnectorSettings
@@ -25,10 +24,11 @@ import {
   searchRegionKind,
   writeLastSemanticRegion
 } from "../lib/semantic-region-preference";
+import { type RankTarget } from "../lib/rank-targets";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
-import { SearchableRegionSelect } from "./searchable-region-select";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticRankTargets } from "./semantic-rank-targets";
 import { SemanticModal } from "./semantic-modal";
 import {
   SemanticOperationScope,
@@ -60,12 +60,17 @@ export function SemanticAiAnswerDialog({
   const { t: uiText } = useUiLocale();
   const competitorMode = mode === "competitors";
   const formId = useId();
-  const operationAttempt = useRef<OperationAttempt | undefined>(undefined);
+  const operationAttempts = useRef(new Map<string, OperationAttempt>());
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [searchEngine, setSearchEngine] = useState<AiAnswerSearchEngine>("YANDEX");
   const [regions, setRegions] = useState(defaultSemanticSearchRegions);
-  const [device, setDevice] = useState<AiAnswerDevice>("DESKTOP");
+  const [targets, setTargets] = useState<readonly RankTarget[]>(() => [{
+    ...defaultSemanticSearchRegions().YANDEX,
+    regionCode: defaultSemanticSearchRegions().YANDEX.code,
+    regionLabel: defaultSemanticSearchRegions().YANDEX.label,
+    device: "DESKTOP"
+  }]);
   const [host, setHost] = useState(() => projectHost(projectDomain));
   const [excludeSubdomains, setExcludeSubdomains] = useState(false);
   const [brandsText, setBrandsText] = useState("");
@@ -87,7 +92,6 @@ export function SemanticAiAnswerDialog({
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const brands = splitBrands(brandsText);
-  const regionCode = regions[searchEngine].code;
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
     resolving: boolean,
@@ -103,13 +107,13 @@ export function SemanticAiAnswerDialog({
   }, [projectDomain]);
 
   useEffect(() => {
-    setRegions(
-      readLastSemanticSearchRegions(
+    const saved = readLastSemanticSearchRegions(
         window.localStorage,
         projectId,
         "AI_ANSWERS"
-      )
-    );
+      );
+    setRegions(saved);
+    setTargets([{ regionCode: saved.YANDEX.code, regionLabel: saved.YANDEX.label, device: "DESKTOP" }]);
   }, [projectId]);
 
   useEffect(() => {
@@ -158,11 +162,13 @@ export function SemanticAiAnswerDialog({
       }
       await ensureBinding(settings, binding, selectedSource.id);
       const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`;
-      const body = {
+      const collections: AiAnswerCollectionSummary[] = [];
+      for (const target of targets) {
+        const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
             searchEngine,
-            regionCode,
-            device,
+            regionCode: target.regionCode,
+            device: target.device,
             host: normalizedHost,
             excludeSubdomains: competitorMode ? false : excludeSubdomains,
             brands: competitorMode ? [] : brands,
@@ -173,18 +179,27 @@ export function SemanticAiAnswerDialog({
                 }
               : {})
           };
-      operationAttempt.current = prepareOperationAttempt(operationAttempt.current, operationPath, body, selectedSource.id, "semantic-ai-answer");
-      const collection = await browserApiRequest<AiAnswerCollectionSummary>(operationPath, {
-        method: "POST", operationAttempt: operationAttempt.current, body
-      });
+        const targetKey = `${searchEngine}:${target.regionCode}:${target.device}`;
+        const attempt = prepareOperationAttempt(
+          operationAttempts.current.get(targetKey),
+          operationPath,
+          body,
+          selectedSource.id,
+          `semantic-ai-answer:${targetKey}`
+        );
+        operationAttempts.current.set(targetKey, attempt);
+        collections.push(await browserApiRequest<AiAnswerCollectionSummary>(operationPath, {
+          method: "POST", operationAttempt: attempt, body
+        }));
+      }
       writeLastSemanticRegion(
         window.localStorage,
         projectId,
         "AI_ANSWERS",
         searchRegionKind(searchEngine),
-        regionCode
+        targets[0]!.regionCode
       );
-      onStarted(collection);
+      onStarted(collections[0]!);
     } catch (requestError) {
       if (requestError instanceof BrowserApiError && requestError.code === "OPERATION_CANCELLED") return;
       setError(aiAnswerErrorMessage(requestError));
@@ -232,7 +247,7 @@ export function SemanticAiAnswerDialog({
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
             <div><Icon name="semantic" /><div><dt><UiText text="К проверке" /></dt><dd>{selections.length} <UiText text="запросов" before=" " /></dd></div></div>
             <div><Icon name="ai" /><div><dt><UiText text="Поисковик" /></dt><dd>{searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</dd></div></div>
-            <div><Icon name="operations" /><div><dt><UiText text="Лимитов Arsenkin" /></dt><dd>{selections.length * 2}</dd></div></div>
+            <div><Icon name="operations" /><div><dt><UiText text="Лимитов Arsenkin" /></dt><dd>{selections.length * targets.length * 2}</dd></div></div>
             {competitorMode ? (
               <div>
                 <Icon name="rankCheck" />
@@ -244,14 +259,14 @@ export function SemanticAiAnswerDialog({
           </dl>
           <div className="semantic-modal-actions">
             <button className="secondary-button" disabled={running} onClick={onClose} type="button"><UiText text="Отмена" /></button>
-            <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || !projectHost(competitorMode ? projectDomain : host) || selections.length === 0 || (!competitorMode && brands.length > 10)} form={formId} type="submit">
+            <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || !projectHost(competitorMode ? projectDomain : host) || selections.length === 0 || targets.length === 0 || (!competitorMode && brands.length > 10)} form={formId} type="submit">
               {resolvingScope
                 ? <UiText text="Загружаем запросы…" />
                 : running
                   ? <UiText text="Запускаем…" />
                   : competitorMode
-                    ? <UiText text="Собрать ИИ-выдачу ({0})" values={[String(selections.length)]} />
-                    : <UiText text="Проверить ИИ-ответы ({0})" values={[String(selections.length)]} />}
+                    ? <UiText text="Собрать ИИ-выдачу ({0})" values={[String(selections.length * targets.length)]} />
+                    : <UiText text="Проверить ИИ-ответы ({0})" values={[String(selections.length * targets.length)]} />}
             </button>
           </div>
         </div>
@@ -276,7 +291,15 @@ export function SemanticAiAnswerDialog({
                   aria-pressed={searchEngine === engine}
                   className={searchEngine === engine ? "selected" : undefined}
                   key={engine}
-                  onClick={() => setSearchEngine(engine)}
+                  onClick={() => {
+                    setSearchEngine(engine);
+                    const preferred = regions[engine];
+                    setTargets([{
+                      regionCode: preferred.code,
+                      regionLabel: preferred.label,
+                      device: targets[0]?.device ?? "DESKTOP"
+                    }]);
+                  }}
                   type="button"
                 >
                   <SearchEngineLogo engine={engine} />
@@ -328,32 +351,12 @@ export function SemanticAiAnswerDialog({
                   : <UiText text="Параметры отдельного среза ИИ-ответов." />}
               </p>
             </header>
-              <label className="semantic-workflow-field">
-                <span><UiText text="Регион" /></span>
-                <SearchableRegionSelect
-                  kind={searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
-                  onChange={(region) => setRegions((current) => ({
-                    ...current,
-                    [searchEngine]: region
-                  }))}
-                  value={regionCode}
-                />
-                <small>
-                  <UiText text="Первый запуск — Москва; затем используется регион последней успешной проверки." /></small>
-              </label>
-              <fieldset className="semantic-device-cards">
-                <legend><UiText text="Устройство" /></legend>
-                <div aria-label={uiText("Устройство")} role="radiogroup">
-                  {(["DESKTOP", "MOBILE"] as const).map((value) => (
-                    <label className={device === value ? "selected" : undefined} key={value}>
-                      <input checked={device === value} onChange={() => setDevice(value)} type="radio" />
-                      <Icon name={value === "DESKTOP" ? "desktop" : "mobile"} />
-                      <span>{value === "DESKTOP" ? <UiText text="Десктоп" /> : <UiText text="Мобильное" />}</span>
-                      <i aria-hidden="true" />
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <SemanticRankTargets
+                disabled={running}
+                engine={searchEngine}
+                onChange={setTargets}
+                targets={targets}
+              />
               {competitorMode ? (
                 <>
                   <label className="semantic-check-row semantic-competitor-position-toggle">

@@ -13,6 +13,7 @@ export function semanticOperationScopeQuery(
   cursor?: string
 ): URLSearchParams {
   const query = new URLSearchParams({
+    includeUntracked: "true",
     limit: String(
       cursor
         ? semanticOperationScopePageSize

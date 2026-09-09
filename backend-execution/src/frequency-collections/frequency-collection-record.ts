@@ -2,12 +2,15 @@ import type {
   FrequencyCollectionStatus,
   FrequencyCollectionProvider,
   FrequencyCollectionSummary,
+  FrequencyCollectionMode,
+  FrequencySeasonalityRequest,
   ConnectorOperationAttemptSummary,
   ConnectorRoutingScope,
   SemanticFrequencyDevice,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
 import { frequencyCollectionKeywordLimit } from "@seo-platform/contracts";
+import { parseFrequencySeasonalityRequest } from "@seo-platform/contracts";
 import type { Job } from "../generated/prisma/client.js";
 
 export type FrequencyJob = Job;
@@ -48,9 +51,11 @@ export function frequencyCollectionSummary(
     selectedKeywords,
     completedKeywords,
     failedKeywords,
+    mode: input.mode,
     types: input.types,
     regionCode: input.regionCode,
     device: input.device,
+    ...(input.seasonality ? { seasonality: input.seasonality } : {}),
     ...(job.retryAt ? { retryAt: job.retryAt.toISOString() } : {}),
     ...currentFailure,
     version: job.version,
@@ -164,23 +169,46 @@ function failedCount(resultSummary: unknown, errorSummary: unknown): number {
 }
 
 function inputSnapshot(value: unknown): {
+  readonly mode: FrequencyCollectionMode;
   readonly types: readonly SemanticFrequencyType[];
   readonly regionCode: string;
   readonly device: SemanticFrequencyDevice;
+  readonly seasonality?: FrequencySeasonalityRequest;
 } {
   const input = record(value);
-  const types = Array.isArray(input?.types)
-    ? input.types.filter(
-        (value): value is SemanticFrequencyType =>
-          value === "BASE" || value === "EXACT" || value === "FIXED"
-      )
-    : [];
+  if (!Array.isArray(input?.types) || input.types.length < 1 || input.types.length > 3) {
+    invalid();
+  }
+  const types = input.types.map((value): SemanticFrequencyType => {
+    if (value !== "BASE" && value !== "EXACT" && value !== "FIXED") invalid();
+    return value;
+  });
+  const mode = input?.mode === undefined ? "FREQUENCY" : input.mode;
   if (
-    types.length < 1 ||
+    new Set(types).size !== types.length ||
+    (mode !== "FREQUENCY" && mode !== "SEASONALITY") ||
     typeof input?.regionCode !== "string" ||
     !device(input.device)
   ) invalid();
-  return { types, regionCode: input.regionCode, device: input.device };
+  let seasonality;
+  if (mode === "SEASONALITY") {
+    // Historical XMLStock jobs may contain several types admitted before the
+    // current create boundary was narrowed to the provider's reliable BASE series.
+    try {
+      seasonality = parseFrequencySeasonalityRequest(input?.seasonality);
+    } catch {
+      invalid();
+    }
+  } else if (input?.seasonality !== undefined) {
+    invalid();
+  }
+  return {
+    mode,
+    types,
+    regionCode: input.regionCode,
+    device: input.device,
+    ...(seasonality ? { seasonality } : {})
+  };
 }
 
 function status(value: string): FrequencyCollectionStatus {

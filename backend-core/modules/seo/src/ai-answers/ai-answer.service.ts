@@ -8,14 +8,15 @@ import {
   NotFoundException,
   ServiceUnavailableException
 } from "@nestjs/common";
-import type {
-  InternalAiAnswerKeywords,
-  InternalAiAnswerHistoryCollection,
-  InternalAiAnswerHistoryQuery,
-  InternalPersistAiAnswerSnapshotBatchInput,
-  InternalResolveAiAnswerKeywordsInput,
-  SemanticAiAnswerDetail,
-  SemanticAiAnswerHistoryItem
+import {
+  parseSemanticRankDimensionKey,
+  type InternalAiAnswerKeywords,
+  type InternalAiAnswerHistoryCollection,
+  type InternalAiAnswerHistoryQuery,
+  type InternalPersistAiAnswerSnapshotBatchInput,
+  type InternalResolveAiAnswerKeywordsInput,
+  type SemanticAiAnswerDetail,
+  type SemanticAiAnswerHistoryItem
 } from "@seo-platform/contracts";
 import { canonicalizeJson } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
@@ -167,8 +168,13 @@ export class AiAnswerService {
   public async latest(
     workspaceId: string,
     projectId: string,
-    keywordId: string
+    keywordId: string,
+    dimensionKey?: string
   ): Promise<readonly SemanticAiAnswerDetail[]> {
+    const dimension = dimensionKey
+      ? parseSemanticRankDimensionKey(dimensionKey)
+      : undefined;
+    if (dimensionKey && !dimension) throw new BadRequestException("Invalid rank dimension");
     const keyword = await this.prisma.keyword.findFirst({
       where: { id: keywordId, workspaceId, projectId, status: { in: ["ACTIVE", "DELETED"] } },
       select: { id: true }
@@ -179,7 +185,12 @@ export class AiAnswerService {
         workspaceId,
         projectId,
         keywordId,
-        positionTrackingEnabled: true
+        positionTrackingEnabled: true,
+        ...(dimension ? {
+          searchEngine: dimension.searchEngine,
+          regionCode: dimension.regionCode,
+          device: dimension.device
+        } : {})
       },
       orderBy: [
         { searchEngine: "asc" },
@@ -196,6 +207,8 @@ export class AiAnswerService {
       snapshots.map((snapshot) => ({
         keywordId: snapshot.keywordId,
         searchEngine: snapshot.searchEngine as SemanticAiAnswerDetail["searchEngine"],
+        regionCode: snapshot.regionCode,
+        device: storedDevice(snapshot.device),
         observedAt: snapshot.observedAt,
         snapshotId: snapshot.id
       }))
@@ -213,6 +226,8 @@ export class AiAnswerService {
         previousPositions,
         snapshot.keywordId,
         snapshot.searchEngine as SemanticAiAnswerDetail["searchEngine"],
+        snapshot.regionCode,
+        storedDevice(snapshot.device),
         snapshot.observedAt,
         snapshot.id
       ),
@@ -282,7 +297,16 @@ export class AiAnswerService {
         brandFound: true,
         provider: true,
         sourceMode: true,
-        observedAt: true
+        observedAt: true,
+        sources: {
+          orderBy: { position: "asc" },
+          select: {
+            position: true,
+            url: true,
+            title: true,
+            description: true
+          }
+        }
       }
     });
     const hasNext = rows.length > input.limit;
@@ -294,6 +318,8 @@ export class AiAnswerService {
       pageRows.map((row) => ({
         keywordId: row.keywordId,
         searchEngine: storedSearchEngine(row.searchEngine),
+        regionCode: row.regionCode,
+        device: storedDevice(row.device),
         observedAt: row.observedAt,
         snapshotId: row.id
       }))
@@ -315,6 +341,8 @@ export class AiAnswerService {
             previousAiAnswerPositionKey(
               row.keywordId,
               searchEngine,
+              row.regionCode,
+              storedDevice(row.device),
               row.observedAt,
               row.id
             )
@@ -409,11 +437,20 @@ function optionalPreviousPosition(
   values: ReadonlyMap<string, number>,
   keywordId: string,
   searchEngine: SemanticAiAnswerDetail["searchEngine"],
+  regionCode: string,
+  device: SemanticAiAnswerDetail["device"],
   observedAt: Date,
   snapshotId: string
 ): Readonly<{ previousPosition?: number }> {
   const previousPosition = values.get(
-    previousAiAnswerPositionKey(keywordId, searchEngine, observedAt, snapshotId)
+    previousAiAnswerPositionKey(
+      keywordId,
+      searchEngine,
+      regionCode,
+      device,
+      observedAt,
+      snapshotId
+    )
   );
   return previousPosition === undefined ? {} : { previousPosition };
 }
@@ -430,6 +467,12 @@ function aiAnswerHistoryItem(
     rankingUrl: string | null;
     brandFound: boolean;
     observedAt: Date;
+    sources: readonly Readonly<{
+      position: number;
+      url: string;
+      title: string | null;
+      description: string | null;
+    }>[];
   }>,
   searchEngine: SemanticAiAnswerHistoryItem["searchEngine"],
   previousPosition: number | undefined
@@ -457,6 +500,12 @@ function aiAnswerHistoryItem(
     ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
     brandFound: row.brandFound,
     provider: "ARSENKIN",
+    results: row.sources.map((source) => ({
+      position: source.position,
+      url: source.url,
+      ...(source.title === null ? {} : { title: source.title }),
+      ...(source.description === null ? {} : { snippet: source.description })
+    })),
     observedAt: row.observedAt.toISOString()
   };
 }

@@ -29,6 +29,7 @@ test("exports newest daily rank independently per geographic and device dimensio
     }
   } as unknown as KeywordService;
   const prisma = {
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
     rankSnapshot: {
       findMany: async (input: unknown) => {
         calls.push(["snapshots", input]);

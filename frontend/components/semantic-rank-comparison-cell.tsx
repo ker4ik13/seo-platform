@@ -124,6 +124,27 @@ export function SemanticRankComparisonCell({
       </span>
     );
   }
+  if (metric.startsWith("ai")) {
+    const answer = item.aiAnswer;
+    if (!answer) return <span className="semantic-rank-comparison-empty">—</span>;
+    if (metric === "aiCheckedAt") {
+      return <SemanticRankCheckedAtCell observedAt={answer.observedAt} />;
+    }
+    if (metric === "aiUrl") {
+      return <SemanticRankUrlCell url={answer.rankingUrl} />;
+    }
+    return (
+      <SemanticRankPositionCell
+        item={{
+          found: answer.siteFound,
+          ...(answer.position === undefined ? {} : { position: answer.position }),
+          ...(answer.previousPosition === undefined ? {} : { previousPosition: answer.previousPosition })
+        }}
+        searchEngine={item.searchEngine}
+        titleSuffix={`${new Date(answer.observedAt).toLocaleString(locale)} · ИИ · ${answer.provider}${answer.rankingUrl ? ` · ${answer.rankingUrl}` : ""}`}
+      />
+    );
+  }
   if (metric === "checkedAt") {
     return <SemanticRankCheckedAtCell observedAt={item.observedAt} />;
   }

@@ -118,7 +118,7 @@ export function scopedRankJobSummary(
   const depth =
     input.depth === undefined
       ? undefined
-      : numericMember(input.depth, [30, 50, 100] as const);
+      : numericMember(input.depth, [10, 20, 30, 50, 100] as const);
   const routing = routeSummary(input.routingScope, input.connectorAttempts);
   const credentialMode =
     input.credentialMode === "BYOK_API_KEY" ||

@@ -102,7 +102,8 @@ test(
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
-      aiAnswerSnapshot: { findMany: async () => [] }
+      aiAnswerSnapshot: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] }
     } as unknown as PrismaService, {} as SemanticVersionService);
 
     try {

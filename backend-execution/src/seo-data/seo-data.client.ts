@@ -34,6 +34,7 @@ import type {
   InternalSemanticImportChunkResult,
   InternalSemanticImportReceipt,
   InternalPersistFrequencySnapshotBatchInput,
+  InternalPersistFrequencySeasonalityBatchInput,
   SemanticImportResultSummary,
   TrackingContextConfigurationInput,
   InternalResolveFrequencyKeywordInput,
@@ -250,6 +251,29 @@ export class SeoDataClient {
     const value = exactObject(payload, ["created"]);
     const maximum = input.items.reduce(
       (count, item) => count + item.snapshots.length,
+      0
+    );
+    if (
+      !value ||
+      !Number.isSafeInteger(value.created) ||
+      Number(value.created) < 0 ||
+      Number(value.created) > maximum
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+  }
+
+  public async persistFrequencySeasonalityBatch(
+    input: InternalPersistFrequencySeasonalityBatchInput
+  ): Promise<void> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/frequencies/seasonality-batch`,
+      input,
+      FREQUENCY_PERSIST_RESPONSE_MAX_BYTES
+    );
+    const value = exactObject(payload, ["created"]);
+    const maximum = input.items.reduce(
+      (count, item) => count + item.points.length,
       0
     );
     if (
@@ -966,7 +990,7 @@ function trackingConfiguration(
     !/^[A-Z]{2}$/u.test(payload.countryCode) ||
     !canonicalLanguage(payload.language) ||
     !["DESKTOP", "MOBILE"].includes(String(payload.device)) ||
-    ![30, 50, 100].includes(Number(payload.depth)) ||
+    ![10, 20, 30, 50, 100].includes(Number(payload.depth)) ||
     typeof payload.safeSearch !== "boolean" ||
     !domainMatchRule ||
     !optionalString(payload, "regionCode", 100) ||

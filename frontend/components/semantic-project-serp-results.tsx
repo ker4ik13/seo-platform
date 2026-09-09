@@ -14,9 +14,11 @@ import { UiText, useUiLocale } from "./ui-locale";
 
 export function SemanticProjectSerpResults({
   results,
+  showUrlDifferences = false,
   targetUrl
 }: Readonly<{
   results: readonly SemanticKeywordListSiteResult[];
+  showUrlDifferences?: boolean;
   targetUrl?: string;
 }>) {
   const { t: uiText } = useUiLocale();
@@ -56,7 +58,12 @@ export function SemanticProjectSerpResults({
                 target="_blank"
                 title={result.rankingUrl}
               >
-                <SemanticSerpResultUrl value={result.rankingUrl} />
+                <SemanticSerpResultUrl
+                  {...(showUrlDifferences && targetUrl
+                    ? { differenceTarget: targetUrl }
+                    : {})}
+                  value={result.rankingUrl}
+                />
               </a>
               {isTarget && <em><UiText text="Целевой URL" /></em>}
             </div>

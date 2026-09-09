@@ -1,10 +1,12 @@
 import {
   frequencyCollectionKeywordLimit,
+  frequencyCollectionModes,
   frequencyCollectionStatuses,
   frequencyCollectionProviders,
   connectorRoutingScopes,
   semanticFrequencyDevices,
   semanticFrequencyTypes,
+  parseFrequencySeasonalityRequest,
   type FrequencyCollectionStatus,
   type FrequencyCollectionSummary,
   type ConnectorOperationAttemptSummary,
@@ -33,6 +35,7 @@ export function scopedFrequencyCollection(
     typeof input.provider !== "string" ||
     !frequencyCollectionProviders.includes(input.provider as never)
   ) invalid();
+  const provider = member(input.provider, frequencyCollectionProviders);
   if (
     !Array.isArray(input.types) ||
     input.types.length < 1 ||
@@ -41,6 +44,23 @@ export function scopedFrequencyCollection(
     invalid();
   }
   const types = input.types.map((value) => member(value, semanticFrequencyTypes));
+  if (new Set(types).size !== types.length) invalid();
+  const mode = input.mode === undefined
+    ? "FREQUENCY"
+    : member(input.mode, frequencyCollectionModes);
+  let seasonality;
+  if (mode === "SEASONALITY") {
+    if (provider === "ARSENKIN" && (types.length !== 1 || types[0] !== "BASE")) {
+      invalid();
+    }
+    try {
+      seasonality = parseFrequencySeasonalityRequest(input.seasonality);
+    } catch {
+      invalid();
+    }
+  } else if (input.seasonality !== undefined) {
+    invalid();
+  }
   const hasRoutingScope = input.routingScope !== undefined;
   const hasConnectorAttempts = input.connectorAttempts !== undefined;
   if (input.requiresUsageReview !== undefined && typeof input.requiresUsageReview !== "boolean") invalid();
@@ -50,7 +70,7 @@ export function scopedFrequencyCollection(
     workspaceId,
     projectId,
     ...(input.actorId === undefined ? {} : { actorId: uuid(input.actorId) }),
-    provider: member(input.provider, frequencyCollectionProviders),
+    provider,
     ...(input.credentialMode === undefined ? {} : { credentialMode: member(input.credentialMode, ["BYOK_API_KEY", "PLATFORM_PAID"] as const) }),
     ...(input.requiresUsageReview === undefined ? {} : { requiresUsageReview: input.requiresUsageReview as boolean }),
     ...(!hasRoutingScope
@@ -76,9 +96,11 @@ export function scopedFrequencyCollection(
       0,
       frequencyCollectionKeywordLimit
     ),
+    mode,
     types,
     regionCode: string(input.regionCode, 100),
     device: member(input.device, semanticFrequencyDevices),
+    ...(seasonality ? { seasonality } : {}),
     ...optionalTimestamp(input.retryAt, "retryAt"),
     ...optionalString(input.failureCode, "failureCode", 64),
     version: integer(input.version, 1, Number.MAX_SAFE_INTEGER),

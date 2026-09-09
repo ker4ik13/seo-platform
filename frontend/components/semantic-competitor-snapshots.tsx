@@ -15,6 +15,7 @@ import {
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SemanticRankContext } from "./semantic-rank-context";
+import { SemanticRankPositionCell } from "./semantic-rank-comparison-cell";
 import { UiText, useUiLocale } from "./ui-locale";
 
 
@@ -22,6 +23,7 @@ export function SemanticCompetitorSnapshots({
   emptyText = "После следующего поддерживаемого съёма здесь появятся позиции, URL и доступные мета-данные результатов.",
   emptyTitle = "SERP для этого запроса ещё не сохранён",
   heading = "Топ конкурентов",
+  movementForResult,
   presenceKeyPrefix,
   projectDomain,
   showEmpty = true,
@@ -30,6 +32,13 @@ export function SemanticCompetitorSnapshots({
   emptyText?: string;
   emptyTitle?: string;
   heading?: string;
+  movementForResult?: (
+    snapshotId: string,
+    resultUrl: string
+  ) => Readonly<{
+    previousPosition?: number;
+    urlChanged?: boolean;
+  }> | undefined;
   presenceKeyPrefix?: string;
   projectDomain: string;
   showEmpty?: boolean;
@@ -46,7 +55,7 @@ export function SemanticCompetitorSnapshots({
         const expanded = expandedSnapshots.has(snapshot.snapshotId);
         const visibleResults = expanded
           ? snapshot.results
-          : snapshot.results.slice(0, 5);
+          : snapshot.results.slice(0, 10);
         return (
           <section
             className="semantic-competitor-snapshot"
@@ -85,13 +94,30 @@ export function SemanticCompetitorSnapshots({
                   result.url,
                   projectDomain
                 );
+                const movement = movementForResult?.(
+                  snapshot.snapshotId,
+                  result.url
+                );
                 return (
                   <li
-                    className={isProjectSite ? "is-project-site" : undefined}
+                    className={`${isProjectSite ? "is-project-site" : ""}${movement ? " has-movement" : ""}${movement?.urlChanged ? " url-changed" : ""}`.trim() || undefined}
                     key={`${snapshot.snapshotId}:${result.position}`}
                   >
-                    <div className="semantic-competitor-rank">
-                      <span>{result.position}</span>
+                    <div className={`semantic-competitor-rank${movement ? " with-movement" : ""}`}>
+                      {movement ? (
+                        <SemanticRankPositionCell
+                          item={{
+                            found: true,
+                            position: result.position,
+                            ...(movement.previousPosition === undefined
+                              ? {}
+                              : { previousPosition: movement.previousPosition })
+                          }}
+                          searchEngine={snapshot.searchEngine}
+                        />
+                      ) : (
+                        <span>{result.position}</span>
+                      )}
                       <SemanticSiteFavicon
                         faviconUrl={
                           "faviconUrl" in result && typeof result.faviconUrl === "string"
@@ -117,12 +143,17 @@ export function SemanticCompetitorSnapshots({
                       >
                         <SemanticSerpResultUrl value={result.url} />
                       </a>
+                      {movement?.urlChanged && (
+                        <em className="semantic-competitor-url-change">
+                          <UiText text="URL изменился" />
+                        </em>
+                      )}
                     </div>
                   </li>
                 );
               })}
             </ol>
-            {snapshot.results.length > 5 && (
+            {snapshot.results.length > 10 && (
               <button
                 className="semantic-competitor-toggle"
                 onClick={() =>
@@ -132,7 +163,9 @@ export function SemanticCompetitorSnapshots({
                 }
                 type="button"
               >
-                {expanded ? <UiText text="Скрыть" /> : <UiText text="Показать все" />}
+                {expanded
+                  ? <UiText text="Скрыть до топ-10" />
+                  : <UiText text="Показать топ {0}" values={[String(snapshot.results.length)]} />}
               </button>
             )}
           </section>
@@ -159,10 +192,14 @@ export function SemanticCompetitorSnapshots({
 }
 
 export function SemanticSerpResultUrl({
+  differenceTarget,
   value
-}: Readonly<{ value: string }>) {
+}: Readonly<{ differenceTarget?: string; value: string }>) {
   const { t: uiText } = useUiLocale();
   const parts = resultUrlParts(value);
+  const targetParts = differenceTarget
+    ? resultUrlParts(differenceTarget)
+    : undefined;
   return (
     <span className="semantic-competitor-url">
       {isInsecureHttpUrl(value) && (
@@ -175,10 +212,33 @@ export function SemanticSerpResultUrl({
           <Icon name="lockOpen" />
         </span>
       )}
-      <b>{parts.domain}</b>
-      <span>{parts.suffix}</span>
+      <b>{targetParts
+        ? <UrlDifferenceTokens target={targetParts.domain} value={parts.domain} />
+        : parts.domain}</b>
+      <span>{targetParts
+        ? <UrlDifferenceTokens target={targetParts.suffix} value={parts.suffix} />
+        : parts.suffix}</span>
     </span>
   );
+}
+
+function UrlDifferenceTokens({
+  target,
+  value
+}: Readonly<{ target: string; value: string }>) {
+  const targetTokens = urlDifferenceTokens(target);
+  return <>{urlDifferenceTokens(value).map((token, index) => (
+    <mark
+      className={token.toLocaleLowerCase("en") === targetTokens[index]?.toLocaleLowerCase("en")
+        ? undefined
+        : "different"}
+      key={`${index}:${token}`}
+    >{token}</mark>
+  ))}</>;
+}
+
+function urlDifferenceTokens(value: string): readonly string[] {
+  return value.split(/([/:?&=._%#-]+)/u).filter(Boolean);
 }
 
 export function SemanticSiteFavicon({

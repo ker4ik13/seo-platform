@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION,
   ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION,
+  ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION,
   ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION,
-  ARSENKIN_YANDEX_LIVE_MAPPING_VERSION,
-  ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION,
   XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION,
   XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION,
   XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION,
@@ -39,7 +37,7 @@ test("persists and verifies exact provider-effective execution", () => {
   );
   assert.equal(
     rankEstimateExecutionHash(execution).toString("hex"),
-    "db32de5f3a4dffd582304429501ee316b684b4e2708f36ad13cbdd2ca20153ec"
+    "af368eda7ab665a2d201040bc4422aec3c5ddbd546fe090e8ed38dc943e7ccad"
   );
 });
 
@@ -72,8 +70,8 @@ test("maps every supported provider, source, device and depth combination", () =
         device,
         depth: 30 as const,
         mapping: source === "LIVE"
-          ? ARSENKIN_YANDEX_LIVE_MAPPING_VERSION
-          : ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION
+          ? ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION
+          : ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION
       }))
     ),
     ...([30, 50, 100] as const).flatMap((depth) =>
@@ -83,7 +81,7 @@ test("maps every supported provider, source, device and depth combination", () =
         source: "LIVE" as const,
         device,
         depth,
-        mapping: ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION
+        mapping: ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION
       }))
     ),
     ...(["SEARCH_API", "LIVE"] as const).flatMap((source) =>

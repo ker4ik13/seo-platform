@@ -161,7 +161,7 @@ export function rankExecutionParameters(
   if (input.device !== "DESKTOP" && input.device !== "MOBILE") {
     invalid("execution.device");
   }
-  if (input.depth !== 30 && input.depth !== 50 && input.depth !== 100) {
+  if (![10, 20, 30, 50, 100].includes(Number(input.depth))) {
     invalid("execution.depth");
   }
   if (typeof input.safeSearch !== "boolean") {
@@ -194,7 +194,7 @@ export function rankExecutionParameters(
     ...(regionCode ? { regionCode } : {}),
     language: language(input.language),
     device: input.device,
-    depth: input.depth,
+    depth: Number(input.depth) as InternalRankExecutionParameters["depth"],
     domainMatchRule: domainMatchRule(input.domainMatchRule),
     safeSearch: input.safeSearch,
     format: "SIMPLE",

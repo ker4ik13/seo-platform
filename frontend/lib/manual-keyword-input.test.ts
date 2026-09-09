@@ -238,6 +238,7 @@ test("bulk retry preserves rejected and failed rows in server order", () => {
 test("bulk runner sends more than one chunk sequentially and aggregates outcomes", async () => {
   const rows = Array.from({ length: 205 }, (_, index) => `query ${index}`);
   const calls: Array<Readonly<{ offset: number; size: number }>> = [];
+  const progress: number[] = [];
   let inFlight = 0;
   const result = await runManualKeywordBulkChunks(rows, async (chunk, offset) => {
     assert.equal(inFlight, 0);
@@ -267,7 +268,7 @@ test("bulk runner sends more than one chunk sequentially and aggregates outcomes
       failed,
       rows: resultRows
     };
-  });
+  }, undefined, (value) => progress.push(value.processed));
 
   assert.equal(MANUAL_KEYWORD_BULK_CHUNK_SIZE, 100);
   assert.deepEqual(calls, [
@@ -278,8 +279,32 @@ test("bulk runner sends more than one chunk sequentially and aggregates outcomes
   assert.equal(result.created, 203);
   assert.equal(result.rejected, 1);
   assert.equal(result.failed, 1);
+  assert.deepEqual(progress, [100, 200, 205]);
   assert.deepEqual(result.retryRows, ["query 99", "query 100"]);
   assert.deepEqual(result.trashCandidates, []);
+});
+
+test("manual add has no operation-wide keyword count limit", async () => {
+  const rows = Array.from({ length: 5_001 }, (_, index) => `query ${index}`);
+  let calls = 0;
+  const result = await runManualKeywordBulkChunks(rows, async (chunk) => {
+    calls += 1;
+    return {
+      selected: chunk.length,
+      created: chunk.length,
+      restored: 0,
+      linked: 0,
+      skipped: 0,
+      rejected: 0,
+      failed: 0,
+      rows: chunk.map((_, index) => ({ index, outcome: "CREATED" as const }))
+    };
+  });
+
+  assert.equal(calls, 51);
+  assert.equal(result.selected, 5_001);
+  assert.equal(result.created, 5_001);
+  assert.deepEqual(result.retryRows, []);
 });
 
 test("network failure retains prior retry rows, current chunk and untouched tail", async () => {

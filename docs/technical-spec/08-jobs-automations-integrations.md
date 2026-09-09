@@ -1715,3 +1715,32 @@ bar, опрашивает этот endpoint чаще при наличии ак�
 явно обнуляет доступные проекты без активных операций; dependency failure
 оставляет последнее подтверждённое состояние и не раскрывает недоступные
 project ID.
+
+## 29. Режим сезонности в durable frequency job
+
+Режим и нормализованный календарный диапазон входят в input snapshot и hash
+`FREQUENCY_COLLECTION`. Broker возвращает их worker вместе с provider route.
+Для `SEASONALITY` Arsenkin claim объединяет до 10 000 keywords в одну задачу;
+перед внешним submit ставится durable marker и резервируется общий provider
+slot. Paid part называется `SEASONALITY_TASK`, а результат сохраняется
+внутренними batch до 100 ключей и 110 точек на ключ. Arsenkin принимает только
+`BASE`; другие типы отклоняются после route resolution до provider request.
+Polling принятой задачи не
+повторяет submit и лениво загружает keyword scope только после статуса finish.
+Готовый live-ответ `type=3` содержит массив строк query/data и отдельный
+упорядоченный список dates; нормализатор требует полное соответствие каждого
+ключа этому списку и принимает только неотрицательную integer frequency.
+
+XMLStock claim остаётся одноэлементным. Worker получает один распределённый
+`WORDSTAT` permit и выполняет идемпотентную paid part `SEASONALITY_BASE`.
+Live-проверка 9 сентября 2026 года по трём ключам и 24 месяцам показала
+полностью одинаковые BASE/EXACT ряды; `!` в `pagetype=history` XMLStock
+отклоняет как синтаксическую ошибку. Поэтому типы частотности в сезонности не
+предлагаются. Каждый GET передаёт
+`pagetype=history`, явные period/start/end/regions/device и type-specific
+Wordstat query. После валидации RFC 3339 date и count нормализатор принимает
+документированную строку share и фактически возвращаемое JSON-число; live-строка
+только с date сохраняется как нулевая точка, а share без count отклоняется; все серии
+одним fenced batch сохраняются в Core SEO; permit освобождается в `finally`.
+Operation center, retry и result page используют `mode`, поэтому сезонность не
+называется частотностью и не открывает таблицу чужого типа данных.

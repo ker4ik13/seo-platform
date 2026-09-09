@@ -74,7 +74,7 @@ export interface ArsenkinCheckTopWireRequest {
       readonly type: 1 | 2 | 3 | 11 | 12;
       readonly region: number;
     }];
-    readonly depth: 10;
+    readonly depth: 10 | 20 | 30 | 50 | 100;
   };
 }
 
@@ -146,10 +146,11 @@ export interface ArsenkinStagedRankResult {
 /**
  * BYOK Arsenkin adapter for rank checks.
  *
- * Uses Arsenkin's documented `positions` tool, which receives the project URL
- * and returns the site's measured position and relevant URL. Raw provider
- * responses are never returned from normalization and must not be logged or
- * persisted by callers.
+ * New position and competitor runs use Arsenkin's documented `check-top`
+ * result so the project position and complete competitor snippets come from
+ * one ordered SERP. Persisted legacy intents keep using `positions`. Raw
+ * provider responses are never returned from normalization and must not be
+ * logged or persisted by callers.
  */
 export class ArsenkinRankConnector {
   public constructor(
@@ -263,13 +264,12 @@ export function buildArsenkinRankWireRequest(
 ): ArsenkinRankWireRequest {
   const intent = rankProviderRequestIntent(intentValue);
   const region = arsenkinRegion(intent.execution.regionCode);
-  const tracking = arsenkinTrackingUrls(intent);
   const searchType = arsenkinSearchType(
     intent.execution.searchEngine,
     intent.execution.device,
     intent.execution.providerMappingVersion
   );
-  if (rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP") {
+  if (usesArsenkinCheckTop(intent)) {
     return {
       tools_name: "check-top",
       data: {
@@ -277,10 +277,11 @@ export function buildArsenkinRankWireRequest(
         is_snippet: true,
         noreask: false,
         se: [{ type: searchType, region }],
-        depth: 10
+        depth: intent.execution.depth
       }
     };
   }
+  const tracking = arsenkinTrackingUrls(intent);
   return {
     tools_name: "positions",
     data: {
@@ -290,7 +291,7 @@ export function buildArsenkinRankWireRequest(
       subdomain: tracking.includeSubdomains,
       se: [
         searchType === 11 || searchType === 12
-          ? { type: searchType, region, depth: intent.execution.depth }
+          ? { type: searchType, region, depth: intent.execution.depth as 30 | 50 | 100 }
           : { type: searchType, region }
       ],
       format: 0
@@ -312,7 +313,7 @@ export function normalizeArsenkinRankResult(
   ) {
     invalidResponse();
   }
-  if (rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP") {
+  if (usesArsenkinCheckTop(intent)) {
     return normalizeArsenkinCheckTopResult(body.result, intent);
   }
   if (
@@ -579,7 +580,7 @@ function wireRequest(value: unknown): ArsenkinRankWireRequest {
           query.length < 1 ||
           query.length > 2_048
       ) ||
-      data.depth !== 10 ||
+      ![10, 20, 30, 50, 100].includes(Number(data.depth)) ||
       data.is_snippet !== true ||
       data.noreask !== false ||
       engines.length !== 1
@@ -605,7 +606,7 @@ function wireRequest(value: unknown): ArsenkinRankWireRequest {
           type: Number(engine.type) as 1 | 2 | 3 | 11 | 12,
           region: Number(engine.region)
         }],
-        depth: 10
+        depth: Number(data.depth) as 10 | 20 | 30 | 50 | 100
       }
     };
   }
@@ -768,7 +769,7 @@ function normalizeArsenkinCheckTopResult(
   );
   return intent.keywords.map((keyword, queryIndex) => {
     const urls = array(rows[queryIndex]);
-    if (urls.length > 10) invalidResponse();
+    if (urls.length > intent.execution.depth) invalidResponse();
     const serpResults = urls.map((rawUrl, index) => {
       const rankingUrl = providerUrl(rawUrl);
       const snippet = arsenkinCheckTopSnippet(
@@ -865,6 +866,17 @@ function arsenkinCheckTopSnippet(value: unknown):
     }
   }
   return undefined;
+}
+
+function usesArsenkinCheckTop(intent: RankProviderRequestIntentV1): boolean {
+  return (
+    rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP" ||
+    [
+      "arsenkin-check-top-yandex-xml@1",
+      "arsenkin-check-top-yandex-live@1",
+      "arsenkin-check-top-google-live@1"
+    ].includes(intent.execution.providerMappingVersion)
+  );
 }
 
 function parseArsenkinTop20(

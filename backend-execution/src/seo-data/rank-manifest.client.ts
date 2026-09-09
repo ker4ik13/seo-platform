@@ -756,7 +756,7 @@ function executionParameters(
     input.language.length < 1 ||
     input.language.length > 16 ||
     !["DESKTOP", "MOBILE"].includes(String(input.device)) ||
-    ![30, 50, 100].includes(Number(input.depth)) ||
+    ![10, 20, 30, 50, 100].includes(Number(input.depth)) ||
     typeof input.safeSearch !== "boolean" ||
     input.format !== "SIMPLE" ||
     input.rawSerp !== false ||

@@ -12,6 +12,7 @@ import { useUiLocale } from "./ui-locale";
 
 export function SemanticModal({
   bodyClassName,
+  bodyLayout = "padded",
   children,
   className,
   closeDisabled = false,
@@ -26,6 +27,7 @@ export function SemanticModal({
   title
 }: Readonly<{
   bodyClassName?: string;
+  bodyLayout?: "padded" | "edge";
   children: ReactNode;
   className?: string;
   closeDisabled?: boolean;
@@ -101,7 +103,7 @@ export function SemanticModal({
         </div>
       </header>
       <div
-        className={`semantic-modal-body${bodyClassName ? ` ${bodyClassName}` : ""}`}
+        className={`semantic-modal-body semantic-modal-body-${bodyLayout}${bodyClassName ? ` ${bodyClassName}` : ""}`}
       >
         {children}
       </div>

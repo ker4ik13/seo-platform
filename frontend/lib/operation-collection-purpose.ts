@@ -1,7 +1,6 @@
-import { competitorSerpOperationResultDepth } from "@seo-platform/contracts";
-
 interface PurposeAwareOperation {
   readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
+  readonly depth?: number;
 }
 
 export function isCompetitorCollection(
@@ -12,7 +11,7 @@ export function isCompetitorCollection(
 
 export function rankCollectionTitle(operation: PurposeAwareOperation): string {
   return isCompetitorCollection(operation)
-    ? `Выдача конкурентов · Топ-${competitorSerpOperationResultDepth}`
+    ? `Выдача конкурентов · Топ-${operation.depth ?? 10}`
     : "Проверка позиций";
 }
 
@@ -29,7 +28,7 @@ export function rankCollectionDepthLabel(
   configuredDepth: number | undefined
 ): string | undefined {
   if (isCompetitorCollection(operation)) {
-    return `Топ-${competitorSerpOperationResultDepth}`;
+    return `Топ-${configuredDepth ?? operation.depth ?? 10}`;
   }
   return configuredDepth === undefined ? undefined : `Топ-${configuredDepth}`;
 }

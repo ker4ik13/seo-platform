@@ -394,7 +394,6 @@ function optionalNote(
   if (value === null && nullable) return { note: null };
   if (typeof value !== "string") invalid("note");
   const note = value.normalize("NFKC").trim();
-  if (note.length > 4_000) invalid("note");
   return note ? { note } : nullable ? { note: null } : {};
 }
 

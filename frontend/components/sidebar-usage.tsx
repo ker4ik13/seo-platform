@@ -21,12 +21,11 @@ export function SidebarUsage({ canView }: Readonly<{ canView: boolean; locale?: 
       {!canView ? <small>{english ? "Managed by the workspace owner" : <UiText text="Управляет владелец рабочей области" />}</small> : loading && !data ? (
         <div className="sidebar-usage-loading" role="status">{english ? "Loading limits…" : <UiText text="Загружаем лимиты…" />}</div>
       ) : !data ? <small role="status">{english ? "Usage is temporarily unavailable" : <UiText text="Лимиты временно недоступны" />}</small> : <>
-        <div className="sidebar-usage-balance"><span>{english ? "Data balance" : <UiText text="Баланс данных" />}</span><strong>{money.format(data.balance.availableMinor / 100)} ₽</strong></div>
+        <div className="sidebar-usage-balance"><span>{english ? "Balance" : <UiText text="Баланс" />}</span><strong>{money.format(data.balance.availableMinor / 100)} ₽</strong></div>
         <UsageBar label={english ? "Projects" : uiText("Проекты")} value={data.resources.projects} number={number} />
         <UsageBar label={english ? "Keywords" : uiText("Запросы")} value={data.resources.keywords} number={number} />
         <UsageBar label={english ? "Active operations" : uiText("Активные операции")} value={data.resources.concurrentJobs} number={number} />
         {(unavailable || data.degraded) && <small className="sidebar-usage-stale">{english ? "Some metrics are temporarily unavailable" : <UiText text="Часть показателей временно недоступна" />}</small>}
-        <Link className="sidebar-usage-action" href="/app/settings/billing">{english ? "Manage plan and balance" : <UiText text="Управлять тарифом и балансом" />}</Link>
       </>}
     </div>
   );

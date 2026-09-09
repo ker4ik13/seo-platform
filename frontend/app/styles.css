@@ -18,6 +18,17 @@
 }
 
 * { box-sizing: border-box; }
+input[type="checkbox"] {
+  aspect-ratio: 1 / 1;
+  block-size: 17px !important;
+  box-sizing: border-box;
+  flex: none;
+  inline-size: 17px !important;
+  max-block-size: 17px !important;
+  max-inline-size: 17px !important;
+  min-block-size: 17px !important;
+  min-inline-size: 17px !important;
+}
 html { scroll-behavior: smooth; }
 body { background: var(--paper); color: var(--ink); margin: 0; }
 a { color: inherit; text-decoration: none; }

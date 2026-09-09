@@ -1029,7 +1029,7 @@ function rankRuntimeTotals(
 function rankRuntimeEntry(
   row: RankRuntimeEntryRow,
   product: RankRuntimeDiagnosticProduct,
-  depth: 30 | 50 | 100,
+  depth: 10 | 20 | 30 | 50 | 100,
   concurrency: number
 ): RankRuntimeDiagnosticEntry {
   const sequence = nonNegativeRuntimeInteger(row.sequence, "sequence");
@@ -1112,7 +1112,7 @@ function rankRuntimeState(
 function rankRuntimePageProgress(
   value: unknown,
   product: RankRuntimeDiagnosticProduct,
-  depth: 30 | 50 | 100,
+  depth: 10 | 20 | 30 | 50 | 100,
   status: string
 ): Pick<RankRuntimeDiagnosticEntry, "completedPages" | "totalPages"> {
   if (product === "YANDEX_SEARCH_API") {

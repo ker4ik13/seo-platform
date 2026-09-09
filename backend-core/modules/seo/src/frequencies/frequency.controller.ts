@@ -22,6 +22,7 @@ import {
 import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import {
   internalPersistFrequencySnapshotBatchInput,
+  internalPersistFrequencySeasonalityBatchInput,
   internalPersistFrequencySnapshotsInput,
   internalResolveFrequencyKeywordsInput,
   internalResolveFrequencyKeywordInput
@@ -85,6 +86,22 @@ export class FrequencyController {
     const input = internalPersistFrequencySnapshotBatchInput(body);
     assertInternalContext(input, context);
     return response(request, await this.frequencies.persistBatch(input));
+  }
+
+  @Post("seasonality-batch")
+  public async persistSeasonalityBatch(
+    @Param("projectId") projectId: string,
+    @Headers() headers: HeadersRecord,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<{ readonly created: number }>> {
+    const context = routeContext(projectId, headers);
+    const input = internalPersistFrequencySeasonalityBatchInput(body);
+    assertInternalContext(input, context);
+    return response(
+      request,
+      await this.frequencies.persistSeasonalityBatch(input)
+    );
   }
 }
 

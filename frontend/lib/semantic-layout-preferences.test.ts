@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   clampSemanticColumnWidth,
   clampSemanticGroupSidebarWidth,
+  clampSemanticInspectorWidth,
   normalizeSemanticKeywordPageSize,
   readSemanticLayoutPreferences,
   semanticAppliedTableLayoutConfig,
@@ -29,12 +30,14 @@ class MemoryStorage {
   }
 }
 
-test("keeps semantic widths isolated per project", () => {
+test("keeps semantic widths isolated per user and project", () => {
   const storage = new MemoryStorage();
   writeSemanticLayoutPreferences(
     "project-a",
+    "user-a",
     {
       groupSidebarWidth: 412,
+      inspectorWidth: 486,
       columnWidths: { query: 388, priority: 94 },
       pageSize: 500,
       expandedGroupIds: ["group-a", "group-b"]
@@ -42,14 +45,16 @@ test("keeps semantic widths isolated per project", () => {
     storage
   );
 
-  assert.deepEqual(readSemanticLayoutPreferences("project-a", storage), {
+  assert.deepEqual(readSemanticLayoutPreferences("project-a", "user-a", storage), {
     groupSidebarWidth: 412,
+    inspectorWidth: 486,
     columnWidths: { query: 388, priority: 94 },
     pageSize: 500,
     expandedGroupIds: ["group-a", "group-b"]
   });
-  assert.deepEqual(readSemanticLayoutPreferences("project-b", storage), {
+  assert.deepEqual(readSemanticLayoutPreferences("project-a", "user-b", storage), {
     groupSidebarWidth: 230,
+    inspectorWidth: 360,
     columnWidths: {},
     pageSize: 100,
     expandedGroupIds: null
@@ -59,6 +64,8 @@ test("keeps semantic widths isolated per project", () => {
 test("clamps corrupted or unsafe layout dimensions", () => {
   assert.equal(clampSemanticGroupSidebarWidth(40), 196);
   assert.equal(clampSemanticGroupSidebarWidth(9_000), 520);
+  assert.equal(clampSemanticInspectorWidth(120), 300);
+  assert.equal(clampSemanticInspectorWidth(9_000), 620);
   assert.equal(clampSemanticColumnWidth("query", 20), 180);
   assert.equal(clampSemanticColumnWidth("priority", 900), 640);
   assert.equal(semanticColumnDefaultWidth("custom:traffic"), 168);
@@ -305,9 +312,10 @@ test("preserves an explicit empty query-indicator selection", () => {
 
 test("falls back when stored layout is malformed", () => {
   const storage = new MemoryStorage();
-  storage.setItem("seonorita:semantic-layout:v1:broken", "{");
-  assert.deepEqual(readSemanticLayoutPreferences("broken", storage), {
+  storage.setItem("seonorita:semantic-layout:v2:user-a:broken", "{");
+  assert.deepEqual(readSemanticLayoutPreferences("broken", "user-a", storage), {
     groupSidebarWidth: 230,
+    inspectorWidth: 360,
     columnWidths: {},
     pageSize: 100,
     expandedGroupIds: null

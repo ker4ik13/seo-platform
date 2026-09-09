@@ -39,6 +39,7 @@ export function SemanticGroupPickerField({
   rootIcon = "projects",
   rootLabel = "Корневая папка",
   searchPlaceholder = "Найти папку по названию или пути",
+  showCount = true,
   showRootOption = true,
   specialOptions = EMPTY_SPECIAL_OPTIONS,
   value
@@ -51,6 +52,7 @@ export function SemanticGroupPickerField({
   rootIcon?: IconName;
   rootLabel?: string;
   searchPlaceholder?: string;
+  showCount?: boolean;
   showRootOption?: boolean;
   specialOptions?: readonly SemanticGroupPickerSpecialOption[];
   value: string;
@@ -155,7 +157,7 @@ export function SemanticGroupPickerField({
   return (
     <>
       <button
-        aria-label={`${dialogTitle}: ${selectedLabel}${selected ? `. Запросов в группе: ${formatInteger(selected.keywordCount, uiLocale)}` : ""}`}
+        aria-label={`${dialogTitle}: ${selectedLabel}${selected && showCount ? `. Запросов в группе: ${formatInteger(selected.keywordCount, uiLocale)}` : ""}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         className={`semantic-group-picker-trigger${className ? ` ${className}` : ""}`}
@@ -182,7 +184,7 @@ export function SemanticGroupPickerField({
             <OverflowingGroupPath path={selected.path} />
           )}
         </span>
-        {selected && (
+        {selected && showCount && (
           <b
             className="semantic-group-picker-trigger-count"
             title={uiText("Запросов в группе: {0}", [String(formatInteger(selected.keywordCount, uiLocale))])}

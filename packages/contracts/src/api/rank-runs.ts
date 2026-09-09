@@ -326,7 +326,7 @@ interface RankJobSummaryBase {
   readonly regionCode?: string;
   readonly language?: string;
   readonly device?: "DESKTOP" | "MOBILE";
-  readonly depth?: 30 | 50 | 100;
+  readonly depth?: 10 | 20 | 30 | 50 | 100;
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
   readonly operation: "POSITIONS";
@@ -863,7 +863,7 @@ export interface InternalRankExecutionParameters {
   readonly regionCode?: string;
   readonly language: string;
   readonly device: TrackingDevice;
-  readonly depth: 30 | 50 | 100;
+  readonly depth: 10 | 20 | 30 | 50 | 100;
   readonly domainMatchRule: TrackingDomainMatchRule;
   readonly safeSearch: boolean;
   readonly format: "SIMPLE";

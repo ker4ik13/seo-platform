@@ -69,6 +69,7 @@ export interface CustomSelectProps extends NativeSelectProps {
   ) => void | Promise<void>;
   readonly optionOrderLabel?: string;
   readonly popoverFooter?: ReactNode;
+  readonly popoverClassName?: string;
   readonly searchPlaceholder?: string;
   readonly searchable?: boolean;
   readonly showSelectedCheck?: boolean;
@@ -94,6 +95,7 @@ export function CustomSelect({
   onOptionOrderChange,
   onFocus,
   popoverFooter,
+  popoverClassName,
   placeholder = "Выберите значение",
   required = false,
   searchPlaceholder = "Поиск…",
@@ -500,7 +502,7 @@ export function CustomSelect({
       </button>
       {open && portalTarget && createPortal(
         <div
-          className={`custom-select-popover${opensUpward ? " opens-upward" : ""}${showSelectedCheck ? "" : " without-selected-check"}`}
+          className={`custom-select-popover${opensUpward ? " opens-upward" : ""}${showSelectedCheck ? "" : " without-selected-check"}${popoverClassName ? ` ${popoverClassName}` : ""}`}
           data-exclusive-dropdown-layer
           ref={popoverRef}
           style={popoverPosition}

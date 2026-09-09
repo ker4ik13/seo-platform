@@ -1,6 +1,10 @@
 import { Prisma } from "../generated/prisma/client.js";
 import { parseSemanticRankDimensionKey, semanticPositionHistoryReadPageSize } from "@seo-platform/contracts";
 import { rankDimensionMetadata } from "../rank-results/rank-dimension.js";
+import {
+  rankDimensionConfigurationPredicate,
+  rankDimensionSources
+} from "../rank-results/rank-dimension-merge.js";
 import { Injectable } from "@nestjs/common";
 import type {
   ApiCollectionResponse,
@@ -36,6 +40,13 @@ export class SemanticPositionHistoryExportService {
       requestId
     );
     const keywordIds = keywordPage.data.map(({ id }) => id);
+    const deletions = keywordIds.length === 0
+      ? []
+      : await this.prisma.rankDimensionHistoryDeletion.findMany({
+          where: { workspaceId: context.workspaceId, projectId: context.projectId },
+          take: 2_000,
+          select: { searchEngine: true, countryCode: true, regionCode: true, language: true, device: true, excludedThrough: true }
+        });
     const snapshots = keywordIds.length === 0
       ? []
       : options.dimensionKeys?.length
@@ -47,6 +58,9 @@ export class SemanticPositionHistoryExportService {
             keywordId: { in: keywordIds },
             sourceMode: { in: ["BYOK", "PLATFORM", "IMPORT"] },
             positionTrackingEnabled: true,
+            ...(deletions.length === 0
+              ? {}
+              : { AND: deletions.map(rankDeletionExclusionWhere) }),
             observedAt: {
               gte: new Date(options.observedFrom),
               lt: new Date(options.observedBefore)
@@ -121,17 +135,35 @@ export class SemanticPositionHistoryExportService {
       meta: keywordPage.meta
     };
   }
-  private groupedSnapshots(context: { workspaceId: string; projectId: string }, keywordIds: readonly string[], options: SemanticPositionHistoryExportOptions): Promise<StoredSnapshot[]> {
-    if (!options.dimensionKeys?.length || options.dimensionKeys.length > 4) throw new Error("History read requires 1 to 4 geographic partitions");
-    const dimensions = options.dimensionKeys.map(key => {
+  private async groupedSnapshots(
+    context: { workspaceId: string; projectId: string },
+    keywordIds: readonly string[],
+    options: SemanticPositionHistoryExportOptions
+  ): Promise<StoredSnapshot[]> {
+    if (!options.dimensionKeys?.length || options.dimensionKeys.length > 4) {
+      throw new Error("History read requires 1 to 4 geographic partitions");
+    }
+    const requested = options.dimensionKeys.map((key) => {
       const value = parseSemanticRankDimensionKey(key);
-      if (!value || !options.searchEngines.includes(value.searchEngine)) throw new Error("Invalid history export dimension");
-      return Prisma.sql`(configuration.search_engine::text = ${value.searchEngine} AND configuration.country_code = ${value.countryCode}
-        AND COALESCE(configuration.region_code, configuration.country_code) = ${value.regionCode}
-        AND configuration.language = ${value.language} AND configuration.device::text = ${value.device})`;
+      if (!value || !options.searchEngines.includes(value.searchEngine)) {
+        throw new Error("Invalid history export dimension");
+      }
+      return value;
     });
+    const sourceSets = await Promise.all(
+      requested.map(async (target) => ({
+        target,
+        sources: await rankDimensionSources(this.prisma, context, target)
+      }))
+    );
+    const sourceToTarget = new Map(
+      sourceSets.flatMap(({ target, sources }) =>
+        sources.map((source) => [source.key, target] as const)
+      )
+    );
+    const sourceDimensions = sourceSets.flatMap(({ sources }) => sources);
     const day = Prisma.sql`(snapshot.observed_at AT TIME ZONE 'UTC')::date`;
-    return this.prisma.$queryRaw<StoredSnapshot[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<StoredSnapshot[]>(Prisma.sql`
       SELECT DISTINCT ON (snapshot.keyword_id, configuration.search_engine, configuration.country_code,
         COALESCE(configuration.region_code, configuration.country_code), configuration.language, configuration.device, ${day})
         snapshot.id, snapshot.keyword_id AS "keywordId", snapshot.observed_at AS "observedAt", snapshot.found, snapshot.position,
@@ -145,12 +177,75 @@ export class SemanticPositionHistoryExportService {
         AND snapshot.keyword_id IN (${Prisma.join(keywordIds.map(id => Prisma.sql`${id}::uuid`))})
         AND snapshot.source_mode::text IN ('BYOK', 'PLATFORM', 'IMPORT') AND snapshot.position_tracking_enabled
         AND snapshot.observed_at >= ${new Date(options.observedFrom)} AND snapshot.observed_at < ${new Date(options.observedBefore)}
+        AND NOT EXISTS (
+          SELECT 1 FROM rank_dimension_history_deletions deletion
+          WHERE deletion.workspace_id = snapshot.workspace_id
+            AND deletion.project_id = snapshot.project_id
+            AND deletion.search_engine = configuration.search_engine::text
+            AND deletion.country_code = configuration.country_code
+            AND deletion.region_code = COALESCE(configuration.region_code, configuration.country_code)
+            AND deletion.language = configuration.language
+            AND deletion.device = configuration.device::text
+            AND snapshot.observed_at <= deletion.excluded_through
+        )
         ${options.storedBefore ? Prisma.sql`AND snapshot.created_at < ${new Date(options.storedBefore)}` : Prisma.empty}
-        AND (${Prisma.join(dimensions, ' OR ')})
+        ${rankDimensionConfigurationPredicate(sourceDimensions)}
       ORDER BY snapshot.keyword_id, configuration.search_engine, configuration.country_code,
         COALESCE(configuration.region_code, configuration.country_code), configuration.language, configuration.device, ${day}, snapshot.observed_at DESC, snapshot.id DESC
     `);
+    const projected = rows.map((row) => {
+      const source = rankDimensionMetadata(row.manifest.configuration);
+      const target = sourceToTarget.get(source.dimensionKey);
+      if (!target) throw new Error("Stored history dimension is outside the selected merge scope");
+      return {
+        ...row,
+        manifest: {
+          configuration: {
+            searchEngine: target.searchEngine,
+            countryCode: target.countryCode,
+            regionCode: target.regionCode,
+            regionLabel: target.regionLabel ?? null,
+            language: target.language,
+            device: target.device
+          }
+        }
+      };
+    }).sort((left, right) =>
+      right.observedAt.getTime() - left.observedAt.getTime() ||
+      right.id.localeCompare(left.id)
+    );
+    const seen = new Set<string>();
+    return projected.filter((row) => {
+      const configuration = row.manifest.configuration;
+      const identity = [
+        row.keywordId,
+        configuration.searchEngine,
+        configuration.countryCode,
+        configuration.regionCode ?? configuration.countryCode,
+        configuration.language,
+        configuration.device,
+        row.observedAt.toISOString().slice(0, 10)
+      ].join(":");
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
   }
+}
+
+function rankDeletionExclusionWhere(deletion: Readonly<{
+  searchEngine: string; countryCode: string; regionCode: string; language: string;
+  device: string; excludedThrough: Date;
+}>): Prisma.RankSnapshotWhereInput {
+  if ((deletion.searchEngine !== "YANDEX" && deletion.searchEngine !== "GOOGLE") ||
+    (deletion.device !== "DESKTOP" && deletion.device !== "MOBILE")) {
+    throw new Error("Stored rank deletion dimension is invalid");
+  }
+  return { NOT: { observedAt: { lte: deletion.excludedThrough }, manifest: { configuration: {
+    searchEngine: deletion.searchEngine, countryCode: deletion.countryCode,
+    language: deletion.language, device: deletion.device,
+    OR: [{ regionCode: deletion.regionCode }, ...(deletion.regionCode === deletion.countryCode ? [{ regionCode: null }] : [])]
+  } } } };
 }
 
 interface StoredSnapshot {

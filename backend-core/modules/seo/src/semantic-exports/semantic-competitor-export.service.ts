@@ -92,7 +92,7 @@ export class SemanticCompetitorExportService {
           rs.id AS snapshot_id,
           rs.observed_at AS snapshot_observed_at,
           configuration.search_engine, configuration.country_code, configuration.region_code, configuration.region_label,
-          configuration.language, configuration.device, rs.provider, rs.tracking_context_id, rs.configuration_version, manifest.execution,
+          configuration.language, configuration.device, configuration.depth, rs.provider, rs.tracking_context_id, rs.configuration_version, manifest.execution,
           manifest.project_domain,
           ROW_NUMBER() OVER (
             PARTITION BY rs.keyword_id, configuration.search_engine, configuration.country_code,
@@ -114,6 +114,17 @@ export class SemanticCompetitorExportService {
           AND rs.project_id = ${context.projectId}::uuid
           AND rs.keyword_id IN (${ids})
           AND rs.provider IN ('ARSENKIN', 'XMLSTOCK')
+          AND NOT EXISTS (
+            SELECT 1 FROM rank_dimension_history_deletions deletion
+            WHERE deletion.workspace_id = rs.workspace_id
+              AND deletion.project_id = rs.project_id
+              AND deletion.search_engine = configuration.search_engine::text
+              AND deletion.country_code = configuration.country_code
+              AND deletion.region_code = COALESCE(configuration.region_code, configuration.country_code)
+              AND deletion.language = configuration.language
+              AND deletion.device = configuration.device::text
+              AND rs.observed_at <= deletion.excluded_through
+          )
           ${dimensions ? Prisma.sql`AND (${Prisma.join(dimensions, ' OR ')})` : Prisma.empty}
           AND EXISTS (
             SELECT 1
@@ -139,7 +150,7 @@ export class SemanticCompetitorExportService {
         ON result.snapshot_observed_at = latest.snapshot_observed_at
         AND result.snapshot_id = latest.snapshot_id
       WHERE latest.latest_rank = 1
-        AND result.position <= 10
+        AND result.position <= latest.depth
       ORDER BY latest.keyword_id ASC, latest.search_engine ASC, result.position ASC
     `);
   }

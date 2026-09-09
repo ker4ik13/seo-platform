@@ -93,8 +93,27 @@ export class SemanticExportWorkerService {
       if (input.positionHistory) {
         const catalog = await this.seoData.listExportRankDimensions(context);
         if (catalog.truncated) throw new ExportFailure("EXPORT_DIMENSIONS_UNAVAILABLE", false);
+        const eligibleDimensions = catalog.dimensions.filter((dimension) =>
+          input.positionHistory!.searchEngines.includes(dimension.searchEngine)
+        );
+        const requestedDimensionKeys = input.positionHistory.dimensionKeys;
+        const dimensionKeys = requestedDimensionKeys ??
+          input.positionHistory.searchEngines.flatMap((engine) => {
+            const dimension = eligibleDimensions.find(
+              (candidate) => candidate.searchEngine === engine
+            );
+            return dimension ? [dimension.key] : [];
+          });
+        if (
+          dimensionKeys.length !== input.positionHistory.searchEngines.length ||
+          dimensionKeys.some((key) =>
+            !eligibleDimensions.some((dimension) => dimension.key === key)
+          )
+        ) {
+          throw new ExportFailure("EXPORT_DIMENSIONS_UNAVAILABLE", false);
+        }
         input = { ...input, positionHistory: { ...input.positionHistory,
-          dimensionKeys: catalog.dimensions.filter(dimension => input.positionHistory!.searchEngines.includes(dimension.searchEngine)).map(dimension => dimension.key),
+          dimensionKeys,
           storedBefore: (claimed.startedAt ?? claimed.createdAt).toISOString()
         } };
         const plan = await this.positionHistoryPlan(claimed, input, leaseOwner);

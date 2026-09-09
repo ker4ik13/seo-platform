@@ -1159,6 +1159,19 @@ function CollectionContinuation({
   online: boolean;
   onLoadMore: () => void;
 }>) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const target = buttonRef.current;
+    if (!target || disabled || loading || !online || failure) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) onLoadMore();
+      },
+      { rootMargin: "280px 0px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [disabled, failure, loading, onLoadMore, online]);
   return (
     <footer className="security-flow">
       <div
@@ -1178,6 +1191,7 @@ function CollectionContinuation({
         className="secondary-button"
         disabled={!online || loading || disabled}
         onClick={onLoadMore}
+        ref={buttonRef}
         type="button"
       >
         {loading

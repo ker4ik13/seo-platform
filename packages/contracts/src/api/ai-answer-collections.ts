@@ -161,7 +161,7 @@ export interface SemanticAiAnswerSummary {
   readonly answerPresent: boolean;
   readonly siteFound: boolean;
   readonly position?: number;
-  /** Previous found position for this canonical keyword and engine, regardless of collection context. */
+  /** Previous found position for this canonical keyword in the same city/device slice. */
   readonly previousPosition?: number;
   readonly rankingUrl?: string;
   readonly brandFound: boolean;
@@ -175,6 +175,7 @@ export interface SemanticAiAnswerHistoryItem extends SemanticAiAnswerSummary {
   readonly regionCode: string;
   readonly device: AiAnswerDevice;
   readonly provider: "ARSENKIN";
+  readonly results: readonly SemanticAiAnswerCompetitorResult[];
 }
 
 export interface AiAnswerHistoryQuery {

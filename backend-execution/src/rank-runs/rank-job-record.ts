@@ -387,7 +387,7 @@ interface RankExecutionPresentation {
   readonly regionCode?: string;
   readonly language?: string;
   readonly device?: "DESKTOP" | "MOBILE";
-  readonly depth?: 30 | 50 | 100;
+  readonly depth?: 10 | 20 | 30 | 50 | 100;
   readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
   readonly saveProjectPosition?: boolean;
 }
@@ -489,7 +489,7 @@ function rankExecutionPresentation(
   const geography = [countryCode, regionCode, language, device];
   if (
     (searchEngine !== "GOOGLE" && searchEngine !== "YANDEX") ||
-    (depth !== 30 && depth !== 50 && depth !== 100) ||
+    ![10, 20, 30, 50, 100].includes(Number(depth)) ||
     (searchSource !== undefined &&
       searchSource !== "SEARCH_API" &&
       searchSource !== "LIVE") ||
@@ -528,7 +528,7 @@ function rankExecutionPresentation(
     ...(typeof regionCode === "string" ? { regionCode } : {}),
     ...(typeof language === "string" ? { language } : {}),
     ...(device === "DESKTOP" || device === "MOBILE" ? { device } : {}),
-    depth,
+    depth: Number(depth) as 10 | 20 | 30 | 50 | 100,
     ...(purpose === undefined
       ? manifestPresentation.purpose
         ? { purpose: manifestPresentation.purpose }
@@ -567,7 +567,7 @@ function manifestExecutionPresentation(
   const device = stored.device;
   if (
     (searchEngine !== "GOOGLE" && searchEngine !== "YANDEX") ||
-    (depth !== 30 && depth !== 50 && depth !== 100) ||
+    ![10, 20, 30, 50, 100].includes(Number(depth)) ||
     (purpose !== undefined &&
       purpose !== "POSITION_TRACKING" &&
       purpose !== "COMPETITOR_SERP") ||
@@ -604,7 +604,7 @@ function manifestExecutionPresentation(
       ? {}
       : { saveProjectPosition }),
     ...(searchSource ? { searchSource } : {}),
-    depth
+    depth: Number(depth) as 10 | 20 | 30 | 50 | 100
   };
 }
 

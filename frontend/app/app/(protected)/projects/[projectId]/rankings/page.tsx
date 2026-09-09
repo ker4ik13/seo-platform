@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { RankingsWorkspace } from "../../../../../../components/rankings-workspace";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Семантика",
+  title: "Позиции",
   robots: {
     index: false,
     follow: false
@@ -19,6 +19,12 @@ export default async function RankHistoryPage({
 }>) {
   const { projectId } = await params;
   const context = await requireProtectedProjectAppContext(projectId);
-  if (!context.project) throw new Error("Project context is missing");
-  redirect("/app/semantics");
+  if (!context.project || !context.workspace) throw new Error("Project context is missing");
+  return <RankingsWorkspace
+    currentUserId={context.user.id}
+    projectDomain={context.project.domain}
+    projectId={context.project.id}
+    {...(context.project.searchCity ? { projectSearchCity: context.project.searchCity } : {})}
+    workspaceId={context.workspace.id}
+  />;
 }

@@ -1,11 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import type {
   FrequencyCollectionProvider,
+  FrequencyCollectionMode,
+  FrequencySeasonalityRequest,
   SemanticFrequencyDevice,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
 import {
   arsenkinWordstatKeywordLimit,
+  parseFrequencySeasonalityRequest,
   semanticFrequencyTypes
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
@@ -29,9 +32,11 @@ export interface FrequencyCollectionClaim {
   readonly provider: FrequencyCollectionProvider;
   readonly maxAttempts: number;
   readonly items: readonly FrequencyCollectionClaimItem[];
+  readonly mode: FrequencyCollectionMode;
   readonly types: readonly SemanticFrequencyType[];
   readonly regionCode: string;
   readonly device: SemanticFrequencyDevice;
+  readonly seasonality?: FrequencySeasonalityRequest;
   readonly jobVersion: number;
   readonly leaseOwner: string;
   readonly leaseExpiresAt: string;
@@ -67,13 +72,16 @@ export class FrequencyCollectionRuntimeBrokerService {
     if (rows.length > maxBatchItems || !rows[0]) invalid();
     const row = rows[0];
     const types = frequencyTypes(row.inputSnapshot);
+    const mode = frequencyMode(row.inputSnapshot);
+    const seasonalityRequest = seasonality(row.inputSnapshot);
+    const collectionProvider = provider(row.provider);
     const result: FrequencyCollectionClaim = {
       jobId: uuid(row.jobId),
       workspaceId: uuid(row.workspaceId),
       projectId: uuid(row.projectId),
       actorId: uuid(row.actorId),
       credentialId: uuid(row.credentialId),
-      provider: provider(row.provider),
+      provider: collectionProvider,
       maxAttempts: positive(row.maxAttempts),
       items: rows.map((item) => ({
         jobItemId: uuid(item.jobItemId),
@@ -84,9 +92,11 @@ export class FrequencyCollectionRuntimeBrokerService {
         keywordVersion: positive(item.keywordVersion),
         attempt: positive(item.attempt)
       })),
+      mode,
       types,
       regionCode: region(row.inputSnapshot),
       device: device(row.inputSnapshot),
+      ...(seasonalityRequest ? { seasonality: seasonalityRequest } : {}),
       jobVersion: positive(row.jobVersion),
       leaseOwner,
       leaseExpiresAt: timestamp(row.leaseExpiresAt),
@@ -322,6 +332,29 @@ function frequencyTypes(value: unknown): readonly SemanticFrequencyType[] {
   return result;
 }
 
+function frequencyMode(value: unknown): FrequencyCollectionMode {
+  const mode = record(value)?.mode;
+  if (mode === undefined || mode === "FREQUENCY") return "FREQUENCY";
+  if (mode === "SEASONALITY") return mode;
+  invalid();
+}
+
+function seasonality(
+  value: unknown
+): FrequencySeasonalityRequest | undefined {
+  const input = record(value);
+  const mode = frequencyMode(value);
+  if (mode === "FREQUENCY") {
+    if (input?.seasonality !== undefined) invalid();
+    return undefined;
+  }
+  try {
+    return parseFrequencySeasonalityRequest(input?.seasonality);
+  } catch {
+    invalid();
+  }
+}
+
 function region(value: unknown): string {
   const result = record(value)?.regionCode;
   if (typeof result !== "string" || !/^[A-Za-z0-9._:-]{1,100}$/u.test(result)) invalid();
@@ -388,8 +421,11 @@ function validateBatchRows(
       timestamp(row.leaseExpiresAt) !== claim.leaseExpiresAt ||
       JSON.stringify(frequencyTypes(row.inputSnapshot)) !==
         JSON.stringify(claim.types) ||
+      frequencyMode(row.inputSnapshot) !== claim.mode ||
       region(row.inputSnapshot) !== claim.regionCode ||
-      device(row.inputSnapshot) !== claim.device
+      device(row.inputSnapshot) !== claim.device ||
+      JSON.stringify(seasonality(row.inputSnapshot)) !==
+        JSON.stringify(claim.seasonality)
     ) invalid();
     itemIds.add(uuid(row.jobItemId));
     requestIds.add(

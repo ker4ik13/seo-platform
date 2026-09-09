@@ -570,6 +570,7 @@ async function loadQueryOptions(
   signal: AbortSignal
 ): Promise<BrowserApiCollection<KeywordListItem>> {
   const query = new URLSearchParams({
+    includeUntracked: "true",
     limit: "200",
     sort: "TEXT_ASC"
   });

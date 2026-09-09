@@ -196,7 +196,10 @@ test("normalizes keyword notes and supports an explicit removal", () => {
     note: "Гипотеза по кластеру"
   });
   assert.deepEqual(updateSemanticKeywordInput({ note: null }), { note: null });
-  assert.throws(() => updateSemanticKeywordInput({ note: "x".repeat(4_001) }), DomainError);
+  assert.equal(
+    updateSemanticKeywordInput({ note: "x".repeat(120_000) }).note?.length,
+    120_000
+  );
 });
 
 test("normalizes nested group create and nullable update", () => {

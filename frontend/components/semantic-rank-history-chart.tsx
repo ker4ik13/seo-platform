@@ -53,7 +53,21 @@ export function SemanticRankHistoryChart({
   const series = useMemo(() => rankSeries(points), [points]);
   const [hoveredSnapshotId, setHoveredSnapshotId] = useState<string>();
   const [focusedSnapshotId, setFocusedSnapshotId] = useState<string>();
+  const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const [chartWidth, setChartWidth] = useState(WIDTH);
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const update = () => {
+      const width = Math.max(280, Math.round(canvas.getBoundingClientRect().width));
+      setChartWidth((current) => current === width ? current : width);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
   const timelinePoints = series.flatMap((entry) => entry.points);
   const visiblePoints = series.flatMap(({ points: entryPoints }) =>
     entryPoints.filter(isPositionPoint)
@@ -75,7 +89,7 @@ export function SemanticRankHistoryChart({
     10,
     ...visiblePoints.map(({ position }) => position)
   );
-  const plotWidth = WIDTH - PADDING.left - PADDING.right;
+  const plotWidth = chartWidth - PADDING.left - PADDING.right;
   const plotHeight = POSITION_PLOT_BOTTOM - PADDING.top;
   const x = (value: string): number => {
     const time = new Date(value).getTime();
@@ -112,7 +126,7 @@ export function SemanticRankHistoryChart({
     const local = cursor.matrixTransform(matrix.inverse());
     if (
       local.x < PADDING.left - 8 ||
-      local.x > WIDTH - PADDING.right + 8 ||
+      local.x > chartWidth - PADDING.right + 8 ||
       local.y < PADDING.top - 8 ||
       local.y > MISSING_Y + 8
     ) {
@@ -134,7 +148,7 @@ export function SemanticRankHistoryChart({
 
   return (
     <div className="semantic-rank-chart">
-      <div className="semantic-rank-chart-canvas">
+      <div className="semantic-rank-chart-canvas" ref={canvasRef}>
         <svg
           aria-label={uiText("Интерактивный график истории позиций. Чем выше линия, тем лучше позиция. Наведите курсор или перейдите по точкам клавишей Tab, чтобы узнать детали съёма.")}
           onPointerLeave={() => setHoveredSnapshotId(undefined)}
@@ -142,14 +156,14 @@ export function SemanticRankHistoryChart({
           preserveAspectRatio="xMidYMid meet"
           ref={svgRef}
           role="group"
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          viewBox={`0 0 ${chartWidth} ${HEIGHT}`}
         >
           {guides.map((position) => (
             <g key={position}>
               <line
                 className="semantic-rank-chart-guide"
                 x1={PADDING.left}
-                x2={WIDTH - PADDING.right}
+                x2={chartWidth - PADDING.right}
                 y1={y(position)}
                 y2={y(position)}
               />
@@ -159,7 +173,7 @@ export function SemanticRankHistoryChart({
           <line
             className="semantic-rank-chart-missing-guide"
             x1={PADDING.left}
-            x2={WIDTH - PADDING.right}
+            x2={chartWidth - PADDING.right}
             y1={MISSING_Y}
             y2={MISSING_Y}
           />
@@ -240,7 +254,7 @@ export function SemanticRankHistoryChart({
             />
           ))}
           <text className="semantic-rank-chart-date" x={PADDING.left} y={HEIGHT - 6}>{formatDate(new Date(minTime).toISOString(), uiLocale)}</text>
-          <text className="semantic-rank-chart-date end" x={WIDTH - PADDING.right} y={HEIGHT - 6}>{formatDate(new Date(maxTime).toISOString(), uiLocale)}</text>
+          <text className="semantic-rank-chart-date end" x={chartWidth - PADDING.right} y={HEIGHT - 6}>{formatDate(new Date(maxTime).toISOString(), uiLocale)}</text>
         </svg>
         {activePoint && <RankPointTooltip plotted={activePoint} svgRef={svgRef} />}
       </div>

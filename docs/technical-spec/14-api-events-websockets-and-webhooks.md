@@ -1676,3 +1676,25 @@ CI:
 - Пользователь без доступа не может join чужую room или получить факт существования ресурса.
 - Webhook имеет проверяемую подпись, историю доставки и ручной redelivery.
 - Secrets отсутствуют в логах, WebSocket payload и domain events.
+
+## 28. Rank workbench API
+
+- `POST /api/v1/projects/{projectId}/rank-workbench/positions` —
+  `ranking.view`, session + CSRF, bounded date matrix response.
+- `POST /api/v1/projects/{projectId}/rank-workbench/serp` —
+  `ranking.view`, session + CSRF, до четырёх dimensions и bounded SERP rows.
+- `POST /api/v1/projects/{projectId}/rank-workbench/delete-dimension-history` —
+  `ranking.configure`, session + CSRF + `Idempotency-Key`, audited tombstone.
+- `GET /api/v1/projects/{projectId}/rank-workbench/dimension-merges` —
+  `ranking.view`, исходные dimensions и текущие обратимые правила.
+- `POST /api/v1/projects/{projectId}/rank-workbench/dimension-merges` —
+  `ranking.configure`, session + CSRF + `Idempotency-Key`, audited source/target
+  mapping.
+- `POST /api/v1/projects/{projectId}/rank-workbench/dimension-merges/{id}/remove`
+  — `ranking.configure`, session + CSRF + `If-Match`, отмена mapping без
+  изменения snapshots.
+
+Platform API добавляет trusted workspace/project/actor headers и заново
+валидирует exact SEO Data response через contracts. Browser не передаёт tenant
+authority. В WebSocket отправляется только обычная project invalidation;
+источником отчёта остаётся повторный HTTP read.

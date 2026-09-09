@@ -5,8 +5,16 @@ export function rankDimensionLabel(dimension: SemanticRankDimension, locale: str
   return `${dimension.searchEngine === "YANDEX" ? english ? "Yandex" : "Яндекс" : "Google"} · ${dimension.regionLabel || dimension.regionCode} · ${dimension.device === "DESKTOP" ? english ? "Desktop" : "ПК" : english ? "Mobile" : "Телефон"}${dimension.language !== "ru" ? ` · ${dimension.language}` : ""}`;
 }
 export function rankDimensionColumns(dimensions: readonly SemanticRankDimension[], locale: string) {
-  const labels = locale.startsWith("en") ? { position: "Position", url: "Ranking URL", checkedAt: "Checked at" } : { position: "Позиция", url: "Найденный URL", checkedAt: "Дата съёма" };
-  return dimensions.flatMap(dimension => (["position", "url", "checkedAt"] as const).map(metric => ({ key: semanticRankColumnKey(dimension.key, metric), label: `${rankDimensionLabel(dimension, locale)} · ${labels[metric]}` })));
+  const labels = locale.startsWith("en")
+    ? { position: "Position", url: "Ranking URL", checkedAt: "Checked at", aiPosition: "AI position", aiUrl: "AI URL", aiCheckedAt: "AI checked at" }
+    : { position: "Позиция", url: "Найденный URL", checkedAt: "Дата съёма", aiPosition: "ИИ-позиция", aiUrl: "URL в ИИ", aiCheckedAt: "Дата ИИ-съёма" };
+  return dimensions.flatMap(dimension =>
+    (["position", "url", "checkedAt", "aiPosition", "aiUrl", "aiCheckedAt"] as const)
+      .map(metric => ({
+        key: semanticRankColumnKey(dimension.key, metric),
+        label: `${rankDimensionLabel(dimension, locale)} · ${labels[metric]}`
+      }))
+  );
 }
 export function rankColumnLabel(key: string, dimensions: readonly SemanticRankDimension[], locale: string): string | undefined {
   const column = parseSemanticRankColumnKey(key);

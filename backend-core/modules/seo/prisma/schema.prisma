@@ -1224,6 +1224,48 @@ model CurrentRank {
   @@map("current_ranks")
 }
 
+model RankDimensionHistoryDeletion {
+  id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  searchEngine    String   @map("search_engine") @db.VarChar(16)
+  countryCode     String   @map("country_code") @db.Char(2)
+  regionCode      String   @map("region_code") @db.VarChar(100)
+  language        String   @db.VarChar(16)
+  device          String   @db.VarChar(16)
+  excludedThrough DateTime @map("excluded_through") @db.Timestamptz(6)
+  deletedBy       String   @map("deleted_by") @db.Uuid
+  idempotencyKey  String   @map("idempotency_key") @db.VarChar(180)
+  requestHash     Bytes    @map("request_hash")
+  affectedSnapshotCount Int @map("affected_snapshot_count")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, idempotencyKey], map: "rank_dimension_history_deletions_idempotency_key")
+  @@index([workspaceId, projectId, searchEngine, countryCode, regionCode, language, device, excludedThrough(sort: Desc)], map: "rank_dimension_history_deletions_dimension_idx")
+  @@map("rank_dimension_history_deletions")
+}
+
+model RankDimensionMerge {
+  id                   String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId          String   @map("workspace_id") @db.Uuid
+  projectId            String   @map("project_id") @db.Uuid
+  sourceDimensionKey   String   @map("source_dimension_key") @db.VarChar(1000)
+  sourceRegionLabel    String?  @map("source_region_label") @db.VarChar(160)
+  targetDimensionKey   String   @map("target_dimension_key") @db.VarChar(1000)
+  targetRegionLabel    String?  @map("target_region_label") @db.VarChar(160)
+  createdBy            String   @map("created_by") @db.Uuid
+  idempotencyKey       String   @map("idempotency_key") @db.VarChar(180)
+  requestHash          Bytes    @map("request_hash")
+  version              Int      @default(1)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, idempotencyKey], map: "rank_dimension_merges_idempotency_key")
+  @@unique([workspaceId, projectId, sourceDimensionKey], map: "rank_dimension_merges_source_key")
+  @@unique([workspaceId, projectId, id], map: "rank_dimension_merges_tenant_project_id_key")
+  @@index([workspaceId, projectId, targetDimensionKey], map: "rank_dimension_merges_target_idx")
+  @@map("rank_dimension_merges")
+}
+
 model FrequencySnapshot {
   id           String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId  String         @map("workspace_id") @db.Uuid
@@ -1244,6 +1286,29 @@ model FrequencySnapshot {
   @@unique([workspaceId, projectId, jobId, keywordId, type, regionCode, device], map: "frequency_snapshots_job_keyword_context_key")
   @@index([projectId, keywordId, type, regionCode, device, observedAt], map: "frequency_snapshots_keyword_context_observed_idx")
   @@map("frequency_snapshots")
+}
+
+model FrequencySeasonalityPoint {
+  id           String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String         @map("workspace_id") @db.Uuid
+  projectId    String         @map("project_id") @db.Uuid
+  keywordId    String         @map("keyword_id") @db.Uuid
+  type         String         @db.VarChar(64)
+  granularity  String         @db.VarChar(16)
+  periodStart  DateTime       @map("period_start") @db.Date
+  value        BigInt
+  share        Decimal?       @db.Decimal(24, 18)
+  regionCode   String         @map("region_code") @db.VarChar(100)
+  device       String         @default("ALL") @db.VarChar(32)
+  provider     String         @db.VarChar(64)
+  sourceMode   DataSourceMode @map("source_mode")
+  jobId        String         @map("job_id") @db.Uuid
+  observedAt   DateTime       @map("observed_at") @db.Timestamptz(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, projectId, jobId, keywordId, type, granularity, periodStart, regionCode, device], map: "frequency_seasonality_points_job_keyword_period_key")
+  @@index([workspaceId, projectId, keywordId, regionCode, device, type, granularity, periodStart], map: "frequency_seasonality_points_keyword_period_idx")
+  @@map("frequency_seasonality_points")
 }
 
 model AiAnswerSnapshot {

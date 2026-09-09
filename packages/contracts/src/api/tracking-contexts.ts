@@ -41,7 +41,7 @@ export const trackingDevices = ["DESKTOP", "MOBILE"] as const;
 
 export type TrackingDevice = (typeof trackingDevices)[number];
 
-export const trackingDepths = [30, 50, 100] as const;
+export const trackingDepths = [10, 20, 30, 50, 100] as const;
 
 export type TrackingDepth = (typeof trackingDepths)[number];
 

@@ -111,7 +111,8 @@ test("accepts exact frequency and crawl result projections", () => {
               qualityFlags: [],
               observedAt: "2026-08-02T10:00:00.000Z"
             }
-          ]
+          ],
+          seasonality: []
         }
       ]
     },
@@ -191,7 +192,7 @@ test("accepts a rank result page beyond the former 1,000-row boundary", () => {
   assert.deepEqual(result.counts, { foundCount: 37, notFoundCount: 163 });
 });
 
-test("accepts a competitor rank result only with its bounded Top-10 rows", () => {
+test("accepts a competitor rank result only within the bounded Top-100 maximum", () => {
   const result = scopedInternalRankOperationResult(
     {
       workspaceId,

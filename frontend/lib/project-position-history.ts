@@ -126,6 +126,7 @@ export function projectPositionTopValue(
   point: ProjectPositionHistoryPoint,
   threshold: ProjectPositionTopThreshold
 ): number {
+  if (threshold === 1) return point.top1KeywordCount;
   if (threshold === 3) return point.top3KeywordCount;
   if (threshold === 5) return point.top5KeywordCount;
   if (threshold === 10) return point.top10KeywordCount;

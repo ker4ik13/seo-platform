@@ -1,6 +1,6 @@
 # Проверки коммерческого MVP
 
-Обновлено 7 сентября 2026. Это промежуточный журнал, не акт готовности production.
+Обновлено 8 сентября 2026. Это промежуточный журнал, не акт готовности production.
 Артефакты расположены в `/home/dev/.local/share/seo-platform-runtime/tmp/e2e.mvp-release-20260906`.
 
 | Проверка | Результат |
@@ -40,13 +40,12 @@
 заданных авторских названий. Проверены draft/noindex, real billing catalog,
 язык SSR и отдельные согласия. Артефакты `public-browser` и `locale-browser-final`.
 
-Большие rank operations пока не развёрнуты. Новые миграции проверены общим
-runner `e2e.pgBE7SodtI`; legacy PostgreSQL tests passed. 50k тест обнаружил
-холодный квадратичный join (180s timeout) и затем реальный Prisma bind limit
-в relation fetch. Исправлены ограниченный read plan и страницы по 5k;
-следующий срез дал scope ~1.5s, assignment ~8.4s, Arsenkin seal ~19.7s.
-Полный 50k ingest/finalization/50k XMLStock manifest ещё проверяется.
-Ни один из этих тестов не отправляет реальные платные SEO запросы.
+Большие rank operations развёрнуты в локальном production-like runtime. Ранний
+50k тест обнаружил холодный квадратичный join и Prisma bind limit; bounded read
+plan и страницы по 5k исправили оба дефекта. Итоговый чистый прогон
+`e2e.pgFQt0xdUs` создал 50 000 ключей, назначил их, сохранил все пакеты,
+финализировал Arsenkin/XMLStock manifests и завершился успешно. Ни один из этих
+тестов не отправляет реальные платные SEO-запросы.
 
 PostgreSQL-проверки используют настоящие изолированные базы и SQL constraints.
 Provider transport контролируется fixtures: этот результат не выдается за
@@ -80,3 +79,46 @@ S3/ClamAV, HTTPS, browser и backup restore находится в `mvp-audit-202
   build → `pnpm deploy --prod` с предварительно убранными локальными `dist`;
   финальный deploy artifact содержит скомпилированную зависимость. Статический
   infrastructure regression закрепляет порядок clean Docker build.
+
+## Позиции, сезонность и выдача — финальный локальный срез
+
+- Контракты: 126 passed; Execution: 823 passed, 13 opt-in skipped; Core API:
+  778 passed, 12 opt-in skipped; Core SEO: 362 passed, 5 opt-in skipped;
+  Frontend: 388 passed. Корневые `typecheck` и `lint`, Prisma validate/generate
+  и production build на 33 маршрута прошли.
+- Изолированный PostgreSQL runner `e2e.pgFQt0xdUs` с новым чистым кластером
+  прошёл миграции, ACL, уведомления, Core/Execution/SEO concurrency и 50k rank
+  workload. Нагрузочная часть завершилась за 165 секунд, live provider calls — 0.
+- Browser E2E `e2e.rank-workbench.2MqHWFed` прошёл через публичный HTTPS/Caddy.
+  Он проверил дневную матрицу, desktop/mobile, city/device sidebar, стабильный
+  drawer колонок, XLSX round trip, длинную заметку 130 033 символа, сезонность,
+  SERP comparison и append-only удаление одного ошибочного среза. Browser
+  errors — 0, paid requests — 0.
+- Перед локальными миграциями сохранена копия четырёх БД:
+  `pre-migration-20260908T175555Z.X1696yjs`. После миграций runtime снова
+  доступен по `https://144.31.221.28:3000`; все readiness endpoints и
+  пользовательский маршрут через системный Caddy возвращают ожидаемые статусы.
+
+## Arsenkin seasonality и компактный интерфейс — 9 сентября
+
+- Официальная документация Arsenkin и фактический API подтвердили
+  `wordstat/type=3`, region/device/group/startdate/enddate и обязательный для
+  текущей границы Wordstat `correct_dates=true`. XMLStock удалён из маршрутов
+  сезонности; обычная частотность XMLStock сохранена.
+- Первый принятый Arsenkin task дал ранее не документированную форму результата
+  `data: [{query, data: {date: {frequency}}}]`; fail-closed parser не сохранил
+  её до проверки. После добавления точной схемы тот же provider result прошёл
+  отдельный regression на 12 точек. Финальный UI-запуск на одном существующем
+  ключе с частотностью завершён `COMPLETED`: 12 месячных точек сохранены в
+  PostgreSQL, operation result и keyword insights, browser errors — 0.
+  Всего на два принятых canary task израсходовано 2 лимита Arsenkin; отклонённые
+  проверки формата лимиты не списали. Project Wordstat route возвращён на
+  исходный XMLStock, все краткоживущие проверочные сессии отозваны.
+- Browser E2E `e2e.rank-ui-final.z9NJ1cN7` прошёл через HTTPS/Caddy. Он проверил
+  отсутствие native select/date, общий календарь, desktop/mobile layout,
+  скрытое распределение, sidebar trigger не выше 52 px и option не выше 56 px.
+- После финального parser/UI diff: Execution — 830 passed, 13 opt-in skipped;
+  Frontend — 388 passed; root typecheck/lint, i18n placeholder check и build на
+  33 маршрута прошли. Живой sidebar дополнительно подтвердил порядок
+  «Частотность → Сезонность», названия «Россия/Москва», подпись «Последние 30
+  дней» и сохранённый график.

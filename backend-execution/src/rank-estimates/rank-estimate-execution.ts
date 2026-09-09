@@ -47,7 +47,7 @@ const SUPPORTED_MAPPING_VERSIONS = [
 ] as const;
 const REGION_ID_PATTERN = /^\d{1,10}$/u;
 const SUPPORTED_SEARCH_ENGINES = ["GOOGLE", "YANDEX"] as const;
-const SUPPORTED_DEPTHS = [30, 50, 100] as const;
+const SUPPORTED_DEPTHS = [10, 20, 30, 50, 100] as const;
 
 export function rankEstimateExecutionParameters(
   configuration: TrackingContextConfigurationInput,
@@ -61,7 +61,10 @@ export function rankEstimateExecutionParameters(
   if (
     !SUPPORTED_SEARCH_ENGINES.includes(configuration.searchEngine) ||
     !SUPPORTED_DEPTHS.includes(configuration.depth) ||
+    (purpose !== "COMPETITOR_SERP" &&
+      ![30, 50, 100].includes(configuration.depth)) ||
     (provider === "ARSENKIN" &&
+      purpose !== "COMPETITOR_SERP" &&
       configuration.searchEngine === "YANDEX" &&
       configuration.depth !== 30) ||
     (configuration.searchEngine === "GOOGLE" &&
@@ -105,8 +108,7 @@ export function rankEstimateExecutionParameters(
         provider,
         configuration.searchEngine,
         searchSource,
-        yandexLiveMode,
-        purpose
+        yandexLiveMode
       )
   };
 }
@@ -230,22 +232,19 @@ function providerMappingVersion(
   provider: "ARSENKIN" | "XMLSTOCK",
   searchEngine: "GOOGLE" | "YANDEX",
   searchSource: "SEARCH_API" | "LIVE",
-  yandexLiveMode: "TURBO" | undefined,
-  purpose: RankCollectionPurpose
+  yandexLiveMode: "TURBO" | undefined
 ): (typeof SUPPORTED_MAPPING_VERSIONS)[number] {
   if (provider === "ARSENKIN") {
-    if (purpose === "COMPETITOR_SERP") {
-      if (searchEngine === "GOOGLE") {
-        return ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION;
-      }
-      return searchSource === "LIVE"
-        ? ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION
-        : ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION;
+    // Check Top returns the complete ordered SERP with snippets and is also
+    // sufficient to derive the project position. New position estimates use
+    // this mapping as well; persisted estimates with the older mapping remain
+    // readable and continue through the legacy `positions` wire request.
+    if (searchEngine === "GOOGLE") {
+      return ARSENKIN_CHECK_TOP_GOOGLE_LIVE_MAPPING_VERSION;
     }
-    if (searchEngine === "GOOGLE") return ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION;
     return searchSource === "LIVE"
-      ? ARSENKIN_YANDEX_LIVE_MAPPING_VERSION
-      : ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION;
+      ? ARSENKIN_CHECK_TOP_YANDEX_LIVE_MAPPING_VERSION
+      : ARSENKIN_CHECK_TOP_YANDEX_XML_MAPPING_VERSION;
   }
   if (searchEngine === "GOOGLE") return XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION;
   if (searchSource === "LIVE" && yandexLiveMode === "TURBO") {

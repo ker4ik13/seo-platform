@@ -611,7 +611,7 @@ async function* positionHistoryXlsxDocument(
       { level: 6 }
     );
     zip.add(stream);
-    const lastColumn = excelColumn(9 + sheet.dates.length);
+    const lastColumn = excelColumn(4 + sheet.dates.length);
     stream.push(
       encoder.encode(
         positionHistoryWorksheetStart(lastColumn) +
@@ -690,7 +690,13 @@ function positionHistoryHeaderRows(
     dates: readonly string[];
   }>
 ): string {
-  const header = ["Фраза", "Добавлен", "Поисковик", "Город", "Код региона", "Устройство", "Страна", "Язык", "Язык запроса", ...sheet.dates.map(displayDate)];
+  const header = [
+    "Фраза",
+    "Добавлен",
+    "Поисковик",
+    "Устройство",
+    ...sheet.dates.map(displayDate)
+  ];
   const headerRow = `<row r="1" ht="25" customHeight="1">${header.map((value, index) =>
     styledInlineCell(1, index + 1, value, 1)
   ).join("")}</row>`;
@@ -705,12 +711,12 @@ function positionHistoryHeaderRows(
         sheet.searchEngine === "YANDEX" ? "Яндекс" : "Google",
         2
       ),
-      ...[4, 5, 6, 7, 8, 9].map(column => emptyStyledCell(row, column, 2)),
+      emptyStyledCell(row, 4, 2),
       ...sheet.dates.map((_, dateIndex) => {
-        const column = excelColumn(dateIndex + 10);
+        const column = excelColumn(dateIndex + 5);
         return formulaCell(
           row,
-          dateIndex + 10,
+          dateIndex + 5,
           `COUNTIFS(${column}$5:INDEX(${column}:${column},MAX(5,COUNTA($A:$A))),">=1",${column}$5:INDEX(${column}:${column},MAX(5,COUNTA($A:$A))),"<=${threshold}")`,
           3
         );
@@ -757,25 +763,20 @@ function positionHistoryDataRow(
     styledInlineCell(rowIndex, 1, row.text, 4),
     styledInlineCell(rowIndex, 2, displayDate(row.createdAt.slice(0, 10)), 5),
     styledInlineCell(rowIndex, 3, searchEngine === "YANDEX" ? "Яндекс" : "Google", 5),
-    styledInlineCell(rowIndex, 4, row.dimension?.regionLabel ?? row.dimension?.regionCode ?? "—", 5),
-    styledInlineCell(rowIndex, 5, row.dimension?.regionCode ?? "—", 5),
-    styledInlineCell(rowIndex, 6, row.dimension ? row.dimension.device === "DESKTOP" ? "ПК" : "Телефон" : "—", 5),
-    styledInlineCell(rowIndex, 7, row.dimension?.countryCode ?? "—", 5),
-    styledInlineCell(rowIndex, 8, row.dimension?.language ?? "—", 5),
-    styledInlineCell(rowIndex, 9, row.keywordLanguage, 5),
+    styledInlineCell(rowIndex, 4, row.dimension ? row.dimension.device === "DESKTOP" ? "ПК" : "Телефон" : "—", 5),
     ...dates.map((date, index) => {
       const current = snapshots.get(date);
       const style = positionHistoryCellStyle(current, olderByDate.get(date));
       if (!current) {
-        return emptyStyledCell(rowIndex, index + 10, style);
+        return emptyStyledCell(rowIndex, index + 5, style);
       }
       if (!current.found) {
-        return styledInlineCell(rowIndex, index + 10, "—", style);
+        return styledInlineCell(rowIndex, index + 5, "—", style);
       }
       if (!Number.isSafeInteger(current.position) || current.position === undefined) {
         throw new TypeError("Position history report position is invalid");
       }
-      return styledNumberCell(rowIndex, index + 10, current.position, style);
+      return styledNumberCell(rowIndex, index + 5, current.position, style);
     })
   ];
   return `<row r="${rowIndex}" ht="21" customHeight="1">${cells.join("")}</row>`;

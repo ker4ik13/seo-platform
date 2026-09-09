@@ -862,6 +862,8 @@ credential, fallback, budget, schedule и поисковые параметры.
 
 - workspace_id;
 - project_id;
+- depth: `10|20|30|50|100`; значения 10/20 используются конкурентными
+  срезами, обычный position workflow ограничен 30/50/100;
 - context_id;
 - configuration_version;
 - search_engine `GOOGLE/YANDEX`;
@@ -2111,3 +2113,28 @@ Custom migration SQL остаётся частью Prisma Migrate: ORM не за
 permissions, triggers и PostgreSQL-specific invariants. Любая попытка удалить
 такой SQL должна доказать эквивалентность блокировок, affected-row semantics,
 идемпотентности, plan и rollback, а не только совпадение happy-path результата.
+
+## 15. Сезонные точки и пользовательское исключение rank-history
+
+`frequency_seasonality_points` принадлежит Core SEO и является append-only.
+Уникальность `(workspace, project, job, keyword, type, granularity,
+period_start, region, device)` делает повтор persistence безопасным и позволяет
+одному job хранить отдельные `BASE|EXACT|FIXED` серии для обратной совместимости;
+текущий XMLStock history workflow создаёт только `BASE`. Значение хранится как
+`bigint`, доля — `decimal(24,18)`; provider/source mode ограничены CHECK.
+
+`rank_dimension_history_deletions` также append-only и хранит полную identity
+dimension, `excluded_through`, actor, idempotency key, SHA-256 request hash и
+число затронутых snapshots. Это tombstone продуктовой видимости, а не удаление
+финансового либо provider evidence. Обе таблицы включены в
+`transfer_seo_project_workspace`, guarded update разрешает только штатный
+workspace re-key, DELETE запрещён trigger.
+
+`rank_dimension_merges` принадлежит Core SEO и хранит обратимую
+presentation-настройку source/target dimension keys, их сохранённые подписи,
+actor, idempotency hash и optimistic version. Уникальность
+`(workspace_id, project_id, source_dimension_key)` запрещает два назначения
+одного source; индекс target поддерживает объединённые чтения. В отличие от
+rank evidence эту строку разрешено удалить для отмены объединения: сами
+snapshots при этом не изменяются. Таблица включена в
+`transfer_seo_project_workspace`.

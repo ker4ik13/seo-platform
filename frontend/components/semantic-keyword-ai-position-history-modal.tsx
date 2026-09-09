@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { SemanticAiAnswerHistoryItem } from "@seo-platform/contracts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  parseSemanticRankDimensionKey,
+  type SemanticAiAnswerCompetitorSnapshot,
+  type SemanticAiAnswerHistoryItem
+} from "@seo-platform/contracts";
 import {
   BrowserApiError,
   browserApiCollectionRequest
@@ -10,20 +14,30 @@ import {
   rankChangePresentation,
   semanticDisplayUrl
 } from "../lib/semantic-rank-presentation";
+import { serpMovementKey, serpMovements } from "../lib/serp-movement";
+import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
 export function SemanticKeywordAiPositionHistoryModal({
+  currentUserId,
+  dimensionKey,
   keywordId,
   keywordText,
   onClose,
+  onOpenAiAnswer,
+  projectDomain,
   projectId
 }: Readonly<{
+  currentUserId: string;
+  dimensionKey?: string;
   keywordId: string;
   keywordText: string;
   onClose: () => void;
+  onOpenAiAnswer: () => void;
+  projectDomain: string;
   projectId: string;
 }>) {
   const uiLocale = useUiLocale().locale;
@@ -34,8 +48,13 @@ export function SemanticKeywordAiPositionHistoryModal({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
+  const [showMovement, setShowMovement] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadMoreRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setShowMovement(readMovementPreference(currentUserId));
+  }, [currentUserId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -93,12 +112,55 @@ export function SemanticKeywordAiPositionHistoryModal({
     return () => observer.disconnect();
   }, [hasNext, loadMore]);
 
+  const selectedDimension = dimensionKey
+    ? parseSemanticRankDimensionKey(dimensionKey)
+    : undefined;
+  const visibleItems = useMemo(
+    () => selectedDimension
+      ? items.filter((item) =>
+          item.searchEngine === selectedDimension.searchEngine &&
+          item.regionCode === selectedDimension.regionCode &&
+          item.device === selectedDimension.device
+        )
+      : items,
+    [items, selectedDimension]
+  );
+  const snapshots = useMemo<readonly SemanticAiAnswerCompetitorSnapshot[]>(
+    () => visibleItems
+      .filter(({ results }) => results.length > 0)
+      .map((item) => ({
+        snapshotId: item.snapshotId,
+        searchEngine: item.searchEngine,
+        regionCode: item.regionCode,
+        device: item.device,
+        provider: item.provider,
+        observedAt: item.observedAt,
+        results: item.results
+      })),
+    [visibleItems]
+  );
+  const movements = useMemo(() => serpMovements(snapshots), [snapshots]);
+  const canShowMovement = snapshots.length > 1;
+  const movementForResult = showMovement && canShowMovement
+    ? (snapshotId: string, resultUrl: string) =>
+        movements.get(serpMovementKey(snapshotId, resultUrl))
+    : undefined;
+  const itemsWithoutSources = visibleItems.filter(({ results }) => results.length === 0);
+
   return (
     <SemanticModal
-      description={uiText("Все сохранённые проверки ИИ-ответов по этому запросу, независимо от региона и устройства. История загружается блоками по 200 записей.")}
+      bodyLayout="edge"
+      description={uiText(dimensionKey ? "Все сохранённые ИИ-ответы и источники выбранного города и устройства." : "Все сохранённые ИИ-ответы и источники этого запроса.")}
+      headerActions={<div className="semantic-ai-history-actions">
+        <button className="secondary-button" onClick={() => { onClose(); onOpenAiAnswer(); }} type="button"><UiText text="Открыть ИИ-ответ" /></button>
+        <label className="semantic-serp-movement-toggle" title={canShowMovement ? undefined : uiText("Для сравнения нужны минимум два съёма")}>
+          <input checked={showMovement} disabled={!canShowMovement} onChange={(event) => { setShowMovement(event.target.checked); writeMovementPreference(currentUserId, event.target.checked); }} type="checkbox" />
+          <UiText text="Показать движение" />
+        </label>
+      </div>}
       onClose={onClose}
       size="large"
-      title={uiText("История ИИ-позиций · {0}", [String(keywordText)])}
+      title={uiText("История ИИ-выдачи и конкурентов · {0}", [String(keywordText)])}
     >
       <div className="semantic-position-history-full semantic-ai-position-history-full">
         <header>
@@ -109,13 +171,22 @@ export function SemanticKeywordAiPositionHistoryModal({
         {loading ? (
           <div className="semantic-position-history-state" role="status">
             <UiText text="Загружаем историю ИИ-позиций…" /></div>
-        ) : items.length === 0 && !error ? (
+        ) : visibleItems.length === 0 && !error ? (
           <div className="semantic-position-history-state">
             <UiText text="Сохранённых проверок ИИ-ответов пока нет." /></div>
         ) : (
-          <ol className="semantic-position-history-list semantic-ai-position-history-list">
-            {items.map((item) => <HistoryRow item={item} key={item.snapshotId} />)}
-          </ol>
+          <>
+            <SemanticCompetitorSnapshots
+              heading={uiText("Сохранённая ИИ-выдача")}
+              projectDomain={projectDomain}
+              showEmpty={false}
+              snapshots={snapshots}
+              {...(movementForResult ? { movementForResult } : {})}
+            />
+            {itemsWithoutSources.length > 0 && <ol className="semantic-position-history-list semantic-ai-position-history-list">
+              {itemsWithoutSources.map((item) => <HistoryRow item={item} key={item.snapshotId} />)}
+            </ol>}
+          </>
         )}
 
         {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
@@ -235,4 +306,24 @@ function formatDateTime(value: string, uiLocale: string = "ru-RU"): string {
         dateStyle: "medium",
         timeStyle: "short"
       }).format(date);
+}
+
+function movementPreferenceKey(currentUserId: string): string {
+  return `seonorita:ai-serp-history-movement:v1:${currentUserId}`;
+}
+
+function readMovementPreference(currentUserId: string): boolean {
+  try {
+    return localStorage.getItem(movementPreferenceKey(currentUserId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeMovementPreference(currentUserId: string, value: boolean): void {
+  try {
+    localStorage.setItem(movementPreferenceKey(currentUserId), String(value));
+  } catch {
+    // The current modal still keeps the preference while it is open.
+  }
 }

@@ -1,4 +1,9 @@
-import { rankDimensionConfigurationWhere, rankDimensionMetadata } from "../rank-results/rank-dimension.js";
+import { rankDimensionMetadata } from "../rank-results/rank-dimension.js";
+import {
+  rankDimensionConfigurationPredicate,
+  rankDimensionConfigurationWhereAny,
+  rankDimensionSources
+} from "../rank-results/rank-dimension-merge.js";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import {
@@ -39,8 +44,11 @@ import {
   type SemanticKeywordListFrequencyValue,
   type SemanticKeywordListPosition,
   type SemanticKeywordInsights,
+  type SemanticRankDimension,
   type SemanticKeywordSort,
   type SemanticFrequencyDevice,
+  type FrequencyCollectionProvider,
+  type FrequencySeasonalityGranularity,
   type SemanticFrequencyQualityFlag,
   type SemanticFrequencyType,
   type SemanticAiAnswerSummary,
@@ -87,6 +95,7 @@ interface ProjectPositionHistoryDayRow {
   readonly observedAt: Date;
   readonly measuredKeywordCount: bigint;
   readonly positionedKeywordCount: bigint;
+  readonly top1KeywordCount: bigint;
   readonly top3KeywordCount: bigint;
   readonly top5KeywordCount: bigint;
   readonly top10KeywordCount: bigint;
@@ -152,42 +161,46 @@ export class KeywordService {
     workspaceId: string,
     projectId: string
   ): Promise<ProjectPositionSummary> {
-    const [keywords, ranks] = await Promise.all([
-      this.prisma.keyword.findMany({
-        where: { workspaceId, projectId, status: "ACTIVE" },
-        select: { id: true }
-      }),
-      this.prisma.currentRank.findMany({
-        where: {
-          workspaceId,
-          projectId,
-          found: true,
-          position: { not: null }
-        },
-        orderBy: [{ observedAt: "desc" }, { keywordId: "asc" }],
-        select: { keywordId: true, position: true }
-      })
-    ]);
-    const activeKeywordIds = new Set(keywords.map(({ id }) => id));
-    const positions = new Map<string, number>();
-    for (const rank of ranks) {
-      if (
-        rank.position !== null &&
-        activeKeywordIds.has(rank.keywordId) &&
-        !positions.has(rank.keywordId)
-      ) {
-        positions.set(rank.keywordId, rank.position);
-      }
-    }
-    const topCounts = positionTopCounts([...positions.values()]);
-    if (positions.size === 0) {
+    const rows = await this.prisma.$queryRaw<readonly { position: number }[]>(Prisma.sql`
+      SELECT DISTINCT ON (current.keyword_id) current.position
+      FROM current_ranks current
+      JOIN keywords keyword
+        ON keyword.workspace_id = current.workspace_id
+       AND keyword.project_id = current.project_id
+       AND keyword.id = current.keyword_id
+      JOIN tracking_context_versions configuration
+        ON configuration.workspace_id = current.workspace_id
+       AND configuration.project_id = current.project_id
+       AND configuration.context_id = current.tracking_context_id
+       AND configuration.configuration_version = current.configuration_version
+      WHERE current.workspace_id = ${workspaceId}::uuid
+        AND current.project_id = ${projectId}::uuid
+        AND keyword.status::text = 'ACTIVE'
+        AND current.found
+        AND current.position IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM rank_dimension_history_deletions deletion
+          WHERE deletion.workspace_id = current.workspace_id
+            AND deletion.project_id = current.project_id
+            AND deletion.search_engine = configuration.search_engine::text
+            AND deletion.country_code = configuration.country_code
+            AND deletion.region_code = COALESCE(configuration.region_code, configuration.country_code)
+            AND deletion.language = configuration.language
+            AND deletion.device = configuration.device::text
+            AND current.observed_at <= deletion.excluded_through
+        )
+      ORDER BY current.keyword_id, current.observed_at DESC, current.snapshot_id DESC
+    `);
+    const positions = rows.map(({ position }) => position);
+    const topCounts = positionTopCounts(positions);
+    if (positions.length === 0) {
       return { positionedKeywordCount: 0, ...topCounts };
     }
     const average =
-      [...positions.values()].reduce((sum, position) => sum + position, 0) /
-      positions.size;
+      positions.reduce((sum, position) => sum + position, 0) /
+      positions.length;
     return {
-      positionedKeywordCount: positions.size,
+      positionedKeywordCount: positions.length,
       averagePosition: Math.round(average * 10) / 10,
       ...topCounts
     };
@@ -204,13 +217,11 @@ export class KeywordService {
     if (query.rankDimensionKey && !dimension) {
       throw new BadRequestException("Invalid rank dimension");
     }
-    const dimensionFilter = dimension
-      ? Prisma.sql`
-          AND configuration.search_engine::text = ${dimension.searchEngine}
-          AND configuration.country_code = ${dimension.countryCode}
-          AND COALESCE(configuration.region_code, configuration.country_code) = ${dimension.regionCode}
-          AND configuration.language = ${dimension.language}
-          AND configuration.device::text = ${dimension.device}`
+    const sourceDimensions = dimension
+      ? await rankDimensionSources(this.prisma, { workspaceId, projectId }, dimension)
+      : undefined;
+    const dimensionFilter = sourceDimensions
+      ? rankDimensionConfigurationPredicate(sourceDimensions)
       : Prisma.empty;
     const rows = await this.prisma.$queryRaw<
       readonly ProjectPositionHistoryDayRow[]
@@ -246,34 +257,90 @@ export class KeywordService {
           AND snapshot.position_tracking_enabled = TRUE
           AND keyword.status = 'ACTIVE'
           AND (${query.includeUntracked}::boolean OR keyword.is_tracked = TRUE)
+          AND NOT EXISTS (
+            SELECT 1 FROM rank_dimension_history_deletions deletion
+            WHERE deletion.workspace_id = snapshot.workspace_id
+              AND deletion.project_id = snapshot.project_id
+              AND deletion.search_engine = configuration.search_engine::text
+              AND deletion.country_code = configuration.country_code
+              AND deletion.region_code = COALESCE(configuration.region_code, configuration.country_code)
+              AND deletion.language = configuration.language
+              AND deletion.device = configuration.device::text
+              AND snapshot.observed_at <= deletion.excluded_through
+          )
           ${dimensionFilter}
+      ),
+      keyword_day_states AS (
+        SELECT
+          "dayKey",
+          "observedAt",
+          keyword_id,
+          found,
+          position,
+          LAG("dayKey") OVER (
+            PARTITION BY keyword_id ORDER BY "dayKey"
+          ) AS "previousDayKey",
+          LAG(found) OVER (
+            PARTITION BY keyword_id ORDER BY "dayKey"
+          ) AS "previousFound",
+          LAG(position) OVER (
+            PARTITION BY keyword_id ORDER BY "dayKey"
+          ) AS "previousPosition"
+        FROM daily_latest
+        WHERE daily_sequence = 1
+      ),
+      daily_deltas AS (
+        SELECT
+          "dayKey",
+          MAX("observedAt") AS "observedAt",
+          COUNT(*) FILTER (WHERE "previousDayKey" IS NULL)::bigint AS "measuredKeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position IS NOT NULL THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" IS NOT NULL THEN 1 ELSE 0 END
+          )::bigint AS "positionedKeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position = 1 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" = 1 THEN 1 ELSE 0 END
+          )::bigint AS "top1KeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position BETWEEN 1 AND 3 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" BETWEEN 1 AND 3 THEN 1 ELSE 0 END
+          )::bigint AS "top3KeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position BETWEEN 1 AND 5 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" BETWEEN 1 AND 5 THEN 1 ELSE 0 END
+          )::bigint AS "top5KeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position BETWEEN 1 AND 10 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" BETWEEN 1 AND 10 THEN 1 ELSE 0 END
+          )::bigint AS "top10KeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position BETWEEN 1 AND 30 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" BETWEEN 1 AND 30 THEN 1 ELSE 0 END
+          )::bigint AS "top30KeywordDelta",
+          SUM(
+            CASE WHEN found = TRUE AND position BETWEEN 1 AND 50 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" = TRUE AND "previousPosition" BETWEEN 1 AND 50 THEN 1 ELSE 0 END
+          )::bigint AS "top50KeywordDelta"
+        FROM keyword_day_states
+        GROUP BY "dayKey"
       ),
       daily_aggregates AS (
         SELECT
           "dayKey",
-          MAX("observedAt") AS "observedAt",
-          COUNT(*)::bigint AS "measuredKeywordCount",
-          COUNT(*) FILTER (
-            WHERE found = TRUE AND position IS NOT NULL
-          )::bigint AS "positionedKeywordCount",
-          COUNT(*) FILTER (
-            WHERE found = TRUE AND position BETWEEN 1 AND 3
-          )::bigint AS "top3KeywordCount",
-          COUNT(*) FILTER (
-            WHERE found = TRUE AND position BETWEEN 1 AND 5
-          )::bigint AS "top5KeywordCount",
-          COUNT(*) FILTER (
-            WHERE found = TRUE AND position BETWEEN 1 AND 10
-          )::bigint AS "top10KeywordCount",
-          COUNT(*) FILTER (
-            WHERE found = TRUE AND position BETWEEN 1 AND 30
-          )::bigint AS "top30KeywordCount",
-          COUNT(*) FILTER (
-            WHERE found = TRUE AND position BETWEEN 1 AND 50
-          )::bigint AS "top50KeywordCount"
-        FROM daily_latest
-        WHERE daily_sequence = 1
-        GROUP BY "dayKey"
+          "observedAt",
+          (SUM("measuredKeywordDelta") OVER cumulative_history)::bigint AS "measuredKeywordCount",
+          (SUM("positionedKeywordDelta") OVER cumulative_history)::bigint AS "positionedKeywordCount",
+          (SUM("top1KeywordDelta") OVER cumulative_history)::bigint AS "top1KeywordCount",
+          (SUM("top3KeywordDelta") OVER cumulative_history)::bigint AS "top3KeywordCount",
+          (SUM("top5KeywordDelta") OVER cumulative_history)::bigint AS "top5KeywordCount",
+          (SUM("top10KeywordDelta") OVER cumulative_history)::bigint AS "top10KeywordCount",
+          (SUM("top30KeywordDelta") OVER cumulative_history)::bigint AS "top30KeywordCount",
+          (SUM("top50KeywordDelta") OVER cumulative_history)::bigint AS "top50KeywordCount"
+        FROM daily_deltas
+        WINDOW cumulative_history AS (
+          ORDER BY "dayKey" ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )
       ),
       bounded_days AS (
         SELECT *
@@ -294,6 +361,7 @@ export class KeywordService {
       observedAt: row.observedAt.toISOString(),
       measuredKeywordCount: safeHistoryCount(row.measuredKeywordCount),
       positionedKeywordCount: safeHistoryCount(row.positionedKeywordCount),
+      top1KeywordCount: safeHistoryCount(row.top1KeywordCount),
       top3KeywordCount: safeHistoryCount(row.top3KeywordCount),
       top5KeywordCount: safeHistoryCount(row.top5KeywordCount),
       top10KeywordCount: safeHistoryCount(row.top10KeywordCount),
@@ -493,7 +561,8 @@ export class KeywordService {
       frequencySnapshots,
       currentRanks,
       aiAnswerSnapshots,
-      selectedGroupMemberships
+      selectedGroupMemberships,
+      rankDeletions
     ] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([])
@@ -587,6 +656,8 @@ export class KeywordService {
               id: true,
               keywordId: true,
               searchEngine: true,
+              regionCode: true,
+              device: true,
               answerPresent: true,
               siteFound: true,
               position: true,
@@ -608,6 +679,21 @@ export class KeywordService {
             select: {
               keywordId: true,
               group: { select: { id: true, path: true, name: true } }
+            }
+          }),
+      keywordIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.rankDimensionHistoryDeletion.findMany({
+            where: { workspaceId, projectId },
+            orderBy: { excludedThrough: "desc" },
+            take: 2_000,
+            select: {
+              searchEngine: true,
+              countryCode: true,
+              regionCode: true,
+              language: true,
+              device: true,
+              excludedThrough: true
             }
           })
     ]);
@@ -634,6 +720,13 @@ export class KeywordService {
           }
         });
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
+    const visibleCurrentRanks = currentRanks.filter((rank) => {
+      const configuration = rankConfigurations.find((candidate) =>
+        candidate.contextId === rank.trackingContextId &&
+        candidate.configurationVersion === rank.configurationVersion
+      );
+      return configuration && !rankIsExcluded(rank.observedAt, configuration, rankDeletions);
+    });
     const clusterNameById = new Map(
       clusters.map(({ id, name }) => [id, name])
     );
@@ -671,6 +764,8 @@ export class KeywordService {
       aiAnswerSnapshots.map((snapshot) => ({
         keywordId: snapshot.keywordId,
         searchEngine: snapshot.searchEngine as SemanticAiAnswerSummary["searchEngine"],
+        regionCode: snapshot.regionCode,
+        device: snapshot.device as "DESKTOP" | "MOBILE",
         observedAt: snapshot.observedAt,
         snapshotId: snapshot.id
       }))
@@ -683,6 +778,8 @@ export class KeywordService {
         previousAiAnswerPositionKey(
           snapshot.keywordId,
           searchEngine,
+          snapshot.regionCode,
+          snapshot.device as "DESKTOP" | "MOBILE",
           snapshot.observedAt,
           snapshot.id
         )
@@ -708,11 +805,11 @@ export class KeywordService {
     const latestRankByKeywordEngine = new Map<
       string,
       Readonly<{
-        rank: (typeof currentRanks)[number];
+        rank: (typeof visibleCurrentRanks)[number];
         searchEngine: RankSearchEngine;
       }>
     >();
-    for (const rank of currentRanks) {
+    for (const rank of visibleCurrentRanks) {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
@@ -734,19 +831,18 @@ export class KeywordService {
         snapshotId: rank.snapshotId
       }))
     );
-    const latestRankSnapshotIds = [...latestRankByKeywordEngine.values()].map(
-      ({ rank }) => rank.snapshotId
-    );
-    const currentSerpSnapshots = latestRankSnapshotIds.length === 0
+    const currentRankSnapshotIds = visibleCurrentRanks.map(({ snapshotId }) => snapshotId);
+    const currentSerpSnapshots = currentRankSnapshotIds.length === 0
       ? []
       : await this.prisma.rankSnapshot.findMany({
           where: {
             workspaceId,
             projectId,
-            id: { in: latestRankSnapshotIds }
+            id: { in: currentRankSnapshotIds }
           },
           select: {
             id: true,
+            keywordId: true,
             manifest: { select: { projectDomain: true } },
             serpResults: {
               orderBy: { position: "asc" },
@@ -769,6 +865,13 @@ export class KeywordService {
           snapshot.manifest.projectDomain
         )
       ])
+    );
+    const keywordsWithMultipleRankingUrls = new Set(
+      currentSerpSnapshots.flatMap((snapshot) =>
+        (siteResultsBySnapshotId.get(snapshot.id)?.length ?? 0) > 1
+          ? [snapshot.keywordId]
+          : []
+      )
     );
     const positionsByKeywordId = new Map<
       string,
@@ -839,7 +942,8 @@ export class KeywordService {
           frequenciesByKeywordId.get(row.id),
           [...(positionsByKeywordId.get(row.id)?.values() ?? [])],
           selectedGroupByKeywordId.get(row.id),
-          aiAnswersByKeywordId.get(row.id)
+          aiAnswersByKeywordId.get(row.id),
+          keywordsWithMultipleRankingUrls.has(row.id)
         )
       ),
       page: {
@@ -890,6 +994,22 @@ export class KeywordService {
     keywordId: string,
     dimensionKey?: string
   ): Promise<SemanticKeywordInsights> {
+    const selectedDimension = dimensionKey
+      ? parseSemanticRankDimensionKey(dimensionKey)
+      : undefined;
+    if (dimensionKey && !selectedDimension) {
+      throw new BadRequestException("Invalid rank dimension");
+    }
+    const insightDimensions = selectedDimension
+      ? await rankDimensionSources(
+          this.prisma,
+          { workspaceId, projectId },
+          selectedDimension
+        )
+      : undefined;
+    const sourceDimensionKeys = insightDimensions
+      ? new Set(insightDimensions.map(({ key }) => key))
+      : undefined;
     const keyword = await this.prisma.keyword.findFirst({
       where: {
         id: keywordId,
@@ -902,8 +1022,22 @@ export class KeywordService {
     if (!keyword) {
       throw new HttpException("Keyword not found", HttpStatus.NOT_FOUND);
     }
+    const rankDeletions = await this.prisma.rankDimensionHistoryDeletion.findMany({
+      where: { workspaceId, projectId },
+      orderBy: { excludedThrough: "desc" },
+      take: 2_000,
+      select: {
+        searchEngine: true,
+        countryCode: true,
+        regionCode: true,
+        language: true,
+        device: true,
+        excludedThrough: true
+      }
+    });
     const [
       frequencies,
+      seasonalityPoints,
       currentRanks,
       rankSnapshots,
       aiPositionSnapshots,
@@ -918,13 +1052,39 @@ export class KeywordService {
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 100
       }),
+      this.prisma.frequencySeasonalityPoint.findMany({
+        where: { workspaceId, projectId, keywordId },
+        orderBy: [
+          { observedAt: "desc" },
+          { jobId: "desc" },
+          { periodStart: "asc" },
+          { id: "asc" }
+        ],
+        take: 1_000
+      }),
       this.prisma.currentRank.findMany({
         where: { workspaceId, projectId, keywordId },
         orderBy: [{ observedAt: "desc" }, { snapshotId: "desc" }],
         take: 200
       }),
       this.prisma.rankSnapshot.findMany({
-        where: { workspaceId, projectId, keywordId, ...(dimensionKey ? { manifest: { configuration: rankDimensionConfigurationWhere(dimensionKey) } } : {}) },
+        where: {
+          workspaceId,
+          projectId,
+          keywordId,
+          ...(insightDimensions
+            ? {
+                manifest: {
+                  configuration: rankDimensionConfigurationWhereAny(
+                    insightDimensions
+                  )
+                }
+              }
+            : {}),
+          ...(rankDeletions.length === 0
+            ? {}
+            : { AND: rankDeletions.map(rankDeletionExclusionWhere) })
+        },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 240,
         select: {
@@ -946,7 +1106,16 @@ export class KeywordService {
           workspaceId,
           projectId,
           keywordId,
-          positionTrackingEnabled: true
+          positionTrackingEnabled: true,
+          ...(selectedDimension
+            ? {
+                searchEngine: selectedDimension.searchEngine,
+                regionCode: {
+                  in: insightDimensions!.map(({ regionCode }) => regionCode)
+                },
+                device: selectedDimension.device
+              }
+            : {})
         },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 240,
@@ -961,7 +1130,16 @@ export class KeywordService {
           position: true,
           rankingUrl: true,
           brandFound: true,
-          observedAt: true
+          observedAt: true,
+          sources: {
+            orderBy: { position: "asc" },
+            select: {
+              position: true,
+              url: true,
+              title: true,
+              description: true
+            }
+          }
         }
       }),
       this.prisma.aiAnswerSnapshot.findMany({
@@ -969,14 +1147,23 @@ export class KeywordService {
           workspaceId,
           projectId,
           keywordId,
-          sources: { some: {} }
+          sources: { some: {} },
+          ...(selectedDimension
+            ? {
+                searchEngine: selectedDimension.searchEngine,
+                regionCode: {
+                  in: insightDimensions!.map(({ regionCode }) => regionCode)
+                },
+                device: selectedDimension.device
+              }
+            : {})
         },
         orderBy: [
           { searchEngine: "asc" },
           { observedAt: "desc" },
           { id: "desc" }
         ],
-        distinct: ["searchEngine"],
+        distinct: ["searchEngine", "regionCode", "device"],
         select: {
           id: true,
           searchEngine: true,
@@ -1033,7 +1220,19 @@ export class KeywordService {
         configuration
       ])
     );
-    const currentRankAnchors = currentRanks.flatMap((rank) => {
+    const visibleCurrentRanks = currentRanks.filter((rank) => {
+      const configuration = configurationById.get(
+        `${rank.trackingContextId}:${rank.configurationVersion}`
+      );
+      return Boolean(
+        configuration &&
+        (!sourceDimensionKeys || sourceDimensionKeys.has(
+          rankDimensionMetadata(configuration).dimensionKey
+        )) &&
+        !rankIsExcluded(rank.observedAt, configuration, rankDeletions)
+      );
+    });
+    const currentRankAnchors = visibleCurrentRanks.flatMap((rank) => {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
@@ -1091,10 +1290,20 @@ export class KeywordService {
       );
       if (
         configuration &&
-        !latestSerpSnapshotByEngine.has(rankDimensionMetadata(configuration).dimensionKey)
+        !latestSerpSnapshotByEngine.has(
+          resolvedRankDimensionMetadata(
+            configuration,
+            selectedDimension,
+            sourceDimensionKeys
+          ).dimensionKey
+        )
       ) {
         latestSerpSnapshotByEngine.set(
-          rankDimensionMetadata(configuration).dimensionKey,
+          resolvedRankDimensionMetadata(
+            configuration,
+            selectedDimension,
+            sourceDimensionKeys
+          ).dimensionKey,
           snapshot
         );
       }
@@ -1115,7 +1324,24 @@ export class KeywordService {
         qualityFlags: frequencyQualityFlags(snapshot.qualityFlags),
         observedAt: snapshot.observedAt.toISOString()
       })),
-      positions: currentRanks.flatMap((rank) => {
+      seasonality: latestSeasonalityPoints(seasonalityPoints).map((point) => ({
+        type: frequencyType(point.type),
+        granularity: frequencySeasonalityGranularity(point.granularity),
+        periodStart: point.periodStart.toISOString().slice(0, 10),
+        value: point.value.toString(),
+        // Prisma Decimal switches small values to exponent notation in
+        // `toString()`. The public contract deliberately uses a plain decimal
+        // string, so keep all scale digits emitted by the DECIMAL(24, 18)
+        // column without scientific notation.
+        ...(point.share === null ? {} : { share: point.share.toFixed() }),
+        regionCode: point.regionCode,
+        device: frequencyDevice(point.device),
+        provider: frequencyProvider(point.provider),
+        sourceMode: frequencySeasonalitySourceMode(point.sourceMode),
+        jobId: point.jobId,
+        observedAt: point.observedAt.toISOString()
+      })),
+      positions: visibleCurrentRanks.flatMap((rank) => {
         const context = contextById.get(rank.trackingContextId);
         const configuration = configurationById.get(
           `${rank.trackingContextId}:${rank.configurationVersion}`
@@ -1131,12 +1357,13 @@ export class KeywordService {
           )
         ) ?? rank.previousPosition ?? undefined;
         return [{
-          ...rankDimensionMetadata(configuration),
+          ...resolvedRankDimensionMetadata(
+            configuration,
+            selectedDimension,
+            sourceDimensionKeys
+          ),
           trackingContextId: rank.trackingContextId,
           contextName: context.name,
-          searchEngine,
-          device: configuration.device,
-          regionCode: configuration.regionCode ?? configuration.countryCode,
           found: rank.found,
           ...(rank.position === null ? {} : { position: rank.position }),
           ...(previousPosition === undefined ? {} : { previousPosition }),
@@ -1156,19 +1383,15 @@ export class KeywordService {
           configuration.searchEngine
         );
         return [{
-          ...rankDimensionMetadata(configuration),
+          ...resolvedRankDimensionMetadata(
+            configuration,
+            selectedDimension,
+            sourceDimensionKeys
+          ),
           snapshotId: snapshot.id,
           trackingContextId: snapshot.trackingContextId,
           contextName: context.name,
-          searchEngine: configuration.searchEngine,
           ...(searchSource ? { searchSource } : {}),
-          device: configuration.device,
-          regionCode: configuration.regionCode ?? configuration.countryCode,
-          ...(configuration.regionLabel === null
-            ? {}
-            : { regionLabel: configuration.regionLabel }),
-          countryCode: configuration.countryCode,
-          language: configuration.language,
           depth: configuration.depth,
           provider: rankHistoryProvider(snapshot.provider),
           found: snapshot.found,
@@ -1188,11 +1411,14 @@ export class KeywordService {
           configuration.searchEngine
         );
         return [{
-          ...rankDimensionMetadata(configuration),
+          ...resolvedRankDimensionMetadata(
+            configuration,
+            selectedDimension,
+            sourceDimensionKeys
+          ),
           snapshotId: snapshot.id,
           trackingContextId: snapshot.trackingContextId,
           contextName: context.name,
-          searchEngine: configuration.searchEngine,
           ...(searchSource ? { searchSource } : {}),
           provider: competitorSnapshotProvider(snapshot.provider),
           observedAt: snapshot.observedAt.toISOString(),
@@ -1219,6 +1445,12 @@ export class KeywordService {
         ...(snapshot.rankingUrl === null ? {} : { rankingUrl: snapshot.rankingUrl }),
         brandFound: snapshot.brandFound,
         provider: "ARSENKIN" as const,
+        results: snapshot.sources.map((source) => ({
+          position: source.position,
+          url: source.url,
+          ...(source.title === null ? {} : { title: source.title }),
+          ...(source.description === null ? {} : { snippet: source.description })
+        })),
         observedAt: snapshot.observedAt.toISOString()
       })),
       aiCompetitorSnapshots: aiSourceSnapshots.map((snapshot) => ({
@@ -2823,7 +3055,8 @@ function keywordItem(
   frequencies: readonly SemanticKeywordListFrequencyValue[] = [],
   positions: readonly SemanticKeywordListPosition[] = [],
   displayGroup?: Readonly<{ id: string; path: string | null; name: string }>,
-  aiAnswers: readonly SemanticAiAnswerSummary[] = []
+  aiAnswers: readonly SemanticAiAnswerSummary[] = [],
+  hasMultipleRankingUrls = false
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
   const group = displayGroup ?? row.memberships[0]?.group;
@@ -2861,6 +3094,7 @@ function keywordItem(
     tags,
     tagsTruncated: row.tags.length > 50,
     hasNote: Boolean(row.note?.trim()),
+    ...(hasMultipleRankingUrls ? { hasMultipleRankingUrls: true } : {}),
     customValues: (row.typedCustomValues ?? []).map(keywordCustomValue),
     ...(legacyBaseFrequency ? { frequency: legacyBaseFrequency } : {}),
     ...(frequencies.length > 0 ? { frequencies } : {}),
@@ -3368,6 +3602,17 @@ async function previousFoundPositions(
         AND snapshot.found = TRUE
         AND snapshot.position_tracking_enabled = TRUE
         AND snapshot.position IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM rank_dimension_history_deletions deletion
+          WHERE deletion.workspace_id = snapshot.workspace_id
+            AND deletion.project_id = snapshot.project_id
+            AND deletion.search_engine = configuration.search_engine::text
+            AND deletion.country_code = configuration.country_code
+            AND deletion.region_code = COALESCE(configuration.region_code, configuration.country_code)
+            AND deletion.language = configuration.language
+            AND deletion.device = configuration.device::text
+            AND snapshot.observed_at <= deletion.excluded_through
+        )
         AND (snapshot.observed_at, snapshot.id) <
             (anchors.observed_at, anchors.snapshot_id)
       ORDER BY snapshot.observed_at DESC, snapshot.id DESC
@@ -3584,6 +3829,17 @@ async function metricSortedKeywordPage(
                     AND previous.position IS NOT NULL
                     AND previous_tcv.search_engine::text = ${rankEngine}
                     ${previousRankDimensionFilter}
+                    AND NOT EXISTS (
+                      SELECT 1 FROM rank_dimension_history_deletions deletion
+                      WHERE deletion.workspace_id = previous.workspace_id
+                        AND deletion.project_id = previous.project_id
+                        AND deletion.search_engine = previous_tcv.search_engine::text
+                        AND deletion.country_code = previous_tcv.country_code
+                        AND deletion.region_code = COALESCE(previous_tcv.region_code, previous_tcv.country_code)
+                        AND deletion.language = previous_tcv.language
+                        AND deletion.device = previous_tcv.device::text
+                        AND previous.observed_at <= deletion.excluded_through
+                    )
                     AND (previous.observed_at, previous.id) <
                         (cr.observed_at, cr.snapshot_id)
                   ORDER BY previous.observed_at DESC, previous.id DESC
@@ -3602,6 +3858,17 @@ async function metricSortedKeywordPage(
               AND cr.keyword_id = k.id
               AND tcv.search_engine::text = ${rankEngine}
               ${currentRankDimensionFilter}
+              AND NOT EXISTS (
+                SELECT 1 FROM rank_dimension_history_deletions deletion
+                WHERE deletion.workspace_id = cr.workspace_id
+                  AND deletion.project_id = cr.project_id
+                  AND deletion.search_engine = tcv.search_engine::text
+                  AND deletion.country_code = tcv.country_code
+                  AND deletion.region_code = COALESCE(tcv.region_code, tcv.country_code)
+                  AND deletion.language = tcv.language
+                  AND deletion.device = tcv.device::text
+                  AND cr.observed_at <= deletion.excluded_through
+              )
             ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
                      cr.tracking_context_id DESC
             LIMIT 1
@@ -3621,6 +3888,17 @@ async function metricSortedKeywordPage(
             AND cr.keyword_id = k.id
             AND tcv.search_engine::text = ${rankEngine}
             ${currentRankDimensionFilter}
+            AND NOT EXISTS (
+              SELECT 1 FROM rank_dimension_history_deletions deletion
+              WHERE deletion.workspace_id = cr.workspace_id
+                AND deletion.project_id = cr.project_id
+                AND deletion.search_engine = tcv.search_engine::text
+                AND deletion.country_code = tcv.country_code
+                AND deletion.region_code = COALESCE(tcv.region_code, tcv.country_code)
+                AND deletion.language = tcv.language
+                AND deletion.device = tcv.device::text
+                AND cr.observed_at <= deletion.excluded_through
+            )
           ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
                    cr.tracking_context_id DESC
           LIMIT 1
@@ -3816,6 +4094,17 @@ function keywordRawFilters(
         AND tcv.search_engine::text = ${dimension.searchEngine} AND tcv.country_code = ${dimension.countryCode}
         AND COALESCE(tcv.region_code, tcv.country_code) = ${dimension.regionCode}
         AND tcv.language = ${dimension.language} AND tcv.device::text = ${dimension.device}
+        AND NOT EXISTS (
+          SELECT 1 FROM rank_dimension_history_deletions deletion
+          WHERE deletion.workspace_id = cr.workspace_id
+            AND deletion.project_id = cr.project_id
+            AND deletion.search_engine = tcv.search_engine::text
+            AND deletion.country_code = tcv.country_code
+            AND deletion.region_code = COALESCE(tcv.region_code, tcv.country_code)
+            AND deletion.language = tcv.language
+            AND deletion.device = tcv.device::text
+            AND cr.observed_at <= deletion.excluded_through
+        )
       ORDER BY cr.observed_at DESC, cr.snapshot_id DESC, cr.tracking_context_id DESC LIMIT 1`;
     if (query.rankState === "NOT_CHECKED") {
       filters.push(Prisma.sql`NOT EXISTS (${base})`);
@@ -3940,6 +4229,124 @@ function frequencyDevice(value: string): SemanticFrequencyDevice {
   throw new Error("Stored frequency device is unsupported");
 }
 
+function frequencySeasonalityGranularity(
+  value: string
+): FrequencySeasonalityGranularity {
+  if (value === "MONTH" || value === "WEEK" || value === "DAY") {
+    return value;
+  }
+  throw new Error("Stored frequency seasonality granularity is unsupported");
+}
+
+function frequencyProvider(value: string): FrequencyCollectionProvider {
+  if (value === "XMLSTOCK" || value === "ARSENKIN") return value;
+  throw new Error("Stored frequency seasonality provider is unsupported");
+}
+
+function frequencySeasonalitySourceMode(
+  value: string
+): "BYOK" | "PLATFORM" {
+  if (value === "BYOK" || value === "PLATFORM") return value;
+  throw new Error("Stored frequency seasonality source mode is unsupported");
+}
+
+function latestSeasonalityPoints<
+  Point extends Readonly<{
+    type: string;
+    granularity: string;
+    regionCode: string;
+    device: string;
+    jobId: string;
+  }>
+>(points: readonly Point[]): readonly Point[] {
+  const latestJobByContext = new Map<string, string>();
+  return points.filter((point) => {
+    const contextKey = JSON.stringify([
+      point.type,
+      point.granularity,
+      point.regionCode,
+      point.device
+    ]);
+    const latestJobId = latestJobByContext.get(contextKey);
+    if (latestJobId === undefined) {
+      latestJobByContext.set(contextKey, point.jobId);
+      return true;
+    }
+    return latestJobId === point.jobId;
+  });
+}
+
+function rankDeletionExclusionWhere(
+  deletion: Readonly<{
+    searchEngine: string;
+    countryCode: string;
+    regionCode: string;
+    language: string;
+    device: string;
+    excludedThrough: Date;
+  }>
+): Prisma.RankSnapshotWhereInput {
+  const searchEngine = storedDeletionSearchEngine(deletion.searchEngine);
+  const device = storedDeletionDevice(deletion.device);
+  return {
+    NOT: {
+      observedAt: { lte: deletion.excludedThrough },
+      manifest: {
+        configuration: {
+          searchEngine,
+          countryCode: deletion.countryCode,
+          language: deletion.language,
+          device,
+          OR: [
+            { regionCode: deletion.regionCode },
+            ...(deletion.regionCode === deletion.countryCode
+              ? [{ regionCode: null }]
+              : [])
+          ]
+        }
+      }
+    }
+  };
+}
+
+function rankIsExcluded(
+  observedAt: Date,
+  configuration: Readonly<{
+    searchEngine: string;
+    countryCode: string;
+    regionCode: string | null;
+    language: string;
+    device: string;
+  }>,
+  deletions: readonly Readonly<{
+    searchEngine: string;
+    countryCode: string;
+    regionCode: string;
+    language: string;
+    device: string;
+    excludedThrough: Date;
+  }>[]
+): boolean {
+  return deletions.some((deletion) =>
+    deletion.searchEngine === configuration.searchEngine &&
+    deletion.countryCode === configuration.countryCode &&
+    deletion.regionCode === (configuration.regionCode ?? configuration.countryCode) &&
+    deletion.language === configuration.language &&
+    deletion.device === configuration.device &&
+    observedAt <= deletion.excludedThrough
+  );
+}
+
+function storedDeletionSearchEngine(value: string): "YANDEX" | "GOOGLE" {
+  if (value === "YANDEX" || value === "GOOGLE") return value;
+  throw new Error("Stored rank deletion search engine is unsupported");
+}
+
+function storedDeletionDevice(value: string): "DESKTOP" | "MOBILE" {
+  if (value === "DESKTOP" || value === "MOBILE") return value;
+  throw new Error("Stored rank deletion device is unsupported");
+}
+
 function frequencyQualityFlags(value: unknown): readonly SemanticFrequencyQualityFlag[] {
   if (!Array.isArray(value) || value.length > 4) {
     throw new Error("Stored frequency quality flags are invalid");
@@ -3989,6 +4396,7 @@ function safeHistoryCount(value: bigint): number {
 
 function emptyPositionTopCounts(): ProjectPositionTopCounts {
   return {
+    top1KeywordCount: 0,
     top3KeywordCount: 0,
     top5KeywordCount: 0,
     top10KeywordCount: 0,
@@ -4003,6 +4411,7 @@ function addPositionTopCount(
   amount: number
 ): ProjectPositionTopCounts {
   return {
+    top1KeywordCount: counts.top1KeywordCount + (position === 1 ? amount : 0),
     top3KeywordCount: counts.top3KeywordCount + (position <= 3 ? amount : 0),
     top5KeywordCount: counts.top5KeywordCount + (position <= 5 ? amount : 0),
     top10KeywordCount:
@@ -4019,4 +4428,27 @@ function competitorSnapshotProvider(
 ): "ARSENKIN" | "XMLSTOCK" {
   if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
   throw new Error("Stored SERP snapshot provider is unsupported");
+}
+
+function resolvedRankDimensionMetadata(
+  configuration: Parameters<typeof rankDimensionMetadata>[0],
+  selectedDimension: SemanticRankDimension | undefined,
+  sourceDimensionKeys: ReadonlySet<string> | undefined
+) {
+  const stored = rankDimensionMetadata(configuration);
+  if (
+    !selectedDimension ||
+    !sourceDimensionKeys?.has(stored.dimensionKey)
+  ) return stored;
+  return {
+    searchEngine: selectedDimension.searchEngine,
+    countryCode: selectedDimension.countryCode,
+    regionCode: selectedDimension.regionCode,
+    language: selectedDimension.language,
+    device: selectedDimension.device,
+    ...(selectedDimension.regionLabel
+      ? { regionLabel: selectedDimension.regionLabel }
+      : {}),
+    dimensionKey: selectedDimension.key
+  };
 }

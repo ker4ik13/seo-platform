@@ -369,9 +369,6 @@ function optionalNote(
     invalid("note", "Must be a string or null");
   }
   const note = value.normalize("NFKC").trim();
-  if (note.length > 4_000) {
-    invalid("note", "Must contain at most 4000 characters");
-  }
   return note ? { note } : nullable ? { note: null } : {};
 }
 

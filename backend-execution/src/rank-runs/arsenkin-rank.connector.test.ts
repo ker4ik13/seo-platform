@@ -94,6 +94,38 @@ test("builds the documented positions payload with exact query order and trackin
   assert.doesNotThrow(() => arsenkinRankWireRequestHash(yandexSearchApi));
 });
 
+test("uses Check Top for new position mappings and derives the project position from its SERP", () => {
+  const base = intent();
+  const checkTopPosition = intent({
+    execution: {
+      ...base.execution,
+      providerMappingVersion: "arsenkin-check-top-google-live@1"
+    }
+  });
+
+  assert.deepEqual(buildArsenkinRankWireRequest(checkTopPosition), {
+    tools_name: "check-top",
+    data: {
+      queries: ["купить диван", "seo audit"],
+      is_snippet: true,
+      noreask: false,
+      se: [{ type: 11, region: 1011969 }],
+      depth: 30
+    }
+  });
+
+  const normalized = normalizeArsenkinRankResult(
+    checkTopResultBody(),
+    "3944",
+    checkTopPosition
+  );
+  assert.equal(normalized[0]?.found, true);
+  assert.equal(normalized[0]?.position, 2);
+  assert.equal(normalized[0]?.serpResults?.length, 2);
+  assert.equal(normalized[0]?.serpResults?.[0]?.title, "Конкурент");
+  assert.equal(normalized[1]?.found, false);
+});
+
 test("builds and normalizes documented Check Top competitor output", () => {
   const collectOnly = competitorIntent(false);
   assert.deepEqual(buildArsenkinRankWireRequest(collectOnly), {
@@ -103,7 +135,7 @@ test("builds and normalizes documented Check Top competitor output", () => {
       is_snippet: true,
       noreask: false,
       se: [{ type: 11, region: 1011969 }],
-      depth: 10
+      depth: 30
     }
   });
 

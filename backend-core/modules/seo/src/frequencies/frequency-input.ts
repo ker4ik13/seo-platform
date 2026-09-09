@@ -1,13 +1,18 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   frequencyCollectionProviders,
+  frequencySeasonalityPointLimit,
   internalFrequencyPersistBatchLimit,
+  internalFrequencySeasonalityPersistBatchLimit,
   internalFrequencyResolveBatchLimit,
+  frequencySeasonalityGranularities,
   semanticFrequencyTypes,
   semanticFrequencyDevices,
   semanticFrequencyQualityFlags,
   type InternalPersistFrequencySnapshotBatchInput,
   type InternalPersistFrequencySnapshotsInput,
+  type InternalPersistFrequencySeasonalityBatchInput,
+  type InternalFrequencySeasonalityPoint,
   type InternalResolveFrequencyKeywordsInput,
   type InternalResolveFrequencyKeywordInput,
   type InternalFrequencySnapshotValue,
@@ -135,6 +140,131 @@ export function internalPersistFrequencySnapshotBatchInput(
     jobId: uuid(input.jobId, "jobId"),
     observedAt: timestamp(input.observedAt),
     items
+  };
+}
+
+export function internalPersistFrequencySeasonalityBatchInput(
+  value: unknown
+): InternalPersistFrequencySeasonalityBatchInput {
+  const input = record(value, [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId",
+    "observedAt",
+    "items"
+  ]);
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > internalFrequencySeasonalityPersistBatchLimit
+  ) {
+    invalid("items");
+  }
+  const items = input.items.map((value, index) => {
+    const item = record(value, ["keywordId", "keywordVersion", "points"]);
+    if (
+      !Array.isArray(item.points) ||
+      item.points.length > frequencySeasonalityPointLimit
+    ) {
+      invalid(`items.${index}.points`);
+    }
+    const points = item.points.map((point, pointIndex) =>
+      frequencySeasonalityPoint(
+        point,
+        `items.${index}.points.${pointIndex}`
+      )
+    );
+    if (
+      new Set(points.map(({ type, granularity, periodStart, regionCode, device }) =>
+        `${type}:${granularity}:${periodStart}:${regionCode}:${device}`
+      )).size !== points.length
+    ) {
+      invalid(`items.${index}.points`);
+    }
+    return {
+      keywordId: uuid(item.keywordId, `items.${index}.keywordId`),
+      keywordVersion: integer(
+        item.keywordVersion,
+        `items.${index}.keywordVersion`
+      ),
+      points
+    };
+  });
+  if (new Set(items.map(({ keywordId }) => keywordId)).size !== items.length) {
+    invalid("items");
+  }
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId"),
+    jobId: uuid(input.jobId, "jobId"),
+    observedAt: timestamp(input.observedAt),
+    items
+  };
+}
+
+function frequencySeasonalityPoint(
+  value: unknown,
+  field: string
+): InternalFrequencySeasonalityPoint {
+  const point = record(value, [
+    "type",
+    "granularity",
+    "periodStart",
+    "value",
+    "share",
+    "regionCode",
+    "device",
+    "provider",
+    "sourceMode"
+  ]);
+  if (!semanticFrequencyTypes.includes(point.type as never)) {
+    invalid(`${field}.type`);
+  }
+  if (!frequencySeasonalityGranularities.includes(point.granularity as never)) {
+    invalid(`${field}.granularity`);
+  }
+  if (
+    typeof point.periodStart !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(point.periodStart) ||
+    new Date(`${point.periodStart}T00:00:00.000Z`).toISOString().slice(0, 10) !==
+      point.periodStart
+  ) {
+    invalid(`${field}.periodStart`);
+  }
+  if (typeof point.value !== "string" || !DECIMAL_PATTERN.test(point.value)) {
+    invalid(`${field}.value`);
+  }
+  if (
+    point.share !== undefined &&
+    (typeof point.share !== "string" ||
+      !/^(?:0(?:\.\d{1,18})?|1(?:\.0{1,18})?)$/u.test(point.share))
+  ) {
+    invalid(`${field}.share`);
+  }
+  if (typeof point.regionCode !== "string" || !REGION_PATTERN.test(point.regionCode)) {
+    invalid(`${field}.regionCode`);
+  }
+  if (!semanticFrequencyDevices.includes(point.device as never)) {
+    invalid(`${field}.device`);
+  }
+  if (
+    !frequencyCollectionProviders.includes(point.provider as never) ||
+    (point.sourceMode !== "BYOK" && point.sourceMode !== "PLATFORM")
+  ) {
+    invalid(`${field}.provider`);
+  }
+  return {
+    type: point.type as InternalFrequencySeasonalityPoint["type"],
+    granularity: point.granularity as InternalFrequencySeasonalityPoint["granularity"],
+    periodStart: point.periodStart,
+    value: point.value,
+    ...(typeof point.share === "string" ? { share: point.share } : {}),
+    regionCode: point.regionCode,
+    device: point.device as InternalFrequencySeasonalityPoint["device"],
+    provider: point.provider as InternalFrequencySeasonalityPoint["provider"],
+    sourceMode: point.sourceMode as InternalFrequencySeasonalityPoint["sourceMode"]
   };
 }
 

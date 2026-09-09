@@ -22,6 +22,7 @@ import { TrackingContextController } from "./tracking-context.controller.js";
 import { AutomationController } from "./automation.controller.js";
 import { CrawlAutomationDispatchGuard } from "../crawls/crawl-automation-dispatch.guard.js";
 import { RankAutomationDispatchController } from "./rank-automation-dispatch.controller.js";
+import { RankWorkbenchController } from "./rank-workbench.controller.js";
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { RankAutomationDispatchController } from "./rank-automation-dispatch.con
     RankEstimateController,
     RankHistoryController,
     RankRunController,
+    RankWorkbenchController,
     TrackingContextController
   ],
   providers: [

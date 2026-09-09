@@ -1,6 +1,9 @@
 import {
   frequencyCollectionKeywordLimit,
+  frequencyCollectionModes,
+  parseFrequencySeasonalityRequest,
   semanticFrequencyDevices,
+  semanticSeasonalityFrequencyTypes,
   semanticFrequencyTypes,
   type CreateFrequencyCollectionInput,
   type SemanticFrequencyDevice,
@@ -22,7 +25,14 @@ export interface SemanticFrequencyContextRoute {
 export function createFrequencyCollectionInput(
   value: unknown
 ): CreateFrequencyCollectionInput {
-  const input = record(value, ["items", "types", "regionCode", "device"]);
+  const input = record(value, [
+    "items",
+    "types",
+    "regionCode",
+    "device",
+    "mode",
+    "seasonality"
+  ]);
   if (
     !Array.isArray(input.items) ||
     input.items.length < 1 ||
@@ -63,11 +73,30 @@ export function createFrequencyCollectionInput(
     typeof input.device !== "string" ||
     !semanticFrequencyDevices.includes(input.device as SemanticFrequencyDevice)
   ) invalid("device");
+  const mode = input.mode === undefined ? "FREQUENCY" : input.mode;
+  if (!frequencyCollectionModes.includes(mode as never)) invalid("mode");
+  let seasonality;
+  if (mode === "SEASONALITY") {
+    if (types.some((type) => !semanticSeasonalityFrequencyTypes.includes(type as "BASE"))) {
+      invalid("types");
+    }
+    try {
+      seasonality = parseFrequencySeasonalityRequest(input.seasonality);
+    } catch {
+      invalid("seasonality");
+    }
+  } else if (input.seasonality !== undefined) {
+    invalid("seasonality");
+  }
   return {
     items,
     types,
     regionCode: input.regionCode,
-    device: input.device as SemanticFrequencyDevice
+    device: input.device as SemanticFrequencyDevice,
+    ...(input.mode === undefined
+      ? {}
+      : { mode: mode as "FREQUENCY" | "SEASONALITY" }),
+    ...(seasonality ? { seasonality } : {})
   };
 }
 

@@ -80,7 +80,7 @@ export function priceOperation(workload: OperationWorkload, policy: ProviderPric
       product = "XMLSTOCK_WORDSTAT";
       multiplierMilli = (workload.operation === "FREQUENCY" ? frequency : 1) * 1_000;
     } else if (["POSITIONS", "COMPETITOR_SERP"].includes(workload.operation)) {
-      const depth = workload.operation === "COMPETITOR_SERP" ? 10 : workload.depth ?? 100;
+      const depth = workload.depth ?? (workload.operation === "COMPETITOR_SERP" ? 10 : 100);
       if (!Number.isSafeInteger(depth) || depth < 10 || depth > 100 || depth % 10) throw new RangeError("Invalid SERP depth");
       const source = workload.searchSource ?? "YANDEX_LIVE";
       const products = { GOOGLE_LIVE: "XMLSTOCK_GOOGLE_LIVE", YANDEX_LIVE: "XMLSTOCK_YANDEX_LIVE", YANDEX_TURBO: "XMLSTOCK_YANDEX_TURBO", YANDEX_SEARCH_API: "XMLSTOCK_YANDEX_SEARCH_API" } as const;

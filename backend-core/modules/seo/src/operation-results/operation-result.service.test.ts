@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { semanticFrequencyTypes } from "@seo-platform/contracts";
+import { Prisma } from "../generated/prisma/client.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import { OperationResultService } from "./operation-result.service.js";
 
@@ -12,12 +13,56 @@ const crawlId = "01900000-0000-7000-8000-000000000005";
 const context = { workspaceId, projectId, actorId };
 
 test("frequency retry metadata uses current active versions and preserves other rows after deletion", async () => {
-  const service = new OperationResultService({ keyword: { findMany: async () => [{ id: "active", textOriginal: "Текущая фраза", version: 9, status: "ACTIVE" }, { id: "trash", textOriginal: "В корзине", version: 12, status: "TRASHED" }] }, frequencySnapshot: { findMany: async () => [] } } as never);
+  const service = new OperationResultService({ keyword: { findMany: async () => [{ id: "active", textOriginal: "Текущая фраза", version: 9, status: "ACTIVE" }, { id: "trash", textOriginal: "В корзине", version: 12, status: "TRASHED" }] }, frequencySnapshot: { findMany: async () => [] }, frequencySeasonalityPoint: { findMany: async () => [] } } as never);
   const result = await service.frequency({ ...context, jobId, keywordIds: ["active", "deleted", "trash"] });
   assert.deepEqual(result.rows.map(row => ({ id: row.keywordId, version: row.keywordVersion, available: row.keywordAvailable })), [
     { id: "active", version: 9, available: true }, { id: "deleted", version: undefined, available: false }, { id: "trash", version: undefined, available: true }
   ]);
   assert.equal(result.rows[0]?.keyword, "Текущая фраза");
+});
+
+test("returns a small seasonality share without exponent notation", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000010";
+  const service = new OperationResultService({
+    keyword: {
+      findMany: async () => [{
+        id: keywordId,
+        textOriginal: "библиотека промптов",
+        version: 2,
+        status: "ACTIVE"
+      }]
+    },
+    frequencySnapshot: { findMany: async () => [] },
+    frequencySeasonalityPoint: {
+      findMany: async () => [{
+        keywordId,
+        type: "BASE",
+        granularity: "MONTH",
+        periodStart: new Date("2026-08-01T00:00:00.000Z"),
+        value: 3n,
+        share: new Prisma.Decimal("0.000000257707063906"),
+        regionCode: "213",
+        device: "ALL",
+        provider: "XMLSTOCK",
+        sourceMode: "BYOK",
+        jobId,
+        observedAt: new Date("2026-09-09T19:18:16.790Z")
+      }]
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.frequency({
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    keywordIds: [keywordId]
+  });
+
+  assert.equal(
+    result.rows[0]?.seasonality[0]?.share,
+    "0.000000257707063906"
+  );
 });
 
 test("returns AI answer rows with per-job snapshot state", async () => {
@@ -196,7 +241,7 @@ test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
   assert.equal(rows[2]?.observedAt, "2026-08-02T10:01:00.000Z");
 });
 
-test("preserves competitor purpose and returns its exact organic Top-10", async () => {
+test("preserves competitor purpose and returns its selected-depth organic SERP", async () => {
   const snapshotId = "01900000-0000-7000-8000-000000000030";
   const service = new OperationResultService({
     rankExecutionManifest: {
@@ -322,7 +367,8 @@ test("fails closed when a frequency result exceeds the bounded projection", asyn
     keyword: {
       findMany: async () => [{ id: keywordId, textOriginal: "seo аудит" }]
     },
-    frequencySnapshot: { findMany: async () => snapshots }
+    frequencySnapshot: { findMany: async () => snapshots },
+    frequencySeasonalityPoint: { findMany: async () => [] }
   } as unknown as PrismaService);
 
   await assert.rejects(

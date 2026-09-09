@@ -28,6 +28,7 @@ import { ProjectNoteModule } from "./notes/project-note.module.js";
 import { PlatformAdminReadModule } from "./admin/platform-admin-read.module.js";
 import { SemanticExportReadModule } from "./semantic-exports/semantic-export-read.module.js";
 import { SemanticGroupColorLegendModule } from "./semantic-group-color-legends/semantic-group-color-legend.module.js";
+import { RankWorkbenchModule } from "./rank-workbench/rank-workbench.module.js";
 
 @Module({
   imports: [
@@ -59,7 +60,8 @@ import { SemanticGroupColorLegendModule } from "./semantic-group-color-legends/s
     SemanticExportReadModule,
     ProjectNoteModule,
     PlatformAdminReadModule,
-    ProjectWorkspaceTransferModule
+    ProjectWorkspaceTransferModule,
+    RankWorkbenchModule
   ]
 })
 export class AppModule {}

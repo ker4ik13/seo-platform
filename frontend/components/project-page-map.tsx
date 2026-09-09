@@ -112,6 +112,8 @@ export function ProjectPageMap({
   const [errors, setErrors] = useState<ProjectPageDraftErrors>({});
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const loadingMoreRef = useRef(false);
   const [loadError, setLoadError] = useState<string>();
   const [operationError, setOperationError] = useState<string>();
   const [success, setSuccess] = useState<string>();
@@ -452,8 +454,9 @@ export function ProjectPageMap({
     }
   }
 
-  async function loadMore(): Promise<void> {
-    if (!collection?.nextCursor || loadingMore) return;
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (!collection?.nextCursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     setOperationError(undefined);
     try {
@@ -477,9 +480,23 @@ export function ProjectPageMap({
         errorMessage(error, "Не удалось загрузить следующую страницу.")
       );
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }
+  }, [appliedFilters, collection, projectId, selectedStructurePath]);
+
+  useEffect(() => {
+    const target = loadMoreButtonRef.current;
+    if (!target || !collection?.nextCursor) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) void loadMore();
+      },
+      { rootMargin: "320px 0px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [collection?.nextCursor, loadMore]);
 
   if (loading && !collection) {
     return (
@@ -783,6 +800,7 @@ export function ProjectPageMap({
                   className="secondary-button"
                   disabled={loadingMore}
                   onClick={() => void loadMore()}
+                  ref={loadMoreButtonRef}
                   type="button"
                 >
                   {loadingMore ? <UiText text="Загрузка…" /> : <UiText text="Показать ещё" />}

@@ -433,7 +433,7 @@ function dashboardJobs(data: DashboardData): readonly DashboardJob[] {
   return [
     ...data.frequencies.map((job): DashboardJob => ({
       id: job.id,
-      title: "Сбор частотности",
+      title: job.mode === "SEASONALITY" ? "Сбор сезонности" : "Сбор частотности",
       provider: job.provider,
       status: job.status,
       ...(job.stage ? { stage: job.stage } : {}),

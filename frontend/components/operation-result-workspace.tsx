@@ -81,6 +81,7 @@ import { Icon } from "./icon";
 import { KeywordResearchRunPreview } from "./keyword-research-workspace";
 import { SemanticGroupPicker } from "./semantic-group-picker";
 import { SemanticModal } from "./semantic-modal";
+import { frequencyCollectionParameters, frequencyCollectionTitle } from "../lib/frequency-operation-presentation";
 import styles from "./operation-result-workspace.module.css";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -1766,6 +1767,9 @@ function AiCompetitorTable({
 function FrequencyTable({ result }: Readonly<{ result: FrequencyOperationResult }>) {
   const uiLocale = useUiLocale().locale;
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.collection.status)} />;
+  if (result.collection.mode === "SEASONALITY") {
+    return <SeasonalityResultTable result={result} />;
+  }
   return (
     <div className={styles.tableScroll}>
       <table className={styles.table}>
@@ -1788,10 +1792,46 @@ function FrequencyTable({ result }: Readonly<{ result: FrequencyOperationResult 
   );
 }
 
+function SeasonalityResultTable({ result }: Readonly<{ result: FrequencyOperationResult }>) {
+  const uiLocale = useUiLocale().locale;
+  return (
+    <div className={styles.tableScroll}>
+      <table className={styles.table}>
+        <caption><UiText text="Сезонность запросов этого запуска" /></caption>
+        <thead><tr><th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Тип" /></th><th><UiText text="Статус" /></th><th><UiText text="Периодов" /></th><th><UiText text="Первое значение" /></th><th><UiText text="Последнее значение" /></th><th><UiText text="Изменение" /></th><th><UiText text="Период" /></th><th><UiText text="Источник" /></th></tr></thead>
+        <tbody>{result.rows.flatMap((row) => result.collection.types.map((type) => {
+          const points = row.seasonality
+            .filter((point) => point.type === type)
+            .toSorted((left, right) => left.periodStart.localeCompare(right.periodStart));
+          const first = points[0];
+          const last = points.at(-1);
+          const delta = first && last ? Number(last.value) - Number(first.value) : undefined;
+          return <tr key={`${row.keywordId}:${type}`}>
+            <td>{row.sequence + 1}</td>
+            <td className={styles.primaryCell}><strong>{row.keywordAvailable === false ? <UiText text="Запрос недоступен" /> : row.keyword}</strong></td>
+            <td><UiText text={seasonalityFrequencyTypeLabel(type)} /></td>
+            <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
+            <td className={styles.numberCell}>{points.length}</td>
+            <td className={styles.numberCell}>{first ? formatDecimal(first.value, uiLocale) : "—"}</td>
+            <td className={styles.numberCell}>{last ? formatDecimal(last.value, uiLocale) : "—"}</td>
+            <td className={styles.numberCell}>{delta === undefined ? "—" : `${delta > 0 ? "+" : ""}${new Intl.NumberFormat(uiLocale).format(delta)}`}</td>
+            <td>{first && last ? `${first.periodStart} — ${last.periodStart}` : "—"}</td>
+            <td>{first?.provider ?? result.collection.provider}</td>
+          </tr>;
+        }))}</tbody>
+      </table>
+    </div>
+  );
+}
+
 function FrequencyCell({ row, type }: Readonly<{ row: FrequencyOperationResultRow; type: SemanticFrequencyType }>) {
   const uiLocale = useUiLocale().locale;
   const snapshot = row.snapshots.find((item) => item.type === type);
   return <td className={styles.numberCell}>{snapshot?.value === undefined ? "—" : formatDecimal(snapshot.value, uiLocale)}</td>;
+}
+
+function seasonalityFrequencyTypeLabel(type: SemanticFrequencyType): string {
+  return { BASE: "Базовая", EXACT: "Фразовая", FIXED: "Точная словоформа" }[type];
 }
 
 interface RankRuntimeLogEvent extends RankRuntimeDiagnosticEntry {
@@ -2462,8 +2502,10 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
     const value = data.value.collection;
     const current = value.completedKeywords + value.failedKeywords;
     return {
-      title: "Сбор частотности",
-      description: `${providerLabel(value.provider)} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
+      title: frequencyCollectionTitle(value),
+      description: value.mode === "SEASONALITY"
+        ? `${providerLabel(value.provider)} · ${frequencyCollectionParameters(value)}`
+        : `${providerLabel(value.provider)} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
       provider: value.provider,
       ...summaryStatus(
         value.status,

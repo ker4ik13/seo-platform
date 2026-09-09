@@ -12,7 +12,7 @@ test("tracking context configuration uses finite versionable enums", () => {
   assert.deepEqual(trackingContextStatuses, ["ACTIVE", "ARCHIVED"]);
   assert.deepEqual(trackingSearchEngines, ["GOOGLE", "YANDEX"]);
   assert.deepEqual(trackingDevices, ["DESKTOP", "MOBILE"]);
-  assert.deepEqual(trackingDepths, [30, 50, 100]);
+  assert.deepEqual(trackingDepths, [10, 20, 30, 50, 100]);
   assert.deepEqual(trackingDomainMatchModes, [
     "EXACT_HOST",
     "INCLUDE_WWW",

@@ -102,6 +102,7 @@ function point(index: number): ProjectPositionHistoryPoint {
     observedAt: new Date(Date.UTC(2026, 6, 28 + index, 12)).toISOString(),
     measuredKeywordCount: 10,
     positionedKeywordCount: 5,
+    top1KeywordCount: 1,
     top3KeywordCount: 1,
     top5KeywordCount: 2,
     top10KeywordCount: 3,

@@ -1,8 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException
+} from "@nestjs/common";
+import {
+  parseCreateRankDimensionMergeInput,
   parseSemanticRankComparisonInput,
   parseSemanticRankDimensionKey,
-  semanticRankDimensionKey,
+  type CreateRankDimensionMergeInput,
+  type RankDimensionMergeSettings,
+  type RankDimensionMergeSummary,
   type SemanticRankComparisonInput,
   type SemanticRankComparisonItem,
   type SemanticRankDimension,
@@ -11,6 +21,13 @@ import {
 import { PrismaService } from "../database/prisma.service.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { rankHistorySearchSource } from "../rank-results/rank-serp-projection.js";
+import {
+  mergedRankDimensionCatalog,
+  rankDimensionConfigurationPredicate,
+  rankDimensionSources,
+  rawRankDimensionCatalog,
+  storedRankDimensionMerge
+} from "../rank-results/rank-dimension-merge.js";
 
 interface StoredComparison {
   keywordId: string; snapshotId: string; trackingContextId: string;
@@ -18,29 +35,144 @@ interface StoredComparison {
   found: boolean; position: number | null; previousPosition: number | null;
   rankingUrl: string | null;
   provider: string; depth: number; execution: Prisma.JsonValue;
+  siteResultCount: bigint;
+}
+interface StoredAiComparison {
+  keywordId: string;
+  snapshotId: string;
+  answerPresent: boolean;
+  siteFound: boolean;
+  position: number | null;
+  previousPosition: number | null;
+  rankingUrl: string | null;
+  brandFound: boolean;
+  observedAt: Date;
 }
 type Scope = Readonly<{ workspaceId: string; projectId: string }>;
 
-/** Read-only projection over immutable snapshots; never writes another owner. */
+/** Rank projection plus reversible display merges over immutable snapshots. */
 @Injectable()
 export class KeywordRankComparisonService {
   constructor(private readonly prisma: PrismaService) {}
 
   async catalog(scope: Scope): Promise<SemanticRankDimensionCatalog> {
-    const tenant = { workspaceId: scope.workspaceId, projectId: scope.projectId };
-    const rows = await this.prisma.trackingContextVersion.groupBy({
-      by: ["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"],
-      where: tenant,
-      orderBy: [{ searchEngine: "asc" }, { countryCode: "asc" }, { regionCode: "asc" }, { device: "asc" }, { language: "asc" }, { regionLabel: "asc" }],
-      take: 2_001
+    return mergedRankDimensionCatalog(this.prisma, scope);
+  }
+
+  async mergeSettings(scope: Scope): Promise<RankDimensionMergeSettings> {
+    const [catalog, rows] = await Promise.all([
+      rawRankDimensionCatalog(this.prisma, scope),
+      this.prisma.rankDimensionMerge.findMany({
+        where: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: 2_000
+      })
+    ]);
+    return {
+      dimensions: catalog.dimensions,
+      merges: rows.map(storedRankDimensionMerge)
+    };
+  }
+
+  async createMerge(
+    scope: Scope & Readonly<{ actorId: string }>,
+    value: CreateRankDimensionMergeInput,
+    idempotencyKey: string
+  ): Promise<RankDimensionMergeSummary> {
+    const input = parseCreateRankDimensionMergeInput(value);
+    const requestHash = createHash("sha256")
+      .update(`${input.sourceDimensionKey}\0${input.targetDimensionKey}`, "utf8")
+      .digest();
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtextextended(${scope.projectId}, 0))
+      `;
+      const replay = await transaction.rankDimensionMerge.findFirst({
+        where: { workspaceId: scope.workspaceId, idempotencyKey }
+      });
+      if (replay) {
+        if (!Buffer.from(replay.requestHash).equals(requestHash)) {
+          throw new ConflictException("Rank dimension merge idempotency conflict");
+        }
+        return storedRankDimensionMerge(replay);
+      }
+      const [catalog, merges] = await Promise.all([
+        rawRankDimensionCatalog(transaction, scope),
+        transaction.rankDimensionMerge.findMany({
+          where: {
+            workspaceId: scope.workspaceId,
+            projectId: scope.projectId
+          },
+          take: 2_000
+        })
+      ]);
+      if (catalog.truncated || merges.length >= 2_000) {
+        throw new ConflictException("Rank dimension catalog is too large to merge safely");
+      }
+      const source = catalog.dimensions.find(
+        ({ key }) => key === input.sourceDimensionKey
+      );
+      const target = catalog.dimensions.find(
+        ({ key }) => key === input.targetDimensionKey
+      );
+      if (!source || !target) {
+        throw new NotFoundException("Rank dimension is unavailable");
+      }
+      if (!compatibleMerge(source, target)) {
+        throw new BadRequestException(
+          "Only dimensions of the same engine, country, language and device can be merged"
+        );
+      }
+      if (
+        merges.some(({ sourceDimensionKey }) =>
+          sourceDimensionKey === source.key || sourceDimensionKey === target.key
+        ) ||
+        merges.some(({ targetDimensionKey }) => targetDimensionKey === source.key)
+      ) {
+        throw new ConflictException("Rank dimension is already part of another merge");
+      }
+      const created = await transaction.rankDimensionMerge.create({
+        data: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          sourceDimensionKey: source.key,
+          sourceRegionLabel: source.regionLabel ?? null,
+          targetDimensionKey: target.key,
+          targetRegionLabel: target.regionLabel ?? null,
+          createdBy: scope.actorId,
+          idempotencyKey,
+          requestHash
+        }
+      });
+      return storedRankDimensionMerge(created);
     });
-    const dimensions = new Map<string, SemanticRankDimension>();
-    for (const row of rows.slice(0, 2_000)) {
-      const value = { searchEngine: row.searchEngine, countryCode: row.countryCode, regionCode: row.regionCode ?? row.countryCode, language: row.language, device: row.device, ...(row.regionLabel ? { regionLabel: row.regionLabel } : {}) };
-      const key = semanticRankDimensionKey(value);
-      if (!dimensions.has(key)) dimensions.set(key, { key, ...value });
-    }
-    return { dimensions: [...dimensions.values()], truncated: rows.length > 2_000 };
+  }
+
+  async removeMerge(
+    scope: Scope,
+    mergeId: string,
+    version: number
+  ): Promise<Readonly<{ id: string; removed: true }>> {
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtextextended(${scope.projectId}, 0))
+      `;
+      const removed = await transaction.rankDimensionMerge.deleteMany({
+        where: {
+          id: mergeId,
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          version
+        }
+      });
+      if (removed.count !== 1) {
+        throw new ConflictException("Rank dimension merge changed or is unavailable");
+      }
+      return { id: mergeId, removed: true };
+    });
   }
 
   async compare(scope: Scope, value: SemanticRankComparisonInput): Promise<readonly SemanticRankComparisonItem[]> {
@@ -51,9 +183,15 @@ export class KeywordRankComparisonService {
     const result: SemanticRankComparisonItem[] = [];
     for (const key of input.dimensionKeys) {
       const dimension = parseSemanticRankDimensionKey(key)!;
-      const rows = await this.readDimension(scope, input.keywordIds, dimension);
+      const sources = await rankDimensionSources(this.prisma, scope, dimension);
+      const [rows, aiRows] = await Promise.all([
+        this.readDimension(scope, input.keywordIds, dimension, sources),
+        this.readAiDimension(scope, input.keywordIds, dimension, sources)
+      ]);
+      const aiByKeyword = new Map(aiRows.map((row) => [row.keywordId, row]));
       for (const row of rows) {
         const searchSource = rankHistorySearchSource(row.execution, dimension.searchEngine);
+        const ai = aiByKeyword.get(row.keywordId);
         result.push({
           keywordId: row.keywordId, dimensionKey: key, searchEngine: dimension.searchEngine,
           snapshotId: row.snapshotId, trackingContextId: row.trackingContextId,
@@ -62,32 +200,54 @@ export class KeywordRankComparisonService {
           ...(row.position === null ? {} : { position: row.position }),
           ...(row.previousPosition === null ? {} : { previousPosition: row.previousPosition }),
           ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
-          provider: row.provider, depth: row.depth, ...(searchSource ? { searchSource } : {})
+          provider: row.provider, depth: row.depth,
+          siteResultCount: safeCount(row.siteResultCount),
+          ...(searchSource ? { searchSource } : {}),
+          ...(ai ? {
+            aiAnswer: {
+              snapshotId: ai.snapshotId,
+              answerPresent: ai.answerPresent,
+              siteFound: ai.siteFound,
+              ...(ai.position === null ? {} : { position: ai.position }),
+              ...(ai.previousPosition === null ? {} : { previousPosition: ai.previousPosition }),
+              ...(ai.rankingUrl === null ? {} : { rankingUrl: ai.rankingUrl }),
+              brandFound: ai.brandFound,
+              observedAt: ai.observedAt.toISOString(),
+              provider: "ARSENKIN" as const
+            }
+          } : {})
         });
       }
     }
     return result;
   }
 
-  private readDimension(scope: Scope, keywordIds: readonly string[], dimension: SemanticRankDimension): Promise<StoredComparison[]> {
+  private readDimension(
+    scope: Scope,
+    keywordIds: readonly string[],
+    dimension: SemanticRankDimension,
+    sources: readonly SemanticRankDimension[]
+  ): Promise<StoredComparison[]> {
     // Each inner scan uses the existing (tenant, keyword, context, observed_at)
     // index. Immutable configuration filters keep old city/device results
     // available even after a profile is edited or archived.
     return this.prisma.$queryRaw<StoredComparison[]>(Prisma.sql`
       WITH configurations AS MATERIALIZED (
         SELECT context_id, configuration_version, depth
-        FROM tracking_context_versions
-        WHERE workspace_id = ${scope.workspaceId}::uuid AND project_id = ${scope.projectId}::uuid
-          AND search_engine::text = ${dimension.searchEngine} AND country_code = ${dimension.countryCode}
-          AND COALESCE(region_code, country_code) = ${dimension.regionCode}
-          AND language = ${dimension.language} AND device::text = ${dimension.device}
+        FROM tracking_context_versions configuration
+        WHERE configuration.workspace_id = ${scope.workspaceId}::uuid AND configuration.project_id = ${scope.projectId}::uuid
+          ${rankDimensionConfigurationPredicate(sources)}
       ), selected_keywords AS (
         SELECT unnest(ARRAY[${Prisma.join(keywordIds.map(id => Prisma.sql`${id}::uuid`))}]) AS id
       )
       SELECT keyword.id AS "keywordId", latest.id AS "snapshotId", latest.tracking_context_id AS "trackingContextId",
         latest.configuration_version AS "configurationVersion", latest.job_id AS "jobId", latest.observed_at AS "observedAt",
         latest.found, latest.position, previous.position AS "previousPosition", latest.ranking_url AS "rankingUrl",
-        latest.provider, latest.depth, manifest.execution
+        latest.provider, latest.depth, manifest.execution,
+        greatest(
+          CASE WHEN latest.found THEN 1 ELSE 0 END,
+          coalesce(site_results.result_count, 0)
+        )::bigint AS "siteResultCount"
       FROM selected_keywords keyword
       CROSS JOIN LATERAL (
         SELECT candidate.*, configuration.depth
@@ -97,6 +257,7 @@ export class KeywordRankComparisonService {
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
             AND snapshot.keyword_id = keyword.id AND snapshot.tracking_context_id = configuration.context_id
             AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled
+            ${visibleSnapshot(scope, dimension)}
           ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
         ) candidate
         ORDER BY candidate.observed_at DESC, candidate.id DESC LIMIT 1
@@ -104,6 +265,27 @@ export class KeywordRankComparisonService {
       JOIN rank_execution_manifests manifest
         ON manifest.workspace_id = ${scope.workspaceId}::uuid AND manifest.project_id = ${scope.projectId}::uuid
           AND manifest.id = latest.manifest_id AND manifest.job_id = latest.job_id
+      CROSS JOIN LATERAL (
+        SELECT regexp_replace(
+          lower(split_part(split_part(regexp_replace(manifest.project_domain, '^https?://', '', 'i'), '/', 1), ':', 1)),
+          '^www\\.', ''
+        ) AS host
+      ) project_host
+      LEFT JOIN LATERAL (
+        SELECT count(DISTINCT result.normalized_ranking_url)::bigint AS result_count
+        FROM rank_serp_results result
+        CROSS JOIN LATERAL (
+          SELECT regexp_replace(
+            lower(split_part(split_part(regexp_replace(result.ranking_url, '^https?://', '', 'i'), '/', 1), ':', 1)),
+            '^www\\.', ''
+          ) AS host
+        ) result_host
+        WHERE result.snapshot_id = latest.id
+          AND (
+            result_host.host = project_host.host OR
+            result_host.host LIKE '%.' || project_host.host
+          )
+      ) site_results ON true
       LEFT JOIN LATERAL (
         SELECT candidate.position FROM configurations configuration
         CROSS JOIN LATERAL (
@@ -111,7 +293,9 @@ export class KeywordRankComparisonService {
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
             AND snapshot.keyword_id = keyword.id AND snapshot.tracking_context_id = configuration.context_id
             AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled AND snapshot.found
-            AND (snapshot.observed_at, snapshot.id) < (latest.observed_at, latest.id)
+            AND (snapshot.observed_at AT TIME ZONE 'UTC')::date <
+              (latest.observed_at AT TIME ZONE 'UTC')::date
+            ${visibleSnapshot(scope, dimension)}
           ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
         ) candidate
         ORDER BY candidate.observed_at DESC, candidate.id DESC LIMIT 1
@@ -119,4 +303,88 @@ export class KeywordRankComparisonService {
       ORDER BY keyword.id
     `);
   }
+
+  private readAiDimension(
+    scope: Scope,
+    keywordIds: readonly string[],
+    dimension: SemanticRankDimension,
+    sources: readonly SemanticRankDimension[]
+  ): Promise<StoredAiComparison[]> {
+    const regionCodes = [...new Set(sources.map(({ regionCode }) => regionCode))];
+    return this.prisma.$queryRaw<StoredAiComparison[]>(Prisma.sql`
+      SELECT DISTINCT ON (snapshot.keyword_id)
+        snapshot.keyword_id AS "keywordId",
+        snapshot.id AS "snapshotId",
+        snapshot.answer_present AS "answerPresent",
+        snapshot.site_found AS "siteFound",
+        snapshot.position,
+        previous.position AS "previousPosition",
+        snapshot.ranking_url AS "rankingUrl",
+        snapshot.brand_found AS "brandFound",
+        snapshot.observed_at AS "observedAt"
+      FROM ai_answer_snapshots snapshot
+      LEFT JOIN LATERAL (
+        SELECT candidate.position
+        FROM ai_answer_snapshots candidate
+        WHERE candidate.workspace_id = snapshot.workspace_id
+          AND candidate.project_id = snapshot.project_id
+          AND candidate.keyword_id = snapshot.keyword_id
+          AND candidate.search_engine = snapshot.search_engine
+          AND candidate.region_code = snapshot.region_code
+          AND candidate.device = snapshot.device
+          AND candidate.position_tracking_enabled
+          AND candidate.site_found
+          AND candidate.position IS NOT NULL
+          AND (candidate.observed_at, candidate.id) <
+            (snapshot.observed_at, snapshot.id)
+        ORDER BY candidate.observed_at DESC, candidate.id DESC
+        LIMIT 1
+      ) previous ON true
+      WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
+        AND snapshot.project_id = ${scope.projectId}::uuid
+        AND snapshot.keyword_id IN (${Prisma.join(keywordIds.map((id) => Prisma.sql`${id}::uuid`))})
+        AND snapshot.search_engine::text = ${dimension.searchEngine}
+        AND snapshot.region_code IN (${Prisma.join(regionCodes)})
+        AND snapshot.device::text = ${dimension.device}
+        AND snapshot.position_tracking_enabled
+      ORDER BY snapshot.keyword_id, snapshot.observed_at DESC, snapshot.id DESC
+    `);
+  }
+}
+
+function safeCount(value: bigint): number {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0 || number > 100) {
+    throw new Error("Invalid site result count");
+  }
+  return number;
+}
+
+function visibleSnapshot(
+  scope: Scope,
+  dimension: SemanticRankDimension
+): Prisma.Sql {
+  return Prisma.sql`
+    AND NOT EXISTS (
+      SELECT 1 FROM rank_dimension_history_deletions deletion
+      WHERE deletion.workspace_id = ${scope.workspaceId}::uuid
+        AND deletion.project_id = ${scope.projectId}::uuid
+        AND deletion.search_engine = ${dimension.searchEngine}
+        AND deletion.country_code = ${dimension.countryCode}
+        AND deletion.region_code = ${dimension.regionCode}
+        AND deletion.language = ${dimension.language}
+        AND deletion.device = ${dimension.device}
+        AND snapshot.observed_at <= deletion.excluded_through
+    )
+  `;
+}
+
+function compatibleMerge(
+  source: SemanticRankDimension,
+  target: SemanticRankDimension
+): boolean {
+  return source.searchEngine === target.searchEngine &&
+    source.countryCode === target.countryCode &&
+    source.language === target.language &&
+    source.device === target.device;
 }

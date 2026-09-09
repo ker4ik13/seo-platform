@@ -47,6 +47,13 @@ const navigation: readonly {
     available: true
   },
   {
+    label: "Позиции",
+    icon: "positions",
+    href: "/app/rankings",
+    section: "rankings",
+    available: true
+  },
+  {
     label: "Инструменты",
     icon: "tools",
     href: "/app/tools",
@@ -82,6 +89,7 @@ const mobileNavigationSections = new Set([
   "overview",
   "tools",
   "semantics",
+  "rankings",
   "tasks"
 ]);
 
@@ -95,11 +103,13 @@ export function AppShell({
   initiallyCollapsed: boolean;
 }>) {
   const { t: uiText } = useUiLocale();
-  const activeSection = appNavigationSection(usePathname());
+  const pathname = usePathname();
+  const activeSection = appNavigationSection(pathname);
+  const isSerpWorkbench = /^\/app\/projects\/[0-9a-f-]+\/tools\/serp\/?$/u.test(pathname ?? "");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initiallyCollapsed);
   const hasProject = Boolean(context.project);
   const hasWorkspace = Boolean(context.workspace);
-  const usesWorkspaceLayout = ["notes", "pages", "semantics", "tasks"].includes(
+  const usesWorkspaceLayout = ["notes", "pages", "semantics", "rankings", "tasks"].includes(
     activeSection
   );
   const isNavigationAvailable = (
@@ -216,8 +226,8 @@ export function AppShell({
       <div
         className={
           usesWorkspaceLayout
-            ? `main-column workspace-main-column section-${activeSection}`
-            : `main-column section-${activeSection}`
+            ? `main-column workspace-main-column section-${activeSection}${isSerpWorkbench ? " route-serp-workbench" : ""}`
+            : `main-column section-${activeSection}${isSerpWorkbench ? " route-serp-workbench" : ""}`
         }
       >
         <header
@@ -259,8 +269,8 @@ export function AppShell({
         <main
           className={
             usesWorkspaceLayout
-              ? `content content-workspace content-${activeSection}`
-              : `content content-${activeSection}`
+              ? `content content-workspace content-${activeSection}${isSerpWorkbench ? " content-serp-workbench" : ""}`
+              : `content content-${activeSection}${isSerpWorkbench ? " content-serp-workbench" : ""}`
           }
           data-presence-key={`screen:${activeSection}`}
           data-presence-cursor-anchor="true"

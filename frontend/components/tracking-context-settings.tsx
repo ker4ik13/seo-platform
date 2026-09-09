@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type {
-  TrackingContextSettings,
-  TrackingContextSummary
+import {
+  parseRankDimensionMergeSettings,
+  type RankDimensionMergeSettings,
+  type RankDimensionMergeSummary,
+  type SemanticRankDimension,
+  type TrackingContextSettings,
+  type TrackingContextSummary
 } from "@seo-platform/contracts";
 import { browserApiRequest } from "../lib/browser-api";
 import {
@@ -18,6 +22,7 @@ import {
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticRankContext } from "./semantic-rank-context";
 import { SearchableRegionSelect } from "./searchable-region-select";
 import { SemanticModal } from "./semantic-modal";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -37,6 +42,11 @@ export function TrackingContextSettingsPanel({
 }: Readonly<{ projectId: string }>) {
   const { t: uiText } = useUiLocale();
   const [settings, setSettings] = useState<TrackingContextSettings>();
+  const [rankMergeSettings, setRankMergeSettings] =
+    useState<RankDimensionMergeSettings>();
+  const [mergeSourceKey, setMergeSourceKey] = useState("");
+  const [mergeTargetKey, setMergeTargetKey] = useState("");
+  const [merging, setMerging] = useState(false);
   const [groups, setGroups] = useState<readonly ContextGroup[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState(defaultTrackingContextSettingsDraft);
@@ -46,6 +56,34 @@ export function TrackingContextSettingsPanel({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const selected = settings?.contexts.find(({ id }) => id === selectedId);
+  const mergeSources = useMemo(() => {
+    if (!rankMergeSettings) return [];
+    const occupied = new Set(
+      rankMergeSettings.merges.flatMap(({ source, target }) => [source.key, target.key])
+    );
+    return rankMergeSettings.dimensions.filter((dimension) =>
+      !occupied.has(dimension.key) &&
+      rankMergeSettings.dimensions.some((target) =>
+        target.key !== dimension.key &&
+        !rankMergeSettings.merges.some(({ source }) => source.key === target.key) &&
+        compatibleRankDimensions(dimension, target)
+      )
+    );
+  }, [rankMergeSettings]);
+  const selectedMergeSource = rankMergeSettings?.dimensions.find(
+    ({ key }) => key === mergeSourceKey
+  );
+  const mergeTargets = useMemo(() => {
+    if (!rankMergeSettings || !selectedMergeSource) return [];
+    const sourceKeys = new Set(
+      rankMergeSettings.merges.map(({ source }) => source.key)
+    );
+    return rankMergeSettings.dimensions.filter((dimension) =>
+      dimension.key !== selectedMergeSource.key &&
+      !sourceKeys.has(dimension.key) &&
+      compatibleRankDimensions(selectedMergeSource, dimension)
+    );
+  }, [rankMergeSettings, selectedMergeSource]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,14 +96,19 @@ export function TrackingContextSettingsPanel({
       browserApiRequest<readonly ContextGroup[]>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`,
         { signal: controller.signal }
-      )
+      ),
+      browserApiRequest<unknown>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/rank-workbench/dimension-merges`,
+        { signal: controller.signal }
+      ).then(parseRankDimensionMergeSettings)
     ])
-      .then(([contextSettings, contextGroups]) => {
+      .then(([contextSettings, contextGroups, mergeSettings]) => {
         if (controller.signal.aborted) return;
         setSettings(contextSettings);
         setGroups(
           contextGroups.filter(({ systemKind }) => systemKind !== "TRASH")
         );
+        setRankMergeSettings(mergeSettings);
         const first =
           contextSettings.contexts.find(({ status }) => status === "ACTIVE") ??
           contextSettings.contexts[0];
@@ -179,6 +222,73 @@ export function TrackingContextSettingsPanel({
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function mergeRankDimensions(): Promise<void> {
+    if (
+      merging ||
+      !settings?.access.canConfigure ||
+      !mergeSourceKey ||
+      !mergeTargetKey
+    ) return;
+    setMerging(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const created = await browserApiRequest<RankDimensionMergeSummary>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/rank-workbench/dimension-merges`,
+        {
+          method: "POST",
+          idempotencyKey: `rank-dimension-merge:${crypto.randomUUID()}`,
+          body: {
+            sourceDimensionKey: mergeSourceKey,
+            targetDimensionKey: mergeTargetKey
+          }
+        }
+      );
+      setRankMergeSettings((current) => current ? {
+        ...current,
+        merges: [...current.merges, created]
+      } : current);
+      setMergeSourceKey("");
+      setMergeTargetKey("");
+      setNotice("Срезы объединены. История и текущие позиции теперь показываются вместе.");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Не удалось объединить срезы."
+      );
+    } finally {
+      setMerging(false);
+    }
+  }
+
+  async function removeRankDimensionMerge(
+    merge: RankDimensionMergeSummary
+  ): Promise<void> {
+    if (merging || !settings?.access.canConfigure) return;
+    setMerging(true);
+    setError(undefined);
+    try {
+      await browserApiRequest(
+        `/app/api/projects/${encodeURIComponent(projectId)}/rank-workbench/dimension-merges/${encodeURIComponent(merge.id)}/remove`,
+        { method: "POST", body: {}, ifMatch: merge.version }
+      );
+      setRankMergeSettings((current) => current ? {
+        ...current,
+        merges: current.merges.filter(({ id }) => id !== merge.id)
+      } : current);
+      setNotice("Объединение отменено. Исходные снимки снова показаны отдельным срезом.");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Не удалось отменить объединение."
+      );
+    } finally {
+      setMerging(false);
     }
   }
 
@@ -374,6 +484,100 @@ export function TrackingContextSettingsPanel({
         </footer>
       </div>
     </section>
+    <section className="panel tracking-dimension-merges">
+      <header>
+        <div>
+          <span><UiText text="История позиций" /></span>
+          <h2><UiText text="Объединение срезов" /></h2>
+          <p><UiText text="Склейте импортированный или лишний срез с основным городом и устройством. Исходные снимки сохранятся." /></p>
+        </div>
+      </header>
+      {rankMergeSettings && mergeSources.length > 0 ? (
+        <div className="tracking-dimension-merge-form">
+          <label>
+            <span><UiText text="Что скрыть и присоединить" /></span>
+            <CustomSelect
+              disabled={merging || !settings?.access.canConfigure}
+              onChange={(event) => {
+                const sourceKey = event.target.value;
+                const source = rankMergeSettings.dimensions.find(
+                  ({ key }) => key === sourceKey
+                );
+                const blockedTargets = new Set(
+                  rankMergeSettings.merges.map(({ source }) => source.key)
+                );
+                const target = source
+                  ? rankMergeSettings.dimensions.find((dimension) =>
+                      dimension.key !== source.key &&
+                      !blockedTargets.has(dimension.key) &&
+                      compatibleRankDimensions(source, dimension)
+                    )
+                  : undefined;
+                setMergeSourceKey(sourceKey);
+                setMergeTargetKey(target?.key ?? "");
+              }}
+              searchable
+              searchPlaceholder={uiText("Найти город или устройство")}
+              value={mergeSourceKey}
+            >
+              <option value=""><UiText text="Выберите исходный срез" /></option>
+              {mergeSources.map((dimension) => (
+                <option key={dimension.key} value={dimension.key}>
+                  <SemanticRankContext {...dimension} />
+                </option>
+              ))}
+            </CustomSelect>
+          </label>
+          <label>
+            <span><UiText text="К какому срезу присоединить" /></span>
+            <CustomSelect
+              disabled={merging || !settings?.access.canConfigure || !mergeSourceKey}
+              onChange={(event) => setMergeTargetKey(event.target.value)}
+              searchable
+              searchPlaceholder={uiText("Найти город или устройство")}
+              value={mergeTargetKey}
+            >
+              <option value=""><UiText text="Выберите основной срез" /></option>
+              {mergeTargets.map((dimension) => (
+                <option key={dimension.key} value={dimension.key}>
+                  <SemanticRankContext {...dimension} />
+                </option>
+              ))}
+            </CustomSelect>
+          </label>
+          <button
+            className="primary-button"
+            disabled={merging || !settings?.access.canConfigure || !mergeSourceKey || !mergeTargetKey}
+            onClick={() => void mergeRankDimensions()}
+            type="button"
+          >
+            {merging ? <><i className="spinner compact" /><UiText text="Объединяем…" /></> : <><Icon name="move" /><UiText text="Объединить срезы" /></>}
+          </button>
+        </div>
+      ) : (
+        <p className="tracking-dimension-merge-empty"><UiText text="Для объединения нужны хотя бы два совместимых сохранённых среза." /></p>
+      )}
+      {rankMergeSettings && rankMergeSettings.merges.length > 0 && (
+        <div className="tracking-dimension-merge-list">
+          <h3><UiText text="Активные объединения" /></h3>
+          {rankMergeSettings.merges.map((merge) => (
+            <div key={merge.id}>
+              <SemanticRankContext {...merge.source} />
+              <Icon name="chevronRight" />
+              <SemanticRankContext {...merge.target} />
+              <button
+                className="text-button"
+                disabled={merging || !settings?.access.canConfigure}
+                onClick={() => void removeRankDimensionMerge(merge)}
+                type="button"
+              >
+                <UiText text="Разъединить" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
     {deleteConfirmationOpen && selected?.status === "ACTIVE" && (
       <SemanticModal
         className="tracking-context-delete-modal"
@@ -554,4 +758,14 @@ function contextFolderRows(
   };
   append(undefined, 0);
   return result;
+}
+
+function compatibleRankDimensions(
+  source: SemanticRankDimension,
+  target: SemanticRankDimension
+): boolean {
+  return source.searchEngine === target.searchEngine &&
+    source.countryCode === target.countryCode &&
+    source.language === target.language &&
+    source.device === target.device;
 }

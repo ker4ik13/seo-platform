@@ -5,6 +5,7 @@ export type AppNavigationSection =
   | "overview"
   | "pages"
   | "projects"
+  | "rankings"
   | "semantics"
   | "settings"
   | "tasks"
@@ -86,9 +87,8 @@ export function appNavigationSection(
   const segments = appPathSegments(pathname);
   if (segments.length === 1) return "overview";
   if (segments[1] === "settings") return "settings";
-  if (segments[1] === "semantics" || segments[1] === "rankings") {
-    return "semantics";
-  }
+  if (segments[1] === "semantics") return "semantics";
+  if (segments[1] === "rankings") return "rankings";
   if (segments[1] === "tasks") return "tasks";
   if (segments[1] === "tools") return "tools";
   if (segments[1] === "competitors") return "competitors";
@@ -102,7 +102,7 @@ export function appNavigationSection(
   if (segments[3] === "rankings" && segments[4] === "contexts") {
     return "settings";
   }
-  if (segments[3] === "rankings") return "semantics";
+  if (segments[3] === "rankings") return "rankings";
   return "projects";
 }
 

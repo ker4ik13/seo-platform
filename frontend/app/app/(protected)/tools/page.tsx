@@ -90,7 +90,7 @@ function ToolCard({
         <span className="tool-workflow-icon">
           <Icon name={toolIcon(tool.code)} />
         </span>
-        <span><UiText text="Техническое SEO" /></span>
+        <span><UiText text={tool.category === "research" ? "Исследование выдачи" : "Техническое SEO"} /></span>
       </div>
       <h2><UiText text={tool.title} /></h2>
       <p><UiText text={tool.description} /></p>
@@ -104,5 +104,6 @@ function ToolCard({
 
 function toolIcon(code: string): IconName {
   if (code === "url.http_inspection.v1") return "http";
+  if (code === "serp.comparison.v1") return "search";
   return "tools";
 }

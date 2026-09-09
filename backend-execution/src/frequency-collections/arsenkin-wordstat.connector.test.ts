@@ -3,9 +3,17 @@ import test from "node:test";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
 import {
   ArsenkinWordstatConnector,
+  arsenkinSeasonalityBatchValues,
+  arsenkinSeasonalityRequest,
   arsenkinWordstatBatchValues,
   arsenkinWordstatRequest
 } from "./arsenkin-wordstat.connector.js";
+
+const monthlySeasonality = {
+  granularity: "MONTH" as const,
+  observedFrom: "2026-01-01",
+  observedThrough: "2026-03-31"
+};
 
 test("builds the documented Arsenkin Wordstat frequency request", () => {
   assert.deepEqual(
@@ -26,6 +34,220 @@ test("builds the documented Arsenkin Wordstat frequency request", () => {
       }
     }
   );
+});
+
+test("builds the documented Arsenkin seasonality request", () => {
+  assert.deepEqual(
+    arsenkinSeasonalityRequest({
+      keywords: ["  ремонт   киа ", "seo аудит"],
+      regionCode: "213",
+      device: "PHONE_ONLY",
+      seasonality: monthlySeasonality
+    }),
+    {
+      tools_name: "wordstat",
+      data: {
+        type: 3,
+        queries: ["ремонт киа", "seo аудит"],
+        device: "phone",
+        region: 213,
+        group: "month",
+        startdate: "2026-01-01",
+        enddate: "2026-03-31",
+        correct_dates: true
+      }
+    }
+  );
+});
+
+test("normalizes a bounded Arsenkin seasonality result", () => {
+  assert.deepEqual(
+    arsenkinSeasonalityBatchValues(
+      seasonalityResult({
+        "seo аудит": {
+          "213": [
+            { date: "2026-01-01", count: 50 },
+            { date: "2026-02-01", count: "80" },
+            { date: "2026-03-01", count: 40 }
+          ]
+        },
+        "ремонт киа": {
+          "213": {
+            "2026-01": 1200,
+            "2026-02": { value: "1500", share: "0.15" },
+            "2026-03": 900
+          }
+        }
+      }),
+      "42",
+      ["ремонт киа", "seo аудит"],
+      monthlySeasonality,
+      "213"
+    ),
+    [
+      {
+        query: "ремонт киа",
+        points: [
+          { periodStart: "2026-01-01", value: "1200" },
+          { periodStart: "2026-02-01", value: "1500", share: "0.15" },
+          { periodStart: "2026-03-01", value: "900" }
+        ]
+      },
+      {
+        query: "seo аудит",
+        points: [
+          { periodStart: "2026-01-01", value: "50" },
+          { periodStart: "2026-02-01", value: "80" },
+          { periodStart: "2026-03-01", value: "40" }
+        ]
+      }
+    ]
+  );
+});
+
+test("normalizes the observed Arsenkin type-3 array response", () => {
+  assert.deepEqual(
+    arsenkinSeasonalityBatchValues(
+      {
+        code: "TASK_RESULT",
+        task_id: 42,
+        result: {
+          type: 3,
+          task_id: "42",
+          data: [{
+            query: "ремонт киа",
+            data: {
+              "2026-01-01": { frequency: 1200 },
+              "2026-02-01": { frequency: 1500 },
+              "2026-03-01": { frequency: 900 }
+            }
+          }],
+          dates: ["2026-01-01", "2026-02-01", "2026-03-01"]
+        },
+        created_at: "2026-09-09 08:25:28",
+        finished_at: "2026-09-09 08:25:50"
+      },
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213"
+    ),
+    [{
+      query: "ремонт киа",
+      points: [
+        { periodStart: "2026-01-01", value: "1200" },
+        { periodStart: "2026-02-01", value: "1500" },
+        { periodStart: "2026-03-01", value: "900" }
+      ]
+    }]
+  );
+});
+
+test("rejects mismatched or duplicate Arsenkin seasonality periods", () => {
+  assert.equal(
+    arsenkinSeasonalityBatchValues(
+      seasonalityResult({
+        "ремонт киа": { "225": [{ date: "2026-01-01", value: 1 }] }
+      }),
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213"
+    ),
+    undefined
+  );
+  assert.equal(
+    arsenkinSeasonalityBatchValues(
+      seasonalityResult({
+        "ремонт киа": {
+          "213": [
+            { date: "2026-01-01", value: 1 },
+            { date: "2026-01-01", value: 2 }
+          ]
+        }
+      }),
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213"
+    ),
+    undefined
+  );
+});
+
+test("keeps only requested full periods after Arsenkin corrects its live boundary", () => {
+  const result = seasonalityResult({
+    "ремонт киа": {
+      "213": [
+        { date: "2026-01-01", value: 10 },
+        { date: "2026-02-01", value: 20 },
+        { date: "2026-03-01", value: 30 },
+        { date: "2026-04-01", value: 40 }
+      ]
+    }
+  });
+  (result as { result: { data: { enddate: string } } }).result.data.enddate =
+    "2026-04-06";
+  assert.deepEqual(
+    arsenkinSeasonalityBatchValues(
+      result,
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213"
+    )?.[0]?.points.map(({ periodStart }) => periodStart),
+    ["2026-01-01", "2026-02-01", "2026-03-01"]
+  );
+});
+
+test("submits and fetches one Arsenkin seasonality task", async () => {
+  const calls: { path: string; body: unknown }[] = [];
+  const connector = new ArsenkinWordstatConnector(allowAll(), async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    calls.push({ path, body: JSON.parse(String(init?.body)) });
+    if (path.endsWith("/set")) return jsonResponse({ task_id: 42 });
+    if (path.endsWith("/check")) {
+      return jsonResponse({ code: "TASK_STATUS", status: "finish", progress: 100 });
+    }
+    return jsonResponse(seasonalityResult({
+      "ремонт киа": { "213": [{ date: "2026-01-01", value: 1200 }] }
+    }));
+  });
+  assert.deepEqual(
+    await connector.submitSeasonality(
+      {
+        keywords: ["ремонт киа"],
+        regionCode: "213",
+        device: "ALL",
+        seasonality: monthlySeasonality
+      },
+      { apiKey: "private-key" },
+      1_000
+    ),
+    { status: "ACCEPTED", taskId: "42" }
+  );
+  assert.deepEqual(
+    await connector.fetchSeasonalityResult(
+      "42",
+      ["ремонт киа"],
+      monthlySeasonality,
+      "213",
+      { apiKey: "private-key" },
+      1_000
+    ),
+    {
+      status: "READY",
+      results: [{
+        query: "ремонт киа",
+        points: [{ periodStart: "2026-01-01", value: "1200" }]
+      }]
+    }
+  );
+  assert.deepEqual(calls.map(({ path }) => path), [
+    "/api/tools/set",
+    "/api/tools/check",
+    "/api/tools/get"
+  ]);
 });
 
 test("accepts exactly 10,000 Wordstat queries and rejects 10,001", () => {
@@ -365,6 +587,29 @@ function liveResult(
     },
     created_at: "2026-08-02 10:00:00",
     finished_at: finishedAt
+  };
+}
+
+function seasonalityResult(result: unknown): unknown {
+  return {
+    code: "TASK_RESULT",
+    task_id: 42,
+    result: {
+      type: 3,
+      task_id: 42,
+      data: {
+        task_id: 42,
+        queries: Object.keys(result as object),
+        region: 213,
+        regions: { "213": "Москва [213]" },
+        group: "month",
+        startdate: "2026-01-01",
+        enddate: "2026-03-31",
+        result
+      }
+    },
+    created_at: "2026-09-09 06:00:00",
+    finished_at: "2026-09-09 06:00:05"
   };
 }
 

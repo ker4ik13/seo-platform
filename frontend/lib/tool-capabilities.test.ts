@@ -9,10 +9,10 @@ import {
 
 const projectId = "01900000-0000-7000-8000-000000000001";
 
-test("catalog exposes only the implemented project HTTP workflow", () => {
+test("catalog exposes every implemented project workflow", () => {
   assert.deepEqual(
     toolCapabilities.map(({ slug }) => slug),
-    ["http-status-checker"]
+    ["http-status-checker", "serp"]
   );
 });
 
@@ -23,7 +23,7 @@ test("every project workflow has a concrete launch route", () => {
     const href = toolProjectHref(tool, projectId);
     assert.equal(
       href,
-      `/app/projects/${projectId}/tools/http-status-checker`
+      `/app/projects/${projectId}/tools/${tool.slug}`
     );
   }
 });

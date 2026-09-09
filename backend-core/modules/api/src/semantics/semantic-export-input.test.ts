@@ -6,6 +6,8 @@ import { createSemanticExportInput } from "./semantic-export-input.js";
 const keywordId = "01900000-0000-7000-8000-000000000010";
 const groupId = "01900000-0000-7000-8000-000000000020";
 const secondGroupId = "01900000-0000-7000-8000-000000000021";
+const yandexDimension = "YANDEX|RU|213|ru|DESKTOP";
+const googleDimension = "GOOGLE|RU|1011969|ru|MOBILE";
 
 test("accepts a bounded filtered semantic export", () => {
   assert.deepEqual(
@@ -113,19 +115,31 @@ test("accepts only a bounded XLSX position-history report", () => {
     positionHistory: {
       observedFrom: "2026-08-01T00:00:00.000Z",
       observedBefore: "2026-08-20T00:00:00.000Z",
-      searchEngines: ["YANDEX", "GOOGLE"]
+      searchEngines: ["YANDEX", "GOOGLE"],
+      dimensionKeys: [yandexDimension, googleDimension]
     }
   });
 
   assert.deepEqual(input.positionHistory, {
     observedFrom: "2026-08-01T00:00:00.000Z",
     observedBefore: "2026-08-20T00:00:00.000Z",
-    searchEngines: ["YANDEX", "GOOGLE"]
+    searchEngines: ["YANDEX", "GOOGLE"],
+    dimensionKeys: [yandexDimension, googleDimension]
   });
   assert.throws(
     () => createSemanticExportInput({
       ...input,
       format: "CSV"
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      positionHistory: {
+        ...input.positionHistory,
+        dimensionKeys: [yandexDimension, "YANDEX|RU|2|ru|MOBILE"]
+      }
     }),
     DomainError
   );

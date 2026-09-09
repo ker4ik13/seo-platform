@@ -480,7 +480,7 @@ function parseRankExecutionPresentation(
   readonly saveProjectPosition?: boolean;
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
-  readonly depth?: 30 | 50 | 100;
+  readonly depth?: 10 | 20 | 30 | 50 | 100;
 } | null {
   const purpose =
     input.purpose === undefined
@@ -510,7 +510,7 @@ function parseRankExecutionPresentation(
   const depth =
     input.depth === undefined
       ? undefined
-      : input.depth === 30 || input.depth === 50 || input.depth === 100
+      : input.depth === 10 || input.depth === 20 || input.depth === 30 || input.depth === 50 || input.depth === 100
         ? input.depth
         : null;
   if (

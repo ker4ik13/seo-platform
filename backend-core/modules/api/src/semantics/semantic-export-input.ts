@@ -12,7 +12,8 @@ import {
   type SemanticExportColumnKey,
   type SemanticExportFilters,
   type SemanticFolderMapExportOptions,
-  type SemanticPositionHistoryExportOptions
+  type SemanticPositionHistoryExportOptions,
+  type SemanticPositionHistorySearchEngine
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 import { keywordListQuery } from "./keyword-query.js";
@@ -159,7 +160,7 @@ function positionHistoryOptions(
 ): SemanticPositionHistoryExportOptions {
   const input = exactRecord(
     value,
-    ["observedFrom", "observedBefore", "searchEngines"],
+    ["observedFrom", "observedBefore", "searchEngines", "dimensionKeys"],
     "positionHistory"
   );
   const observedFrom = canonicalInstant(
@@ -194,7 +195,39 @@ function positionHistoryOptions(
   if (new Set(searchEngines).size !== searchEngines.length) {
     invalid("positionHistory.searchEngines", "Search engines must be unique");
   }
-  return { observedFrom, observedBefore, searchEngines };
+  const dimensionKeys = input.dimensionKeys === undefined
+    ? undefined
+    : positionHistoryDimensionKeys(input.dimensionKeys, searchEngines);
+  return {
+    observedFrom,
+    observedBefore,
+    searchEngines,
+    ...(dimensionKeys ? { dimensionKeys } : {})
+  };
+}
+
+function positionHistoryDimensionKeys(
+  value: unknown,
+  searchEngines: readonly SemanticPositionHistorySearchEngine[]
+): readonly string[] {
+  if (!Array.isArray(value) || value.length !== searchEngines.length) {
+    invalid("positionHistory.dimensionKeys", "Select one city and device per search engine");
+  }
+  const dimensions = value.map((key, index) => {
+    const dimension = parseSemanticRankDimensionKey(key);
+    if (!dimension || !searchEngines.includes(dimension.searchEngine)) {
+      invalid(`positionHistory.dimensionKeys[${index}]`, "Invalid rank dimension");
+    }
+    return dimension;
+  });
+  if (
+    new Set(dimensions.map(({ key }) => key)).size !== dimensions.length ||
+    new Set(dimensions.map(({ searchEngine }) => searchEngine)).size !==
+      searchEngines.length
+  ) {
+    invalid("positionHistory.dimensionKeys", "Select one city and device per search engine");
+  }
+  return dimensions.map(({ key }) => key);
 }
 
 function exportFilters(value: unknown): SemanticExportFilters {

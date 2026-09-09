@@ -51,6 +51,44 @@ test("rejects duplicate keywords, unknown fields and blind retries", () => {
   assert.throws(() => semanticFrequencyContextRoute("BASE", "213", "TV"));
 });
 
+test("accepts bounded seasonality types and a normalized calendar range", () => {
+  assert.deepEqual(createFrequencyCollectionInput({
+    items: [{ id: keywordId, version: 3 }],
+    mode: "SEASONALITY",
+    types: ["BASE"],
+    regionCode: "213",
+    device: "DESKTOP",
+    seasonality: {
+      granularity: "MONTH",
+      observedFrom: "2026-01-01",
+      observedThrough: "2026-03-31"
+    }
+  }), {
+    items: [{ id: keywordId, version: 3 }],
+    mode: "SEASONALITY",
+    types: ["BASE"],
+    regionCode: "213",
+    device: "DESKTOP",
+    seasonality: {
+      granularity: "MONTH",
+      observedFrom: "2026-01-01",
+      observedThrough: "2026-03-31"
+    }
+  });
+  assert.throws(() => createFrequencyCollectionInput({
+    items: [{ id: keywordId, version: 3 }],
+    mode: "SEASONALITY",
+    types: ["EXACT"],
+    regionCode: "213",
+    device: "DESKTOP",
+    seasonality: {
+      granularity: "MONTH",
+      observedFrom: "2026-01-01",
+      observedThrough: "2026-03-31"
+    }
+  }));
+});
+
 test("accepts a 50,000-keyword operation and rejects command overflow", () => {
   const items = Array.from({ length: 50_000 }, (_, index) => ({
     id: keywordIdAt(index),

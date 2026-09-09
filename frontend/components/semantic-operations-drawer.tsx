@@ -36,6 +36,7 @@ import {
 import { OperationStopConfirmation } from "./operation-stop-confirmation";
 import { ProviderLogo } from "./provider-logo";
 import { SemanticRankContext } from "./semantic-rank-context";
+import { frequencyCollectionCompactTitle, frequencyCollectionParameters } from "../lib/frequency-operation-presentation";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
@@ -442,7 +443,7 @@ export function SemanticOperationsDrawer({
         onClose={() => setSelectedOperation(undefined)}
         operationId={openedOperation.id}
         projectId={projectId}
-        title={openedOperation.kind === "FREQUENCY" ? uiText("Сбор частотности") : openedOperation.kind === "AI_ANSWER" ? openedOperation.competitorCollection ? uiText("ИИ-выдача конкурентов") : uiText("Сбор ИИ-ответов") : openedOperation.kind === "CLUSTERING" ? uiText("Кластеризация запросов") : openedOperation.kind === "RESEARCH" ? openedOperation.title : openedOperation.competitorCollection ? uiText("Выдача конкурентов · Топ-10") : uiText("Проверка позиций")}
+        title={openedOperation.kind === "FREQUENCY" ? openedOperation.title : openedOperation.kind === "AI_ANSWER" ? openedOperation.competitorCollection ? uiText("ИИ-выдача конкурентов") : uiText("Сбор ИИ-ответов") : openedOperation.kind === "CLUSTERING" ? uiText("Кластеризация запросов") : openedOperation.kind === "RESEARCH" ? openedOperation.title : openedOperation.competitorCollection ? uiText("Выдача конкурентов · Топ-10") : uiText("Проверка позиций")}
       />
     )}
     {stopConfirmation && (
@@ -493,12 +494,15 @@ interface Operation {
 function frequencyOperation(value: FrequencyCollectionSummary): Operation {
   const done = value.completedKeywords + value.failedKeywords;
   const durationLabel = operationDurationLabel(value);
+  const seasonality = value.mode === "SEASONALITY";
   return {
     id: value.id,
     kind: "FREQUENCY",
     provider: value.provider,
-    title: `Частотность · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
-    description: `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
+    title: frequencyCollectionCompactTitle(value),
+    description: seasonality
+      ? `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${frequencyCollectionParameters(value)}`
+      : `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${done} из ${value.selectedKeywords}`,
     percent: value.selectedKeywords > 0 ? Math.round(done / value.selectedKeywords * 100) : 0,

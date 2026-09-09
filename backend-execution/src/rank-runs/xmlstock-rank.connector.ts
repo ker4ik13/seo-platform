@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { SaxesParser } from "saxes";
 import {
-  rankExecutionPurpose,
   rankExecutionTracksProjectPosition,
   type InternalNormalizedRankResult,
   type RankManifestHash
@@ -50,7 +49,7 @@ export interface XmlStockRankWireRequest {
   readonly countryCode: string;
   readonly language: string;
   readonly device: "DESKTOP" | "MOBILE";
-  readonly depth: 10 | 30 | 50 | 100;
+  readonly depth: 10 | 20 | 30 | 50 | 100;
   readonly delayed: boolean;
   readonly turbo: boolean;
 }
@@ -117,7 +116,7 @@ export interface XmlStockRankPageProgressV1 {
   readonly schemaVersion: "xmlstock-rank-page-progress@1";
   readonly taskId: string;
   readonly engine: "YANDEX" | "GOOGLE";
-  readonly depth: 30 | 50 | 100;
+  readonly depth: 10 | 20 | 30 | 50 | 100;
   readonly nextPage: number;
   readonly documents: readonly XmlStockDocument[];
 }
@@ -126,7 +125,7 @@ export interface XmlStockRankPageProgressV2 {
   readonly schemaVersion: "xmlstock-rank-page-progress@2";
   readonly taskId: string;
   readonly engine: "YANDEX";
-  readonly depth: 30 | 50 | 100;
+  readonly depth: 10 | 20 | 30 | 50 | 100;
   readonly resultsPerPage: 10 | 20 | 30 | 40 | 50;
   readonly nextPage: number;
   readonly documents: readonly XmlStockDocument[];
@@ -400,7 +399,7 @@ export function xmlStockRankPageProgress(
     typeof input.taskId !== "string" ||
     (input.engine !== "YANDEX" && input.engine !== "GOOGLE") ||
     (turbo && input.engine !== "YANDEX") ||
-    (input.depth !== 30 && input.depth !== 50 && input.depth !== 100) ||
+    ![10, 20, 30, 50, 100].includes(Number(input.depth)) ||
     !Number.isSafeInteger(input.nextPage) ||
     Number(input.nextPage) < 1 ||
     Number(input.nextPage) >=
@@ -450,7 +449,7 @@ export function xmlStockRankPageProgress(
     schemaVersion: PAGE_PROGRESS_V2_SCHEMA,
     taskId: providerTaskId(input.taskId),
     engine: "YANDEX",
-    depth: input.depth,
+    depth: Number(input.depth) as 10 | 20 | 30 | 50 | 100,
     resultsPerPage,
     nextPage: Number(input.nextPage),
     documents
@@ -458,7 +457,7 @@ export function xmlStockRankPageProgress(
     schemaVersion: PAGE_PROGRESS_V1_SCHEMA,
     taskId: providerTaskId(input.taskId),
     engine: input.engine,
-    depth: input.depth,
+    depth: Number(input.depth) as 10 | 20 | 30 | 50 | 100,
     nextPage: Number(input.nextPage),
     documents
   };
@@ -491,10 +490,7 @@ export function buildXmlStockRankWireRequest(
     countryCode: intent.execution.countryCode,
     language: intent.execution.language,
     device: intent.execution.device,
-    depth:
-      rankExecutionPurpose(intent.execution) === "COMPETITOR_SERP"
-        ? 10
-        : intent.execution.depth,
+    depth: intent.execution.depth,
     delayed:
       intent.execution.searchEngine === "YANDEX" &&
       xmlStockSearchSource(intent.execution.providerMappingVersion) ===

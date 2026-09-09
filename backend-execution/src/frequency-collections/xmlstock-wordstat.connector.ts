@@ -1,7 +1,9 @@
 import type {
+  FrequencySeasonalityRequest,
   SemanticFrequencyDevice,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
+import { frequencySeasonalitySeriesPointLimit } from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import {
@@ -13,6 +15,17 @@ const XMLSTOCK_WORDSTAT_URL = "https://xmlstock.com/wordstat/json/";
 
 export type WordstatCollectionResult =
   | { readonly ok: true; readonly value: string }
+  | ProviderFailure;
+
+export type XmlStockSeasonalityResult =
+  | {
+      readonly ok: true;
+      readonly points: readonly Readonly<{
+        periodStart: string;
+        value: string;
+        share?: string;
+      }>[];
+    }
   | ProviderFailure;
 
 type ProviderFailure = {
@@ -38,7 +51,7 @@ export type XmlStockWordstatExpansionResult =
   | ProviderFailure;
 
 export class XmlStockWordstatConnector {
-  public readonly version = "xmlstock-wordstat@1.3.0";
+  public readonly version = "xmlstock-wordstat@2.0.0";
 
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
 
@@ -78,6 +91,51 @@ export class XmlStockWordstatConnector {
         response.status,
         response.value,
         input.keyword
+      );
+      return !result.ok && result.retryable && response.retryAfterSeconds !== undefined
+        ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
+        : result;
+    } catch (error) {
+      if (error instanceof ProviderTransportError) {
+        return failure("PROVIDER_UNAVAILABLE", true);
+      }
+      throw error;
+    }
+  }
+
+  public async collectSeasonality(
+    input: {
+      readonly keyword: string;
+      readonly type: SemanticFrequencyType;
+      readonly regionCode: string;
+      readonly device: SemanticFrequencyDevice;
+      readonly seasonality: FrequencySeasonalityRequest;
+    },
+    secret: IntegrationCredentialSecret,
+    timeoutMs: number
+  ): Promise<XmlStockSeasonalityResult> {
+    if (!secret.accountIdentifier) return failure("INVALID_CREDENTIAL", false);
+    const url = new URL(XMLSTOCK_WORDSTAT_URL);
+    url.searchParams.set("user", secret.accountIdentifier);
+    url.searchParams.set("key", secret.apiKey);
+    url.searchParams.set("query", wordstatQuery(input.keyword, input.type));
+    url.searchParams.set("pagetype", "history");
+    url.searchParams.set("period", providerSeasonalityPeriod(input.seasonality.granularity));
+    url.searchParams.set("start", providerDate(input.seasonality.observedFrom));
+    url.searchParams.set("end", providerDate(input.seasonality.observedThrough));
+    url.searchParams.set("regions", input.regionCode === "ALL" ? "all" : input.regionCode);
+    url.searchParams.set("device", providerDevice(input.device));
+    try {
+      const response = await providerJsonRequest(
+        url,
+        { method: "GET", headers: { Accept: "application/json" } },
+        timeoutMs,
+        this.fetcher
+      );
+      const result = xmlStockSeasonalityResult(
+        response.status,
+        response.value,
+        input.seasonality
       );
       return !result.ok && result.retryable && response.retryAfterSeconds !== undefined
         ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
@@ -146,6 +204,7 @@ export class XmlStockWordstatConnector {
       throw error;
     }
   }
+
 }
 
 export function xmlStockWordstatExpansionResult(
@@ -267,6 +326,77 @@ export function xmlStockWordstatResult(
     }
   }
   return failure("PROVIDER_INVALID_RESPONSE", true);
+}
+
+export function xmlStockSeasonalityResult(
+  status: number,
+  value: unknown,
+  seasonality: FrequencySeasonalityRequest
+): XmlStockSeasonalityResult {
+  const requestFailure = providerRequestFailure(status, value);
+  if (requestFailure) return requestFailure;
+  const body = record(value);
+  if (!body || !Array.isArray(body.results) || body.results.length > frequencySeasonalitySeriesPointLimit) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  const points: Array<{ periodStart: string; value: string; share?: string }> = [];
+  let previous = "";
+  for (const candidate of body.results) {
+    const row = record(candidate);
+    const periodStart = providerPeriodStart(row?.date);
+    // XMLStock can return a dated placeholder without `count` and `share`
+    // when Yandex has no observations for that period. The provider still
+    // includes the period in the requested series, so project it as zero
+    // instead of rejecting the complete response.
+    const isEmptyPeriod = row?.count === undefined && row?.share === undefined;
+    const count = isEmptyPeriod ? "0" : decimal(row?.count);
+    const share = providerShare(row?.share);
+    if (
+      !periodStart ||
+      count === undefined ||
+      (row?.share !== undefined && share === undefined) ||
+      periodStart < seasonality.observedFrom ||
+      periodStart > seasonality.observedThrough ||
+      (previous && periodStart <= previous)
+    ) {
+      return failure("PROVIDER_INVALID_RESPONSE", true);
+    }
+    points.push({
+      periodStart,
+      value: count,
+      ...(share === undefined ? {} : { share })
+    });
+    previous = periodStart;
+  }
+  return { ok: true, points };
+}
+
+function providerSeasonalityPeriod(
+  value: FrequencySeasonalityRequest["granularity"]
+): string {
+  return { MONTH: "month", WEEK: "week", DAY: "day" }[value];
+}
+
+function providerDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) throw new WordstatQueryError();
+  return `${day}.${month}.${year}`;
+}
+
+function providerPeriodStart(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString().slice(0, 10);
+}
+
+function providerShare(value: unknown): string | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0 || value > 1) return undefined;
+    return value.toFixed(18).replace(/0+$/u, "").replace(/\.$/u, "");
+  }
+  return typeof value === "string" && /^(?:0(?:\.\d{1,18})?|1(?:\.0{1,18})?)$/u.test(value)
+    ? value
+    : undefined;
 }
 
 function expansionQuery(input: {

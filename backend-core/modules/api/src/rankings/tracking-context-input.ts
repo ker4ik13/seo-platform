@@ -240,7 +240,7 @@ function configurationInput(
     typeof input.depth !== "number" ||
     !DEPTHS.has(input.depth)
   ) {
-    invalid("configuration.depth", "Must be one of 30, 50 or 100");
+    invalid("configuration.depth", "Must be one of 10, 20, 30, 50 or 100");
   }
   if (typeof input.safeSearch !== "boolean") {
     invalid("configuration.safeSearch", "Must be a boolean");

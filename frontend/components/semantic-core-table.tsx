@@ -28,6 +28,7 @@ import {
   type SemanticKeywordMultiSearch,
   type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
+  type SemanticKeywordInsights,
   type CreateWordstatExpansionRunInput,
   type KeywordResearchRunSummary,
   type AiAnswerCollectionSummary,
@@ -79,11 +80,13 @@ import {
 import {
   hasSemanticAiAnswerSnapshot,
   rankChangePresentation,
-  sameSemanticRankingUrl
+  sameSemanticRankingUrl,
+  semanticUrlBelongsToProject
 } from "../lib/semantic-rank-presentation";
 import {
   clampSemanticColumnWidth,
   clampSemanticGroupSidebarWidth,
+  clampSemanticInspectorWidth,
   normalizeSemanticKeywordPageSize,
   readSemanticLayoutPreferences,
   semanticAppliedTableLayoutConfig,
@@ -93,6 +96,9 @@ import {
   semanticGroupSidebarDefaultWidth,
   semanticGroupSidebarMaxWidth,
   semanticGroupSidebarMinWidth,
+  semanticInspectorDefaultWidth,
+  semanticInspectorMaxWidth,
+  semanticInspectorMinWidth,
   semanticSavedViewConfigForPersistence,
   semanticVisibleColumnWidths,
   writeSemanticLayoutPreferences
@@ -129,6 +135,7 @@ import {
   type SemanticMultiSearchAction
 } from "./semantic-multi-search-dialog";
 import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
+import { SemanticKeywordNoteModal } from "./semantic-keyword-note-modal";
 import { SemanticProjectSerpResults } from "./semantic-project-serp-results";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
@@ -193,6 +200,7 @@ interface SemanticKeyword {
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
   readonly hasNote?: boolean;
+  readonly hasMultipleRankingUrls?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly groupPath?: string;
@@ -304,7 +312,18 @@ interface ManualKeywordDuplicateReview {
   readonly selectedIndices: ReadonlySet<number>;
 }
 
-const MANUAL_KEYWORD_LIMIT = 2_000;
+interface ManualKeywordAddOperation {
+  readonly phase: "CHECKING" | "ADDING" | "COMPLETED" | "FAILED";
+  readonly processed: number;
+  readonly total: number;
+  readonly added: number;
+  readonly skipped: number;
+  readonly failed: number;
+  readonly error?: string;
+  readonly retryDraft?: KeywordDraft;
+  readonly retryRows?: readonly string[];
+}
+
 const SEMANTIC_KEYWORD_EDITOR_FORM_ID = "semantic-keyword-editor-form";
 
 interface SemanticCoreTableProps {
@@ -390,6 +409,8 @@ export function SemanticCoreTable({
   const [manualDuplicateReview, setManualDuplicateReview] =
     useState<ManualKeywordDuplicateReview>();
   const [saving, setSaving] = useState(false);
+  const [manualAddOperation, setManualAddOperation] =
+    useState<ManualKeywordAddOperation>();
   const [mutationError, setMutationError] = useState<string>();
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
   const [multiGroupIds, setMultiGroupIds] = useState<readonly string[]>([]);
@@ -416,6 +437,8 @@ export function SemanticCoreTable({
   const [exportHistoryEngines, setExportHistoryEngines] = useState<
     readonly SemanticPositionHistorySearchEngine[]
   >(["YANDEX"]);
+  const [exportHistoryDimensionKeys, setExportHistoryDimensionKeys] =
+    useState<readonly string[]>([]);
   const [exportHistoryFrom, setExportHistoryFrom] = useState(
     () => semanticHistoryDefaultRange().from
   );
@@ -450,6 +473,9 @@ export function SemanticCoreTable({
   const [groupSidebarWidth, setGroupSidebarWidth] = useState(
     semanticGroupSidebarDefaultWidth
   );
+  const [inspectorWidth, setInspectorWidth] = useState(
+    semanticInspectorDefaultWidth
+  );
   const [mobileGroupTreeOpen, setMobileGroupTreeOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<
     Readonly<Record<string, number>>
@@ -462,6 +488,7 @@ export function SemanticCoreTable({
   );
   const layoutPreferencesRef = useRef({
     groupSidebarWidth: semanticGroupSidebarDefaultWidth,
+    inspectorWidth: semanticInspectorDefaultWidth,
     columnWidths: {} as Readonly<Record<string, number>>,
     pageSize: semanticKeywordDefaultPageSize as SemanticKeywordPageSize,
     expandedGroupIds: null as readonly string[] | null
@@ -485,14 +512,22 @@ export function SemanticCoreTable({
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [competitorDialogOpen, setCompetitorDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
+  const [seasonalityDialogOpen, setSeasonalityDialogOpen] = useState(false);
   const [wordstatDialogOpen, setWordstatDialogOpen] = useState(false);
   const [aiAnswerDialogOpen, setAiAnswerDialogOpen] = useState(false);
   const [aiCompetitorDialogOpen, setAiCompetitorDialogOpen] = useState(false);
   const [clusteringDialogOpen, setClusteringDialogOpen] = useState(false);
-  const [aiAnswerKeyword, setAiAnswerKeyword] = useState<SemanticKeyword>();
+  const [aiAnswerKeyword, setAiAnswerKeyword] = useState<Readonly<{
+    item: SemanticKeyword;
+    dimensionKey?: string;
+  }>>();
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
-  const [siteResultsKeyword, setSiteResultsKeyword] = useState<SemanticKeyword>();
+  const [siteResultsKeyword, setSiteResultsKeyword] = useState<Readonly<{
+    item: SemanticKeyword;
+    mode: "MISMATCH" | "MULTIPLE";
+  }>>();
+  const [noteKeyword, setNoteKeyword] = useState<SemanticKeyword>();
   const [watchedFrequencyId, setWatchedFrequencyId] = useState<string>();
   const [operationsRefreshVersion, setOperationsRefreshVersion] = useState(0);
   const activeOperationCount = useProjectActiveOperationCount(
@@ -841,6 +876,7 @@ export function SemanticCoreTable({
     setMultiGroupIds([]);
     const preferences = readSemanticLayoutPreferences(
       projectId,
+      currentUserId,
       window.localStorage
     );
     manualAddPreferencesRef.current = readSemanticManualAddPreferences(
@@ -849,6 +885,7 @@ export function SemanticCoreTable({
     );
     layoutPreferencesRef.current = preferences;
     setGroupSidebarWidth(preferences.groupSidebarWidth);
+    setInspectorWidth(preferences.inspectorWidth);
     setColumnWidths(preferences.columnWidths);
     setPageSize(preferences.pageSize);
     setExpandedGroupIds(
@@ -856,7 +893,7 @@ export function SemanticCoreTable({
         ? new Set(preferences.expandedGroupIds)
         : null
     );
-  }, [projectId]);
+  }, [currentUserId, projectId]);
 
   useEffect(() => {
     if (
@@ -927,7 +964,7 @@ export function SemanticCoreTable({
       if (!(target instanceof Element)) return;
       if (
         target.closest(
-          ".semantic-keyword-inspector, .semantic-operations-drawer, .semantic-history-drawer, .semantic-layout-drawer, .semantic-modal, [data-semantic-sidebar-trigger], [data-exclusive-dropdown-layer]"
+          ".semantic-keyword-inspector, .semantic-keyword-inspector-resizer, .semantic-operations-drawer, .semantic-history-drawer, .semantic-layout-drawer, .semantic-modal, [data-semantic-sidebar-trigger], [data-exclusive-dropdown-layer]"
         )
       ) {
         return;
@@ -1813,16 +1850,18 @@ export function SemanticCoreTable({
     nextGroupSidebarWidth = layoutPreferencesRef.current.groupSidebarWidth,
     nextColumnWidths = layoutPreferencesRef.current.columnWidths,
     nextPageSize = layoutPreferencesRef.current.pageSize,
-    nextExpandedGroupIds = layoutPreferencesRef.current.expandedGroupIds
+    nextExpandedGroupIds = layoutPreferencesRef.current.expandedGroupIds,
+    nextInspectorWidth = layoutPreferencesRef.current.inspectorWidth
   ): void {
     const preferences = {
       groupSidebarWidth: nextGroupSidebarWidth,
+      inspectorWidth: nextInspectorWidth,
       columnWidths: nextColumnWidths,
       pageSize: nextPageSize,
       expandedGroupIds: nextExpandedGroupIds
     };
     layoutPreferencesRef.current = preferences;
-    writeSemanticLayoutPreferences(projectId, preferences, window.localStorage);
+    writeSemanticLayoutPreferences(projectId, currentUserId, preferences, window.localStorage);
   }
 
   function resizeSemanticColumn(
@@ -1850,6 +1889,74 @@ export function SemanticCoreTable({
     };
     setGroupSidebarWidth(nextWidth);
     if (persist) persistLayoutPreferences(nextWidth);
+  }
+
+  function updateInspectorWidth(width: number, persist: boolean): void {
+    const nextWidth = clampSemanticInspectorWidth(width);
+    layoutPreferencesRef.current = {
+      ...layoutPreferencesRef.current,
+      inspectorWidth: nextWidth
+    };
+    setInspectorWidth(nextWidth);
+    if (persist) {
+      persistLayoutPreferences(undefined, undefined, undefined, undefined, nextWidth);
+    }
+  }
+
+  function startInspectorResize(
+    event: ReactPointerEvent<HTMLDivElement>
+  ): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startWidth = layoutPreferencesRef.current.inspectorWidth;
+    let nextWidth = startWidth;
+    let finished = false;
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      nextWidth = clampSemanticInspectorWidth(
+        startWidth + startX - moveEvent.clientX
+      );
+      updateInspectorWidth(nextWidth, false);
+    };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("blur", finish);
+      handle.removeEventListener("lostpointercapture", finish);
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      document.body.classList.remove("semantic-inspector-resizing");
+      updateInspectorWidth(nextWidth, true);
+    };
+    document.body.classList.add("semantic-inspector-resizing");
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    window.addEventListener("blur", finish, { once: true });
+    handle.addEventListener("lostpointercapture", finish, { once: true });
+    handle.setPointerCapture(pointerId);
+  }
+
+  function resizeInspectorFromKeyboard(
+    event: ReactKeyboardEvent<HTMLDivElement>
+  ): void {
+    const current = layoutPreferencesRef.current.inspectorWidth;
+    const next = event.key === "Home"
+      ? semanticInspectorMinWidth
+      : event.key === "End"
+        ? semanticInspectorMaxWidth
+        : event.key === "ArrowLeft"
+          ? current + (event.shiftKey ? 40 : 12)
+          : event.key === "ArrowRight"
+            ? current - (event.shiftKey ? 40 : 12)
+            : undefined;
+    if (next === undefined) return;
+    event.preventDefault();
+    updateInspectorWidth(next, true);
   }
 
   function updatePageSize(value: string): void {
@@ -2146,10 +2253,16 @@ export function SemanticCoreTable({
   }, [loading, items.length]);
 
   function openCreate(): void {
+    if (manualAddOperation?.phase === "ADDING") {
+      setBulkNotice("Добавление запросов уже выполняется в фоне.");
+      return;
+    }
+    setManualAddOperation(undefined);
     setCheckedIds(new Set());
     setBulkNotice(undefined);
     setMutationError(undefined);
     setManualDuplicateReview(undefined);
+    setManualAddOperation(undefined);
     setEditor({
       mode: "create",
       draft: {
@@ -2258,17 +2371,15 @@ export function SemanticCoreTable({
     });
   }
 
-  async function saveKeyword(event: FormEvent<HTMLFormElement>, uiLocale: string = "ru-RU"): Promise<void> {
+  async function saveKeyword(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!editor || saving) return;
     const draft = editor.draft;
     const texts = editor.mode === "create"
       ? manualKeywordTexts(draft.text)
       : [draft.text.trim()];
-    if (texts.length < 1 || texts.length > MANUAL_KEYWORD_LIMIT) {
-      setMutationError(
-        `Введите от 1 до ${formatInteger(MANUAL_KEYWORD_LIMIT, uiLocale)} запросов, по одному в строке.`
-      );
+    if (texts.length < 1) {
+      setMutationError("Введите хотя бы один запрос, по одному в строке.");
       return;
     }
     if (texts.some((text) => text.length > 2_000)) {
@@ -2277,6 +2388,16 @@ export function SemanticCoreTable({
     }
     setSaving(true);
     setMutationError(undefined);
+    if (editor.mode === "create") {
+      setManualAddOperation({
+        phase: manualDuplicateReview ? "ADDING" : "CHECKING",
+        processed: 0,
+        total: texts.length,
+        added: 0,
+        skipped: 0,
+        failed: 0
+      });
+    }
     const commonBody = {
       language: draft.language,
       priority: Number(draft.priority),
@@ -2328,7 +2449,16 @@ export function SemanticCoreTable({
                     }))
                   }
                 }
-              )
+              ),
+            undefined,
+            ({ processed, total }) => setManualAddOperation({
+              phase: "CHECKING",
+              processed,
+              total,
+              added: 0,
+              skipped: 0,
+              failed: 0
+            })
           );
           if (preview.newKeywords !== preview.selected) {
             duplicateReview = {
@@ -2345,6 +2475,7 @@ export function SemanticCoreTable({
               )
             };
             setManualDuplicateReview(duplicateReview);
+            setManualAddOperation(undefined);
             return;
           }
         }
@@ -2356,7 +2487,19 @@ export function SemanticCoreTable({
         const fallbackDuplicatePolicy = draft.skipDuplicates
           ? "SKIP_EXISTING"
           : "REJECT_EXISTING";
-        const result = await runManualKeywordBulkChunks(
+        const submittedDraft = { ...draft };
+        setManualAddOperation({
+          phase: "ADDING",
+          processed: 0,
+          total: texts.length,
+          added: 0,
+          skipped: 0,
+          failed: 0
+        });
+        setManualDuplicateReview(undefined);
+        setEditor(undefined);
+        setSaving(false);
+        void runManualKeywordBulkChunks(
           texts,
           async (chunk, offset) =>
             browserApiRequest<SemanticKeywordBulkCreateResult>(
@@ -2386,33 +2529,55 @@ export function SemanticCoreTable({
                   })
                 }
               }
-            )
-        );
-        const locallySkipped = inputStats.duplicates;
-        setRetryVersion((value) => value + 1);
-        setBulkNotice(
-          `Добавлено: ${result.created} · перемещено: ${result.linked} · ` +
-            `восстановлено: ${result.restored} · ` +
-            `пропущено: ${result.skipped}` +
-            (locallySkipped > 0
-              ? ` · повторов во вставке объединено: ${locallySkipped}`
-              : "")
-        );
-        if (result.retryRows.length > 0) {
-          setManualDuplicateReview(undefined);
-          setEditor((current) => current && current.mode === "create"
-            ? { ...current, draft: { ...current.draft, text: result.retryRows.join("\n") } }
-            : current);
-          setMutationError(
-            result.transportError
-              ? `Соединение прервано после ${result.selected} запросов. ` +
-                  "В форме оставлены неподтверждённые и необработанные строки. " +
-                  keywordMutationError(result.transportError)
-              : `Не добавлено: ${result.rejected + result.failed}. ` +
-                  "В форме оставлены дубли и строки с ошибками — исправьте их или удалите."
-          );
-          return;
-        }
+            ),
+          undefined,
+          (progress) => setManualAddOperation({
+            phase: "ADDING",
+            processed: progress.processed,
+            total: progress.total,
+            added: progress.created + progress.restored + progress.linked,
+            skipped: progress.skipped,
+            failed: progress.rejected + progress.failed
+          })
+        ).then((result) => {
+          const failed = result.rejected + result.failed;
+          const added = result.created + result.restored + result.linked;
+          setRetryVersion((value) => value + 1);
+          setManualAddOperation({
+            phase: result.retryRows.length > 0 ? "FAILED" : "COMPLETED",
+            processed: result.selected,
+            total: texts.length,
+            added,
+            skipped: result.skipped,
+            failed,
+            ...(result.transportError
+              ? { error: keywordMutationError(result.transportError) }
+              : failed > 0
+                ? { error: `Не добавлено запросов: ${failed}.` }
+                : inputStats.duplicates > 0
+                  ? { error: `Повторов во вставке объединено: ${inputStats.duplicates}.` }
+                  : {}),
+            ...(result.retryRows.length > 0
+              ? {
+                  retryDraft: submittedDraft,
+                  retryRows: result.retryRows
+                }
+              : {})
+          });
+        }).catch((error: unknown) => {
+          setManualAddOperation({
+            phase: "FAILED",
+            processed: 0,
+            total: texts.length,
+            added: 0,
+            skipped: 0,
+            failed: texts.length,
+            error: keywordMutationError(error),
+            retryDraft: submittedDraft,
+            retryRows: texts
+          });
+        });
+        return;
       } else {
         await browserApiRequest<SemanticKeyword>(
           `/app/api/projects/${encodeURIComponent(
@@ -2429,6 +2594,7 @@ export function SemanticCoreTable({
       setManualDuplicateReview(undefined);
       setEditor(undefined);
     } catch (requestError) {
+      setManualAddOperation(undefined);
       setMutationError(keywordMutationError(requestError));
     } finally {
       setSaving(false);
@@ -2747,7 +2913,8 @@ export function SemanticCoreTable({
                   positionHistory: semanticHistoryExportOptions(
                     exportHistoryFrom,
                     exportHistoryTo,
-                    exportHistoryEngines
+                    exportHistoryEngines,
+                    exportHistoryDimensionKeys
                   )
                 }
               : {}),
@@ -3232,6 +3399,37 @@ export function SemanticCoreTable({
     `${retryVersion}:${operationsRefreshVersion}:${virtualRows.items.map(row => row.positions?.map(position => position.observedAt).join(",")).join(";")}`,
     `${retryVersion}:${operationsRefreshVersion}`
   );
+  useEffect(() => {
+    const availableEngines = [...new Set(
+      rankComparison.dimensions.map(({ searchEngine }) => searchEngine)
+    )];
+    setExportHistoryEngines((current) => {
+      const available = current.filter((engine) =>
+        availableEngines.includes(engine)
+      );
+      return available.length > 0
+        ? available
+        : availableEngines[0]
+          ? [availableEngines[0]]
+          : [];
+    });
+  }, [rankComparison.dimensions]);
+  useEffect(() => {
+    setExportHistoryDimensionKeys((current) =>
+      exportHistoryEngines.flatMap((engine) => {
+        const existing = current.find((key) =>
+          rankComparison.dimensions.some(
+            (dimension) =>
+              dimension.key === key && dimension.searchEngine === engine
+          )
+        );
+        const selected = existing ?? rankComparison.dimensions.find(
+          (dimension) => dimension.searchEngine === engine
+        )?.key;
+        return selected ? [selected] : [];
+      })
+    );
+  }, [exportHistoryEngines, rankComparison.dimensions]);
   const rankColumns = useMemo(() => rankDimensionColumns(rankComparison.dimensions, uiLocale), [rankComparison.dimensions, uiLocale]);
   const focusedKeywordId = rightSidebar?.type === "KEYWORD"
     ? rightSidebar.keywordId
@@ -3251,6 +3449,13 @@ export function SemanticCoreTable({
             icon: <Icon name="frequency" />,
             disabled: !projectHasKeywords,
             onSelect: () => setFrequencyDialogOpen(true)
+          },
+          {
+            id: "seasonality",
+            label: "Собрать сезонность",
+            icon: <Icon name="trend" />,
+            disabled: !projectHasKeywords,
+            onSelect: () => setSeasonalityDialogOpen(true)
           },
           {
             id: "wordstat-parsing",
@@ -3410,7 +3615,8 @@ export function SemanticCoreTable({
       aria-busy={loading}
       className={`semantic-core${mobileGroupTreeOpen ? " semantic-mobile-groups-open" : ""}`}
       style={{
-        "--semantic-groups-width": `${groupSidebarWidth}px`
+        "--semantic-groups-width": `${groupSidebarWidth}px`,
+        "--semantic-inspector-width": `${inspectorWidth}px`
       } as CSSProperties}
     >
       <header
@@ -3524,7 +3730,21 @@ export function SemanticCoreTable({
         data-presence-cursor-anchor="true"
         data-presence-key="semantic-commandbar"
       >
-        <button className={activityButtonClass("SEMANTIC_ADD")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:add" onClick={openCreate} type="button"><Icon name="plus" /><UiText text="Добавить" /></button>
+        <button
+          className={activityButtonClass("SEMANTIC_ADD")}
+          data-presence-cursor-anchor="true"
+          data-presence-key="semantic-action:add"
+          disabled={manualAddOperation?.phase === "ADDING"}
+          onClick={openCreate}
+          type="button"
+        >
+          {manualAddOperation?.phase === "ADDING"
+            ? <i className="spinner compact" />
+            : <Icon name="plus" />}
+          <UiText
+            text={manualAddOperation?.phase === "ADDING" ? "Добавление…" : "Добавить"}
+          />
+        </button>
         <button className={activityButtonClass("SEMANTIC_IMPORT")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:import" onClick={onOpenImport} type="button"><Icon name="import" /><UiText text="Импорт" /></button>
         <button
           aria-expanded={commandMenu?.kind === "WORDSTAT"}
@@ -4113,17 +4333,79 @@ export function SemanticCoreTable({
                     <label key={engine}>
                       <input
                         checked={exportHistoryEngines.includes(engine)}
-                        disabled={exporting || exportJob?.status === "COMPLETED"}
+                        disabled={
+                          exporting ||
+                          exportJob?.status === "COMPLETED" ||
+                          !rankComparison.dimensions.some(
+                            (dimension) => dimension.searchEngine === engine
+                          )
+                        }
                         name="position-history-engine"
-                        onChange={() => setExportHistoryEngines([engine])}
-                        type="radio"
+                        onChange={(event) => setExportHistoryEngines((current) =>
+                          event.target.checked
+                            ? [...new Set([...current, engine])]
+                            : current.filter((item) => item !== engine)
+                        )}
+                        type="checkbox"
                       />
                       <SearchEngineLogo engine={engine} />
                       <span>{engine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</span>
                     </label>
                   ))}
                 </div>
-                <p className="semantic-history-export-compatibility"><UiText text="Один файл содержит одну поисковую систему и совместим с обратным импортом истории позиций." /></p>
+                <div className="semantic-history-export-dimensions">
+                  {exportHistoryEngines.map((engine) => {
+                    const engineDimensions = rankComparison.dimensions.filter(
+                      (dimension) => dimension.searchEngine === engine
+                    );
+                    const selectedKey = exportHistoryDimensionKeys.find((key) =>
+                      engineDimensions.some((dimension) => dimension.key === key)
+                    ) ?? "";
+                    return (
+                      <label key={engine}>
+                        <span>
+                          <UiText
+                            text="Город и устройство · {0}"
+                            values={[engine === "YANDEX" ? "Яндекс" : "Google"]}
+                          />
+                        </span>
+                        <CustomSelect
+                          disabled={exporting || exportJob?.status === "COMPLETED"}
+                          onChange={(event) =>
+                            setExportHistoryDimensionKeys((current) => [
+                              ...current.filter((key) =>
+                                !rankComparison.dimensions.some(
+                                  (dimension) =>
+                                    dimension.key === key &&
+                                    dimension.searchEngine === engine
+                                )
+                              ),
+                              event.target.value
+                            ])
+                          }
+                          searchable
+                          searchPlaceholder={uiText("Найти город или устройство")}
+                          value={selectedKey}
+                        >
+                          {engineDimensions.length === 0 && (
+                            <option value=""><UiText text="Нет сохранённых съёмов" /></option>
+                          )}
+                          {engineDimensions.map((dimension) => (
+                            <option key={dimension.key} value={dimension.key}>
+                              <span className="rankings-dimension-option">
+                                <SemanticRankContext {...dimension} />
+                                <span className="visually-hidden">
+                                  {rankDimensionLabel(dimension, uiLocale)}
+                                </span>
+                              </span>
+                            </option>
+                          ))}
+                        </CustomSelect>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="semantic-history-export-compatibility"><UiText text="Выбранные поисковые системы экспортируются в отдельные вкладки одного файла." /></p>
                 <div className="semantic-history-export-dates">
                   <label>
                     <span><UiText text="С даты" /></span>
@@ -4238,6 +4520,7 @@ export function SemanticCoreTable({
                     (exportContent !== "POSITION_HISTORY" && exportColumns.length === 0) ||
                     (exportContent === "POSITION_HISTORY" &&
                       (exportHistoryEngines.length === 0 ||
+                        exportHistoryDimensionKeys.length !== exportHistoryEngines.length ||
                         !validSemanticHistoryDateRange(exportHistoryFrom, exportHistoryTo))) ||
                     (exportContent === "FOLDER_MAP" && exportFolderMapGroupIds.size === 0) ||
                     (exportContent !== "FOLDER_MAP" && exportScope === "SELECTED" && checkedIds.size === 0)
@@ -4259,13 +4542,26 @@ export function SemanticCoreTable({
           description={uiText("Группа, кластер, посадочная страница и теги сохраняются вместе с проверкой версии.")}
           footer={
             <div className="semantic-keyword-editor-footer">
-              <span>
-                {editor.mode === "edit"
-                  ? <UiText text="Изменения применятся к одному запросу" />
-                  : manualDuplicateReview
-                    ? <UiText text="Новых: {0} · совпадений: {1}" values={[String(formatInteger(manualDuplicateReview.preview.newKeywords, uiLocale)), String(formatInteger(manualDuplicateRows.length, uiLocale))]} />
-                    : <UiText text="Уникальных запросов: {0}" values={[String(formatInteger(manualInputStats?.unique ?? 0, uiLocale))]} />}
-              </span>
+              {manualAddOperation?.phase === "CHECKING" ? (
+                <span className="semantic-manual-add-inline">
+                  <i className="spinner compact" />
+                  <UiText
+                    text="Проверено {0} из {1} запросов"
+                    values={[
+                      String(formatInteger(manualAddOperation.processed, uiLocale)),
+                      String(formatInteger(manualAddOperation.total, uiLocale))
+                    ]}
+                  />
+                </span>
+              ) : (
+                <span>
+                  {editor.mode === "edit"
+                    ? <UiText text="Изменения применятся к одному запросу" />
+                    : manualDuplicateReview
+                      ? <UiText text="Новых: {0} · совпадений: {1}" values={[String(formatInteger(manualDuplicateReview.preview.newKeywords, uiLocale)), String(formatInteger(manualDuplicateRows.length, uiLocale))]} />
+                      : <UiText text="Уникальных запросов: {0}" values={[String(formatInteger(manualInputStats?.unique ?? 0, uiLocale))]} />}
+                </span>
+              )}
               <div className="semantic-modal-actions">
                 <button
                   className="secondary-button"
@@ -4308,7 +4604,7 @@ export function SemanticCoreTable({
           <form
             className="semantic-editor"
             id={SEMANTIC_KEYWORD_EDITOR_FORM_ID}
-            onSubmit={(event) => void saveKeyword(event, uiLocale)}
+            onSubmit={(event) => void saveKeyword(event)}
           >
           <fieldset className="semantic-editor-fields" disabled={saving}>
           <div className="semantic-editor-grid">
@@ -4318,28 +4614,19 @@ export function SemanticCoreTable({
                 <>
                   <textarea
                     autoFocus
-                    maxLength={4_100_000}
                     onChange={(event) => updateDraft({ text: event.target.value })}
                     placeholder={uiText("купить слона доставка слона цена слона")}
                     required
                     rows={6}
                     value={editor.draft.text}
                   />
-                  <small
-                    className={
-                      manualInputStats &&
-                      manualInputStats.unique > MANUAL_KEYWORD_LIMIT
-                        ? "semantic-editor-query-limit"
-                        : undefined
-                    }
-                  >
+                  <small>
                     {manualInputStats?.total ?? 0} <UiText text="запросов" before=" " />{manualInputStats
                       ? <UiText text="· уникальных: {0}" values={[String(manualInputStats.unique)]} before=" " />
                       : ""}
                     {manualInputStats?.duplicates
                       ? <UiText text="· повторов в списке будет объединено: {0}" values={[String(manualInputStats.duplicates)]} before=" " />
                       : ""}
-                    {<UiText text="· лимит за один запуск: {0}" values={[String(formatInteger(MANUAL_KEYWORD_LIMIT, uiLocale))]} before=" " />}
                   </small>
                 </>
               ) : (
@@ -4700,13 +4987,78 @@ export function SemanticCoreTable({
 
       {siteResultsKeyword && (
         <SemanticSiteResultsModal
-          item={siteResultsKeyword}
+          item={siteResultsKeyword.item}
+          mode={siteResultsKeyword.mode}
           onClose={() => setSiteResultsKeyword(undefined)}
+          projectDomain={projectDomain}
+          projectId={projectId}
+        />
+      )}
+      {noteKeyword && (
+        <SemanticKeywordNoteModal
+          keywordId={noteKeyword.id}
+          keywordText={noteKeyword.textOriginal}
+          keywordVersion={noteKeyword.version}
+          onClose={() => setNoteKeyword(undefined)}
+          onUpdated={() => setRetryVersion((value) => value + 1)}
+          projectId={projectId}
         />
       )}
 
-      {(bulkNotice || exportNotice || (!editor && !exportDialog && mutationError)) && (
+      {(bulkNotice || exportNotice || (manualAddOperation && manualAddOperation.phase !== "CHECKING") || (!editor && !exportDialog && mutationError)) && (
         <div className="semantic-toast-stack" aria-live="polite">
+          {manualAddOperation && manualAddOperation.phase !== "CHECKING" && (
+            <div
+              className={`semantic-toast semantic-manual-add-toast ${manualAddOperation.phase === "FAILED" ? "danger" : manualAddOperation.phase === "COMPLETED" ? "success" : "progress"}`}
+              role={manualAddOperation.phase === "FAILED" ? "alert" : "status"}
+            >
+              {manualAddOperation.phase === "ADDING" ? (
+                <i className="spinner compact" />
+              ) : (
+                <span aria-hidden="true">{manualAddOperation.phase === "COMPLETED" ? "✓" : "!"}</span>
+              )}
+              <div>
+                <strong>
+                  <UiText text={manualAddOperation.phase === "ADDING" ? "Добавление запросов" : manualAddOperation.phase === "COMPLETED" ? "Запросы добавлены" : "Добавление завершено с ошибками"} />
+                </strong>
+                <small>
+                  <UiText
+                    text="Добавлено {0} · обработано {1} из {2}"
+                    values={[
+                      String(formatInteger(manualAddOperation.added, uiLocale)),
+                      String(formatInteger(manualAddOperation.processed, uiLocale)),
+                      String(formatInteger(manualAddOperation.total, uiLocale))
+                    ]}
+                  />
+                  {manualAddOperation.error ? ` · ${manualAddOperation.error}` : ""}
+                </small>
+                <progress
+                  max={Math.max(1, manualAddOperation.total)}
+                  value={manualAddOperation.processed}
+                />
+              </div>
+              {manualAddOperation.phase === "FAILED" && manualAddOperation.retryDraft && manualAddOperation.retryRows ? (
+                <button
+                  className="semantic-manual-add-retry"
+                  onClick={() => {
+                    setEditor({
+                      mode: "create",
+                      draft: {
+                        ...manualAddOperation.retryDraft!,
+                        text: manualAddOperation.retryRows!.join("\n")
+                      }
+                    });
+                    setManualAddOperation(undefined);
+                  }}
+                  type="button"
+                >
+                  <UiText text="Открыть ошибки" />
+                </button>
+              ) : manualAddOperation.phase !== "ADDING" ? (
+                <button aria-label={uiText("Закрыть уведомление")} onClick={() => setManualAddOperation(undefined)} type="button">×</button>
+              ) : null}
+            </div>
+          )}
           {bulkNotice && (
             <div className="semantic-toast success" role="status">
               <span aria-hidden="true">✓</span>
@@ -4836,8 +5188,9 @@ export function SemanticCoreTable({
                     column,
                     customColumns,
                     (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
-                    () => setSiteResultsKeyword(item),
-                    () => setAiAnswerKeyword(item),
+                    (mode) => setSiteResultsKeyword({ item, mode }),
+                    () => setNoteKeyword(item),
+                    () => setAiAnswerKeyword({ item }),
                     viewConfig.density,
                     semanticQueryIndicatorsFor(viewConfig), uiLocale
                   )
@@ -4900,14 +5253,34 @@ export function SemanticCoreTable({
         </>
       )}
       {rightSidebar?.type === "KEYWORD" && focusedKeyword && (
+        <div
+          aria-label={uiText("Изменить ширину панели запроса")}
+          aria-orientation="vertical"
+          aria-valuemax={semanticInspectorMaxWidth}
+          aria-valuemin={semanticInspectorMinWidth}
+          aria-valuenow={inspectorWidth}
+          className="semantic-keyword-inspector-resizer"
+          onDoubleClick={() => updateInspectorWidth(semanticInspectorDefaultWidth, true)}
+          onKeyDown={resizeInspectorFromKeyboard}
+          onPointerDown={startInspectorResize}
+          role="separator"
+          tabIndex={0}
+          title={uiText("Потяните для изменения ширины. Двойной клик — сбросить")}
+        />
+      )}
+      {rightSidebar?.type === "KEYWORD" && focusedKeyword && (
         <SemanticKeywordInspector
+          currentUserId={currentUserId}
           item={focusedKeyword}
           onClose={() => setRightSidebar(undefined)}
           onEdit={() => openEdit(focusedKeyword)}
           onFrequencyDeleted={() =>
             setRetryVersion((value) => value + 1)
           }
-          onOpenAiAnswer={() => setAiAnswerKeyword(focusedKeyword)}
+          onOpenAiAnswer={(dimensionKey) => setAiAnswerKeyword({
+            item: focusedKeyword,
+            ...(dimensionKey ? { dimensionKey } : {})
+          })}
           onUpdated={(updated) => {
             setItems((current) =>
               current.map((keyword) => {
@@ -4928,6 +5301,7 @@ export function SemanticCoreTable({
           }}
           projectDomain={projectDomain}
           projectId={projectId}
+          rankDimensionPreferenceScope={activeSavedView?.id ?? "default"}
         />
       )}
       {rightSidebar?.type === "HISTORY" && (
@@ -5174,6 +5548,25 @@ export function SemanticCoreTable({
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
       )}
+      {seasonalityDialogOpen && (
+        <SemanticFrequencyDialog
+          activeGroupId={viewConfig.filters.groupId}
+          groups={groups}
+          mode="SEASONALITY"
+          onClose={() => setSeasonalityDialogOpen(false)}
+          onStarted={(job) => {
+            setSeasonalityDialogOpen(false);
+            setWatchedFrequencyId(job.id);
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice("Сбор сезонности запущен в фоне. Динамика появится в карточке запроса после завершения.");
+            setRightSidebar({ type: "OPERATIONS" });
+          }}
+          projectId={projectId}
+          initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
+        />
+      )}
       {clusteringDialogOpen && (
         <SemanticClusteringDialog
           activeGroupId={viewConfig.filters.groupId}
@@ -5242,8 +5635,9 @@ export function SemanticCoreTable({
       )}
       {aiAnswerKeyword && (
         <SemanticAiAnswerDetailsModal
-          keywordId={aiAnswerKeyword.id}
-          keywordText={aiAnswerKeyword.textOriginal}
+          {...(aiAnswerKeyword.dimensionKey ? { dimensionKey: aiAnswerKeyword.dimensionKey } : {})}
+          keywordId={aiAnswerKeyword.item.id}
+          keywordText={aiAnswerKeyword.item.textOriginal}
           onClose={() => setAiAnswerKeyword(undefined)}
           projectId={projectId}
         />
@@ -5695,7 +6089,13 @@ function columnHeader(
   const rank = parseSemanticRankColumnKey(column);
   if (rank) {
     const dimension = rankDimensions.find(value => value.key === rank.dimension.key) ?? rank.dimension;
-    return <span className="semantic-rank-column-header" title={rankColumnLabel(column, rankDimensions, locale)}><SearchEngineLogo engine={dimension.searchEngine} size="compact" /><span>{dimension.regionLabel || dimension.regionCode}<small><UiText text={dimension.device === "DESKTOP" ? "ПК" : "Телефон"} /> · <UiText text={rank.metric === "position" ? "Позиция" : rank.metric === "url" ? "URL" : "Дата"} /></small></span></span>;
+    const aiMetric = rank.metric.startsWith("ai");
+    const metricLabel = rank.metric === "position" || rank.metric === "aiPosition"
+      ? aiMetric ? "ИИ-позиция" : "Позиция"
+      : rank.metric === "url" || rank.metric === "aiUrl"
+        ? aiMetric ? "URL в ИИ" : "URL"
+        : aiMetric ? "Дата ИИ" : "Дата";
+    return <span className="semantic-rank-column-header" title={rankColumnLabel(column, rankDimensions, locale)}>{aiMetric ? <Icon name="ai" /> : <SearchEngineLogo engine={dimension.searchEngine} size="compact" />}<span>{dimension.regionLabel || dimension.regionCode}<small><UiText text={dimension.device === "DESKTOP" ? "ПК" : "Телефон"} /> · <UiText text={metricLabel} /></small></span></span>;
   }
   if (column === "frequency") {
     return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> <UiText text="База" before=" " /></span>;
@@ -5747,28 +6147,183 @@ function columnHeader(
 
 function SemanticSiteResultsModal({
   item,
-  onClose
+  mode,
+  onClose,
+  projectDomain,
+  projectId
 }: Readonly<{
   item: SemanticKeyword;
+  mode: "MISMATCH" | "MULTIPLE";
   onClose: () => void;
+  projectDomain: string;
+  projectId: string;
 }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
-  const positions = (item.positions ?? []).filter(
-    ({ siteResults }) => (siteResults?.length ?? 0) > 1
+  const [showDifferences, setShowDifferences] = useState(false);
+  const comparison = useSemanticRankComparison(
+    projectId,
+    JSON.stringify([item.id]),
+    "ALL",
+    item.updatedAt,
+    projectId
   );
+  const rowsByDimension = useMemo(
+    () => new Map(
+      [...comparison.items.values()]
+        .filter(({ keywordId }) => keywordId === item.id)
+        .map((row) => [row.dimensionKey, row] as const)
+    ),
+    [comparison.items, item.id]
+  );
+  const availableDimensions = useMemo(() => comparison.dimensions.filter(({ key }) => {
+    const row = rowsByDimension.get(key);
+    if (!row) return false;
+    if (mode === "MISMATCH") {
+      return Boolean(
+        item.targetUrl &&
+        row.found &&
+        row.rankingUrl &&
+        !sameSemanticRankingUrl(item.targetUrl, row.rankingUrl)
+      );
+    }
+    return row.siteResultCount > 1;
+  }), [comparison.dimensions, item.targetUrl, mode, rowsByDimension]);
+  const [dimensionKey, setDimensionKey] = useState("");
+  const [dimensionInsights, setDimensionInsights] =
+    useState<SemanticKeywordInsights>();
+  const [loadedDimensionKey, setLoadedDimensionKey] = useState("");
+  const [loadingDimension, setLoadingDimension] = useState(false);
 
+  useEffect(() => {
+    if (dimensionKey && availableDimensions.some(({ key }) => key === dimensionKey)) return;
+    const preferred = availableDimensions.find((dimension) =>
+      item.positions?.some(({ dimension: itemDimension }) =>
+        itemDimension?.key === dimension.key
+      )
+    ) ?? availableDimensions[0];
+    setDimensionKey(preferred?.key ?? "");
+  }, [availableDimensions, dimensionKey, item.positions]);
+
+  useEffect(() => {
+    if (!dimensionKey) {
+      setDimensionInsights(undefined);
+      setLoadedDimensionKey("");
+      return;
+    }
+    const controller = new AbortController();
+    setDimensionInsights(undefined);
+    setLoadedDimensionKey("");
+    setLoadingDimension(true);
+    void browserApiRequest<SemanticKeywordInsights>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights?dimensionKey=${encodeURIComponent(dimensionKey)}`,
+      { signal: controller.signal }
+    ).then((insights) => {
+      if (!controller.signal.aborted) {
+        setDimensionInsights(insights);
+        setLoadedDimensionKey(dimensionKey);
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setDimensionInsights(undefined);
+        setLoadedDimensionKey(dimensionKey);
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoadingDimension(false);
+    });
+    return () => controller.abort();
+  }, [dimensionKey, item.id, projectId]);
+
+  const selectedDimension = availableDimensions.find(
+    ({ key }) => key === dimensionKey
+  );
+  const selectedRow = dimensionKey ? rowsByDimension.get(dimensionKey) : undefined;
+  const selectedSnapshot = dimensionInsights?.competitorSnapshots
+    ?.filter((snapshot) => snapshot.dimensionKey === dimensionKey)
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))[0];
+  const selectedSiteResults = selectedSnapshot?.results
+    .filter(({ url }) => semanticUrlBelongsToProject(url, projectDomain))
+    .map((result) => ({
+      position: result.position,
+      rankingUrl: result.url,
+      ...(result.faviconUrl ? { faviconUrl: result.faviconUrl } : {}),
+      ...(result.title ? { title: result.title } : {}),
+      ...(result.snippet ? { snippet: result.snippet } : {})
+    })) ?? [];
+  const contextualPosition = selectedDimension && selectedRow && loadedDimensionKey === dimensionKey ? {
+    searchEngine: selectedDimension.searchEngine,
+    dimension: selectedDimension,
+    found: selectedRow.found,
+    ...(selectedRow.position === undefined ? {} : { position: selectedRow.position }),
+    ...(selectedRow.previousPosition === undefined
+      ? {}
+      : { previousPosition: selectedRow.previousPosition }),
+    ...(selectedRow.rankingUrl ? { rankingUrl: selectedRow.rankingUrl } : {}),
+    ...(selectedSiteResults.length > 0 ? { siteResults: selectedSiteResults } : {}),
+    observedAt: selectedSnapshot?.observedAt ?? selectedRow.observedAt
+  } : undefined;
+  const positions = (contextualPosition ? [contextualPosition] : []).filter(
+    ({ found, rankingUrl, siteResults }) => mode === "MULTIPLE"
+      ? (siteResults?.length ?? 0) > 1
+      : Boolean(
+          item.targetUrl &&
+          found &&
+          rankingUrl &&
+          !sameSemanticRankingUrl(item.targetUrl, rankingUrl)
+        )
+  );
   return (
     <SemanticModal
-      description={uiText("Страницы проекта, одновременно найденные в последней сохранённой выдаче, с доступными title, description и URL.")}
+      bodyLayout="edge"
+      bodyClassName="semantic-data-modal-body"
+      description={uiText(mode === "MISMATCH"
+        ? "Страницы домена из сохранённой выдачи выбранного среза с подсветкой отличий от целевого URL."
+        : "Целевой URL и все страницы проекта из последних сохранённых снимков выдачи.")}
       onClose={onClose}
       size="large"
-      title={uiText("Страницы сайта в выдаче · {0}", [String(item.textOriginal)])}
+      title={uiText(mode === "MISMATCH" ? "Нерелевантный URL · {0}" : "Целевой и найденные URL · {0}", [String(item.textOriginal)])}
     >
       <div className="semantic-site-results-modal">
+        {comparison.dimensions.length > 0 && (
+          <div className="semantic-url-context-selector">
+            <span><UiText text="Поисковая система, город и устройство" /></span>
+            <CustomSelect
+              disabled={availableDimensions.length === 0}
+              onChange={(event) => setDimensionKey(event.target.value)}
+              searchable
+              searchPlaceholder={uiText("Найти город или устройство")}
+              value={dimensionKey}
+            >
+              <option disabled value="">
+                <UiText text={comparison.loading ? "Загружаем срезы…" : "Выберите город и устройство"} />
+              </option>
+              {availableDimensions.map((dimension) => {
+                const row = rowsByDimension.get(dimension.key)!;
+                return (
+                  <option key={dimension.key} value={dimension.key}>
+                    <span className="semantic-url-context-option">
+                      <SemanticRankContext {...dimension} />
+                      <small>
+                        {row.position ?? "×"} · {formatSemanticDateTime(row.observedAt, uiLocale)}
+                      </small>
+                    </span>
+                  </option>
+                );
+              })}
+            </CustomSelect>
+            {loadingDimension && <span className="semantic-url-context-loading"><i className="spinner compact" /><UiText text="Загружаем URL выбранного среза…" /></span>}
+          </div>
+        )}
+        <div className="semantic-url-comparison-toolbar">
+          <div><span><UiText text="Целевой URL" /></span><strong>{item.targetUrl ?? <UiText text="Не задан" />}</strong></div>
+          <label><input checked={showDifferences} disabled={!item.targetUrl} onChange={(event) => setShowDifferences(event.target.checked)} type="checkbox" /><UiText text="Показать различия" /></label>
+        </div>
         {positions.length === 0 && (
-          <div className="semantic-site-results-empty">
-            <UiText text="Актуальная выдача изменилась. Повторно откройте список из строки запроса." /></div>
+          <div className="semantic-site-results-empty" role={loadingDimension ? "status" : undefined}>
+            {loadingDimension
+              ? <><i className="spinner compact" /><UiText text="Загружаем URL выбранного среза…" /></>
+              : <UiText text="Актуальная выдача изменилась. Повторно откройте список из строки запроса." />}
+          </div>
         )}
         {positions.map((position) => (
           <section key={`${position.searchEngine}:${position.dimension?.key ?? "legacy"}:${position.observedAt}`}>
@@ -5798,7 +6353,12 @@ function SemanticSiteResultsModal({
               </time>
             </header>
             <SemanticProjectSerpResults
-              results={position.siteResults ?? []}
+              results={position.siteResults?.length
+                ? position.siteResults
+                : position.found && position.rankingUrl && position.position
+                  ? [{ position: position.position, rankingUrl: position.rankingUrl }]
+                  : []}
+              showUrlDifferences={showDifferences}
               {...(item.targetUrl ? { targetUrl: item.targetUrl } : {})}
             />
           </section>
@@ -5811,25 +6371,18 @@ function SemanticSiteResultsModal({
 function keywordHasTargetUrlMismatch(item: SemanticKeyword): boolean {
   return Boolean(
     item.targetUrl &&
-    (
-      item.positions?.some(
-        ({ found, rankingUrl }) =>
-          found &&
-          rankingUrl !== undefined &&
-          !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
-      ) ||
-      item.aiAnswers?.some(
-        ({ siteFound, rankingUrl }) =>
-          siteFound &&
-          rankingUrl !== undefined &&
-          !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
-      )
+    item.positions?.some(
+      ({ found, rankingUrl }) =>
+        found &&
+        rankingUrl !== undefined &&
+        !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
     )
   );
 }
 
 function keywordHasMultipleSiteResults(item: SemanticKeyword): boolean {
   return Boolean(
+    item.hasMultipleRankingUrls ||
     item.positions?.some(({ siteResults }) => (siteResults?.length ?? 0) > 1)
   );
 }
@@ -5839,7 +6392,8 @@ function keywordColumn(
   column: SemanticViewColumn,
   customColumns: readonly SemanticCustomColumn[],
   onEditCustom: (column: SemanticCustomColumn) => void,
-  onOpenSiteResults: () => void,
+  onOpenSiteResults: (mode: "MISMATCH" | "MULTIPLE") => void,
+  onOpenNote: () => void,
   onOpenAiAnswer: () => void,
   density: SemanticViewConfig["density"],
   queryIndicators: readonly SemanticQueryIndicator[], uiLocale: string = "ru-RU"
@@ -5885,31 +6439,31 @@ function keywordColumn(
             </span>
             <span className="semantic-query-actions">
               {item.hasNote && (
-                <UiElement tag="span" uiLabels={{"aria-label": "Есть заметка", "title": "У запроса есть заметка"}}  className="semantic-keyword-note-indicator" >
+                <UiElement tag="button" uiLabels={{"aria-label": "Открыть заметку", "title": "Открыть и изменить заметку"}} className="semantic-keyword-note-indicator" onClick={(event) => { event.stopPropagation(); onOpenNote(); }} type="button">
                   <Icon name="note" />
                 </UiElement>
               )}
               {queryIndicators.includes("TARGET_URL_MISMATCH") &&
                 keywordHasTargetUrlMismatch(item) && (
-                <UiElement tag="span" uiLabels={{"aria-label": "Найденный URL не совпадает с целевым", "title": "Найденный при съёме URL не совпадает с целевым URL запроса"}}
-
+                <UiElement tag="button" uiLabels={{"aria-label": "Открыть нерелевантный URL", "title": "Открыть нерелевантный URL и сравнить с целевым"}}
                   className="semantic-keyword-rank-indicator mismatch"
-                  role="img"
-
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenSiteResults("MISMATCH");
+                  }}
+                  type="button"
                 >
                   <Icon name="link" />
                 </UiElement>
               )}
               {queryIndicators.includes("MULTIPLE_URLS") &&
                 keywordHasMultipleSiteResults(item) && (
-                <UiElement tag="button" uiLabels={{"aria-label": "Показать страницы сайта в выдаче", "title": "В выдаче найдено несколько страниц вашего сайта"}}
-
+                <UiElement tag="button" uiLabels={{"aria-label": "Показать несколько страниц сайта в выдаче", "title": "В одном из срезов найдено несколько страниц сайта"}}
                   className="semantic-keyword-rank-indicator multiple"
                   onClick={(event) => {
                     event.stopPropagation();
-                    onOpenSiteResults();
+                    onOpenSiteResults("MULTIPLE");
                   }}
-
                   type="button"
                 >
                   <Icon name="multiGroup" />
@@ -6457,9 +7011,14 @@ function validSemanticHistoryDateRange(from: string, to: string): boolean {
 function semanticHistoryExportOptions(
   from: string,
   to: string,
-  searchEngines: readonly SemanticPositionHistorySearchEngine[]
+  searchEngines: readonly SemanticPositionHistorySearchEngine[],
+  dimensionKeys: readonly string[]
 ) {
-  if (!validSemanticHistoryDateRange(from, to) || searchEngines.length === 0) {
+  if (
+    !validSemanticHistoryDateRange(from, to) ||
+    searchEngines.length === 0 ||
+    dimensionKeys.length !== searchEngines.length
+  ) {
     throw new Error("INVALID_POSITION_HISTORY_EXPORT_RANGE");
   }
   const fromTime = semanticHistoryDateTimestamp(from)!;
@@ -6467,7 +7026,8 @@ function semanticHistoryExportOptions(
   return {
     observedFrom: new Date(fromTime).toISOString(),
     observedBefore: new Date(toTime + 24 * 60 * 60 * 1_000).toISOString(),
-    searchEngines
+    searchEngines,
+    dimensionKeys
   };
 }
 

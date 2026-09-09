@@ -26,6 +26,7 @@ export * from "./api/admin-overview.js";
 export * from "./api/rank-execution-grants.js";
 export * from "./api/rank-history.js";
 export * from "./api/rank-runs.js";
+export * from "./api/rank-workbench.js";
 export * from "./api/realtime.js";
 export * from "./api/semantic-imports.js";
 export * from "./api/semantic-exports.js";

@@ -825,8 +825,11 @@ function estimateBlockers(
       blockers.add("UNSUPPORTED_SEARCH_ENGINE");
     }
     if (
-      ![30, 50, 100].includes(scope.configuration.depth) ||
+      ![10, 20, 30, 50, 100].includes(scope.configuration.depth) ||
+      (input.purpose !== "COMPETITOR_SERP" &&
+        ![30, 50, 100].includes(scope.configuration.depth)) ||
       (provider === "ARSENKIN" &&
+        input.purpose !== "COMPETITOR_SERP" &&
         scope.configuration.searchEngine === "YANDEX" &&
         scope.configuration.depth !== 30)
     ) {
