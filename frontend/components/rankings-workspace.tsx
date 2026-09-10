@@ -99,8 +99,7 @@ export function RankingsWorkspace({
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
-  const [showDistribution, setShowDistribution] = useState(false);
+  const [showStatistics, setShowStatistics] = useState(false);
   const [queryColumnWidth, setQueryColumnWidth] = useState(rankingsQueryColumnDefaultWidth);
   const [hiddenDates, setHiddenDates] = useState<ReadonlySet<string>>(new Set());
   const [preferencesReady, setPreferencesReady] = useState(false);
@@ -372,29 +371,32 @@ export function RankingsWorkspace({
   return (
     <main className="rankings-workspace" ref={workspaceRef}>
       <section className="rankings-filter-bar" aria-label={t("Параметры отчёта")}>
-        <div className="rankings-mode-switch" role="tablist">
-          <button
-            aria-selected={effectiveMode === "SEO"}
-            className={effectiveMode === "SEO" ? "active" : undefined}
-            onClick={() => setMode("SEO")}
-            role="tab"
-            type="button"
-          >
-            <UiText text="SEO выдача" />
-          </button>
-          {aiDimensions.length > 0 && (
+        <div className="rankings-filter-primary">
+        <div className="rankings-filter-mode">
+          <span><UiText text="Тип выдачи" /></span>
+          <div className="rankings-mode-switch" role="tablist">
             <button
-              aria-selected={effectiveMode === "AI"}
-              className={effectiveMode === "AI" ? "active" : undefined}
-              onClick={() => setMode("AI")}
+              aria-selected={effectiveMode === "SEO"}
+              className={effectiveMode === "SEO" ? "active" : undefined}
+              onClick={() => setMode("SEO")}
               role="tab"
               type="button"
             >
-              <UiText text="ИИ выдача" />
+              <UiText text="SEO выдача" />
             </button>
-          )}
+            {aiDimensions.length > 0 && (
+              <button
+                aria-selected={effectiveMode === "AI"}
+                className={effectiveMode === "AI" ? "active" : undefined}
+                onClick={() => setMode("AI")}
+                role="tab"
+                type="button"
+              >
+                <UiText text="ИИ выдача" />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="rankings-filter-primary">
         <label className="rankings-filter-dimension">
           <span><UiText text="Город, поисковик и устройство" /></span>
           <CustomSelect
@@ -510,28 +512,19 @@ export function RankingsWorkspace({
           <RankingSummary report={report} locale={locale} />
           <div className="rankings-summary-disclosures">
             <button
-              aria-expanded={showAnalytics}
-              className="rankings-distribution-toggle"
-              onClick={() => setShowAnalytics((value) => !value)}
+              aria-expanded={showStatistics}
+              className="rankings-statistics-toggle"
+              onClick={() => setShowStatistics((value) => !value)}
               type="button"
             >
               <Icon name="trend" />
-              <UiText text={showAnalytics ? "Скрыть динамику" : "График и динамика"} />
-            </button>
-            <button
-              aria-expanded={showDistribution}
-              className="rankings-distribution-toggle"
-              onClick={() => setShowDistribution((value) => !value)}
-              type="button"
-            >
-              <Icon name="frequency" />
-              <UiText text={showDistribution ? "Скрыть распределение" : "Распределение по ТОПам"} />
+              <UiText text="Статистика" />
             </button>
           </div>
         </div>
       )}
-      {report && report.trend.length > 0 && (showAnalytics || showDistribution) && (
-        <RankingCharts report={report} showAnalytics={showAnalytics} showDistribution={showDistribution} />
+      {report && showStatistics && (
+        <RankingCharts report={report} />
       )}
 
       <section className="rankings-table-panel">
@@ -768,17 +761,17 @@ function RankingSummary({ report, locale }: { report: RankPositionReport; locale
   return <section className="rankings-summary">{values.map(([label, value, tone]) => <div className={`tone-${tone}`} key={label}><span><UiText text={label} /></span><strong>{typeof value === "number" ? value.toLocaleString(locale) : value}</strong></div>)}</section>;
 }
 
-function RankingCharts({ report, showAnalytics, showDistribution }: { report: RankPositionReport; showAnalytics: boolean; showDistribution: boolean }) {
+function RankingCharts({ report }: { report: RankPositionReport }) {
   const maximumPosition = Math.max(1, ...report.trend.map(({ averagePosition }) => averagePosition ?? 0));
   const points = report.trend.flatMap((point, index) => point.averagePosition === undefined ? [] : [{
     x: report.trend.length === 1 ? 50 : index / (report.trend.length - 1) * 100,
     y: 4 + (point.averagePosition - 1) / Math.max(1, maximumPosition - 1) * 32,
     value: point.averagePosition
   }]);
-  return <section className={`rankings-charts${showDistribution ? "" : " without-distribution"}${showAnalytics ? "" : " distribution-only"}`}>
-    {showAnalytics && <article><header><div><span><UiText text="Средняя позиция" /></span><strong>{report.summary.averagePosition?.toLocaleString() ?? "—"}</strong></div><Icon name="trend" /></header>{points.length > 0 ? <svg aria-label="График средней позиции" role="img" viewBox="0 0 100 40"><path d={points.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ")} /></svg> : <div className="rankings-chart-empty"><UiText text="В последнем срезе нет найденных позиций" /></div>}</article>}
-    {showDistribution && <article className="rankings-distribution"><header><span><UiText text="Распределение по ТОПам" /></span><strong>{report.summary.measuredCount}</strong></header>{[["Топ-3", report.summary.top3Count], ["Топ-10", report.summary.top10Count], ["Топ-30", report.summary.top30Count]].map(([label, value]) => <div key={String(label)}><span>{label}</span><div><i style={{ width: `${Math.min(100, Number(value) / Math.max(1, report.summary.measuredCount) * 100)}%` }} /></div><strong>{value}</strong></div>)}</article>}
-    {showAnalytics && <article className="rankings-movement"><header><span><UiText text="Изменения" /></span><Icon name="positions" /></header><div><span className="up"><Icon name="arrowUp" />{report.summary.improvedCount}<small><UiText text="рост" /></small></span><span className="down"><Icon name="arrowDown" />{report.summary.declinedCount}<small><UiText text="падение" /></small></span><span>{report.summary.unchangedCount}<small><UiText text="без изменений" /></small></span></div></article>}
+  return <section className="rankings-charts">
+    <article><header><div><span><UiText text="Средняя позиция" /></span><strong>{report.summary.averagePosition?.toLocaleString() ?? "—"}</strong></div><Icon name="trend" /></header>{points.length > 0 ? <svg aria-label="График средней позиции" role="img" viewBox="0 0 100 40"><path d={points.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ")} /></svg> : <div className="rankings-chart-empty"><UiText text="В последнем срезе нет найденных позиций" /></div>}</article>
+    <article className="rankings-distribution"><header><span><UiText text="Распределение по ТОПам" /></span><strong>{report.summary.measuredCount}</strong></header>{[["Топ-3", report.summary.top3Count], ["Топ-10", report.summary.top10Count], ["Топ-30", report.summary.top30Count]].map(([label, value]) => <div key={String(label)}><span>{label}</span><div><i style={{ width: `${Math.min(100, Number(value) / Math.max(1, report.summary.measuredCount) * 100)}%` }} /></div><strong>{value}</strong></div>)}</article>
+    <article className="rankings-movement"><header><span><UiText text="Изменения" /></span><Icon name="positions" /></header><div><span className="up"><Icon name="arrowUp" />{report.summary.improvedCount}<small><UiText text="рост" /></small></span><span className="down"><Icon name="arrowDown" />{report.summary.declinedCount}<small><UiText text="падение" /></small></span><span>{report.summary.unchangedCount}<small><UiText text="без изменений" /></small></span></div></article>
   </section>;
 }
 
