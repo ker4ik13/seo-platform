@@ -30,7 +30,7 @@ export function assertApiTokenAccess(
   }
 
   const route = request.routeOptions.url ?? "";
-  const scope = apiTokenScopeForRoute(request.method, route);
+  const scope = apiTokenScopeForRoute(request.method, route, request.body);
   if (!scope || !authorization.scopes.includes(scope)) {
     forbidden("API token does not have the required scope");
   }
@@ -45,12 +45,19 @@ export function assertApiTokenAccess(
 
 export function apiTokenScopeForRoute(
   method: string,
-  route: string
+  route: string,
+  body?: unknown
 ): ApiTokenScope | undefined {
   const normalized = route.startsWith("/") ? route : `/${route}`;
   if (!normalized.startsWith("/api/v1/")) return undefined;
   if (normalized.includes("/api-tokens")) return undefined;
   const read = ["GET", "HEAD"].includes(method.toUpperCase());
+
+  if (normalized.includes("/operation-estimates")) {
+    return method.toUpperCase() === "POST"
+      ? operationEstimateScope(body)
+      : undefined;
+  }
 
   if (
     normalized.includes("/automations") ||
@@ -65,6 +72,20 @@ export function apiTokenScopeForRoute(
     normalized.includes("/rank-history") ||
     /\/projects\/:projectId\/jobs(?:\/|$)/u.test(normalized)
   ) {
+    return read ? "positions:read" : "positions:run";
+  }
+  if (normalized.includes("/keyword-ranks")) {
+    return ["GET", "HEAD", "POST"].includes(method.toUpperCase())
+      ? "positions:read"
+      : undefined;
+  }
+  if (normalized.includes("/rank-workbench")) {
+    if (
+      method.toUpperCase() === "POST" &&
+      /\/rank-workbench\/(?:positions|serp)$/u.test(normalized)
+    ) {
+      return "positions:read";
+    }
     return read ? "positions:read" : "positions:run";
   }
   if (normalized.includes("/frequency-collections")) {
@@ -96,6 +117,18 @@ export function apiTokenScopeForRoute(
     return read ? "integrations:read" : "integrations:write";
   }
   if (
+    method.toUpperCase() === "POST" &&
+    (
+      normalized.endsWith("/keywords/search") ||
+      normalized.endsWith("/keywords/list") ||
+      normalized.endsWith("/semantic-duplicates/preview") ||
+      normalized.endsWith("/negative-keywords/preview") ||
+      normalized.endsWith("/semantic-group-color-legend/seen")
+    )
+  ) {
+    return "semantics:read";
+  }
+  if (
     normalized.includes("/keywords") ||
     normalized.includes("/keyword-groups") ||
     normalized.includes("/clusters") ||
@@ -123,6 +156,24 @@ export function apiTokenScopeForRoute(
     return read ? "projects:read" : "projects:write";
   }
   return undefined;
+}
+
+function operationEstimateScope(body: unknown): ApiTokenScope | undefined {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+  switch ((body as Readonly<Record<string, unknown>>).kind) {
+    case "FREQUENCY_COLLECTION":
+      return "frequency:run";
+    case "AI_ANSWER_COLLECTION":
+      return "ai:run";
+    case "CLUSTERING_RUN":
+      return "semantics:write";
+    case "KEYWORD_RESEARCH":
+      return "research:run";
+    default:
+      return undefined;
+  }
 }
 
 function restrictedWorkspaceRouteAllowed(

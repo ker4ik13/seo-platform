@@ -731,28 +731,57 @@
   font-weight: 650;
 }
 
+.referenceGroups > section > header h2,
+.referenceGroups > section > header p {
+  margin: 0;
+}
+
+.referenceGroups > section > header p {
+  color: #747b86;
+  font-size: 11px;
+  margin-top: 3px;
+}
+
 .endpointReferenceList {
   border: 1px solid var(--docs-border);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.endpointReferenceList > div {
-  align-items: center;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: auto minmax(240px, 1.3fr) minmax(180px, 1fr) minmax(120px, .55fr);
-  min-height: 52px;
-  padding: 9px 13px;
+.endpointReference {
   scroll-margin-top: 84px;
 }
 
-.endpointReferenceList > div + div {
+.endpointReference + .endpointReference {
   border-top: 1px solid var(--docs-border);
 }
 
-.endpointReferenceList > div:target {
+.endpointReference:target {
   background: #f1efff;
+}
+
+.endpointReference > summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(240px, 1.3fr) minmax(180px, 1fr) minmax(120px, .55fr);
+  list-style: none;
+  min-height: 52px;
+  padding: 9px 13px;
+}
+
+.endpointReference > summary::-webkit-details-marker {
+  display: none;
+}
+
+.endpointReference > summary:hover {
+  background: #fafafa;
+}
+
+.endpointReference[open] > summary {
+  background: #f7f6ff;
+  border-bottom: 1px solid var(--docs-border);
 }
 
 .endpointReferenceList code {
@@ -772,6 +801,43 @@
   color: #6d7480;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 9px;
+}
+
+.endpointFormats {
+  background: #fcfcfd;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.endpointFormats section {
+  min-width: 0;
+}
+
+.endpointFormats h3 {
+  color: #626975;
+  font-size: 10px;
+  letter-spacing: .04em;
+  margin: 0 0 7px;
+  text-transform: uppercase;
+}
+
+.endpointFormats pre {
+  background: #20232a;
+  border-radius: 7px;
+  color: #e8eaf0;
+  margin: 0;
+  min-height: 74px;
+  overflow: auto;
+  padding: 11px 12px;
+  white-space: pre-wrap;
+}
+
+.endpointFormats pre code {
+  color: inherit;
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .pageNavigation {
@@ -820,11 +886,11 @@
     padding-right: 30px;
   }
 
-  .endpointReferenceList > div {
+  .endpointReference > summary {
     grid-template-columns: auto minmax(190px, 1fr) minmax(150px, .85fr);
   }
 
-  .endpointReferenceList > div small {
+  .endpointReference > summary small {
     grid-column: 2 / -1;
   }
 }
@@ -959,14 +1025,18 @@
     border-top: 0;
   }
 
-  .endpointReferenceList > div {
+  .endpointReference > summary {
     align-items: start;
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .endpointReferenceList > div span,
-  .endpointReferenceList > div small {
+  .endpointReference > summary span,
+  .endpointReference > summary small {
     grid-column: 2;
+  }
+
+  .endpointFormats {
+    grid-template-columns: 1fr;
   }
 
   .pageNavigation {

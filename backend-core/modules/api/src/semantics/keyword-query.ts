@@ -2,6 +2,7 @@ import {
   semanticKeywordDefaultPageSize,
   semanticKeywordIntents,
   semanticKeywordMaxPageSize,
+  semanticKeywordNotesMaxPageSize,
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
@@ -16,7 +17,7 @@ import { validationError } from "../common/domain-error.js";
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 const BODY_QUERY_FIELDS = [
-  "limit", "cursor", "search", "tag", "intent", "groupId", "groupIds",
+  "limit", "cursor", "includeNotes", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort",
   "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
   "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
@@ -132,6 +133,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
       : {};
   const limit = optionalSingleString(query.limit, "limit");
   const cursor = optionalSingleString(query.cursor, "cursor");
+  const includeNotes = optionalBoolean(query.includeNotes, "includeNotes");
   const search = optionalSingleString(query.search, "search")?.normalize(
     "NFKC"
   );
@@ -199,6 +201,12 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
       `Must be an integer between 1 and ${semanticKeywordMaxPageSize}`
     );
   }
+  if (includeNotes && parsedLimit > semanticKeywordNotesMaxPageSize) {
+    invalid(
+      "limit",
+      `Must not exceed ${semanticKeywordNotesMaxPageSize} when includeNotes=true`
+    );
+  }
   if (groupId && groupIds.length > 0) {
     invalid("groupIds", "Must not be combined with groupId");
   }
@@ -249,6 +257,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   return {
     limit: parsedLimit,
     ...(cursor ? { cursor } : {}),
+    ...(includeNotes === undefined ? {} : { includeNotes }),
     ...(search ? { search } : {}),
     ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),

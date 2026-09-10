@@ -3,6 +3,7 @@ import {
   semanticKeywordDefaultPageSize,
   semanticKeywordIntents,
   semanticKeywordMaxPageSize,
+  semanticKeywordNotesMaxPageSize,
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
@@ -15,7 +16,7 @@ import {
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 const BODY_QUERY_FIELDS = [
-  "limit", "cursor", "search", "tag", "intent", "groupId", "groupIds",
+  "limit", "cursor", "includeNotes", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
   , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
   "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
@@ -100,6 +101,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
       : {};
   const limit = optionalSingleString(query.limit, "limit");
   const cursor = optionalSingleString(query.cursor, "cursor");
+  const includeNotes = optionalBoolean(query.includeNotes, "includeNotes");
   const search = optionalSingleString(query.search, "search")?.normalize(
     "NFKC"
   );
@@ -157,6 +159,9 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   ) {
     invalid("limit");
   }
+  if (includeNotes && parsedLimit > semanticKeywordNotesMaxPageSize) {
+    invalid("limit");
+  }
   if (cursor && !CURSOR_PATTERN.test(cursor)) invalid("cursor");
   if (search && search.length > 200) invalid("search");
   if (tag && tag.length > 160) invalid("tag");
@@ -195,6 +200,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   return {
     limit: parsedLimit,
     ...(cursor ? { cursor } : {}),
+    ...(includeNotes === undefined ? {} : { includeNotes }),
     ...(search ? { search } : {}),
     ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),

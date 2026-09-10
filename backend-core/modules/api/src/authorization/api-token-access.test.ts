@@ -50,8 +50,17 @@ test("maps every documented tenant API family to its least-privilege scope", () 
     ["GET", "/api/v1/workspaces/:workspaceId/project-capabilities", "projects:read"],
     ["PATCH", "/api/v1/projects/:projectId", "projects:write"],
     ["GET", "/api/v1/projects/:projectId/keywords", "semantics:read"],
+    ["POST", "/api/v1/projects/:projectId/keywords/list", "semantics:read"],
+    ["POST", "/api/v1/projects/:projectId/semantic-duplicates/preview", "semantics:read"],
+    ["POST", "/api/v1/projects/:projectId/negative-keywords/preview", "semantics:read"],
+    ["POST", "/api/v1/projects/:projectId/semantic-group-color-legend/seen", "semantics:read"],
     ["POST", "/api/v1/projects/:projectId/imports", "semantics:write"],
     ["GET", "/api/v1/projects/:projectId/rank-history", "positions:read"],
+    ["POST", "/api/v1/projects/:projectId/rank-workbench/positions", "positions:read"],
+    ["POST", "/api/v1/projects/:projectId/rank-workbench/serp", "positions:read"],
+    ["POST", "/api/v1/projects/:projectId/rank-workbench/dimension-merges", "positions:run"],
+    ["GET", "/api/v1/projects/:projectId/keyword-ranks/dimensions", "positions:read"],
+    ["POST", "/api/v1/projects/:projectId/keyword-ranks/comparison", "positions:read"],
     ["POST", "/api/v1/projects/:projectId/rank-estimates", "positions:run"],
     ["GET", "/api/v1/projects/:projectId/ai-answer-collections", "ai:read"],
     ["POST", "/api/v1/projects/:projectId/ai-answer-collections", "ai:run"],
@@ -64,6 +73,50 @@ test("maps every documented tenant API family to its least-privilege scope", () 
   ] as const;
   for (const [method, route, scope] of cases) {
     assert.equal(apiTokenScopeForRoute(method, route), scope);
+  }
+});
+
+test("maps a shared operation-estimate route from its validated operation kind", () => {
+  const cases = [
+    ["FREQUENCY_COLLECTION", "frequency:run"],
+    ["AI_ANSWER_COLLECTION", "ai:run"],
+    ["CLUSTERING_RUN", "semantics:write"],
+    ["KEYWORD_RESEARCH", "research:run"]
+  ] as const;
+  for (const [kind, scope] of cases) {
+    assert.equal(
+      apiTokenScopeForRoute(
+        "POST",
+        "/api/v1/projects/:projectId/operation-estimates",
+        { kind, command: {} }
+      ),
+      scope
+    );
+  }
+  assert.equal(
+    apiTokenScopeForRoute(
+      "POST",
+      "/api/v1/projects/:projectId/operation-estimates",
+      { kind: "UNKNOWN", command: {} }
+    ),
+    undefined
+  );
+});
+
+test("authorizes notes and group colors through their dedicated API-token scopes", () => {
+  const projectToken: ApiTokenAuthorization = {
+    ...token(),
+    scopes: ["notes:read", "notes:write", "semantics:read", "semantics:write"]
+  };
+  for (const [method, route] of [
+    ["GET", "/api/v1/projects/:projectId/notes"],
+    ["PATCH", "/api/v1/projects/:projectId/notes/:noteId"],
+    ["GET", "/api/v1/projects/:projectId/semantic-group-color-legend"],
+    ["PATCH", "/api/v1/projects/:projectId/semantic-group-color-legend"]
+  ] as const) {
+    assert.doesNotThrow(() =>
+      assertApiTokenAccess(request(method, route), projectToken, { projectId })
+    );
   }
 });
 
@@ -142,9 +195,10 @@ function token(): ApiTokenAuthorization {
   };
 }
 
-function request(method: string, route: string): FastifyRequest {
+function request(method: string, route: string, body?: unknown): FastifyRequest {
   return {
     method,
-    routeOptions: { url: route }
+    routeOptions: { url: route },
+    ...(body === undefined ? {} : { body })
   } as FastifyRequest;
 }

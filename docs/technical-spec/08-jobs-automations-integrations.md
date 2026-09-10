@@ -692,7 +692,13 @@ Validation flow:
    учитывает bounded `Retry-After`, а periodic dispatcher восстанавливает
    пропущенные queue messages и просроченные leases. Его lease/retry indexes
    начинаются с `job.type`, чтобы typed dispatcher не сканировал jobs других
-   типов.
+   типов. Для уже успешно проверенного Arsenkin credential такой временный
+   результат фоновой revalidation не снимает `ACTIVE`: Job и `last_error_*`
+   сохраняют наблюдаемую ошибку и backoff, а новые операции продолжают
+   использовать обычный provider capacity limiter. Ранее записанный
+   `RATE_LIMITED` и `DEGRADED + PROVIDER_UNAVAILABLE` этого credential
+   восстанавливается в `ACTIVE`. Ошибка авторизации и постоянный
+   `PROVIDER_PLAN_OR_REQUEST_REJECTED` остаются блокирующими.
 
 Публичные validation states: `QUEUED`, `RUNNING`, `RETRY_SCHEDULED`,
 `SUCCEEDED`, `FAILED_RETRYABLE`, `FAILED_FINAL`, `STALE`. Terminal states —
@@ -800,7 +806,9 @@ provider `Retry-After` — 3 600 секундами.
 Каждый credential `info` request проходит через общий для всех Arsenkin
 connector workflows и replicas Redis sliding-window limiter на 30 HTTP
 requests за 60 секунд; при недоступности limiter запрос блокируется
-fail-closed. DB-enforced single-active cap на credential/material остаётся
+fail-closed. Отказ локального limiter у фоновой проверки ключа означает
+повтор самой проверки и не превращает уже подтверждённый рабочий route в
+`CONNECTOR_NOT_READY`. DB-enforced single-active cap на credential/material остаётся
 отдельным ограничением. Перед multi-tenant beta обязательны единый
 cross-workflow cap пяти одновременно исполняемых provider tasks, server-side
 per-workspace/provider quotas и fair scheduling. Terminal validation result

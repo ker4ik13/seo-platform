@@ -19,6 +19,19 @@ test("parses a bounded semantic keyword query", () => {
     limit: 100,
     sort: "CREATED_DESC"
   });
+  assert.equal(keywordListQuery({ includeNotes: "true" }).includeNotes, true);
+  assert.equal(
+    keywordBodyListInput({ query: { includeNotes: true } }).includeNotes,
+    true
+  );
+  assert.throws(
+    () => keywordListQuery({ includeNotes: "yes" }),
+    DomainError
+  );
+  assert.throws(
+    () => keywordListQuery({ includeNotes: "true", limit: "201" }),
+    DomainError
+  );
   assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
   assert.deepEqual(
     keywordListQuery({

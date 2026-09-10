@@ -11,6 +11,44 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const actorId = "01900000-0000-7000-8000-000000000002";
 const tokenId = "01900000-0000-7000-8000-000000000003";
 
+test("lists only non-revoked API tokens owned by the current user", async () => {
+  let receivedWhere: unknown;
+  const service = serviceWith(
+    {
+      apiToken: {
+        findMany: async (query: { where: unknown }) => {
+          receivedWhere = query.where;
+          return [storedToken()];
+        }
+      }
+    } as unknown as PrismaService,
+    {} as AuditService
+  );
+
+  assert.deepEqual(await service.list(workspaceId, actorId), {
+    tokens: [
+      {
+        id: tokenId,
+        workspaceId,
+        name: "SEO agent",
+        prefix: `seo_pat_${"a".repeat(12)}`,
+        scopes: ["positions:read"],
+        allProjects: true,
+        projectIds: [],
+        status: "ACTIVE",
+        version: 1,
+        createdAt: "2026-09-01T12:00:00.000Z",
+        updatedAt: "2026-09-01T12:00:00.000Z"
+      }
+    ]
+  });
+  assert.deepEqual(receivedWhere, {
+    workspaceId,
+    createdBy: actorId,
+    revokedAt: null
+  });
+});
+
 test("returns a newly issued secret when only its success audit is unavailable", async () => {
   const auditActions: string[] = [];
   let createCalls = 0;

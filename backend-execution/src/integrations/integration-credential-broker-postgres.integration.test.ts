@@ -358,6 +358,13 @@ test(
         keyVersion,
         `${suffix}-rate`
       );
+      await verifyVerifiedArsenkinTransientFailure(
+        setup,
+        first,
+        restrictedRole,
+        keyVersion,
+        `${suffix}-arsenkin-transient`
+      );
       await verifyMaterialDrift(
         setup,
         first,
@@ -496,6 +503,7 @@ async function createValidation(
   options: {
     readonly provider?: "ARSENKIN" | "KEYS_SO";
     readonly connectorVersion?: string;
+    readonly verified?: boolean;
   } = {}
 ): Promise<ValidationFixture> {
   const [workspaceId, credentialId, jobId] = await databaseUuidV7s(client, 3);
@@ -567,6 +575,21 @@ async function createValidation(
         `broker-validation-${suffix}`
       ]
     );
+    if (options.verified) {
+      assert.equal(provider, "ARSENKIN");
+      await client.query(
+        `UPDATE public.integration_credentials
+         SET status = 'ACTIVE',
+             verified_at = clock_timestamp(),
+             last_success_at = clock_timestamp(),
+             capabilities = '["SERP_RANK_TRACKING","SERP_COLLECTION","WORDSTAT","CLUSTERING","KEYWORD_RESEARCH"]'::jsonb,
+             provider_meta = '{"limitsTotal":100}'::jsonb,
+             version = version + 1,
+             updated_at = clock_timestamp()
+         WHERE workspace_id = $1::uuid AND id = $2::uuid`,
+        [workspaceId, credentialId]
+      );
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -718,6 +741,99 @@ async function verifyProviderFailureAndUtc(
     state.rows[0]?.retryAtJson,
     state.rows[0]?.retryAt.toISOString()
   );
+}
+
+async function verifyVerifiedArsenkinTransientFailure(
+  setup: Client,
+  connector: Client,
+  role: string,
+  keyVersion: number,
+  suffix: string
+): Promise<void> {
+  for (const scenario of [
+    {
+      name: "rate-limited",
+      errorCode: "PROVIDER_RATE_LIMITED",
+      credentialStatus: "RATE_LIMITED",
+      expectedJobStatus: "WAITING_RATE_LIMIT",
+      expectedCredentialStatus: "ACTIVE"
+    },
+    {
+      name: "unavailable",
+      errorCode: "PROVIDER_UNAVAILABLE",
+      credentialStatus: "DEGRADED",
+      expectedJobStatus: "RETRY_SCHEDULED",
+      expectedCredentialStatus: "ACTIVE"
+    },
+    {
+      name: "plan-rejected",
+      errorCode: "PROVIDER_PLAN_OR_REQUEST_REJECTED",
+      credentialStatus: "DEGRADED",
+      expectedJobStatus: "FAILED_FINAL",
+      expectedCredentialStatus: "DEGRADED"
+    }
+  ] as const) {
+    const fixture = await createValidation(
+      setup,
+      keyVersion,
+      `${suffix}-${scenario.name}`,
+      {
+        provider: "ARSENKIN",
+        connectorVersion: arsenkinConnectorVersion,
+        verified: true
+      }
+    );
+    const claimedRows = await claim(
+      connector,
+      role,
+      fixture.jobId,
+      `${scenario.name}-${suffix}`
+    );
+    const claimed = claimedRows[0];
+    assert.equal(claimed?.claimOutcome, "CLAIMED");
+    assert.ok(claimed.leaseToken);
+
+    const finished = await asRole(connector, role, () =>
+      connector.query<{ readonly jobStatus: string }>(
+        `SELECT *
+         FROM public.finish_integration_credential_validation_provider_failure(
+           $1::uuid, $2::text, $3::uuid, $4::integer,
+           $5::text, $6::text, 30
+         )`,
+        [
+          fixture.jobId,
+          claimed.leaseOwner,
+          claimed.leaseToken,
+          claimed.jobVersion,
+          scenario.errorCode,
+          scenario.credentialStatus
+        ]
+      )
+    );
+    assert.equal(finished.rows[0]?.jobStatus, scenario.expectedJobStatus);
+
+    const state = await setup.query<{
+      readonly credentialStatus: string;
+      readonly errorCode: string;
+      readonly appliedCredentialStatus: string | null;
+    }>(
+      `SELECT credential.status::text AS "credentialStatus",
+              credential.last_error_code AS "errorCode",
+              job.error_summary ->> 'credentialStatus' AS "appliedCredentialStatus"
+       FROM public.jobs job
+       JOIN public.integration_credentials credential
+         ON credential.workspace_id = job.workspace_id
+        AND credential.id = $2::uuid
+       WHERE job.id = $1::uuid`,
+      [fixture.jobId, fixture.credentialId]
+    );
+    assert.deepEqual(state.rows[0], {
+      credentialStatus: scenario.expectedCredentialStatus,
+      errorCode: scenario.errorCode,
+      appliedCredentialStatus:
+        scenario.expectedCredentialStatus === "ACTIVE" ? null : "DEGRADED"
+    });
+  }
 }
 
 async function verifyCorruptedScopes(

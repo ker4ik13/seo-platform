@@ -481,6 +481,11 @@ session_call POST \
   "$token_version"
 expect_status 201 api-token-revoke
 
+session_call GET "workspaces/$workspace_id/api-tokens"
+expect_status 200 api-token-list-after-revoke
+jq -e '.data.tokens == []' "$response_body" >/dev/null ||
+  runtime_fail "revoked API token remains in the user-visible collection"
+
 token_call GET \
   "projects/$project_alpha/keywords?limit=5" \
   '' \

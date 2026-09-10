@@ -239,7 +239,13 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   const snapshotId = "01900000-0000-7000-8000-000000000074";
   let observedWhere: unknown;
   const rows = [
-    keyword("01900000-0000-7000-8000-000000000010", "2026-07-29T08:00:00Z"),
+    {
+      ...keyword(
+        "01900000-0000-7000-8000-000000000010",
+        "2026-07-29T08:00:00Z"
+      ),
+      note: "Учитывать коммерческий интент в тексте страницы"
+    },
     keyword("01900000-0000-7000-8000-000000000011", "2026-07-29T07:00:00Z")
   ];
   const service = new KeywordService({
@@ -370,6 +376,8 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   assert.equal(result.data[0]?.groupPath, "Услуги / SEO");
   assert.equal(result.data[0]?.targetUrl, "https://example.com/seo");
   assert.deepEqual(result.data[0]?.tags, ["Приоритет"]);
+  assert.equal(result.data[0]?.hasNote, true);
+  assert.equal(result.data[0]?.note, undefined);
   assert.equal(result.data[0]?.isTracked, false);
   assert.equal(result.data[0]?.frequency?.value, "12890");
   assert.deepEqual(result.data[0]?.frequency, {
@@ -415,6 +423,17 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   assert.equal(result.page.totalApprox, 2);
   assert.ok(result.page.nextCursor);
   assert.ok(observedWhere);
+
+  const resultWithNotes = await service.list(
+    workspaceId,
+    projectId,
+    { limit: 1, search: "SEO", includeNotes: true },
+    "request-with-notes"
+  );
+  assert.equal(
+    resultWithNotes.data[0]?.note,
+    "Учитывать коммерческий интент в тексте страницы"
+  );
 
   await assert.rejects(
     () =>

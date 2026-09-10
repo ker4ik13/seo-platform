@@ -280,6 +280,20 @@ test("accepts a strictly shaped semantic keyword page", () => {
   assert.deepEqual(result.data[0]?.aiAnswers, validItem.aiAnswers);
   assert.equal(result.data[0]?.hasNote, false);
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
+
+  const withNote = semanticKeywordPage({
+    data: [{
+      ...validItem,
+      hasNote: true,
+      note: "Учитывать коммерческий интент"
+    }],
+    page: { hasNext: false, totalApprox: 1 }
+  }, true);
+  assert.equal(withNote.data[0]?.note, "Учитывать коммерческий интент");
+  assert.throws(() => semanticKeywordPage({
+    data: [{ ...validItem, hasNote: false, note: "Скрытая заметка" }],
+    page: { hasNext: false }
+  }));
 });
 
 test("validates the project color legend and its unread projection", () => {
@@ -1831,6 +1845,26 @@ test("sends a large folder union through the body-only keyword route", async () 
       (capturedBody as { query: { groupIds: readonly string[] } }).query.groupIds,
       groupIds
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("forwards the explicit full-note projection to SEO data", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (input): Promise<Response> => {
+    capturedUrl = new URL(String(input));
+    return jsonResponse({ data: [], page: { hasNext: false } });
+  }) as typeof fetch;
+
+  try {
+    await client().listKeywords(internalContext(), {
+      limit: 100,
+      includeNotes: true,
+      sort: "CREATED_DESC"
+    });
+    assert.equal(capturedUrl?.searchParams.get("includeNotes"), "true");
   } finally {
     globalThis.fetch = originalFetch;
   }

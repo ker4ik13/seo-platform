@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 9 сентября 2026 года.
+Актуально на 10 сентября 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -908,6 +908,10 @@ Webhook raw body ограничен точным маршрутом и 64 KiB; �
   либо пользовательского `copy` из выделенного секрета.
   При rotate предыдущий hash остаётся допустим ровно 10 минут для bounded
   handover; revoke немедленно блокирует и текущий, и предыдущий material.
+  Отозванный ключ сразу исключается из пользовательского list API и локального
+  UI, поэтому после обновления страницы не появляется снова. В Platform DB
+  остаётся только revoked tombstone с hash и audit identity: plaintext там
+  никогда не хранится, а security evidence не превращается в рабочий ключ.
   Session-only workspace/account/team/billing/API-token-management routes fail
   closed.
   Отдельный token-only `GET /api/v1/access` не принимает cookie-session и без
@@ -915,6 +919,16 @@ Webhook raw body ограничен точным маршрутом и 64 KiB; �
   текущего project access пользователя с allowlist ключа. Это единственное
   parameterless исключение из обычной `TenantPermissionGuard` boundary;
   `ApiTokenOnlyGuard` делает его явным и fail-closed.
+  Scope mapper отдельно классифицирует read-only POST endpoints
+  `keywords/search|list`, duplicate/negative preview, `keyword-ranks`
+  comparison и `rank-workbench/positions|serp` как чтение. Общий
+  `operation-estimates` выбирает ровно один run/write scope из проверенного
+  `body.kind`; ключ с доступом к частотности не может оценивать ИИ или
+  кластеризацию. Поэтому внешнему агенту доступны те же durable данные и
+  команды проекта, включая полный Markdown project notes, keyword notes через
+  явный `includeNotes=true` с page limit 200, цвета папок и примечания цветовой легенды, без
+  расширения account/session-only маршрутов. Обычный UI list сохраняет
+  компактный `hasNote` и не переносит большие тексты заметок без запроса.
   Публичная документация берёт canonical API origin только из runtime
   `API_PUBLIC_URL` (в local development — из `PLATFORM_API_INTERNAL_URL`),
   поэтому curl-примеры не зависят от домена конкретного окружения.
@@ -1066,7 +1080,12 @@ Arsenkin `@3.0.0`/XMLStock `@2.0.0`; существующие receipts не пе
   общим searchable sidebar, копируемыми примерами запросов/ответов и
   постраничной навигацией; quick start начинает с identifier-free
   `GET /access`, а единый каталог разделов и public endpoints хранится в
-  `frontend/lib/api-docs.ts`.
+  `frontend/lib/api-docs.ts`. Каталог покрывает все durable project/workspace
+  integration routes, выводит для каждого endpoint формат запроса и ответа и
+  группирует страницы, семантику, позиции, частотность, ИИ, исследования,
+  аудиты, интеграции и расписания. `/docs/api/catalog.json` отдаёт ту же
+  secret-free machine-readable проекцию для ИИ-агента; Bearer token в неё и в
+  prompt не включается.
 - `lib/server-runtime-origin.ts` валидирует canonical `WEB_PUBLIC_URL` и
   внутренний Platform API origin; production web origin обязан использовать
   HTTPS и не может быть локальным именем.
@@ -1332,6 +1351,16 @@ validation (например, при rolling upgrade), grant принимает 
 же credential, connector и `materialVersion`; смена routing/secret material
 по-прежнему завершается как `ESTIMATE_STALE`. Этот инвариант повторён в
 `assert_rank_connector_execution_scope`, а не оставлен только приложению.
+Фоновая проверка Arsenkin после provider operation использует тот же Redis
+rate-limit gate, что и рабочие connector-вызовы. Её временный `429` или
+transport outage продолжает validation Job через bounded backoff и сохраняет
+`last_error_*`, но больше не переводит ранее проверенный credential из
+`ACTIVE` в неисполняемый статус. Migration
+`20260910070000_arsenkin_transient_validation_status` также возвращает в
+`ACTIVE` существующие Arsenkin credentials, которые прежняя логика оставила в
+`RATE_LIMITED` либо в `DEGRADED` именно после `PROVIDER_UNAVAILABLE`.
+Неверный ключ и постоянный provider plan/request rejection по-прежнему
+применяют `INVALID`/`DEGRADED` и закрывают route.
 Validation completion в PostgreSQL имеет микросекундную точность, а
 JavaScript execution evidence — миллисекундную; migration
 `20260805201500_rank_validation_timestamp_precision` сравнивает proof на

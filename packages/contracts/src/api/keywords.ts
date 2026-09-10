@@ -104,6 +104,7 @@ export const semanticKeywordDefaultPageSize = semanticKeywordPageSizes[0];
 export type SemanticKeywordPageSize =
   (typeof semanticKeywordPageSizes)[number];
 export const semanticKeywordMaxPageSize: SemanticKeywordPageSize = 1_000;
+export const semanticKeywordNotesMaxPageSize = 200;
 export const semanticKeywordMultiSearchMaxTerms = 500;
 export const semanticKeywordMultiSearchModes = [
   "EXACT",
@@ -121,6 +122,8 @@ export interface SemanticKeywordMultiSearch {
 export interface KeywordListQuery {
   readonly limit: number;
   readonly cursor?: string;
+  /** Include the full keyword note for API/export consumers; false by default. */
+  readonly includeNotes?: boolean;
   readonly search?: string;
   /** Case-insensitive substring matched against normalized active tag names. */
   readonly tag?: string;
@@ -179,8 +182,10 @@ export interface SemanticKeywordListItem {
   readonly targetUrl?: string;
   readonly tags: readonly string[];
   readonly tagsTruncated: boolean;
-  /** The list never exposes the note body, only its presence. */
+  /** Cheap note-presence marker returned for every list projection. */
   readonly hasNote?: boolean;
+  /** Returned only when the caller explicitly requests includeNotes=true. */
+  readonly note?: string;
   /** At least one current city/device snapshot contains several project URLs. */
   readonly hasMultipleRankingUrls?: boolean;
   readonly customValues?: readonly import("./semantic-custom-columns.js").SemanticKeywordCustomValue[];

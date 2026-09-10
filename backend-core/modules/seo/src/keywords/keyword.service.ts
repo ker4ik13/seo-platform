@@ -943,7 +943,8 @@ export class KeywordService {
           [...(positionsByKeywordId.get(row.id)?.values() ?? [])],
           selectedGroupByKeywordId.get(row.id),
           aiAnswersByKeywordId.get(row.id),
-          keywordsWithMultipleRankingUrls.has(row.id)
+          keywordsWithMultipleRankingUrls.has(row.id),
+          query.includeNotes === true
         )
       ),
       page: {
@@ -3056,10 +3057,12 @@ function keywordItem(
   positions: readonly SemanticKeywordListPosition[] = [],
   displayGroup?: Readonly<{ id: string; path: string | null; name: string }>,
   aiAnswers: readonly SemanticAiAnswerSummary[] = [],
-  hasMultipleRankingUrls = false
+  hasMultipleRankingUrls = false,
+  includeNote = false
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
   const group = displayGroup ?? row.memberships[0]?.group;
+  const note = row.note?.trim() ? row.note : undefined;
   const baseFrequency = frequencies.find(({ type }) => type === "BASE");
   const legacyBaseFrequency = baseFrequency
     ? {
@@ -3093,7 +3096,8 @@ function keywordItem(
     ...(targetUrl ? { targetUrl } : {}),
     tags,
     tagsTruncated: row.tags.length > 50,
-    hasNote: Boolean(row.note?.trim()),
+    hasNote: note !== undefined,
+    ...(includeNote && note !== undefined ? { note } : {}),
     ...(hasMultipleRankingUrls ? { hasMultipleRankingUrls: true } : {}),
     customValues: (row.typedCustomValues ?? []).map(keywordCustomValue),
     ...(legacyBaseFrequency ? { frequency: legacyBaseFrequency } : {}),

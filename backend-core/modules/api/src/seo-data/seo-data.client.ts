@@ -366,14 +366,17 @@ export class SeoDataClient {
         context,
         { query: listQuery, search: multiSearch }
       );
-      return semanticKeywordPage(payload);
+      return semanticKeywordPage(payload, listQuery.includeNotes === true);
     }
     if (bodyList) {
       const payload = await this.request("POST", url, context, { query: listQuery });
-      return semanticKeywordPage(payload);
+      return semanticKeywordPage(payload, listQuery.includeNotes === true);
     }
     url.searchParams.set("limit", String(listQuery.limit));
     if (listQuery.cursor) url.searchParams.set("cursor", listQuery.cursor);
+    if (listQuery.includeNotes !== undefined) {
+      url.searchParams.set("includeNotes", String(listQuery.includeNotes));
+    }
     if (listQuery.search) url.searchParams.set("search", listQuery.search);
     if (listQuery.tag) url.searchParams.set("tag", listQuery.tag);
     if (listQuery.intent) url.searchParams.set("intent", listQuery.intent);
@@ -406,7 +409,7 @@ export class SeoDataClient {
     if (listQuery.sort) url.searchParams.set("sort", listQuery.sort);
 
     const payload = await this.request("GET", url, context);
-    return semanticKeywordPage(payload);
+    return semanticKeywordPage(payload, listQuery.includeNotes === true);
   }
 
   public async listKeywordTagOptions(
@@ -2701,7 +2704,10 @@ export class SeoDataClient {
   }
 }
 
-export function semanticKeywordPage(payload: unknown): KeywordPage {
+export function semanticKeywordPage(
+  payload: unknown,
+  includeNotes = false
+): KeywordPage {
   const response = objectValue(payload);
   const data = response?.data;
   const page = objectValue(response?.page);
@@ -2718,7 +2724,7 @@ export function semanticKeywordPage(payload: unknown): KeywordPage {
     throw invalidResponse();
   }
 
-  const items = data.map(semanticKeywordItem);
+  const items = data.map((item) => semanticKeywordItem(item, includeNotes));
   return {
     data: items,
     page: {
@@ -3470,7 +3476,8 @@ function validUtcDateKey(value: unknown): value is string {
 }
 
 export function semanticKeywordItem(
-  value: unknown
+  value: unknown,
+  includeNote = false
 ): SemanticKeywordListItem {
   const item = objectValue(value);
   if (!item) throw invalidResponse();
@@ -3492,6 +3499,11 @@ export function semanticKeywordItem(
     typeof item.isTracked !== "boolean" ||
     typeof item.showAiAnswerButton !== "boolean" ||
     (item.hasNote !== undefined && typeof item.hasNote !== "boolean") ||
+    (item.note !== undefined &&
+      (!includeNote ||
+        typeof item.note !== "string" ||
+        !item.note ||
+        item.hasNote !== true)) ||
     (item.hasMultipleRankingUrls !== undefined && typeof item.hasMultipleRankingUrls !== "boolean") ||
     (item.intent !== undefined &&
       (typeof item.intent !== "string" ||
@@ -3536,6 +3548,7 @@ export function semanticKeywordItem(
     isTracked: item.isTracked,
     showAiAnswerButton: item.showAiAnswerButton,
     hasNote: item.hasNote === true,
+    ...(typeof item.note === "string" ? { note: item.note } : {}),
     ...(item.hasMultipleRankingUrls === true ? { hasMultipleRankingUrls: true } : {}),
     ...(typeof item.intent === "string"
       ? {
@@ -3918,7 +3931,9 @@ export function semanticKeywordBulkResult(
   ) {
     throw invalidResponse();
   }
-  const updatedItems = result.updatedItems.map(semanticKeywordItem);
+  const updatedItems = result.updatedItems.map((item) =>
+    semanticKeywordItem(item)
+  );
   const allowedIds = new Set(input.items.map(({ id }) => id));
   const idLists = [
     result.conflictedIds,
@@ -4293,7 +4308,7 @@ export function semanticKeywordCleaningResult(
     "failedIds"
   ]);
   const updatedItems = Array.isArray(result.updatedItems)
-    ? result.updatedItems.map(semanticKeywordItem)
+    ? result.updatedItems.map((item) => semanticKeywordItem(item))
     : [];
   const unchangedIds = uuidList(result.unchangedIds, input.items.length);
   const conflictedIds = uuidList(result.conflictedIds, input.items.length);

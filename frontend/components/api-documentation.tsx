@@ -76,6 +76,7 @@ export function ApiDocumentation({
         </Link>
         <nav aria-label={uiText("Ссылки документации")}>
           <Link aria-current="page" href="/docs/api">API v1</Link>
+          <Link href="/docs/api/catalog.json">JSON для агента</Link>
           <Link href="/app/settings/api"><UiText text="API-ключи" /></Link>
         </nav>
       </header>
@@ -235,6 +236,11 @@ function DocumentationPage({
       return <AiAnswers baseUrl={baseUrl} />;
     case "frequency":
       return <Frequency baseUrl={baseUrl} />;
+    case "research":
+    case "audits":
+    case "project-data":
+    case "integrations":
+      return <EndpointGroup section={activeSection} />;
     case "automations":
       return <Automations baseUrl={baseUrl} />;
     case "jobs":
@@ -254,6 +260,12 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
         description={uiText("Создайте отдельный ключ, выполните первый запрос и проверьте стандартную оболочку ответа.")}
         title={uiText("Быстрый старт")}
       />
+      <Callout title="Каталог для ИИ-агента">
+        Передайте агенту публичный JSON-каталог <code>/docs/api/catalog.json</code>.
+        Он содержит группы, методы, пути, scopes и формат запроса и ответа для
+        каждого endpoint. Сам <code>SEO_API_TOKEN</code> храните только в secret
+        manager инструмента и не добавляйте в промпт.
+      </Callout>
       <Callout title={uiText("Базовый URL")}>
         <UiText text="Все пути в справочнике добавляются после" after=" " /><code>{baseUrl}</code><UiText text=". Домен берётся из настроек текущего окружения. Идентификаторы заранее передавать агенту не нужно: первый запрос" after=" " /><code>GET /access</code>
         <UiText text="вернёт доступную рабочую область, проекты и права ключа." /></Callout>
@@ -393,6 +405,11 @@ Accept: application/json`}
         <UiText text="Любой действующий ключ может вызвать" after=" " /><code>GET /access</code><UiText text=". Endpoint не расширяет доступ: он показывает только workspace, allowlisted проекты и scopes самого ключа, повторно проверяя актуальное членство и права пользователя." /></Callout>
       <Callout title={uiText("Ротация")}>
         <UiText text="При обычном перевыпуске старый секрет действует ещё 10 минут. Команда отзыва отключает текущий и переходный секрет немедленно." /></Callout>
+      <Callout title="Отзыв">
+        Отозванный ключ сразу перестаёт проходить авторизацию и удаляется из
+        пользовательского списка. Внутри остаётся только недоступный для API
+        security tombstone с hash и audit ID; исходный секрет не хранится.
+      </Callout>
     </article>
   );
 }
@@ -1224,7 +1241,7 @@ function Reference() {
       />
       <div className={styles.referenceGroups}>
         {apiDocSections
-          .filter(({ slug }) => !["jobs", "errors"].includes(slug))
+          .filter(({ slug }) => slug !== "reference")
           .map((section) => {
             const endpoints = apiEndpointCatalog.filter(
               (endpoint) => endpoint.section === section.slug
@@ -1233,17 +1250,15 @@ function Reference() {
             return (
               <section key={section.slug}>
                 <header>
-                  <h2>{section.title}</h2>
+                  <div>
+                    <h2>{section.title}</h2>
+                    <p>{section.description}</p>
+                  </div>
                   <Link href={apiDocHref(section.slug)}><UiText text="Инструкция →" /></Link>
                 </header>
                 <div className={styles.endpointReferenceList}>
                   {endpoints.map((endpoint) => (
-                    <div id={endpoint.id} key={endpoint.id}>
-                      <Method method={endpoint.method} />
-                      <code>{endpoint.path}</code>
-                      <span>{endpoint.description}</span>
-                      <small>{endpoint.scope}</small>
-                    </div>
+                    <EndpointReference endpoint={endpoint} key={endpoint.id} />
                   ))}
                 </div>
               </section>
@@ -1251,6 +1266,54 @@ function Reference() {
           })}
       </div>
     </article>
+  );
+}
+
+function EndpointGroup({
+  section
+}: Readonly<{ section: ApiDocSectionSlug }>) {
+  const metadata = apiDocSections.find(({ slug }) => slug === section);
+  const endpoints = apiEndpointCatalog.filter(
+    (endpoint) => endpoint.section === section
+  );
+  if (!metadata) return null;
+  return (
+    <article className={styles.document}>
+      <PageHeading
+        description={metadata.description}
+        title={metadata.title}
+      />
+      <div className={styles.endpointReferenceList}>
+        {endpoints.map((endpoint) => (
+          <EndpointReference endpoint={endpoint} key={endpoint.id} />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function EndpointReference({
+  endpoint
+}: Readonly<{ endpoint: ApiEndpointDoc }>) {
+  return (
+    <details className={styles.endpointReference} id={endpoint.id}>
+      <summary>
+        <Method method={endpoint.method} />
+        <code>{endpoint.path}</code>
+        <span>{endpoint.description}</span>
+        <small>{endpoint.scope}</small>
+      </summary>
+      <div className={styles.endpointFormats}>
+        <section>
+          <h3>Формат запроса</h3>
+          <pre><code>{endpoint.requestFormat}</code></pre>
+        </section>
+        <section>
+          <h3>Формат ответа</h3>
+          <pre><code>{endpoint.responseFormat}</code></pre>
+        </section>
+      </div>
+    </details>
   );
 }
 

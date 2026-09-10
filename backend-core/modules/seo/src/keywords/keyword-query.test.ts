@@ -19,6 +19,19 @@ test("parses bounded keyword list query", () => {
     limit: 100,
     sort: "CREATED_DESC"
   });
+  assert.equal(keywordListQuery({ includeNotes: "true" }).includeNotes, true);
+  assert.equal(
+    keywordBodyListInput({ query: { includeNotes: true } }).includeNotes,
+    true
+  );
+  assert.throws(
+    () => keywordListQuery({ includeNotes: "yes" }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordListQuery({ includeNotes: "true", limit: "201" }),
+    BadRequestException
+  );
   assert.deepEqual(
     keywordListQuery({
       intent: "LOCAL",

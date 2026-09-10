@@ -46,7 +46,7 @@ export class ApiTokenService {
     actorId: string
   ): Promise<ApiTokenCollection> {
     const tokens = await this.prisma.apiToken.findMany({
-      where: { workspaceId, createdBy: actorId },
+      where: { workspaceId, createdBy: actorId, revokedAt: null },
       include: {
         projectAccesses: {
           orderBy: { projectId: "asc" },

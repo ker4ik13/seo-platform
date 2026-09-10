@@ -239,7 +239,15 @@ export function ApiTokenSettings({
         );
       } else {
         setIssued(undefined);
-        setNotice("API-ключ отозван.");
+        setCollection((current) =>
+          current
+            ? {
+                tokens: current.tokens.filter(({ id }) => id !== token.id)
+              }
+            : current
+        );
+        if (editingId === token.id) resetEditor();
+        setNotice("API-ключ отозван и удалён из списка.");
       }
       await load();
     } catch (caught) {

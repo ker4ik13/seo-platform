@@ -325,5 +325,6 @@
   "Сохранённая выдача для этой позиции недоступна.": "Saved results are unavailable for this position.",
   "Страницы домена из сохранённой выдачи относятся именно к выбранному историческому съёму.": "Domain pages from the saved results belong to the selected historical capture.",
   "Страницы домена из сохранённой выдачи выбранного среза с подсветкой отличий от целевого URL.": "Domain pages from the saved results for the selected slice, with differences from the target URL highlighted.",
-  "Баланс": "Balance"
+  "Баланс": "Balance",
+  "API-ключ отозван и удалён из списка.": "API key revoked and removed from the list."
 }

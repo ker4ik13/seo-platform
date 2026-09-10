@@ -1040,13 +1040,30 @@ idempotency, billing и permission checks. Управление доступно
 full rights/project replacement, rotate и revoke. Token имеет формат
 `seo_pat_*`; plaintext возвращается только create/rotate response, после чего
 остаётся HMAC hash и display prefix. При rotate прежний hash действует ещё 10
-минут для bounded handover; revoke блокирует обе версии немедленно. Каждый
-запрос ограничен workspace,
+минут для bounded handover; revoke блокирует обе версии немедленно.
+Отозванный token сразу исключается из management list и UI. Platform DB
+сохраняет только неисполняемый tombstone с HMAC hash, tenant/actor identity и
+audit linkage; это не позволяет восстановить plaintext или повторно включить
+ключ, но сохраняет доказательство отзыва. Каждый запрос ограничен workspace,
 project allowlist, current permissions создавшего пользователя и одним из
 отдельных scopes: projects, semantics, positions, frequency, AI, research,
 audits, pages, notes, integrations или automations. Position и frequency run
 scopes намеренно не взаимозаменяемы. Restricted token получает только
 allowlisted проекты даже из workspace project collection.
+
+Durable project API покрывает те же данные и команды, что рабочие экраны:
+семантику, папки с `color`, проектную цветовую легенду с `note`, полные
+Markdown project notes и keyword notes по явному `includeNotes=true`, страницы,
+причём страница с полными keyword notes ограничена 200 строками. Также доступны
+страницы, позиции и SERP workbench, ИИ-ответы, частотность,
+исследования, аудиты, интеграции и расписания. Read-only POST queries
+`keywords/search|list`, duplicate/negative preview,
+`keyword-ranks/comparison` и `rank-workbench/positions|serp` требуют read
+scope. `operation-estimates` выбирает required scope из allowlisted
+`body.kind`: frequency, AI, clustering либо keyword research. Другой kind или
+отсутствующий scope отклоняются до доменной операции. Presence, notification
+preferences, realtime tickets, account/team/billing и управление API tokens
+остаются session-only.
 
 Identifier-free discovery выполняется через token-only
 `GET /api/v1/access`. Запрос не содержит workspace/project ID и возвращает
@@ -1074,7 +1091,9 @@ realtime ticket и управление самими API tokens остаются
 наличии Authorization невалидный Bearer никогда не заменяется cookie-сессией.
 Отдельный per-token DB rate bucket ограничивает 600 запросов в минуту, а
 `lastUsedAt` записывается не чаще одного раза в минуту. Полная human-readable
-документация и примеры опубликованы на `/docs/api`.
+документация и примеры опубликованы на `/docs/api`; автоматический тест
+сопоставляет каталог со всеми durable project controller routes и требует
+явного исключения для session-only путей.
 
 Документация:
 
@@ -1082,9 +1101,13 @@ realtime ticket и управление самими API tokens остаются
 - base URL каждого примера вычисляется во время SSR как
   `${API_PUBLIC_URL}/api/v1`; IP, hostname и порт окружения в исходниках не
   фиксируются;
-- versioned reference генерируется из `platform-contracts`;
-- OpenAPI JSON публикуется относительно того же `API_PUBLIC_URL` после
-  включения generated reference;
+- versioned reference хранит для каждого endpoint method, path, scope,
+  назначение, формат запроса и формат success response и группируется по
+  доменным разделам;
+- `${WEB_PUBLIC_URL}/docs/api/catalog.json` отдаёт тот же secret-free каталог
+  и общие conventions в JSON, пригодном для загрузки в контекст ИИ-агента;
+- полноценный OpenAPI schema остаётся отдельным generated artifact целевого
+  этапа и не подменяется этим компактным каталогом;
 - интерактивный Explorer хранит token только в памяти вкладки;
 - examples используют синтетические данные;
 - breaking changes публикуются до отключения версии.
