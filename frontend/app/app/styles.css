@@ -5776,6 +5776,9 @@ svg { display: block; }
 .content-rankings.content-workspace { min-height: 0; overflow: hidden; padding: 0; }
 .rankings-workspace { align-content: start; display: grid; gap: 10px; height: 100%; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px 18px; }
 .rankings-filter-bar { align-items: stretch; background: #fff; border-bottom: 1px solid var(--line); display: grid; gap: 7px; margin: -10px -12px 0; padding: 8px 12px; position: sticky; top: -10px; z-index: 12; }
+.rankings-mode-switch { background: #f4f3fa; border: 1px solid var(--line); border-radius: 9px; display: grid; gap: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 340px; padding: 3px; }
+.rankings-mode-switch > button { background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--muted); font-size: 11px; font-weight: 750; min-height: 30px; padding: 5px 14px; }
+.rankings-mode-switch > button.active { background: #fff; border-color: #a99ef8; box-shadow: 0 1px 4px rgba(64, 50, 160, .08); color: var(--brand-dark); }
 .rankings-filter-primary { align-items: end; display: grid; gap: 8px; grid-template-columns: minmax(250px, 1.25fr) minmax(180px, .75fr) minmax(210px, .8fr) minmax(190px, .75fr); min-width: 0; }
 .rankings-filter-secondary { align-items: end; display: grid; gap: 8px; grid-template-columns: minmax(280px, 1fr) auto auto auto; min-width: 0; }
 .rankings-filter-bar label, .rankings-date-filter, .rankings-group-filter { display: grid; gap: 4px; min-width: 0; }
@@ -14508,4 +14511,600 @@ svg { display: block; }
 @media (max-width: 700px) {
   .rankings-table-heading-actions { align-items: flex-end; flex-direction: column; }
   .rankings-table-scroll { height: min(62dvh, 620px); }
+}
+
+/* Reversible semantic keyword inspector redesign. The data contracts and
+   collection dialogs remain shared with the semantic workspace. */
+.semantic-keyword-inspector {
+  background: #f8f8fc;
+  padding: 0;
+  scrollbar-color: #d8d7e2 transparent;
+}
+.semantic-keyword-inspector > header {
+  background: #fff;
+  height: 96px;
+  margin: 0;
+  padding: 13px 14px 11px;
+}
+.semantic-keyword-inspector > header > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.semantic-keyword-inspector > header > div:first-child > span:first-child {
+  font-size: 10px;
+}
+.semantic-keyword-inspector > header > div:first-child > strong {
+  display: -webkit-box;
+  font-size: 15px;
+  line-height: 1.3;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.semantic-keyword-inspector > header > div:first-child > small {
+  font-size: 9px;
+}
+.semantic-keyword-inspector > header .semantic-sidebar-actions {
+  gap: 5px;
+}
+.semantic-keyword-inspector > header .semantic-sidebar-edit,
+.semantic-keyword-inspector > header .semantic-sidebar-tracking,
+.semantic-keyword-inspector > header .semantic-sidebar-close {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e1e0e9;
+  border-radius: 8px;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  min-height: 30px;
+}
+.semantic-keyword-inspector > header .semantic-sidebar-edit {
+  padding: 0 9px;
+}
+.semantic-keyword-inspector > header .semantic-sidebar-tracking,
+.semantic-keyword-inspector > header .semantic-sidebar-close {
+  padding: 0;
+  width: 30px;
+}
+.semantic-keyword-inspector > header .semantic-sidebar-close svg {
+  height: 15px;
+  width: 15px;
+}
+.semantic-inspector-tabs {
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 38px;
+  min-height: 43px;
+  position: sticky;
+  top: 96px;
+  z-index: 4;
+}
+.semantic-inspector-tabs > button {
+  align-items: center;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  color: #687083;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 650;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 5px;
+  position: relative;
+}
+.semantic-inspector-tabs > button:hover {
+  background: #f8f7ff;
+  color: var(--brand);
+}
+.semantic-inspector-tabs > button.active {
+  background: #f8f7ff;
+  border-bottom-color: var(--brand);
+  color: var(--brand-dark);
+}
+.semantic-inspector-tabs .semantic-inspector-note-tab svg {
+  height: 15px;
+  width: 15px;
+}
+.semantic-inspector-tabs .semantic-inspector-note-tab.has-note::after {
+  background: var(--brand);
+  border: 2px solid #fff;
+  border-radius: 999px;
+  content: "";
+  height: 7px;
+  position: absolute;
+  right: 7px;
+  top: 8px;
+  width: 7px;
+}
+.semantic-keyword-inspector > section {
+  border-bottom: 0;
+  padding: 13px;
+}
+.semantic-keyword-inspector > section[hidden] { display: none; }
+.semantic-inspector-overview {
+  display: grid;
+  gap: 10px;
+}
+.semantic-inspector-parameter-card,
+.semantic-inspector-target-url,
+.semantic-inspector-data-state {
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 11px;
+  box-shadow: 0 2px 8px rgba(25, 28, 42, .025);
+  padding: 12px;
+}
+.semantic-inspector-parameter-card > h3,
+.semantic-inspector-data-state > h3 {
+  font-size: 13px;
+  margin: 0 0 11px;
+}
+.semantic-inspector-parameter-card dl {
+  gap: 9px;
+}
+.semantic-inspector-parameter-card dl > div {
+  grid-template-columns: 92px minmax(0, 1fr);
+}
+.semantic-inspector-target-url {
+  border-top: 1px solid #e3e3eb;
+  gap: 7px;
+  margin-top: 0;
+  padding-top: 12px;
+}
+.semantic-inspector-target-url-heading > strong {
+  font-size: 13px;
+}
+.semantic-inspector-target-url > a {
+  display: -webkit-box;
+  font-size: 10px;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.semantic-inspector-data-state {
+  display: grid;
+  gap: 0;
+}
+.semantic-inspector-data-state > button {
+  align-items: center;
+  background: transparent;
+  border-top: 1px solid #efeff4;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 28px minmax(0, 1fr) 14px;
+  min-height: 48px;
+  padding: 7px 2px;
+  text-align: left;
+}
+.semantic-inspector-data-state > button:hover {
+  background: #faf9ff;
+}
+.semantic-inspector-data-state > button > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.semantic-inspector-data-state > button strong {
+  font-size: 11px;
+}
+.semantic-inspector-data-state > button small {
+  color: var(--muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.semantic-inspector-data-state > button > svg {
+  color: #9a9fad;
+  height: 12px;
+  width: 12px;
+}
+.semantic-inspector-state-icon {
+  align-items: center;
+  background: #f0edff;
+  border-radius: 8px;
+  color: var(--brand);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+.semantic-inspector-state-icon.serp { background: #eef5ff; color: #3475d5; }
+.semantic-inspector-state-icon.wordstat { background: #fff1ed; color: #eb4326; }
+.semantic-inspector-state-icon svg { height: 14px; width: 14px; }
+.semantic-keyword-inspector > .semantic-inspector-dates {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  padding-block: 10px 15px;
+}
+.semantic-keyword-inspector > .semantic-inspector-dates small {
+  font-size: 8px;
+}
+.semantic-inspector-tab-panel {
+  display: grid;
+  gap: 12px;
+}
+.semantic-inspector-mode-switch {
+  background: #f0eff6;
+  border: 1px solid #e2e0eb;
+  border-radius: 9px;
+  display: grid;
+  gap: 2px;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  padding: 2px;
+}
+.semantic-inspector-mode-switch > button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #73798a;
+  font-size: 10px;
+  font-weight: 700;
+  min-height: 30px;
+}
+.semantic-inspector-mode-switch > button.active {
+  background: #fff;
+  border-color: #a99ef8;
+  box-shadow: 0 1px 4px rgba(64, 50, 160, .08);
+  color: var(--brand-dark);
+}
+.semantic-inspector-slice-selector {
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 11px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+.semantic-inspector-slice-selector > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.semantic-inspector-slice-selector > header > span {
+  color: #687083;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+.semantic-inspector-slice-selector > header > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.semantic-inspector-slice-selector > header > div > button {
+  align-items: center;
+  background: transparent;
+  color: var(--brand);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 700;
+  gap: 4px;
+}
+.semantic-inspector-slice-selector > header > div > button:disabled {
+  color: #a8abb5;
+}
+.semantic-inspector-slice-selector > header > div > button svg {
+  height: 12px;
+  width: 12px;
+}
+.semantic-inspector-slice-selector .custom-select-trigger {
+  min-height: 50px;
+  padding: 5px 8px;
+  width: 100%;
+}
+.semantic-inspector-slice-selector .custom-select-value,
+.semantic-inspector-slice-popover .custom-select-option > span:last-child {
+  min-width: 0;
+  white-space: normal;
+  width: 100%;
+}
+.semantic-inspector-slice-option {
+  align-items: center;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-width: 0;
+  width: 100%;
+}
+.semantic-inspector-slice-option > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.semantic-inspector-slice-option strong {
+  display: block;
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.semantic-inspector-slice-option small {
+  color: var(--muted);
+  display: block;
+  font-size: 8px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.semantic-inspector-slice-option .semantic-rank-device-badge {
+  font-size: 8px;
+  gap: 3px;
+  padding: 3px 5px;
+}
+.semantic-inspector-slice-option .semantic-rank-device-badge svg {
+  height: 9px;
+  width: 9px;
+}
+.semantic-inspector-ranks > .semantic-regional-ranks,
+.semantic-inspector-ranks > .semantic-normal-rank-chart,
+.semantic-inspector-ranks > .semantic-rank-change-history,
+.semantic-inspector-ranks > .semantic-ai-rank-chart,
+.semantic-inspector-ranks > .semantic-current-ranks,
+.semantic-inspector-serp > .semantic-competitor-snapshot,
+.semantic-inspector-wordstat > .semantic-inspector-seasonality {
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 11px;
+  margin: 0;
+  padding: 11px;
+}
+.semantic-inspector-ranks > .semantic-normal-rank-chart,
+.semantic-inspector-ranks > .semantic-ai-rank-chart {
+  min-height: 170px;
+}
+.semantic-inspector-ai-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.semantic-inspector-ai-heading h3 { margin: 0; }
+.semantic-inspector-ai-heading button {
+  background: transparent;
+  color: var(--brand);
+  font-size: 9px;
+  font-weight: 700;
+}
+.semantic-current-ai-ranks {
+  margin-bottom: 0;
+}
+.semantic-current-ai-ranks > div {
+  border-color: #ebe9f5;
+  min-height: 70px;
+}
+.semantic-keyword-inspector .semantic-serp-history-button {
+  align-items: center;
+  border-color: #bcb3fa;
+  color: var(--brand-dark);
+  display: flex;
+  font-size: 10px;
+  gap: 6px;
+  justify-content: center;
+  margin: 0;
+  min-height: 36px;
+  width: 100%;
+}
+.semantic-keyword-inspector .semantic-serp-history-button svg {
+  height: 13px;
+  width: 13px;
+}
+.semantic-inspector-loading {
+  align-content: center;
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 11px;
+  display: grid;
+  gap: 11px;
+  justify-items: center;
+  min-height: 260px;
+  padding: 28px 18px;
+}
+.semantic-inspector-loading .spinner { height: 24px; width: 24px; }
+.semantic-inspector-loading strong { font-size: 11px; }
+.semantic-inspector-loading > i {
+  background: #e8e9f0;
+  border-radius: 999px;
+  display: block;
+  height: 10px;
+  width: 84%;
+}
+.semantic-inspector-loading > i:nth-of-type(2) { width: 68%; }
+.semantic-inspector-loading > i:nth-of-type(3) { width: 76%; }
+.semantic-inspector-action-empty {
+  align-content: center;
+  background: #fff;
+  border: 1px dashed #dcd9e9;
+  border-radius: 11px;
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  min-height: 210px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.semantic-inspector-action-empty > span {
+  align-items: center;
+  background: #efecff;
+  border-radius: 50%;
+  color: var(--brand);
+  display: inline-flex;
+  height: 54px;
+  justify-content: center;
+  margin-bottom: 4px;
+  width: 54px;
+}
+.semantic-inspector-action-empty > span svg { height: 25px; width: 25px; }
+.semantic-inspector-action-empty > strong { font-size: 13px; }
+.semantic-inspector-action-empty > p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 250px;
+}
+.semantic-inspector-action-empty > button {
+  align-items: center;
+  display: inline-flex;
+  font-size: 10px;
+  gap: 7px;
+  justify-content: center;
+  margin-top: 8px;
+  min-height: 38px;
+  width: 100%;
+}
+.semantic-inspector-action-empty > button svg { height: 14px; width: 14px; }
+.semantic-keyword-inspector > .inline-alert {
+  margin: 10px 13px 0;
+}
+.semantic-frequency-summary {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.semantic-frequency-summary > article {
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px;
+}
+.semantic-frequency-summary > article > span {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 8px;
+  gap: 5px;
+  min-width: 0;
+}
+.semantic-frequency-summary > article > span i {
+  background: #5b3df5;
+  border-radius: 999px;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+.semantic-frequency-summary > article.type-fixed > span i { background: #fc3f1d; }
+.semantic-frequency-summary > article.type-base > span i { background: #3475d5; }
+.semantic-frequency-summary > article strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.semantic-wordstat-context {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 9px;
+  justify-content: space-between;
+}
+.semantic-wordstat-context small { font-size: 8px; }
+.semantic-frequency-details {
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.semantic-frequency-details > summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto 14px;
+  list-style: none;
+  min-height: 40px;
+  padding: 7px 10px;
+}
+.semantic-frequency-details > summary::-webkit-details-marker { display: none; }
+.semantic-frequency-details > summary b {
+  background: #efedfa;
+  border-radius: 999px;
+  color: #6c657e;
+  font-size: 8px;
+  padding: 3px 6px;
+}
+.semantic-frequency-details > summary svg { height: 12px; transition: transform .15s ease; width: 12px; }
+.semantic-frequency-details[open] > summary { border-bottom: 1px solid var(--line); }
+.semantic-frequency-details[open] > summary svg { transform: rotate(180deg); }
+.semantic-frequency-details .semantic-frequency-list { padding: 0 10px; }
+.semantic-inspector-wordstat > .semantic-inspector-seasonality {
+  border-top: 1px solid #e3e3eb;
+  margin-top: 2px;
+  padding-top: 11px;
+}
+.semantic-keyword-note {
+  align-content: start;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: calc(100% - 139px);
+}
+.semantic-keyword-note form {
+  background: #fff;
+  border: 1px solid #e3e3eb;
+  border-radius: 11px;
+  gap: 0;
+  overflow: hidden;
+}
+.semantic-keyword-note form textarea {
+  border: 0;
+  border-radius: 0;
+  min-height: 360px;
+  padding: 12px;
+  resize: vertical;
+}
+.semantic-keyword-note form textarea:focus-visible {
+  box-shadow: none;
+  outline: 0;
+}
+.semantic-note-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 2px;
+  min-height: 36px;
+  padding: 4px 7px;
+}
+.semantic-note-toolbar > button {
+  align-items: center;
+  background: transparent;
+  border-radius: 6px;
+  color: #626a7b;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 27px;
+  justify-content: center;
+  width: 27px;
+}
+.semantic-note-toolbar > button:hover { background: #f0edff; color: var(--brand); }
+.semantic-note-toolbar > button svg { height: 13px; width: 13px; }
+.semantic-note-footer {
+  border-top: 1px solid var(--line);
+  padding: 8px;
+}
+.semantic-keyword-note .semantic-note-footer .primary-button {
+  min-height: 32px;
+  padding-inline: 12px;
+}
+@media (max-width: 680px) {
+  .semantic-keyword-inspector > header {
+    height: 90px;
+    padding-inline: 12px;
+  }
+  .semantic-inspector-tabs { top: 90px; }
+  .semantic-keyword-inspector > header .semantic-sidebar-edit { display: none; }
+  .semantic-keyword-inspector > section { padding: 11px; }
 }

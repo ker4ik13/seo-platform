@@ -3,7 +3,8 @@ import test from "node:test";
 import type { PrismaService } from "../database/prisma.service.js";
 import {
   mergedRankDimensionCatalog,
-  rankDimensionSources
+  rankDimensionSources,
+  rawAiRankDimensionCatalog
 } from "./rank-dimension-merge.js";
 
 const scope = {
@@ -65,4 +66,28 @@ test("target reads include its immutable source history", async () => {
   };
   const sources = await rankDimensionSources(database(), scope, target);
   assert.deepEqual(sources.map(({ key }) => key), [targetKey, sourceKey]);
+});
+
+test("AI catalog exposes only position-tracking AI dimensions", async () => {
+  let queryText = "";
+  const catalog = await rawAiRankDimensionCatalog({
+    $queryRaw: async (query: unknown) => {
+      queryText = ((query as { strings?: readonly string[] }).strings ?? []).join(" ");
+      return [{
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "2",
+        regionLabel: null,
+        language: "ru",
+        device: "MOBILE"
+      }];
+    },
+    rankDimensionMerge: { findMany: async () => [] }
+  } as unknown as PrismaService, scope);
+
+  assert.match(queryText, /FROM ai_answer_snapshots snapshot/u);
+  assert.match(queryText, /snapshot\.position_tracking_enabled/u);
+  assert.deepEqual(catalog.dimensions.map(({ key }) => key), [
+    "YANDEX|RU|2|ru|MOBILE"
+  ]);
 });

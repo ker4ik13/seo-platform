@@ -32,8 +32,10 @@ import {
 } from "../lib/rankings-preferences";
 import { SemanticKeywordPositionHistoryModal } from "./semantic-keyword-position-history-modal";
 import { SemanticKeywordSerpHistory } from "./semantic-keyword-serp-history";
+import { SemanticKeywordAiPositionHistoryModal } from "./semantic-keyword-ai-position-history-modal";
 import { SemanticModal } from "./semantic-modal";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
+import { SemanticAiAnswerDialog } from "./semantic-ai-answer-dialog";
 import { SemanticRankContext } from "./semantic-rank-context";
 import { SemanticGroupPickerField } from "./semantic-group-picker";
 import { CustomDateRangePicker } from "./custom-date-range-picker";
@@ -74,8 +76,11 @@ export function RankingsWorkspace({
 }>) {
   const { locale, t } = useUiLocale();
   const [dimensions, setDimensions] = useState<readonly SemanticRankDimension[]>([]);
+  const [aiDimensions, setAiDimensions] = useState<readonly SemanticRankDimension[]>([]);
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
-  const [dimensionKey, setDimensionKey] = useState("");
+  const [mode, setMode] = useState<"SEO" | "AI">("SEO");
+  const [seoDimensionKey, setSeoDimensionKey] = useState("");
+  const [aiDimensionKey, setAiDimensionKey] = useState("");
   const [groupId, setGroupId] = useState("");
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -88,7 +93,8 @@ export function RankingsWorkspace({
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [history, setHistory] = useState<HistorySelection>();
   const [serpHistory, setSerpHistory] = useState<HistorySelection>();
-  const [positionDialog, setPositionDialog] = useState(false);
+  const [aiHistory, setAiHistory] = useState<HistorySelection>();
+  const [collectionMode, setCollectionMode] = useState<"SEO" | "AI">();
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState<string>();
@@ -106,6 +112,15 @@ export function RankingsWorkspace({
     from: addCalendarDays(today(), -3 * 366 + 1),
     to: today()
   }), []);
+  const effectiveMode: "SEO" | "AI" =
+    mode === "AI" && aiDimensions.length > 0 ? "AI" : "SEO";
+  const activeDimensions = effectiveMode === "AI" ? aiDimensions : dimensions;
+  const dimensionKey = effectiveMode === "AI" ? aiDimensionKey : seoDimensionKey;
+
+  function selectDimension(key: string): void {
+    if (effectiveMode === "AI") setAiDimensionKey(key);
+    else setSeoDimensionKey(key);
+  }
 
   useEffect(() => {
     const initial = initialDateRange();
@@ -113,7 +128,9 @@ export function RankingsWorkspace({
       projectId,
       currentUserId,
       {
-        dimensionKey: "",
+        mode: "SEO",
+        seoDimensionKey: "",
+        aiDimensionKey: "",
         groupId: "",
         dateFrom: initial.from,
         dateThrough: initial.through,
@@ -123,7 +140,9 @@ export function RankingsWorkspace({
       },
       window.localStorage
     );
-    setDimensionKey(preferences.dimensionKey);
+    setMode(preferences.mode);
+    setSeoDimensionKey(preferences.seoDimensionKey);
+    setAiDimensionKey(preferences.aiDimensionKey);
     setGroupId(preferences.groupId);
     setDateRange({
       from: preferences.dateFrom < availableDateRange.from
@@ -142,7 +161,9 @@ export function RankingsWorkspace({
   useEffect(() => {
     if (!preferencesReady) return;
     writeRankingsPreferences(projectId, currentUserId, {
-      dimensionKey,
+      mode,
+      seoDimensionKey,
+      aiDimensionKey,
       groupId,
       dateFrom: dateRange.from,
       dateThrough: dateRange.through,
@@ -150,7 +171,7 @@ export function RankingsWorkspace({
       queryColumnWidth,
       hiddenDates: [...hiddenDates]
     }, window.localStorage);
-  }, [currentUserId, dateRange, dimensionKey, groupId, hiddenDates, preferencesReady, projectId, queryColumnWidth, sort]);
+  }, [aiDimensionKey, currentUserId, dateRange, groupId, hiddenDates, mode, preferencesReady, projectId, queryColumnWidth, seoDimensionKey, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -166,15 +187,21 @@ export function RankingsWorkspace({
     ]).then(([catalog, nextGroups]) => {
       if (controller.signal.aborted) return;
       setDimensions(catalog.dimensions);
+      setAiDimensions(catalog.aiDimensions ?? []);
       const availableGroups = nextGroups.filter(({ systemKind }) => systemKind !== "TRASH");
       setGroups(availableGroups);
       setGroupId((current) => current && availableGroups.some(({ id }) => id === current)
         ? current
         : "");
-      setDimensionKey((current) =>
+      setSeoDimensionKey((current) =>
         current && catalog.dimensions.some(({ key }) => key === current)
           ? current
           : catalog.dimensions[0]?.key ?? ""
+      );
+      setAiDimensionKey((current) =>
+        current && (catalog.aiDimensions ?? []).some(({ key }) => key === current)
+          ? current
+          : catalog.aiDimensions?.[0]?.key ?? ""
       );
     }).catch(() => {
       if (!controller.signal.aborted) {
@@ -194,9 +221,10 @@ export function RankingsWorkspace({
       ...(groupId ? { groupIds: [groupId] } : {}),
       ...(search ? { search } : {}),
       limit: 100 as const,
-      sort
+      sort,
+      mode: effectiveMode
     };
-  }, [dateRange, dimensionKey, groupId, search, sort]);
+  }, [dateRange, dimensionKey, effectiveMode, groupId, search, sort]);
 
   useEffect(() => {
     if (!requestInput) {
@@ -204,11 +232,7 @@ export function RankingsWorkspace({
       return;
     }
     const controller = new AbortController();
-    setState((current) => ({
-      ...(current.report ? { report: current.report } : {}),
-      loading: true,
-      loadingMore: false
-    }));
+    setState({ loading: true, loadingMore: false });
     void requestReport(projectId, requestInput, controller.signal)
       .then((report) => {
         if (!controller.signal.aborted) {
@@ -330,7 +354,7 @@ export function RankingsWorkspace({
         }
       );
       setDeleteConfirm(false);
-      setDimensionKey("");
+      setSeoDimensionKey("");
       setNotice(t("История среза удалена из отчётов: {0} снимков.", [String(result.affectedSnapshots)]));
       setCatalogRevision((value) => value + 1);
       setRevision((value) => value + 1);
@@ -343,22 +367,44 @@ export function RankingsWorkspace({
 
   const report = state.report;
   const visibleDates = report?.dates.filter((date) => !hiddenDates.has(date)) ?? [];
-  const selectedDimension = dimensions.find(({ key }) => key === dimensionKey);
+  const selectedDimension = activeDimensions.find(({ key }) => key === dimensionKey);
 
   return (
     <main className="rankings-workspace" ref={workspaceRef}>
       <section className="rankings-filter-bar" aria-label={t("Параметры отчёта")}>
+        <div className="rankings-mode-switch" role="tablist">
+          <button
+            aria-selected={effectiveMode === "SEO"}
+            className={effectiveMode === "SEO" ? "active" : undefined}
+            onClick={() => setMode("SEO")}
+            role="tab"
+            type="button"
+          >
+            <UiText text="SEO выдача" />
+          </button>
+          {aiDimensions.length > 0 && (
+            <button
+              aria-selected={effectiveMode === "AI"}
+              className={effectiveMode === "AI" ? "active" : undefined}
+              onClick={() => setMode("AI")}
+              role="tab"
+              type="button"
+            >
+              <UiText text="ИИ выдача" />
+            </button>
+          )}
+        </div>
         <div className="rankings-filter-primary">
         <label className="rankings-filter-dimension">
           <span><UiText text="Город, поисковик и устройство" /></span>
           <CustomSelect
-            onChange={(event) => setDimensionKey(event.target.value)}
+            onChange={(event) => selectDimension(event.target.value)}
             searchable
             searchPlaceholder={t("Найти город или устройство")}
             value={dimensionKey}
           >
-            {dimensions.length === 0 && <option value=""><UiText text="Нет сохранённых съёмов" /></option>}
-            {dimensions.map((dimension) => (
+            {activeDimensions.length === 0 && <option value=""><UiText text="Нет сохранённых съёмов" /></option>}
+            {activeDimensions.map((dimension) => (
               <option key={dimension.key} value={dimension.key}>
                 <span className="rankings-dimension-option">
                   <SemanticRankContext {...dimension} />
@@ -445,11 +491,12 @@ export function RankingsWorkspace({
           <button className="secondary-button" onClick={() => setRevision((value) => value + 1)} type="button">
             <Icon name="history" /><UiText text="Обновить" />
           </button>
-          <button className="primary-button" onClick={() => setPositionDialog(true)} type="button">
-            <Icon name="rankCheck" /><UiText text="Снять позиции" />
+          <button className="primary-button" onClick={() => setCollectionMode(effectiveMode)} type="button">
+            <Icon name={effectiveMode === "AI" ? "ai" : "rankCheck"} />
+            <UiText text={effectiveMode === "AI" ? "Снять ИИ-позиции" : "Снять позиции"} />
           </button>
         </div>
-        {selectedDimension && (
+        {effectiveMode === "SEO" && selectedDimension && (
           <button className="rankings-delete-slice" onClick={() => setDeleteConfirm(true)} type="button">
             <Icon name="trash" /><UiText text="Удалить историю среза" />
           </button>
@@ -570,15 +617,19 @@ export function RankingsWorkspace({
                             title={t("Открыть запрос в поиске")}
                           ><Icon name="search" /></a>
                           <button
-                            aria-label={t("Открыть историю позиций")}
-                            onClick={() => setHistory(selection)}
-                            title={t("Открыть историю позиций")}
+                            aria-label={t(effectiveMode === "AI" ? "Открыть историю ИИ-позиций" : "Открыть историю позиций")}
+                            onClick={() => effectiveMode === "AI"
+                              ? setAiHistory(selection)
+                              : setHistory(selection)}
+                            title={t(effectiveMode === "AI" ? "Открыть историю ИИ-позиций" : "Открыть историю позиций")}
                             type="button"
                           ><Icon name="history" /></button>
                           <button
-                            aria-label={t("Открыть историю выдачи")}
-                            onClick={() => setSerpHistory(selection)}
-                            title={t("Открыть историю выдачи")}
+                            aria-label={t(effectiveMode === "AI" ? "Открыть историю ИИ-выдачи" : "Открыть историю выдачи")}
+                            onClick={() => effectiveMode === "AI"
+                              ? setAiHistory(selection)
+                              : setSerpHistory(selection)}
+                            title={t(effectiveMode === "AI" ? "Открыть историю ИИ-выдачи" : "Открыть историю выдачи")}
                             type="button"
                           ><Icon name="competitors" /></button>
                         </div>
@@ -587,13 +638,17 @@ export function RankingsWorkspace({
                         <RankingCell
                           cell={byDate.get(date)}
                           key={date}
-                          onOpenSiteResults={(snapshotId) => setHistory({ ...selection, initialSiteResultsSnapshotId: snapshotId })}
-                          onOpenTargetMismatch={(snapshotId, observedAt) => setHistory({
-                            ...selection,
-                            initialObservedAt: observedAt,
-                            initialSiteResultsSnapshotId: snapshotId,
-                            showUrlComparison: true
-                          })}
+                          onOpenSiteResults={(snapshotId) => effectiveMode === "AI"
+                            ? setAiHistory(selection)
+                            : setHistory({ ...selection, initialSiteResultsSnapshotId: snapshotId })}
+                          onOpenTargetMismatch={(snapshotId, observedAt) => effectiveMode === "AI"
+                            ? setAiHistory(selection)
+                            : setHistory({
+                                ...selection,
+                                initialObservedAt: observedAt,
+                                initialSiteResultsSnapshotId: snapshotId,
+                                showUrlComparison: true
+                              })}
                           {...(row.targetUrl ? { targetUrl: row.targetUrl } : {})}
                         />
                       ))}
@@ -649,15 +704,41 @@ export function RankingsWorkspace({
           projectId={projectId}
         />
       )}
-      {positionDialog && (
+      {aiHistory && selectedDimension && (
+        <SemanticKeywordAiPositionHistoryModal
+          currentUserId={currentUserId}
+          dimensionKey={selectedDimension.key}
+          keywordId={aiHistory.keywordId}
+          keywordText={aiHistory.keywordText}
+          onClose={() => setAiHistory(undefined)}
+          projectDomain={projectDomain}
+          projectId={projectId}
+        />
+      )}
+      {collectionMode === "SEO" && (
         <SemanticPositionDialog
           groups={groups.map((group) => ({ ...group }))}
           initialSelections={[]}
-          onClose={() => setPositionDialog(false)}
-          onStarted={() => { setPositionDialog(false); setNotice(t("Съём запущен. Новые данные появятся после завершения операции.")); }}
+          onClose={() => setCollectionMode(undefined)}
+          onStarted={() => { setCollectionMode(undefined); setNotice(t("Съём запущен. Новые данные появятся после завершения операции.")); }}
           projectId={projectId}
           {...(projectSearchCity ? { projectSearchCity } : {})}
           workspaceId={workspaceId}
+        />
+      )}
+      {collectionMode === "AI" && (
+        <SemanticAiAnswerDialog
+          activeGroupId={groupId || undefined}
+          groups={groups.map((group) => ({ ...group }))}
+          initialSelections={[]}
+          mode="positions"
+          onClose={() => setCollectionMode(undefined)}
+          onStarted={() => {
+            setCollectionMode(undefined);
+            setNotice(t("Съём ИИ-позиций запущен. Новые данные появятся после завершения операции."));
+          }}
+          projectDomain={projectDomain}
+          projectId={projectId}
         />
       )}
       {deleteConfirm && selectedDimension && (
@@ -757,24 +838,6 @@ function RankingCell({
         ) : (
           <span className="rankings-cell-value">{positionValue}</span>
         )}
-        {cell.aiAnswer && (
-          <div
-            className={`rankings-ai-value${cell.aiAnswer.siteFound ? " found" : " missing"}`}
-            title={cell.aiAnswer.answerPresent
-              ? cell.aiAnswer.siteFound
-                ? t("Сайт найден в источниках ИИ-ответа")
-                : t("ИИ-ответ есть, сайт не найден в источниках")
-              : t("ИИ-ответ не найден")}
-          >
-            <Icon name="ai" />
-            {cell.aiAnswer.rankingUrl ? (
-              <a className="rankings-ai-position-link" href={cell.aiAnswer.rankingUrl} rel="noopener noreferrer" target="_blank" title={cell.aiAnswer.rankingUrl}>
-                <strong>{cell.aiAnswer.position ?? "×"}</strong>
-                <small>{rankingsAiDelta(cell.aiAnswer.position, cell.aiAnswer.previousPosition)}</small>
-              </a>
-            ) : <><strong>{cell.aiAnswer.position ?? "×"}</strong><small>{rankingsAiDelta(cell.aiAnswer.position, cell.aiAnswer.previousPosition)}</small></>}
-          </div>
-        )}
         <div className="rankings-cell-actions">
           {targetMismatch && (
             <button
@@ -798,16 +861,6 @@ function RankingCell({
       </div>
     </td>
   );
-}
-
-function rankingsAiDelta(
-  position: number | undefined,
-  previousPosition: number | undefined
-): string {
-  if (position === undefined) return previousPosition === undefined ? "" : `←${previousPosition}`;
-  if (previousPosition === undefined) return "Новая";
-  const delta = previousPosition - position;
-  return delta === 0 ? "—" : `${delta > 0 ? "▲" : "▼"}${Math.abs(delta)}`;
 }
 
 function rankingFrequencyLabel(type: "BASE" | "EXACT" | "FIXED"): string {

@@ -2997,7 +2997,7 @@ export function semanticKeywordInsights(
     !Array.isArray(aiPositionHistory) ||
     aiPositionHistory.length > 240 ||
     !Array.isArray(aiCompetitorSnapshots) ||
-    aiCompetitorSnapshots.length > 2
+    aiCompetitorSnapshots.length > 240
   ) {
     throw invalidResponse();
   }
@@ -3251,9 +3251,9 @@ export function semanticKeywordInsights(
 function semanticAiAnswerCompetitorSnapshots(
   value: unknown
 ): readonly SemanticAiAnswerCompetitorSnapshot[] {
-  if (!Array.isArray(value) || value.length > 2) throw invalidResponse();
+  if (!Array.isArray(value) || value.length > 240) throw invalidResponse();
   const snapshotIds = new Set<string>();
-  const engines = new Set<string>();
+  const dimensions = new Set<string>();
   return value.map((candidate) => {
     const item = exactRecord(candidate, [
       "snapshotId",
@@ -3269,7 +3269,6 @@ function semanticAiAnswerCompetitorSnapshots(
       !UUID_PATTERN.test(item.snapshotId) ||
       snapshotIds.has(item.snapshotId) ||
       !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) ||
-      engines.has(String(item.searchEngine)) ||
       !requiredString(item.regionCode) ||
       !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
       item.provider !== "ARSENKIN" ||
@@ -3280,6 +3279,8 @@ function semanticAiAnswerCompetitorSnapshots(
     ) {
       throw invalidResponse();
     }
+    const dimension = `${String(item.searchEngine)}:${item.regionCode}:${String(item.device)}`;
+    if (dimensions.has(dimension)) throw invalidResponse();
     let previousPosition = 0;
     const results = item.results.map((candidate) => {
       const result = exactRecord(candidate, ["position", "url", "title", "snippet"]);
@@ -3306,7 +3307,7 @@ function semanticAiAnswerCompetitorSnapshots(
       };
     });
     snapshotIds.add(item.snapshotId);
-    engines.add(String(item.searchEngine));
+    dimensions.add(dimension);
     return {
       snapshotId: item.snapshotId,
       searchEngine: item.searchEngine as SemanticAiAnswerCompetitorSnapshot["searchEngine"],

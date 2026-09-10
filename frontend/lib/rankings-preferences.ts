@@ -3,7 +3,9 @@ export const rankingsQueryColumnMaxWidth = 520;
 export const rankingsQueryColumnDefaultWidth = 300;
 
 export interface RankingsPreferences {
-  readonly dimensionKey: string;
+  readonly mode: "SEO" | "AI";
+  readonly seoDimensionKey: string;
+  readonly aiDimensionKey: string;
   readonly groupId: string;
   readonly dateFrom: string;
   readonly dateThrough: string;
@@ -34,7 +36,16 @@ export function readRankingsPreferences(
     const dateThrough = calendarDate(value.dateThrough) ?? fallback.dateThrough;
     const validRange = dateFrom <= dateThrough;
     return {
-      dimensionKey: boundedString(value.dimensionKey, 1_000) ?? fallback.dimensionKey,
+      mode: value.mode === "AI" || value.mode === "SEO"
+        ? value.mode
+        : fallback.mode,
+      seoDimensionKey:
+        boundedString(value.seoDimensionKey, 1_000) ??
+        boundedString(value.dimensionKey, 1_000) ??
+        fallback.seoDimensionKey,
+      aiDimensionKey:
+        boundedString(value.aiDimensionKey, 1_000) ??
+        fallback.aiDimensionKey,
       groupId: boundedString(value.groupId, 100) ?? fallback.groupId,
       dateFrom: validRange ? dateFrom : fallback.dateFrom,
       dateThrough: validRange ? dateThrough : fallback.dateThrough,

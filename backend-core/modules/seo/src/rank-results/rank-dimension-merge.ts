@@ -64,24 +64,26 @@ export async function rawRankDimensionCatalog(
       language, "regionLabel"
     LIMIT 2001
   `);
-  const dimensions = new Map<string, SemanticRankDimension>();
-  for (const row of rows.slice(0, 2_000)) {
-    if (
-      (row.searchEngine !== "YANDEX" && row.searchEngine !== "GOOGLE") ||
-      (row.device !== "DESKTOP" && row.device !== "MOBILE")
-    ) throw new Error("Stored rank dimension is unsupported");
-    const value = {
-      searchEngine: row.searchEngine,
-      countryCode: row.countryCode,
-      regionCode: row.regionCode ?? row.countryCode,
-      language: row.language,
-      device: row.device,
-      ...(row.regionLabel ? { regionLabel: row.regionLabel } : {})
-    } satisfies Omit<SemanticRankDimension, "key">;
-    const key = semanticRankDimensionKey(value);
-    if (!dimensions.has(key)) dimensions.set(key, { key, ...value });
-  }
-  return { dimensions: [...dimensions.values()], truncated: rows.length > 2_000 };
+  return rankDimensionCatalogFromRows(rows);
+}
+
+export async function rawAiRankDimensionCatalog(
+  database: RankDimensionDatabase,
+  scope: RankDimensionScope
+): Promise<SemanticRankDimensionCatalog> {
+  const rows = await database.$queryRaw<readonly RawRankDimensionRow[]>(Prisma.sql`
+    SELECT DISTINCT snapshot.search_engine::text AS "searchEngine",
+      'RU'::text AS "countryCode", snapshot.region_code AS "regionCode",
+      NULL::text AS "regionLabel", 'ru'::text AS language,
+      snapshot.device::text AS device
+    FROM ai_answer_snapshots snapshot
+    WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
+      AND snapshot.project_id = ${scope.projectId}::uuid
+      AND snapshot.position_tracking_enabled
+    ORDER BY "searchEngine", "regionCode", device
+    LIMIT 2001
+  `);
+  return rankDimensionCatalogFromRows(rows);
 }
 
 export async function mergedRankDimensionCatalog(
@@ -104,18 +106,30 @@ export async function mergedRankDimensionCatalog(
       }
     })
   ]);
-  const mergeBySource = new Map(
-    merges.map((merge) => [merge.sourceDimensionKey, merge] as const)
-  );
-  const dimensions = new Map<string, SemanticRankDimension>();
-  for (const dimension of catalog.dimensions) {
-    const merge = mergeBySource.get(dimension.key);
-    const resolved = merge
-      ? storedDimension(merge.targetDimensionKey, merge.targetRegionLabel)
-      : dimension;
-    if (!dimensions.has(resolved.key)) dimensions.set(resolved.key, resolved);
-  }
-  return { dimensions: [...dimensions.values()], truncated: catalog.truncated };
+  return applyDimensionMerges(catalog, merges);
+}
+
+export async function mergedAiRankDimensionCatalog(
+  database: RankDimensionDatabase,
+  scope: RankDimensionScope
+): Promise<SemanticRankDimensionCatalog> {
+  const [catalog, merges] = await Promise.all([
+    rawAiRankDimensionCatalog(database, scope),
+    database.rankDimensionMerge.findMany({
+      where: {
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 2_000,
+      select: {
+        sourceDimensionKey: true,
+        targetDimensionKey: true,
+        targetRegionLabel: true
+      }
+    })
+  ]);
+  return applyDimensionMerges(catalog, merges);
 }
 
 export async function rankDimensionSources(
@@ -193,6 +207,51 @@ export function storedRankDimensionMerge(
     version: row.version,
     createdAt: row.createdAt.toISOString()
   };
+}
+
+function rankDimensionCatalogFromRows(
+  rows: readonly RawRankDimensionRow[]
+): SemanticRankDimensionCatalog {
+  const dimensions = new Map<string, SemanticRankDimension>();
+  for (const row of rows.slice(0, 2_000)) {
+    if (
+      (row.searchEngine !== "YANDEX" && row.searchEngine !== "GOOGLE") ||
+      (row.device !== "DESKTOP" && row.device !== "MOBILE")
+    ) throw new Error("Stored rank dimension is unsupported");
+    const value = {
+      searchEngine: row.searchEngine,
+      countryCode: row.countryCode,
+      regionCode: row.regionCode ?? row.countryCode,
+      language: row.language,
+      device: row.device,
+      ...(row.regionLabel ? { regionLabel: row.regionLabel } : {})
+    } satisfies Omit<SemanticRankDimension, "key">;
+    const key = semanticRankDimensionKey(value);
+    if (!dimensions.has(key)) dimensions.set(key, { key, ...value });
+  }
+  return { dimensions: [...dimensions.values()], truncated: rows.length > 2_000 };
+}
+
+function applyDimensionMerges(
+  catalog: SemanticRankDimensionCatalog,
+  merges: readonly Readonly<{
+    sourceDimensionKey: string;
+    targetDimensionKey: string;
+    targetRegionLabel: string | null;
+  }>[]
+): SemanticRankDimensionCatalog {
+  const mergeBySource = new Map(
+    merges.map((merge) => [merge.sourceDimensionKey, merge] as const)
+  );
+  const dimensions = new Map<string, SemanticRankDimension>();
+  for (const dimension of catalog.dimensions) {
+    const merge = mergeBySource.get(dimension.key);
+    const resolved = merge
+      ? storedDimension(merge.targetDimensionKey, merge.targetRegionLabel)
+      : dimension;
+    if (!dimensions.has(resolved.key)) dimensions.set(resolved.key, resolved);
+  }
+  return { dimensions: [...dimensions.values()], truncated: catalog.truncated };
 }
 
 function storedDimension(key: string, regionLabel: string | null): SemanticRankDimension {

@@ -623,6 +623,11 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     downloadable: false,
     version: value.version,
     ...(competitorCollection ? { competitorCollection: true } : {}),
+    rankContext: {
+      searchEngine: value.searchEngine,
+      regionCode: value.regionCode,
+      device: value.device
+    },
     ...(value.routingScope
       ? {
           routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`

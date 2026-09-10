@@ -158,6 +158,7 @@ export class RankWorkbenchService {
       dimension
     );
     const offset = decodeOffsetCursor(input.cursor, positionFilterHash(input));
+    const aiMode = input.mode === "AI";
     const [rows, trendRows] = await Promise.all([
       this.positionKeywordPage(scope, input, dimension, sourceDimensions, offset),
       this.positionTrend(scope, input, dimension, sourceDimensions)
@@ -171,25 +172,32 @@ export class RankWorkbenchService {
     const keywordIds = pageRows.map(({ id }) => id);
     const [dailyRows, dailyAiRows] = keywordIds.length === 0 || dates.length === 0
       ? [[], []] as const
-      : await Promise.all([
-          this.dailyRanks(
-            scope,
-            input,
-            dimension,
-            sourceDimensions,
-            keywordIds,
-            dates
-          ),
-          this.dailyAiRanks(scope, dimension, sourceDimensions, keywordIds, dates)
-        ]);
-    const aiByKeywordDate = new Map(
-      dailyAiRows.map((row) => [`${row.keywordId}:${calendarDate(row.day)}`, row])
-    );
+      : aiMode
+        ? [
+            [],
+            await this.dailyAiRanks(
+              scope,
+              dimension,
+              sourceDimensions,
+              keywordIds,
+              dates
+            )
+          ] as const
+        : [
+            await this.dailyRanks(
+              scope,
+              input,
+              dimension,
+              sourceDimensions,
+              keywordIds,
+              dates
+            ),
+            []
+          ] as const;
     const dateSet = new Set(dates);
     const cellsByKeyword = new Map<string, Map<string, RankPositionReportCell>>();
     for (const row of dailyRows) {
       const date = calendarDate(row.day);
-      const ai = aiByKeywordDate.get(`${row.keywordId}:${date}`);
       const byDate = cellsByKeyword.get(row.keywordId) ?? new Map();
       byDate.set(date, {
         date,
@@ -201,19 +209,24 @@ export class RankWorkbenchService {
           ? {}
           : { previousPosition: row.previousPosition }),
         ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
-        siteResultCount: safeCount(row.siteResultCount),
-        ...(ai ? {
-          aiAnswer: {
-            snapshotId: ai.snapshotId,
-            observedAt: ai.observedAt.toISOString(),
-            answerPresent: ai.answerPresent,
-            siteFound: ai.siteFound,
-            ...(ai.position === null ? {} : { position: ai.position }),
-            ...(ai.previousPosition === null ? {} : { previousPosition: ai.previousPosition }),
-            ...(ai.rankingUrl === null ? {} : { rankingUrl: ai.rankingUrl }),
-            brandFound: ai.brandFound
-          }
-        } : {})
+        siteResultCount: safeCount(row.siteResultCount)
+      });
+      cellsByKeyword.set(row.keywordId, byDate);
+    }
+    for (const row of dailyAiRows) {
+      const date = calendarDate(row.day);
+      const byDate = cellsByKeyword.get(row.keywordId) ?? new Map();
+      byDate.set(date, {
+        date,
+        snapshotId: row.snapshotId,
+        observedAt: row.observedAt.toISOString(),
+        found: row.siteFound,
+        ...(row.position === null ? {} : { position: row.position }),
+        ...(row.previousPosition === null
+          ? {}
+          : { previousPosition: row.previousPosition }),
+        ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
+        siteResultCount: row.siteFound ? 1 : 0
       });
       cellsByKeyword.set(row.keywordId, byDate);
     }
@@ -499,6 +512,49 @@ export class RankWorkbenchService {
   ): Promise<PositionKeywordRow[]> {
     const filters = keywordFilters(scope, input);
     const order = positionOrder(input.sort);
+    const regionCodes = [...new Set(sourceDimensions.map(({ regionCode }) => regionCode))];
+    const dailyCandidates = input.mode === "AI"
+      ? Prisma.sql`
+          SELECT DISTINCT ON (
+            snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date
+          ) snapshot.keyword_id, snapshot.id, snapshot.observed_at,
+            snapshot.site_found AS found, snapshot.position
+          FROM ai_answer_snapshots snapshot
+          JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
+          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
+            AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.search_engine::text = ${dimension.searchEngine}
+            AND snapshot.region_code IN (${Prisma.join(regionCodes)})
+            AND snapshot.device::text = ${dimension.device}
+            AND snapshot.position_tracking_enabled
+            AND snapshot.observed_at >= ${new Date(input.observedFrom)}
+            AND snapshot.observed_at < ${new Date(input.observedBefore)}
+          ORDER BY snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date,
+            snapshot.observed_at DESC, snapshot.id DESC
+        `
+      : Prisma.sql`
+          SELECT DISTINCT ON (
+            snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date
+          ) snapshot.keyword_id, snapshot.id, snapshot.observed_at,
+            snapshot.found, snapshot.position
+          FROM rank_snapshots snapshot
+          JOIN configurations configuration
+            ON configuration.context_id = snapshot.tracking_context_id
+           AND configuration.configuration_version = snapshot.configuration_version
+          JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
+          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
+            AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.position_tracking_enabled
+            AND snapshot.observed_at >= ${new Date(input.observedFrom)}
+            AND snapshot.observed_at < ${new Date(input.observedBefore)}
+            ${visibleSnapshotPredicate(scope, dimension, "snapshot")}
+          ORDER BY snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date,
+            snapshot.observed_at DESC, snapshot.id DESC
+        `;
     return this.prisma.$queryRaw<PositionKeywordRow[]>(Prisma.sql`
       WITH configurations AS MATERIALIZED (
         SELECT context_id, configuration_version
@@ -514,26 +570,7 @@ export class RankWorkbenchService {
         FROM keywords keyword
         WHERE ${Prisma.join(filters, " AND ")}
       ), daily_candidates AS MATERIALIZED (
-        SELECT DISTINCT ON (
-          snapshot.keyword_id,
-          (snapshot.observed_at AT TIME ZONE 'UTC')::date
-        ) snapshot.keyword_id, snapshot.id, snapshot.observed_at,
-          snapshot.manifest_id,
-          snapshot.found, snapshot.position
-        FROM rank_snapshots snapshot
-        JOIN configurations configuration
-          ON configuration.context_id = snapshot.tracking_context_id
-         AND configuration.configuration_version = snapshot.configuration_version
-        JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
-        WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
-          AND snapshot.project_id = ${scope.projectId}::uuid
-          AND snapshot.position_tracking_enabled
-          AND snapshot.observed_at >= ${new Date(input.observedFrom)}
-          AND snapshot.observed_at < ${new Date(input.observedBefore)}
-          ${visibleSnapshotPredicate(scope, dimension, "snapshot")}
-        ORDER BY snapshot.keyword_id,
-          (snapshot.observed_at AT TIME ZONE 'UTC')::date,
-          snapshot.observed_at DESC, snapshot.id DESC
+        ${dailyCandidates}
       ), candidates AS MATERIALIZED (
         SELECT daily_candidates.*,
           row_number() OVER (
@@ -776,6 +813,51 @@ export class RankWorkbenchService {
     sourceDimensions: readonly SemanticRankDimension[]
   ): Promise<TrendRow[]> {
     const filters = keywordFilters(scope, input);
+    const regionCodes = [...new Set(sourceDimensions.map(({ regionCode }) => regionCode))];
+    const latestDaily = input.mode === "AI"
+      ? Prisma.sql`
+          SELECT DISTINCT ON (
+            snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date
+          ) snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date AS day,
+            snapshot.site_found AS found, snapshot.position
+          FROM ai_answer_snapshots snapshot
+          JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
+          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
+            AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.search_engine::text = ${dimension.searchEngine}
+            AND snapshot.region_code IN (${Prisma.join(regionCodes)})
+            AND snapshot.device::text = ${dimension.device}
+            AND snapshot.position_tracking_enabled
+            AND snapshot.observed_at >= ${new Date(input.observedFrom)}
+            AND snapshot.observed_at < ${new Date(input.observedBefore)}
+          ORDER BY snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date,
+            snapshot.observed_at DESC, snapshot.id DESC
+        `
+      : Prisma.sql`
+          SELECT DISTINCT ON (
+            snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date
+          ) snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date AS day,
+            snapshot.found, snapshot.position
+          FROM rank_snapshots snapshot
+          JOIN configurations configuration
+            ON configuration.context_id = snapshot.tracking_context_id
+           AND configuration.configuration_version = snapshot.configuration_version
+          JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
+          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
+            AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.position_tracking_enabled
+            AND snapshot.observed_at >= ${new Date(input.observedFrom)}
+            AND snapshot.observed_at < ${new Date(input.observedBefore)}
+            ${visibleSnapshotPredicate(scope, dimension, "snapshot")}
+          ORDER BY snapshot.keyword_id,
+            (snapshot.observed_at AT TIME ZONE 'UTC')::date,
+            snapshot.observed_at DESC, snapshot.id DESC
+        `;
     return this.prisma.$queryRaw<TrendRow[]>(Prisma.sql`
       WITH configurations AS MATERIALIZED (
         SELECT context_id, configuration_version
@@ -787,26 +869,7 @@ export class RankWorkbenchService {
         SELECT keyword.id FROM keywords keyword
         WHERE ${Prisma.join(filters, " AND ")}
       ), latest_daily AS MATERIALIZED (
-        SELECT DISTINCT ON (
-          snapshot.keyword_id,
-          (snapshot.observed_at AT TIME ZONE 'UTC')::date
-        ) snapshot.keyword_id,
-          (snapshot.observed_at AT TIME ZONE 'UTC')::date AS day,
-          snapshot.found, snapshot.position
-        FROM rank_snapshots snapshot
-        JOIN configurations configuration
-          ON configuration.context_id = snapshot.tracking_context_id
-         AND configuration.configuration_version = snapshot.configuration_version
-        JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
-        WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
-          AND snapshot.project_id = ${scope.projectId}::uuid
-          AND snapshot.position_tracking_enabled
-          AND snapshot.observed_at >= ${new Date(input.observedFrom)}
-          AND snapshot.observed_at < ${new Date(input.observedBefore)}
-          ${visibleSnapshotPredicate(scope, dimension, "snapshot")}
-        ORDER BY snapshot.keyword_id,
-          (snapshot.observed_at AT TIME ZONE 'UTC')::date,
-          snapshot.observed_at DESC, snapshot.id DESC
+        ${latestDaily}
       )
       SELECT day, count(*)::bigint AS measured,
         count(*) FILTER (WHERE found)::bigint AS found,
@@ -1111,6 +1174,7 @@ function deletionResult(
 
 function positionFilterHash(input: RankPositionReportInput): string {
   return filterHash({
+    mode: input.mode,
     dimensionKey: input.dimensionKey,
     observedFrom: input.observedFrom,
     observedBefore: input.observedBefore,

@@ -1165,6 +1165,7 @@ export class KeywordService {
           { id: "desc" }
         ],
         distinct: ["searchEngine", "regionCode", "device"],
+        take: 240,
         select: {
           id: true,
           searchEngine: true,

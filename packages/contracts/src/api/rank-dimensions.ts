@@ -13,6 +13,7 @@ export interface SemanticRankDimension {
 
 export interface SemanticRankDimensionCatalog {
   readonly dimensions: readonly SemanticRankDimension[];
+  readonly aiDimensions?: readonly SemanticRankDimension[];
   readonly truncated: boolean;
 }
 
@@ -124,15 +125,29 @@ export function parseSemanticRankComparisonInput(value: unknown): SemanticRankCo
 /** Rebuild trusted responses through an allowlist before exposing them to Web. */
 export function parseSemanticRankDimensionCatalog(value: unknown): SemanticRankDimensionCatalog {
   const input = record(value);
-  if (!Array.isArray(input.dimensions) || input.dimensions.length > 2_000 || typeof input.truncated !== "boolean") throw new TypeError("Invalid dimension catalog");
+  if (!Array.isArray(input.dimensions) || input.dimensions.length > 2_000 ||
+    (input.aiDimensions !== undefined && (!Array.isArray(input.aiDimensions) || input.aiDimensions.length > 2_000)) ||
+    typeof input.truncated !== "boolean") throw new TypeError("Invalid dimension catalog");
+  const dimensions = rankDimensionCatalogItems(input.dimensions);
+  const aiDimensions = input.aiDimensions === undefined
+    ? undefined
+    : rankDimensionCatalogItems(input.aiDimensions);
+  return {
+    dimensions,
+    ...(aiDimensions === undefined ? {} : { aiDimensions }),
+    truncated: input.truncated
+  };
+}
+
+function rankDimensionCatalogItems(values: readonly unknown[]): readonly SemanticRankDimension[] {
   const seen = new Set<string>();
-  return { truncated: input.truncated, dimensions: input.dimensions.map(value => {
+  return values.map(value => {
     const item = record(value), dimension = parseSemanticRankDimensionKey(item.key);
     if (!dimension || seen.has(dimension.key) || ["searchEngine", "countryCode", "regionCode", "language", "device"].some(key => item[key] !== dimension[key as keyof SemanticRankDimension])) throw new TypeError("Invalid dimension");
     seen.add(dimension.key);
     const regionLabel = optionalText(item.regionLabel, 160);
     return { ...dimension, ...(regionLabel === undefined ? {} : { regionLabel }) };
-  }) };
+  });
 }
 
 export function parseSemanticRankComparisonItems(value: unknown, scope: SemanticRankComparisonInput): readonly SemanticRankComparisonItem[] {

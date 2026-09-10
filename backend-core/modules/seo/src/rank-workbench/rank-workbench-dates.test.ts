@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rankWorkbenchReportDates } from "./rank-workbench.service.js";
+import type { PrismaService } from "../database/prisma.service.js";
+import {
+  RankWorkbenchService,
+  rankWorkbenchReportDates
+} from "./rank-workbench.service.js";
 
 test("returns only observed days for a short ranking range", () => {
   assert.deepEqual(
@@ -49,3 +53,44 @@ test("uses observed days directly when a long range has no more than the limit",
 
   assert.deepEqual(dates, ["2026-08-08", "2025-10-10"]);
 });
+
+test("reads AI position mode only from immutable AI snapshots", async () => {
+  const queries: unknown[] = [];
+  const service = new RankWorkbenchService({
+    $queryRaw: async (query: unknown) => {
+      queries.push(query);
+      return [];
+    },
+    rankDimensionMerge: { findMany: async () => [] }
+  } as unknown as PrismaService);
+
+  const report = await service.positions(
+    {
+      workspaceId: "01900000-0000-7000-8000-000000000001",
+      projectId: "01900000-0000-7000-8000-000000000002"
+    },
+    {
+      mode: "AI",
+      dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+      observedFrom: "2026-08-01T00:00:00.000Z",
+      observedBefore: "2026-09-11T00:00:00.000Z",
+      dateLimit: 31,
+      limit: 100,
+      sort: "QUERY_ASC"
+    }
+  );
+
+  assert.equal(report.rows.length, 0);
+  assert.equal(queries.length, 2);
+  for (const query of queries) {
+    const text = sqlText(query);
+    assert.match(text, /FROM ai_answer_snapshots snapshot/u);
+    assert.doesNotMatch(text, /FROM rank_snapshots snapshot/u);
+  }
+});
+
+function sqlText(value: unknown): string {
+  const strings = (value as { readonly strings?: readonly string[] }).strings;
+  assert.ok(strings);
+  return strings.join(" ");
+}

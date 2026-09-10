@@ -5273,6 +5273,15 @@ export function SemanticCoreTable({
           currentUserId={currentUserId}
           item={focusedKeyword}
           onClose={() => setRightSidebar(undefined)}
+          onCollect={(collection) => {
+            setCheckedIds(new Set([focusedKeyword.id]));
+            if (collection === "POSITIONS") setPositionDialogOpen(true);
+            if (collection === "AI_POSITIONS") setAiAnswerDialogOpen(true);
+            if (collection === "SERP") setCompetitorDialogOpen(true);
+            if (collection === "AI_SERP") setAiCompetitorDialogOpen(true);
+            if (collection === "FREQUENCY") setFrequencyDialogOpen(true);
+            if (collection === "SEASONALITY") setSeasonalityDialogOpen(true);
+          }}
           onEdit={() => openEdit(focusedKeyword)}
           onFrequencyDeleted={() =>
             setRetryVersion((value) => value + 1)

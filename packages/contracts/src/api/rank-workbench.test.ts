@@ -31,8 +31,10 @@ test("parses a bounded daily position report command", () => {
     groupIds: [keywordId],
     search: "  купить   бетон ",
     limit: 100,
-    sort: "CHANGE_DESC"
+    sort: "CHANGE_DESC",
+    mode: "AI"
   }), {
+    mode: "AI",
     dimensionKey,
     observedFrom: "2026-08-01T00:00:00.000Z",
     observedBefore: "2026-09-01T00:00:00.000Z",
@@ -42,6 +44,23 @@ test("parses a bounded daily position report command", () => {
     limit: 100,
     sort: "CHANGE_DESC"
   });
+  assert.equal(parseRankPositionReportInput({
+    dimensionKey,
+    observedFrom: "2026-08-01T00:00:00.000Z",
+    observedBefore: "2026-09-01T00:00:00.000Z",
+    dateLimit: 31,
+    limit: 100,
+    sort: "QUERY_ASC"
+  }).mode, "SEO");
+  assert.throws(() => parseRankPositionReportInput({
+    dimensionKey,
+    observedFrom: "2026-08-01T00:00:00.000Z",
+    observedBefore: "2026-09-01T00:00:00.000Z",
+    dateLimit: 31,
+    limit: 100,
+    sort: "QUERY_ASC",
+    mode: "BOTH"
+  }));
 });
 
 test("rejects more than five SERP comparison dimensions", () => {

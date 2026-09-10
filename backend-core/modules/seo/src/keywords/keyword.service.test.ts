@@ -636,9 +636,10 @@ test("projects AI position changes across collection contexts", async () => {
   assert.equal(latestQueryWhere?.positionTrackingEnabled, true);
 });
 
-test("keeps competitor SERP evidence out of position history when projection is disabled", async () => {
+test("projects every SEO SERP slice and keeps competitor evidence out of position history", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000012";
   const contextId = "01900000-0000-7000-8000-000000000072";
+  const mobileContextId = "01900000-0000-7000-8000-000000000074";
   const service = new KeywordService(
     {
       keyword: {
@@ -650,22 +651,40 @@ test("keeps competitor SERP evidence out of position history when projection is 
       currentRank: { findMany: async () => [] },
       aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: {
-        findMany: async () => [{
-          id: "01900000-0000-7000-8000-000000000073",
-          trackingContextId: contextId,
-          configurationVersion: 2,
-          provider: "XMLSTOCK",
-          positionTrackingEnabled: false,
-          found: false,
-          position: null,
-          observedAt: new Date("2026-08-06T11:45:00.000Z"),
-          manifest: {
-            projectDomain: "example.com",
-            execution: {
-              providerMappingVersion: "xmlstock-yandex-live@2"
+        findMany: async () => [
+          {
+            id: "01900000-0000-7000-8000-000000000073",
+            trackingContextId: contextId,
+            configurationVersion: 2,
+            provider: "XMLSTOCK",
+            positionTrackingEnabled: false,
+            found: false,
+            position: null,
+            observedAt: new Date("2026-08-06T11:45:00.000Z"),
+            manifest: {
+              projectDomain: "example.com",
+              execution: {
+                providerMappingVersion: "xmlstock-yandex-live@2"
+              }
+            }
+          },
+          {
+            id: "01900000-0000-7000-8000-000000000075",
+            trackingContextId: mobileContextId,
+            configurationVersion: 1,
+            provider: "XMLSTOCK",
+            positionTrackingEnabled: false,
+            found: false,
+            position: null,
+            observedAt: new Date("2026-08-05T11:45:00.000Z"),
+            manifest: {
+              projectDomain: "example.com",
+              execution: {
+                providerMappingVersion: "xmlstock-yandex-live@2"
+              }
             }
           }
-        }]
+        ]
       },
       rankSerpResult: {
         findMany: async () => [
@@ -683,24 +702,47 @@ test("keeps competitor SERP evidence out of position history when projection is 
             rankingUrl: "https://example.com/result",
             title: null,
             snippet: null
+          },
+          {
+            snapshotId: "01900000-0000-7000-8000-000000000075",
+            position: 1,
+            rankingUrl: "https://mobile-competitor.example/result",
+            title: "Мобильный конкурент",
+            snippet: "Санкт-Петербург"
           }
         ]
       },
       trackingContext: {
-        findMany: async () => [{ id: contextId, name: "Яндекс · Москва" }]
+        findMany: async () => [
+          { id: contextId, name: "Яндекс · Москва" },
+          { id: mobileContextId, name: "Яндекс · Санкт-Петербург" }
+        ]
       },
       trackingContextVersion: {
-        findMany: async () => [{
-          contextId,
-          configurationVersion: 2,
-          searchEngine: "YANDEX",
-          device: "DESKTOP",
-          regionCode: "213",
-          regionLabel: "Москва",
-          countryCode: "RU",
-          language: "ru",
-          depth: 50
-        }]
+        findMany: async () => [
+          {
+            contextId,
+            configurationVersion: 2,
+            searchEngine: "YANDEX",
+            device: "DESKTOP",
+            regionCode: "213",
+            regionLabel: "Москва",
+            countryCode: "RU",
+            language: "ru",
+            depth: 50
+          },
+          {
+            contextId: mobileContextId,
+            configurationVersion: 1,
+            searchEngine: "YANDEX",
+            device: "MOBILE",
+            regionCode: "2",
+            regionLabel: "Санкт-Петербург",
+            countryCode: "RU",
+            language: "ru",
+            depth: 50
+          }
+        ]
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -709,30 +751,53 @@ test("keeps competitor SERP evidence out of position history when projection is 
   const result = await service.insights(workspaceId, projectId, keywordId);
 
   assert.deepEqual(result.positionHistory, []);
-  assert.deepEqual(result.competitorSnapshots, [{
-    snapshotId: "01900000-0000-7000-8000-000000000073",
-    trackingContextId: contextId,
-    contextName: "Яндекс · Москва",
-    searchEngine: "YANDEX",
-    countryCode: "RU",
-    regionCode: "213",
-    regionLabel: "Москва",
-    language: "ru",
-    device: "DESKTOP",
-    dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
-    searchSource: "LIVE",
-    provider: "XMLSTOCK",
-    observedAt: "2026-08-06T11:45:00.000Z",
-    results: [
-      {
+  assert.deepEqual(result.competitorSnapshots, [
+    {
+      snapshotId: "01900000-0000-7000-8000-000000000073",
+      trackingContextId: contextId,
+      contextName: "Яндекс · Москва",
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP",
+      dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+      searchSource: "LIVE",
+      provider: "XMLSTOCK",
+      observedAt: "2026-08-06T11:45:00.000Z",
+      results: [
+        {
+          position: 1,
+          url: "https://competitor.example/one",
+          faviconUrl: "https://search-assets.example/competitor.png",
+          title: "Конкурент"
+        },
+        { position: 2, url: "https://example.com/result" }
+      ]
+    },
+    {
+      snapshotId: "01900000-0000-7000-8000-000000000075",
+      trackingContextId: mobileContextId,
+      contextName: "Яндекс · Санкт-Петербург",
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "2",
+      regionLabel: "Санкт-Петербург",
+      language: "ru",
+      device: "MOBILE",
+      dimensionKey: "YANDEX|RU|2|ru|MOBILE",
+      searchSource: "LIVE",
+      provider: "XMLSTOCK",
+      observedAt: "2026-08-05T11:45:00.000Z",
+      results: [{
         position: 1,
-        url: "https://competitor.example/one",
-        faviconUrl: "https://search-assets.example/competitor.png",
-        title: "Конкурент"
-      },
-      { position: 2, url: "https://example.com/result" }
-    ]
-  }]);
+        url: "https://mobile-competitor.example/result",
+        title: "Мобильный конкурент",
+        snippet: "Санкт-Петербург"
+      }]
+    }
+  ]);
 });
 
 test("serializes a small seasonality share without exponent notation", async () => {
@@ -804,6 +869,7 @@ test("projects immutable AI history and latest source competitors into insights"
     observedAt
   };
   const aiQueries: Readonly<Record<string, unknown>>[] = [];
+  const aiTakes: Array<number | undefined> = [];
   const service = new KeywordService(
     {
       keyword: { findFirst: async () => ({ id: keywordId, note: null }) },
@@ -813,8 +879,15 @@ test("projects immutable AI history and latest source competitors into insights"
       currentRank: { findMany: async () => [] },
       rankSnapshot: { findMany: async () => [] },
       aiAnswerSnapshot: {
-        findMany: async ({ where }: { where: Readonly<Record<string, unknown>> }) => {
+        findMany: async ({
+          where,
+          take
+        }: {
+          where: Readonly<Record<string, unknown>>;
+          take?: number;
+        }) => {
           aiQueries.push(where);
+          aiTakes.push(take);
           return "sources" in where
             ? [{
                 id: snapshotId,
@@ -869,6 +942,7 @@ test("projects immutable AI history and latest source competitors into insights"
   }]);
   assert.equal(aiQueries[0]?.positionTrackingEnabled, true);
   assert.equal("positionTrackingEnabled" in (aiQueries[1] ?? {}), false);
+  assert.deepEqual(aiTakes, [240, 240]);
 });
 
 test("deletes only one tenant-scoped keyword frequency context", async () => {

@@ -36,7 +36,7 @@ export function SemanticKeywordAiPositionHistoryModal({
   keywordId: string;
   keywordText: string;
   onClose: () => void;
-  onOpenAiAnswer: () => void;
+  onOpenAiAnswer?: () => void;
   projectDomain: string;
   projectId: string;
 }>) {
@@ -152,7 +152,7 @@ export function SemanticKeywordAiPositionHistoryModal({
       bodyLayout="edge"
       description={uiText(dimensionKey ? "Все сохранённые ИИ-ответы и источники выбранного города и устройства." : "Все сохранённые ИИ-ответы и источники этого запроса.")}
       headerActions={<div className="semantic-ai-history-actions">
-        <button className="secondary-button" onClick={() => { onClose(); onOpenAiAnswer(); }} type="button"><UiText text="Открыть ИИ-ответ" /></button>
+        {onOpenAiAnswer && <button className="secondary-button" onClick={() => { onClose(); onOpenAiAnswer(); }} type="button"><UiText text="Открыть ИИ-ответ" /></button>}
         <label className="semantic-serp-movement-toggle" title={canShowMovement ? undefined : uiText("Для сравнения нужны минимум два съёма")}>
           <input checked={showMovement} disabled={!canShowMovement} onChange={(event) => { setShowMovement(event.target.checked); writeMovementPreference(currentUserId, event.target.checked); }} type="checkbox" />
           <UiText text="Показать движение" />
@@ -162,7 +162,7 @@ export function SemanticKeywordAiPositionHistoryModal({
       size="large"
       title={uiText("История ИИ-выдачи и конкурентов · {0}", [String(keywordText)])}
     >
-      <div className="semantic-position-history-full semantic-ai-position-history-full">
+      <div className="semantic-position-history-full semantic-ai-position-history-full semantic-serp-history-list">
         <header>
           <span><UiText text="Загружено записей:" after=" " /><strong>{items.length.toLocaleString(uiLocale)}</strong></span>
           <span><UiText text="Новые съёмы выше, старые ниже" /></span>

@@ -305,15 +305,17 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("rank-dimension-merge-create", "POST", "/projects/{projectId}/rank-workbench/dimension-merges", "positions:run", "Объединить совместимые срезы в представлении", "positions"),
   endpoint("rank-dimension-merge-remove", "POST", "/projects/{projectId}/rank-workbench/dimension-merges/{mergeId}/remove", "positions:run", "Удалить правило объединения срезов", "positions"),
   endpoint("rank-workbench-positions", "POST", "/projects/{projectId}/rank-workbench/positions", "positions:read", "Матрица позиций, URL, частотности и ИИ-позиций", "positions", {
-    request: "JSON: { dimensionKey, observedFrom, observedBefore, dateLimit: 2..31, groupIds?, search?, limit: 50|100|200, cursor?, sort }.",
-    response: "200 · data: { dimension, dates, summary, trend, rows, page }; rows содержат query, groupPath, targetUrl, frequencies и cells с position/rankingUrl/aiAnswer."
+    request: "JSON: { mode?: SEO|AI, dimensionKey, observedFrom, observedBefore, dateLimit: 2..31, groupIds?, search?, limit: 50|100|200, cursor?, sort }. Без mode используется SEO.",
+    response: "200 · data: { dimension, dates, summary, trend, rows, page }; dates, summary, trend и cells с position/rankingUrl относятся только к выбранному mode."
   }),
   endpoint("rank-workbench-serp", "POST", "/projects/{projectId}/rank-workbench/serp", "positions:read", "Сравнить обычную и ИИ-выдачу до пяти срезов", "positions", {
     request: "JSON: { dimensionKeys: string[1..5], groupIds?, search?, limit: 50|100|200, cursor? }.",
     response: "200 · data: { dimensions, rows, page }; каждая строка содержит snapshots и aiSnapshots с position, URL, title, snippet и faviconUrl."
   }),
   endpoint("rank-dimension-history-delete", "POST", "/projects/{projectId}/rank-workbench/delete-dimension-history", "positions:run", "Исключить старую историю выбранного среза", "positions"),
-  endpoint("rank-dimensions", "GET", "/projects/{projectId}/keyword-ranks/dimensions", "positions:read", "Каталог поисковиков, городов и устройств", "positions"),
+  endpoint("rank-dimensions", "GET", "/projects/{projectId}/keyword-ranks/dimensions", "positions:read", "Каталог поисковиков, городов и устройств", "positions", {
+    response: "200 · data: { dimensions, aiDimensions?, truncated }; dimensions содержит SEO-срезы, aiDimensions — срезы с сохранёнными ИИ-позициями."
+  }),
   endpoint("rank-comparison", "POST", "/projects/{projectId}/keyword-ranks/comparison", "positions:read", "Сравнить позиции ключей по нескольким срезам", "positions"),
   endpoint("context-get", "GET", "/projects/{projectId}/tracking-contexts/{contextId}", "positions:read", "Получить контекст съёма", "positions"),
   endpoint("context-archive", "POST", "/projects/{projectId}/tracking-contexts/{contextId}/archive", "positions:run", "Архивировать контекст", "positions"),

@@ -13,7 +13,9 @@ class MemoryStorage {
 }
 
 const fallback: RankingsPreferences = {
-  dimensionKey: "",
+  mode: "SEO",
+  seoDimensionKey: "",
+  aiDimensionKey: "",
   groupId: "",
   dateFrom: "2026-08-27",
   dateThrough: "2026-09-09",
@@ -25,7 +27,9 @@ const fallback: RankingsPreferences = {
 test("keeps all ranking screen controls isolated by user and project", () => {
   const storage = new MemoryStorage();
   const saved: RankingsPreferences = {
-    dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+    mode: "AI",
+    seoDimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+    aiDimensionKey: "GOOGLE|RU|213|ru|MOBILE",
     groupId: "01900000-0000-7000-8000-000000000001",
     dateFrom: "2026-08-01",
     dateThrough: "2026-09-09",
@@ -41,4 +45,19 @@ test("keeps all ranking screen controls isolated by user and project", () => {
   });
   assert.deepEqual(readRankingsPreferences("project-a", "user-b", fallback, storage), fallback);
   assert.deepEqual(readRankingsPreferences("project-b", "user-a", fallback, storage), fallback);
+});
+
+test("migrates the old shared dimension into the SEO view", () => {
+  const storage = new MemoryStorage();
+  storage.setItem(
+    "seonorita:rankings-view:v1:user-a:project-a",
+    JSON.stringify({ dimensionKey: "YANDEX|RU|2|ru|MOBILE" })
+  );
+  assert.deepEqual(
+    readRankingsPreferences("project-a", "user-a", fallback, storage),
+    {
+      ...fallback,
+      seoDimensionKey: "YANDEX|RU|2|ru|MOBILE"
+    }
+  );
 });

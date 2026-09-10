@@ -392,23 +392,38 @@ test("validates safe interactive rank history metadata", () => {
       results: [],
       observedAt: "2026-08-19T11:45:00.000Z"
     }],
-    aiCompetitorSnapshots: [{
-      snapshotId: "01900000-0000-7000-8000-000000000009",
-      searchEngine: "YANDEX",
-      regionCode: "213",
-      device: "DESKTOP",
-      provider: "ARSENKIN",
-      observedAt: "2026-08-19T11:45:00.000Z",
-      results: [{
-        position: 1,
-        url: "https://competitor.example/ai",
-        title: "Источник ИИ",
-        snippet: "Описание источника"
-      }]
-    }]
+    aiCompetitorSnapshots: [
+      {
+        snapshotId: "01900000-0000-7000-8000-000000000009",
+        searchEngine: "YANDEX",
+        regionCode: "213",
+        device: "DESKTOP",
+        provider: "ARSENKIN",
+        observedAt: "2026-08-19T11:45:00.000Z",
+        results: [{
+          position: 1,
+          url: "https://competitor.example/ai",
+          title: "Источник ИИ",
+          snippet: "Описание источника"
+        }]
+      },
+      {
+        snapshotId: "01900000-0000-7000-8000-000000000010",
+        searchEngine: "YANDEX",
+        regionCode: "2",
+        device: "MOBILE",
+        provider: "ARSENKIN",
+        observedAt: "2026-08-18T11:45:00.000Z",
+        results: [{
+          position: 1,
+          url: "https://competitor.example/ai-mobile"
+        }]
+      }
+    ]
   }, keywordId);
   assert.equal(withAiHistory.aiPositionHistory?.[0]?.previousPosition, 5);
   assert.equal(withAiHistory.aiCompetitorSnapshots?.[0]?.results[0]?.position, 1);
+  assert.equal(withAiHistory.aiCompetitorSnapshots?.length, 2);
   const { searchSource: _searchSource, ...importedPoint } =
     insights.positionHistory[0]!;
   const imported = semanticKeywordInsights({

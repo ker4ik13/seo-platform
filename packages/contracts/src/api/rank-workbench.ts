@@ -27,6 +27,7 @@ export interface RankWorkbenchKeywordScope {
 }
 
 export interface RankPositionReportInput extends RankWorkbenchKeywordScope {
+  readonly mode: "SEO" | "AI";
   readonly dimensionKey: string;
   readonly observedFrom: string;
   readonly observedBefore: string;
@@ -203,7 +204,8 @@ export function parseRankPositionReportInput(
     "search",
     "limit",
     "cursor",
-    "sort"
+    "sort",
+    "mode"
   ]);
   const dimensionKey = rankDimensionKey(input.dimensionKey);
   const observedFrom = instant(input.observedFrom);
@@ -212,8 +214,12 @@ export function parseRankPositionReportInput(
   if (range <= 0 || range > 3 * 366 * 86_400_000) invalid();
   const dateLimit = integer(input.dateLimit, 2, rankWorkbenchMaxDates);
   const sort = member(input.sort, rankWorkbenchPositionSorts);
+  const mode = input.mode === undefined
+    ? "SEO"
+    : member(input.mode, ["SEO", "AI"] as const);
   return {
     ...keywordScope(input),
+    mode,
     dimensionKey,
     observedFrom,
     observedBefore,

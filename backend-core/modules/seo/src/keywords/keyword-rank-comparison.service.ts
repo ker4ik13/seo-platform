@@ -22,6 +22,7 @@ import { PrismaService } from "../database/prisma.service.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { rankHistorySearchSource } from "../rank-results/rank-serp-projection.js";
 import {
+  mergedAiRankDimensionCatalog,
   mergedRankDimensionCatalog,
   rankDimensionConfigurationPredicate,
   rankDimensionSources,
@@ -56,7 +57,15 @@ export class KeywordRankComparisonService {
   constructor(private readonly prisma: PrismaService) {}
 
   async catalog(scope: Scope): Promise<SemanticRankDimensionCatalog> {
-    return mergedRankDimensionCatalog(this.prisma, scope);
+    const [seo, ai] = await Promise.all([
+      mergedRankDimensionCatalog(this.prisma, scope),
+      mergedAiRankDimensionCatalog(this.prisma, scope)
+    ]);
+    return {
+      dimensions: seo.dimensions,
+      aiDimensions: ai.dimensions,
+      truncated: seo.truncated || ai.truncated
+    };
   }
 
   async mergeSettings(scope: Scope): Promise<RankDimensionMergeSettings> {
