@@ -5055,5 +5055,6 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Дубли из других групп добавятся в текущую открытую группу «{0}».": "Duplicates from other groups are added to the currently open group “{0}”.",
   "Сначала откройте обычную группу слева.": "Open a regular group on the left first.",
   "Сначала откройте обычную группу, чтобы добавлять дубли в неё.": "Open a regular group first to add duplicates to it.",
-  "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP добавляет существующую canonical keyword identity в duplicateGroupId (либо groupId), сохраняя прежние папки. groupId по-прежнему задаёт папку для новой строки.": "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP adds an existing canonical keyword identity to duplicateGroupId (or groupId) while keeping current folders. groupId still selects the folder for a new row."
+  "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP добавляет существующую canonical keyword identity в duplicateGroupId (либо groupId), сохраняя прежние папки. groupId по-прежнему задаёт папку для новой строки.": "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP adds an existing canonical keyword identity to duplicateGroupId (or groupId) while keeping current folders. groupId still selects the folder for a new row.",
+  "Сохранить группы": "Keep groups"
 };

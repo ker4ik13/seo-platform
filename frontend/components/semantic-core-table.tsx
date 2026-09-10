@@ -4770,7 +4770,7 @@ export function SemanticCoreTable({
                 >
                   {([
                     ["SKIP_PROJECT", "Не добавлять"],
-                    ["PRESERVE_FOLDERS", "Группы"],
+                    ["PRESERVE_FOLDERS", "Сохранить группы"],
                     ["CURRENT_GROUP", "В эту группу"]
                   ] as const).map(([mode, label]) => (
                     <button
