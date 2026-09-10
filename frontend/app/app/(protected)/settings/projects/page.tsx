@@ -44,6 +44,9 @@ export default async function SettingsProjectsPage() {
       ) : (
         <ProjectCatalog
           {...(context.project ? { activeProjectId: context.project.id } : {})}
+          {...(context.projectCapabilities
+            ? { capabilities: context.projectCapabilities }
+            : {})}
           projects={context.projects}
           workspace={workspace}
         />

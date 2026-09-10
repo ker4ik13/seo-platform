@@ -95,9 +95,16 @@ test("soft-deletes a versioned project and emits an auditable event", async () =
   const projectId = "01900000-0000-7000-8000-000000000020";
   const workspaceId = "01900000-0000-7000-8000-000000000021";
   const updates: unknown[] = [];
+  const memberAccessDeletes: unknown[] = [];
+  const tokenAccessDeletes: unknown[] = [];
+  let inviteCleanups = 0;
   const auditRecords: unknown[] = [];
   const outboxEvents: unknown[] = [];
   const transaction = {
+    $executeRaw: async () => {
+      inviteCleanups += 1;
+      return 1;
+    },
     project: {
       findUnique: async () => ({
         id: projectId,
@@ -113,6 +120,18 @@ test("soft-deletes a versioned project and emits an auditable event", async () =
     },
     projectTransferRequest: {
       findFirst: async () => null
+    },
+    projectMemberAccess: {
+      deleteMany: async (input: unknown) => {
+        memberAccessDeletes.push(input);
+        return { count: 2 };
+      }
+    },
+    apiTokenProjectAccess: {
+      deleteMany: async (input: unknown) => {
+        tokenAccessDeletes.push(input);
+        return { count: 1 };
+      }
     }
   };
   const service = new TenantService(
@@ -153,6 +172,11 @@ test("soft-deletes a versioned project and emits an auditable event", async () =
       status: { in: ["DRAFT", "ACTIVE", "ARCHIVED"] }
     }
   );
+  assert.deepEqual(memberAccessDeletes, [{ where: { projectId } }]);
+  assert.deepEqual(tokenAccessDeletes, [
+    { where: { projectId, workspaceId } }
+  ]);
+  assert.equal(inviteCleanups, 1);
   assert.equal(auditRecords.length, 1);
   assert.equal(
     (outboxEvents[0] as { eventType: string }).eventType,

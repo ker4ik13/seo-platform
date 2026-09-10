@@ -49,6 +49,13 @@ export class ApiTokenService {
       where: { workspaceId, createdBy: actorId, revokedAt: null },
       include: {
         projectAccesses: {
+          where: {
+            project: {
+              workspaceId,
+              status: { notIn: ["DELETING", "DELETED"] },
+              deletedAt: null
+            }
+          },
           orderBy: { projectId: "asc" },
           select: { projectId: true }
         }

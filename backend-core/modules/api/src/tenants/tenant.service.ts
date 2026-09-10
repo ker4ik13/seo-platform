@@ -911,6 +911,32 @@ export class TenantService {
         }
       });
       if (updated.count !== 1) throw this.versionConflict();
+      await transaction.projectMemberAccess.deleteMany({
+        where: { projectId }
+      });
+      await transaction.apiTokenProjectAccess.deleteMany({
+        where: { projectId, workspaceId: current.workspaceId }
+      });
+      await transaction.$executeRaw`
+        UPDATE workspace_invites AS invite
+        SET project_accesses = (
+              SELECT COALESCE(
+                jsonb_agg(entry.item ORDER BY entry.ordinality),
+                '[]'::jsonb
+              )
+              FROM jsonb_array_elements(invite.project_accesses)
+                WITH ORDINALITY AS entry(item, ordinality)
+              WHERE entry.item ->> 'projectId' <> ${projectId}
+            ),
+            updated_at = clock_timestamp()
+        WHERE invite.workspace_id = ${current.workspaceId}::uuid
+          AND invite.status IN ('SENT', 'DELIVERED')
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(invite.project_accesses) AS entry(item)
+            WHERE entry.item ->> 'projectId' = ${projectId}
+          )
+      `;
       await this.audit.record(
         {
           actorId: userId,

@@ -13,11 +13,13 @@ const tokenId = "01900000-0000-7000-8000-000000000003";
 
 test("lists only non-revoked API tokens owned by the current user", async () => {
   let receivedWhere: unknown;
+  let receivedInclude: unknown;
   const service = serviceWith(
     {
       apiToken: {
-        findMany: async (query: { where: unknown }) => {
+        findMany: async (query: { where: unknown; include: unknown }) => {
           receivedWhere = query.where;
+          receivedInclude = query.include;
           return [storedToken()];
         }
       }
@@ -46,6 +48,19 @@ test("lists only non-revoked API tokens owned by the current user", async () => 
     workspaceId,
     createdBy: actorId,
     revokedAt: null
+  });
+  assert.deepEqual(receivedInclude, {
+    projectAccesses: {
+      where: {
+        project: {
+          workspaceId,
+          status: { notIn: ["DELETING", "DELETED"] },
+          deletedAt: null
+        }
+      },
+      orderBy: { projectId: "asc" },
+      select: { projectId: true }
+    }
   });
 });
 

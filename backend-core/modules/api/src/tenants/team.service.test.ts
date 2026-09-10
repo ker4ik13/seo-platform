@@ -20,6 +20,8 @@ const OTHER_WORKSPACE_ID = "01900000-0000-7000-8000-000000000002";
 const USER_ID = "01900000-0000-7000-8000-000000000003";
 const INVITE_ID = "01900000-0000-7000-8000-000000000004";
 const ACCEPTED_MEMBER_ID = "01900000-0000-7000-8000-000000000005";
+const ACTIVE_PROJECT_ID = "01900000-0000-7000-8000-000000000006";
+const DELETED_PROJECT_ID = "01900000-0000-7000-8000-000000000007";
 const INVITE_TOKEN = "workspace-invite-test-token";
 const REQUEST_CONTEXT = { requestId: "team-service-test-request" } as const;
 const CONFIG = loadAppConfig({
@@ -62,6 +64,24 @@ test("paginates workspace members with an opaque tenant-bound keyset", async () 
   assert.equal(calls[0]?.take, 2);
   assert.deepEqual(calls[0]?.orderBy, { id: "desc" });
   assert.deepEqual(
+    (
+      calls[0]?.include as
+        | {
+            readonly projectAccesses?: {
+              readonly where?: unknown;
+            };
+          }
+        | undefined
+    )?.projectAccesses?.where,
+    {
+      project: {
+        workspaceId: WORKSPACE_ID,
+        status: { notIn: ["DELETING", "DELETED"] },
+        deletedAt: null
+      }
+    }
+  );
+  assert.deepEqual(
     (calls[1]?.where as Readonly<Record<string, unknown>> | undefined)?.id,
     { lt: newest.id }
   );
@@ -76,6 +96,79 @@ test("paginates workspace members with an opaque tenant-bound keyset", async () 
       error.fieldErrors?.[0]?.code === "INVALID_CURSOR"
   );
   assert.equal(calls.length, 2);
+});
+
+test("drops a deleted project override while updating a workspace member", async () => {
+  const stored = {
+    ...member(ACCEPTED_MEMBER_ID, "member@example.com"),
+    projectAccesses: [
+      projectAccess(ACTIVE_PROJECT_ID, "VIEWER")
+    ]
+  };
+  const createdAccesses: unknown[] = [];
+  const transaction = {
+    workspaceMember: {
+      updateMany: async () => ({ count: 1 }),
+      findUniqueOrThrow: async () => stored
+    },
+    projectMemberAccess: {
+      deleteMany: async () => ({ count: 2 }),
+      createMany: async (input: unknown) => {
+        createdAccesses.push(input);
+        return { count: 1 };
+      }
+    }
+  };
+  const prisma = {
+    project: {
+      findMany: async () => [
+        { id: ACTIVE_PROJECT_ID, status: "ACTIVE", deletedAt: null },
+        {
+          id: DELETED_PROJECT_ID,
+          status: "DELETED",
+          deletedAt: new Date("2026-09-10T08:00:00.000Z")
+        }
+      ]
+    },
+    workspaceMember: {
+      findFirst: async () => stored
+    },
+    $transaction: async <T>(
+      operation: (value: typeof transaction) => Promise<T>
+    ) => operation(transaction)
+  } as unknown as PrismaService;
+  const service = teamService(prisma);
+
+  const result = await service.updateMember(
+    USER_ID,
+    WORKSPACE_ID,
+    ACCEPTED_MEMBER_ID,
+    1,
+    {
+      roleCode: "ADMIN",
+      allProjects: true,
+      projectAccesses: [
+        { projectId: ACTIVE_PROJECT_ID, level: "VIEWER" },
+        { projectId: DELETED_PROJECT_ID, level: "NONE" }
+      ]
+    },
+    REQUEST_CONTEXT
+  );
+
+  assert.deepEqual(createdAccesses, [
+    {
+      data: [
+        {
+          memberId: ACCEPTED_MEMBER_ID,
+          projectId: ACTIVE_PROJECT_ID,
+          level: "VIEWER"
+        }
+      ]
+    }
+  ]);
+  assert.deepEqual(result.projectAccesses, [
+    { projectId: ACTIVE_PROJECT_ID, level: "VIEWER" }
+  ]);
 });
 
 test("lists only active unexpired pending invitations with a bounded page", async () => {
@@ -428,8 +521,8 @@ test("accepts a matching verified invitation in one authoritative transaction", 
 function teamService(prisma: PrismaService): TeamService {
   return new TeamService(
     prisma,
-    {} as AuditService,
-    {} as OutboxService,
+    { record: async () => undefined } as unknown as AuditService,
+    { event: async () => undefined } as unknown as OutboxService,
     new AuthCryptoService(CONFIG),
     CONFIG,
     permissiveEntitlements()
@@ -504,6 +597,21 @@ function invite(id: string, email: string): WorkspaceInvite {
     acceptedAt: null,
     declinedAt: null,
     revokedAt: null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function projectAccess(
+  projectId: string,
+  level: ProjectMemberAccess["level"]
+): ProjectMemberAccess {
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  return {
+    id: projectId,
+    projectId,
+    memberId: ACCEPTED_MEMBER_ID,
+    level,
     createdAt: now,
     updatedAt: now
   };

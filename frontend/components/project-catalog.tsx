@@ -106,7 +106,11 @@ export function ProjectCatalog({
             value={query}
           />
         </label>
-        <span>{visibleProjects.length} <UiText text="из" before=" " after=" " />{projects.length}</span>
+        <span>
+          {capabilities
+            ? <>{capabilities.creation.used} <UiText text="из" before=" " after=" " />{capabilities.creation.limit} <UiText text="проектов занято" before=" " /></>
+            : <>{visibleProjects.length} <UiText text="из" before=" " after=" " />{projects.length}</>}
+        </span>
         <button
           className="primary-button"
           disabled={!canCreate}

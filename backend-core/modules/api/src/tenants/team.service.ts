@@ -77,6 +77,13 @@ export class TeamService {
       include: {
         user: true,
         projectAccesses: {
+          where: {
+            project: {
+              workspaceId: normalizedWorkspaceId,
+              status: { notIn: ["DELETING", "DELETED"] },
+              deletedAt: null
+            }
+          },
           orderBy: { projectId: "asc" }
         }
       },
@@ -187,7 +194,11 @@ export class TeamService {
     assertUuid(workspaceId, "workspaceId");
     const emailNormalized = normalizeEmail(input.email);
     const emailDisplay = input.email.normalize("NFKC").trim();
-    await this.validateProjectAccesses(workspaceId, input.projectAccesses);
+    const projectAccesses = await this.availableProjectAccesses(
+      workspaceId,
+      input.projectAccesses,
+      input.allProjects
+    );
     await this.expireInvites(workspaceId);
 
     const existingUser = await this.prisma.user.findUnique({
@@ -245,7 +256,7 @@ export class TeamService {
               emailDisplay,
               roleCode: input.roleCode,
               allProjects: input.allProjects,
-              projectAccesses: input.projectAccesses.map(
+              projectAccesses: projectAccesses.map(
                 ({ projectId, level }) => ({ projectId, level })
               ),
               ...(input.message ? { message: input.message } : {}),
@@ -446,7 +457,11 @@ export class TeamService {
   ): Promise<WorkspaceMemberSummary> {
     assertUuid(workspaceId, "workspaceId");
     assertUuid(memberId, "memberId");
-    await this.validateProjectAccesses(workspaceId, input.projectAccesses);
+    const projectAccesses = await this.availableProjectAccesses(
+      workspaceId,
+      input.projectAccesses,
+      input.allProjects
+    );
 
     const current = await this.prisma.workspaceMember.findFirst({
       where: { id: memberId, workspaceId }
@@ -475,9 +490,9 @@ export class TeamService {
       await transaction.projectMemberAccess.deleteMany({
         where: { memberId }
       });
-      if (input.projectAccesses.length) {
+      if (projectAccesses.length) {
         await transaction.projectMemberAccess.createMany({
-          data: input.projectAccesses.map(({ projectId, level }) => ({
+          data: projectAccesses.map(({ projectId, level }) => ({
             memberId,
             projectId,
             level
@@ -828,7 +843,16 @@ export class TeamService {
         where: { id: member.id },
         include: {
           user: true,
-          projectAccesses: { orderBy: { projectId: "asc" } }
+          projectAccesses: {
+            where: {
+              project: {
+                workspaceId: invite.workspaceId,
+                status: { notIn: ["DELETING", "DELETED"] },
+                deletedAt: null
+              }
+            },
+            orderBy: { projectId: "asc" }
+          }
         }
       });
       if (!summary) throw this.memberNotFound();
@@ -875,19 +899,19 @@ export class TeamService {
     return databaseClock(transaction);
   }
 
-  private async validateProjectAccesses(
+  private async availableProjectAccesses(
     workspaceId: string,
-    assignments: readonly ProjectAccessAssignment[]
-  ): Promise<void> {
-    if (!assignments.length) return;
+    assignments: readonly ProjectAccessAssignment[],
+    allProjects: boolean
+  ): Promise<readonly ProjectAccessAssignment[]> {
+    if (!assignments.length) return assignments;
     const projectIds = assignments.map(({ projectId }) => projectId);
     const projects = await this.prisma.project.findMany({
       where: {
         id: { in: projectIds },
-        workspaceId,
-        status: { notIn: ["DELETING", "DELETED"] }
+        workspaceId
       },
-      select: { id: true }
+      select: { id: true, status: true, deletedAt: true }
     });
     if (projects.length !== projectIds.length) {
       throw validationError(
@@ -896,6 +920,28 @@ export class TeamService {
         "One or more projects are unavailable in this workspace"
       );
     }
+    const deletedIds = new Set(
+      projects
+        .filter(
+          ({ status, deletedAt }) =>
+            deletedAt !== null || ["DELETING", "DELETED"].includes(status)
+        )
+        .map(({ id }) => id)
+    );
+    const available = assignments.filter(
+      ({ projectId }) => !deletedIds.has(projectId)
+    );
+    if (
+      !allProjects &&
+      !available.some(({ level }) => level !== "NONE")
+    ) {
+      throw validationError(
+        "projectAccesses",
+        "PROJECT_ACCESS_REQUIRED",
+        "Select at least one accessible project"
+      );
+    }
+    return available;
   }
 
   private async expireInvites(
@@ -957,6 +1003,13 @@ export class TeamService {
       include: {
         user: true,
         projectAccesses: {
+          where: {
+            project: {
+              workspaceId,
+              status: { notIn: ["DELETING", "DELETED"] },
+              deletedAt: null
+            }
+          },
           orderBy: { projectId: "asc" }
         }
       }
