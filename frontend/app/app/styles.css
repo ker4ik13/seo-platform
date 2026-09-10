@@ -1312,8 +1312,7 @@ svg { display: block; }
 .semantic-query-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-query-actions { align-items: center; display: inline-flex; flex: 0 0 auto; gap: 4px; overflow: visible; }
 .semantic-query-actions .semantic-keyword-note-indicator,
-.semantic-query-actions .semantic-keyword-rank-indicator,
-.semantic-query-actions .semantic-keyword-ai-indicator {
+.semantic-query-actions .semantic-keyword-rank-indicator {
   margin-left: 0;
   vertical-align: middle;
 }
@@ -2706,9 +2705,62 @@ svg { display: block; }
 .semantic-editor-check { align-content: center; align-items: center; display: flex !important; grid-column: 1 / -1; grid-template-columns: auto 1fr; padding-top: 4px; }
 .semantic-editor-check input { accent-color: var(--accent); height: 16px; width: 16px; }
 .semantic-editor-check > span { color: var(--text) !important; font-size: 11px !important; letter-spacing: 0 !important; text-transform: none !important; }
-.semantic-editor-deduplicate > span { display: grid; gap: 2px; }
-.semantic-editor-deduplicate strong { font-size: 11px; line-height: 1.3; }
-.semantic-editor-deduplicate small { color: var(--muted); font-size: 9px; font-weight: 500; line-height: 1.4; }
+.semantic-duplicate-mode-field {
+  display: grid;
+  gap: 7px;
+  grid-column: 1 / -1;
+}
+.semantic-duplicate-mode-field > span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.semantic-duplicate-mode-switch {
+  background: #f0eff6;
+  border: 1px solid #e2e0eb;
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 3px;
+}
+.semantic-duplicate-mode-switch > button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #73798a;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  min-height: 34px;
+  padding: 5px 8px;
+}
+.semantic-duplicate-mode-switch > button.active {
+  background: #fff;
+  border-color: #a99ef8;
+  box-shadow: 0 1px 4px rgba(64, 50, 160, .08);
+  color: var(--brand-dark);
+}
+.semantic-duplicate-mode-description {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+  min-height: 26px;
+}
+.semantic-duplicate-select-all {
+  align-items: center !important;
+  display: flex !important;
+  gap: 7px !important;
+}
+.semantic-duplicate-select-all > span {
+  color: var(--text) !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
 .semantic-manual-duplicate-review {
   border-top: 1px solid var(--line);
   display: grid;
@@ -5582,6 +5634,39 @@ svg { display: block; }
 .semantic-inspector-tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .semantic-inspector-tags span { background: #f1f0f7; border-radius: 5px; color: var(--muted); font-size: 9px; padding: 4px 6px; }
 .semantic-inspector-overview-tags .semantic-inspector-tags { justify-content: flex-end; }
+.semantic-inspector-overview-groups { align-items: start !important; }
+.semantic-inspector-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+.semantic-inspector-group-list > span {
+  align-items: center;
+  background: #f5f4fa;
+  border: 1px solid #e5e3ed;
+  border-radius: 6px;
+  color: #4e5361;
+  display: inline-flex;
+  font-size: 9px;
+  gap: 5px;
+  line-height: 1.3;
+  max-width: 100%;
+  padding: 4px 6px;
+  text-align: left;
+}
+.semantic-inspector-group-list > span > i {
+  border-radius: 2px;
+  flex: 0 0 4px;
+  height: 14px;
+  width: 4px;
+}
+.semantic-inspector-group-list > em {
+  color: var(--muted);
+  font-size: 8px;
+  font-style: normal;
+  padding: 3px 1px;
+}
 .semantic-frequency-list { display: grid; gap: 0; }
 .semantic-frequency-row {
   align-items: center;
@@ -6541,6 +6626,30 @@ svg { display: block; }
   min-block-size: 16px;
   min-inline-size: 16px;
 }
+.semantic-table tbody td.semantic-select-cell {
+  overflow: visible;
+  position: relative;
+}
+.semantic-keyword-duplicate-indicator {
+  align-items: center;
+  background: #eeeaff;
+  border: 1px solid #d8d1ff;
+  border-radius: 6px;
+  color: var(--brand);
+  display: inline-flex;
+  gap: 2px;
+  min-height: 18px;
+  padding: 2px 4px;
+  pointer-events: none;
+  position: absolute;
+  left: calc(50% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  z-index: 3;
+}
+.semantic-keyword-duplicate-indicator svg { height: 10px; width: 10px; }
+.semantic-keyword-duplicate-indicator b { font-size: 8px; line-height: 1; }
 .semantic-table.has-row-numbers .semantic-row-number-cell {
   color: #8a909d;
   font-variant-numeric: tabular-nums;
@@ -6597,12 +6706,23 @@ svg { display: block; }
   min-width: 62px;
   width: 62px;
 }
-.semantic-table .semantic-select-header { padding-inline: 7px; }
+.semantic-table .semantic-select-header {
+  overflow: hidden;
+  padding-inline: 7px;
+  z-index: 5;
+}
 .semantic-header-selection-controls {
   align-items: center;
   display: inline-flex;
   gap: 6px;
   justify-content: center;
+  position: static;
+  vertical-align: middle;
+}
+.semantic-header-selection-controls > input {
+  inset: auto;
+  position: static;
+  transform: none;
 }
 .semantic-table .semantic-highlight-selector:not(:checked) {
   background-image: linear-gradient(var(--brand), var(--brand));
@@ -12093,30 +12213,6 @@ svg { display: block; }
 }
 
 /* AI answer collection and saved semantic views */
-.semantic-keyword-ai-indicator {
-  align-items: center;
-  aspect-ratio: 1;
-  background: linear-gradient(135deg, #ede9ff, #e4f5ff);
-  border: 0;
-  border-radius: 6px;
-  color: #6548ef;
-  cursor: pointer;
-  display: inline-flex;
-  height: 20px;
-  justify-content: center;
-  margin-left: 5px;
-  min-height: 20px;
-  min-width: 20px;
-  padding: 0;
-  vertical-align: -5px;
-  width: 20px;
-}
-.semantic-keyword-ai-indicator svg { height: 13px; pointer-events: none; width: 13px; }
-.semantic-keyword-ai-indicator:hover,
-.semantic-keyword-ai-indicator:focus-visible {
-  box-shadow: inset 0 0 0 2px rgba(101, 72, 239, .25);
-  outline: 0;
-}
 .semantic-ai-column-header > svg:not(.search-engine-logo) { color: #6548ef; height: 12px; width: 12px; }
 .semantic-ai-answer-absent { color: var(--muted); font-size: 9px; white-space: nowrap; }
 .semantic-ai-site-not-found { color: #e5484d; font-size: 15px; font-weight: 800; }
@@ -15048,52 +15144,35 @@ svg { display: block; }
 }
 .semantic-keyword-note {
   align-content: start;
+  gap: 6px;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: calc(100% - 139px);
+  padding: 8px !important;
 }
+.semantic-keyword-note > h3 { font-size: 12px; margin: 0; }
 .semantic-keyword-note form {
-  background: #fff;
-  border: 1px solid #e3e3eb;
-  border-radius: 11px;
-  gap: 0;
-  overflow: hidden;
-}
-.semantic-keyword-note form textarea {
+  background: transparent;
   border: 0;
   border-radius: 0;
+  gap: 6px;
+  overflow: visible;
+}
+.semantic-keyword-note form textarea {
+  background: #fff;
+  border: 1px solid #dfe1e9;
+  border-radius: 8px;
   min-height: 360px;
-  padding: 12px;
+  padding: 8px;
   resize: vertical;
 }
 .semantic-keyword-note form textarea:focus-visible {
-  box-shadow: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(91, 61, 245, .1);
   outline: 0;
 }
-.semantic-note-toolbar {
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  gap: 2px;
-  min-height: 36px;
-  padding: 4px 7px;
-}
-.semantic-note-toolbar > button {
-  align-items: center;
-  background: transparent;
-  border-radius: 6px;
-  color: #626a7b;
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 800;
-  height: 27px;
-  justify-content: center;
-  width: 27px;
-}
-.semantic-note-toolbar > button:hover { background: #f0edff; color: var(--brand); }
-.semantic-note-toolbar > button svg { height: 13px; width: 13px; }
 .semantic-note-footer {
-  border-top: 1px solid var(--line);
-  padding: 8px;
+  border-top: 0;
+  padding: 0;
 }
 .semantic-keyword-note .semantic-note-footer .primary-button {
   min-height: 32px;

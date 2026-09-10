@@ -29,10 +29,16 @@ export function internalCreateSemanticKeywordInput(
     ...scopeFields(),
     "entitlement",
     "duplicatePolicy",
+    "duplicateGroupId",
     ...editableFields()
   ]);
   const intent = optionalIntent(input.intent, false).intent;
   const groupId = optionalGroupId(input.groupId, false).groupId;
+  const duplicateGroupId = optionalGroupId(
+    input.duplicateGroupId,
+    false,
+    "duplicateGroupId"
+  ).groupId;
   const clusterId = optionalClusterId(input.clusterId, false).clusterId;
   const targetUrl = optionalTargetUrl(input.targetUrl, false).targetUrl;
   return {
@@ -49,6 +55,7 @@ export function internalCreateSemanticKeywordInput(
         : booleanValue(input.isTracked, "isTracked"),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(duplicateGroupId ? { duplicateGroupId } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(targetUrl ? { targetUrl } : {}),
     tagNames: tagNames(input.tagNames),
@@ -86,7 +93,8 @@ export function internalSemanticKeywordBulkCreateInput(
     items: input.items.map((value) => {
       const item = exactRecord(value, [
         ...editableFields(),
-        "duplicatePolicy"
+        "duplicatePolicy",
+        "duplicateGroupId"
       ]);
       const itemPolicy = item.duplicatePolicy === undefined
         ? policy
@@ -458,11 +466,12 @@ function optionalIntent(
 
 function optionalGroupId(
   value: unknown,
-  nullable: boolean
+  nullable: boolean,
+  path = "groupId"
 ): Readonly<{ groupId?: string | null }> {
   if (value === undefined) return {};
   if (value === null && nullable) return { groupId: null };
-  return { groupId: uuid(value, "groupId") };
+  return { groupId: uuid(value, path) };
 }
 
 function optionalClusterId(

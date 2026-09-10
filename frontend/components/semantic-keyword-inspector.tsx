@@ -144,7 +144,6 @@ export function SemanticKeywordInspector({
   const [targetUrlError, setTargetUrlError] = useState<string>();
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const noteDirtyRef = useRef(false);
-  const noteInputRef = useRef<HTMLTextAreaElement>(null);
   const presenceKeyPrefix = `semantic-keyword-inspector:${item.id}`;
 
   useEffect(() => {
@@ -479,29 +478,6 @@ export function SemanticKeywordInspector({
     onClose();
   }
 
-  function insertNoteMarkup(
-    prefix: string,
-    suffix = prefix,
-    placeholder = "текст"
-  ): void {
-    const input = noteInputRef.current;
-    if (!input || item.trashed || savingNote) return;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    const selected = note.slice(start, end) || placeholder;
-    const next = `${note.slice(0, start)}${prefix}${selected}${suffix}${note.slice(end)}`;
-    setNote(next);
-    setNoteDirty(true);
-    setNoteStatus(undefined);
-    window.requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(
-        start + prefix.length,
-        start + prefix.length + selected.length
-      );
-    });
-  }
-
   async function saveNote(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (savingNote || item.trashed) return;
@@ -626,6 +602,21 @@ export function SemanticKeywordInspector({
     }
   }
 
+  const inspectorGroups: readonly Readonly<{
+    id: string;
+    name: string;
+    path: string;
+    color?: string;
+  }>[] = insights
+    ? insights.groups
+    : item.groupPath
+      ? [{
+          id: `${item.id}:primary-group`,
+          name: visibleGroupPath(item.groupPath),
+          path: visibleGroupPath(item.groupPath)
+        }]
+      : [];
+
   return (
     <aside
       aria-label={uiText("Детали запроса {0}", [String(item.textOriginal)])}
@@ -734,7 +725,31 @@ export function SemanticKeywordInspector({
           <h3><UiText text="Параметры запроса" /></h3>
           <dl>
             <div><dt><UiText text="Интент" /></dt><dd><span className="semantic-intent-chip">{<UiText text={intentLabel(item.intent) ?? ""} />}</span></dd></div>
-            <div><dt><UiText text="Группа" /></dt><dd>{visibleGroupPath(item.groupPath)}</dd></div>
+            <div className="semantic-inspector-overview-groups">
+              <dt><UiText text="Папки" /></dt>
+              <dd>
+                {inspectorGroups.length > 0 ? (
+                  <span className="semantic-inspector-group-list">
+                    {inspectorGroups.map((group) => (
+                      <span key={group.id} title={group.path}>
+                        <i
+                          aria-hidden="true"
+                          style={{ backgroundColor: group.color ?? "#a8a5b8" }}
+                        />
+                        {group.path}
+                      </span>
+                    ))}
+                    {insights?.groupsTruncated && (
+                      <em><UiText text="Показана часть папок" /></em>
+                    )}
+                  </span>
+                ) : (
+                  <span className="semantic-inspector-muted">
+                    <UiText text="Без группы" />
+                  </span>
+                )}
+              </dd>
+            </div>
             <div><dt><UiText text="Кластер" /></dt><dd>{item.clusterName ?? <UiText text="Не назначен" />}</dd></div>
             <div><dt><UiText text="Язык" /></dt><dd>{item.language.toUpperCase()}</dd></div>
             <div><dt><UiText text="Отслеживание" /></dt><dd>{item.isTracked ? <UiText text="Включено" /> : <UiText text="Выключено" />}</dd></div>
@@ -1175,14 +1190,6 @@ export function SemanticKeywordInspector({
         >
           <h3><UiText text="Заметка" /></h3>
           <form onSubmit={(event) => void saveNote(event)}>
-            {!item.trashed && (
-              <div aria-label={uiText("Форматирование заметки")} className="semantic-note-toolbar" role="toolbar">
-                <button aria-label={uiText("Жирный текст")} onClick={() => insertNoteMarkup("**")} type="button">B</button>
-                <button aria-label={uiText("Курсив")} onClick={() => insertNoteMarkup("_")} type="button"><em>I</em></button>
-                <button aria-label={uiText("Список")} onClick={() => insertNoteMarkup("- ", "", "пункт")} type="button"><Icon name="list" /></button>
-                <button aria-label={uiText("Ссылка")} onClick={() => insertNoteMarkup("[", "](https://)", "ссылка")} type="button"><Icon name="link" /></button>
-              </div>
-            )}
             <textarea
               disabled={item.trashed || savingNote}
               onChange={(event) => {
@@ -1191,7 +1198,6 @@ export function SemanticKeywordInspector({
                 setNoteStatus(undefined);
               }}
               placeholder={uiText("Добавьте контекст, гипотезу или задачу по запросу…")}
-              ref={noteInputRef}
               rows={10}
               value={note}
             />
@@ -1427,6 +1433,8 @@ function withoutNote(
 ): Omit<SemanticKeywordInsights, "note"> {
   return {
     keywordId: insights.keywordId,
+    groups: insights.groups,
+    ...(insights.groupsTruncated ? { groupsTruncated: true } : {}),
     frequencies: insights.frequencies,
     positions: insights.positions,
     positionHistory: insights.positionHistory,

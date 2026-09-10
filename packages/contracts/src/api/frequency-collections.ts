@@ -335,6 +335,9 @@ export interface InternalPersistFrequencySeasonalityBatchInput {
 export interface SemanticKeywordInsights {
   readonly keywordId: string;
   readonly note?: string;
+  /** Current active folder memberships for this canonical keyword. */
+  readonly groups: readonly SemanticKeywordInsightGroup[];
+  readonly groupsTruncated?: boolean;
   readonly frequencies: readonly FrequencySnapshotSummary[];
   readonly seasonality?: readonly FrequencySeasonalityPointSummary[];
   readonly positions: readonly SemanticKeywordPositionSummary[];
@@ -342,6 +345,14 @@ export interface SemanticKeywordInsights {
   readonly competitorSnapshots?: readonly SemanticKeywordCompetitorSnapshot[];
   readonly aiPositionHistory?: readonly SemanticAiAnswerHistoryItem[];
   readonly aiCompetitorSnapshots?: readonly SemanticAiAnswerCompetitorSnapshot[];
+}
+
+export interface SemanticKeywordInsightGroup {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly color?: string;
+  readonly systemKind?: "UNGROUPED" | "TRASH";
 }
 
 export interface SemanticKeywordCompetitorSnapshot extends SemanticRankDimensionMetadata {

@@ -190,6 +190,9 @@ export function arsenkinAiAnswerValues(
     ((input.searchEngine === "YANDEX" && info.se !== "Яндекс") ||
       (input.searchEngine === "GOOGLE" && info.se !== "Google"))
   ) return undefined;
+  const singleQueryTopSources = queries.length === 1
+    ? aggregateTopSources(result.top)
+    : [];
   const output: ArsenkinAiAnswerQueryResult[] = [];
   for (const [index, query] of queries.entries()) {
     const row = record(alignedRows[index]);
@@ -203,8 +206,11 @@ export function arsenkinAiAnswerValues(
     if (answerMarkdown && answerMarkdown.length > 300_000) return undefined;
     const sourceValues = row.sources === undefined ? [] : row.sources;
     if (!Array.isArray(sourceValues) || sourceValues.length > 100) return undefined;
-    const sources = sourceValues.map((candidate) => source(candidate));
-    if (sources.some((candidate) => candidate === undefined)) return undefined;
+    const parsedSources = sourceValues.map((candidate) => source(candidate));
+    if (parsedSources.some((candidate) => candidate === undefined)) return undefined;
+    const sources = parsedSources.length > 0 || !answerPresent
+      ? parsedSources
+      : singleQueryTopSources;
     const position = record(row.position);
     const rank = positiveInteger(position?.position);
     const rankingUrl = httpUrl(position?.url);
@@ -301,6 +307,28 @@ function source(value: unknown): InternalAiAnswerSnapshotValue["sources"][number
       ? { description: description.trim() }
       : {})
   };
+}
+
+function aggregateTopSources(
+  value: unknown
+): readonly InternalAiAnswerSnapshotValue["sources"][number][] {
+  const top = record(value);
+  const urls = record(top?.urls);
+  if (!urls) return [];
+  const entries = Object.entries(urls);
+  if (entries.length < 1 || entries.length > 100) return [];
+  const seen = new Set<string>();
+  return entries.flatMap(([candidate, count]) => {
+    const url = httpUrl(candidate);
+    if (
+      !url ||
+      !Number.isSafeInteger(count) ||
+      Number(count) < 1 ||
+      seen.has(url)
+    ) return [];
+    seen.add(url);
+    return [{ url }];
+  });
 }
 
 function providerFailure(

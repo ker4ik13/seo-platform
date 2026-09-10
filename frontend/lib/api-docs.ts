@@ -147,12 +147,15 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   }),
   endpoint("keywords-list", "GET", "/projects/{projectId}/keywords", "semantics:read", "Ключевые слова с фильтрами, примечаниями и курсором", "semantics", {
     request: "Query: limit, cursor?, search?, groupId/groupIds?, filters?, sort?, includeNotes=true|false. Полный note возвращается только при includeNotes=true; в этом режиме limit <= 200.",
-    response: "200 · data: SemanticKeywordListItem[] с groupPath, targetUrl, tags, frequencies, positions, aiAnswers, hasNote и optional note; page: { hasNext, nextCursor?, totalApprox? }."
+    response: "200 · data: SemanticKeywordListItem[] с groupPath, optional groupMembershipCount для нескольких папок, targetUrl, tags, frequencies, positions, aiAnswers, hasNote и optional note; page: { hasNext, nextCursor?, totalApprox? }."
   }),
   endpoint("position-summary", "GET", "/projects/{projectId}/keywords/position-summary", "semantics:read", "Текущая средняя позиция и число запросов в Топ-3/5/10/30/50", "positions"),
   endpoint("position-history", "GET", "/projects/{projectId}/keywords/position-history", "semantics:read", "До 100 последних проектных срезов; includeUntracked=true включает активные неотслеживаемые запросы", "positions"),
   endpoint("keywords-create", "POST", "/projects/{projectId}/keywords", "semantics:write", "Создать ключевое слово", "semantics"),
-  endpoint("keywords-bulk", "POST", "/projects/{projectId}/keywords/bulk", "semantics:write", "Пакетное создание ключей", "semantics"),
+  endpoint("keywords-bulk", "POST", "/projects/{projectId}/keywords/bulk", "semantics:write", "Пакетное создание ключей", "semantics", {
+    request: "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP добавляет существующую canonical keyword identity в duplicateGroupId (либо groupId), сохраняя прежние папки. groupId по-прежнему задаёт папку для новой строки.",
+    response: "200 · data содержит indexed outcomes CREATED, LINKED_EXISTING, RESTORED, SKIPPED_EXISTING, REJECTED_EXISTING или FAILED."
+  }),
   endpoint("keyword-update", "PATCH", "/projects/{projectId}/keywords/{keywordId}", "semantics:write", "Изменить ключевое слово", "semantics"),
   endpoint("keyword-delete", "DELETE", "/projects/{projectId}/keywords/{keywordId}", "semantics:write", "Переместить запрос в корзину или окончательно очистить его данные", "semantics", {
     request: "Headers: If-Match. Optional JSON: { permanent?: boolean }; permanent=true допустим только для ключа в корзине.",
@@ -234,7 +237,7 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   }),
   endpoint("keyword-tag-options", "GET", "/projects/{projectId}/keywords/tag-options", "semantics:read", "Получить доступные теги проекта", "semantics"),
   endpoint("keywords-bulk-preview", "POST", "/projects/{projectId}/keywords/bulk-preview", "semantics:write", "Проверить пакет ключей перед созданием", "semantics"),
-  endpoint("keyword-insights", "GET", "/projects/{projectId}/keywords/{keywordId}/insights", "semantics:read", "Карточка ключа: позиции, частотность, SERP, URL и заметка", "semantics", {
+  endpoint("keyword-insights", "GET", "/projects/{projectId}/keywords/{keywordId}/insights", "semantics:read", "Карточка ключа: текущие папки с цветами, позиции, частотность, SERP, URL и заметка", "semantics", {
     request: "Path: projectId, keywordId (UUID). Query: dimensionKey? — точный срез поисковика, региона и устройства.",
     response: "200 · data: SemanticKeywordInsights с последними частотностями, позициями, SERP-результатами, target URL и note."
   }),

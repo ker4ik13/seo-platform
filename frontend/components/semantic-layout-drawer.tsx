@@ -288,7 +288,6 @@ const queryIndicatorOptions: readonly Readonly<{
   key: SemanticQueryIndicator;
   label: string;
 }>[] = [
-  { key: "AI_ANSWER", label: "ИИ выдача" },
   { key: "MULTIPLE_URLS", label: "Несколько URL" },
   { key: "TARGET_URL_MISMATCH", label: "Нецелевой URL" }
 ];

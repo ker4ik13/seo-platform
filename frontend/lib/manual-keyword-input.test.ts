@@ -32,8 +32,7 @@ test("target-group import wins when both duplicate options are enabled", () => {
       addDuplicatesToGroup: true,
       inTargetGroup: false,
       previewState: "ACTIVE_DUPLICATE",
-      selectedForTargetGroup: true,
-      skipDuplicates: true
+      selectedForTargetGroup: true
     }),
     "ADD_TO_GROUP"
   );
@@ -42,8 +41,7 @@ test("target-group import wins when both duplicate options are enabled", () => {
       addDuplicatesToGroup: true,
       inTargetGroup: false,
       previewState: "ACTIVE_DUPLICATE",
-      selectedForTargetGroup: false,
-      skipDuplicates: true
+      selectedForTargetGroup: false
     }),
     "SKIP_EXISTING"
   );
@@ -52,8 +50,7 @@ test("target-group import wins when both duplicate options are enabled", () => {
       addDuplicatesToGroup: true,
       inTargetGroup: true,
       previewState: "ACTIVE_DUPLICATE",
-      selectedForTargetGroup: true,
-      skipDuplicates: true
+      selectedForTargetGroup: true
     }),
     "ADD_TO_GROUP"
   );
@@ -65,8 +62,7 @@ test("trashed duplicates are restored only after an explicit row choice", () => 
       addDuplicatesToGroup: true,
       inTargetGroup: false,
       previewState: "TRASHED_DUPLICATE",
-      selectedForTargetGroup: true,
-      skipDuplicates: true
+      selectedForTargetGroup: true
     }),
     "RESTORE_TRASHED"
   );
@@ -75,20 +71,29 @@ test("trashed duplicates are restored only after an explicit row choice", () => 
       addDuplicatesToGroup: true,
       inTargetGroup: false,
       previewState: "TRASHED_DUPLICATE",
-      selectedForTargetGroup: false,
-      skipDuplicates: false
+      selectedForTargetGroup: false
     }),
     "SKIP_EXISTING"
   );
 });
 
-test("duplicate review offers only real moves and explicit trash restores", () => {
+test("duplicate review offers only new folder links and explicit trash restores", () => {
   const targetGroupId = "01900000-0000-7000-8000-000000000001";
   const targetGroup = {
     id: targetGroupId,
     name: "Новая",
     path: "Новая"
   };
+  assert.equal(
+    manualKeywordDuplicateCanApply({
+      index: 0,
+      state: "ACTIVE_DUPLICATE",
+      groups: [],
+      groupsTruncated: false,
+      inTargetGroup: false
+    }, targetGroupId),
+    true
+  );
   assert.equal(
     manualKeywordDuplicateCanApply({
       index: 0,
@@ -114,7 +119,7 @@ test("duplicate review offers only real moves and explicit trash restores", () =
       groupsTruncated: false,
       inTargetGroup: true
     }, targetGroupId),
-    true
+    false
   );
   assert.equal(
     manualKeywordDuplicateCanApply({
@@ -128,24 +133,31 @@ test("duplicate review offers only real moves and explicit trash restores", () =
   );
 });
 
-test("unresolved duplicates are rejected only when silent skipping is disabled", () => {
+test("unselected duplicates are skipped after the explicit review", () => {
   assert.equal(
     manualKeywordDuplicatePolicy({
       addDuplicatesToGroup: false,
       inTargetGroup: false,
       previewState: "ACTIVE_DUPLICATE",
-      selectedForTargetGroup: false,
-      skipDuplicates: false
+      selectedForTargetGroup: true
     }),
-    "REJECT_EXISTING"
+    "ADD_TO_GROUP"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: false,
+      inTargetGroup: false,
+      previewState: "ACTIVE_DUPLICATE",
+      selectedForTargetGroup: false
+    }),
+    "SKIP_EXISTING"
   );
   assert.equal(
     manualKeywordDuplicatePolicy({
       addDuplicatesToGroup: true,
       inTargetGroup: true,
       previewState: "ACTIVE_DUPLICATE",
-      selectedForTargetGroup: false,
-      skipDuplicates: false
+      selectedForTargetGroup: false
     }),
     "SKIP_EXISTING"
   );
@@ -154,8 +166,7 @@ test("unresolved duplicates are rejected only when silent skipping is disabled",
       addDuplicatesToGroup: false,
       inTargetGroup: false,
       previewState: "TRASHED_DUPLICATE",
-      selectedForTargetGroup: false,
-      skipDuplicates: false
+      selectedForTargetGroup: false
     }),
     "SKIP_EXISTING"
   );
@@ -167,8 +178,7 @@ test("new preview rows keep a race-safe duplicate fallback", () => {
       addDuplicatesToGroup: true,
       inTargetGroup: false,
       previewState: "NEW",
-      selectedForTargetGroup: false,
-      skipDuplicates: true
+      selectedForTargetGroup: false
     }),
     "ADD_TO_GROUP"
   );
@@ -176,10 +186,9 @@ test("new preview rows keep a race-safe duplicate fallback", () => {
     manualKeywordDuplicatePolicy({
       addDuplicatesToGroup: false,
       inTargetGroup: false,
-      selectedForTargetGroup: false,
-      skipDuplicates: false
+      selectedForTargetGroup: false
     }),
-    "REJECT_EXISTING"
+    "SKIP_EXISTING"
   );
 });
 

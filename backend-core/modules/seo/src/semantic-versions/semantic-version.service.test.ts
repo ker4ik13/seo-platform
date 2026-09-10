@@ -64,6 +64,39 @@ test("preview refuses to overwrite a newer keyword version", async () => {
   assert.equal(result.changes[0]?.conflictCode, "NEWER_CHANGE");
 });
 
+test("preview accepts a versioned keyword in several available folders", async () => {
+  const firstGroupId = "01900000-0000-7000-8000-000000000041";
+  const secondGroupId = "01900000-0000-7000-8000-000000000042";
+  const beforeState = {
+    ...keywordState(),
+    groupId: firstGroupId,
+    groupIds: [firstGroupId, secondGroupId]
+  };
+  const service = new SemanticVersionService({
+    semanticVersion: { findFirst: async () => version() },
+    semanticEntityChange: {
+      findMany: async () => [{
+        ...createChange(),
+        operation: "UPDATE",
+        beforeState,
+        afterState: { ...beforeState, priority: 1 },
+        beforeVersion: 1,
+        afterVersion: 2
+      }]
+    },
+    keyword: {
+      findMany: async () => [{ id: keywordId, version: 2, status: "ACTIVE" }],
+      findFirst: async () => null
+    },
+    keywordGroup: { count: async () => 2 }
+  } as unknown as PrismaService);
+
+  const result = await service.previewUndo(workspaceId, projectId, versionId);
+
+  assert.equal(result.applicable, 1);
+  assert.equal(result.conflicted, 0);
+});
+
 test("preview accepts an unchanged cluster mapping with available dependencies", async () => {
   const service = new SemanticVersionService({
     semanticVersion: {

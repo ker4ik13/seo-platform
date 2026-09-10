@@ -171,11 +171,13 @@ export interface SemanticKeywordListItem {
   readonly priority: number;
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
-  /** Whether the saved AI-answer shortcut is visible beside this keyword. */
+  /** Legacy rolling-deployment preference; the table no longer renders a shortcut. */
   readonly showAiAnswerButton: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly groupPath?: string;
+  /** Number of active regular folders containing this canonical keyword. */
+  readonly groupMembershipCount?: number;
   readonly clusterId?: string;
   readonly clusterName?: string;
   readonly targetPageId?: string;
@@ -307,6 +309,8 @@ export type SemanticKeywordBulkCreateItemInput = Omit<
 > & Readonly<{
   /** Optional row-level override; the bulk policy remains the fallback. */
   duplicatePolicy?: SemanticKeywordDuplicatePolicy;
+  /** Folder used only when ADD_TO_GROUP resolves an existing canonical row. */
+  duplicateGroupId?: string;
 }>;
 
 export interface SemanticKeywordBulkCreateInput {
@@ -409,6 +413,7 @@ export interface InternalCreateSemanticKeywordInput
   readonly actorId: string;
   readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
   readonly duplicatePolicy: SemanticKeywordDuplicatePolicy;
+  readonly duplicateGroupId?: string;
 }
 
 export interface InternalSemanticKeywordBulkCreateInput

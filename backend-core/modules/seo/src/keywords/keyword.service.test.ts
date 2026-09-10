@@ -244,7 +244,8 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         "01900000-0000-7000-8000-000000000010",
         "2026-07-29T08:00:00Z"
       ),
-      note: "Учитывать коммерческий интент в тексте страницы"
+      note: "Учитывать коммерческий интент в тексте страницы",
+      _count: { memberships: 2 }
     },
     keyword("01900000-0000-7000-8000-000000000011", "2026-07-29T07:00:00Z")
   ];
@@ -374,6 +375,7 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
 
   assert.equal(result.data.length, 1);
   assert.equal(result.data[0]?.groupPath, "Услуги / SEO");
+  assert.equal(result.data[0]?.groupMembershipCount, 2);
   assert.equal(result.data[0]?.targetUrl, "https://example.com/seo");
   assert.deepEqual(result.data[0]?.tags, ["Приоритет"]);
   assert.equal(result.data[0]?.hasNote, true);
@@ -643,7 +645,30 @@ test("projects every SEO SERP slice and keeps competitor evidence out of positio
   const service = new KeywordService(
     {
       keyword: {
-        findFirst: async () => ({ id: keywordId, note: null })
+        findFirst: async () => ({
+          id: keywordId,
+          note: null,
+          memberships: [
+            {
+              group: {
+                id: "01900000-0000-7000-8000-000000000076",
+                name: "Статьи",
+                path: "Контент / Статьи",
+                color: "#6758ef",
+                systemKind: null
+              }
+            },
+            {
+              group: {
+                id: "01900000-0000-7000-8000-000000000077",
+                name: "Съем",
+                path: "Съем",
+                color: "#ff0000",
+                systemKind: null
+              }
+            }
+          ]
+        })
       },
       rankDimensionHistoryDeletion: { findMany: async () => [] },
       frequencySeasonalityPoint: { findMany: async () => [] },
@@ -750,6 +775,20 @@ test("projects every SEO SERP slice and keeps competitor evidence out of positio
 
   const result = await service.insights(workspaceId, projectId, keywordId);
 
+  assert.deepEqual(result.groups, [
+    {
+      id: "01900000-0000-7000-8000-000000000076",
+      name: "Статьи",
+      path: "Контент / Статьи",
+      color: "#6758ef"
+    },
+    {
+      id: "01900000-0000-7000-8000-000000000077",
+      name: "Съем",
+      path: "Съем",
+      color: "#ff0000"
+    }
+  ]);
   assert.deepEqual(result.positionHistory, []);
   assert.deepEqual(result.competitorSnapshots, [
     {
@@ -1882,7 +1921,7 @@ test("skips active and trashed duplicates without capacity or restore writes", a
   }
 });
 
-test("moves an active canonical keyword to another regular group", async () => {
+test("links an active canonical keyword to another regular group", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000086";
   const targetGroupId = "01900000-0000-7000-8000-000000000087";
   const tagId = "01900000-0000-7000-8000-000000000089";
@@ -1920,7 +1959,7 @@ test("moves an active canonical keyword to another regular group", async () => {
         throw new Error("Moving an existing keyword must not consume capacity");
       },
       create: async () => {
-        throw new Error("Moving must not create another keyword identity");
+        throw new Error("Linking must not create another keyword identity");
       }
     },
     keywordGroup: {
@@ -1941,7 +1980,7 @@ test("moves an active canonical keyword to another regular group", async () => {
         createdMembership = data;
         stored = {
           ...stored,
-          memberships: [{
+          memberships: [...stored.memberships, {
             group: {
               id: data.groupId,
               path: "Услуги / Продвижение",
@@ -1954,8 +1993,7 @@ test("moves an active canonical keyword to another regular group", async () => {
       },
       deleteMany: async ({ where }: { where: unknown }) => {
         removedMemberships = where;
-        stored = { ...stored, memberships: [] };
-        return { count: 1 };
+        return { count: 0 };
       }
     },
     page: {
@@ -1987,19 +2025,29 @@ test("moves an active canonical keyword to another regular group", async () => {
 
   const result = await service.create({
     ...createInput("ADD_TO_GROUP"),
-    groupId: targetGroupId
+    groupId: "01900000-0000-7000-8000-000000000088",
+    duplicateGroupId: targetGroupId
   });
 
   assert.equal(result.id, keywordId);
   assert.equal(result.groupId, targetGroupId);
   assert.equal(result.version, 2);
+  assert.equal(result.groupMembershipCount, 2);
   assert.equal(result.createOutcome, "LINKED_EXISTING");
   assert.deepEqual(createdMembership, {
     projectId,
     keywordId,
     groupId: targetGroupId
   });
-  assert.deepEqual(removedMemberships, { projectId, keywordId });
+  assert.deepEqual(removedMemberships, {
+    projectId,
+    keywordId,
+    group: {
+      workspaceId,
+      projectId,
+      systemKind: "UNGROUPED"
+    }
+  });
   assert.deepEqual(observedUpdate, {
     where: {
       id: keywordId,
@@ -2043,7 +2091,11 @@ test("moves an active canonical keyword to another regular group", async () => {
       status: "ACTIVE",
       clusterId: null,
       targetPageId: "01900000-0000-7000-8000-000000000020",
-      groupId: targetGroupId,
+      groupId: "01900000-0000-7000-8000-000000000030",
+      groupIds: [
+        "01900000-0000-7000-8000-000000000030",
+        targetGroupId
+      ],
       tagIds: [tagId]
     },
     beforeVersion: 1,

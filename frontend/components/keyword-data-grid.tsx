@@ -62,6 +62,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   presenceByRowId = EMPTY_ROW_PRESENCE,
   rowNumberOffset = 0,
   rows,
+  selectionAdornment,
   selectedIds,
   showRowNumbers = false,
   tableClassName = "semantic-table",
@@ -87,6 +88,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   presenceByRowId?: ReadonlyMap<string, KeywordDataGridRowPresence>;
   rowNumberOffset?: number;
   rows: readonly Row[];
+  selectionAdornment?: (row: Row) => ReactNode;
   selectedIds: ReadonlySet<string>;
   showRowNumbers?: boolean;
   tableClassName?: string;
@@ -344,6 +346,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                   readOnly
                   type="checkbox"
                 />
+                {selectionAdornment?.(row)}
               </td>
               {columns.map((column) => (
                 <td

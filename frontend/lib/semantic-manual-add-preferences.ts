@@ -1,6 +1,24 @@
+export const semanticManualDuplicateModes = [
+  "SKIP_PROJECT",
+  "PRESERVE_FOLDERS",
+  "CURRENT_GROUP"
+] as const;
+
+export type SemanticManualDuplicateMode =
+  (typeof semanticManualDuplicateModes)[number];
+
 export interface SemanticManualAddPreferences {
-  readonly addDuplicatesToGroup: boolean;
-  readonly skipDuplicates: boolean;
+  readonly duplicateMode: SemanticManualDuplicateMode;
+}
+
+export function semanticManualDuplicateTargetGroupId(
+  mode: SemanticManualDuplicateMode,
+  primaryGroupId: string,
+  currentGroupId: string
+): string {
+  if (mode === "PRESERVE_FOLDERS") return primaryGroupId;
+  if (mode === "CURRENT_GROUP") return currentGroupId;
+  return "";
 }
 
 interface StorageLike {
@@ -8,10 +26,10 @@ interface StorageLike {
   setItem(key: string, value: string): void;
 }
 
-const storagePrefix = "seonorita:semantic-manual-add:v1:";
+const storagePrefix = "seonorita:semantic-manual-add:v2:";
+const legacyStoragePrefix = "seonorita:semantic-manual-add:v1:";
 const defaults: SemanticManualAddPreferences = {
-  addDuplicatesToGroup: false,
-  skipDuplicates: true
+  duplicateMode: "SKIP_PROJECT"
 };
 
 export function readSemanticManualAddPreferences(
@@ -20,21 +38,33 @@ export function readSemanticManualAddPreferences(
 ): SemanticManualAddPreferences {
   try {
     const raw = storage.getItem(`${storagePrefix}${projectId}`);
-    if (!raw) return defaults;
-    const value = JSON.parse(raw) as Readonly<{
+    if (raw) {
+      const value = JSON.parse(raw) as Readonly<{
+        duplicateMode?: unknown;
+      }>;
+      return {
+        duplicateMode:
+          typeof value.duplicateMode === "string" &&
+          semanticManualDuplicateModes.includes(
+            value.duplicateMode as SemanticManualDuplicateMode
+          )
+            ? (value.duplicateMode as SemanticManualDuplicateMode)
+            : value.duplicateMode === "SPECIFIC_FOLDER"
+              ? "CURRENT_GROUP"
+              : defaults.duplicateMode
+      };
+    }
+    const legacyRaw = storage.getItem(`${legacyStoragePrefix}${projectId}`);
+    if (!legacyRaw) return defaults;
+    const legacy = JSON.parse(legacyRaw) as Readonly<{
       addDuplicatesToGroup?: unknown;
       skipDuplicates?: unknown;
     }>;
-    const skipDuplicates =
-      typeof value.skipDuplicates === "boolean"
-        ? value.skipDuplicates
-        : defaults.skipDuplicates;
     return {
-      addDuplicatesToGroup:
-        typeof value.addDuplicatesToGroup === "boolean"
-          ? value.addDuplicatesToGroup
-          : !skipDuplicates,
-      skipDuplicates
+      duplicateMode:
+        legacy.addDuplicatesToGroup === true || legacy.skipDuplicates === false
+          ? "PRESERVE_FOLDERS"
+          : "SKIP_PROJECT"
     };
   } catch {
     return defaults;
@@ -49,10 +79,7 @@ export function writeSemanticManualAddPreferences(
   try {
     storage.setItem(
       `${storagePrefix}${projectId}`,
-      JSON.stringify({
-        addDuplicatesToGroup: preferences.addDuplicatesToGroup,
-        skipDuplicates: preferences.skipDuplicates
-      })
+      JSON.stringify(preferences)
     );
   } catch {
     // The command still carries an explicit policy when storage is unavailable.

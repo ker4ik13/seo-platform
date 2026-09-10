@@ -2975,6 +2975,7 @@ export function semanticKeywordInsights(
   keywordId: string
 ): SemanticKeywordInsights {
   const input = objectValue(value);
+  const groups = input?.groups ?? [];
   const seasonality = input?.seasonality ?? [];
   const positionHistory = input?.positionHistory ?? [];
   const competitorSnapshots = input?.competitorSnapshots ?? [];
@@ -2983,6 +2984,10 @@ export function semanticKeywordInsights(
   if (
     !input ||
     input.keywordId !== keywordId ||
+    !Array.isArray(groups) ||
+    groups.length > 200 ||
+    (input.groupsTruncated !== undefined &&
+      typeof input.groupsTruncated !== "boolean") ||
     !Array.isArray(input.frequencies) ||
     input.frequencies.length > 100 ||
     !Array.isArray(seasonality) ||
@@ -3001,9 +3006,43 @@ export function semanticKeywordInsights(
   ) {
     throw invalidResponse();
   }
+  const groupIds = new Set<string>();
+  const parsedGroups = groups.map((value) => {
+    const group = objectValue(value);
+    if (
+      !group ||
+      !requiredString(group.id) ||
+      groupIds.has(group.id) ||
+      !requiredString(group.name) ||
+      group.name.length > 160 ||
+      !requiredString(group.path) ||
+      group.path.length > 2_000 ||
+      (group.color !== undefined &&
+        (typeof group.color !== "string" ||
+          !/^#[0-9a-f]{6}$/iu.test(group.color))) ||
+      (group.systemKind !== undefined &&
+        !["UNGROUPED", "TRASH"].includes(String(group.systemKind)))
+    ) {
+      throw invalidResponse();
+    }
+    groupIds.add(group.id);
+    const systemKind =
+      group.systemKind === "UNGROUPED" || group.systemKind === "TRASH"
+        ? (group.systemKind as "UNGROUPED" | "TRASH")
+        : undefined;
+    return {
+      id: group.id,
+      name: group.name,
+      path: group.path,
+      ...(typeof group.color === "string" ? { color: group.color } : {}),
+      ...(systemKind ? { systemKind } : {})
+    };
+  });
   return {
     keywordId,
     ...(typeof input.note === "string" ? { note: input.note } : {}),
+    groups: parsedGroups,
+    ...(input.groupsTruncated === true ? { groupsTruncated: true } : {}),
     frequencies: input.frequencies.map((value) => {
       const item = objectValue(value);
       if (
@@ -3511,6 +3550,10 @@ export function semanticKeywordItem(
         !semanticKeywordIntents.some((intent) => intent === item.intent))) ||
     (item.groupId !== undefined && !requiredString(item.groupId)) ||
     (item.groupPath !== undefined && typeof item.groupPath !== "string") ||
+    (item.groupMembershipCount !== undefined &&
+      (!Number.isSafeInteger(item.groupMembershipCount) ||
+        Number(item.groupMembershipCount) < 0 ||
+        Number(item.groupMembershipCount) > 2_000)) ||
     (item.clusterId !== undefined && !requiredString(item.clusterId)) ||
     (item.clusterName !== undefined && typeof item.clusterName !== "string") ||
     (item.targetPageId !== undefined && !requiredString(item.targetPageId)) ||
@@ -3561,6 +3604,9 @@ export function semanticKeywordItem(
       : {}),
     ...(typeof item.groupPath === "string"
       ? { groupPath: item.groupPath }
+      : {}),
+    ...(typeof item.groupMembershipCount === "number"
+      ? { groupMembershipCount: item.groupMembershipCount }
       : {}),
     ...(typeof item.clusterId === "string"
       ? { clusterId: item.clusterId }

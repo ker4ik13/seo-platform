@@ -564,7 +564,9 @@ function Semantics({ baseUrl }: Readonly<{ baseUrl: string }>) {
       "isFavorite": false,
       "isTracked": true,
       "tagNames": [],
-      "groupId": "019..."
+      "groupId": "019...",
+      "duplicatePolicy": "ADD_TO_GROUP",
+      "duplicateGroupId": "019..."
     }
   ],
   "duplicatePolicy": "SKIP_EXISTING"

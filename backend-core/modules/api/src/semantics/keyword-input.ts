@@ -342,14 +342,21 @@ function semanticKeywordBulkCreateItemInput(
 ): SemanticKeywordBulkCreateItemInput {
   const input = exactRecord(
     value,
-    [...editableFields(), "duplicatePolicy"],
+    [...editableFields(), "duplicatePolicy", "duplicateGroupId"],
     "items"
   );
-  const parsed = createSemanticKeywordInput(input);
+  const { duplicateGroupId: rawDuplicateGroupId, ...createInput } = input;
+  const parsed = createSemanticKeywordInput(createInput);
   const { duplicatePolicy: policy, ...keyword } = parsed;
+  const duplicateGroupId = optionalGroupId(
+    rawDuplicateGroupId,
+    false,
+    "duplicateGroupId"
+  ).groupId;
   return {
     ...keyword,
-    ...(input.duplicatePolicy === undefined ? {} : { duplicatePolicy: policy })
+    ...(input.duplicatePolicy === undefined ? {} : { duplicatePolicy: policy }),
+    ...(duplicateGroupId ? { duplicateGroupId } : {})
   };
 }
 
@@ -428,12 +435,13 @@ function optionalIntent(
 
 function optionalGroupId(
   value: unknown,
-  nullable: boolean
+  nullable: boolean,
+  path = "groupId"
 ): Readonly<{ groupId?: string | null }> {
   if (value === undefined) return {};
   if (value === null && nullable) return { groupId: null };
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-    invalid("groupId", "Must be a UUID");
+    invalid(path, "Must be a UUID");
   }
   return { groupId: value };
 }

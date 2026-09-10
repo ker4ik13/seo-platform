@@ -42,7 +42,6 @@ export interface ManualKeywordDuplicatePolicyInput {
   readonly inTargetGroup: boolean;
   readonly previewState?: SemanticKeywordBulkCreatePreviewState;
   readonly selectedForTargetGroup: boolean;
-  readonly skipDuplicates: boolean;
 }
 
 type ManualKeywordDuplicatePreviewRow =
@@ -54,19 +53,14 @@ export function manualKeywordDuplicateCanApply(
 ): boolean {
   if (row.state === "TRASHED_DUPLICATE") return true;
   if (row.state !== "ACTIVE_DUPLICATE" || !targetGroupId) return false;
-  return (
-    !row.inTargetGroup ||
-    row.groupsTruncated ||
-    row.groups.some((group) => group.id !== targetGroupId)
-  );
+  return !row.inTargetGroup;
 }
 
 export function manualKeywordDuplicatePolicy({
   addDuplicatesToGroup,
   inTargetGroup,
   previewState,
-  selectedForTargetGroup,
-  skipDuplicates
+  selectedForTargetGroup
 }: ManualKeywordDuplicatePolicyInput): SemanticKeywordDuplicatePolicy {
   if (previewState === "TRASHED_DUPLICATE") {
     return selectedForTargetGroup ? "RESTORE_TRASHED" : "SKIP_EXISTING";
@@ -83,7 +77,7 @@ export function manualKeywordDuplicatePolicy({
   ) {
     return "ADD_TO_GROUP";
   }
-  return skipDuplicates ? "SKIP_EXISTING" : "REJECT_EXISTING";
+  return "SKIP_EXISTING";
 }
 
 export interface ManualKeywordBulkResultRow {

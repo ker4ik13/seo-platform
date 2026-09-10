@@ -48,6 +48,7 @@ export interface SemanticKeywordVersionState {
   readonly clusterId: string | null;
   readonly targetPageId: string | null;
   readonly groupId: string | null;
+  readonly groupIds?: readonly string[];
   readonly tagIds: readonly string[];
 }
 
@@ -137,7 +138,15 @@ export class SemanticVersionService {
         visibleRows.flatMap((row) => [row.beforeState, row.afterState]
           .flatMap((state) => {
             const value = jsonRecord(state);
-            return typeof value?.groupId === "string" ? [value.groupId] : [];
+            if (!value) return [];
+            return [
+              ...(typeof value.groupId === "string" ? [value.groupId] : []),
+              ...(Array.isArray(value.groupIds)
+                ? value.groupIds.filter(
+                    (id): id is string => typeof id === "string"
+                  )
+                : [])
+            ];
           }))
       )
     ];
@@ -897,7 +906,8 @@ async function keywordRestoreConflict(
 ): Promise<string | undefined> {
   if (state === null) return undefined;
   if (state.status === "DELETED") return undefined;
-  const [duplicate, group, cluster, page, tagCount] = await Promise.all([
+  const groupIds = keywordStateGroupIds(state);
+  const [duplicate, groupCount, cluster, page, tagCount] = await Promise.all([
     client.keyword.findFirst({
       where: {
         workspaceId,
@@ -909,17 +919,16 @@ async function keywordRestoreConflict(
       },
       select: { id: true }
     }),
-    state.groupId
-      ? client.keywordGroup.findFirst({
+    groupIds.length > 0
+      ? client.keywordGroup.count({
           where: {
-            id: state.groupId,
+            id: { in: [...groupIds] },
             workspaceId,
             projectId,
             status: "ACTIVE"
-          },
-          select: { id: true }
+          }
         })
-      : Promise.resolve({ id: "" }),
+      : Promise.resolve(0),
     state.clusterId && !restoredClusterIds.has(state.clusterId)
       ? client.cluster.findFirst({
           where: {
@@ -954,7 +963,7 @@ async function keywordRestoreConflict(
         })
   ]);
   if (duplicate) return "DUPLICATE_KEYWORD";
-  if (!group) return "GROUP_UNAVAILABLE";
+  if (groupCount !== groupIds.length) return "GROUP_UNAVAILABLE";
   if (!cluster) return "CLUSTER_UNAVAILABLE";
   if (!page) return "TARGET_PAGE_UNAVAILABLE";
   if (tagCount !== state.tagIds.length) return "TAG_UNAVAILABLE";
@@ -1043,9 +1052,10 @@ async function restoreKeyword(
   await transaction.keywordGroupMembership.deleteMany({
     where: { projectId, keywordId }
   });
-  if (state.status === "ACTIVE" && state.groupId) {
-    await transaction.keywordGroupMembership.create({
-      data: { projectId, keywordId, groupId: state.groupId }
+  const groupIds = keywordStateGroupIds(state);
+  if (state.status === "ACTIVE" && groupIds.length > 0) {
+    await transaction.keywordGroupMembership.createMany({
+      data: groupIds.map((groupId) => ({ projectId, keywordId, groupId }))
     });
   }
   await transaction.keywordTag.deleteMany({
@@ -1270,6 +1280,7 @@ const HISTORY_FIELD_LABELS: Readonly<Record<string, string>> = {
   intent: "Интент",
   status: "Статус",
   groupId: "Группа",
+  groupIds: "Папки",
   clusterId: "Кластер",
   targetPageId: "Целевой URL",
   tagIds: "Теги",
@@ -1368,18 +1379,25 @@ function historyEntityState(
         "intent",
         "status",
         "groupId",
+        "groupIds",
         "clusterId",
         "targetPageId",
         "tagIds"
       ];
   const fields = allowedKeys
-    .filter((key) => key in state)
+    .filter((key) =>
+      key in state && !(key === "groupId" && Array.isArray(state.groupIds))
+    )
     .map((key) => ({
       key,
       label: HISTORY_FIELD_LABELS[key] ?? humanizeHistoryKey(key),
       value:
         key === "groupId" && typeof state[key] === "string"
           ? groupNameById.get(state[key]) ?? state[key]
+          : key === "groupIds" && Array.isArray(state[key])
+            ? state[key].map((id) =>
+                typeof id === "string" ? groupNameById.get(id) ?? id : id
+              ).join(", ")
           : historyValue(state[key])
     }));
   const titleCandidate = entityType === "CLUSTER" ? state.name : state.textOriginal;
@@ -1555,11 +1573,15 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     "clusterId",
     "targetPageId",
     "groupId",
+    "groupIds",
     "tagIds"
   ];
+  const requiredKeys = keys.filter(
+    (key) => key !== "isTracked" && key !== "groupIds"
+  );
+  const groupIds = state.groupIds;
   if (
-    ![keys.length - 1, keys.length].includes(Object.keys(state).length) ||
-    keys.filter((key) => key !== "isTracked").some((key) => !(key in state)) ||
+    requiredKeys.some((key) => !(key in state)) ||
     Object.keys(state).some((key) => !keys.includes(key)) ||
     typeof state.textOriginal !== "string" ||
     typeof state.textNormalized !== "string" ||
@@ -1574,6 +1596,13 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     !nullableUuid(state.clusterId) ||
     !nullableUuid(state.targetPageId) ||
     !nullableUuid(state.groupId) ||
+    (groupIds !== undefined && (
+      !Array.isArray(groupIds) ||
+      groupIds.length > 2_000 ||
+      groupIds.some((id) => typeof id !== "string" || !uuid(id)) ||
+      new Set(groupIds).size !== groupIds.length ||
+      (groupIds[0] ?? null) !== state.groupId
+    )) ||
     !Array.isArray(state.tagIds) ||
     !state.tagIds.every((id) => typeof id === "string" && uuid(id))
   ) {
@@ -1592,8 +1621,15 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     clusterId: state.clusterId as string | null,
     targetPageId: state.targetPageId as string | null,
     groupId: state.groupId as string | null,
+    ...(Array.isArray(groupIds) ? { groupIds: groupIds as string[] } : {}),
     tagIds: state.tagIds as string[]
   };
+}
+
+function keywordStateGroupIds(
+  state: SemanticKeywordVersionState
+): readonly string[] {
+  return state.groupIds ?? (state.groupId ? [state.groupId] : []);
 }
 
 function nullableUuid(value: Prisma.JsonValue | undefined): boolean {

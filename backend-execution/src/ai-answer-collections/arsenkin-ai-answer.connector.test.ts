@@ -173,3 +173,69 @@ test("HTML converter preserves readable structure without raw tags", () => {
     "\\[ссылка\\]\\(javascript:alert\\(1\\)\\)"
   );
 });
+
+test("keeps an unambiguous Google AI top when the row omits source details", () => {
+  const result = arsenkinAiAnswerValues(
+    {
+      code: "TASK_RESULT",
+      task_id: "google-one",
+      result: {
+        queries: [query],
+        info: { se: "Google" },
+        table: [{
+          found: true,
+          position: false,
+          brand: false,
+          details: "Google AI Overview",
+          sources: []
+        }],
+        top: {
+          urls: {
+            "https://competitor.example/one": 1,
+            "https://competitor.example/two": 1
+          }
+        }
+      }
+    },
+    "google-one",
+    [query],
+    {
+      ...context,
+      searchEngine: "GOOGLE",
+      regionCode: "1011969"
+    }
+  );
+
+  assert.deepEqual(result?.[0]?.snapshot.sources, [
+    { url: "https://competitor.example/one" },
+    { url: "https://competitor.example/two" }
+  ]);
+});
+
+test("does not assign an aggregate Google top across several queries", () => {
+  const secondQuery = "второй google ai запрос";
+  const result = arsenkinAiAnswerValues(
+    {
+      code: "TASK_RESULT",
+      task_id: "google-many",
+      result: {
+        queries: [query, secondQuery],
+        info: { se: "Google" },
+        table: [
+          { found: true, position: false, brand: false, sources: [] },
+          { found: true, position: false, brand: false, sources: [] }
+        ],
+        top: { urls: { "https://competitor.example/ambiguous": 2 } }
+      }
+    },
+    "google-many",
+    [query, secondQuery],
+    {
+      ...context,
+      searchEngine: "GOOGLE",
+      regionCode: "1011969"
+    }
+  );
+
+  assert.deepEqual(result?.map(({ snapshot }) => snapshot.sources), [[], []]);
+});

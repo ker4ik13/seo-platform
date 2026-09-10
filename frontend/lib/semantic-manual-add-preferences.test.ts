@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   readSemanticManualAddPreferences,
+  semanticManualDuplicateTargetGroupId,
   writeSemanticManualAddPreferences
 } from "./semantic-manual-add-preferences.ts";
 
@@ -17,28 +18,45 @@ class MemoryStorage {
   }
 }
 
-test("keeps the duplicate choice isolated per project", () => {
+test("resolves a distinct target for every duplicate import mode", () => {
+  assert.equal(
+    semanticManualDuplicateTargetGroupId("SKIP_PROJECT", "primary", "current"),
+    ""
+  );
+  assert.equal(
+    semanticManualDuplicateTargetGroupId("PRESERVE_FOLDERS", "primary", "current"),
+    "primary"
+  );
+  assert.equal(
+    semanticManualDuplicateTargetGroupId("CURRENT_GROUP", "primary", "current"),
+    "current"
+  );
+});
+
+test("keeps the three-way duplicate choice isolated per project", () => {
   const storage = new MemoryStorage();
   writeSemanticManualAddPreferences(
     "project-a",
-    { addDuplicatesToGroup: true, skipDuplicates: true },
+    { duplicateMode: "CURRENT_GROUP" },
     storage
   );
 
   assert.deepEqual(readSemanticManualAddPreferences("project-a", storage), {
-    addDuplicatesToGroup: true,
-    skipDuplicates: true
+    duplicateMode: "CURRENT_GROUP"
   });
   assert.deepEqual(readSemanticManualAddPreferences("project-b", storage), {
-    addDuplicatesToGroup: false,
-    skipDuplicates: true
+    duplicateMode: "SKIP_PROJECT"
   });
 });
 
-test("migrates the legacy inverse duplicate preference", () => {
+test("migrates both legacy duplicate switches into one mode", () => {
   const storage = new MemoryStorage();
   storage.setItem(
     "seonorita:semantic-manual-add:v1:legacy-import",
+    JSON.stringify({ addDuplicatesToGroup: true, skipDuplicates: true })
+  );
+  storage.setItem(
+    "seonorita:semantic-manual-add:v1:legacy-inverse",
     JSON.stringify({ skipDuplicates: false })
   );
   storage.setItem(
@@ -46,21 +64,20 @@ test("migrates the legacy inverse duplicate preference", () => {
     JSON.stringify({ skipDuplicates: true })
   );
 
-  assert.deepEqual(
-    readSemanticManualAddPreferences("legacy-import", storage),
-    { addDuplicatesToGroup: true, skipDuplicates: false }
-  );
-  assert.deepEqual(
-    readSemanticManualAddPreferences("legacy-skip", storage),
-    { addDuplicatesToGroup: false, skipDuplicates: true }
-  );
+  for (const projectId of ["legacy-import", "legacy-inverse"]) {
+    assert.deepEqual(readSemanticManualAddPreferences(projectId, storage), {
+      duplicateMode: "PRESERVE_FOLDERS"
+    });
+  }
+  assert.deepEqual(readSemanticManualAddPreferences("legacy-skip", storage), {
+    duplicateMode: "SKIP_PROJECT"
+  });
 });
 
-test("falls back to safe duplicate skipping for malformed storage", () => {
+test("falls back to safe project-wide skipping for malformed storage", () => {
   const storage = new MemoryStorage();
-  storage.setItem("seonorita:semantic-manual-add:v1:broken", "{");
+  storage.setItem("seonorita:semantic-manual-add:v2:broken", "{");
   assert.deepEqual(readSemanticManualAddPreferences("broken", storage), {
-    addDuplicatesToGroup: false,
-    skipDuplicates: true
+    duplicateMode: "SKIP_PROJECT"
   });
 });

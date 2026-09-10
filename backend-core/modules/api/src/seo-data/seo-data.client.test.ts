@@ -95,6 +95,7 @@ const validItem = {
   intent: "COMMERCIAL",
   groupId: "01900000-0000-7000-8000-000000000011",
   groupPath: "Услуги / SEO",
+  groupMembershipCount: 2,
   targetPageId: "01900000-0000-7000-8000-000000000012",
   targetUrl: "https://example.com/seo",
   tags: ["Приоритет"],
@@ -261,6 +262,7 @@ test("accepts a strictly shaped semantic keyword page", () => {
   });
 
   assert.equal(result.data[0]?.textOriginal, "SEO аудит");
+  assert.equal(result.data[0]?.groupMembershipCount, 2);
   assert.equal(result.data[0]?.frequency?.value, "12890");
   assert.deepEqual(
     result.data[0]?.frequencies?.map(({ type, value }) => ({ type, value })),
@@ -292,6 +294,10 @@ test("accepts a strictly shaped semantic keyword page", () => {
   assert.equal(withNote.data[0]?.note, "Учитывать коммерческий интент");
   assert.throws(() => semanticKeywordPage({
     data: [{ ...validItem, hasNote: false, note: "Скрытая заметка" }],
+    page: { hasNext: false }
+  }));
+  assert.throws(() => semanticKeywordPage({
+    data: [{ ...validItem, groupMembershipCount: 2_001 }],
     page: { hasNext: false }
   }));
 });
@@ -327,6 +333,12 @@ test("validates the project color legend and its unread projection", () => {
 test("validates safe interactive rank history metadata", () => {
   const insights = semanticKeywordInsights({
     keywordId,
+    groups: [{
+      id: "01900000-0000-7000-8000-000000000008",
+      name: "Статьи",
+      path: "Контент / Статьи",
+      color: "#6758ef"
+    }],
     frequencies: [],
     positions: [],
     positionHistory: [{
@@ -348,6 +360,12 @@ test("validates safe interactive rank history metadata", () => {
   }, keywordId);
 
   assert.equal(insights.positionHistory[0]?.searchSource, "LIVE");
+  assert.deepEqual(insights.groups, [{
+    id: "01900000-0000-7000-8000-000000000008",
+    name: "Статьи",
+    path: "Контент / Статьи",
+    color: "#6758ef"
+  }]);
   assert.equal(insights.positionHistory[0]?.regionLabel, "Москва");
   assert.equal(insights.positionHistory[0]?.depth, 50);
   const withCompetitors = semanticKeywordInsights({

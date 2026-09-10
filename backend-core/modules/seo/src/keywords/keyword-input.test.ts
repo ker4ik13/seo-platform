@@ -68,11 +68,37 @@ test("keeps duplicate policy explicit across the trusted create boundary", () =>
       items: [
         {
           ...bulk.items[0],
-          duplicatePolicy: "ADD_TO_GROUP"
+          duplicatePolicy: "ADD_TO_GROUP",
+          duplicateGroupId: "01900000-0000-7000-8000-000000000005"
         }
       ]
     }).items[0]?.duplicatePolicy,
     "ADD_TO_GROUP"
+  );
+  assert.equal(
+    internalSemanticKeywordBulkCreateInput({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement,
+      duplicatePolicy: "SKIP_EXISTING",
+      items: [{
+        ...bulk.items[0],
+        duplicateGroupId: "01900000-0000-7000-8000-000000000005"
+      }]
+    }).items[0]?.duplicateGroupId,
+    "01900000-0000-7000-8000-000000000005"
+  );
+  assert.throws(
+    () => internalSemanticKeywordBulkCreateInput({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement,
+      duplicatePolicy: "ADD_TO_GROUP",
+      items: [{ ...bulk.items[0], duplicateGroupId: "not-a-uuid" }]
+    }),
+    BadRequestException
   );
   assert.equal(
     internalSemanticKeywordBulkCreateInput({
