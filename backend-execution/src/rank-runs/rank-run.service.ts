@@ -714,7 +714,8 @@ export class RankRunService {
       where: {
         workspaceId,
         projectId,
-        type: MANUAL_RANK_CHECK_JOB_TYPE
+        type: MANUAL_RANK_CHECK_JOB_TYPE,
+        dismissedAt: null
       },
       include: { rankRun: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],

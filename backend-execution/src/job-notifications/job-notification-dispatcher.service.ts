@@ -87,14 +87,17 @@ export class JobNotificationDispatcherService
     ), " ");
     const jobs = await this.prisma.$queryRaw<Pick<Job,
       "id" | "workspaceId" | "projectId" | "actorId" | "type" | "status" |
-      "progressCurrent" | "progressTotal" | "errorSummary"
+      "progressCurrent" | "progressTotal" | "errorSummary" |
+      "inputSnapshot" | "scopeSnapshot"
     >[]>(Prisma.sql`
       SELECT j.id, j.workspace_id AS "workspaceId", j.project_id AS "projectId",
         j.actor_id AS "actorId", j.type, j.status,
         j.progress_current AS "progressCurrent", j.progress_total AS "progressTotal",
-        j.error_summary AS "errorSummary"
+        j.error_summary AS "errorSummary", j.input_snapshot AS "inputSnapshot",
+        j.scope_snapshot AS "scopeSnapshot"
       FROM jobs j
       WHERE j.actor_id IS NOT NULL AND j.project_id IS NOT NULL
+        AND j.dismissed_at IS NULL
         AND j.type <> 'TECHNICAL_CRAWL'
         AND j.status::text IN (${Prisma.join(terminalJobNotificationStatuses)})
         AND j.updated_at >= ${new Date(Date.now() - TERMINAL_LOOKBACK_MS)}
@@ -121,7 +124,7 @@ export class JobNotificationDispatcherService
           projectId: job.projectId,
           actorId: job.actorId,
           jobId: job.id,
-          jobType: job.type,
+          jobType: jobNotificationOperationType(job),
           status: job.status,
           progressCurrent: progressNumber(job.progressCurrent),
           progressTotal: job.progressTotal === null
@@ -222,6 +225,42 @@ export class JobNotificationDispatcherService
       data: { status: "FAILED" }
     });
   }
+}
+
+export function jobNotificationOperationType(
+  job: Pick<Job, "type" | "inputSnapshot" | "scopeSnapshot">
+): string {
+  const input = jsonRecord(job.inputSnapshot);
+  const scope = jsonRecord(job.scopeSnapshot);
+  if (job.type === "MANUAL_RANK_CHECK") {
+    return scope?.purpose === "COMPETITOR_SERP"
+      ? "RANK_COMPETITOR_SERP"
+      : "RANK_POSITION_TRACKING";
+  }
+  if (job.type === "AI_ANSWER_COLLECTION") {
+    return input?.purpose === "COMPETITOR_SERP"
+      ? "AI_COMPETITOR_SERP"
+      : "AI_ANSWER_COLLECTION";
+  }
+  if (job.type === "FREQUENCY_COLLECTION") {
+    return input?.mode === "SEASONALITY"
+      ? "WORDSTAT_SEASONALITY_COLLECTION"
+      : "WORDSTAT_FREQUENCY_COLLECTION";
+  }
+  if (job.type === "KEYWORD_RESEARCH") {
+    return input?.source === "KEYS_SO"
+      ? "KEYS_SO_RESEARCH"
+      : "WORDSTAT_KEYWORD_RESEARCH";
+  }
+  return job.type;
+}
+
+function jsonRecord(
+  value: Prisma.JsonValue
+): Prisma.JsonObject | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value
+    : undefined;
 }
 
 export function jobNotificationPayload(

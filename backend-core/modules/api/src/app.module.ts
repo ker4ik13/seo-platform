@@ -20,6 +20,7 @@ import { PageModule } from "./pages/page.module.js";
 import { CrawlModule } from "./crawls/crawl.module.js";
 import { KeywordResearchModule } from "./keyword-research/keyword-research.module.js";
 import { ProjectNoteModule } from "./notes/project-note.module.js";
+import { ProjectOperationModule } from "./operations/project-operation.module.js";
 import { ApiTokenModule } from "./api-tokens/api-token.module.js";
 
 @Module({
@@ -45,6 +46,7 @@ import { ApiTokenModule } from "./api-tokens/api-token.module.js";
     NotificationModule,
     KeywordResearchModule,
     ProjectNoteModule,
+    ProjectOperationModule,
     SystemModule
   ]
 })

@@ -52,6 +52,7 @@ import { operationStatusLabel } from "../lib/operation-status-presentation";
 import {
   aiAnswerCollectionTitle,
   isCompetitorCollection,
+  keywordResearchCollectionTitle,
   rankCollectionDepthLabel,
   rankCollectionTitle
 } from "../lib/operation-collection-purpose";
@@ -2666,7 +2667,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
     ? "XMLSTOCK"
     : "ARSENKIN";
   return {
-    title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
+    title: keywordResearchCollectionTitle(value),
     description: keysSo
       ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
       : `${wordstatProvider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,

@@ -141,7 +141,12 @@ export class AiAnswerCollectionService {
     projectId: string
   ): Promise<readonly AiAnswerCollectionSummary[]> {
     const jobs = await this.prisma.job.findMany({
-      where: { workspaceId, projectId, type: "AI_ANSWER_COLLECTION" },
+      where: {
+        workspaceId,
+        projectId,
+        type: "AI_ANSWER_COLLECTION",
+        dismissedAt: null
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 25
     });

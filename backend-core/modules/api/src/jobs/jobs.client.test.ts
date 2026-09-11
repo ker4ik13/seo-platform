@@ -226,6 +226,47 @@ test("loads one bounded active-operation count collection for a workspace", asyn
   }
 });
 
+test("dismisses one failed project operation through the tenant-bound Jobs route", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: { readonly url: URL; readonly method: string | undefined; readonly headers: Headers } | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    captured = {
+      url: new URL(input instanceof Request ? input.url : input.toString()),
+      method: init?.method,
+      headers: new Headers(init?.headers)
+    };
+    return dataResponse({
+      operationId: crawlJobId,
+      dismissedAt: "2026-09-11T12:45:00.000Z"
+    });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(
+      await client().dismissProjectOperation(
+        projectContext("request-operation-dismiss-001"),
+        crawlJobId
+      ),
+      {
+        operationId: crawlJobId,
+        dismissedAt: "2026-09-11T12:45:00.000Z"
+      }
+    );
+    assert.equal(captured?.method, "DELETE");
+    assert.equal(
+      captured?.url.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/operations/${crawlJobId}`
+    );
+    assert.equal(captured?.headers.get("x-project-id"), projectId);
+    assert.equal(captured?.headers.get("x-actor-id"), actorId);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("cancels a frequency collection without forwarding a stale UI version", async () => {
   const originalFetch = globalThis.fetch;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;

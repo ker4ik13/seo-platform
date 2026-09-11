@@ -32,6 +32,7 @@ import {
   parseOperationResultHref,
   type OperationResultKind
 } from "../lib/operation-result-routes";
+import { operationResultTitleFromNotification } from "../lib/operation-collection-purpose";
 import { OperationResultModal } from "./operation-result-modal";
 import { useUiLocale, UiText } from "./ui-locale";
 
@@ -264,7 +265,7 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
       setSelectedOperation({
         ...operation,
         projectId: operationProjectId,
-        title: notificationOperationTitle(operation.kind, item.title),
+        title: operationResultTitleFromNotification(operation.kind, item.title),
         description: `${item.title} · ${formatNotificationTime(item.createdAt, uiLocale)}`
       });
       return;
@@ -490,27 +491,6 @@ export function NotificationCenter({ projectId }: Readonly<{ projectId?: string 
       )}
     </div>
   );
-}
-
-function notificationOperationTitle(
-  kind: OperationResultKind,
-  notificationTitle: string
-): string {
-  if (
-    kind === "crawl" &&
-    (notificationTitle.includes("HTTP-статусов") ||
-      notificationTitle.includes("Обход сайта"))
-  ) {
-    return "Обход сайта";
-  }
-  return ({
-    frequency: "Сбор частотности",
-    "ai-answer": "Сбор ИИ-ответов",
-    clustering: "Кластеризация запросов",
-    rank: "Проверка позиций",
-    crawl: "Технический аудит",
-    research: "Сбор конкурентов"
-  } as const)[kind];
 }
 
 function loadPage(

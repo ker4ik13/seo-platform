@@ -112,6 +112,7 @@ function validationJob(overrides: Partial<Job> = {}): Job {
   const now = new Date("2026-07-29T09:00:00.000Z");
   return {
     billingQuoteId: null, billingCommandHash: null, billingMaximumUnitsMilli: null,
+    dismissedAt: null, dismissedBy: null,
     id: "01900000-0000-7000-8000-000000000004",
     workspaceId,
     projectId: null,

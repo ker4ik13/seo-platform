@@ -59,6 +59,10 @@ export function apiTokenScopeForRoute(
       : undefined;
   }
 
+  if (normalized.endsWith("/projects/:projectId/operations/:operationId")) {
+    return method.toUpperCase() === "DELETE" ? "projects:write" : undefined;
+  }
+
   if (
     normalized.includes("/automations") ||
     normalized.includes("/crawl-automations")

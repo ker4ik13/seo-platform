@@ -49,6 +49,7 @@ test("maps every documented tenant API family to its least-privilege scope", () 
     ["PUT", "/api/v1/workspaces/:workspaceId/projects/order", "projects:write"],
     ["GET", "/api/v1/workspaces/:workspaceId/project-capabilities", "projects:read"],
     ["PATCH", "/api/v1/projects/:projectId", "projects:write"],
+    ["DELETE", "/api/v1/projects/:projectId/operations/:operationId", "projects:write"],
     ["GET", "/api/v1/projects/:projectId/keywords", "semantics:read"],
     ["POST", "/api/v1/projects/:projectId/keywords/list", "semantics:read"],
     ["POST", "/api/v1/projects/:projectId/semantic-duplicates/preview", "semantics:read"],

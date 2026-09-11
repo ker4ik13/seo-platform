@@ -21,6 +21,7 @@ import type { OperationResultKind } from "../lib/operation-result-routes";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
 import {
   aiAnswerCollectionTitle,
+  keywordResearchCollectionTitle,
   rankCollectionTitle
 } from "../lib/operation-collection-purpose";
 import { Icon } from "./icon";
@@ -466,7 +467,7 @@ function dashboardJobs(data: DashboardData): readonly DashboardJob[] {
     })),
     ...data.research.runs.map((job): DashboardJob => ({
       id: job.id,
-      title: "Сбор конкурентов",
+      title: keywordResearchCollectionTitle(job),
       provider: "KEYS_SO",
       status: job.status,
       createdAt: job.createdAt,

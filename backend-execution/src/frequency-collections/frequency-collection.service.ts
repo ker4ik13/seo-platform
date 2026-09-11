@@ -172,7 +172,12 @@ export class FrequencyCollectionService {
     projectId: string
   ): Promise<readonly FrequencyCollectionSummary[]> {
     const jobs = await this.prisma.job.findMany({
-      where: { workspaceId, projectId, type: "FREQUENCY_COLLECTION" },
+      where: {
+        workspaceId,
+        projectId,
+        type: "FREQUENCY_COLLECTION",
+        dismissedAt: null
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 25
     });

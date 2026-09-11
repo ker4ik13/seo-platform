@@ -110,7 +110,12 @@ export class SemanticExportService {
     projectId: string
   ): Promise<SemanticExportCollection> {
     const jobs = await this.prisma.job.findMany({
-      where: { workspaceId, projectId, type: "SEMANTIC_EXPORT" },
+      where: {
+        workspaceId,
+        projectId,
+        type: "SEMANTIC_EXPORT",
+        dismissedAt: null
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 50
     });

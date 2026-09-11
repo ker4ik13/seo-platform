@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -9,13 +10,16 @@ import {
   UseGuards
 } from "@nestjs/common";
 import type {
+  InternalDismissProjectOperationInput,
   InternalWorkspaceExecutionUsage,
   InternalAdminOperationSearchResult,
   ApiResponse,
-  ProjectOperationActivitySummary
+  ProjectOperationActivitySummary,
+  ProjectOperationDismissal
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
+  internalCommandContext,
   internalUuid,
   internalWorkspaceCommandContext
 } from "../internal/internal-command-context.js";
@@ -59,6 +63,39 @@ export class OperationActivityController {
     }
     return {
       data: { projects: await this.activity.list(context.workspaceId) },
+      meta: { requestId: request.id }
+    };
+  }
+}
+
+@Controller("internal/v1/workspaces/:workspaceId/projects/:projectId/operations")
+@UseGuards(PlatformApiGuard)
+export class ProjectOperationController {
+  public constructor(private readonly activity: OperationActivityService) {}
+
+  @Delete(":operationId")
+  public async dismiss(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("operationId") operationId: string,
+    @Headers() headers: HeadersRecord,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<ProjectOperationDismissal>> {
+    const context = internalCommandContext(headers);
+    const input: InternalDismissProjectOperationInput = {
+      workspaceId: internalUuid(workspaceId, "workspaceId"),
+      projectId: internalUuid(projectId, "projectId"),
+      actorId: context.actorId,
+      operationId: internalUuid(operationId, "operationId")
+    };
+    if (
+      input.workspaceId !== context.workspaceId ||
+      input.projectId !== context.projectId
+    ) {
+      throw new BadRequestException("Operation scope does not match trusted context");
+    }
+    return {
+      data: await this.activity.dismiss(input),
       meta: { requestId: request.id }
     };
   }

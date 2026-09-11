@@ -207,6 +207,8 @@ model Job {
   queuedAt             DateTime?      @map("queued_at") @db.Timestamptz(6)
   startedAt            DateTime?      @map("started_at") @db.Timestamptz(6)
   finishedAt           DateTime?      @map("finished_at") @db.Timestamptz(6)
+  dismissedAt          DateTime?      @map("dismissed_at") @db.Timestamptz(6)
+  dismissedBy          String?        @map("dismissed_by") @db.Uuid
   cancelRequestedAt    DateTime?      @map("cancel_requested_at") @db.Timestamptz(6)
   leaseOwner           String?        @map("lease_owner") @db.VarChar(100)
   leaseExpiresAt       DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
@@ -229,6 +231,7 @@ model Job {
   @@unique([workspaceId, id], map: "jobs_tenant_id_key")
   @@unique([workspaceId, projectId, id], map: "jobs_tenant_project_id_key")
   @@index([workspaceId, projectId, status, createdAt])
+  @@index([workspaceId, projectId, dismissedAt, createdAt, id], map: "jobs_project_dismissed_created_idx")
   @@index([status, priority, createdAt])
   @@index([workspaceId, deduplicationKey, status])
   @@index([type, status, leaseExpiresAt, createdAt])

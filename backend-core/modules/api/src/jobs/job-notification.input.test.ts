@@ -54,6 +54,27 @@ test("maps rank and frequency jobs to their result pages", () => {
   assert.match(rank.body, /PROVIDER_UNAVAILABLE/u);
 });
 
+test("gives every SEO collection its own operation name and result route", () => {
+  const cases = [
+    ["WORDSTAT_FREQUENCY_COLLECTION", "Сбор частотности", "FREQUENCY_COLLECTION", "frequency"],
+    ["WORDSTAT_SEASONALITY_COLLECTION", "Сбор сезонности", "FREQUENCY_COLLECTION", "frequency"],
+    ["RANK_POSITION_TRACKING", "Проверка позиций", "RANK_TRACKING", "rank"],
+    ["RANK_COMPETITOR_SERP", "Выдача конкурентов", "SERP_COLLECTION", "rank"],
+    ["AI_ANSWER_COLLECTION", "Сбор ИИ-ответов", "SERP_COLLECTION", "ai-answer"],
+    ["AI_COMPETITOR_SERP", "ИИ-выдача конкурентов", "SERP_COLLECTION", "ai-answer"],
+    ["CLUSTERING_RUN", "Кластеризация запросов", "CLUSTERING", "clustering"],
+    ["KEYS_SO_RESEARCH", "Анализ Keys.so", "MAGNET", "research"],
+    ["WORDSTAT_KEYWORD_RESEARCH", "Парсинг Wordstat", "MAGNET", "research"]
+  ] as const;
+
+  for (const [jobType, label, eventType, resultKind] of cases) {
+    const content = jobNotificationContent({ ...validInput(), jobType });
+    assert.equal(content.title, `${label}: завершено`);
+    assert.equal(content.eventType, eventType);
+    assert.equal(content.deepLink, `/app/tasks/${resultKind}/${jobId}`);
+  }
+});
+
 function validInput() {
   return {
     workspaceId,

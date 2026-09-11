@@ -33,6 +33,10 @@ import {
   parseOperationResultHref,
   type OperationResultKind
 } from "../lib/operation-result-routes";
+import {
+  notificationOperationLabel,
+  operationResultTitleFromNotification
+} from "../lib/operation-collection-purpose";
 import { OperationResultModal } from "./operation-result-modal";
 import { useUiLocale, UiText } from "./ui-locale";
 
@@ -261,7 +265,7 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
       setSelectedOperation({
         ...operation,
         projectId: operationProjectId,
-        title: operationTitle(operation.kind, item.title),
+        title: operationResultTitleFromNotification(operation.kind, item.title),
         description: `${item.title} · ${formatTime(item.createdAt, uiLocale)}`
       });
       return;
@@ -453,7 +457,7 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
               >
                 ×
               </button>
-              <span>{<UiText text={eventLabel(toast.eventType) ?? ""} />}</span>
+              <span>{notificationOperationLabel(toast.title, eventLabel(toast.eventType))}</span>
               <strong>{toast.title}</strong>
               {toast.body && <p>{toast.body}</p>}
               {toast.deepLink && (
@@ -476,24 +480,6 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
       )}
     </>
   );
-}
-
-function operationTitle(kind: OperationResultKind, notificationTitle: string): string {
-  if (
-    kind === "crawl" &&
-    (notificationTitle.includes("HTTP-статусов") ||
-      notificationTitle.includes("Обход сайта"))
-  ) {
-    return "Обход сайта";
-  }
-  return ({
-    frequency: "Сбор частотности",
-    "ai-answer": "Сбор ИИ-ответов",
-    clustering: "Кластеризация запросов",
-    rank: "Проверка позиций",
-    crawl: "Технический аудит",
-    research: "Сбор конкурентов"
-  } as const)[kind];
 }
 
 function NotificationGroup({

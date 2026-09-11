@@ -120,7 +120,12 @@ export class ClusteringRunService {
 
   public async list(workspaceId: string, projectId: string): Promise<readonly ClusteringRunSummary[]> {
     const jobs = await this.prisma.job.findMany({
-      where: { workspaceId, projectId, type: "CLUSTERING_RUN" },
+      where: {
+        workspaceId,
+        projectId,
+        type: "CLUSTERING_RUN",
+        dismissedAt: null
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 25
     });

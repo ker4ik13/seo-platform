@@ -727,7 +727,10 @@ Device lifecycle следует ADR-2026-035:
   при повторной доставке одного domain event.
 - Завершение, частичное завершение, отмена, окончательная ошибка и
   `ACTION_REQUIRED` любой project Job доходят через generic terminal
-  reconciler; отдельный тип операции влияет только на текст и deep link.
+  reconciler; безопасный подтип выводится из immutable Job snapshot. Проверка
+  позиций, выдача конкурентов, ИИ-ответы, ИИ-выдача конкурентов, частотность,
+  сезонность, Keys.so и Wordstat имеют отдельные названия, event type и точный
+  deep link. Открытая из уведомления result modal сохраняет это название.
 - Realtime принимает только resource `technical_crawl` либо `job`; для `job`
   resource ID должен буквально совпадать с allowlisted `/app/tasks` deep link
   и `job-notification:{id}:{terminalStatus}` dedupe key.

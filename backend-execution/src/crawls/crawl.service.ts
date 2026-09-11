@@ -136,7 +136,7 @@ export class CrawlService {
     projectId: string
   ): Promise<TechnicalCrawlCollection> {
     const rows = await this.prisma.technicalCrawl.findMany({
-      where: { workspaceId, projectId },
+      where: { workspaceId, projectId, job: { dismissedAt: null } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 50
     });

@@ -5058,5 +5058,8 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP добавляет существующую canonical keyword identity в duplicateGroupId (либо groupId), сохраняя прежние папки. groupId по-прежнему задаёт папку для новой строки.": "JSON: { duplicatePolicy, items[] }; row-level ADD_TO_GROUP adds an existing canonical keyword identity to duplicateGroupId (or groupId) while keeping current folders. groupId still selects the folder for a new row.",
   "Сохранить группы": "Keep groups",
   "Тип выдачи": "Result type",
-  "Статистика": "Statistics"
+  "Статистика": "Statistics",
+  "Операция исчезнет из пользовательского журнала.": "The operation will disappear from the activity log.",
+  "Удалить операцию?": "Delete operation?",
+  "Сохранённые результаты, расчёты и аудит останутся доступными системе.": "Saved results, billing records, and audit history remain available to the system."
 };

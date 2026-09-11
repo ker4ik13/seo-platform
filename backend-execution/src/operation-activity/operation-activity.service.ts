@@ -1,5 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException
+} from "@nestjs/common";
 import type {
+  InternalDismissProjectOperationInput,
   InternalWorkspaceExecutionUsage,
   InternalExecutionOverview,
   AdminOperationResultMetrics,
@@ -7,8 +12,10 @@ import type {
   AdminOperationStatusGroup,
   InternalAdminOperationSearchResult,
   InternalAdminOperationSummary,
-  ProjectOperationActivitySummary
+  ProjectOperationActivitySummary,
+  ProjectOperationDismissal
 } from "@seo-platform/contracts";
+import { databaseClock } from "../database/database-clock.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
   Prisma,
@@ -38,6 +45,12 @@ const activeOperationStatuses = [
   "CANCEL_REQUESTED",
   "RETRY_SCHEDULED",
   "FAILED_RETRYABLE"
+] as const;
+
+const dismissibleOperationStatuses = [
+  "FAILED_FINAL",
+  "ACTION_REQUIRED",
+  "EXPIRED"
 ] as const;
 
 const adminActiveStatuses = [
@@ -112,6 +125,62 @@ export class OperationActivityService {
         ? [{ projectId, activeOperationCount: _count._all }]
         : []
     );
+  }
+
+  public async dismiss(
+    input: InternalDismissProjectOperationInput
+  ): Promise<ProjectOperationDismissal> {
+    return this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.job.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          type: { in: [...visibleOperationTypes] },
+          OR: [
+            { id: input.operationId },
+            { technicalCrawl: { is: { id: input.operationId } } },
+            { keywordResearchRun: { is: { id: input.operationId } } }
+          ]
+        },
+        select: { id: true, status: true, dismissedAt: true }
+      });
+      if (!current) throw new NotFoundException("Operation not found");
+      if (current.dismissedAt) {
+        return {
+          operationId: input.operationId,
+          dismissedAt: current.dismissedAt.toISOString()
+        };
+      }
+      if (!dismissibleOperationStatuses.includes(
+        current.status as (typeof dismissibleOperationStatuses)[number]
+      )) {
+        throw new ConflictException("Operation is not dismissible");
+      }
+      const dismissedAt = await databaseClock(
+        transaction,
+        "Unable to read operation dismissal clock"
+      );
+      const updated = await transaction.job.updateMany({
+        where: {
+          id: current.id,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: { in: [...dismissibleOperationStatuses] },
+          dismissedAt: null
+        },
+        data: {
+          dismissedAt,
+          dismissedBy: input.actorId
+        }
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException("Operation dismissal conflicted");
+      }
+      return {
+        operationId: input.operationId,
+        dismissedAt: dismissedAt.toISOString()
+      };
+    });
   }
 
   public async workspaceUsage(workspaceId: string): Promise<InternalWorkspaceExecutionUsage> {

@@ -440,6 +440,7 @@ function jobRecord(overrides: Partial<Job> = {}): Job {
   const now = new Date("2026-07-29T09:00:00.000Z");
   return {
     billingQuoteId: null, billingCommandHash: null, billingMaximumUnitsMilli: null,
+    dismissedAt: null, dismissedBy: null,
     id: validationId,
     workspaceId,
     projectId: null,

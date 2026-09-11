@@ -1681,6 +1681,13 @@ purpose аналогично называется «ИИ-выдача конку
 источников. Очереди и cancel/retry endpoints при этом остаются общими для
 соответствующего доменного Job: разделение является точной purpose-aware
 проекцией, а не дублированием исполнения.
+Ошибочную terminal-операцию со статусом `FAILED_FINAL`, `ACTION_REQUIRED` или
+`EXPIRED` пользователь с `task.manage` может убрать из проектного журнала.
+`DELETE /projects/{projectId}/operations/{operationId}` записывает в Jobs
+`dismissed_at` и `dismissed_by`; списки всех типов операций исключают такую
+строку. Job, результаты, billing evidence и audit history физически не
+удаляются. Активные, успешные, частично завершённые и отменённые операции этим
+маршрутом скрыть нельзя.
 Для `AI_ANSWER_COLLECTION` detail открывает cursor-paginated построчный лог и
 в active, и в terminal состоянии: status/attempt, факт provider submit, finite
 error и безопасную проекцию сохранённого ответа. Jobs применяет scope до

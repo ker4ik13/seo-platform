@@ -213,6 +213,7 @@ export interface InternalDeliverJobNotificationInput {
   readonly projectId: string;
   readonly actorId: string;
   readonly jobId: string;
+  /** Jobs-owned safe operation discriminator; may refine the persisted Job type. */
   readonly jobType: string;
   readonly status: TerminalJobNotificationStatus;
   readonly progressCurrent: number;

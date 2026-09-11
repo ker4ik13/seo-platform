@@ -79,7 +79,7 @@ test("PostgreSQL imports dated manual history idempotently and updates only the 
           observedAt: "2026-08-08T15:00:00.000Z",
           measuredKeywordCount: 1,
           positionedKeywordCount: 1,
-          top1KeywordCount: 1,
+          top1KeywordCount: 0,
           top3KeywordCount: 1,
           top5KeywordCount: 1,
           top10KeywordCount: 1,

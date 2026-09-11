@@ -6,6 +6,8 @@ import { OperationActivityService } from "./operation-activity.service.js";
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const firstProjectId = "01900000-0000-7000-8000-000000000002";
 const secondProjectId = "01900000-0000-7000-8000-000000000003";
+const actorId = "01900000-0000-7000-8000-000000000004";
+const jobId = "01900000-0000-7000-8000-000000000005";
 
 test("counts only active user-visible operations by project", async () => {
   let query: unknown;
@@ -56,6 +58,93 @@ test("counts only active user-visible operations by project", async () => {
     },
     _count: { _all: true }
   });
+});
+
+test("dismisses only a failed project operation and records the actor", async () => {
+  const dismissedAt = new Date("2026-09-11T12:45:00.000Z");
+  let lookup: unknown;
+  let update: unknown;
+  const transaction = {
+    $queryRaw: async () => [{ now: dismissedAt }],
+    job: {
+      findFirst: async (value: unknown) => {
+        lookup = value;
+        return { id: jobId, status: "FAILED_FINAL", dismissedAt: null };
+      },
+      updateMany: async (value: unknown) => {
+        update = value;
+        return { count: 1 };
+      }
+    }
+  };
+  const service = new OperationActivityService({
+    $transaction: async (run: (client: typeof transaction) => unknown) => run(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.dismiss({
+    workspaceId,
+    projectId: firstProjectId,
+    actorId,
+    operationId: jobId
+  }), { operationId: jobId, dismissedAt: dismissedAt.toISOString() });
+  assert.deepEqual(lookup, {
+    where: {
+      workspaceId,
+      projectId: firstProjectId,
+      type: {
+        in: [
+          "FREQUENCY_COLLECTION",
+          "MANUAL_RANK_CHECK",
+          "AI_ANSWER_COLLECTION",
+          "CLUSTERING_RUN",
+          "TECHNICAL_CRAWL",
+          "KEYWORD_RESEARCH",
+          "SEMANTIC_EXPORT"
+        ]
+      },
+      OR: [
+        { id: jobId },
+        { technicalCrawl: { is: { id: jobId } } },
+        { keywordResearchRun: { is: { id: jobId } } }
+      ]
+    },
+    select: { id: true, status: true, dismissedAt: true }
+  });
+  assert.deepEqual(update, {
+    where: {
+      id: jobId,
+      workspaceId,
+      projectId: firstProjectId,
+      status: { in: ["FAILED_FINAL", "ACTION_REQUIRED", "EXPIRED"] },
+      dismissedAt: null
+    },
+    data: { dismissedAt, dismissedBy: actorId }
+  });
+});
+
+test("keeps completed operations visible and replays an existing dismissal", async () => {
+  const dismissedAt = new Date("2026-09-11T12:45:00.000Z");
+  const serviceFor = (current: Readonly<Record<string, unknown>>) =>
+    new OperationActivityService({
+      $transaction: async (run: (client: unknown) => unknown) => run({
+        job: {
+          findFirst: async () => current,
+          updateMany: async () => {
+            throw new Error("must not update");
+          }
+        }
+      })
+    } as unknown as PrismaService);
+  const input = { workspaceId, projectId: firstProjectId, actorId, operationId: jobId };
+
+  await assert.rejects(
+    () => serviceFor({ id: jobId, status: "COMPLETED", dismissedAt: null }).dismiss(input),
+    /not dismissible/iu
+  );
+  assert.deepEqual(
+    await serviceFor({ id: jobId, status: "FAILED_FINAL", dismissedAt }).dismiss(input),
+    { operationId: jobId, dismissedAt: dismissedAt.toISOString() }
+  );
 });
 
 test("lists a bounded platform operation summary without raw job payloads", async () => {

@@ -22,12 +22,17 @@ import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { semanticExportFileUrl } from "../lib/app-path";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
+  isDismissibleOperationStatus,
+  operationDismissalPath
+} from "../lib/operation-dismissal";
+import {
   searchRegionDisplayName,
   seoRegionDisplayName
 } from "../lib/seo-regions";
 import {
   aiAnswerCollectionTitle,
   isCompetitorCollection,
+  keywordResearchCollectionTitle,
   rankCollectionDepthLabel,
   rankCollectionTitle
 } from "../lib/operation-collection-purpose";
@@ -52,6 +57,8 @@ import {
   OperationStopIcon
 } from "./operation-result-modal";
 import { OperationStopConfirmation } from "./operation-stop-confirmation";
+import { OperationDismissConfirmation } from "./operation-dismiss-confirmation";
+import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { ProjectContextSelect } from "./project-context-select";
 import type { AppProject } from "../lib/app-types";
@@ -94,6 +101,7 @@ interface ProjectTask {
   readonly errorCode?: string;
   readonly version: number;
   readonly cancellable: boolean;
+  readonly dismissible: boolean;
   readonly retryable: boolean;
   readonly retryLabel: string;
   readonly inputFacts: readonly TaskFact[];
@@ -115,7 +123,6 @@ export function TaskCenter({
   const [rankRetry, setRankRetry] = useState<RankRetryDraft>();
   const [frequencyRetry, setFrequencyRetry] = useState<FrequencyRetryDraft>();
   const frequencyRetryLoad = useRef<AbortController | undefined>(undefined);
-  useEffect(() => { setFrequencyRetry(undefined); setRankRetry(undefined); return () => frequencyRetryLoad.current?.abort(); }, [projectId]);
   const { t: uiText } = useUiLocale();
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
@@ -132,7 +139,17 @@ export function TaskCenter({
   const [resultId, setResultId] = useState<string>();
   const [busyId, setBusyId] = useState<string>();
   const [stopConfirmation, setStopConfirmation] = useState<ProjectTask>();
+  const [dismissConfirmation, setDismissConfirmation] = useState<ProjectTask>();
   const requestInFlight = useRef(false);
+
+  useEffect(() => {
+    setDismissConfirmation(undefined);
+    setFrequencyRetry(undefined);
+    setRankRetry(undefined);
+    setResultId(undefined);
+    setStopConfirmation(undefined);
+    return () => frequencyRetryLoad.current?.abort();
+  }, [projectId]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (requestInFlight.current) return;
@@ -318,6 +335,38 @@ export function TaskCenter({
     }
   }
 
+  async function dismiss(task: ProjectTask): Promise<void> {
+    const current = tasks.find(({ id, kind }) =>
+      id === task.id && kind === task.kind
+    ) ?? task;
+    if (!current.dismissible) {
+      setDismissConfirmation(undefined);
+      await load();
+      return;
+    }
+    setBusyId(current.id);
+    setErrors([]);
+    try {
+      await browserApiRequest(operationDismissalPath(projectId, current.id), {
+        method: "DELETE"
+      });
+      setFrequencies((items) => items.filter(({ id }) => id !== current.id));
+      setAiAnswers((items) => items.filter(({ id }) => id !== current.id));
+      setClusteringRuns((items) => items.filter(({ id }) => id !== current.id));
+      setRanks((items) => items.filter(({ id }) => id !== current.id));
+      setCrawls((items) => items.filter(({ id }) => id !== current.id));
+      setResearch((items) => items.filter(({ id }) => id !== current.id));
+      setSemanticExports((items) => items.filter(({ id }) => id !== current.id));
+      setResultId(undefined);
+      setDismissConfirmation(undefined);
+      await load();
+    } catch (requestError) {
+      setErrors([taskError(requestError)]);
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
   return (
     <section className="task-center">
       {rankRetry && <SemanticPositionDialog projectId={projectId} workspaceId={rankRetry.result.job.workspaceId} groups={rankRetry.groups} initialSelections={rankRetry.selections} initialRun={rankRetry.result} mode={rankRetry.result.execution.purpose === "COMPETITOR_SERP" ? "competitors" : "positions"} onClose={() => setRankRetry(undefined)} onStarted={() => { setRankRetry(undefined); void load(); }} />}
@@ -362,7 +411,7 @@ export function TaskCenter({
           <option value="RANK"><UiText text="Позиции" /></option>
           <option value="COMPETITOR_SERP"><UiText text="Выдача конкурентов" /></option>
           <option value="CRAWL"><UiText text="Аудиты" /></option>
-          <option value="RESEARCH"><UiText text="Сбор конкурентов" /></option>
+          <option value="RESEARCH"><UiText text="Исследование запросов" /></option>
           <option value="EXPORT"><UiText text="Экспорт" /></option>
         </CustomSelect>
       </div>
@@ -390,13 +439,15 @@ export function TaskCenter({
               <button
                 aria-pressed={task.resultKind ? resultId === task.id : undefined}
                 className="task-ledger-row"
-                disabled={!task.resultKind && !task.downloadUrl}
+                disabled={!task.resultKind && !task.downloadUrl && !task.dismissible}
                 key={`${task.kind}:${task.id}`}
                 onClick={() => {
                   if (task.downloadUrl) {
                     window.location.assign(task.downloadUrl);
                   } else if (task.resultKind) {
                     setResultId(task.id);
+                  } else if (task.dismissible) {
+                    setDismissConfirmation(task);
                   }
                 }}
                 title={task.downloadUrl ? uiText("Скачать готовый файл") : undefined}
@@ -454,6 +505,18 @@ export function TaskCenter({
                   <OperationStopIcon />
                 </button>
               )}
+              {resultTask.dismissible && (
+                <button
+                  aria-label={uiText("Удалить операцию?")}
+                  className="operation-result-header-action is-danger"
+                  disabled={busyId === resultTask.id}
+                  onClick={() => setDismissConfirmation(resultTask)}
+                  title={uiText("Удалить операцию?")}
+                  type="button"
+                >
+                  <Icon name="trash" />
+                </button>
+              )}
             </>
           )}
           description={`${resultTask.description} · ${formatDateTime(resultTask.createdAt, uiLocale)}`}
@@ -477,6 +540,15 @@ export function TaskCenter({
           title={stopConfirmation.title}
         />
       )}
+      {dismissConfirmation && (
+        <OperationDismissConfirmation
+          busy={busyId === dismissConfirmation.id}
+          description={dismissConfirmation.description}
+          onCancel={() => setDismissConfirmation(undefined)}
+          onConfirm={() => void dismiss(dismissConfirmation)}
+          title={dismissConfirmation.title}
+        />
+      )}
     </section>
   );
 }
@@ -497,6 +569,7 @@ function frequencyTask(value: FrequencyCollectionSummary, uiLocale: string = "ru
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
+    dismissible: isDismissibleOperationStatus(value.status),
     retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
     retryLabel: "Повторить ошибки",
     inputFacts: [
@@ -548,6 +621,7 @@ function aiAnswerTask(value: AiAnswerCollectionSummary, uiLocale: string = "ru-R
       "RETRY_SCHEDULED",
       "FAILED_RETRYABLE"
     ].includes(value.status),
+    dismissible: isDismissibleOperationStatus(value.status),
     retryable: false,
     retryLabel: "",
     inputFacts: [
@@ -595,6 +669,7 @@ function clusteringTask(value: ClusteringRunSummary, uiLocale: string = "ru-RU")
       "RETRY_SCHEDULED",
       "FAILED_RETRYABLE"
     ].includes(value.status),
+    dismissible: isDismissibleOperationStatus(value.status),
     retryable: false,
     retryLabel: "",
     inputFacts: [
@@ -641,6 +716,7 @@ function rankTask(value: RankJobSummary, uiLocale: string = "ru-RU"): ProjectTas
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED" ? { errorCode: value.failure.code } : {}),
     version: 1,
     cancellable: isCancellableRankJob(value),
+    dismissible: isDismissibleOperationStatus(value.status),
     retryable:
       value.status === "PARTIALLY_COMPLETED" &&
       Number(value.result.failedCount) > 0 &&
@@ -681,7 +757,7 @@ function crawlTask(value: TechnicalCrawlSummary, uiLocale: string = "ru-RU"): Pr
     ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}), ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
-    cancellable: ["QUEUED", "RUNNING"].includes(value.status), retryable: false,
+    cancellable: ["QUEUED", "RUNNING"].includes(value.status), dismissible: isDismissibleOperationStatus(value.status), retryable: false,
     retryLabel: "Повторить",
     inputFacts: [
       { label: "Стартовые URL", value: crawlStartLabel(value.config.startUrls) },
@@ -709,7 +785,7 @@ function researchTask(value: KeywordResearchRunSummary, uiLocale: string = "ru-R
       ? "Arsenkin Tools"
       : "Keys.so";
   return {
-    id: value.id, kind: "RESEARCH", resultKind: "research", provider: value.provider, title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
+    id: value.id, kind: "RESEARCH", resultKind: "research", provider: value.provider, title: keywordResearchCollectionTitle(value),
     description: keysSo
       ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
       : `${providerName} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,
@@ -718,7 +794,7 @@ function researchTask(value: KeywordResearchRunSummary, uiLocale: string = "ru-R
     progressTotal: value.totalAvailable ?? value.maxKeywords, createdAt: value.createdAt,
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}), ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
-    cancellable: ["QUEUED", "RUNNING", "RETRY_SCHEDULED", "READY_TO_IMPORT"].includes(value.status), retryable: false,
+    cancellable: ["QUEUED", "RUNNING", "RETRY_SCHEDULED", "READY_TO_IMPORT"].includes(value.status), dismissible: isDismissibleOperationStatus(value.status), retryable: false,
     retryLabel: "Повторить",
     inputFacts: [
       ...(keysSo
@@ -768,6 +844,7 @@ function exportTask(
       "RETRY_SCHEDULED",
       "FAILED_RETRYABLE"
     ].includes(value.status),
+    dismissible: isDismissibleOperationStatus(value.status),
     retryable: false,
     retryLabel: "",
     inputFacts: [

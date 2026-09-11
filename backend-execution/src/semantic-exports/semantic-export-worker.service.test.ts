@@ -358,6 +358,7 @@ function queuedJob(): Job {
   const now = new Date("2026-08-12T10:00:00.000Z");
   return {
     billingQuoteId: null, billingCommandHash: null, billingMaximumUnitsMilli: null,
+    dismissedAt: null, dismissedBy: null,
     id: "01900000-0000-7000-8000-000000000010",
     workspaceId: "01900000-0000-7000-8000-000000000001",
     projectId: "01900000-0000-7000-8000-000000000002",

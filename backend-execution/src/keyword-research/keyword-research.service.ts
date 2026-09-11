@@ -188,7 +188,7 @@ export class KeywordResearchService {
     projectId: string
   ): Promise<readonly KeywordResearchRunSummary[]> {
     const runs = await this.prisma.keywordResearchRun.findMany({
-      where: { workspaceId, projectId },
+      where: { workspaceId, projectId, job: { dismissedAt: null } },
       include: { rows: { orderBy: { ordinal: "asc" }, take: 500 } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 25

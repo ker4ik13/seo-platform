@@ -41,6 +41,18 @@ export interface OperationResultPageInfo {
   readonly nextCursor?: string;
 }
 
+export interface InternalDismissProjectOperationInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly operationId: string;
+}
+
+export interface ProjectOperationDismissal {
+  readonly operationId: string;
+  readonly dismissedAt: string;
+}
+
 /** Jobs-owned exact scope of one frequency collection. */
 export interface InternalFrequencyOperationScopeItem {
   readonly sequence: number;

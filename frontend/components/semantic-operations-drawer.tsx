@@ -26,6 +26,15 @@ import {
 import { operationStatusLabel } from "../lib/operation-status-presentation";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
+  isDismissibleOperationStatus,
+  operationDismissalPath
+} from "../lib/operation-dismissal";
+import {
+  aiAnswerCollectionTitle,
+  keywordResearchCollectionTitle,
+  rankCollectionTitle
+} from "../lib/operation-collection-purpose";
+import {
   searchRegionDisplayName,
   seoRegionDisplayName
 } from "../lib/seo-regions";
@@ -38,9 +47,14 @@ import {
   OperationStopIcon
 } from "./operation-result-modal";
 import { OperationStopConfirmation } from "./operation-stop-confirmation";
+import { OperationDismissConfirmation } from "./operation-dismiss-confirmation";
 import { ProviderLogo } from "./provider-logo";
 import { SemanticRankContext } from "./semantic-rank-context";
-import { frequencyCollectionCompactTitle, frequencyCollectionParameters } from "../lib/frequency-operation-presentation";
+import {
+  frequencyCollectionCompactTitle,
+  frequencyCollectionParameters,
+  frequencyCollectionTitle
+} from "../lib/frequency-operation-presentation";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
@@ -65,7 +79,6 @@ export function SemanticOperationsDrawer({
   const [rankRetry, setRankRetry] = useState<RankRetryDraft>();
   const [frequencyRetry, setFrequencyRetry] = useState<FrequencyRetryDraft>();
   const frequencyRetryLoad = useRef<AbortController | undefined>(undefined);
-  useEffect(() => { setFrequencyRetry(undefined); setRankRetry(undefined); return () => frequencyRetryLoad.current?.abort(); }, [projectId]);
   const { t: uiText } = useUiLocale();
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
@@ -77,12 +90,23 @@ export function SemanticOperationsDrawer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [cancellingId, setCancellingId] = useState<string>();
+  const [dismissingId, setDismissingId] = useState<string>();
   const [retryingId, setRetryingId] = useState<string>();
   const [selectedOperation, setSelectedOperation] = useState<Operation>();
   const [stopConfirmation, setStopConfirmation] = useState<Operation>();
+  const [dismissConfirmation, setDismissConfirmation] = useState<Operation>();
   const settledFrequencyNotifications = useRef(new Set<string>());
   const onFrequencySettledRef = useRef(onFrequencySettled);
   const requestInFlight = useRef(false);
+
+  useEffect(() => {
+    setDismissConfirmation(undefined);
+    setFrequencyRetry(undefined);
+    setRankRetry(undefined);
+    setSelectedOperation(undefined);
+    setStopConfirmation(undefined);
+    return () => frequencyRetryLoad.current?.abort();
+  }, [projectId]);
 
   useEffect(() => {
     onFrequencySettledRef.current = onFrequencySettled;
@@ -290,6 +314,37 @@ export function SemanticOperationsDrawer({
     }
   }
 
+  async function dismiss(operation: Operation): Promise<void> {
+    const current = allOperations.find(({ id, kind }) =>
+      id === operation.id && kind === operation.kind
+    ) ?? operation;
+    if (!current.dismissible) {
+      setDismissConfirmation(undefined);
+      await load();
+      return;
+    }
+    setDismissingId(current.id);
+    setError(undefined);
+    try {
+      await browserApiRequest(operationDismissalPath(projectId, current.id), {
+        method: "DELETE"
+      });
+      setFrequencies((items) => items.filter(({ id }) => id !== current.id));
+      setRanks((items) => items.filter(({ id }) => id !== current.id));
+      setAiAnswers((items) => items.filter(({ id }) => id !== current.id));
+      setClusteringRuns((items) => items.filter(({ id }) => id !== current.id));
+      setResearchRuns((items) => items.filter(({ id }) => id !== current.id));
+      setSemanticExports((items) => items.filter(({ id }) => id !== current.id));
+      setSelectedOperation(undefined);
+      setDismissConfirmation(undefined);
+      await load();
+    } catch (requestError) {
+      setError(operationError(requestError));
+    } finally {
+      setDismissingId(undefined);
+    }
+  }
+
   return (
     <>
     {rankRetry && <SemanticPositionDialog projectId={projectId} workspaceId={rankRetry.result.job.workspaceId} groups={rankRetry.groups} initialSelections={rankRetry.selections} initialRun={rankRetry.result} mode={rankRetry.result.execution.purpose === "COMPETITOR_SERP" ? "competitors" : "positions"} onClose={() => setRankRetry(undefined)} onStarted={() => { setRankRetry(undefined); void load(); }} />}
@@ -366,6 +421,15 @@ export function SemanticOperationsDrawer({
                   {cancellingId === operation.id ? <UiText text="Останавливаем…" /> : <UiText text="Остановить" />}
                 </button>
               )}
+              {operation.dismissible && (
+                <button
+                  disabled={dismissingId === operation.id}
+                  onClick={() => setDismissConfirmation(operation)}
+                  type="button"
+                >
+                  {dismissingId === operation.id ? <UiText text="Удаляем…" /> : <UiText text="Удалить" />}
+                </button>
+              )}
               {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING" || operation.kind === "RESEARCH") && (
                 <button
                   className="semantic-operation-open"
@@ -421,8 +485,9 @@ export function SemanticOperationsDrawer({
       openedOperation.kind === "RESEARCH"
     ) && (
       <OperationResultModal
-        actions={openedOperation.cancellable ? (
-          <button
+        actions={(
+          <>
+          {openedOperation.cancellable && <button
             aria-label={cancellingId === openedOperation.id ? uiText("Операция останавливается") : uiText("Остановить операцию")}
             className="operation-result-header-action is-danger"
             disabled={cancellingId === openedOperation.id}
@@ -431,8 +496,19 @@ export function SemanticOperationsDrawer({
             type="button"
           >
             <OperationStopIcon />
-          </button>
-        ) : undefined}
+          </button>}
+          {openedOperation.dismissible && <button
+            aria-label={uiText("Удалить операцию?")}
+            className="operation-result-header-action is-danger"
+            disabled={dismissingId === openedOperation.id}
+            onClick={() => setDismissConfirmation(openedOperation)}
+            title={uiText("Удалить операцию?")}
+            type="button"
+          >
+            <Icon name="trash" />
+          </button>}
+          </>
+        )}
         description={`${openedOperation.description} · ${formatDateTime(openedOperation.createdAt, uiLocale)}`}
         kind={openedOperation.kind === "FREQUENCY"
           ? "frequency"
@@ -447,7 +523,7 @@ export function SemanticOperationsDrawer({
         onClose={() => setSelectedOperation(undefined)}
         operationId={openedOperation.id}
         projectId={projectId}
-        title={openedOperation.kind === "FREQUENCY" ? openedOperation.title : openedOperation.kind === "AI_ANSWER" ? openedOperation.competitorCollection ? uiText("ИИ-выдача конкурентов") : uiText("Сбор ИИ-ответов") : openedOperation.kind === "CLUSTERING" ? uiText("Кластеризация запросов") : openedOperation.kind === "RESEARCH" ? openedOperation.title : openedOperation.competitorCollection ? uiText("Выдача конкурентов · Топ-10") : uiText("Проверка позиций")}
+        title={openedOperation.resultTitle}
       />
     )}
     {stopConfirmation && (
@@ -461,6 +537,15 @@ export function SemanticOperationsDrawer({
         title={stopConfirmation.title}
       />
     )}
+    {dismissConfirmation && (
+      <OperationDismissConfirmation
+        busy={dismissingId === dismissConfirmation.id}
+        description={dismissConfirmation.description}
+        onCancel={() => setDismissConfirmation(undefined)}
+        onConfirm={() => void dismiss(dismissConfirmation)}
+        title={dismissConfirmation.title}
+      />
+    )}
     </>
   );
 }
@@ -470,6 +555,7 @@ interface Operation {
   readonly kind: "FREQUENCY" | "RANK" | "AI_ANSWER" | "CLUSTERING" | "RESEARCH" | "EXPORT";
   readonly provider?: "XMLSTOCK" | "ARSENKIN" | "KEYS_SO";
   readonly title: string;
+  readonly resultTitle: string;
   readonly description: string;
   readonly statusLabel: string;
   readonly progressLabel: string;
@@ -479,6 +565,7 @@ interface Operation {
   readonly retryable: boolean;
   readonly retryLabel: string;
   readonly downloadable: boolean;
+  readonly dismissible: boolean;
   readonly version: number;
   readonly errorCode?: string;
   readonly routeLabel?: string;
@@ -504,6 +591,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     kind: "FREQUENCY",
     provider: value.provider,
     title: frequencyCollectionCompactTitle(value),
+    resultTitle: frequencyCollectionTitle(value),
     description: seasonality
       ? `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${frequencyCollectionParameters(value)}`
       : `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
@@ -515,6 +603,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
     retryLabel: "Повторить ошибки",
     downloadable: false,
+    dismissible: isDismissibleOperationStatus(value.status),
     version: value.version,
     ...(value.routingScope
       ? {
@@ -550,6 +639,7 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
     kind: "RANK",
     provider: value.provider,
     title: `${competitorCollection ? "Выдача конкурентов" : "Проверка позиций"} · ${description}`,
+    resultTitle: rankCollectionTitle(value),
     description,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${current} из ${total}`,
@@ -562,6 +652,7 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
       Number(value.result.submitOutcomeUnknownCount) === 0,
     retryLabel: competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
     downloadable: false,
+    dismissible: isDismissibleOperationStatus(value.status),
     version: 1,
     ...(competitorCollection ? { competitorCollection: true } : {}),
     ...(value.searchEngine && value.regionCode && value.device
@@ -607,7 +698,8 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     id: value.id,
     kind: "AI_ANSWER",
     provider: "ARSENKIN",
-    title: `${competitorCollection ? "ИИ-выдача конкурентов" : "ИИ-ответы"} · ${engine}`,
+    title: `${aiAnswerCollectionTitle(value)} · ${engine}`,
+    resultTitle: aiAnswerCollectionTitle(value),
     description: `Arsenkin · ${engine} · ${searchRegionDisplayName(value.searchEngine, value.regionCode)} · ${device}`,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${done} из ${value.selectedKeywords}`,
@@ -625,6 +717,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     retryable: false,
     retryLabel: "",
     downloadable: false,
+    dismissible: isDismissibleOperationStatus(value.status),
     version: value.version,
     ...(competitorCollection ? { competitorCollection: true } : {}),
     rankContext: {
@@ -655,7 +748,8 @@ function clusteringOperation(value: ClusteringRunSummary): Operation {
     id: value.id,
     kind: "CLUSTERING",
     provider: "ARSENKIN",
-    title: `Кластеризация · ${engine}`,
+    title: `Кластеризация запросов · ${engine}`,
+    resultTitle: "Кластеризация запросов",
     description: `Arsenkin · ${engine} · ТОП-${value.depth} · ${value.method === "SOFT" ? "мягкая" : "жёсткая"}`,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: value.status === "COMPLETED" && value.clusterCount !== undefined
@@ -677,6 +771,7 @@ function clusteringOperation(value: ClusteringRunSummary): Operation {
     retryable: false,
     retryLabel: "",
     downloadable: false,
+    dismissible: isDismissibleOperationStatus(value.status),
     version: value.version,
     ...(value.routingScope
       ? {
@@ -709,7 +804,8 @@ function researchOperation(value: KeywordResearchRunSummary, uiLocale: string = 
     id: value.id,
     kind: "RESEARCH",
     provider: value.provider,
-    title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
+    title: keywordResearchCollectionTitle(value),
+    resultTitle: keywordResearchCollectionTitle(value),
     description: keysSo
       ? `${providerLabel} · ${value.domain ?? "—"}`
       : `${providerLabel} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,
@@ -734,6 +830,7 @@ function researchOperation(value: KeywordResearchRunSummary, uiLocale: string = 
     retryable: false,
     retryLabel: "",
     downloadable: false,
+    dismissible: isDismissibleOperationStatus(value.status),
     version: value.version,
     routeLabel: keysSo ? "Данные домена" : "Расширение семантики",
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
@@ -754,6 +851,7 @@ function exportOperation(value: SemanticExportJobSummary): Operation {
     id: value.id,
     kind: "EXPORT",
     title: `Экспорт семантики · ${exportFormatLabel(value.format)}`,
+    resultTitle: "Экспорт семантики",
     description: `${exportFormatLabel(value.format)} · ${exportScopeLabel(value.scope)}`,
     statusLabel: exportStatusLabel(value.status),
     progressLabel: complete
@@ -776,6 +874,7 @@ function exportOperation(value: SemanticExportJobSummary): Operation {
     retryable: false,
     retryLabel: "",
     downloadable: complete,
+    dismissible: isDismissibleOperationStatus(value.status),
     version: value.version,
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     routeLabel: exportScopeLabel(value.scope),

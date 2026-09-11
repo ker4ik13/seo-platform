@@ -162,25 +162,52 @@ function operationDescriptor(jobType: string, jobId: string): {
   readonly label: string;
   readonly deepLink: string;
 } {
-  if (jobType === "FREQUENCY_COLLECTION") {
+  if (
+    jobType === "FREQUENCY_COLLECTION" ||
+    jobType === "WORDSTAT_FREQUENCY_COLLECTION"
+  ) {
     return {
       eventType: "FREQUENCY_COLLECTION",
       label: "Сбор частотности",
       deepLink: `/app/tasks/frequency/${jobId}`
     };
   }
-  if (jobType === "MANUAL_RANK_CHECK") {
+  if (jobType === "WORDSTAT_SEASONALITY_COLLECTION") {
+    return {
+      eventType: "FREQUENCY_COLLECTION",
+      label: "Сбор сезонности",
+      deepLink: `/app/tasks/frequency/${jobId}`
+    };
+  }
+  if (
+    jobType === "MANUAL_RANK_CHECK" ||
+    jobType === "RANK_POSITION_TRACKING"
+  ) {
     return {
       eventType: "RANK_TRACKING",
       label: "Проверка позиций",
       deepLink: `/app/tasks/rank/${jobId}`
     };
   }
+  if (jobType === "RANK_COMPETITOR_SERP") {
+    return {
+      eventType: "SERP_COLLECTION",
+      label: "Выдача конкурентов",
+      deepLink: `/app/tasks/rank/${jobId}`
+    };
+  }
   if (jobType === "AI_ANSWER_COLLECTION") {
     return {
       eventType: "SERP_COLLECTION",
-      label: "Проверка ИИ-ответов",
-      deepLink: "/app/tasks"
+      label: "Сбор ИИ-ответов",
+      deepLink: `/app/tasks/ai-answer/${jobId}`
+    };
+  }
+  if (jobType === "AI_COMPETITOR_SERP") {
+    return {
+      eventType: "SERP_COLLECTION",
+      label: "ИИ-выдача конкурентов",
+      deepLink: `/app/tasks/ai-answer/${jobId}`
     };
   }
   if (jobType === "CLUSTERING_RUN") {
@@ -190,10 +217,36 @@ function operationDescriptor(jobType: string, jobId: string): {
       deepLink: `/app/tasks/clustering/${jobId}`
     };
   }
-  if (jobType === "KEYWORD_RESEARCH") {
+  if (jobType === "KEYS_SO_RESEARCH") {
     return {
       eventType: "MAGNET",
-      label: "Сбор поисковых данных",
+      label: "Анализ Keys.so",
+      deepLink: `/app/tasks/research/${jobId}`
+    };
+  }
+  if (
+    jobType === "KEYWORD_RESEARCH" ||
+    jobType === "WORDSTAT_KEYWORD_RESEARCH"
+  ) {
+    return {
+      eventType: "MAGNET",
+      label: jobType === "KEYWORD_RESEARCH"
+        ? "Исследование запросов"
+        : "Парсинг Wordstat",
+      deepLink: `/app/tasks/research/${jobId}`
+    };
+  }
+  if (jobType === "SEMANTIC_IMPORT") {
+    return {
+      eventType: "SEMANTIC_IMPORT",
+      label: "Импорт семантики",
+      deepLink: "/app/tasks"
+    };
+  }
+  if (jobType === "SEMANTIC_EXPORT") {
+    return {
+      eventType: "REPORT",
+      label: "Экспорт семантики",
       deepLink: "/app/tasks"
     };
   }

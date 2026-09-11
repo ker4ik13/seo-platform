@@ -177,6 +177,10 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("rank-job", "GET", "/projects/{projectId}/jobs/{jobId}", "positions:read", "Текущее состояние задания", "positions"),
   endpoint("rank-result", "GET", "/projects/{projectId}/jobs/{jobId}/result", "positions:read", "Постраничный результат позиций", "positions"),
   endpoint("rank-cancel", "POST", "/projects/{projectId}/jobs/{jobId}/cancel", "positions:run", "Запросить отмену задания", "positions"),
+  endpoint("operation-dismiss", "DELETE", "/projects/{projectId}/operations/{operationId}", "projects:write", "Убрать завершившуюся с ошибкой или истёкшую операцию из пользовательского журнала", "jobs", {
+    request: "Path: projectId, operationId (UUID). Тело отсутствует. Допустимы только terminal statuses FAILED_FINAL, ACTION_REQUIRED и EXPIRED.",
+    response: "200 · data: { operationId, dismissedAt }. Результаты, биллинг и audit history не удаляются."
+  }),
   endpoint("frequency-list", "GET", "/projects/{projectId}/frequency-collections", "frequency:read", "История съёмов частотности", "frequency"),
   endpoint("frequency-create", "POST", "/projects/{projectId}/frequency-collections", "frequency:run", "Создать съём частотности", "frequency"),
   endpoint("frequency-get", "GET", "/projects/{projectId}/frequency-collections/{jobId}", "frequency:read", "Состояние съёма частотности", "frequency"),

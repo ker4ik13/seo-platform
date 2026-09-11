@@ -142,7 +142,8 @@ import type {
   CreateClusteringRunInput,
   InternalCreateClusteringRunInput,
   InternalCancelClusteringRunInput,
-  ClusteringRunSummary
+  ClusteringRunSummary,
+  ProjectOperationDismissal
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -423,6 +424,27 @@ export class JobsClient {
       counts.set(projectId, Number(activity.activeOperationCount));
     }
     return counts;
+  }
+
+  public async dismissProjectOperation(
+    context: InternalContext,
+    operationId: string
+  ): Promise<ProjectOperationDismissal> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "DELETE",
+      projectOperationPath(context.tenant.workspaceId, projectId, operationId),
+      context
+    );
+    const input = exactRecord(value, ["operationId", "dismissedAt"]);
+    if (
+      input.operationId !== operationId ||
+      typeof input.dismissedAt !== "string" ||
+      !canonicalTimestamp(input.dismissedAt)
+    ) {
+      throw invalidJobsResponse();
+    }
+    return { operationId, dismissedAt: input.dismissedAt };
   }
 
   public async listAdminOperations(
@@ -2492,6 +2514,24 @@ function workspaceOperationActivityPath(workspaceId: string): string {
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/operation-activity`;
+}
+
+function projectOperationPath(
+  workspaceId: string,
+  projectId: string,
+  operationId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/operations/${encodeURIComponent(operationId)}`;
+}
+
+function canonicalTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value)) {
+    return false;
+  }
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
 function rankRunCollectionPath(

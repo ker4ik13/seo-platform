@@ -1899,7 +1899,14 @@ keyword остаётся одной строкой файла; нескольк�
 пользовательский клик не зависит от browser user-activation после async polling.
 Drawer «Задачи и операции» продолжает polling после закрытия export modal,
 показывает прогресс и позволяет остановить активный экспорт либо повторно скачать
-завершённый файл прямой пользовательской ссылкой.
+завершённый файл прямой пользовательской ссылкой. Ошибочные и истёкшие Job
+можно убрать из обоих пользовательских журналов через tenant-scoped
+`DELETE /api/v1/projects/:projectId/operations/:operationId` с разрешением
+`task.manage`. Platform API аудитирует команду, а Execution записывает
+`jobs.dismissed_at/dismissed_by`; owning lists фильтруют скрытые строки, сохраняя
+результаты, расчёты, provider evidence и admin/audit history. Ограничения и
+индекс добавляет migration
+`20260911124500_failed_operation_dismissal`.
 
 Проектный инструмент `/app/projects/{projectId}/tools/http-status-checker`
 переиспользует тот же `technical-crawl` Job/queue/worker и отличается
@@ -1947,12 +1954,18 @@ Terminal Job reconciler работает внутри HTTP-role Execution и п�
 `ACTION_REQUIRED` каждого project Job доставляются в Core, а затем в единый
 центр уведомлений без обращения Execution к Core DB. Realtime принимает два
 точных resource-контракта: `technical_crawl` и tenant-bound `job`, причём Job
-ID обязан совпадать с deep link и dedupe key. Миграции
+ID обязан совпадать с deep link и dedupe key. Перед созданием outbox event
+Execution выводит безопасный тип операции из immutable `input_snapshot` или
+`scope_snapshot`: позиции и SEO-выдача, ИИ-ответы и ИИ-выдача, частотность и
+сезонность, Keys.so и Wordstat получают разные названия, event type и точные
+result deep links. Web сохраняет это же название при открытии результата из
+уведомления. Миграции
 `20260805163000_retry_terminal_job_notifications` и
 `20260805171000_retry_terminal_notifications_after_contract_fix` ограниченно
 возвращают в очередь idempotent terminal events, исчерпавшие retry до
 исправления route/resource allowlist. Пользовательские Job-заголовки используют
-грамматически нейтральный формат `Операция: статус`; ограниченная Realtime
+грамматически нейтральный формат `Точное название операции: статус`;
+ограниченная Realtime
 миграция исправляет только прежние системные шаблоны.
 
 ### Platform admin: ручная подписка
