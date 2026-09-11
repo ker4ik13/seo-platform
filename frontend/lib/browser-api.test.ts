@@ -79,6 +79,61 @@ test("coalesces concurrent 401 responses into one refresh rotation", async () =>
   }
 });
 
+test("retries with cookies rotated by another browser tab without a second refresh", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let csrf = "old-csrf";
+  let apiCalls = 0;
+  let refreshCalls = 0;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      get cookie() {
+        return `seo_csrf=${csrf}`;
+      }
+    }
+  });
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      locks: {
+        request: async (
+          _name: string,
+          _options: Readonly<{ mode: "exclusive" }>,
+          callback: () => Promise<boolean>
+        ) => {
+          csrf = "peer-rotated-csrf";
+          return callback();
+        }
+      }
+    }
+  });
+  globalThis.fetch = async (input) => {
+    if (input === "/app/auth/refresh") {
+      refreshCalls += 1;
+      return Response.json({ data: { refreshed: true } });
+    }
+    apiCalls += 1;
+    return apiCalls === 1
+      ? Response.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 })
+      : Response.json({ data: { ready: true } });
+  };
+
+  try {
+    assert.deepEqual(
+      await browserApiRequest("/app/api/notifications"),
+      { ready: true }
+    );
+    assert.equal(apiCalls, 2);
+    assert.equal(refreshCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreGlobalDocument(originalDocument);
+    restoreGlobalNavigator(originalNavigator);
+  }
+});
+
 test("preserves request metadata from a standard API error", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
@@ -344,5 +399,15 @@ function restoreGlobalDocument(
     Object.defineProperty(globalThis, "document", descriptor);
   } else {
     Reflect.deleteProperty(globalThis, "document");
+  }
+}
+
+function restoreGlobalNavigator(
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(globalThis, "navigator", descriptor);
+  } else {
+    Reflect.deleteProperty(globalThis, "navigator");
   }
 }

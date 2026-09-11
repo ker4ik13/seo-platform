@@ -513,6 +513,12 @@ Browser BFF-клиент обрабатывает истечение корот�
 после чего каждый исходный same-origin запрос повторяется не более одного раза
 с новым CSRF token. Истинно завершённая refresh session остаётся terminal и не
 порождает цикл повторов или ложную ссылку на настройку provider route.
+`frontend/lib/session-refresh-coordination.ts` расширяет это правило на разные
+вкладки: браузер использует same-origin Web Lock и замечает peer-rotation по
+смене CSRF cookie, а refresh BFF объединяет только совпавшие одновременно
+выполняющиеся SHA-256 fingerprints. In-flight registry ограничен 256 записями,
+не содержит raw token, очищается сразу после ответа и не создаёт replay grace;
+разные браузеры и поздний reuse остаются видимы Platform reuse-защите.
 Страница `/app/login` до показа формы проверяет серверную auth session и при
 действующем access token либо наличии refresh cookie сразу перенаправляет на
 `/app`; истёкший access token затем проходит через общий protected refresh flow.

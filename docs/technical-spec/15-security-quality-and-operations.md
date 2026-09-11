@@ -127,6 +127,11 @@ embedded content отклоняется.
 - Маркетинговый сайт не получает cookie приложения без необходимости.
 - Admin использует отдельную cookie/session audience.
 - Access session короткоживущая; refresh rotation.
+- Конкурентная rotation из вкладок одного браузера сериализуется Web Locks и
+  bounded in-flight BFF coalescing. Координационный ключ является SHA-256
+  fingerprint и не логируется; BFF не хранит raw token и не сохраняет
+  завершённый ответ. Поэтому поздний reuse отозванного refresh token сохраняет
+  terminal family revoke.
 - Security-значимые session writers одного пользователя сериализуются общим
   namespaced PostgreSQL advisory transaction lock. Выдача session под lock
   повторно требует ожидаемую версию `ACTIVE` пользователя.

@@ -6,6 +6,10 @@ import { announceSemanticMutationForRequest } from "./semantic-realtime.ts";
 import type { OperationEstimate } from "@seo-platform/contracts";
 import { confirmPaidOperation, hasOperationConfirmation, quotedOperationRoute } from "./operation-confirmation.ts";
 import type { OperationAttempt } from "./operation-attempt.ts";
+import {
+  coordinatedBrowserSessionRefresh,
+  type BrowserSessionRefreshLockManager
+} from "./session-refresh-coordination.ts";
 
 export interface BrowserFieldError {
   readonly path: string;
@@ -219,16 +223,17 @@ async function sessionAwareFetch(
   path: string,
   request: RequestInit
 ): Promise<Response> {
+  const observedCsrf = browserCookie(csrfCookieName());
   const response = await fetch(path, request);
   if (
     response.status !== 401 ||
-    !browserCookie(csrfCookieName()) ||
+    !observedCsrf ||
     request.signal?.aborted
   ) {
     return response;
   }
 
-  const refreshed = await refreshBrowserSession();
+  const refreshed = await refreshBrowserSession(observedCsrf);
   if (!refreshed || request.signal?.aborted) return response;
 
   const headers = new Headers(request.headers);
@@ -239,16 +244,19 @@ async function sessionAwareFetch(
   return fetch(path, { ...request, headers });
 }
 
-async function refreshBrowserSession(): Promise<boolean> {
-  sessionRefreshPromise ??= performSessionRefresh().finally(() => {
+async function refreshBrowserSession(observedCsrf: string): Promise<boolean> {
+  sessionRefreshPromise ??= coordinatedBrowserSessionRefresh(
+    observedCsrf,
+    () => browserCookie(csrfCookieName()),
+    performSessionRefresh,
+    browserSessionLockManager()
+  ).finally(() => {
     sessionRefreshPromise = undefined;
   });
   return sessionRefreshPromise;
 }
 
-async function performSessionRefresh(): Promise<boolean> {
-  const csrf = browserCookie(csrfCookieName());
-  if (!csrf) return false;
+async function performSessionRefresh(csrf: string): Promise<boolean> {
   const response = await fetch("/app/auth/refresh", {
     method: "POST",
     headers: {
@@ -259,6 +267,16 @@ async function performSessionRefresh(): Promise<boolean> {
     cache: "no-store"
   }).catch(() => undefined);
   return response?.ok === true;
+}
+
+function browserSessionLockManager(): BrowserSessionRefreshLockManager | undefined {
+  if (
+    typeof navigator === "undefined" ||
+    typeof navigator.locks?.request !== "function"
+  ) {
+    return undefined;
+  }
+  return navigator.locks as unknown as BrowserSessionRefreshLockManager;
 }
 
 function csrfCookieName(): string {

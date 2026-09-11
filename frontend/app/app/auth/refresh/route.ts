@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import {
   proxyPlatformApi,
   responseCookies
 } from "../../../../lib/platform-api-proxy";
 import { safeAppReturnTo } from "../../../../lib/app-path";
 import { webPublicOrigin } from "../../../../lib/server-runtime-origin";
+import { coalescedServerSessionRefresh } from "../../../../lib/session-refresh-coordination";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest): Promise<Response> {
-  return proxyPlatformApi(request, ["auth", "refresh"], {
-    csrfFromCookie: true
-  });
+  return coalescedServerSessionRefresh(
+    refreshRequestFingerprint(request),
+    () => proxyPlatformApi(request, ["auth", "refresh"], {
+      csrfFromCookie: true
+    })
+  );
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -56,4 +61,21 @@ function clearSessionCookies(response: NextResponse): void {
   ]) {
     response.cookies.delete(name);
   }
+}
+
+function refreshRequestFingerprint(request: NextRequest): string | undefined {
+  const refreshCookie = request.cookies.get(
+    process.env.AUTH_SESSION_COOKIE_NAME ?? "seo_session"
+  )?.value;
+  const csrfCookie = request.cookies.get(
+    process.env.AUTH_CSRF_COOKIE_NAME ?? "seo_csrf"
+  )?.value;
+  if (!refreshCookie || !csrfCookie) return undefined;
+  return createHash("sha256")
+    .update(refreshCookie)
+    .update("\0")
+    .update(csrfCookie)
+    .update("\0")
+    .update(request.headers.get("user-agent") ?? "")
+    .digest("base64url");
 }

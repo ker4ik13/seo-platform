@@ -160,6 +160,13 @@ credentials других process boundaries не переиспользуютс�
   refresh rotation для всех параллельных запросов и повторяет каждый исходный
   same-origin запрос не более одного раза. Повтор использует новый CSRF token;
   refresh endpoint и terminal `401` не ретраятся циклически.
+- Между вкладками браузера refresh сериализуется same-origin Web Lock. Пока
+  вкладка ждёт lock, изменение CSRF cookie означает уже завершённую peer-
+  rotation: второй refresh не отправляется, а исходный запрос повторяется с
+  новой cookie-парой. BFF дополнительно объединяет только одновременно
+  выполняющиеся refresh-запросы с одним SHA-256 fingerprint от refresh/CSRF и
+  User-Agent; разные fingerprint не объединяются, а после завершения запроса
+  replay-окна нет.
 - Повторное использование отозванного refresh token отзывает семейство сессий.
 - Rotation внутри одной family не является terminal revoke и не создаёт
   `identity.session-family.revoked.v1`.
