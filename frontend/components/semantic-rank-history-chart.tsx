@@ -16,6 +16,10 @@ import {
   rankSearchSystemLabel,
   semanticRankHistoryByEngine
 } from "../lib/semantic-rank-presentation";
+import {
+  searchContextDisplayName,
+  searchRegionDisplayName
+} from "../lib/seo-regions";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchEngineLogo } from "./search-engine-logo";
@@ -287,7 +291,17 @@ function RankPointTooltip({
     top: number;
   }>>();
   const position = isPositionPoint(point) ? String(point.position) : "Не найдена";
-  const region = point.regionLabel?.trim() || point.regionCode || point.countryCode || "—";
+  const region = searchRegionDisplayName(
+    point.searchEngine,
+    point.regionCode,
+    point.regionLabel
+  );
+  const contextName = searchContextDisplayName(
+    point.contextName,
+    point.searchEngine,
+    point.regionCode,
+    point.regionLabel
+  );
 
   useLayoutEffect(() => {
     const updatePosition = () => {
@@ -373,7 +387,7 @@ function RankPointTooltip({
           <dd>{<UiText text={deviceLabel(point.device) ?? ""} />}{point.depth ? <UiText text="· Топ-{0}" values={[String(point.depth)]} before=" " /> : ""}</dd>
         </div>
       </dl>
-      <small>{point.contextName}</small>
+      <small>{contextName}</small>
     </div>,
     document.body
   );

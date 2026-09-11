@@ -14,6 +14,7 @@ import {
   defaultTrackingContextSettingsDraft,
   trackingContextApiPath,
   trackingContextCreateInput,
+  trackingContextDisplayName,
   trackingContextDraft,
   validateTrackingContextDraft,
   withTrackingContext,
@@ -319,7 +320,7 @@ export function TrackingContextSettingsPanel({
             >
               <SearchEngineLogo engine={context.configuration.searchEngine} size="compact" />
               <span>
-                <strong>{context.name}</strong>
+                <strong>{trackingContextDisplayName(context)}</strong>
                 <small>
                   {context.assignedKeywordCount} <UiText text="запросов ·" before=" " after=" " />{context.status === "ACTIVE" ? <UiText text="активен" /> : <UiText text="удалён из запусков" />}
                 </small>

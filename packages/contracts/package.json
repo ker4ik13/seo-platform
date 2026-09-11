@@ -23,7 +23,11 @@
     "./schemas/identity.session-family.revoked.v1.schema.json":
       "./schemas/identity.session-family.revoked.v1.schema.json",
     "./schemas/identity.session-family.revoked.v1.asyncapi.json":
-      "./schemas/identity.session-family.revoked.v1.asyncapi.json"
+      "./schemas/identity.session-family.revoked.v1.asyncapi.json",
+    "./seo-regions": {
+      "types": "./dist/seo-regions.d.ts",
+      "import": "./dist/seo-regions.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

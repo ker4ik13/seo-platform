@@ -1,5 +1,6 @@
 import type { TrackingContextDraft } from "./tracking-contexts.ts";
 import { normalizedUiLocale, translateUi } from "./ui-i18n.ts";
+import { searchRegionDisplayName } from "./seo-regions.ts";
 
 export interface RankTarget {
   readonly regionCode: string;
@@ -24,7 +25,14 @@ export function rankTargetDraft(base: TrackingContextDraft, target: RankTarget, 
   const currentLocale = normalizedUiLocale(locale);
   const engine = translateUi(currentLocale, base.searchEngine === "YANDEX" ? "Яндекс" : "Google");
   const device = translateUi(currentLocale, target.device === "DESKTOP" ? "Десктоп" : "Мобильное");
-  const region = translateUi(currentLocale, target.regionLabel || target.regionCode);
+  const region = translateUi(
+    currentLocale,
+    searchRegionDisplayName(
+      base.searchEngine,
+      target.regionCode,
+      target.regionLabel
+    )
+  );
   const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
   return { ...base, ...target, name: `${prefix}${engine} · ${region} · ${device}`.slice(0, 160) };
 }

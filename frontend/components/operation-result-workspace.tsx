@@ -75,6 +75,11 @@ import {
   rankSearchSystemLabel
 } from "../lib/rank-jobs";
 import { rankOperationCounts } from "../lib/rank-operation-counts";
+import {
+  searchContextDisplayName,
+  searchRegionDisplayName,
+  seoRegionDisplayName
+} from "../lib/seo-regions";
 import { ProviderLogo } from "./provider-logo";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
@@ -2516,7 +2521,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
       facts: [
         { label: "Обработано", value: formatInteger(current, uiLocale) },
         { label: "Ошибок", value: formatInteger(value.failedKeywords, uiLocale) },
-        { label: "Регион", value: value.regionCode },
+        { label: "Регион", value: seoRegionDisplayName("WORDSTAT", value.regionCode) },
         { label: "Устройство", value: deviceLabel(value.device) },
         ...(value.failureCode
           ? [{ label: "Код ошибки", value: value.failureCode }]
@@ -2546,7 +2551,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
           )
         },
         { label: "Ошибок", value: formatInteger(value.failedKeywords, uiLocale) },
-        { label: "Регион", value: value.regionCode },
+        { label: "Регион", value: searchRegionDisplayName(value.searchEngine, value.regionCode) },
         ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
       ]
     };
@@ -2594,7 +2599,11 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
     return {
       title: rankCollectionTitle(value.execution),
       description: `${searchSystem} · ${deviceLabel(value.execution.device)}${competitorCollection ? " · органическая выдача" : ""}`,
-      context: value.contextName,
+      context: searchContextDisplayName(
+        value.contextName,
+        value.execution.searchEngine,
+        value.execution.regionCode
+      ),
       provider: value.job.provider,
       ...summaryStatus(value.job.status, current, total, undefined, uiLocale),
       facts: [
@@ -2621,7 +2630,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
               { label: "Не найдено", value: formatInteger(notFound, uiLocale) }
             ]),
         { label: "Ошибок", value: formatInteger(failed, uiLocale) },
-        { label: "Регион", value: value.execution.regionCode ?? value.execution.countryCode },
+        { label: "Регион", value: searchRegionDisplayName(value.execution.searchEngine, value.execution.regionCode) },
         { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—" },
         ...("failure" in value.job && value.job.failure
           ? [{ label: "Код ошибки", value: value.job.failure.code }]
@@ -2660,7 +2669,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
     title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
     description: keysSo
       ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
-      : `${wordstatProvider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
+      : `${wordstatProvider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,
     provider: keysSo ? "KEYS_SO" : wordstatProvider,
     ...summaryStatus(value.status, current, total, undefined, uiLocale),
     facts: [

@@ -7,6 +7,7 @@ import { uniqueRankTargets, type RankTarget } from "../lib/rank-targets";
 import { createRankTargetBatch, launchRankTargetBatch, prepareRankTargetBatch, rankTargetBatchCharge, rankTargetBatchReady, rankTargetBatchSignature, type RankTargetBatch, type RankTargetBatchInput } from "../lib/rank-target-batch";
 import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import { rankRetryContextDraft } from "../lib/rank-retry";
+import { searchRegionDisplayName } from "../lib/seo-regions";
 import { normalizedUiLocale, translateUi } from "../lib/ui-i18n";
 import type { RankOperationResult } from "@seo-platform/contracts";
 
@@ -53,6 +54,7 @@ import {
   reconcileTrackingContextCreate,
   trackingContextApiPath,
   trackingContextCreateInput,
+  trackingContextDisplayName,
   trackingContextDraft,
   trackingContextDraftDirty,
   trackingContextMatchesDraft,
@@ -1076,7 +1078,7 @@ export function SemanticPositionDialog({
           <p><UiText text="Каждое сочетание города и устройства создаёт отдельную задачу. Принятые задачи продолжат работу после закрытия окна." /></p>
           {selectedSource?.mode === "PLATFORM_PAID" && <p><UiText text="Максимальный расход оставшихся съёмов: {0}" values={[batchCharge ?? "—"]} /></p>}
           <ul>{currentBatch.entries.map(entry => <li key={`${entry.draft.regionCode}:${entry.draft.device}`}>
-            <span>{entry.draft.regionLabel || entry.draft.regionCode} · <UiText text={entry.draft.device === "DESKTOP" ? "ПК" : "Телефон"} /></span>
+            <span>{searchRegionDisplayName(entry.draft.searchEngine, entry.draft.regionCode, entry.draft.regionLabel)} · <UiText text={entry.draft.device === "DESKTOP" ? "ПК" : "Телефон"} /></span>
             <strong className={entry.error ? "danger-text" : undefined}>{entry.job ? <UiText text="В очереди" /> : entry.error ? <UiText text={entry.error} /> : entry.estimate?.status === "READY" ? selectedSource?.mode === "PLATFORM_PAID" ? formatPlatformCharge(entry.estimate.platformChargeMicro, uiLocale) : <UiText text="Готов к запуску" /> : <UiText text="Подготовка…" />}</strong>
           </li>)}</ul>
         </section>}
@@ -1154,7 +1156,7 @@ function PositionContextSelector({
             .filter(({ status }) => status === "ACTIVE")
             .map((context) => (
               <option key={context.id} value={context.id}>
-                {context.name} · {context.assignedKeywordCount} <UiText text="запросов" before=" " /></option>
+                {trackingContextDisplayName(context)} · {context.assignedKeywordCount} <UiText text="запросов" before=" " /></option>
             ))}
         </CustomSelect>
       </label>
@@ -1545,7 +1547,14 @@ function technicalContextName(
 ): string {
   const currentLocale = normalizedUiLocale(locale);
   const engine = translateUi(currentLocale, draft.searchEngine === "YANDEX" ? "Яндекс" : "Google");
-  const region = translateUi(currentLocale, draft.regionLabel.trim() || draft.regionCode.trim() || draft.countryCode.toUpperCase());
+  const region = translateUi(
+    currentLocale,
+    searchRegionDisplayName(
+      draft.searchEngine,
+      draft.regionCode,
+      draft.regionLabel
+    )
+  );
   const device = translateUi(currentLocale, draft.device === "MOBILE" ? "Мобильное" : "Десктоп");
   const prefix = translateUi(currentLocale, competitorMode ? "Конкуренты" : "Авто");
   return `${prefix} · ${engine} · ${region} · ${device}`.slice(0, 160);
@@ -1561,7 +1570,10 @@ function contextDisplayName(
   const currentLocale = normalizedUiLocale(locale);
   const engine = translateUi(currentLocale, searchEngine === "YANDEX" ? "Яндекс" : "Google");
   const deviceLabel = translateUi(currentLocale, device === "MOBILE" ? "Мобильное" : "Десктоп");
-  const region = translateUi(currentLocale, regionLabel);
+  const region = translateUi(
+    currentLocale,
+    searchRegionDisplayName(searchEngine, regionLabel, regionLabel)
+  );
   const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
   return `${prefix}${engine} · ${region} · ${deviceLabel}`;
 }

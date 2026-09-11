@@ -11,6 +11,7 @@ import {
   reconcileTrackingContextCreate,
   reconcileTrackingContextEditorRevision,
   trackingContextCreateInput,
+  trackingContextDisplayName,
   trackingContextDraft,
   trackingContextDraftDirty,
   trackingContextMatchesDraft,
@@ -57,6 +58,23 @@ const settings: TrackingContextSettings = {
     mutationRestriction: "NONE"
   }
 };
+
+test("repairs a numeric city segment in a legacy tracking-context name", () => {
+  assert.equal(
+    trackingContextDisplayName({
+      ...context,
+      name: "Яндекс · 213 · Десктоп",
+      configuration: {
+        ...context.configuration,
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "213"
+      }
+    }),
+    "Яндекс · Москва · Десктоп"
+  );
+});
 
 test("normalizes a tracking context draft into the public mutation shape", () => {
   const input = trackingContextCreateInput({

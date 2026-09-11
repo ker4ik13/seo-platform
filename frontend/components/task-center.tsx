@@ -22,6 +22,10 @@ import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { semanticExportFileUrl } from "../lib/app-path";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
+  searchRegionDisplayName,
+  seoRegionDisplayName
+} from "../lib/seo-regions";
+import {
   aiAnswerCollectionTitle,
   isCompetitorCollection,
   rankCollectionDepthLabel,
@@ -501,7 +505,7 @@ function frequencyTask(value: FrequencyCollectionSummary, uiLocale: string = "ru
       ...(seasonality && value.seasonality
         ? [{ label: "Период", value: `${value.seasonality.observedFrom} — ${value.seasonality.observedThrough}` }]
         : []),
-      { label: "Регион", value: value.regionCode },
+      { label: "Регион", value: seoRegionDisplayName("WORDSTAT", value.regionCode) },
       { label: "Устройство", value: frequencyDeviceLabel(value.device) },
       { label: "Ключей", value: formatInteger(value.selectedKeywords, uiLocale) },
       ...(value.routingScope
@@ -548,7 +552,7 @@ function aiAnswerTask(value: AiAnswerCollectionSummary, uiLocale: string = "ru-R
     retryLabel: "",
     inputFacts: [
       { label: "Поисковая система", value: value.searchEngine === "YANDEX" ? "Яндекс" : "Google" },
-      { label: "Регион", value: value.regionCode },
+      { label: "Регион", value: searchRegionDisplayName(value.searchEngine, value.regionCode) },
       { label: "Устройство", value: frequencyDeviceLabel(value.device) },
       { label: "Ключей", value: formatInteger(value.selectedKeywords, uiLocale) },
       ...(value.routingScope
@@ -595,7 +599,7 @@ function clusteringTask(value: ClusteringRunSummary, uiLocale: string = "ru-RU")
     retryLabel: "",
     inputFacts: [
       { label: "Поисковая система", value: engine },
-      { label: "Регион", value: value.regionCode },
+      { label: "Регион", value: searchRegionDisplayName(value.searchEngine, value.regionCode) },
       { label: "Метод", value: value.method === "SOFT" ? "Мягкий" : "Жёсткий" },
       { label: "Совпадений", value: String(value.overlapCount) },
       { label: "Глубина", value: `ТОП-${value.depth}` },
@@ -708,7 +712,7 @@ function researchTask(value: KeywordResearchRunSummary, uiLocale: string = "ru-R
     id: value.id, kind: "RESEARCH", resultKind: "research", provider: value.provider, title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
     description: keysSo
       ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
-      : `${providerName} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
+      : `${providerName} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,
     statusLabel: operationStatusLabel(value.status),
     column: taskColumn(value.status), progressCurrent: value.importedKeywords > 0 ? value.importedKeywords : value.collectedKeywords,
     progressTotal: value.totalAvailable ?? value.maxKeywords, createdAt: value.createdAt,
@@ -724,7 +728,7 @@ function researchTask(value: KeywordResearchRunSummary, uiLocale: string = "ru-R
           ]
         : [
             { label: "Исходных фраз", value: formatInteger(value.seedCount ?? 0, uiLocale) },
-            { label: "Регион", value: value.regionCode === "225" ? "Россия" : value.regionCode ?? "225" }
+            { label: "Регион", value: seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225") }
           ]),
       { label: "Лимит ключей", value: formatInteger(value.maxKeywords, uiLocale) }
     ],

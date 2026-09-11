@@ -15,6 +15,10 @@ import {
   semanticUrlBelongsToProject,
   type SemanticRankEngine
 } from "../lib/semantic-rank-presentation";
+import {
+  searchContextDisplayName,
+  searchRegionDisplayName
+} from "../lib/seo-regions";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
@@ -251,15 +255,16 @@ function HistoryRow({
   const status = item.found
     ? `Позиция ${item.position}`
     : "Не найдена";
+  const contextName = context ? historyContextName(context) : undefined;
   return (
     <li className={item.found ? undefined : "not-found"}>
       <div className="semantic-position-history-row-head">
         <time dateTime={item.observedAt} title={formatDateTime(item.observedAt, uiLocale)}>
           {formatDateTime(item.observedAt, uiLocale)}
         </time>
-        <span title={context?.contextName ?? item.trackingContextId}>
+        <span title={contextName ?? item.trackingContextId}>
           {context && <SearchEngineLogo engine={context.searchEngine} size="compact" />}
-          <b>{context?.contextName ?? <UiText text="Контекст {0}" values={[String(item.trackingContextId.slice(0, 8))]} />}</b>
+          <b>{contextName ?? <UiText text="Контекст {0}" values={[String(item.trackingContextId.slice(0, 8))]} />}</b>
         </span>
         <small>{<UiText text={rankHistoryProviderLabel(item.provider) ?? ""} />}</small>
         <div className="semantic-position-history-row-actions">
@@ -278,7 +283,7 @@ function HistoryRow({
         </div>
       </div>
       <div className="semantic-position-history-row-body">
-        {context && <small>{context.regionLabel || context.regionCode}{context.device ? <> · <UiText text={context.device === "DESKTOP" ? "ПК" : "Телефон"} /></> : null}{item.depth ? <> · <UiText text="Топ-" />{item.depth}</> : null}</small>}
+        {context && <small>{searchRegionDisplayName(context.searchEngine, context.regionCode, context.regionLabel)}{context.device ? <> · <UiText text={context.device === "DESKTOP" ? "ПК" : "Телефон"} /></> : null}{item.depth ? <> · <UiText text="Топ-" />{item.depth}</> : null}</small>}
         {item.found ? (
           <>
             {item.title && <span title={item.title}>{item.title}</span>}
@@ -358,7 +363,7 @@ function HistorySiteResultsModal({
               {context && (
                 <SearchEngineLogo engine={context.searchEngine} size="compact" />
               )}
-              <strong>{context?.contextName ?? <UiText text="Исторический съём" />}</strong>
+              <strong>{context ? historyContextName(context) : <UiText text="Исторический съём" />}</strong>
             </span>
             <time dateTime={item.observedAt} title={formatDateTime(item.observedAt, uiLocale)}>
               {formatDateTime(item.observedAt, uiLocale)}
@@ -419,6 +424,15 @@ function historyContextProps(
   }
   const context = fallback.get(item.trackingContextId);
   return context ? { context } : {};
+}
+
+function historyContextName(context: HistoryContextPresentation): string {
+  return searchContextDisplayName(
+    context.contextName,
+    context.searchEngine,
+    context.regionCode,
+    context.regionLabel
+  );
 }
 
 function historyRange(createdAt: string): Readonly<{

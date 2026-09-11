@@ -37,6 +37,7 @@ import {
 } from "./semantic-export-encoder.js";
 import { storedSemanticExportInput } from "./semantic-export-input.js";
 import { parseSemanticRankColumnKey, semanticPositionHistoryReadPageSize, type SemanticRankComparisonItem } from "@seo-platform/contracts";
+import { resolveSeoRegionLabel } from "@seo-platform/contracts/seo-regions";
 
 const PAGE_SIZE = 1_000;
 const COMPETITOR_PAGE_SIZE = 12;
@@ -481,7 +482,12 @@ export class SemanticExportWorkerService {
       const english = input.locale === "en", metric = parsed.metric === "position" ? english ? "Position" : "Позиция" : parsed.metric === "url" ? "URL" : english ? "Checked at" : "Дата съёма";
       const engine = dimension.searchEngine === "YANDEX" ? english ? "Yandex" : "Яндекс" : "Google";
       const device = dimension.device === "DESKTOP" ? english ? "Desktop" : "ПК" : english ? "Mobile" : "Телефон";
-      return [column, `${engine} · ${dimension.regionLabel || dimension.regionCode} · ${device} · ${metric}`];
+      const region = resolveSeoRegionLabel(
+        dimension.searchEngine === "GOOGLE" ? "GOOGLE_RANK" : "YANDEX_RANK",
+        dimension.regionCode,
+        dimension.regionLabel
+      ) ?? (english ? "Other region" : "Другой регион");
+      return [column, `${engine} · ${region} · ${device} · ${metric}`];
     }));
   }
 

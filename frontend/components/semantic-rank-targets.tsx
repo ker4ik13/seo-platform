@@ -1,5 +1,6 @@
 "use client";
 import { rankTargetGroups, rankTargetLimit, uniqueRankTargets, type RankTarget } from "../lib/rank-targets";
+import { searchRegionDisplayName } from "../lib/seo-regions";
 import { SearchableRegionSelect } from "./searchable-region-select";
 import { Icon } from "./icon";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -10,7 +11,15 @@ export function SemanticRankTargets({ targets, engine, disabled = false, onChang
   disabled?: boolean;
   onChange: (targets: readonly RankTarget[]) => void;
 }) {
-  const { t } = useUiLocale(), groups = rankTargetGroups(targets);
+  const { t } = useUiLocale();
+  const groups = rankTargetGroups(targets).map((group) => ({
+    ...group,
+    regionLabel: searchRegionDisplayName(
+      engine,
+      group.regionCode,
+      group.regionLabel
+    )
+  }));
   const kind = engine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK";
   return <fieldset className="semantic-rank-targets" disabled={disabled}>
     <legend><UiText text="Города и устройства" /></legend>

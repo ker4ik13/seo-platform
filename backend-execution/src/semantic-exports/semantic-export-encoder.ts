@@ -1,5 +1,6 @@
 import { Zip, ZipDeflate } from "fflate";
 import { parseSemanticRankColumnKey, type SemanticRankComparisonItem } from "@seo-platform/contracts";
+import { resolveSeoRegionLabel } from "@seo-platform/contracts/seo-regions";
 import type {
   CreateSemanticExportInput,
   SemanticCompetitorExportItem,
@@ -874,7 +875,13 @@ function systemColumnValue(
   }
   switch (column) {
     case "competitorEngine": return item.exportCompetitor?.searchEngine ?? null;
-    case "competitorRegion": return item.exportCompetitor?.regionLabel ?? item.exportCompetitor?.regionCode ?? null;
+    case "competitorRegion": return item.exportCompetitor?.regionCode || item.exportCompetitor?.regionLabel
+      ? exportRegionLabel(
+          item.exportCompetitor?.searchEngine,
+          item.exportCompetitor?.regionCode,
+          item.exportCompetitor?.regionLabel
+        )
+      : null;
     case "competitorRegionCode": return item.exportCompetitor?.regionCode ?? null;
     case "competitorDevice": return item.exportCompetitor?.device ?? null;
     case "competitorPosition": return item.exportCompetitor?.position ?? null;
@@ -991,7 +998,7 @@ function columnHeader(
   customColumnNames: Readonly<Record<string, string>>
 ): string {
   const rank = parseSemanticRankColumnKey(column);
-  if (rank) return customColumnNames[column] ?? `${rank.dimension.searchEngine} · ${rank.dimension.regionCode} · ${rank.dimension.device} · ${rank.metric}`;
+  if (rank) return customColumnNames[column] ?? `${rank.dimension.searchEngine} · ${exportRegionLabel(rank.dimension.searchEngine, rank.dimension.regionCode)} · ${rank.dimension.device} · ${rank.metric}`;
   const id = customColumnId(column);
   return id ? customColumnNames[id]! : HEADERS[column as keyof typeof HEADERS][locale];
 }
@@ -1227,5 +1234,17 @@ function isNumericColumn(column: SemanticExportColumnKey): boolean { return XLSX
 
 function competitorContext(item: SemanticCompetitorExportItem): string {
   if (!item.searchEngine) return "";
-  return `[${item.searchEngine} · ${item.regionLabel || item.regionCode || ""} · ${item.device || ""}${item.position ? ` · #${item.position}` : ""}${item.observedAt ? ` · ${item.observedAt}` : ""}]\n`;
+  return `[${item.searchEngine} · ${exportRegionLabel(item.searchEngine, item.regionCode, item.regionLabel)} · ${item.device || ""}${item.position ? ` · #${item.position}` : ""}${item.observedAt ? ` · ${item.observedAt}` : ""}]\n`;
+}
+
+function exportRegionLabel(
+  searchEngine: "GOOGLE" | "YANDEX" | undefined,
+  regionCode: string | null | undefined,
+  regionLabel?: string | null
+): string {
+  return resolveSeoRegionLabel(
+    searchEngine === "GOOGLE" ? "GOOGLE_RANK" : "YANDEX_RANK",
+    regionCode,
+    regionLabel
+  ) ?? "Другой регион";
 }

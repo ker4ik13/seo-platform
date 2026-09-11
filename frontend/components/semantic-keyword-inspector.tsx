@@ -22,7 +22,10 @@ import {
   sameSemanticRankingUrl
 } from "../lib/semantic-rank-presentation";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
-import { seoRegionOptions } from "../lib/seo-regions";
+import {
+  searchRegionDisplayName,
+  seoRegionDisplayName
+} from "../lib/seo-regions";
 import { Icon, type IconName } from "./icon";
 import { CustomSelect } from "./custom-select";
 import { SearchEngineLogo } from "./search-engine-logo";
@@ -1303,7 +1306,7 @@ export function SemanticKeywordInspector({
         >
           <div className="semantic-confirm-dialog semantic-frequency-delete-dialog">
             <div className="inline-alert danger" role="alert">
-              <UiText text="Все сохранённые срезы «" />{<UiText text={frequencyTypeLabel(frequencyToDelete.type) ?? ""} />}<UiText text="» для региона" after=" " />{frequencyToDelete.regionCode} <UiText text="и устройства «" before=" " />{<UiText text={frequencyDeviceLabel(frequencyToDelete.device) ?? ""} />}<UiText text="» будут удалены без возможности восстановления." /></div>
+              <UiText text="Все сохранённые срезы «" />{<UiText text={frequencyTypeLabel(frequencyToDelete.type) ?? ""} />}<UiText text="» для региона" after=" " />{<UiText text={frequencyRegionLabel(frequencyToDelete.regionCode)} />} <UiText text="и устройства «" before=" " />{<UiText text={frequencyDeviceLabel(frequencyToDelete.device) ?? ""} />}<UiText text="» будут удалены без возможности восстановления." /></div>
             <div className="semantic-frequency-delete-summary">
               <span>{<UiText text={frequencyTypeLabel(frequencyToDelete.type) ?? ""} />}</span>
               <strong>{frequencyToDelete.value ? formatInteger(frequencyToDelete.value, uiLocale) : "—"}</strong>
@@ -1636,9 +1639,11 @@ function inspectorSeoPositionSlices(
     }),
     searchEngine: position.searchEngine,
     regionCode: position.regionCode,
-    regionLabel:
-      position.regionLabel ??
-      inspectorRegionLabel(position.searchEngine, position.regionCode),
+    regionLabel: inspectorRegionLabel(
+      position.searchEngine,
+      position.regionCode,
+      position.regionLabel
+    ),
     device: position.device,
     observedAt: position.observedAt,
     found: position.found,
@@ -1661,9 +1666,11 @@ function inspectorSeoSerpSlices(
       }),
       searchEngine: snapshot.searchEngine,
       regionCode: snapshot.regionCode,
-      regionLabel:
-        snapshot.regionLabel ??
-        inspectorRegionLabel(snapshot.searchEngine, snapshot.regionCode),
+      regionLabel: inspectorRegionLabel(
+        snapshot.searchEngine,
+        snapshot.regionCode,
+        snapshot.regionLabel
+      ),
       device: snapshot.device,
       observedAt: snapshot.observedAt,
       resultCount: snapshot.results.length
@@ -1764,11 +1771,10 @@ function latestInspectorSlices(
 
 function inspectorRegionLabel(
   searchEngine: "GOOGLE" | "YANDEX",
-  regionCode: string
+  regionCode: string,
+  regionLabel?: string
 ): string {
-  return seoRegionOptions(
-    searchEngine === "GOOGLE" ? "GOOGLE_RANK" : "YANDEX_RANK"
-  ).find(({ code }) => code === regionCode)?.label ?? regionCode;
+  return searchRegionDisplayName(searchEngine, regionCode, regionLabel);
 }
 
 function inspectorSliceStatus(
@@ -1954,8 +1960,7 @@ function frequencyDeviceLabel(device: string): string {
 }
 
 function frequencyRegionLabel(regionCode: string): string {
-  if (regionCode === "ALL" || regionCode === "0") return "Все регионы";
-  return seoRegionOptions("WORDSTAT").find(({ code }) => code === regionCode)?.label ?? regionCode;
+  return seoRegionDisplayName("WORDSTAT", regionCode);
 }
 
 function frequencyPeriodLabel(period: string): string {

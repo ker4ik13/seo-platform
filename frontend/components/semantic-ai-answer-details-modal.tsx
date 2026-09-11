@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { searchRegionDisplayName } from "../lib/seo-regions";
 import {
   semanticAiAnswerMarkdownWithSources,
   semanticAiCitationDomain,
@@ -113,7 +114,7 @@ export function SemanticAiAnswerDetailsModal({
             <div><dt><UiText text="ИИ-ответ" /></dt><dd>{active.answerPresent ? <UiText text="Найден" /> : <UiText text="Не найден" />}</dd></div>
             <div><dt><UiText text="Позиция сайта" /></dt><dd>{active.siteFound && active.position ? `№ ${active.position}` : <UiText text="Не найден" />}</dd></div>
             <div><dt><UiText text="Бренд" /></dt><dd>{active.brandFound ? <UiText text="Упомянут" /> : <UiText text="Не найден" />}</dd></div>
-            <div><dt><UiText text="Регион / устройство" /></dt><dd>{active.regionCode} · {active.device === "DESKTOP" ? <UiText text="десктоп" /> : <UiText text="мобильное" />}</dd></div>
+            <div><dt><UiText text="Регион / устройство" /></dt><dd>{searchRegionDisplayName(active.searchEngine, active.regionCode)} · {active.device === "DESKTOP" ? <UiText text="десктоп" /> : <UiText text="мобильное" />}</dd></div>
             <div><dt><UiText text="Проверено" /></dt><dd><time dateTime={active.observedAt}>{formatDateTime(active.observedAt, uiLocale)}</time></dd></div>
           </dl>
 

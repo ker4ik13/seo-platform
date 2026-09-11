@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { CustomSelect } from "./custom-select";
 import {
+  seoRegionDisplayName,
   seoRegionOptions,
   type SeoRegionCodeKind
 } from "../lib/seo-regions";
@@ -30,7 +31,11 @@ export function SearchableRegionSelect({
       const known = seoRegionOptions(kind);
       return [
         ...(value && !known.some(({ code }) => code === value)
-          ? [{ code: value, label: valueLabel?.trim() || "Другой регион", translate: !valueLabel?.trim() }]
+          ? [{
+              code: value,
+              label: seoRegionDisplayName(kind, value, valueLabel),
+              translate: true
+            }]
           : []),
         ...known.map(option => ({ ...option, translate: true })),
         ...(allowAll ? [{ code: "ALL", label: "Без ограничения", translate: true }] : [])
@@ -48,7 +53,7 @@ export function SearchableRegionSelect({
       }}
       required
       searchable
-      searchPlaceholder={uiText("Регион или код")}
+      searchPlaceholder={uiText("Регион")}
       value={value}
     >
       {options.map((option) => (
@@ -59,5 +64,5 @@ export function SearchableRegionSelect({
 }
 
 function display(option: { readonly code: string; readonly label: string }): string {
-  return `${option.label} — ${option.code}`;
+  return option.label;
 }

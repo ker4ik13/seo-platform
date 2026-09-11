@@ -6,6 +6,7 @@ import type {
 } from "@seo-platform/contracts";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { rankDimensionLabel } from "../lib/rank-dimension-presentation";
+import { searchRegionDisplayName } from "../lib/seo-regions";
 import { useSemanticRankComparison } from "./use-semantic-rank-comparison";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { CustomSelect } from "./custom-select";
@@ -167,7 +168,11 @@ function RankDimensionOption({
 }
 
 function rankDimensionRegionLabel(dimension: SemanticRankDimension): string {
-  return dimension.regionLabel || dimension.regionCode;
+  return searchRegionDisplayName(
+    dimension.searchEngine,
+    dimension.regionCode,
+    dimension.regionLabel
+  );
 }
 
 function engineOrder(engine: SemanticRankDimension["searchEngine"]): number {

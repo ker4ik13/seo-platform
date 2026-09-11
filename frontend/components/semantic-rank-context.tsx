@@ -1,7 +1,7 @@
 "use client";
 
 import type { SemanticRankDimension } from "@seo-platform/contracts";
-import { seoRegionOptions } from "../lib/seo-regions";
+import { searchRegionDisplayName } from "../lib/seo-regions";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { UiText } from "./ui-locale";
@@ -47,9 +47,5 @@ export function rankRegionDisplayName(
   regionCode: string,
   regionLabel?: string
 ): string {
-  const explicit = regionLabel?.trim();
-  if (explicit) return explicit;
-  return seoRegionOptions(
-    searchEngine === "GOOGLE" ? "GOOGLE_RANK" : "YANDEX_RANK"
-  ).find(({ code }) => code === regionCode)?.label ?? regionCode;
+  return searchRegionDisplayName(searchEngine, regionCode, regionLabel);
 }

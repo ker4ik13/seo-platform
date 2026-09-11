@@ -26,6 +26,10 @@ import {
 import { operationStatusLabel } from "../lib/operation-status-presentation";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
+  searchRegionDisplayName,
+  seoRegionDisplayName
+} from "../lib/seo-regions";
+import {
   isCancellableRankJob,
   rankSearchSystemLabel
 } from "../lib/rank-jobs";
@@ -604,7 +608,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     kind: "AI_ANSWER",
     provider: "ARSENKIN",
     title: `${competitorCollection ? "ИИ-выдача конкурентов" : "ИИ-ответы"} · ${engine}`,
-    description: `Arsenkin · ${engine} · регион ${value.regionCode} · ${device}`,
+    description: `Arsenkin · ${engine} · ${searchRegionDisplayName(value.searchEngine, value.regionCode)} · ${device}`,
     statusLabel: operationStatusLabel(value.status, value.stage),
     progressLabel: `${done} из ${value.selectedKeywords}`,
     percent: value.selectedKeywords > 0
@@ -708,7 +712,7 @@ function researchOperation(value: KeywordResearchRunSummary, uiLocale: string = 
     title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
     description: keysSo
       ? `${providerLabel} · ${value.domain ?? "—"}`
-      : `${providerLabel} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
+      : `${providerLabel} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,
     statusLabel: operationStatusLabel(value.status),
     progressLabel: value.status === "READY_TO_IMPORT"
       ? `Найдено ${formatInteger(value.collectedKeywords, uiLocale)}`

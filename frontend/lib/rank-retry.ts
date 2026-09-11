@@ -3,6 +3,10 @@ import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import type { SemanticOperationGroup } from "../components/semantic-operation-scope";
 import type { TrackingContextDraft } from "./tracking-contexts";
 import { browserApiRequest, BrowserApiError } from "./browser-api.ts";
+import {
+  searchContextDisplayName,
+  searchRegionDisplayName
+} from "./seo-regions.ts";
 
 export interface RankRetryDraft {
   readonly result: RankOperationResult;
@@ -45,11 +49,17 @@ export function rankRetryContextDraft(result: RankOperationResult): TrackingCont
   const { execution } = result;
   const rule = execution.domainMatchRule;
   return {
-    name: result.contextName,
+    name: searchContextDisplayName(
+      result.contextName,
+      execution.searchEngine,
+      execution.regionCode
+    ),
     searchEngine: execution.searchEngine,
     countryCode: execution.countryCode,
     regionCode: execution.regionCode ?? "",
-    regionLabel: execution.regionCode ?? "",
+    regionLabel: execution.regionCode
+      ? searchRegionDisplayName(execution.searchEngine, execution.regionCode)
+      : "",
     language: execution.language,
     device: execution.device,
     depth: execution.depth,

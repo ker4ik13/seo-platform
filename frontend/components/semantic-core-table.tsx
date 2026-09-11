@@ -5,6 +5,10 @@ import { CustomSelect } from "./custom-select";
 import { KeywordTagPicker } from "./keyword-tag-picker";
 import { uniqueKeywordTags } from "../lib/keyword-tags";
 import { rankColumnLabel, rankDimensionColumns, rankDimensionLabel } from "../lib/rank-dimension-presentation";
+import {
+  searchRegionDisplayName,
+  seoRegionDisplayName
+} from "../lib/seo-regions";
 import { useSemanticRankComparison } from "./use-semantic-rank-comparison";
 import {
   SemanticRankCheckedAtCell,
@@ -6176,7 +6180,7 @@ function columnHeader(
       : rank.metric === "url" || rank.metric === "aiUrl"
         ? aiMetric ? "URL в ИИ" : "URL"
         : aiMetric ? "Дата ИИ" : "Дата";
-    return <span className="semantic-rank-column-header" title={rankColumnLabel(column, rankDimensions, locale)}>{aiMetric ? <Icon name="ai" /> : <SearchEngineLogo engine={dimension.searchEngine} size="compact" />}<span>{dimension.regionLabel || dimension.regionCode}<small><UiText text={dimension.device === "DESKTOP" ? "ПК" : "Телефон"} /> · <UiText text={metricLabel} /></small></span></span>;
+    return <span className="semantic-rank-column-header" title={rankColumnLabel(column, rankDimensions, locale)}>{aiMetric ? <Icon name="ai" /> : <SearchEngineLogo engine={dimension.searchEngine} size="compact" />}<span>{searchRegionDisplayName(dimension.searchEngine, dimension.regionCode, dimension.regionLabel)}<small><UiText text={dimension.device === "DESKTOP" ? "ПК" : "Телефон"} /> · <UiText text={metricLabel} /></small></span></span>;
   }
   if (column === "frequency") {
     return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> <UiText text="База" before=" " /></span>;
@@ -6770,7 +6774,7 @@ function keywordFrequency(
     item.frequencies?.find((entry) => entry.type === type) ??
     (type === "BASE" ? item.frequency : undefined);
   return frequency?.value ? (
-    <UiElement tag="span" uiLabels={{"title": { text: "{0} · регион {1}", values: [String(frequency.provider), String(frequency.regionCode)] }}}
+    <UiElement tag="span" uiLabels={{"title": { text: "{0} · регион {1}", values: [String(frequency.provider), seoRegionDisplayName("WORDSTAT", frequency.regionCode)] }}}
       className="semantic-metric-value"
 
     >

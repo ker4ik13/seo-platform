@@ -258,6 +258,38 @@ test("writes competitor URLs and SERP data into ordinary keyword columns", async
   assert.match(styles, /wrapText="1"/u);
 });
 
+test("exports a canonical city name when a legacy competitor row has only its code", async () => {
+  async function* rows(): AsyncGenerator<SemanticExportKeywordRow> {
+    yield {
+      ...keyword("запрос со старым срезом"),
+      exportCompetitor: {
+        source: "SERP",
+        url: "https://competitor.example/legacy",
+        normalizedUrl: "https://competitor.example/legacy",
+        searchEngine: "YANDEX",
+        regionCode: "213",
+        device: "DESKTOP"
+      }
+    };
+  }
+
+  const file = semanticExportFile(
+    rows(),
+    {
+      format: "CSV",
+      scope: "CURRENT_FILTER",
+      locale: "ru",
+      columns: ["query", "competitorRegion", "competitorRegionCode"]
+    },
+    {}
+  );
+
+  assert.equal(
+    new TextDecoder().decode(await collect(file.bytes)),
+    "Запрос,Город,Код региона\r\nзапрос со старым срезом,Москва,213\r\n"
+  );
+});
+
 test("builds a position-history workbook with formulas and comparison colors", async () => {
   const file = semanticPositionHistoryExportFile(
     positionHistoryRows(),

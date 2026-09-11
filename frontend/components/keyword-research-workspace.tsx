@@ -30,6 +30,7 @@ import {
   type FormEvent
 } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { seoRegionDisplayName } from "../lib/seo-regions";
 import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import {
@@ -1166,7 +1167,7 @@ function runTitle(run: KeywordResearchRunSummary): string {
 function runMeta(run: KeywordResearchRunSummary): string {
   return run.source === "KEYS_SO"
     ? `${databaseLabel(run.database ?? "msk")} · ${run.collectedKeywords} из ${run.totalAvailable ?? "?"}`
-    : `${run.regionCode === "225" ? "Россия" : `регион ${run.regionCode ?? "225"}`} · найдено ${run.collectedKeywords} · ${run.includeRightColumn ? "левая + правая колонки" : "левая колонка"}`;
+    : `${seoRegionDisplayName("WORDSTAT", run.regionCode ?? "225")} · найдено ${run.collectedKeywords} · ${run.includeRightColumn ? "левая + правая колонки" : "левая колонка"}`;
 }
 
 function wordstatProviderLabel(run: KeywordResearchRunSummary): string {

@@ -10,6 +10,7 @@ import type {
   TrackingSearchEngine,
   TrackingSearchSource
 } from "@seo-platform/contracts";
+import { searchContextDisplayName } from "./seo-regions.ts";
 
 export interface TrackingContextDraft {
   readonly name: string;
@@ -93,7 +94,7 @@ export function trackingContextDraft(
 ): TrackingContextDraft {
   const rule = context.configuration.domainMatchRule;
   return {
-    name: context.name,
+    name: trackingContextDisplayName(context),
     searchEngine: context.configuration.searchEngine,
     countryCode: context.configuration.countryCode,
     regionCode: context.configuration.regionCode ?? "",
@@ -112,6 +113,17 @@ export function trackingContextDraft(
     scopeMode: context.launchProfile?.scope.mode ?? "ALL",
     groupIds: context.launchProfile?.scope.groupIds ?? []
   };
+}
+
+export function trackingContextDisplayName(
+  context: Pick<TrackingContextSummary, "name" | "configuration">
+): string {
+  return searchContextDisplayName(
+    context.name,
+    context.configuration.searchEngine,
+    context.configuration.regionCode,
+    context.configuration.regionLabel
+  );
 }
 
 export function trackingContextCreateInput(

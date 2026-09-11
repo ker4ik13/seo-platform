@@ -24,6 +24,7 @@ test("a new rank run excludes found, not-found and inactive rows; uses current v
     assert.equal(calls.length, 2);
     const context = rankRetryContextDraft(draft.result);
     assert.equal(context.name, "Настройки");
+    assert.equal(context.regionLabel, "Москва");
     assert.equal(context.depth, 30);
     assert.equal(context.scopeMode, "KEYWORDS");
     assert.equal(context.includeUntracked, true);

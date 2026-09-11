@@ -15,6 +15,7 @@ import {
   semanticDisplayUrl
 } from "../lib/semantic-rank-presentation";
 import { serpMovementKey, serpMovements } from "../lib/serp-movement";
+import { searchRegionDisplayName } from "../lib/seo-regions";
 import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
@@ -217,7 +218,7 @@ function HistoryRow({ item }: Readonly<{ item: SemanticAiAnswerHistoryItem }>) {
           <SearchEngineLogo engine={item.searchEngine} size="compact" />
           <b>{item.searchEngine === "YANDEX" ? <UiText text="ИИ-ответ Яндекса" /> : <UiText text="ИИ-ответ Google" />}</b>
         </span>
-        <small>{item.regionCode} · {item.device === "DESKTOP" ? <UiText text="десктоп" /> : <UiText text="мобильное" />}</small>
+        <small>{searchRegionDisplayName(item.searchEngine, item.regionCode)} · {item.device === "DESKTOP" ? <UiText text="десктоп" /> : <UiText text="мобильное" />}</small>
         <div className={`semantic-position-history-row-actions semantic-ai-position-history-row-actions ${status.tone}`}>
           <strong title={status.title}>{status.label}</strong>
         </div>

@@ -1,8 +1,10 @@
 import {
   googleRussiaRegionRows,
+  resolveSeoRegionLabel,
   yandexRussiaRegionRows,
+  type SeoRegionCodeKind,
   type SeoRegionRow
-} from "./seo-regions.generated.ts";
+} from "@seo-platform/contracts/seo-regions";
 import type { ProjectSearchCity } from "@seo-platform/contracts";
 
 export interface SeoRegionOption {
@@ -10,7 +12,7 @@ export interface SeoRegionOption {
   readonly label: string;
 }
 
-export type SeoRegionCodeKind = "WORDSTAT" | "YANDEX_RANK" | "GOOGLE_RANK";
+export type { SeoRegionCodeKind } from "@seo-platform/contracts/seo-regions";
 
 const ADMINISTRATIVE_REGION_PATTERN =
   /(?:область|край|район|округ|республика|автономная область|автономный округ|федеральный округ)$/iu;
@@ -27,8 +29,65 @@ export function seoRegionOptions(
     : yandexRussiaSeoRegions;
 }
 
+/**
+ * Provider region codes are stable identifiers, not user-facing labels.
+ * Legacy snapshots may omit regionLabel or contain the numeric code in it,
+ * so every presentation surface resolves the canonical catalogue label here.
+ */
+export function seoRegionDisplayName(
+  kind: SeoRegionCodeKind,
+  regionCode: string | number | null | undefined,
+  regionLabel?: string | null
+): string {
+  const code = normalizedRegionValue(regionCode);
+  const resolved = resolveSeoRegionLabel(kind, code, regionLabel);
+  if (resolved) return resolved;
+
+  if (code === "ALL" || code === "0") return "Все регионы";
+  return "Другой регион";
+}
+
+export function searchRegionDisplayName(
+  searchEngine: "GOOGLE" | "YANDEX",
+  regionCode: string | number | null | undefined,
+  regionLabel?: string | null
+): string {
+  return seoRegionDisplayName(
+    searchEngine === "GOOGLE" ? "GOOGLE_RANK" : "YANDEX_RANK",
+    regionCode,
+    regionLabel
+  );
+}
+
+/** Replaces a legacy generated `· 213 ·` segment without rewriting custom names. */
+export function searchContextDisplayName(
+  contextName: string,
+  searchEngine: "GOOGLE" | "YANDEX",
+  regionCode: string | number | null | undefined,
+  regionLabel?: string | null
+): string {
+  const code = normalizedRegionValue(regionCode);
+  if (!code) return contextName;
+  const region = searchRegionDisplayName(searchEngine, code, regionLabel);
+  return contextName
+    .split("·")
+    .map((part) => part.trim() === code ? ` ${region} ` : part)
+    .join("·")
+    .trim();
+}
+
 function options(rows: readonly SeoRegionRow[]): readonly SeoRegionOption[] {
   return rows.map(([code, label]) => ({ code, label }));
+}
+
+function normalizedRegionValue(
+  value: string | number | null | undefined
+): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : typeof value === "string"
+      ? value.normalize("NFKC").replace(/\s+/gu, " ").trim()
+      : "";
 }
 
 function pairedRussianSearchCities(): readonly ProjectSearchCity[] {

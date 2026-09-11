@@ -14,6 +14,7 @@ import {
   microToRubles,
   positiveMoneyMicro
 } from "../lib/rank-automation-money";
+import { trackingContextDisplayName } from "../lib/tracking-contexts";
 import { CustomSelect } from "./custom-select";
 import styles from "./rank-automation-panel.module.css";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -279,7 +280,7 @@ export function RankAutomationPanel({
               value={draft.trackingContextId}
             >
               {activeContexts.map((context) => (
-                <option key={context.id} value={context.id}>{context.name}</option>
+                <option key={context.id} value={context.id}>{trackingContextDisplayName(context)}</option>
               ))}
             </CustomSelect>
           </label>

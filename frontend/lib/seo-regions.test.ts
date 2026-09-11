@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   googleRussiaSeoRegions,
+  searchContextDisplayName,
+  searchRegionDisplayName,
+  seoRegionDisplayName,
   seoRegionOptions,
   yandexRussiaSeoRegions
 } from "./seo-regions.ts";
@@ -48,5 +51,28 @@ test("disambiguates localities with their Russian parent region", () => {
   assert.equal(
     googleRussiaSeoRegions.find(({ code }) => code === "1011852")?.label,
     "Майкоп · Адыгея"
+  );
+});
+
+test("uses canonical city names instead of legacy numeric labels", () => {
+  assert.equal(searchRegionDisplayName("YANDEX", "213"), "Москва");
+  assert.equal(searchRegionDisplayName("YANDEX", 213, "213"), "Москва");
+  assert.equal(searchRegionDisplayName("GOOGLE", "1012040"), "Санкт-Петербург");
+  assert.equal(seoRegionDisplayName("WORDSTAT", "225", "Россия [225]"), "Россия");
+});
+
+test("never exposes an unknown provider code as a region name", () => {
+  assert.equal(seoRegionDisplayName("WORDSTAT", "999999999", "999999999"), "Другой регион");
+  assert.equal(seoRegionDisplayName("WORDSTAT", "ALL"), "Все регионы");
+});
+
+test("repairs only a standalone numeric region segment in legacy context names", () => {
+  assert.equal(
+    searchContextDisplayName("Конкуренты · Яндекс · 213 · Десктоп", "YANDEX", "213"),
+    "Конкуренты · Яндекс · Москва · Десктоп"
+  );
+  assert.equal(
+    searchContextDisplayName("Профиль 213", "YANDEX", "213"),
+    "Профиль 213"
   );
 });

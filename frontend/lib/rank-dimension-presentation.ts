@@ -1,8 +1,9 @@
 import { parseSemanticRankColumnKey, semanticRankColumnKey, type SemanticRankDimension } from "@seo-platform/contracts";
+import { searchRegionDisplayName } from "./seo-regions.ts";
 
 export function rankDimensionLabel(dimension: SemanticRankDimension, locale: string): string {
   const english = locale.startsWith("en");
-  return `${dimension.searchEngine === "YANDEX" ? english ? "Yandex" : "Яндекс" : "Google"} · ${dimension.regionLabel || dimension.regionCode} · ${dimension.device === "DESKTOP" ? english ? "Desktop" : "ПК" : english ? "Mobile" : "Телефон"}${dimension.language !== "ru" ? ` · ${dimension.language}` : ""}`;
+  return `${dimension.searchEngine === "YANDEX" ? english ? "Yandex" : "Яндекс" : "Google"} · ${searchRegionDisplayName(dimension.searchEngine, dimension.regionCode, dimension.regionLabel)} · ${dimension.device === "DESKTOP" ? english ? "Desktop" : "ПК" : english ? "Mobile" : "Телефон"}${dimension.language !== "ru" ? ` · ${dimension.language}` : ""}`;
 }
 export function rankDimensionColumns(dimensions: readonly SemanticRankDimension[], locale: string) {
   const labels = locale.startsWith("en")

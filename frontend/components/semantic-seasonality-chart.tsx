@@ -7,7 +7,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { seoRegionOptions } from "../lib/seo-regions";
+import { seoRegionDisplayName } from "../lib/seo-regions";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -241,8 +241,7 @@ function frequencyTypeLabel(type: FrequencySeasonalityPointSummary["type"]): str
 }
 
 function regionLabel(code: string): string {
-  if (code === "ALL" || code === "0") return "Все регионы";
-  return seoRegionOptions("WORDSTAT").find((region) => region.code === code)?.label ?? code;
+  return seoRegionDisplayName("WORDSTAT", code);
 }
 
 function deviceLabel(device: string): string {
