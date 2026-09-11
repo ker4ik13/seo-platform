@@ -4,6 +4,7 @@ import {
   type SemanticKeywordBulkPatch,
   type SemanticKeywordBulkResult,
   type SemanticKeywordBulkSelection,
+  type SemanticKeywordListItem,
   type SemanticKeywordCleaningInput,
   type SemanticKeywordCleaningPreview,
   type SemanticKeywordCleaningResult,
@@ -46,6 +47,48 @@ export async function updateSemanticKeywordsInBatches(
     );
   }
   return aggregate;
+}
+
+export interface SemanticKeywordMoveReconciliation<Row> {
+  readonly items: readonly Row[];
+  readonly updatedIds: readonly string[];
+  readonly removedIds: readonly string[];
+}
+
+/** Applies the authoritative bulk response without restarting cursor paging. */
+export function reconcileSemanticKeywordMove<
+  Row extends Readonly<{
+    id: string;
+    groupId?: string;
+    groupMembershipCount?: number;
+  }>
+>(
+  currentItems: readonly Row[],
+  updatedItems: readonly SemanticKeywordListItem[],
+  visibleGroupIds: readonly string[]
+): SemanticKeywordMoveReconciliation<Row> {
+  const updatedById = new Map(updatedItems.map((item) => [item.id, item]));
+  const visibleGroups = new Set(visibleGroupIds);
+  const updatedIds: string[] = [];
+  const removedIds: string[] = [];
+  const items = currentItems.flatMap((current) => {
+    const updated = updatedById.get(current.id);
+    if (!updated) return [current];
+    updatedIds.push(current.id);
+    const { groupMembershipCount: _previousMembershipCount, ...preserved } =
+      current;
+    void _previousMembershipCount;
+    const merged = { ...preserved, ...updated } as unknown as Row;
+    if (
+      visibleGroups.size > 0 &&
+      (!merged.groupId || !visibleGroups.has(merged.groupId))
+    ) {
+      removedIds.push(current.id);
+      return [];
+    }
+    return [merged];
+  });
+  return { items, updatedIds, removedIds };
 }
 
 export async function previewSemanticKeywordCleaningInBatches(

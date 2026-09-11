@@ -60,6 +60,7 @@ import {
   type BrowserCursorPage
 } from "../lib/browser-api";
 import { semanticExportFileUrl } from "../lib/app-path";
+import { reconcileSemanticKeywordMove } from "../lib/semantic-keyword-bulk";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import {
   manualKeywordDuplicateCanApply,
@@ -5384,15 +5385,47 @@ export function SemanticCoreTable({
             setActionIds(null);
           }}
           onCompleted={(result) => {
+            const visibleGroupIds = keywordQueryConfig.groupIds ??
+              (keywordQueryConfig.filters.groupId
+                ? [keywordQueryConfig.filters.groupId]
+                : []);
+            const reconciliation = reconcileSemanticKeywordMove(
+              items,
+              result.updatedItems,
+              visibleGroupIds
+            );
             setMoveKeywordDialog(false);
             setMoveKeywordTargetId("");
             setCheckedIds(new Set());
+            setHighlightedIds((current) => {
+              const next = new Set(current);
+              for (const id of reconciliation.updatedIds) next.delete(id);
+              return next;
+            });
+            if (
+              rightSidebar?.type === "KEYWORD" &&
+              reconciliation.removedIds.includes(rightSidebar.keywordId)
+            ) {
+              setRightSidebar(undefined);
+            }
+            setItems(reconciliation.items);
+            if (reconciliation.removedIds.length > 0) {
+              setPage((current) => current.totalApprox === undefined
+                ? current
+                : {
+                    ...current,
+                    totalApprox: Math.max(
+                      0,
+                      current.totalApprox - reconciliation.removedIds.length
+                    )
+                  });
+            }
             setActionIds(null);
             setBulkNotice(
               `Перенесено ${result.changed} из ${result.selected}` +
                 (result.conflicted > 0 ? `, конфликтов: ${result.conflicted}` : "")
             );
-            setRetryVersion((value) => value + 1);
+            onGroupsChanged();
           }}
           projectId={projectId}
           selections={items

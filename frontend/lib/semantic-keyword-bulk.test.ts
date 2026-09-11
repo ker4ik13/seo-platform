@@ -5,11 +5,13 @@ import type {
   SemanticKeywordBulkSelection,
   SemanticKeywordCleaningInput,
   SemanticKeywordCleaningPreview,
-  SemanticKeywordCleaningResult
+  SemanticKeywordCleaningResult,
+  SemanticKeywordListItem
 } from "@seo-platform/contracts";
 import {
   cleanSemanticKeywordsInBatches,
   previewSemanticKeywordCleaningInBatches,
+  reconcileSemanticKeywordMove,
   updateSemanticKeywordsInBatches
 } from "./semantic-keyword-bulk.ts";
 
@@ -52,6 +54,64 @@ test("folder move keeps all selected keywords and sends bounded batches", async 
   assert.deepEqual(result.conflictedIds, ["keyword-400"]);
 });
 
+test("folder move merges returned rows without losing loaded metrics", () => {
+  const current = {
+    ...keyword("keyword-1", "group-old", "Старая", 4),
+    groupMembershipCount: 2,
+    frequencies: [{
+      type: "BASE" as const,
+      value: "120",
+      regionCode: "213",
+      device: "ALL" as const,
+      provider: "XMLSTOCK",
+      observedAt: "2026-09-10T10:00:00.000Z"
+    }]
+  };
+  const updated = keyword("keyword-1", "group-new", "Новая", 5);
+
+  const result = reconcileSemanticKeywordMove([current], [updated], []);
+
+  assert.deepEqual(result.updatedIds, ["keyword-1"]);
+  assert.deepEqual(result.removedIds, []);
+  assert.equal(result.items[0]?.groupId, "group-new");
+  assert.equal(result.items[0]?.groupPath, "Новая");
+  assert.equal(result.items[0]?.version, 5);
+  assert.equal(result.items[0]?.groupMembershipCount, undefined);
+  assert.deepEqual(result.items[0]?.frequencies, current.frequencies);
+});
+
+test("folder move removes only changed rows that left the visible group", () => {
+  const moved = keyword("keyword-1", "group-old", "Старая", 4);
+  const conflicted = keyword("keyword-2", "group-old", "Старая", 8);
+  const updated = keyword("keyword-1", "group-new", "Новая", 5);
+
+  const result = reconcileSemanticKeywordMove(
+    [moved, conflicted],
+    [updated],
+    ["group-old"]
+  );
+
+  assert.deepEqual(result.items.map(({ id }) => id), ["keyword-2"]);
+  assert.deepEqual(result.updatedIds, ["keyword-1"]);
+  assert.deepEqual(result.removedIds, ["keyword-1"]);
+  assert.equal(result.items[0]?.version, 8);
+});
+
+test("folder move preserves every already loaded cursor page", () => {
+  const current = Array.from({ length: 501 }, (_, index) =>
+    keyword(`keyword-${index}`, "group-old", "Старая", index + 1)
+  );
+  const updated = keyword("keyword-500", "group-new", "Новая", 502);
+
+  const result = reconcileSemanticKeywordMove(current, [updated], []);
+
+  assert.equal(result.items.length, 501);
+  assert.equal(result.items[0]?.id, "keyword-0");
+  assert.equal(result.items[500]?.id, "keyword-500");
+  assert.equal(result.items[500]?.groupId, "group-new");
+  assert.equal(result.items[500]?.version, 502);
+});
+
 test("bulk commands project rich editor rows to exact id and version selections", async () => {
   const richSelections = [{
     id: "keyword-1",
@@ -85,6 +145,32 @@ test("bulk commands project rich editor rows to exact id and version selections"
     }
   );
 });
+
+function keyword(
+  id: string,
+  groupId: string,
+  groupPath: string,
+  version: number
+): SemanticKeywordListItem {
+  return {
+    id,
+    textOriginal: id,
+    textNormalized: id,
+    language: "ru",
+    priority: 0,
+    isFavorite: false,
+    isTracked: true,
+    showAiAnswerButton: false,
+    groupId,
+    groupPath,
+    tags: [],
+    tagsTruncated: false,
+    sourceMode: "MANUAL",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    updatedAt: "2026-09-10T10:00:00.000Z",
+    version
+  };
+}
 
 test("cleaning preview and apply aggregate the complete selection", async () => {
   const previewBatchSizes: number[] = [];
