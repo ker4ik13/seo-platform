@@ -1684,7 +1684,9 @@ purpose аналогично называется «ИИ-выдача конку
 Ошибочную terminal-операцию со статусом `FAILED_FINAL`, `ACTION_REQUIRED` или
 `EXPIRED` пользователь с `task.manage` может убрать из проектного журнала.
 `DELETE /projects/{projectId}/operations/{operationId}` записывает в Jobs
-`dismissed_at` и `dismissed_by`; списки всех типов операций исключают такую
+`dismissed_at` и `dismissed_by`; mutation атомарно увеличивает `Job.version`,
+чтобы соблюдать optimistic-lock и terminal guards всех типов Jobs, включая
+`MANUAL_RANK_CHECK`. Списки всех типов операций исключают такую
 строку. Job, результаты, billing evidence и audit history физически не
 удаляются. Активные, успешные, частично завершённые и отменённые операции этим
 маршрутом скрыть нельзя.

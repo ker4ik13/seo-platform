@@ -70,6 +70,7 @@ test(
       const stored = await prisma.job.findUniqueOrThrow({ where: { id: failed.id } });
       assert.equal(stored.dismissedBy, actorId);
       assert.equal(stored.dismissedAt?.toISOString(), receipt.dismissedAt);
+      assert.equal(stored.version, failed.version + 1);
       assert.deepEqual(stored.errorSummary, { code: "TEST_ERROR" });
 
       await assert.rejects(() => service.dismiss({

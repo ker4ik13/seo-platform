@@ -1903,7 +1903,9 @@ Drawer «Задачи и операции» продолжает polling пос�
 можно убрать из обоих пользовательских журналов через tenant-scoped
 `DELETE /api/v1/projects/:projectId/operations/:operationId` с разрешением
 `task.manage`. Platform API аудитирует команду, а Execution записывает
-`jobs.dismissed_at/dismissed_by`; owning lists фильтруют скрытые строки, сохраняя
+`jobs.dismissed_at/dismissed_by` и увеличивает `jobs.version`, поэтому
+database guard терминальных `MANUAL_RANK_CHECK` не обходится; owning lists
+фильтруют скрытые строки, сохраняя
 результаты, расчёты, provider evidence и admin/audit history. Ограничения и
 индекс добавляет migration
 `20260911124500_failed_operation_dismissal`.

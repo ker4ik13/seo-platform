@@ -170,7 +170,12 @@ export class OperationActivityService {
         },
         data: {
           dismissedAt,
-          dismissedBy: input.actorId
+          dismissedBy: input.actorId,
+          // MANUAL_RANK_CHECK is protected by the database-level optimistic
+          // version guard even after it reaches a terminal state. Dismissal is
+          // a real Job mutation, so advance the canonical version for every
+          // operation type instead of bypassing that invariant for rank Jobs.
+          version: { increment: 1 }
         }
       });
       if (updated.count !== 1) {

@@ -60,7 +60,7 @@ test("counts only active user-visible operations by project", async () => {
   });
 });
 
-test("dismisses only a failed project operation and records the actor", async () => {
+test("dismisses a failed operation and advances the guarded Job version", async () => {
   const dismissedAt = new Date("2026-09-11T12:45:00.000Z");
   let lookup: unknown;
   let update: unknown;
@@ -118,7 +118,11 @@ test("dismisses only a failed project operation and records the actor", async ()
       status: { in: ["FAILED_FINAL", "ACTION_REQUIRED", "EXPIRED"] },
       dismissedAt: null
     },
-    data: { dismissedAt, dismissedBy: actorId }
+    data: {
+      dismissedAt,
+      dismissedBy: actorId,
+      version: { increment: 1 }
+    }
   });
 });
 
