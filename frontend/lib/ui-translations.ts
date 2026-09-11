@@ -4868,6 +4868,7 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Распределение по ТОПам": "Top ranking distribution",
   "Результаты по запросам": "Query results",
   "Свой домен отмечен зелёным, одинаковые результаты — жёлтым. Добавьте важные сайты для фиолетовой подсветки.": "Your domain is green and repeated results are yellow. Add important sites for purple highlighting.",
+  "Свой домен отмечен зелёным. Одинаковые домены во всех показанных срезах и запросах получают собственный цвет; уникальные автоматически не выделяются, а добавленные вручную выделяются всегда.": "Your domain is green. Matching domains across all visible slices and queries get their own color; unique domains are not highlighted automatically, while manually added domains are always highlighted.",
   "Сезонность": "Seasonality",
   "Сезонность ещё не собрана": "Seasonality has not been collected yet",
   "Символов:": "Characters:",

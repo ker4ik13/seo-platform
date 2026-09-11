@@ -20,6 +20,11 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { browserApiRequest } from "../lib/browser-api";
+import {
+  assignSerpDomainColors,
+  normalizedSerpDomain,
+  repeatedSerpDomains
+} from "../lib/serp-domain-highlights";
 import { semanticUrlBelongsToProject } from "../lib/semantic-rank-presentation";
 import { Icon } from "./icon";
 import {
@@ -205,7 +210,7 @@ export function SerpWorkbench({
   }
 
   function addWatchedDomain(): void {
-    const value = normalizedDomain(domainDraft);
+    const value = normalizedSerpDomain(domainDraft);
     if (!value || watchedDomains.includes(value)) return;
     const next = [...watchedDomains, value].slice(0, 20);
     setWatchedDomains(next);
@@ -299,6 +304,14 @@ export function SerpWorkbench({
     const dimension = dimensions.find((item) => item.key === key);
     return dimension ? [dimension] : [];
   });
+  const duplicateHosts = useMemo(
+    () => repeatedSerpDomains(report?.rows ?? [], aiOnly ? "ai" : "organic"),
+    [aiOnly, report?.rows]
+  );
+  const domainColors = useMemo(
+    () => assignSerpDomainColors([...watchedDomains, ...duplicateHosts]),
+    [duplicateHosts, watchedDomains]
+  );
 
   return <main className="serp-workbench">
     <section className="serp-controls">
@@ -330,7 +343,7 @@ export function SerpWorkbench({
       <div>
         <strong><UiText text="Подсветка доменов" /></strong>
         <span>
-          <UiText text="Свой домен отмечен зелёным. Повторяющиеся и добавленные домены получают стабильный собственный цвет." />
+          <UiText text="Свой домен отмечен зелёным. Одинаковые домены во всех показанных срезах и запросах получают собственный цвет; уникальные автоматически не выделяются, а добавленные вручную выделяются всегда." />
         </span>
         <label className="serp-duplicate-toggle">
           <input
@@ -355,12 +368,12 @@ export function SerpWorkbench({
         </button>
       </form>
       <div className="serp-domain-chips">
-        <span className="own">{normalizedDomain(projectDomain) ?? projectDomain}</span>
+        <span className="own">{normalizedSerpDomain(projectDomain) ?? projectDomain}</span>
         {watchedDomains.map((domain) => (
           <button
             key={domain}
             onClick={() => removeWatchedDomain(domain)}
-            style={domainColorStyle(domain)}
+            style={domainColorStyle(domain, domainColors)}
             title={t("Убрать подсветку")}
             type="button"
           >
@@ -444,9 +457,6 @@ export function SerpWorkbench({
             </thead>
             <tbody>
               {report.rows.map((row) => {
-                const duplicateHosts = repeatedHosts(
-                  (aiOnly ? row.aiSnapshots : row.snapshots).flatMap(({ results }) => results)
-                );
                 const resultDepth = Math.max(
                   0,
                   ...(aiOnly ? row.aiSnapshots : row.snapshots).map(({ results }) => results.length)
@@ -483,6 +493,7 @@ export function SerpWorkbench({
                           {snapshot ? <div className="serp-combined-snapshots">
                               <SerpSnapshotCell
                                 duplicateHosts={duplicateHosts}
+                                domainColors={domainColors}
                                 expanded={expanded}
                                 highlightDuplicateDomains={highlightDuplicateDomains}
                                 kind={aiOnly ? "ai" : "organic"}
@@ -572,6 +583,7 @@ function SerpColumnResizeHandle({
 }
 
 function SerpSnapshotCell({
+  domainColors,
   duplicateHosts,
   expanded,
   highlightDuplicateDomains,
@@ -582,6 +594,7 @@ function SerpSnapshotCell({
   results,
   watchedDomains
 }: Readonly<{
+  domainColors: ReadonlyMap<string, string>;
   duplicateHosts: ReadonlySet<string>;
   expanded: boolean;
   highlightDuplicateDomains: boolean;
@@ -610,7 +623,7 @@ function SerpSnapshotCell({
       </header>
       <ol>
         {visible.map((result) => {
-          const host = normalizedDomain(result.url) ?? "";
+          const host = normalizedSerpDomain(result.url) ?? "";
           const watched = watchedDomains.includes(host);
           const tone = semanticUrlBelongsToProject(result.url, projectDomain)
             ? "own"
@@ -623,7 +636,9 @@ function SerpSnapshotCell({
             <li
               className={tone}
               key={`${result.position}:${result.url}`}
-              style={watched || tone === "duplicate" ? domainColorStyle(host) : undefined}
+              style={watched || tone === "duplicate"
+                ? domainColorStyle(host, domainColors)
+                : undefined}
             >
               <span className="serp-result-rank">{result.position}</span>
               <SemanticSiteFavicon faviconUrl={result.faviconUrl} pageUrl={result.url} />
@@ -642,44 +657,18 @@ function SerpSnapshotCell({
   );
 }
 
-const WATCHED_DOMAIN_COLORS = [
-  "#5b43e8",
-  "#b23a79",
-  "#087f8c",
-  "#b45f06",
-  "#2563c7",
-  "#7b4cc2",
-  "#0f7b55",
-  "#b13f32",
-  "#6b7280",
-  "#be185d",
-  "#0369a1",
-  "#a16207",
-  "#4338ca",
-  "#0f766e",
-  "#9f1239",
-  "#7c3aed",
-  "#047857",
-  "#c2410c",
-  "#1d4ed8",
-  "#86198f"
-] as const;
-
-function domainColorStyle(domain: string): CSSProperties {
-  let hash = 0;
-  for (const character of domain) {
-    hash = (hash * 31 + character.codePointAt(0)!) >>> 0;
-  }
+function domainColorStyle(
+  domain: string,
+  colors: ReadonlyMap<string, string>
+): CSSProperties {
   return {
-    "--serp-domain-color": WATCHED_DOMAIN_COLORS[hash % WATCHED_DOMAIN_COLORS.length]
+    "--serp-domain-color": colors.get(domain)
   } as CSSProperties;
 }
 
 async function requestSerp(projectId: string, input: object, signal?: AbortSignal): Promise<SerpWorkbenchReport> { const value = await browserApiRequest<unknown>(`/app/api/projects/${encodeURIComponent(projectId)}/rank-workbench/serp`, { method: "POST", body: input, ...(signal ? { signal } : {}) }); return parseSerpWorkbenchReport(value); }
-function normalizedDomain(value: string): string | undefined { try { const candidate = value.includes("://") ? value : `https://${value}`; return new URL(candidate).hostname.toLowerCase().replace(/^www\./u, ""); } catch { return undefined; } }
-function repeatedHosts(results: readonly SerpWorkbenchResult[]): ReadonlySet<string> { const counts = new Map<string, number>(); for (const result of results) { const host = normalizedDomain(result.url); if (host) counts.set(host, (counts.get(host) ?? 0) + 1); } return new Set([...counts].filter(([, count]) => count > 1).map(([host]) => host)); }
 function watchedStorageKey(projectId: string): string { return `seonorita:serp-watched-domains:v1:${projectId}`; }
-function readWatchedDomains(projectId: string): readonly string[] { try { const value = JSON.parse(localStorage.getItem(watchedStorageKey(projectId)) ?? "[]"); return Array.isArray(value) ? value.flatMap((item) => typeof item === "string" && normalizedDomain(item) === item ? [item] : []).slice(0, 20) : []; } catch { return []; } }
+function readWatchedDomains(projectId: string): readonly string[] { try { const value = JSON.parse(localStorage.getItem(watchedStorageKey(projectId)) ?? "[]"); return Array.isArray(value) ? value.flatMap((item) => typeof item === "string" && normalizedSerpDomain(item) === item ? [item] : []).slice(0, 20) : []; } catch { return []; } }
 function writeWatchedDomains(projectId: string, values: readonly string[]): void { try { localStorage.setItem(watchedStorageKey(projectId), JSON.stringify(values)); } catch {} }
 function duplicateHighlightStorageKey(projectId: string, currentUserId: string): string { return `seonorita:serp-duplicate-highlight:v1:${currentUserId}:${projectId}`; }
 function readDuplicateHighlightPreference(projectId: string, currentUserId: string): boolean { try { return localStorage.getItem(duplicateHighlightStorageKey(projectId, currentUserId)) !== "false"; } catch { return true; } }

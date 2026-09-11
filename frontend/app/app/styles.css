@@ -14272,11 +14272,11 @@ svg { display: block; }
 
 /* SERP comparison fills the complete content viewport. */
 .main-column.section-tools.route-serp-workbench { display: flex; flex-direction: column; height: 100dvh; min-height: 0; overflow: hidden; }
-.main-column.section-tools.route-serp-workbench > .topbar { flex: 0 0 66px; }
+.main-column.section-tools.route-serp-workbench > .topbar { flex: 0 0 48px; height: 48px; min-height: 48px; }
 .main-column.section-tools.route-serp-workbench > .content-tools { flex: 1 1 auto; height: 0; }
 .main-column.route-serp-workbench > .content-tools.content-serp-workbench { min-height: 0; overflow: hidden; padding: 0; }
 .serp-workbench { box-sizing: border-box; gap: 8px; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; overflow: hidden; padding: 10px 12px 0; }
-.serp-controls { border-radius: 10px; gap: 8px; grid-template-columns: minmax(260px, 1.2fr) minmax(180px, .7fr) minmax(270px, 1fr) auto; padding: 8px 10px; }
+.serp-controls { border-left: 0; border-radius: 0; border-right: 0; gap: 8px; grid-template-columns: minmax(260px, 1.2fr) minmax(180px, .7fr) minmax(270px, 1fr) auto; margin: -10px -12px 0; padding: 7px 12px; }
 .serp-controls > label, .serp-controls form label, .serp-dimension-control, .serp-group-control { display: grid; gap: 4px; min-width: 0; }
 .serp-controls :is(label, .serp-dimension-control, .serp-group-control) > span { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .035em; text-transform: uppercase; }
 .serp-group-control .semantic-group-picker-trigger { border-radius: 8px; height: 36px; min-height: 36px; width: 100%; }
@@ -14327,12 +14327,12 @@ svg { display: block; }
 }
 .serp-duplicate-toggle input { accent-color: var(--brand); height: 14px; margin: 0; width: 14px; }
 .serp-snapshot-cell > ol > li.watched {
-  background: color-mix(in srgb, var(--serp-domain-color) 10%, white);
-  box-shadow: inset 3px 0 var(--serp-domain-color);
+  background: color-mix(in srgb, var(--serp-domain-color) 12%, white);
+  box-shadow: inset 4px 0 var(--serp-domain-color);
 }
 .serp-snapshot-cell > ol > li.duplicate {
-  background: color-mix(in srgb, var(--serp-domain-color) 9%, white);
-  box-shadow: inset 3px 0 var(--serp-domain-color);
+  background: color-mix(in srgb, var(--serp-domain-color) 11%, white);
+  box-shadow: inset 4px 0 var(--serp-domain-color);
 }
 .serp-single-context {
   align-items: center;
@@ -14481,6 +14481,7 @@ svg { display: block; }
 }
 @media (max-width: 680px) {
   .serp-workbench { padding: 0; }
+  .serp-controls { border-left: 1px solid var(--line); border-right: 1px solid var(--line); margin: 0; }
   .serp-controls { grid-template-columns: 1fr; }
   .serp-controls form { grid-column: 1; }
 }

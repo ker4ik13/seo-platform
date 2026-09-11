@@ -10,6 +10,7 @@ import {
   type CSSProperties
 } from "react";
 import { createPortal } from "react-dom";
+import { expandedAncestorIds } from "../lib/semantic-operation-tree";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import { Icon, type IconName } from "./icon";
 import { useUiLocale, UiText } from "./ui-locale";
@@ -315,10 +316,46 @@ export function SemanticGroupPicker({
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(
     () => initiallyExpandedGroupIds(availableGroups, value)
   );
+  const treeRef = useRef<HTMLDivElement>(null);
+  const selectedRowRef = useRef<HTMLButtonElement>(null);
+  const lastCenteredValueRef = useRef<string | undefined>(undefined);
   const rows = useMemo(
     () => groupPickerRows(availableGroups, expandedIds, search),
     [availableGroups, expandedIds, search]
   );
+
+  useEffect(() => {
+    const required = expandedAncestorIds(
+      availableGroups,
+      value ? [value] : []
+    );
+    setExpandedIds((current) => {
+      if ([...required].every((id) => current.has(id))) return current;
+      return new Set([...current, ...required]);
+    });
+  }, [availableGroups, value]);
+
+  useLayoutEffect(() => {
+    if (search.trim()) {
+      lastCenteredValueRef.current = undefined;
+      return;
+    }
+    if (lastCenteredValueRef.current === value) return;
+    const tree = treeRef.current;
+    const selectedRow = selectedRowRef.current;
+    if (!tree || !selectedRow) return;
+    const frame = requestAnimationFrame(() => {
+      const treeBounds = tree.getBoundingClientRect();
+      const rowBounds = selectedRow.getBoundingClientRect();
+      tree.scrollTop = Math.max(
+        0,
+        tree.scrollTop + rowBounds.top - treeBounds.top -
+          (tree.clientHeight - rowBounds.height) / 2
+      );
+      lastCenteredValueRef.current = value;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [rows, search, value]);
 
   function toggleExpanded(id: string): void {
     setExpandedIds((current) => {
@@ -352,13 +389,19 @@ export function SemanticGroupPicker({
           </button>
         )}
       </label>
-      <div aria-label={uiText("Дерево групп")} className="semantic-move-tree" role="tree">
+      <div
+        aria-label={uiText("Дерево групп")}
+        className="semantic-move-tree"
+        ref={treeRef}
+        role="tree"
+      >
         {specialOptions.map((option) => (
           <button
             aria-selected={value === option.value}
             className={`semantic-move-tree-row root special${value === option.value ? " selected" : ""}`}
             key={option.value}
             onClick={() => onChange(option.value)}
+            ref={value === option.value ? selectedRowRef : undefined}
             role="treeitem"
             type="button"
           >
@@ -373,6 +416,7 @@ export function SemanticGroupPicker({
             aria-selected={value === ""}
             className={`semantic-move-tree-row root${value === "" ? " selected" : ""}`}
             onClick={() => onChange("")}
+            ref={value === "" ? selectedRowRef : undefined}
             role="treeitem"
             type="button"
           >
@@ -411,6 +455,7 @@ export function SemanticGroupPicker({
                 aria-selected={selected}
                 className="semantic-move-tree-choice"
                 onClick={() => onChange(group.id)}
+                ref={selected ? selectedRowRef : undefined}
                 role="treeitem"
                 title={group.path}
                 type="button"
