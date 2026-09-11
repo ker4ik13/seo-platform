@@ -6,6 +6,7 @@ import {
   semanticClipboardText,
   semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
+  semanticSelectionAfterDeletion,
   semanticSelectionScopeSignature,
   toggleSemanticHighlightedSelection
 } from "./semantic-row-selection.ts";
@@ -100,6 +101,45 @@ test("header control promotes highlighted rows to bulk selection and toggles the
     [...toggleSemanticHighlightedSelection(selected, highlighted)],
     ["one"]
   );
+});
+
+test("deleting highlighted rows preserves the independent checkbox selection", () => {
+  const result = semanticSelectionAfterDeletion(
+    new Set(["one", "two"]),
+    new Set(["three"]),
+    "three",
+    new Set(["three"])
+  );
+
+  assert.deepEqual([...result.selectedIds], ["one", "two"]);
+  assert.deepEqual([...result.highlightedIds], []);
+  assert.equal(result.anchorId, undefined);
+});
+
+test("deleting checked rows preserves other highlighted rows", () => {
+  const result = semanticSelectionAfterDeletion(
+    new Set(["one"]),
+    new Set(["two", "three", "four"]),
+    "three",
+    new Set(["one"])
+  );
+
+  assert.deepEqual([...result.selectedIds], []);
+  assert.deepEqual([...result.highlightedIds], ["two", "three", "four"]);
+  assert.equal(result.anchorId, "three");
+});
+
+test("partial deletion removes only successfully deleted keyword ids", () => {
+  const result = semanticSelectionAfterDeletion(
+    new Set(["one", "two", "three"]),
+    new Set(["two", "three", "four"]),
+    "two",
+    new Set(["two"])
+  );
+
+  assert.deepEqual([...result.selectedIds], ["one", "three"]);
+  assert.deepEqual([...result.highlightedIds], ["three", "four"]);
+  assert.equal(result.anchorId, "three");
 });
 
 test("new keyword inherits the open active folder but never trash", () => {

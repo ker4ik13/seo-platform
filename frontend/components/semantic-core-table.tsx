@@ -79,6 +79,7 @@ import {
   semanticClipboardText,
   semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
+  semanticSelectionAfterDeletion,
   semanticSelectionScopeSignature,
   toggleSemanticHighlightedSelection
 } from "../lib/semantic-row-selection";
@@ -3009,8 +3010,22 @@ export function SemanticCoreTable({
           : []
       )
     );
+    const remainingSelection = semanticSelectionAfterDeletion(
+      checkedIds,
+      highlightedIds,
+      highlightAnchorIdRef.current,
+      deletedIds
+    );
     setItems((current) => current.filter(({ id }) => !deletedIds.has(id)));
-    setCheckedIds(new Set());
+    setCheckedIds(remainingSelection.selectedIds);
+    setHighlightedIds(remainingSelection.highlightedIds);
+    highlightAnchorIdRef.current = remainingSelection.anchorId;
+    if (
+      rightSidebar?.type === "KEYWORD" &&
+      deletedIds.has(rightSidebar.keywordId)
+    ) {
+      setRightSidebar(undefined);
+    }
     setActionIds(null);
     setDeleteSelectionOpen(false);
     setSaving(false);

@@ -3,6 +3,10 @@ export interface SemanticHighlightState {
   readonly highlightedIds: ReadonlySet<string>;
 }
 
+export interface SemanticSelectionState extends SemanticHighlightState {
+  readonly selectedIds: ReadonlySet<string>;
+}
+
 export interface SemanticHighlightModifiers {
   readonly additive: boolean;
   readonly extendRange: boolean;
@@ -137,6 +141,27 @@ export function toggleSemanticHighlightedSelection(
     else next.add(id);
   }
   return next;
+}
+
+export function semanticSelectionAfterDeletion(
+  selectedIds: ReadonlySet<string>,
+  highlightedIds: ReadonlySet<string>,
+  anchorId: string | undefined,
+  deletedIds: ReadonlySet<string>
+): SemanticSelectionState {
+  const remainingSelected = new Set(
+    [...selectedIds].filter((id) => !deletedIds.has(id))
+  );
+  const remainingHighlighted = new Set(
+    [...highlightedIds].filter((id) => !deletedIds.has(id))
+  );
+  return {
+    selectedIds: remainingSelected,
+    highlightedIds: remainingHighlighted,
+    anchorId: anchorId && !deletedIds.has(anchorId)
+      ? anchorId
+      : remainingHighlighted.values().next().value
+  };
 }
 
 export function initialSemanticCreateGroupId(
