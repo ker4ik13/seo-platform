@@ -312,6 +312,12 @@ dispatcher подготавливает до 48 keyword executions одного 
 чтобы заполнить три connector process по 16 rank workers. Общая DB capacity
 из пяти задач остаётся Arsenkin-only; один XMLStock credential всё равно
 строго ограничен своим Redis product bucket.
+
+Все Arsenkin submit-пути используют одну lock identity
+`seo-platform:rank-dispatch:ARSENKIN`. Это включает rank/check-top, Wordstat,
+ИИ-ответы, кластеризацию и keyword research. Принятый provider task может
+вернуться из `check` в `queue|queued|wait|waiting|pending`; такой ответ не
+является ошибкой и продолжает bounded polling без повторного submit.
 Нормализованные `STAGED` rank-results сохраняются отдельным секундным bounded
 dispatcher. Короткий PostgreSQL claim сначала выравнивает число активных
 persistence leases между workspace, затем между Job одного workspace и только
@@ -1035,7 +1041,8 @@ authorize. Authorize повторно проверяет полный current gr
 `SUBMITTING` и фиксирует durable may-have-started marker. Connector-worker
 отправляет documented `positions`, сохраняет wire hash/task ID, выполняет
 `check → get` только после `finish/100` и stage-ит normalized `result.table`;
-rank-worker ingest-ит chunk и terminal закрывает manifest/Job. Runtime
+provider queue/wait статусы остаются в `POLL_WAIT`; rank-worker ingest-ит
+chunk и terminal закрывает manifest/Job. Runtime
 activation использует новую immutable kill-switch generation
 `arsenkin-positions@4`. Live BYOK request/status/result canary зафиксирован
 4 августа 2026 года. В тот же день минимальный XMLStock rank canary прошёл

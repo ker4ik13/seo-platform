@@ -6695,11 +6695,16 @@ function keywordAiPosition(
         </span>
       );
     }
-    if (!answer.answerPresent) {
-      return <UiElement tag="span" uiLabels={{"title": "Проверка выполнена: ИИ-ответ не найден"}} className="semantic-ai-answer-absent" ><UiText text="Нет ответа" /></UiElement>;
-    }
     return (
-      <UiElement tag="span" uiLabels={{"title": "ИИ-ответ найден, но домен проекта отсутствует в источниках"}} className="semantic-ai-site-not-found" >
+      <UiElement
+        tag="span"
+        uiLabels={{
+          "title": answer.answerPresent
+            ? "ИИ-ответ найден, но домен проекта отсутствует в источниках"
+            : "Проверка выполнена: позиция в ИИ-ответе не найдена"
+        }}
+        className="semantic-ai-site-not-found"
+      >
         ×
       </UiElement>
     );

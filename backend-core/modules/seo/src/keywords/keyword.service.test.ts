@@ -552,7 +552,11 @@ test("keeps position deltas across tracking contexts", async () => {
   assert.match(rawQueries[0]?.sql ?? "", /FROM rank_snapshots snapshot/u);
   assert.match(
     rawQueries[0]?.sql ?? "",
-    /configuration\.search_engine::text = anchors\.search_engine/u
+    /configuration\.search_engine = current_configuration\.search_engine/u
+  );
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /previous ON previous\.found = TRUE AND previous\.position IS NOT NULL/u
   );
   assert.match(
     rawQueries[0]?.sql ?? "",
@@ -634,7 +638,10 @@ test("projects AI position changes across collection contexts", async () => {
   }]);
   assert.equal(rawQueries.length, 1);
   assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots snapshot/u);
-  assert.match(rawQueries[0]?.sql ?? "", /snapshot\.site_found = TRUE/u);
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /previous ON previous\.site_found = TRUE AND previous\.position IS NOT NULL/u
+  );
   assert.equal(latestQueryWhere?.positionTrackingEnabled, true);
 });
 
@@ -1475,7 +1482,7 @@ test("sorts tags by the first normalized active tag on the server", async () => 
   assert.ok(rawQueries[0]?.values.includes("бренд"));
 });
 
-test("sorts by the latest engine result and keeps missing positions last", async () => {
+test("sorts engine positions in four stable capture-state buckets", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000012";
   const latestContextId = "01900000-0000-7000-8000-000000000072";
   const previousContextId = "01900000-0000-7000-8000-000000000071";
@@ -1588,14 +1595,17 @@ test("sorts by the latest engine result and keeps missing positions last", async
   for (const query of metricQueries) {
     assert.match(query.sql, /latest_rank\.found/u);
     assert.match(query.sql, /historical_position/u);
-    assert.match(query.sql, /previous\.found = TRUE/u);
+    assert.match(
+      query.sql,
+      /WHEN previous\.found = TRUE AND previous\.position IS NOT NULL/u
+    );
     assert.match(query.sql, /FROM rank_snapshots previous/u);
     assert.match(
       query.sql,
       /\(previous\.observed_at, previous\.id\) </u
     );
   }
-  assert.ok(metricQueries[0]?.values.includes(2_000_000n));
+  assert.ok(metricQueries[0]?.values.includes(3_000_000n));
   assert.ok(metricQueries[1]?.values.includes(0n));
   assert.match(
     metricQueries[0]?.sql ?? "",
@@ -1621,7 +1631,7 @@ test("sorts by the latest engine result and keeps missing positions last", async
   ]);
 });
 
-test("sorts current and historical AI positions before absent answers", async () => {
+test("sorts AI positions in four stable capture-state buckets", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000014";
   const rawQueries: Prisma.Sql[] = [];
   const service = new KeywordService(
@@ -1671,28 +1681,29 @@ test("sorts current and historical AI positions before absent answers", async ()
 
   assert.equal(rawQueries.length, 3);
   assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots current_ai/u);
-  assert.match(rawQueries[0]?.sql ?? "", /current_ai\.answer_present/u);
   for (const query of rawQueries.slice(0, 2)) {
     assert.match(
       query.sql,
-      /WHEN NOT latest_ai\.answer_present[\s\S]*WHEN latest_ai\.site_found/u
+      /WHEN latest_ai\.site_found AND latest_ai\.position IS NOT NULL/u
     );
   }
   assert.match(rawQueries[0]?.sql ?? "", /latest_ai\.site_found/u);
   assert.match(rawQueries[0]?.sql ?? "", /historical_position/u);
-  assert.match(rawQueries[0]?.sql ?? "", /previous\.site_found = TRUE/u);
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /WHEN previous\.site_found = TRUE AND previous\.position IS NOT NULL/u
+  );
   assert.match(
     rawQueries[0]?.sql ?? "",
     /\(previous\.observed_at, previous\.id\) </u
   );
   assert.match(rawQueries[0]?.sql ?? "", /ORDER BY ranked\.sort_value ASC/u);
   assert.ok(rawQueries[0]?.values.includes("YANDEX"));
-  assert.ok(rawQueries[0]?.values.includes(2_000_000n));
   assert.ok(rawQueries[0]?.values.includes(3_000_000n));
   assert.match(rawQueries[1]?.sql ?? "", /historical_position/u);
   assert.match(rawQueries[1]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
   assert.ok(rawQueries[1]?.values.includes("GOOGLE"));
-  assert.ok(rawQueries[1]?.values.includes(-1n));
+  assert.ok(rawQueries[1]?.values.includes(0n));
   assert.match(rawQueries[2]?.sql ?? "", /extract\(epoch from latest_ai\.observed_at\)/u);
   assert.match(rawQueries[2]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
   assert.ok(rawQueries[2]?.values.includes("GOOGLE"));

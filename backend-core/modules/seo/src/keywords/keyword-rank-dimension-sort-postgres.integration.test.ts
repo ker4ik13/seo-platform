@@ -13,7 +13,7 @@ const projectId = id(102);
 const targetDimension = "GOOGLE|RU|1011973|ru|MOBILE";
 const targetContext = id(201);
 const otherContext = id(202);
-const keywords = Array.from({ length: 7 }, (_, index) => ({
+const keywords = Array.from({ length: 8 }, (_, index) => ({
   id: id(index + 1),
   workspace_id: workspaceId,
   project_id: projectId,
@@ -49,11 +49,15 @@ const currentRanks = [
   current(3, targetContext, false, null, "2026-09-05T10:00:00.000Z"),
   current(4, targetContext, false, null, "2026-09-01T10:00:00.000Z"),
   current(5, targetContext, false, null, "2026-09-03T10:00:00.000Z"),
-  current(7, otherContext, true, 1, "2026-09-06T10:00:00.000Z")
+  current(7, otherContext, true, 1, "2026-09-06T10:00:00.000Z"),
+  current(8, targetContext, false, null, "2026-09-07T10:00:00.000Z")
 ];
 const snapshots = [
-  previous(3, 3, "2026-09-03T10:00:00.000Z"),
-  previous(4, 9, "2026-08-30T10:00:00.000Z")
+  ...currentRanks.map(snapshotFromCurrent),
+  previous(3, 1, true, 3, "2026-09-03T10:00:00.000Z"),
+  previous(4, 1, true, 9, "2026-08-30T10:00:00.000Z"),
+  previous(5, 1, true, 11, "2026-08-30T10:00:00.000Z"),
+  previous(5, 2, false, null, "2026-09-02T10:00:00.000Z")
 ];
 
 test(
@@ -109,13 +113,15 @@ test(
     } as unknown as PrismaService, {} as SemanticVersionService);
 
     try {
-      const cases: readonly [SemanticKeywordSort, readonly number[]][] = [
-        ["RANK_POSITION_ASC", [1, 2, 3, 4, 5, 6, 7]],
-        ["RANK_POSITION_DESC", [2, 1, 4, 3, 7, 6, 5]],
-        ["RANK_CHECKED_AT_ASC", [4, 2, 5, 1, 3, 6, 7]],
-        ["RANK_CHECKED_AT_DESC", [3, 1, 5, 2, 4, 7, 6]]
+      const cases: readonly [SemanticKeywordSort, readonly number[], boolean][] = [
+        ["RANK_POSITION_ASC", [1, 2, 3, 4, 5, 8, 6, 7], true],
+        ["RANK_POSITION_DESC", [2, 1, 4, 3, 8, 5, 7, 6], true],
+        ["RANK_CHECKED_AT_ASC", [4, 2, 5, 1, 3, 8, 6, 7], true],
+        ["RANK_CHECKED_AT_DESC", [8, 3, 1, 5, 2, 4, 7, 6], true],
+        ["GOOGLE_POSITION_ASC", [7, 1, 2, 3, 4, 5, 8, 6], false],
+        ["GOOGLE_POSITION_DESC", [2, 1, 7, 4, 3, 8, 5, 6], false]
       ];
-      for (const [sort, expected] of cases) {
+      for (const [sort, expected, exactDimension] of cases) {
         await t.test(sort, async () => {
           for (const limit of [100, 2]) {
             const received: string[] = [];
@@ -124,7 +130,7 @@ test(
               const page = await service.list(workspaceId, projectId, {
                 limit,
                 sort,
-                rankSortDimensionKey: targetDimension,
+                ...(exactDimension ? { rankSortDimensionKey: targetDimension } : {}),
                 ...(cursor ? { cursor } : {})
               }, "request-rank-dimension-sort");
               received.push(...page.data.map(row => row.id));
@@ -161,15 +167,36 @@ function current(
   };
 }
 
-function previous(keyword: number, position: number, observedAt: string) {
+function snapshotFromCurrent(row: (typeof currentRanks)[number]) {
   return {
-    id: id(2_000 + keyword),
+    id: row.snapshot_id,
+    workspace_id: row.workspace_id,
+    project_id: row.project_id,
+    keyword_id: row.keyword_id,
+    tracking_context_id: row.tracking_context_id,
+    configuration_version: row.configuration_version,
+    found: row.found,
+    position: row.position,
+    position_tracking_enabled: true,
+    observed_at: row.observed_at
+  };
+}
+
+function previous(
+  keyword: number,
+  sequence: number,
+  found: boolean,
+  position: number | null,
+  observedAt: string
+) {
+  return {
+    id: id(2_000 + keyword * 10 + sequence),
     workspace_id: workspaceId,
     project_id: projectId,
     keyword_id: id(keyword),
     tracking_context_id: targetContext,
     configuration_version: 1,
-    found: true,
+    found,
     position,
     position_tracking_enabled: true,
     observed_at: observedAt

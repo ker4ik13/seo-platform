@@ -9,6 +9,7 @@ import {
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
+import { arsenkinTaskLifecycle } from "../integrations/arsenkin-task-status.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -502,22 +503,13 @@ function providerFailure(
 
 function arsenkinTaskStatus(value: unknown, taskId: string): "PENDING" | "FINISHED" | undefined {
   const body = record(value);
-  const progress = taskProgress(body?.progress);
+  const lifecycle = arsenkinTaskLifecycle(body?.status, body?.progress);
   if (
     body?.code !== "TASK_STATUS" ||
     (body.task_id !== undefined && taskIdFromUnknown(body.task_id) !== taskId) ||
-    progress === undefined
+    lifecycle === undefined
   ) return undefined;
-  if (body.status === "process" && progress < 100) return "PENDING";
-  if (body.status === "finish" && progress === 100) return "FINISHED";
-  return undefined;
-}
-
-function taskProgress(value: unknown): number | undefined {
-  if (typeof value === "number") return Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined;
-  if (typeof value !== "string" || !/^\d{1,3}%?$/u.test(value)) return undefined;
-  const result = Number(value.replace(/%$/u, ""));
-  return result >= 0 && result <= 100 ? result : undefined;
+  return lifecycle;
 }
 
 function requestInit(secret: IntegrationCredentialSecret, body: unknown): RequestInit {

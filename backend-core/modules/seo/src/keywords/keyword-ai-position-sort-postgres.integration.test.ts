@@ -24,6 +24,8 @@ interface SnapshotFixture {
   project_id: string;
   keyword_id: string;
   search_engine: "YANDEX" | "GOOGLE";
+  region_code: string;
+  device: "DESKTOP" | "MOBILE";
   observed_at: string;
   answer_present: boolean;
   site_found: boolean;
@@ -34,20 +36,36 @@ interface SnapshotFixture {
 const snapshots: SnapshotFixture[] = [];
 for (const searchEngine of ["YANDEX", "GOOGLE"] as const) {
   const positions = searchEngine === "YANDEX" ? [2, 7, 3, 9] : [9, 1, 8, 2];
-  for (let index = 0; index < 7; index += 1) {
-    if (index === 2 || index === 3 || index === 5) {
-      snapshots.push(snapshot(index + 1, searchEngine, {
-        position: positions[index] ?? 5,
-        site_found: true,
-        observed_at: "2026-09-03T10:00:00.000Z"
-      }));
-    }
-    snapshots.push(snapshot(index + 1, searchEngine, {
-      answer_present: index < 5,
-      site_found: index < 2,
-      position: index < 2 ? positions[index]! : null
-    }));
-  }
+  snapshots.push(
+    snapshot(1, searchEngine, { site_found: true, position: positions[0]! }),
+    snapshot(2, searchEngine, { site_found: true, position: positions[1]! }),
+    snapshot(3, searchEngine, {
+      site_found: true,
+      position: positions[2]!,
+      observed_at: "2026-09-03T10:00:00.000Z"
+    }),
+    snapshot(3, searchEngine, {}),
+    snapshot(4, searchEngine, {
+      site_found: true,
+      position: positions[3]!,
+      observed_at: "2026-09-03T10:00:00.000Z"
+    }),
+    snapshot(4, searchEngine, { answer_present: false }),
+    snapshot(5, searchEngine, {
+      site_found: true,
+      position: 5,
+      observed_at: "2026-09-01T10:00:00.000Z"
+    }),
+    snapshot(5, searchEngine, {
+      observed_at: "2026-09-03T10:00:00.000Z"
+    }),
+    snapshot(5, searchEngine, {}),
+    snapshot(6, searchEngine, {}),
+    snapshot(7, searchEngine, {
+      observed_at: "2026-09-03T10:00:00.000Z"
+    }),
+    snapshot(7, searchEngine, {})
+  );
   // A newer competitor-only snapshot must not change the positional sort.
   snapshots.push(snapshot(1, searchEngine, {
     answer_present: false,
@@ -68,7 +86,7 @@ for (const searchEngine of ["YANDEX", "GOOGLE"] as const) {
 }
 
 test(
-  "PostgreSQL keeps absent AI answers last for both engines and cursor directions",
+  "PostgreSQL keeps four AI position states stable for both engines and cursor directions",
   { skip: !databaseUrl, timeout: 15_000 },
   async (t) => {
     const database = new PrismaService(loadAppConfig({
@@ -87,7 +105,8 @@ test(
             SELECT * FROM jsonb_to_recordset(${JSON.stringify(snapshots)}::jsonb)
               AS fixture(
                 id uuid, workspace_id uuid, project_id uuid, keyword_id uuid,
-                search_engine text, observed_at timestamptz, answer_present boolean,
+                search_engine text, region_code text, device text,
+                observed_at timestamptz, answer_present boolean,
                 site_found boolean, position integer, position_tracking_enabled boolean
               )
           )
@@ -109,9 +128,9 @@ test(
     try {
       const cases: readonly [SemanticKeywordSort, readonly number[]][] = [
         ["YANDEX_AI_POSITION_ASC", [1, 2, 3, 4, 5, 6, 7, 8]],
-        ["YANDEX_AI_POSITION_DESC", [2, 1, 4, 3, 5, 8, 7, 6]],
+        ["YANDEX_AI_POSITION_DESC", [2, 1, 4, 3, 7, 6, 5, 8]],
         ["GOOGLE_AI_POSITION_ASC", [2, 1, 4, 3, 5, 6, 7, 8]],
-        ["GOOGLE_AI_POSITION_DESC", [1, 2, 3, 4, 5, 8, 7, 6]]
+        ["GOOGLE_AI_POSITION_DESC", [1, 2, 3, 4, 7, 6, 5, 8]]
       ];
       for (const [sort, expected] of cases) {
         await t.test(sort, async () => {
@@ -154,6 +173,8 @@ function snapshot(
     project_id: projectId,
     keyword_id: id(keyword),
     search_engine: searchEngine,
+    region_code: "RU-MOW",
+    device: "DESKTOP",
     observed_at: observedAt,
     answer_present: true,
     site_found: false,

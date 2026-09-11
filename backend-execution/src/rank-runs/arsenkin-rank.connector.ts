@@ -13,6 +13,7 @@ import {
 } from "@seo-platform/contracts/canonical-json";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
+import { arsenkinTaskLifecycle } from "../integrations/arsenkin-task-status.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import {
   providerJsonRequest,
@@ -451,33 +452,16 @@ function checkResult(
   const failure = httpFailure(status, value, retryAfterSeconds);
   if (failure) return failure;
   const body = record(value);
-  const progress = taskProgress(body.progress);
+  const lifecycle = arsenkinTaskLifecycle(body.status, body.progress);
   if (
     body.code !== "TASK_STATUS" ||
-    progress === undefined
+    lifecycle === undefined
   ) {
     return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
   }
-  if (body.status === "process" && progress < 100) {
-    return { status: "PENDING" };
-  }
-  if (body.status === "finish" && progress === 100) {
-    return { status: "READY" };
-  }
-  return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
-}
-
-function taskProgress(value: unknown): number | undefined {
-  if (typeof value === "number") {
-    return Number.isFinite(value) && value >= 0 && value <= 100
-      ? value
-      : undefined;
-  }
-  if (typeof value !== "string" || !/^\d{1,3}%?$/u.test(value)) {
-    return undefined;
-  }
-  const progress = Number(value.replace(/%$/u, ""));
-  return progress >= 0 && progress <= 100 ? progress : undefined;
+  return lifecycle === "FINISHED"
+    ? { status: "READY" }
+    : { status: "PENDING" };
 }
 
 function fetchResult(

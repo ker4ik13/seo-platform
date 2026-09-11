@@ -298,12 +298,19 @@ export class KeywordRankComparisonService {
       LEFT JOIN LATERAL (
         SELECT candidate.position FROM configurations configuration
         CROSS JOIN LATERAL (
-          SELECT snapshot.position, snapshot.observed_at, snapshot.id FROM rank_snapshots snapshot
+          SELECT
+            CASE
+              WHEN snapshot.found = TRUE AND snapshot.position IS NOT NULL
+                THEN snapshot.position
+              ELSE NULL
+            END AS position,
+            snapshot.observed_at,
+            snapshot.id
+          FROM rank_snapshots snapshot
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
             AND snapshot.keyword_id = keyword.id AND snapshot.tracking_context_id = configuration.context_id
-            AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled AND snapshot.found
-            AND (snapshot.observed_at AT TIME ZONE 'UTC')::date <
-              (latest.observed_at AT TIME ZONE 'UTC')::date
+            AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled
+            AND (snapshot.observed_at, snapshot.id) < (latest.observed_at, latest.id)
             ${visibleSnapshot(scope, dimension)}
           ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
         ) candidate
@@ -333,7 +340,12 @@ export class KeywordRankComparisonService {
         snapshot.observed_at AS "observedAt"
       FROM ai_answer_snapshots snapshot
       LEFT JOIN LATERAL (
-        SELECT candidate.position
+        SELECT
+          CASE
+            WHEN candidate.site_found = TRUE AND candidate.position IS NOT NULL
+              THEN candidate.position
+            ELSE NULL
+          END AS position
         FROM ai_answer_snapshots candidate
         WHERE candidate.workspace_id = snapshot.workspace_id
           AND candidate.project_id = snapshot.project_id
@@ -342,8 +354,6 @@ export class KeywordRankComparisonService {
           AND candidate.region_code = snapshot.region_code
           AND candidate.device = snapshot.device
           AND candidate.position_tracking_enabled
-          AND candidate.site_found
-          AND candidate.position IS NOT NULL
           AND (candidate.observed_at, candidate.id) <
             (snapshot.observed_at, snapshot.id)
         ORDER BY candidate.observed_at DESC, candidate.id DESC

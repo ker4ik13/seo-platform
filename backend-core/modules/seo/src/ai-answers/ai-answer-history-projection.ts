@@ -26,10 +26,7 @@ export function previousAiAnswerPositionKey(
   return `${keywordId}:${searchEngine}:${regionCode}:${device}:${observedAt.toISOString()}:${snapshotId}`;
 }
 
-/**
- * Looks behind each immutable AI snapshot across every region/device context.
- * A context change must not make a canonical keyword look new again.
- */
+/** Finds a position only when the immediately preceding exact-slice snapshot found the site. */
 export async function previousAiAnswerPositions(
   prisma: PrismaService,
   workspaceId: string,
@@ -73,7 +70,7 @@ export async function previousAiAnswerPositions(
       previous.position AS "previousPosition"
     FROM anchors
     INNER JOIN LATERAL (
-      SELECT snapshot.position
+      SELECT snapshot.site_found, snapshot.position
       FROM ai_answer_snapshots snapshot
       WHERE snapshot.workspace_id = ${workspaceId}::uuid
         AND snapshot.project_id = ${projectId}::uuid
@@ -81,14 +78,12 @@ export async function previousAiAnswerPositions(
         AND snapshot.search_engine = anchors.search_engine
         AND snapshot.region_code = anchors.region_code
         AND snapshot.device::text = anchors.device
-        AND snapshot.site_found = TRUE
         AND snapshot.position_tracking_enabled = TRUE
-        AND snapshot.position IS NOT NULL
         AND (snapshot.observed_at, snapshot.id) <
             (anchors.observed_at, anchors.snapshot_id)
       ORDER BY snapshot.observed_at DESC, snapshot.id DESC
       LIMIT 1
-    ) previous ON TRUE
+    ) previous ON previous.site_found = TRUE AND previous.position IS NOT NULL
   `;
   const expectedKeys = new Set(
     anchors.map((anchor) =>

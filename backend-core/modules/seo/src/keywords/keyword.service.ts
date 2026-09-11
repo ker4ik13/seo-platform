@@ -655,7 +655,6 @@ export class KeywordService {
               configurationVersion: true,
               found: true,
               position: true,
-              previousPosition: true,
               rankingUrl: true,
               observedAt: true,
               snapshotId: true
@@ -915,7 +914,7 @@ export class KeywordService {
           rank.observedAt,
           rank.snapshotId
         )
-      ) ?? rank.previousPosition ?? undefined;
+      );
       const siteResults = siteResultsBySnapshotId.get(rank.snapshotId) ?? [];
       const regionCode = configuration.regionCode ?? configuration.countryCode;
       const dimension =
@@ -1424,7 +1423,7 @@ export class KeywordService {
             rank.observedAt,
             rank.snapshotId
           )
-        ) ?? rank.previousPosition ?? undefined;
+        );
         return [{
           ...resolvedRankDimensionMetadata(
             configuration,
@@ -3717,8 +3716,18 @@ async function previousFoundPositions(
       anchors.snapshot_id::text AS "snapshotId",
       previous.position AS "previousPosition"
     FROM anchors
+    INNER JOIN rank_snapshots current_snapshot
+      ON current_snapshot.workspace_id = ${workspaceId}::uuid
+     AND current_snapshot.project_id = ${projectId}::uuid
+     AND current_snapshot.keyword_id = anchors.keyword_id
+     AND current_snapshot.id = anchors.snapshot_id
+    INNER JOIN tracking_context_versions current_configuration
+      ON current_configuration.workspace_id = current_snapshot.workspace_id
+     AND current_configuration.project_id = current_snapshot.project_id
+     AND current_configuration.context_id = current_snapshot.tracking_context_id
+     AND current_configuration.configuration_version = current_snapshot.configuration_version
     INNER JOIN LATERAL (
-      SELECT snapshot.position
+      SELECT snapshot.found, snapshot.position
       FROM rank_snapshots snapshot
       INNER JOIN tracking_context_versions configuration
         ON configuration.workspace_id = snapshot.workspace_id
@@ -3728,10 +3737,13 @@ async function previousFoundPositions(
       WHERE snapshot.workspace_id = ${workspaceId}::uuid
         AND snapshot.project_id = ${projectId}::uuid
         AND snapshot.keyword_id = anchors.keyword_id
-        AND configuration.search_engine::text = anchors.search_engine
-        AND snapshot.found = TRUE
+        AND configuration.search_engine = current_configuration.search_engine
+        AND configuration.country_code = current_configuration.country_code
+        AND COALESCE(configuration.region_code, configuration.country_code) =
+            COALESCE(current_configuration.region_code, current_configuration.country_code)
+        AND configuration.language = current_configuration.language
+        AND configuration.device = current_configuration.device
         AND snapshot.position_tracking_enabled = TRUE
-        AND snapshot.position IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM rank_dimension_history_deletions deletion
           WHERE deletion.workspace_id = snapshot.workspace_id
@@ -3747,7 +3759,8 @@ async function previousFoundPositions(
             (anchors.observed_at, anchors.snapshot_id)
       ORDER BY snapshot.observed_at DESC, snapshot.id DESC
       LIMIT 1
-    ) previous ON TRUE
+    ) previous ON previous.found = TRUE AND previous.position IS NOT NULL
+    WHERE current_configuration.search_engine::text = anchors.search_engine
   `;
   const expectedKeys = new Set(
     anchors.map((anchor) =>
@@ -3818,13 +3831,10 @@ async function metricSortedKeywordPage(
     throw new Error("Validated rank sort dimension is invalid");
   }
   const positionBucket = 1_000_000n;
-  const absentAiAnswerMetric = ascending ? positionBucket * 3n : -1n;
-  const nullSentinel = aiPositionSort
-    ? absentAiAnswerMetric
-    : rankPositionSort
-      ? ascending
-        ? positionBucket * 2n
-        : 0n
+  const nullSentinel = aiPositionSort || rankPositionSort
+    ? ascending
+      ? positionBucket * 3n
+      : 0n
       : ascending
         ? 9_223_372_036_854_775_807n
         : -1n;
@@ -3846,34 +3856,33 @@ async function metricSortedKeywordPage(
     : Prisma.empty;
   const positionMetric = ascending
     ? Prisma.sql`CASE
-        WHEN latest_rank.found THEN latest_rank.position::bigint
+        WHEN latest_rank.found AND latest_rank.position IS NOT NULL
+          THEN latest_rank.position::bigint
         WHEN latest_rank.historical_position IS NOT NULL
           THEN ${positionBucket}::bigint + latest_rank.historical_position::bigint
         ELSE ${positionBucket * 2n}::bigint
       END`
     : Prisma.sql`CASE
-        WHEN latest_rank.found
-          THEN ${positionBucket * 2n}::bigint + latest_rank.position::bigint
+        WHEN latest_rank.found AND latest_rank.position IS NOT NULL
+          THEN ${positionBucket * 3n}::bigint + latest_rank.position::bigint
         WHEN latest_rank.historical_position IS NOT NULL
-          THEN ${positionBucket}::bigint + latest_rank.historical_position::bigint
-        ELSE 0::bigint
+          THEN ${positionBucket * 2n}::bigint + latest_rank.historical_position::bigint
+        ELSE ${positionBucket}::bigint
       END`;
-  // An absent answer stays last even if the site had a historical position.
   const aiPositionMetric = ascending
     ? Prisma.sql`CASE
-        WHEN NOT latest_ai.answer_present THEN ${absentAiAnswerMetric}::bigint
-        WHEN latest_ai.site_found THEN latest_ai.position::bigint
+        WHEN latest_ai.site_found AND latest_ai.position IS NOT NULL
+          THEN latest_ai.position::bigint
         WHEN latest_ai.historical_position IS NOT NULL
           THEN ${positionBucket}::bigint + latest_ai.historical_position::bigint
         ELSE ${positionBucket * 2n}::bigint
       END`
     : Prisma.sql`CASE
-        WHEN NOT latest_ai.answer_present THEN ${absentAiAnswerMetric}::bigint
-        WHEN latest_ai.site_found
-          THEN ${positionBucket * 2n}::bigint + latest_ai.position::bigint
+        WHEN latest_ai.site_found AND latest_ai.position IS NOT NULL
+          THEN ${positionBucket * 3n}::bigint + latest_ai.position::bigint
         WHEN latest_ai.historical_position IS NOT NULL
-          THEN ${positionBucket}::bigint + latest_ai.historical_position::bigint
-        ELSE 0::bigint
+          THEN ${positionBucket * 2n}::bigint + latest_ai.historical_position::bigint
+        ELSE ${positionBucket}::bigint
       END`;
   const metricJoin = sort.startsWith("FREQUENCY_")
     ? Prisma.sql`
@@ -3893,19 +3902,22 @@ async function metricSortedKeywordPage(
           SELECT ${aiPositionMetric} AS metric
           FROM (
             SELECT
-              current_ai.answer_present,
               current_ai.site_found,
               current_ai.position,
               (
-                SELECT previous.position
+                SELECT CASE
+                  WHEN previous.site_found = TRUE AND previous.position IS NOT NULL
+                    THEN previous.position
+                  ELSE NULL
+                END
                 FROM ai_answer_snapshots previous
                 WHERE previous.workspace_id = current_ai.workspace_id
                   AND previous.project_id = current_ai.project_id
                   AND previous.keyword_id = current_ai.keyword_id
                   AND previous.search_engine = current_ai.search_engine
+                  AND previous.region_code = current_ai.region_code
+                  AND previous.device = current_ai.device
                   AND previous.position_tracking_enabled = TRUE
-                  AND previous.site_found = TRUE
-                  AND previous.position IS NOT NULL
                   AND (previous.observed_at, previous.id) <
                       (current_ai.observed_at, current_ai.id)
                 ORDER BY previous.observed_at DESC, previous.id DESC
@@ -3942,9 +3954,12 @@ async function metricSortedKeywordPage(
             SELECT
               cr.found,
               cr.position,
-              COALESCE(
-                (
-                  SELECT previous.position
+              (
+                  SELECT CASE
+                    WHEN previous.found = TRUE AND previous.position IS NOT NULL
+                      THEN previous.position
+                    ELSE NULL
+                  END
                   FROM rank_snapshots previous
                   INNER JOIN tracking_context_versions previous_tcv
                     ON previous_tcv.workspace_id = previous.workspace_id
@@ -3954,10 +3969,13 @@ async function metricSortedKeywordPage(
                   WHERE previous.workspace_id = cr.workspace_id
                     AND previous.project_id = cr.project_id
                     AND previous.keyword_id = cr.keyword_id
-                    AND previous.found = TRUE
                     AND previous.position_tracking_enabled = TRUE
-                    AND previous.position IS NOT NULL
                     AND previous_tcv.search_engine::text = ${rankEngine}
+                    AND previous_tcv.country_code = tcv.country_code
+                    AND COALESCE(previous_tcv.region_code, previous_tcv.country_code) =
+                        COALESCE(tcv.region_code, tcv.country_code)
+                    AND previous_tcv.language = tcv.language
+                    AND previous_tcv.device = tcv.device
                     ${previousRankDimensionFilter}
                     AND NOT EXISTS (
                       SELECT 1 FROM rank_dimension_history_deletions deletion
@@ -3974,8 +3992,6 @@ async function metricSortedKeywordPage(
                         (cr.observed_at, cr.snapshot_id)
                   ORDER BY previous.observed_at DESC, previous.id DESC
                   LIMIT 1
-                ),
-                cr.previous_position
               ) AS historical_position
             FROM current_ranks cr
             INNER JOIN tracking_context_versions tcv

@@ -279,7 +279,7 @@ test("submits the current 15,000-key positions scope as exactly one provider tas
   assert.equal(submissions, 1);
 });
 
-test("accepts percentage task status before fetching a Check Top result", async () => {
+test("keeps queued Check Top tasks pending before fetching their result", async () => {
   const responses = [
     json(
       {
@@ -291,6 +291,8 @@ test("accepts percentage task status before fetching a Check Top result", async 
       429,
       { "Retry-After": "15" }
     ),
+    json({ code: "TASK_STATUS", status: "queue" }),
+    json({ code: "TASK_STATUS", status: "waiting", progress: "0%" }),
     json({ code: "TASK_STATUS", status: "process", progress: "50%" }),
     json({ code: "TASK_STATUS", status: "finish", progress: "100%" }),
     json(checkTopResultBody())
@@ -331,6 +333,22 @@ test("accepts percentage task status before fetching a Check Top result", async 
     ),
     { status: "PENDING" }
   );
+  assert.deepEqual(
+    await connector.fetchResult(
+      "3944",
+      { apiKey: "private-key" },
+      1_000
+    ),
+    { status: "PENDING" }
+  );
+  assert.deepEqual(
+    await connector.fetchResult(
+      "3944",
+      { apiKey: "private-key" },
+      1_000
+    ),
+    { status: "PENDING" }
+  );
   const ready = await connector.fetchResult(
     "3944",
     { apiKey: "private-key" },
@@ -349,9 +367,11 @@ test("accepts percentage task status before fetching a Check Top result", async 
     "https://arsenkin.ru/api/tools/check",
     "https://arsenkin.ru/api/tools/check",
     "https://arsenkin.ru/api/tools/check",
+    "https://arsenkin.ru/api/tools/check",
+    "https://arsenkin.ru/api/tools/check",
     "https://arsenkin.ru/api/tools/get"
   ]);
-  assert.equal(permits, 4);
+  assert.equal(permits, 6);
 });
 
 test("does not fetch rank result without a second shared HTTP permit", async () => {
