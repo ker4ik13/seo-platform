@@ -187,6 +187,7 @@ export function SemanticPositionDialog({
   const assignmentCommand = useRef<IdempotentCommand | undefined>(undefined);
   const runCommand = useRef<IdempotentCommand | undefined>(undefined);
   const pendingRun = useRef<PendingSemanticRankRun | undefined>(undefined);
+  const oneOffContext = useRef<TrackingContextSummary | undefined>(undefined);
   const initialSelectionsRef = useRef(initialSelections);
   const assignmentKeywordIds = selections.map(({ id }) => id);
   const keywordIds = selections
@@ -221,8 +222,9 @@ export function SemanticPositionDialog({
   const batchInput: RankTargetBatchInput | undefined = useMemo(() => selectedSource && contextDraft.regionCode.trim() ? {
     projectId, workspaceId, base: contextDraft, targets, keywordIds: selections.map(({ id }) => id),
     selectedKeywordCount: selections.filter(({ isTracked }) => contextDraft.includeUntracked || isTracked !== false).length,
-    source: selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, locale: uiLocale
-  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, uiLocale]);
+    source: selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo,
+    saveContexts: !competitorMode && Boolean(selectedContextId), locale: uiLocale
+  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, selectedContextId, uiLocale]);
   const batchSignature = useMemo(() => batchInput ? rankTargetBatchSignature(batchInput) : undefined, [batchInput]);
   const currentBatch = recoveringBatch || multiBatch.current?.signature === batchSignature ? multiBatch.current : undefined;
   const batchReady = currentBatch ? rankTargetBatchReady(currentBatch) : false;
@@ -288,6 +290,7 @@ export function SemanticPositionDialog({
     multiBatch.current = undefined;
     setYandexLiveTurbo(false);
     setSelectedContextId(contextId);
+    oneOffContext.current = undefined;
     const context = settings?.contexts.find(({ id }) => id === contextId);
     if (context) {
       setSelections([]);
@@ -445,10 +448,6 @@ export function SemanticPositionDialog({
             lastRunDraft.regionCode
           );
         }
-        const previousContext =
-          initialSelections.length === 0 && !activeGroupId
-            ? lastRunContext
-            : undefined;
         setSettings(trackingResult);
         setConnectorSettings(integrationResult);
         setWorkspaceRouting(workspaceResult);
@@ -458,10 +457,6 @@ export function SemanticPositionDialog({
         setPreferredRegionSources(nextPreferredRegionSources);
         if (initialRun) {
           setContextDraft(rankRetryContextDraft(initialRun));
-        } else if (previousContext) {
-          setSelectedContextId(previousContext.id);
-          setScopeCount(previousContext.assignedKeywordCount);
-          setContextDraft(trackingContextDraft(previousContext));
         } else {
           setContextDraft((current) => ({
             ...contextDraftWithRegion(
@@ -598,8 +593,11 @@ export function SemanticPositionDialog({
         ? settings?.contexts.find(
             ({ id, status }) => id === selectedContextId && status === "ACTIVE"
           )
-        : matchingTechnicalContext(settings, launchDraft);
-      if (selectedContext) {
+        : oneOffContext.current &&
+            trackingContextMatchesDraft(oneOffContext.current, launchDraft)
+          ? oneOffContext.current
+          : undefined;
+      if (selectedContext && selectedContextId) {
         const authoritative = await browserApiRequest<TrackingContextSummary>(
           trackingContextApiPath(projectId, selectedContext.id)
         );
@@ -618,7 +616,10 @@ export function SemanticPositionDialog({
         );
       }
       if (!selectedContext && settings?.access.canConfigure) {
-        const signature = trackingContextPayloadSignature(launchDraft);
+        const isReusable = Boolean(selectedContextId) && !competitorMode;
+        const signature = trackingContextPayloadSignature(launchDraft, {
+          isReusable
+        });
         createContextCommand.current = stableIdempotencyCommand(
           createContextCommand.current,
           signature,
@@ -629,7 +630,9 @@ export function SemanticPositionDialog({
           {
             method: "POST",
             idempotencyKey: createContextCommand.current.key,
-            body: trackingContextCreateInput(launchDraft)
+            body: trackingContextCreateInput(launchDraft, {
+              isReusable
+            })
           }
         );
         const authoritative = await browserApiRequest<TrackingContextSummary>(
@@ -641,10 +644,16 @@ export function SemanticPositionDialog({
         ).current;
         createContextCommand.current = undefined;
         selectedContext = createdContext;
-        setSelectedContextId(createdContext.id);
-        setSettings((current) =>
-          current ? withTrackingContext(current, createdContext) : current
-        );
+        if (!selectedContextId || competitorMode) {
+          oneOffContext.current = createdContext;
+        } else {
+          setSelectedContextId(createdContext.id);
+        }
+        if (selectedContextId && !competitorMode) {
+          setSettings((current) =>
+            current ? withTrackingContext(current, createdContext) : current
+          );
+        }
       } else if (!selectedContext) {
         throw new Error(
           competitorMode
@@ -681,9 +690,14 @@ export function SemanticPositionDialog({
         assignedKeywordCount: replacement.assignedKeywordCount,
         version: replacement.version
       };
-      setSettings((current) =>
-        current ? withTrackingContext(current, selectedContext!) : current
-      );
+      if (!selectedContextId || competitorMode) {
+        oneOffContext.current = selectedContext;
+      }
+      if (selectedContextId && !competitorMode) {
+        setSettings((current) =>
+          current ? withTrackingContext(current, selectedContext!) : current
+        );
+      }
       const launchContext = {
         ...selectedContext,
         assignedKeywordCount: replacement.assignedKeywordCount
@@ -972,8 +986,6 @@ export function SemanticPositionDialog({
           <fieldset className="semantic-rank-parameters" disabled={running || batchStarted > 0 || recoveringBatch}>
             <PositionContextSelector
               contexts={settings?.contexts ?? []}
-              draft={contextDraft}
-              onDraftChange={setContextDraft}
               onSelect={selectContext}
               projectId={projectId}
               selectedContextId={selectedContextId}
@@ -1113,16 +1125,12 @@ export function SemanticPositionDialog({
 function PositionContextSelector({
   competitorMode,
   contexts,
-  draft,
-  onDraftChange,
   onSelect,
   projectId,
   selectedContextId
 }: Readonly<{
   competitorMode: boolean;
   contexts: readonly TrackingContextSummary[];
-  draft: TrackingContextDraft;
-  onDraftChange: (draft: TrackingContextDraft) => void;
   onSelect: (contextId: string) => void;
   projectId: string;
   selectedContextId: string;
@@ -1135,47 +1143,50 @@ function PositionContextSelector({
           <Icon name={competitorMode ? "competitors" : "positions"} />
         </span>
         <div>
-          <strong>{competitorMode ? <UiText text="Контекст выдачи" /> : <UiText text="Контекст съёма" />}</strong>
+          <strong>{competitorMode ? <UiText text="Разовый сбор выдачи" /> : <UiText text="Контекст съёма" />}</strong>
           <small>
             {competitorMode
-              ? <UiText text="Хранит папки, поисковик, регион, устройство и глубину выдачи." />
-              : <UiText text="Хранит папки, поисковик, регион, устройство и глубину проверки." />}
+              ? <UiText text="Параметры применятся только к этому запуску и не сохранятся как профиль." />
+              : <UiText text="Без контекста параметры применятся только к текущему запуску." />}
           </small>
         </div>
       </div>
       <label>
-        <span><UiText text="Сохранённый контекст" /></span>
+        <span><UiText text="Профиль запуска" /></span>
         <CustomSelect
+          disabled={competitorMode}
           onChange={(event) => onSelect(event.target.value)}
           value={selectedContextId}
         >
           <option value="">
-            {competitorMode ? <UiText text="Новый контекст конкурентов" /> : <UiText text="Новый контекст" />}
+            <span className="semantic-context-option semantic-context-option-none">
+              <Icon name={competitorMode ? "competitors" : "positions"} />
+              <UiText text="Без контекста" />
+            </span>
           </option>
-          {contexts
+          {!competitorMode && contexts
             .filter(({ status }) => status === "ACTIVE")
             .map((context) => (
               <option key={context.id} value={context.id}>
-                {trackingContextDisplayName(context)} · {context.assignedKeywordCount} <UiText text="запросов" before=" " /></option>
+                <span className="semantic-context-option">
+                  <SearchEngineLogo engine={context.configuration.searchEngine} size="compact" />
+                  <span>
+                    <strong>{trackingContextDisplayName(context)}</strong>
+                    <small>{context.assignedKeywordCount} <UiText text="запросов" before=" " /></small>
+                  </span>
+                </span>
+              </option>
             ))}
         </CustomSelect>
       </label>
-      <label>
-        <span><UiText text="Название" /></span>
-        <input
-          maxLength={160}
-          onChange={(event) =>
-            onDraftChange({ ...draft, name: event.target.value })
-          }
-          placeholder={competitorMode ? uiText("Например, Конкуренты · Москва") : uiText("Например, Москва · десктоп")}
-          value={draft.name}
-        />
-      </label>
       <a
-        className="semantic-dialog-link"
+        aria-label={uiText("Настройки контекстов")}
+        className="semantic-position-context-settings"
         href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}
+        title={uiText("Настройки контекстов")}
       >
-        <UiText text="Управлять контекстами" /></a>
+        <Icon name="settings" />
+      </a>
     </section>
   );
 }
@@ -1530,23 +1541,12 @@ function contextDraftWithRegion(
   };
 }
 
-function matchingTechnicalContext(
-  settings: TrackingContextSettings | undefined,
-  draft: TrackingContextDraft
-): TrackingContextSummary | undefined {
-  return settings?.contexts.find((context) =>
-    context.status === "ACTIVE" &&
-    trackingContextMatchesDraft(context, draft)
-  );
-}
-
 function technicalContextName(
   draft: TrackingContextDraft,
   competitorMode = false,
   locale = "ru"
 ): string {
   const currentLocale = normalizedUiLocale(locale);
-  const engine = translateUi(currentLocale, draft.searchEngine === "YANDEX" ? "Яндекс" : "Google");
   const region = translateUi(
     currentLocale,
     searchRegionDisplayName(
@@ -1556,8 +1556,10 @@ function technicalContextName(
     )
   );
   const device = translateUi(currentLocale, draft.device === "MOBILE" ? "Мобильное" : "Десктоп");
-  const prefix = translateUi(currentLocale, competitorMode ? "Конкуренты" : "Авто");
-  return `${prefix} · ${engine} · ${region} · ${device}`.slice(0, 160);
+  const prefix = competitorMode
+    ? `${translateUi(currentLocale, "Конкуренты")} · `
+    : "";
+  return `${prefix}${region} · ${device}`.slice(0, 160);
 }
 
 function contextDisplayName(
@@ -1568,14 +1570,13 @@ function contextDisplayName(
   locale = "ru"
 ): string {
   const currentLocale = normalizedUiLocale(locale);
-  const engine = translateUi(currentLocale, searchEngine === "YANDEX" ? "Яндекс" : "Google");
   const deviceLabel = translateUi(currentLocale, device === "MOBILE" ? "Мобильное" : "Десктоп");
   const region = translateUi(
     currentLocale,
     searchRegionDisplayName(searchEngine, regionLabel, regionLabel)
   );
   const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
-  return `${prefix}${engine} · ${region} · ${deviceLabel}`;
+  return `${prefix}${region} · ${deviceLabel}`;
 }
 
 async function synchronizeContextAssignments(

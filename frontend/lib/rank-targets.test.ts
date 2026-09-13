@@ -12,6 +12,6 @@ test("rank targets preserve both devices per city and reject invalid targets", (
   assert.equal(targets.length, 2);
   assert.deepEqual(rankTargetGroups(targets), [{ regionCode: "213", regionLabel: "Москва", devices: ["DESKTOP", "MOBILE"] }]);
   assert.match(rankTargetDraft(defaultTrackingContextSettingsDraft(), targets[1]!, true).name, /Конкуренты.+Москва.+Мобильное/u);
-  assert.equal(rankTargetDraft(defaultTrackingContextSettingsDraft(), targets[1]!, false, "en").name, "Yandex · Moscow · Mobile");
+  assert.equal(rankTargetDraft(defaultTrackingContextSettingsDraft(), targets[1]!, false, "en").name, "Moscow · Mobile");
   assert.throws(() => uniqueRankTargets([]));
 });

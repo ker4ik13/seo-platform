@@ -58,8 +58,69 @@ test("keeps imported rank contexts out of runnable settings", async () => {
   assert.deepEqual(observedWhere, {
     workspaceId,
     projectId,
+    isReusable: true,
+    status: "ACTIVE",
     rankManifests: { none: { provider: { in: ["KEY_COLLECTOR", "MANUAL_IMPORT"] } } }
   });
+});
+
+test("marks a manual execution context as non-reusable", async () => {
+  let createdData: Record<string, unknown> | undefined;
+  const createdAt = new Date("2026-09-13T09:00:00Z");
+  const aggregate = (data: Record<string, any>) => ({
+    id: contextId,
+    workspaceId,
+    projectId,
+    name: data.name,
+    launchProfile: data.launchProfile ?? null,
+    isReusable: data.isReusable,
+    status: "ACTIVE",
+    createdBy: actorId,
+    updatedBy: actorId,
+    archivedBy: null,
+    version: 1,
+    createdAt,
+    updatedAt: createdAt,
+    archivedAt: null,
+    configurations: [{
+      ...data.configurations.create,
+      contextId,
+      workspaceId,
+      projectId,
+      createdAt
+    }],
+    _count: { keywordAssignments: 0 }
+  });
+  const transaction = {
+    trackingContextCreateReceipt: {
+      findUnique: async () => undefined,
+      create: async () => undefined
+    },
+    trackingContext: {
+      create: async ({ data }: { data: Record<string, any> }) => {
+        createdData = data;
+        return aggregate(data);
+      }
+    },
+    outboxEvent: { create: async () => undefined }
+  };
+  const service = new TrackingContextService({
+    trackingContextCreateReceipt: { findUnique: async () => undefined },
+    $transaction: async (work: (value: unknown) => unknown) => work(transaction)
+  } as unknown as PrismaService);
+
+  const result = await service.create({
+    workspaceId,
+    projectId,
+    actorId,
+    idempotencyKey: "one-off-context-1",
+    name: "Москва · Десктоп",
+    configuration,
+    isReusable: false
+  });
+
+  assert.equal(createdData?.isReusable, false);
+  assert.equal(result.status, "ACTIVE");
 });
 
 test("replays the immutable create receipt and rejects key reuse", async () => {

@@ -48,6 +48,28 @@ test("normalizes a provider-neutral tracking context command", () => {
   });
 });
 
+test("preserves the non-reusable execution marker", () => {
+  const input = internalCreateTrackingContextInput({
+    workspaceId,
+    projectId,
+    actorId,
+    idempotencyKey: "one-off-context-1",
+    name: "Москва · Десктоп",
+    isReusable: false,
+    configuration: {
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      language: "ru",
+      device: "DESKTOP",
+      depth: 50,
+      domainMatchRule: { mode: "EXACT_HOST" },
+      safeSearch: false
+    }
+  });
+
+  assert.equal(input.isReusable, false);
+});
+
 test("rejects unknown fields and inconsistent domain rules", () => {
   const base = {
     workspaceId,

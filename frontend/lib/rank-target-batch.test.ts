@@ -53,6 +53,7 @@ test("prepares every city/device estimate before sending the first paid run", as
   const batch = createRankTargetBatch(input);
   const events: string[] = [];
   const contexts = new Map<string, TrackingContextSummary>();
+  const createdInputs: CreateTrackingContextInput[] = [];
   const keywordHash = await sha256([...keywordIds].sort().join("\n"));
   let contextSequence = 20;
   let estimateSequence = 30;
@@ -65,6 +66,7 @@ test("prepares every city/device estimate before sending the first paid run", as
     if (path.endsWith("/tracking-contexts") && options.method === "POST") {
       events.push("context");
       const body = options.body as CreateTrackingContextInput;
+      createdInputs.push(body);
       const id = uuid(contextSequence++);
       const now = "2026-09-08T10:00:00.000Z";
       const context: TrackingContextSummary = {
@@ -126,6 +128,7 @@ test("prepares every city/device estimate before sending the first paid run", as
   assert.equal(rankTargetBatchReady(batch), true, JSON.stringify(batch.entries.map(entry => entry.error)));
   assert.equal(events.filter(event => event === "estimate").length, 4);
   assert.equal(events.includes("run"), false);
+  assert.equal(createdInputs.every(({ isReusable }) => isReusable === false), true);
 
   await launchRankTargetBatch(batch, () => undefined, request);
 

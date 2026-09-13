@@ -33,7 +33,29 @@ const UUID_PATTERN =
 export function createTrackingContextInput(
   value: unknown
 ): CreateTrackingContextInput {
-  return contextInput(value);
+  const input = exactRecord(
+    value,
+    ["name", "configuration", "launchProfile", "isReusable"],
+    "$"
+  );
+  if (
+    input.isReusable !== undefined &&
+    typeof input.isReusable !== "boolean"
+  ) {
+    invalid("isReusable", "Must be a boolean");
+  }
+  return {
+    ...contextInput({
+      name: input.name,
+      configuration: input.configuration,
+      ...(input.launchProfile === undefined
+        ? {}
+        : { launchProfile: input.launchProfile })
+    }),
+    ...(input.isReusable === undefined
+      ? {}
+      : { isReusable: input.isReusable })
+  };
 }
 
 export function updateTrackingContextInput(

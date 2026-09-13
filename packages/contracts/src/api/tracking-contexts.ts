@@ -135,6 +135,8 @@ export interface CreateTrackingContextInput {
   readonly name: string;
   readonly configuration: TrackingContextConfigurationInput;
   readonly launchProfile?: TrackingContextLaunchProfile;
+  /** Defaults to true. Manual one-off runs set this to false. */
+  readonly isReusable?: boolean;
 }
 
 export interface InternalCreateTrackingContextInput

@@ -39,6 +39,17 @@ test("normalizes a complete tracking context command", () => {
   assert.deepEqual(updateTrackingContextInput(validInput), result);
 });
 
+test("accepts a non-reusable context only when creating", () => {
+  assert.equal(
+    createTrackingContextInput({ ...validInput, isReusable: false }).isReusable,
+    false
+  );
+  assert.throws(
+    () => updateTrackingContextInput({ ...validInput, isReusable: false }),
+    DomainError
+  );
+});
+
 test("normalizes the explicit untracked launch override and defaults legacy input", () => {
   const explicit = createTrackingContextInput({
     ...validInput,

@@ -16,6 +16,8 @@ export interface RankTargetBatchInput {
   readonly competitorMode: boolean;
   readonly saveProjectPosition: boolean;
   readonly yandexLiveTurbo: boolean;
+  /** Saved profiles may be reused only after the user explicitly selects one. */
+  readonly saveContexts?: boolean;
   readonly locale?: "ru" | "en";
 }
 export interface RankTargetBatchEntry {
@@ -64,9 +66,11 @@ export async function prepareRankTargetBatch(batch: RankTargetBatch, settings: T
         const validation = Object.values(validateTrackingContextDraft(entry.draft))[0];
         if (validation) throw new Error(validation);
         if (!entry.context) {
-          const match = settings.contexts.find(context => context.status === "ACTIVE" && trackingContextMatchesDraft(context, entry.draft));
+          const match = input.saveContexts
+            ? settings.contexts.find(context => context.status === "ACTIVE" && trackingContextMatchesDraft(context, entry.draft))
+            : undefined;
           if (!match && !settings.access.canConfigure) throw new Error("Нет права создавать профили съёма.");
-          const context = match ?? await request<TrackingContextSummary>(`/app/api/projects/${input.projectId}/tracking-contexts`, { method: "POST", idempotencyKey: entry.createKey, body: trackingContextCreateInput(entry.draft) });
+          const context = match ?? await request<TrackingContextSummary>(`/app/api/projects/${input.projectId}/tracking-contexts`, { method: "POST", idempotencyKey: entry.createKey, body: trackingContextCreateInput(entry.draft, { isReusable: input.saveContexts === true }) });
           const authoritative = await request<TrackingContextSummary>(trackingContextApiPath(input.projectId, context.id));
           if (authoritative.workspaceId !== input.workspaceId || authoritative.projectId !== input.projectId || authoritative.id !== context.id || authoritative.status !== "ACTIVE" || !trackingContextMatchesDraft(authoritative, entry.draft)) throw new Error("Профиль изменился параллельно. Обновите параметры съёма.");
           entry.context = authoritative;

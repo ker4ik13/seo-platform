@@ -47,8 +47,15 @@ export function internalCreateTrackingContextInput(
     "idempotencyKey",
     "name",
     "configuration",
-    "launchProfile"
+    "launchProfile",
+    "isReusable"
   ]);
+  if (
+    input.isReusable !== undefined &&
+    typeof input.isReusable !== "boolean"
+  ) {
+    invalid("isReusable");
+  }
   return {
     ...scope(input),
     idempotencyKey: idempotencyKey(input.idempotencyKey),
@@ -56,7 +63,10 @@ export function internalCreateTrackingContextInput(
     configuration: configurationInput(input.configuration),
     ...(input.launchProfile === undefined
       ? {}
-      : { launchProfile: launchProfileInput(input.launchProfile) })
+      : { launchProfile: launchProfileInput(input.launchProfile) }),
+    ...(input.isReusable === undefined
+      ? {}
+      : { isReusable: input.isReusable })
   };
 }
 

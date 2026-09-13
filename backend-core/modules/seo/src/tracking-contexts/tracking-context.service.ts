@@ -50,6 +50,11 @@ const CONTEXT_LIMIT = 200;
 const USER_TRACKING_CONTEXT_FILTER: Prisma.TrackingContextWhereInput = {
   rankManifests: { none: { provider: { in: ["KEY_COLLECTOR", "MANUAL_IMPORT"] } } }
 };
+const SAVED_ACTIVE_TRACKING_CONTEXT_FILTER: Prisma.TrackingContextWhereInput = {
+  ...USER_TRACKING_CONTEXT_FILTER,
+  isReusable: true,
+  status: "ACTIVE"
+};
 // Six scalar columns are inserted per assignment. Keeping a batch at 5,000
 // leaves ample headroom below PostgreSQL's 65,535 bind-parameter limit.
 const ASSIGNMENT_CREATE_BATCH_SIZE = 5_000;
@@ -96,7 +101,7 @@ export class TrackingContextService {
       where: {
         workspaceId,
         projectId,
-        ...USER_TRACKING_CONTEXT_FILTER
+        ...SAVED_ACTIVE_TRACKING_CONTEXT_FILTER
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: CONTEXT_LIMIT + 1,
@@ -151,6 +156,7 @@ export class TrackingContextService {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             name: input.name,
+            isReusable: input.isReusable ?? true,
             ...(input.launchProfile
               ? { launchProfile: json(input.launchProfile) }
               : {}),
@@ -1001,6 +1007,7 @@ function createRequestHash(
           actorId: input.actorId,
           name: input.name,
           configuration: input.configuration,
+          ...(input.isReusable === false ? { isReusable: false } : {}),
           ...(input.launchProfile
             ? { launchProfile: input.launchProfile }
             : {})

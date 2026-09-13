@@ -11,6 +11,7 @@ import {
 } from "@seo-platform/contracts";
 import { browserApiRequest } from "../lib/browser-api";
 import {
+  announceTrackingContextsChanged,
   defaultTrackingContextSettingsDraft,
   trackingContextApiPath,
   trackingContextCreateInput,
@@ -110,9 +111,9 @@ export function TrackingContextSettingsPanel({
           contextGroups.filter(({ systemKind }) => systemKind !== "TRASH")
         );
         setRankMergeSettings(mergeSettings);
-        const first =
-          contextSettings.contexts.find(({ status }) => status === "ACTIVE") ??
-          contextSettings.contexts[0];
+        const first = contextSettings.contexts.find(
+          ({ status }) => status === "ACTIVE"
+        );
         if (first) {
           setSelectedId(first.id);
           setDraft(trackingContextDraft(first));
@@ -184,6 +185,7 @@ export function TrackingContextSettingsPanel({
       setSelectedId(context.id);
       setDraft(trackingContextDraft(context));
       setNotice(selected ? "Контекст обновлён." : "Контекст создан.");
+      announceTrackingContextsChanged();
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -195,25 +197,22 @@ export function TrackingContextSettingsPanel({
     }
   }
 
-  async function changeStatus(): Promise<void> {
+  async function deleteContext(): Promise<void> {
     if (!selected || saving || !settings?.access.canConfigure) return;
-    const action = selected.status === "ACTIVE" ? "archive" : "restore";
     setSaving(true);
     setError(undefined);
     try {
       const context = await browserApiRequest<TrackingContextSummary>(
-        `${trackingContextApiPath(projectId, selected.id)}/${action}`,
+        `${trackingContextApiPath(projectId, selected.id)}/archive`,
         { method: "POST", ifMatch: selected.version }
       );
-      setSettings((current) =>
-        current ? withTrackingContext(current, context) : current
-      );
-      setDraft(trackingContextDraft(context));
-      setNotice(
-        context.status === "ACTIVE"
-          ? "Контекст восстановлен."
-          : "Контекст удалён из новых запусков. История и результаты сохранены."
-      );
+      const remaining = settings.contexts.filter(({ id }) => id !== context.id);
+      const next = remaining[0];
+      setSettings({ ...settings, contexts: remaining });
+      setSelectedId(next?.id ?? "");
+      setDraft(next ? trackingContextDraft(next) : defaultTrackingContextSettingsDraft());
+      setNotice("Контекст удалён из профилей запуска. История и результаты сохранены.");
+      announceTrackingContextsChanged();
       setDeleteConfirmationOpen(false);
     } catch (requestError) {
       setError(
@@ -311,7 +310,9 @@ export function TrackingContextSettingsPanel({
           </button>
         </header>
         <div className="tracking-context-catalog-list">
-          {settings?.contexts.map((context) => (
+          {settings?.contexts
+            .filter(({ status }) => status === "ACTIVE")
+            .map((context) => (
             <button
               className={context.id === selectedId ? "selected" : undefined}
               key={context.id}
@@ -322,12 +323,12 @@ export function TrackingContextSettingsPanel({
               <span>
                 <strong>{trackingContextDisplayName(context)}</strong>
                 <small>
-                  {context.assignedKeywordCount} <UiText text="запросов ·" before=" " after=" " />{context.status === "ACTIVE" ? <UiText text="активен" /> : <UiText text="удалён из запусков" />}
+                  {context.assignedKeywordCount} <UiText text="запросов · активен" before=" " />
                 </small>
               </span>
             </button>
           ))}
-          {settings?.contexts.length === 0 && (
+          {settings?.contexts.filter(({ status }) => status === "ACTIVE").length === 0 && (
             <p><UiText text="Контекстов пока нет. Создайте первый профиль запуска." /></p>
           )}
         </div>
@@ -339,11 +340,7 @@ export function TrackingContextSettingsPanel({
             <span>{selected ? <UiText text="Редактирование" /> : <UiText text="Новый профиль" />}</span>
             <h2>{selected?.name ?? <UiText text="Новый контекст позиций" />}</h2>
           </div>
-          {selected && (
-            <span className={`status-badge ${selected.status === "ACTIVE" ? "success" : "neutral"}`}>
-              {selected.status === "ACTIVE" ? <UiText text="Активен" /> : <UiText text="Удалён" />}
-            </span>
-          )}
+          {selected && <span className="status-badge success"><UiText text="Активен" /></span>}
         </header>
 
         <div className="tracking-context-form-grid">
@@ -459,24 +456,20 @@ export function TrackingContextSettingsPanel({
         <footer>
           {selected && (
             <button
-              className={selected.status === "ACTIVE" ? "secondary-button danger-button" : "secondary-button"}
+              className="secondary-button danger-button"
               disabled={saving || !settings?.access.canConfigure}
               onClick={() => {
-                if (selected.status === "ACTIVE") {
-                  setError(undefined);
-                  setDeleteConfirmationOpen(true);
-                } else {
-                  void changeStatus();
-                }
+                setError(undefined);
+                setDeleteConfirmationOpen(true);
               }}
               type="button"
             >
-              {selected.status === "ACTIVE" ? <UiText text="Удалить контекст" /> : <UiText text="Восстановить" />}
+              <UiText text="Удалить контекст" />
             </button>
           )}
           <button
             className="primary-button"
-            disabled={saving || !settings?.access.canConfigure || selected?.status === "ARCHIVED"}
+            disabled={saving || !settings?.access.canConfigure}
             onClick={() => void save()}
             type="button"
           >
@@ -579,7 +572,7 @@ export function TrackingContextSettingsPanel({
         </div>
       )}
     </section>
-    {deleteConfirmationOpen && selected?.status === "ACTIVE" && (
+    {deleteConfirmationOpen && selected && (
       <SemanticModal
         className="tracking-context-delete-modal"
         description={uiText("Контекст «{0}» больше нельзя будет выбрать для нового съёма.", [String(selected.name)])}
@@ -595,7 +588,7 @@ export function TrackingContextSettingsPanel({
             <button
               className="danger-button"
               disabled={saving}
-              onClick={() => void changeStatus()}
+              onClick={() => void deleteContext()}
               type="button"
             >
               {saving ? <UiText text="Удаляем…" /> : <UiText text="Удалить контекст" />}
@@ -618,7 +611,7 @@ export function TrackingContextSettingsPanel({
       >
         <div className="tracking-context-delete-copy">
           <div className="inline-alert info">
-            <UiText text="Результаты, история позиций и выполненные операции не удаляются. Контекст останется доступен в истории и его можно будет восстановить." /></div>
+            <UiText text="Результаты, история позиций и выполненные операции не удаляются. Профиль исчезнет из настроек и новых запусков." /></div>
           {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
         </div>
       </SemanticModal>

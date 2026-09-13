@@ -23,7 +23,6 @@ export function uniqueRankTargets(values: readonly RankTarget[]): readonly RankT
 
 export function rankTargetDraft(base: TrackingContextDraft, target: RankTarget, competitorMode: boolean, locale = "ru"): TrackingContextDraft {
   const currentLocale = normalizedUiLocale(locale);
-  const engine = translateUi(currentLocale, base.searchEngine === "YANDEX" ? "Яндекс" : "Google");
   const device = translateUi(currentLocale, target.device === "DESKTOP" ? "Десктоп" : "Мобильное");
   const region = translateUi(
     currentLocale,
@@ -34,7 +33,7 @@ export function rankTargetDraft(base: TrackingContextDraft, target: RankTarget, 
     )
   );
   const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
-  return { ...base, ...target, name: `${prefix}${engine} · ${region} · ${device}`.slice(0, 160) };
+  return { ...base, ...target, name: `${prefix}${region} · ${device}`.slice(0, 160) };
 }
 
 export function rankTargetGroups(targets: readonly RankTarget[]) {

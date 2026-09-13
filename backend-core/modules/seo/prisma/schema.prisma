@@ -873,6 +873,7 @@ model TrackingContext {
   projectId     String                @map("project_id") @db.Uuid
   name          String                @db.VarChar(160)
   launchProfile Json?                 @map("launch_profile")
+  isReusable    Boolean               @default(true) @map("is_reusable")
   status        TrackingContextStatus @default(ACTIVE)
   createdBy     String                @map("created_by") @db.Uuid
   updatedBy     String                @map("updated_by") @db.Uuid
@@ -890,6 +891,7 @@ model TrackingContext {
 
   @@unique([workspaceId, projectId, id], map: "tracking_contexts_tenant_project_id_key")
   @@index([workspaceId, projectId, status, createdAt, id], map: "tracking_contexts_tenant_project_status_created_idx")
+  @@index([workspaceId, projectId, isReusable, status, createdAt, id], map: "tracking_contexts_reusable_status_created_idx")
   @@map("tracking_contexts")
 }
 

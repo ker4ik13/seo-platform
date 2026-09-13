@@ -38,7 +38,7 @@
   box-shadow: none;
   display: block;
   margin: 0;
-  max-height: calc(100dvh - 100px);
+  max-height: calc(100dvh - 188px);
   overflow: auto;
   overscroll-behavior: contain;
   padding: 0 8px 8px 0;

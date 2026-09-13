@@ -696,7 +696,8 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
         <EndpointHeader method="POST" path="/projects/{projectId}/tracking-contexts" scope="positions:run" />
         <CodeBlock
           code={`{
-  "name": "Яндекс · Москва · Десктоп",
+  "name": "Москва · Десктоп",
+  "isReusable": true,
   "configuration": {
     "searchEngine": "YANDEX",
     "countryCode": "RU",
@@ -718,7 +719,7 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
           title={uiText("JSON · Тело запроса")}
         />
         <p>
-          <UiText text="Для создания обязателен уникальный" after=" " /><code>Idempotency-Key</code><UiText text=". Для изменения передавайте ETag контекста через If-Match." /></p>
+          <UiText text="Для создания обязателен уникальный" after=" " /><code>Idempotency-Key</code><UiText text=". Для одноразового ручного запуска передайте isReusable=false: контекст сохранит неизменяемую историю, но не появится в каталоге профилей и расписаниях. GET-список возвращает только активные сохранённые профили. Для изменения передавайте ETag контекста через If-Match." /></p>
       </Section>
       <Section title={uiText("2. Получить оценку")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/rank-estimates" scope="positions:run" />

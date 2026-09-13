@@ -6,6 +6,7 @@ import type {
 } from "@seo-platform/contracts";
 import { stableIdempotencyCommand } from "./idempotency.ts";
 import {
+  defaultTrackingContextSettingsDraft,
   effectiveTrackingContextRestriction,
   emptyTrackingContextDraft,
   reconcileTrackingContextCreate,
@@ -117,6 +118,18 @@ test("normalizes a tracking context draft into the public mutation shape", () =>
       }
     }
   });
+});
+
+test("marks only an explicit one-off tracking context as non-reusable", () => {
+  const draft = {
+    ...defaultTrackingContextSettingsDraft(),
+    scopeMode: "ALL" as const
+  };
+  assert.equal(trackingContextCreateInput(draft).isReusable, undefined);
+  assert.equal(
+    trackingContextCreateInput(draft, { isReusable: false }).isReusable,
+    false
+  );
 });
 
 test("matches server text and BCP-47 normalization", () => {

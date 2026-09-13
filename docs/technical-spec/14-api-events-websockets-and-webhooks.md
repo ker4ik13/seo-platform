@@ -554,6 +554,12 @@ versions; preset mutations требуют `semantic.update` и `If-Match`.
 - `GET .../{contextId}/keywords`;
 - `PUT|DELETE .../{contextId}/keywords/{keywordId}`.
 
+`POST` принимает необязательный `isReusable` (по умолчанию `true`). Значение
+`false` предназначено для одноразового ручного исполнения: такой контекст
+возвращается в ответе создания и доступен по точному ID для estimate/history,
+но не входит в `GET`-каталог активных сохранённых профилей. Каталог также не
+возвращает архивные профили.
+
 Проектная сводка позиций доступна по двум read-only маршрутам:
 
 - `GET /api/v1/projects/{projectId}/keywords/position-summary` возвращает

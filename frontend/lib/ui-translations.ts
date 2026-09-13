@@ -5062,5 +5062,14 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Статистика": "Statistics",
   "Операция исчезнет из пользовательского журнала.": "The operation will disappear from the activity log.",
   "Удалить операцию?": "Delete operation?",
-  "Сохранённые результаты, расчёты и аудит останутся доступными системе.": "Saved results, billing records, and audit history remain available to the system."
+  "Сохранённые результаты, расчёты и аудит останутся доступными системе.": "Saved results, billing records, and audit history remain available to the system.",
+  "Разовый сбор выдачи": "One-time search results collection",
+  "Параметры применятся только к этому запуску и не сохранятся как профиль.": "These settings apply only to this run and will not be saved as a profile.",
+  "Без контекста параметры применятся только к текущему запуску.": "Without a context, these settings apply only to the current run.",
+  "Профиль запуска": "Run profile",
+  "Без контекста": "No context",
+  "Настройки контекстов": "Context settings",
+  "запросов · активен": "keywords · active",
+  "Результаты, история позиций и выполненные операции не удаляются. Профиль исчезнет из настроек и новых запусков.": "Results, rank history, and completed operations are kept. The profile will disappear from settings and new runs.",
+  ". Для одноразового ручного запуска передайте isReusable=false: контекст сохранит неизменяемую историю, но не появится в каталоге профилей и расписаниях. GET-список возвращает только активные сохранённые профили. Для изменения передавайте ETag контекста через If-Match.": ". For a one-time manual run, pass isReusable=false: the context keeps immutable history but does not appear in the profile catalog or schedules. The GET collection returns active saved profiles only. For updates, pass the context ETag through If-Match."
 };

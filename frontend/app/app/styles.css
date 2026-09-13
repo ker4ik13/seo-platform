@@ -8294,7 +8294,7 @@ svg { display: block; }
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(210px, 1fr) minmax(210px, 1fr) auto;
+  grid-template-columns: minmax(240px, 1fr) minmax(260px, 1.4fr) auto;
   padding: 8px 20px;
 }
 .semantic-position-context-bar > div { align-items: center; display: flex; gap: 10px; min-width: 0; }
@@ -8308,7 +8308,15 @@ svg { display: block; }
 .semantic-position-context-bar label > span { color: var(--muted); font-size: 8px; font-weight: 700; }
 .semantic-position-context-bar input { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; font: inherit; height: 36px; min-height: 36px; min-width: 0; padding: 0 10px; width: 100%; }
 .semantic-position-context-bar .custom-select-trigger { height: 36px; min-height: 36px; }
-.semantic-position-context-bar .semantic-dialog-link { align-items: center; display: inline-flex; min-height: 36px; white-space: nowrap; }
+.semantic-context-option { align-items: center; display: inline-flex; gap: 8px; min-width: 0; width: 100%; }
+.semantic-context-option > span:last-child { display: grid; gap: 1px; min-width: 0; }
+.semantic-context-option strong,
+.semantic-context-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.semantic-context-option small { color: var(--muted); font-size: 8px; font-weight: 500; }
+.semantic-context-option > svg { color: var(--muted); flex: 0 0 auto; height: 15px; width: 15px; }
+.semantic-position-context-settings { align-items: center; align-self: end; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--brand); display: inline-flex; height: 36px; justify-content: center; width: 36px; }
+.semantic-position-context-settings:hover { background: #f2f0ff; border-color: #c9c3ff; }
+.semantic-position-context-settings svg { height: 16px; width: 16px; }
 
 .semantic-operation-folder-row {
   --semantic-folder-guide-color: rgba(104, 112, 132, .15);
@@ -8372,7 +8380,7 @@ svg { display: block; }
 .tracking-context-settings-loading { color: var(--muted); font-size: 14px; padding: 28px; }
 .tracking-context-catalog,
 .tracking-context-editor { min-width: 0; padding: 24px; }
-.tracking-context-catalog { align-self: start; display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: min(760px, calc(100dvh - 154px)); }
+.tracking-context-catalog { align-self: start; display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: calc(100dvh - 76px); position: sticky; top: 0; }
 .tracking-context-catalog > header,
 .tracking-context-editor > header,
 .tracking-context-scope-editor > header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }

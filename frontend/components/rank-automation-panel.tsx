@@ -14,7 +14,10 @@ import {
   microToRubles,
   positiveMoneyMicro
 } from "../lib/rank-automation-money";
-import { trackingContextDisplayName } from "../lib/tracking-contexts";
+import {
+  trackingContextDisplayName,
+  trackingContextsChangedEvent
+} from "../lib/tracking-contexts";
 import { CustomSelect } from "./custom-select";
 import styles from "./rank-automation-panel.module.css";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -70,13 +73,20 @@ export function RankAutomationPanel({
       if (signal?.aborted) return;
       setSettings(automationSettings);
       setContexts(contextSettings);
-      setDraft((current) => ({
-        ...current,
-        trackingContextId:
-          current.trackingContextId ||
-          contextSettings.contexts.find(({ status }) => status === "ACTIVE")?.id ||
-          ""
-      }));
+      setDraft((current) => {
+        const currentContextAvailable = contextSettings.contexts.some(
+          ({ id, status }) =>
+            id === current.trackingContextId && status === "ACTIVE"
+        );
+        return {
+          ...current,
+          trackingContextId: currentContextAvailable
+            ? current.trackingContextId
+            : contextSettings.contexts.find(
+                ({ status }) => status === "ACTIVE"
+              )?.id ?? ""
+        };
+      });
       setError(undefined);
     } catch (caught) {
       if (!signal?.aborted) {
@@ -91,6 +101,12 @@ export function RankAutomationPanel({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
+  }, [load]);
+
+  useEffect(() => {
+    const refresh = () => void load();
+    window.addEventListener(trackingContextsChangedEvent, refresh);
+    return () => window.removeEventListener(trackingContextsChangedEvent, refresh);
   }, [load]);
 
   useEffect(() => {

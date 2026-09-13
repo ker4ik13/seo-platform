@@ -12,6 +12,14 @@ import type {
 } from "@seo-platform/contracts";
 import { searchContextDisplayName } from "./seo-regions.ts";
 
+export const trackingContextsChangedEvent = "tracking-contexts:changed";
+
+export function announceTrackingContextsChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(trackingContextsChangedEvent));
+  }
+}
+
 export interface TrackingContextDraft {
   readonly name: string;
   readonly searchEngine: TrackingSearchEngine;
@@ -76,7 +84,7 @@ export function emptyTrackingContextDraft(): TrackingContextDraft {
 export function defaultTrackingContextSettingsDraft(): TrackingContextDraft {
   return {
     ...emptyTrackingContextDraft(),
-    name: "Яндекс · Москва · Десктоп",
+    name: "Москва · Десктоп",
     searchEngine: "YANDEX",
     countryCode: "RU",
     regionCode: "213",
@@ -127,15 +135,22 @@ export function trackingContextDisplayName(
 }
 
 export function trackingContextCreateInput(
-  draft: TrackingContextDraft
+  draft: TrackingContextDraft,
+  options: Readonly<{ isReusable?: boolean }> = {}
 ): CreateTrackingContextInput {
-  return trackingContextMutationInput(draft);
+  return {
+    ...trackingContextMutationInput(draft),
+    ...(options.isReusable === undefined
+      ? {}
+      : { isReusable: options.isReusable })
+  };
 }
 
 export function trackingContextPayloadSignature(
-  draft: TrackingContextDraft
+  draft: TrackingContextDraft,
+  options: Readonly<{ isReusable?: boolean }> = {}
 ): string {
-  return JSON.stringify(trackingContextCreateInput(draft));
+  return JSON.stringify(trackingContextCreateInput(draft, options));
 }
 
 export function trackingContextDraftDirty(
