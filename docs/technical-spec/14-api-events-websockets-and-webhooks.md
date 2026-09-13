@@ -596,6 +596,8 @@ tenant scope, заново строит `ALL/GROUPS` с потомками и т
 атомарно заменяет назначения с optimistic version retry и возвращает
 `TrackingContextKeywordReplacementResult` с новым count/hash/version. Этот же
 internal command вызывается Core перед estimate каждого rank automation run.
+Удалённые папки сохранённого `GROUPS` scope не превращают materialize в `409`:
+они исключаются, а полностью удалённый scope материализуется в пустой набор.
 
 Tenant/actor отсутствуют в public body. Platform API передаёт их в internal
 headers/body, SEO Data повторно сверяет route project, trusted context и

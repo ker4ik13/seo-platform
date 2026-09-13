@@ -561,6 +561,7 @@ test("materializes current tracked keywords from selected folders and descendant
   const parentGroupId = "01900000-0000-7000-8000-000000000101";
   const childGroupId = "01900000-0000-7000-8000-000000000102";
   const unrelatedGroupId = "01900000-0000-7000-8000-000000000103";
+  const removedGroupId = "01900000-0000-7000-8000-000000000104";
   const firstKeywordId = keywordIdAt(201);
   const secondKeywordId = keywordIdAt(202);
   let keywordWhere: unknown;
@@ -572,7 +573,10 @@ test("materializes current tracked keywords from selected folders and descendant
         launchProfile: {
           searchSource: "LIVE",
           includeUntracked: false,
-          scope: { mode: "GROUPS", groupIds: [parentGroupId] }
+          scope: {
+            mode: "GROUPS",
+            groupIds: [parentGroupId, removedGroupId]
+          }
         }
       })
     },
@@ -644,6 +648,63 @@ test("materializes current tracked keywords from selected folders and descendant
     }).memberships?.some?.groupId?.in?.sort(),
     [childGroupId, parentGroupId].sort()
   );
+});
+
+test("materializes an empty scope when every selected folder was removed", async () => {
+  const removedGroupId = "01900000-0000-7000-8000-000000000105";
+  let replacement: InternalReplaceTrackingContextKeywordsInput | undefined;
+  const service = new TrackingContextService({
+    $transaction: async (work: (value: unknown) => unknown) => work({
+      trackingContext: {
+        findFirst: async () => ({
+          ...aggregate(),
+          launchProfile: {
+            searchSource: "LIVE",
+            includeUntracked: false,
+            scope: { mode: "GROUPS", groupIds: [removedGroupId] }
+          }
+        })
+      },
+      keywordGroup: { findMany: async () => [] }
+    })
+  } as unknown as PrismaService);
+  (
+    service as unknown as {
+      replaceKeywords: (
+        input: InternalReplaceTrackingContextKeywordsInput
+      ) => Promise<TrackingContextKeywordReplacementResult>;
+    }
+  ).replaceKeywords = async (input) => {
+    replacement = input;
+    return {
+      contextId,
+      assignedKeywordCount: 0,
+      addedKeywordCount: 0,
+      removedKeywordCount: 1,
+      unchangedKeywordCount: 0,
+      keywordSetHash: { algorithm: "SHA_256", value: "a".repeat(64) },
+      version: 2,
+      changedAt: "2026-09-13T20:00:00.000Z"
+    };
+  };
+
+  const result = await service.materialize({
+    workspaceId,
+    projectId,
+    contextId,
+    actorId,
+    entitlement: {
+      planCode: "PRO",
+      planVersion: 2,
+      storedKeywords: 0,
+      keywordsPerProject: 0,
+      foldersPerProject: 0,
+      trackedContextPairs: 0
+    }
+  });
+
+  assert.equal(result.assignedKeywordCount, 0);
+  assert.deepEqual(replacement?.keywordIds, []);
 });
 
 test("archive and restore use entity CAS without changing configuration", async () => {

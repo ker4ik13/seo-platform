@@ -65,6 +65,13 @@ presentation-списка: Web debounce-ит быстрое переключен
 с `keywords.is_tracked=false` не входят в effective set. Архивные запросы и
 папки не попадают в новый состав. Пересчёт ограничен тем же пределом 300 000
 назначений и выполняется только в проверенном workspace/project scope.
+Сохранённый `GROUPS` scope может пережить удаление папки: materializer
+игнорирует отсутствующие корни и возвращает пустой effective set, когда
+активных корней не осталось. Web удаляет недоступные UUID из редактируемого
+draft. Если фоновый materialize успел изменить только version/assignment,
+сохранение перечитывает authoritative context и ограниченно повторяет `PATCH`;
+изменённые другим пользователем name/configuration/launch profile автоматически
+не перезаписываются.
 
 По ADR-2026-033 provider/credential принадлежат project connector binding, а
 schedule/timezone — automation. Экран может показывать их effective projection

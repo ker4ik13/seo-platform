@@ -757,14 +757,9 @@ export class TrackingContextService {
           select: { id: true, parentId: true }
         });
         const available = new Set(groups.map(({ id }) => id));
-        if (profile.scope.groupIds.some((groupId) => !available.has(groupId))) {
-          internalError(
-            HttpStatus.CONFLICT,
-            "RESOURCE_STATE_CONFLICT",
-            "One or more tracking context groups are no longer active"
-          );
-        }
-        const included = new Set(profile.scope.groupIds);
+        const included = new Set(
+          profile.scope.groupIds.filter((groupId) => available.has(groupId))
+        );
         const children = new Map<string, string[]>();
         for (const group of groups) {
           if (!group.parentId) continue;
@@ -781,6 +776,9 @@ export class TrackingContextService {
           }
         }
         groupIds = [...included];
+        if (groupIds.length === 0) {
+          return { version: context.version, keywordIds: [] };
+        }
       }
 
       const keywords = await transaction.keyword.findMany({

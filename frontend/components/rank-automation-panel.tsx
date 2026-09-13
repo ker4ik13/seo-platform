@@ -522,12 +522,19 @@ export function RankAutomationPanel({
                   <strong>{automation.name}</strong>
                   <span>{<UiText text={scheduleLabel(automation, uiLocale) ?? ""} />}</span>
                 </div>
-                <span className={automation.enabled ? styles.active : styles.inactive}>
-                  {automation.enabled
-                    ? <UiText text="Активно" />
-                    : automation.pausedReason === "ONE_TIME_COMPLETED"
-                      ? <UiText text="Выполнено" />
-                      : <UiText text="На паузе" />}
+                <span
+                  aria-label={uiText(automationStatusLabel(automation))}
+                  className={`${styles.statusIcon} ${
+                    automation.enabled
+                      ? styles.active
+                      : automation.pausedReason === "ONE_TIME_COMPLETED"
+                        ? styles.completed
+                        : styles.inactive
+                  }`}
+                  role="img"
+                  title={uiText(automationStatusLabel(automation))}
+                >
+                  <Icon name={automationStatusIcon(automation)} />
                 </span>
               </div>
               {(() => {
@@ -556,36 +563,49 @@ export function RankAutomationPanel({
                   : <UiText text="· до {0} ₽ внутренних токенов" values={[String(microToRubles(automation.maxPlatformChargeMicro))]} before=" " />}
               </p>
               <div className={styles.itemActions}>
-                <button className="text-button" disabled={busy} onClick={() => edit(automation)} type="button">
-                  {automation.pausedReason === "ONE_TIME_COMPLETED" ? <UiText text="Запланировать снова" /> : <UiText text="Изменить" />}
-                </button>
                 <button
-                  className="text-button"
-                  disabled={busy || !settings.access.canEnable}
-                  onClick={() => void action(automation, "runs")}
+                  aria-label={uiText(automation.pausedReason === "ONE_TIME_COMPLETED" ? "Запланировать снова" : "Изменить")}
+                  className={styles.iconAction}
+                  disabled={busy}
+                  onClick={() => edit(automation)}
+                  title={uiText(automation.pausedReason === "ONE_TIME_COMPLETED" ? "Запланировать снова" : "Изменить")}
                   type="button"
                 >
-                  <UiText text="Запустить сейчас" /></button>
+                  <Icon name="edit" />
+                </button>
+                <button
+                  aria-label={uiText("Запустить сейчас")}
+                  className={`${styles.iconAction} ${styles.runAction}`}
+                  disabled={busy || !settings.access.canEnable}
+                  onClick={() => void action(automation, "runs")}
+                  title={uiText("Запустить сейчас")}
+                  type="button"
+                >
+                  <Icon name="play" />
+                </button>
                 {automation.pausedReason !== "ONE_TIME_COMPLETED" && (
                   <button
-                    className="text-button"
+                    aria-label={uiText(automation.enabled ? "Пауза" : "Возобновить")}
+                    className={styles.iconAction}
                     disabled={busy || !settings.access.canEnable}
                     onClick={() =>
                       void action(automation, automation.enabled ? "pause" : "resume")
                     }
+                    title={uiText(automation.enabled ? "Пауза" : "Возобновить")}
                     type="button"
                   >
-                    {automation.enabled ? <UiText text="Пауза" /> : <UiText text="Возобновить" />}
+                    <Icon name={automation.enabled ? "pause" : "refresh"} />
                   </button>
                 )}
                 <button
-                  className={`${styles.deleteAction} text-button`}
+                  aria-label={uiText("Удалить")}
+                  className={`${styles.iconAction} ${styles.deleteAction}`}
                   disabled={busy || !settings.access.canManage}
                   onClick={() => setAutomationToDelete(automation)}
+                  title={uiText("Удалить")}
                   type="button"
                 >
                   <Icon name="trash" />
-                  <UiText text="Удалить" />
                 </button>
               </div>
             </article>
@@ -632,6 +652,24 @@ export function RankAutomationPanel({
     )}
     </>
   );
+}
+
+function automationStatusLabel(
+  automation: RankTrackingAutomationSummary
+): "Активно" | "Выполнено" | "На паузе" {
+  if (automation.enabled) return "Активно";
+  return automation.pausedReason === "ONE_TIME_COMPLETED"
+    ? "Выполнено"
+    : "На паузе";
+}
+
+function automationStatusIcon(
+  automation: RankTrackingAutomationSummary
+): "checkDouble" | "calendar" | "pause" {
+  if (automation.enabled) return "checkDouble";
+  return automation.pausedReason === "ONE_TIME_COMPLETED"
+    ? "calendar"
+    : "pause";
 }
 
 const dayNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;

@@ -10,7 +10,7 @@ import {
   type TrackingContextSettings,
   type TrackingContextSummary
 } from "@seo-platform/contracts";
-import { browserApiRequest } from "../lib/browser-api";
+import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { defaultSemanticSearchRegions } from "../lib/semantic-region-preference";
 import {
   rankTargetDraft,
@@ -24,6 +24,7 @@ import {
   trackingContextCreateInput,
   trackingContextDisplayName,
   trackingContextDraft,
+  trackingContextMatchesDraft,
   validateTrackingContextDraft,
   withTrackingContext,
   type TrackingContextDraft
@@ -122,18 +123,23 @@ export function TrackingContextSettingsPanel({
       .then(([contextSettings, contextGroups, mergeSettings]) => {
         if (controller.signal.aborted) return;
         loadedProject.current = projectId;
-        setSettings(contextSettings);
-        setGroups(
-          contextGroups.filter(({ systemKind }) => systemKind !== "TRASH")
+        const availableGroups = contextGroups.filter(
+          ({ systemKind }) => systemKind !== "TRASH"
         );
+        setSettings(contextSettings);
+        setGroups(availableGroups);
         setRankMergeSettings(mergeSettings);
         const first = contextSettings.contexts.find(
           ({ status }) => status === "ACTIVE"
         );
         if (first) {
+          const firstDraft = editableTrackingContextDraft(
+            first,
+            availableGroups
+          );
           setSelectedId(first.id);
-          setDraft(trackingContextDraft(first));
-          setTargets([trackingContextTarget(trackingContextDraft(first))]);
+          setDraft(firstDraft);
+          setTargets([trackingContextTarget(firstDraft)]);
         }
       })
       .catch((requestError: unknown) => {
@@ -194,7 +200,7 @@ export function TrackingContextSettingsPanel({
   }, [loading, projectId, settings?.access.canConfigure, settings?.contexts]);
 
   function choose(context: TrackingContextSummary): void {
-    const nextDraft = trackingContextDraft(context);
+    const nextDraft = editableTrackingContextDraft(context, groups);
     setSelectedId(context.id);
     setDraft(nextDraft);
     setTargets([trackingContextTarget(nextDraft)]);
@@ -269,13 +275,10 @@ export function TrackingContextSettingsPanel({
       const saved: TrackingContextSummary[] = [];
       for (const [index, targetDraft] of targetDrafts.entries()) {
         const savedContext = selected && index === 0
-          ? await browserApiRequest<TrackingContextSummary>(
-              trackingContextApiPath(projectId, selected.id),
-              {
-                method: "PATCH",
-                ifMatch: selected.version,
-                body: trackingContextCreateInput(targetDraft)
-              }
+          ? await updateTrackingContext(
+              projectId,
+              selected,
+              targetDraft
             )
           : await browserApiRequest<TrackingContextSummary>(
               `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts`,
@@ -300,7 +303,7 @@ export function TrackingContextSettingsPanel({
         );
       }
       const primary = saved[0]!;
-      const primaryDraft = trackingContextDraft(primary);
+      const primaryDraft = editableTrackingContextDraft(primary, groups);
       setSelectedId(primary.id);
       setDraft(primaryDraft);
       setTargets([trackingContextTarget(primaryDraft)]);
@@ -328,16 +331,13 @@ export function TrackingContextSettingsPanel({
     setSaving(true);
     setError(undefined);
     try {
-      const context = await browserApiRequest<TrackingContextSummary>(
-        `${trackingContextApiPath(projectId, selected.id)}/archive`,
-        { method: "POST", ifMatch: selected.version }
-      );
+      const context = await archiveTrackingContext(projectId, selected);
       const remaining = settings.contexts.filter(({ id }) => id !== context.id);
       const next = remaining[0];
       setSettings({ ...settings, contexts: remaining });
       setSelectedId(next?.id ?? "");
       const nextDraft = next
-        ? trackingContextDraft(next)
+        ? editableTrackingContextDraft(next, groups)
         : defaultTrackingContextSettingsDraft();
       setDraft(nextDraft);
       setTargets([trackingContextTarget(nextDraft)]);
@@ -882,6 +882,90 @@ function trackingContextTarget(draft: TrackingContextDraft): RankTarget {
     regionLabel: draft.regionLabel,
     device: draft.device
   };
+}
+
+function editableTrackingContextDraft(
+  context: TrackingContextSummary,
+  groups: readonly ContextGroup[]
+): TrackingContextDraft {
+  const draft = trackingContextDraft(context);
+  if (draft.scopeMode !== "GROUPS") return draft;
+  const available = new Set(groups.map(({ id }) => id));
+  return {
+    ...draft,
+    groupIds: draft.groupIds.filter((groupId) => available.has(groupId))
+  };
+}
+
+async function updateTrackingContext(
+  projectId: string,
+  base: TrackingContextSummary,
+  draft: TrackingContextDraft
+): Promise<TrackingContextSummary> {
+  const baseDraft = trackingContextDraft(base);
+  const currentRevision = async (): Promise<TrackingContextSummary> => {
+    const current = await browserApiRequest<TrackingContextSummary>(
+      trackingContextApiPath(projectId, base.id)
+    );
+    if (
+      current.status !== "ACTIVE" ||
+      !trackingContextMatchesDraft(current, baseDraft)
+    ) {
+      throw new Error(
+        "Контекст изменён в другой вкладке. Обновите страницу и проверьте новые настройки."
+      );
+    }
+    return current;
+  };
+  let revision = await currentRevision();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await browserApiRequest<TrackingContextSummary>(
+        trackingContextApiPath(projectId, base.id),
+        {
+          method: "PATCH",
+          ifMatch: revision.version,
+          body: trackingContextCreateInput(draft)
+        }
+      );
+    } catch (error) {
+      if (!(error instanceof BrowserApiError) || error.status !== 412) {
+        throw error;
+      }
+      revision = await currentRevision();
+    }
+  }
+  throw new Error(
+    "Контекст обновляется параллельно. Повторите сохранение через несколько секунд."
+  );
+}
+
+async function archiveTrackingContext(
+  projectId: string,
+  base: TrackingContextSummary
+): Promise<TrackingContextSummary> {
+  let revision = await browserApiRequest<TrackingContextSummary>(
+    trackingContextApiPath(projectId, base.id)
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (revision.status === "ARCHIVED") return revision;
+    try {
+      return await browserApiRequest<TrackingContextSummary>(
+        `${trackingContextApiPath(projectId, base.id)}/archive`,
+        { method: "POST", ifMatch: revision.version }
+      );
+    } catch (error) {
+      if (!(error instanceof BrowserApiError) || error.status !== 412) {
+        throw error;
+      }
+      revision = await browserApiRequest<TrackingContextSummary>(
+        trackingContextApiPath(projectId, base.id)
+      );
+    }
+  }
+  throw new Error(
+    "Контекст обновляется параллельно. Повторите удаление через несколько секунд."
+  );
 }
 
 async function materializeTrackingContext(

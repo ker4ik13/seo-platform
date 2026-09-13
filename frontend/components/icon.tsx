@@ -52,7 +52,10 @@ export type IconName =
   | "palette"
   | "calendar"
   | "desktop"
-  | "mobile";
+  | "mobile"
+  | "play"
+  | "pause"
+  | "refresh";
 
 const paths: Record<IconName, string> = {
   dashboard: "M4 4h6v6H4V4Zm10 0h6v10h-6V4ZM4 14h6v6H4v-6Zm10 4h6v2h-6v-2Z",
@@ -106,7 +109,10 @@ const paths: Record<IconName, string> = {
   palette: "M12 3a9 9 0 0 0 0 18h1.4a2.6 2.6 0 0 0 0-5.2H12a1.8 1.8 0 0 1 0-3.6h4.8A4.2 4.2 0 0 0 21 8c0-2.8-4-5-9-5ZM7.2 12.2a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Zm2.1-4.1a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Zm4.6-.7a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Zm3.3 3.1a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Z",
   calendar: "M7 2h2v2h6V2h2v2h4v18H3V4h4V2Zm12 8H5v10h14V10ZM5 6v2h14V6H5Zm3 7h3v3H8v-3Z",
   desktop: "M3 4h18v13H3V4Zm2 2v9h14V6H5Zm5 13v-2h4v2h4v2H6v-2h4Z",
-  mobile: "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 3v13h10V5H7Zm4 14v2h2v-2h-2Z"
+  mobile: "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 3v13h10V5H7Zm4 14v2h2v-2h-2Z",
+  play: "M8 5v14l11-7L8 5Z",
+  pause: "M7 5h4v14H7V5Zm6 0h4v14h-4V5Z",
+  refresh: "M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"
 };
 
 export function Icon({
