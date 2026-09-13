@@ -53,6 +53,7 @@ export interface RankConnectorPollClaim extends RankConnectorClaim {
   readonly providerTaskId: string;
   readonly request: RankProviderRequestIntentV1;
   readonly providerProgress?: XmlStockRankPageProgress;
+  readonly providerProgressInvalid?: true;
 }
 
 export interface RankConnectorSubmitPermit {
@@ -268,16 +269,26 @@ export class RankConnectorRuntimeBrokerService {
     if (rows.length !== 1 || !rows[0]) invalid("poll claim cardinality");
     const row = rows[0];
     const provider = rankProvider(row.provider);
-    const providerProgress = storedProviderProgress(
-      provider,
-      row.providerProgressSnapshot,
-      row.providerProgressHash
-    );
+    let providerProgress: XmlStockRankPageProgress | undefined;
+    let providerProgressInvalid = false;
+    try {
+      providerProgress = storedProviderProgress(
+        provider,
+        row.providerProgressSnapshot,
+        row.providerProgressHash
+      );
+    } catch (error) {
+      if (provider !== "XMLSTOCK" || !(error instanceof TypeError)) {
+        throw error;
+      }
+      providerProgressInvalid = true;
+    }
     return {
       ...claim(row, leaseOwner),
       providerTaskId: taskId(row.providerTaskId),
       request: rankProviderRequestIntent(row.requestSnapshot),
-      ...(providerProgress ? { providerProgress } : {})
+      ...(providerProgress ? { providerProgress } : {}),
+      ...(providerProgressInvalid ? { providerProgressInvalid: true } : {})
     };
   }
 

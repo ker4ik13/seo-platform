@@ -223,6 +223,13 @@ export class RankConnectorRuntimeService {
   private async poll(
     claim: RankConnectorPollClaim
   ): Promise<RankConnectorRuntimeOutcome> {
+    if (claim.provider === "XMLSTOCK" && claim.providerProgressInvalid) {
+      await this.broker.completePoll(claim, {
+        outcome: "REJECTED",
+        errorCode: "INVALID_PROVIDER_RESPONSE"
+      });
+      return "POLL_TERMINAL";
+    }
     const xmlStockRequest = claim.provider === "XMLSTOCK"
       ? buildXmlStockRankWireRequest(claim.request)
       : undefined;

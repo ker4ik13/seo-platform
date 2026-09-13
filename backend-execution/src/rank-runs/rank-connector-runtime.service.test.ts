@@ -622,6 +622,103 @@ test("backs off XMLStock delayed Yandex polling to the documented cadence", asyn
   });
 });
 
+test("terminally records an invalid XMLStock response without reclaiming the row", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    provider: "XMLSTOCK",
+    providerTaskId: "xml-request-3944",
+    request: xmlStockRequestIntent()
+  };
+  let completed:
+    | { readonly outcome: string; readonly errorCode?: string }
+    | undefined;
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async completePoll(_claim: unknown, input: typeof completed) {
+      completed = input;
+      return {
+        executionId: ids.execution,
+        status: "FAILED_FINAL",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const xmlStockConnector = {
+    async fetchResult() {
+      return {
+        status: "REJECTED" as const,
+        code: "INVALID_PROVIDER_RESPONSE" as const
+      };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      false,
+      1_000,
+      xmlStockConnector
+    ).processOne("connector-worker"),
+    "POLL_TERMINAL"
+  );
+  assert.deepEqual(completed, {
+    outcome: "REJECTED",
+    errorCode: "INVALID_PROVIDER_RESPONSE"
+  });
+});
+
+test("terminally records a corrupt XMLStock checkpoint without provider I/O", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    provider: "XMLSTOCK",
+    providerTaskId: "xml-request-3944",
+    request: xmlStockRequestIntent(),
+    providerProgressInvalid: true
+  };
+  let providerCalls = 0;
+  let completed:
+    | { readonly outcome: string; readonly errorCode?: string }
+    | undefined;
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async completePoll(_claim: unknown, input: typeof completed) {
+      completed = input;
+      return {
+        executionId: ids.execution,
+        status: "FAILED_FINAL",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const xmlStockConnector = {
+    async fetchResult() {
+      providerCalls += 1;
+      return { status: "PENDING" as const, retryAfterSeconds: 25 };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      false,
+      1_000,
+      xmlStockConnector
+    ).processOne("connector-worker"),
+    "POLL_TERMINAL"
+  );
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(completed, {
+    outcome: "REJECTED",
+    errorCode: "INVALID_PROVIDER_RESPONSE"
+  });
+});
+
 test("runs XMLStock Yandex Live Turbo without the standard account quota gate", async () => {
   const pollClaim: RankConnectorPollClaim = {
     ...claim(),

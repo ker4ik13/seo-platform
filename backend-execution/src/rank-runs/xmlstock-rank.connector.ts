@@ -161,16 +161,16 @@ export class XmlStockRankConnector {
     secret: IntegrationCredentialSecret,
     timeoutMs: number
   ): Promise<XmlStockRankSubmitResult> {
-    const intent = xmlStockIntent(intentValue);
-    const request = buildXmlStockRankWireRequest(intent);
-    if (!request.delayed) {
-      return {
-        status: "ACCEPTED",
-        taskId: liveTaskId(intent),
-        request
-      };
-    }
     try {
+      const intent = xmlStockIntent(intentValue);
+      const request = buildXmlStockRankWireRequest(intent);
+      if (!request.delayed) {
+        return {
+          status: "ACCEPTED",
+          taskId: liveTaskId(intent),
+          request
+        };
+      }
       const response = await providerTextRequest(
         yandexSubmitUrl(request, secret),
         requestInit(),
@@ -203,6 +203,9 @@ export class XmlStockRankConnector {
           code: "PROVIDER_TRANSPORT_AMBIGUOUS"
         };
       }
+      if (error instanceof TypeError) {
+        return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+      }
       throw error;
     }
   }
@@ -214,9 +217,9 @@ export class XmlStockRankConnector {
     intentValue: unknown,
     progressValue?: unknown
   ): Promise<XmlStockRankFetchResult> {
-    const intent = xmlStockIntent(intentValue);
-    const taskId = providerTaskId(taskIdValue);
     try {
+      const intent = xmlStockIntent(intentValue);
+      const taskId = providerTaskId(taskIdValue);
       const request = buildXmlStockRankWireRequest(intent);
       return request.delayed
         ? await this.fetchYandexSearchApi(taskId, secret, timeoutMs, intent)
@@ -234,6 +237,9 @@ export class XmlStockRankConnector {
           status: "RETRYABLE_FAILURE",
           code: "PROVIDER_UNAVAILABLE"
         };
+      }
+      if (error instanceof TypeError) {
+        return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
       }
       throw error;
     }
@@ -325,34 +331,34 @@ export class XmlStockRankConnector {
     );
     if (failure) return failure;
     const parsed = parseXmlStockXml(response.value);
-    if (request.turbo && parsed.documents.length > 50) {
+    if (request.turbo && parsed.documentSlots > 50) {
       return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
     }
     if (
       progress?.schemaVersion === PAGE_PROGRESS_V2_SCHEMA &&
-      parsed.documents.length > progress.resultsPerPage
+      parsed.documentSlots > progress.resultsPerPage
     ) {
       return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
     }
-    documents.push(
-      ...parsed.documents.map((document, index) => ({
-        ...document,
-        position: documents.length + index + 1
-      }))
-    );
-    const nextPage = page + 1;
     const detectedResultsPerPage = request.turbo
       ? progress?.schemaVersion === PAGE_PROGRESS_V2_SCHEMA
         ? progress.resultsPerPage
-        : turboResultsPerPage(parsed.documents.length)
+        : turboResultsPerPage(parsed.documentSlots)
       : 10;
+    const pageWidth = resultsPerPage ?? detectedResultsPerPage ?? 1;
+    documents.push(
+      ...parsed.documents.map((document) => ({
+        ...document,
+        position: page * pageWidth + document.position
+      }))
+    );
+    const nextPage = page + 1;
     const detectedPageCount = detectedResultsPerPage === undefined
       ? undefined
       : Math.ceil(request.depth / detectedResultsPerPage);
     if (
       detectedResultsPerPage !== undefined &&
-      parsed.documents.length === detectedResultsPerPage &&
-      documents.length < request.depth &&
+      parsed.documentSlots === detectedResultsPerPage &&
       detectedPageCount !== undefined &&
       nextPage < detectedPageCount
     ) {
@@ -405,11 +411,13 @@ export function xmlStockRankPageProgress(
     Number(input.nextPage) >=
       Math.ceil(Number(input.depth) / resultsPerPage) ||
     !Array.isArray(input.documents) ||
-    input.documents.length !== Number(input.nextPage) * resultsPerPage
+    input.documents.length > Number(input.nextPage) * resultsPerPage
   ) {
     invalid();
   }
-  const documents = input.documents.map((document, index) => {
+  const maximumPosition = Number(input.nextPage) * resultsPerPage;
+  let previousPosition = 0;
+  const documents = input.documents.map((document) => {
     const parsed = record(document);
     const allowed = new Set([
       "position",
@@ -421,7 +429,8 @@ export function xmlStockRankPageProgress(
     if (
       Object.keys(parsed).some((field) => !allowed.has(field)) ||
       !Number.isSafeInteger(parsed.position) ||
-      parsed.position !== index + 1 ||
+      Number(parsed.position) <= previousPosition ||
+      Number(parsed.position) > maximumPosition ||
       typeof parsed.url !== "string" ||
       parsed.url.length < 1 ||
       (parsed.title !== undefined &&
@@ -435,6 +444,7 @@ export function xmlStockRankPageProgress(
     ) {
       invalid();
     }
+    previousPosition = Number(parsed.position);
     return {
       position: Number(parsed.position),
       url: providerUrl(parsed.url).original,
@@ -770,11 +780,13 @@ function responseFailure(
 function parseXmlStockXml(xml: string): {
   readonly requestId?: string;
   readonly errorCode?: string;
-  readonly documents: readonly Omit<XmlStockDocument, "position">[];
+  readonly documentSlots: number;
+  readonly documents: readonly XmlStockDocument[];
 } {
   let requestId: string | undefined;
   let errorCode: string | undefined;
-  const documents: Array<Omit<XmlStockDocument, "position">> = [];
+  const documents: XmlStockDocument[] = [];
+  let documentSlots = 0;
   const names: string[] = [];
   const texts: string[] = [];
   let current: {
@@ -823,25 +835,45 @@ function parseXmlStockXml(xml: string): {
         if (faviconUrl) current.faviconUrl = faviconUrl;
       }
       if (name === "doc") {
-        if (!current.url) invalid();
-        documents.push({
-          url: current.url,
-          ...(current.faviconUrl
-            ? { faviconUrl: current.faviconUrl }
-            : {}),
-          ...(current.title ? { title: current.title } : {}),
-          ...(current.snippets.length > 0
-            ? { snippet: current.snippets.join(" ") }
-            : {})
-        });
+        documentSlots += 1;
+        if (current.url) {
+          try {
+            const url = providerUrl(current.url).original;
+            documents.push({
+              position: documentSlots,
+              url,
+              ...(current.faviconUrl
+                ? { faviconUrl: current.faviconUrl }
+                : {}),
+              ...(current.title
+                ? { title: current.title.slice(0, MAX_TITLE_LENGTH) }
+                : {}),
+              ...(current.snippets.length > 0
+                ? {
+                    snippet: current.snippets
+                      .join(" ")
+                      .slice(0, MAX_SNIPPET_LENGTH)
+                  }
+                : {})
+            });
+          } catch {
+            // XMLStock may expose a non-organic block through the same <doc>
+            // container. It occupies a result slot but is not safe SERP data.
+          }
+        }
         current = undefined;
       }
     }
   });
-  parser.write(xml).close();
+  try {
+    parser.write(xml).close();
+  } catch {
+    invalid();
+  }
   return {
     ...(requestId ? { requestId } : {}),
     ...(errorCode ? { errorCode } : {}),
+    documentSlots,
     documents
   };
 }
@@ -862,16 +894,19 @@ function wireResult(
   documents: readonly Omit<XmlStockDocument, "position">[] | readonly XmlStockDocument[],
   depth: number
 ): XmlStockWireResultV1 {
+  const normalized = documents.map((document, index) => ({
+    ...document,
+    position:
+      "position" in document && typeof document.position === "number"
+        ? document.position
+        : index + 1
+  }));
   return {
     schemaVersion: WIRE_RESULT_SCHEMA,
     engine,
-    documents: documents.slice(0, depth).map((document, index) => ({
-      ...document,
-      position:
-        "position" in document && typeof document.position === "number"
-          ? document.position
-          : index + 1
-    }))
+    documents: normalized
+      .filter(({ position }) => position <= depth)
+      .slice(0, depth)
   };
 }
 

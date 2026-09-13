@@ -440,6 +440,91 @@ test("retries only the failed Live page and retains every paid checkpoint", asyn
   assert.deepEqual(pages, ["0", "1", "1", "2"]);
 });
 
+test("skips URL-less result blocks without losing page progress or positions", async () => {
+  const pages: string[] = [];
+  const connector = new XmlStockRankConnector(async (url) => {
+    const page = Number(new URL(String(url)).searchParams.get("page"));
+    pages.push(String(page));
+    const documents = Array.from({ length: 10 }, (_, index) => {
+      if ((page === 0 && index === 0) || (page === 2 && index === 9)) {
+        return `<doc><title>Unsupported result block</title></doc>`;
+      }
+      const resultUrl = page === 0 && index === 1
+        ? "https://example.com/sparse-result"
+        : `https://foreign-${page}-${index}.example/`;
+      const title = page === 1 && index === 0
+        ? "x".repeat(2_100)
+        : "Result";
+      return `<doc><url>${resultUrl}</url><title>${title}</title></doc>`;
+    }).join("");
+    return xml(`<response><results>${documents}</results></response>`);
+  });
+  const value = intent("YANDEX", "xmlstock-yandex-live@2", { depth: 30 });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await connector.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+
+  const ready = await fetchLiveUntilReady(
+    connector,
+    submitted.taskId,
+    secret,
+    value
+  );
+  const result = stageXmlStockRankResult(
+    ready.value,
+    submitted.taskId,
+    value,
+    "2026-09-13T19:30:00.000Z"
+  ).snapshot.results[0];
+
+  assert.deepEqual(pages, ["0", "1", "2"]);
+  assert.equal(result?.position, 2);
+  assert.equal(result?.serpResults?.length, 28);
+  assert.equal(result?.serpResults?.some(({ position }) => position === 1), false);
+  assert.equal(result?.serpResults?.some(({ position }) => position === 30), false);
+  assert.equal(
+    result?.serpResults?.find(({ position }) => position === 11)?.title?.length,
+    2_048
+  );
+});
+
+test("turns malformed XML and incompatible checkpoints into terminal outcomes", async () => {
+  let providerCalls = 0;
+  const malformed = new XmlStockRankConnector(async () => {
+    providerCalls += 1;
+    return xml("<response><results><doc>");
+  });
+  const value = intent("YANDEX", "xmlstock-yandex-live@2", { depth: 30 });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await malformed.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+  assert.deepEqual(
+    await malformed.fetchResult(submitted.taskId, secret, 1_000, value),
+    { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" }
+  );
+
+  assert.deepEqual(
+    await malformed.fetchResult(
+      submitted.taskId,
+      secret,
+      1_000,
+      value,
+      {
+        schemaVersion: "xmlstock-rank-page-progress@1",
+        taskId: "another-task",
+        engine: "YANDEX",
+        depth: 30,
+        nextPage: 1,
+        documents: []
+      }
+    ),
+    { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" }
+  );
+  assert.equal(providerCalls, 1);
+});
+
 test("keeps persisted Live checkpoints bounded and URL-safe", () => {
   const documents = Array.from({ length: 10 }, (_, index) => ({
     position: index + 1,
