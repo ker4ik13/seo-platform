@@ -40,6 +40,7 @@ import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
+import { DomainError } from "../common/domain-error.js";
 import { setEntityVersion } from "../common/entity-version.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
 import { assertUuid } from "../common/identifier.js";
@@ -309,6 +310,50 @@ export class TrackingContextController {
     return apiResponse(request, result, result.version);
   }
 
+  @Post(":contextId/materialize")
+  @HttpCode(200)
+  @RequirePermission("ranking.configure")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async materialize(
+    @Param("contextId") contextId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<TrackingContextKeywordReplacementResult>> {
+    assertEmptyObject(body);
+    const tenant = requiredMutableProjectTenant(request);
+    const canonicalContextId = assertUuid(contextId, "contextId");
+    const context = requestContext(request);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "ranking.tracking_context.materialize_requested",
+      resourceType: "tracking_context_keyword_assignments",
+      resourceId: canonicalContextId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.materializeTrackingContext(
+      internalProjectContext(request, principal, tenant),
+      canonicalContextId,
+      await this.billingEntitlements.semanticCapacity(tenant.workspaceId)
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "ranking.tracking_context.materialized",
+      resourceType: "tracking_context_keyword_assignments",
+      resourceId: canonicalContextId,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    setEntityVersion(reply, result.version);
+    return apiResponse(request, result, result.version);
+  }
+
   @Put(":contextId/keywords/:keywordId")
   @RequirePermission("ranking.configure")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
@@ -446,6 +491,20 @@ function trackingContextAccess(
     canConfigure: mutationRestriction === "NONE",
     mutationRestriction
   };
+}
+
+function assertEmptyObject(value: unknown): void {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 0
+  ) return;
+  throw new DomainError({
+    statusCode: 422,
+    code: "VALIDATION_FAILED",
+    message: "Request body must be an empty object"
+  });
 }
 
 function trackingContextMutationRestriction(

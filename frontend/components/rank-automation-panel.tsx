@@ -292,6 +292,13 @@ export function RankAutomationPanel({
     setNotice(undefined);
   }
 
+  function startNewSchedule(): void {
+    setEditingId(undefined);
+    setDraft(newDraft(activeContexts[0]?.id, defaultRunAt()));
+    setError(undefined);
+    setNotice(undefined);
+  }
+
   return (
     <>
     <section className={`${styles.panel} panel`}>
@@ -314,6 +321,7 @@ export function RankAutomationPanel({
       {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
       {notice && <div className="inline-alert success" role="status">{<UiText text={notice ?? ""} />}</div>}
 
+      <div className={styles.workspace}>
       {loading && !settings ? (
         <p><UiText text="Загружаем расписания…" /></p>
       ) : activeContexts.length === 0 ? (
@@ -480,10 +488,7 @@ export function RankAutomationPanel({
             {editing && (
               <button
                 className="secondary-button"
-                onClick={() => {
-                  setEditingId(undefined);
-                  setDraft(newDraft(activeContexts[0]?.id, defaultRunAt()));
-                }}
+                onClick={startNewSchedule}
                 type="button"
               >
                 <UiText text="Отмена" /></button>
@@ -492,10 +497,26 @@ export function RankAutomationPanel({
         </div>
       )}
 
-      {settings?.automations.length ? (
-        <div className={styles.list}>
-          {settings.automations.map((automation) => (
-            <article key={automation.id}>
+        <aside className={styles.list}>
+          <header className={styles.catalogHeader}>
+            <div>
+              <span><UiText text="Настроенные съёмы" /></span>
+              <strong>{settings?.automations.length ?? 0}</strong>
+            </div>
+            <button
+              aria-label={uiText("Создать расписание")}
+              disabled={busy || !settings?.access.canManage || activeContexts.length === 0}
+              onClick={startNewSchedule}
+              type="button"
+            >
+              <Icon name="plus" />
+            </button>
+          </header>
+          {settings?.automations.map((automation) => (
+            <article
+              className={editingId === automation.id ? styles.selectedItem : undefined}
+              key={automation.id}
+            >
               <div className={styles.itemHead}>
                 <div>
                   <strong>{automation.name}</strong>
@@ -569,10 +590,11 @@ export function RankAutomationPanel({
               </div>
             </article>
           ))}
-        </div>
-      ) : (
-        !loading && <p className={styles.empty}><UiText text="Расписаний пока нет." /></p>
-      )}
+          {!loading && !settings?.automations.length && (
+            <p className={styles.empty}><UiText text="Расписаний пока нет." /></p>
+          )}
+        </aside>
+      </div>
     </section>
     {automationToDelete && (
       <SemanticModal

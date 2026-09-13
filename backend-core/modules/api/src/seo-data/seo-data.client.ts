@@ -92,6 +92,7 @@ import {
   type InternalChangeProjectPageStatusInput,
   type InternalCreateProjectPageInput,
   type InternalCreateTrackingContextInput,
+  type InternalMaterializeTrackingContextInput,
   type InternalReplaceTrackingContextKeywordsInput,
   type InternalUpdateProjectPageInput,
   type InternalUpdateTrackingContextInput,
@@ -2205,6 +2206,35 @@ export class SeoDataClient {
     );
   }
 
+  public async materializeTrackingContext(
+    context: InternalContext,
+    contextId: string,
+    entitlement: SemanticCapacityEntitlement
+  ): Promise<TrackingContextKeywordReplacementResult> {
+    const scope = trackingScope(context);
+    const body: InternalMaterializeTrackingContextInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      contextId,
+      actorId: context.actorId,
+      entitlement
+    };
+    const payload = await this.request(
+      "POST",
+      trackingContextUrl(
+        context,
+        this.config.services.seoData,
+        `${contextId}/materialize`
+      ),
+      context,
+      body
+    );
+    return scopedTrackingContextKeywordReplacement(
+      responseData(payload),
+      contextId
+    );
+  }
+
   public async listProjectPages(
     context: InternalContext,
     query: ProjectPageListQuery
@@ -2668,6 +2698,8 @@ export class SeoDataClient {
       body === undefined ? undefined : JSON.stringify(body);
     const timeoutMs =
       method === "PUT" && /\/tracking-contexts\/[^/]+\/keywords\/?$/u.test(url.pathname)
+        ? Math.max(65_000, this.config.internalCommandTimeoutMs)
+        : method === "POST" && /\/tracking-contexts\/[^/]+\/materialize\/?$/u.test(url.pathname)
         ? Math.max(65_000, this.config.internalCommandTimeoutMs)
         : method === "GET"
         ? this.config.dependencyTimeoutMs

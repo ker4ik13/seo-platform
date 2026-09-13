@@ -6,6 +6,7 @@ import type { AuthorizationService } from "../authorization/authorization.servic
 import type { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { DomainError } from "../common/domain-error.js";
 import type { JobsClient } from "../jobs/jobs.client.js";
+import type { SeoDataClient } from "../seo-data/seo-data.client.js";
 import type { TenantService } from "../tenants/tenant.service.js";
 import { RankAutomationDispatchController } from "./rank-automation-dispatch.controller.js";
 
@@ -35,6 +36,12 @@ test("rechecks current access, price and quota before every automation run", asy
         return { id: jobId };
       }
     },
+    seoData: {
+      materializeTrackingContext: async (...args: unknown[]) => {
+        calls.push({ operation: "materialize", args });
+        return {};
+      }
+    },
     audit: {
       record: async (record: { readonly action: string }) => {
         audits.push(record.action);
@@ -50,10 +57,10 @@ test("rechecks current access, price and quota before every automation run", asy
   );
 
   assert.deepEqual(response.data, { estimateId, jobId });
-  assert.deepEqual(calls.map(({ operation }) => operation), ["estimate", "run"]);
-  assert.equal(calls[0]?.args[2], `automation-estimate-${runId}`);
-  assert.equal(calls[1]?.args[2], `automation-rank-${runId}`);
-  assert.deepEqual(calls[1]?.args[1], {
+  assert.deepEqual(calls.map(({ operation }) => operation), ["materialize", "estimate", "run"]);
+  assert.equal(calls[1]?.args[2], `automation-estimate-${runId}`);
+  assert.equal(calls[2]?.args[2], `automation-rank-${runId}`);
+  assert.deepEqual(calls[2]?.args[1], {
     estimateId,
     confirmedPlatformChargeMicro: "500000",
     workspaceId,
@@ -119,6 +126,9 @@ function controllerWith(options: Readonly<{
     readonly createRankEstimate: (...args: unknown[]) => Promise<unknown>;
     readonly createRankRun: (...args: unknown[]) => Promise<unknown>;
   };
+  seoData?: {
+    readonly materializeTrackingContext: (...args: unknown[]) => Promise<unknown>;
+  };
   audit?: {
     readonly record: (
       record: { readonly action: string }
@@ -147,6 +157,14 @@ function controllerWith(options: Readonly<{
         planCode: "PRO",
         planVersion: 2,
         concurrentJobs: 4
+      }),
+      semanticCapacity: async () => ({
+        planCode: "PRO",
+        planVersion: 2,
+        storedKeywords: 0,
+        keywordsPerProject: 0,
+        foldersPerProject: 0,
+        trackedContextPairs: 0
       })
     } as unknown as BillingEntitlementService,
     {
@@ -164,6 +182,9 @@ function controllerWith(options: Readonly<{
       })
     } as unknown as TenantService,
     options.jobs as unknown as JobsClient,
+    (options.seoData ?? {
+      materializeTrackingContext: async () => ({})
+    }) as unknown as SeoDataClient,
     (options.audit ?? { record: async () => undefined }) as unknown as AuditService
   );
 }

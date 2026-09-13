@@ -19,6 +19,7 @@ import {
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
   type InternalCreateTrackingContextInput,
+  type InternalMaterializeTrackingContextInput,
   type InternalReplaceTrackingContextKeywordsInput,
   type InternalUpdateTrackingContextInput,
   type TrackingContextCollection,
@@ -411,6 +412,26 @@ export class TrackingContextService {
     return this.changeKeywordAssignment(input, false);
   }
 
+  public async materialize(
+    input: InternalMaterializeTrackingContextInput
+  ): Promise<TrackingContextKeywordReplacementResult> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const scope = await this.materializedKeywordScope(input);
+      try {
+        return await this.replaceKeywords({
+          ...input,
+          version: scope.version,
+          keywordIds: scope.keywordIds,
+          idempotencyKey:
+            `materialize:${input.contextId}:${scope.version}:${hashKeywordSet(scope.keywordIds)}`
+        });
+      } catch (error) {
+        if (attempt === 2 || !isVersionConflict(error)) throw error;
+      }
+    }
+    throw new Error("Tracking context materialization retry exhausted");
+  }
+
   public async replaceKeywords(
     input: InternalReplaceTrackingContextKeywordsInput
   ): Promise<TrackingContextKeywordReplacementResult> {
@@ -683,6 +704,112 @@ export class TrackingContextService {
       );
       return summary;
     });
+  }
+
+  private async materializedKeywordScope(
+    input: InternalMaterializeTrackingContextInput
+  ): Promise<{
+    readonly version: number;
+    readonly keywordIds: readonly string[];
+  }> {
+    return this.prisma.$transaction(async (transaction) => {
+      const context = await this.requiredContext(
+        transaction,
+        input.workspaceId,
+        input.projectId,
+        input.contextId
+      );
+      assertActive(context.status);
+      const profile = launchProfileSnapshot(context.launchProfile);
+      if (!profile || profile.scope.mode === "KEYWORDS") {
+        const assignments =
+          await transaction.trackingContextKeywordAssignment.findMany({
+            where: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              contextId: input.contextId,
+              removedAt: null,
+              keyword: {
+                status: "ACTIVE",
+                ...(profile?.includeUntracked ? {} : { isTracked: true })
+              }
+            },
+            orderBy: { keywordId: "asc" },
+            take: trackingContextKeywordReplacementLimit + 1,
+            select: { keywordId: true }
+          });
+        assertMaterializedScopeLimit(assignments.length);
+        return {
+          version: context.version,
+          keywordIds: assignments.map(({ keywordId }) => keywordId)
+        };
+      }
+
+      let groupIds: readonly string[] | undefined;
+      if (profile.scope.mode === "GROUPS") {
+        const groups = await transaction.keywordGroup.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE",
+            OR: [{ systemKind: null }, { systemKind: "UNGROUPED" }]
+          },
+          select: { id: true, parentId: true }
+        });
+        const available = new Set(groups.map(({ id }) => id));
+        if (profile.scope.groupIds.some((groupId) => !available.has(groupId))) {
+          internalError(
+            HttpStatus.CONFLICT,
+            "RESOURCE_STATE_CONFLICT",
+            "One or more tracking context groups are no longer active"
+          );
+        }
+        const included = new Set(profile.scope.groupIds);
+        const children = new Map<string, string[]>();
+        for (const group of groups) {
+          if (!group.parentId) continue;
+          const siblings = children.get(group.parentId) ?? [];
+          siblings.push(group.id);
+          children.set(group.parentId, siblings);
+        }
+        const pending = [...included];
+        for (let index = 0; index < pending.length; index += 1) {
+          for (const groupId of children.get(pending[index]!) ?? []) {
+            if (included.has(groupId)) continue;
+            included.add(groupId);
+            pending.push(groupId);
+          }
+        }
+        groupIds = [...included];
+      }
+
+      const keywords = await transaction.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          ...(profile.includeUntracked ? {} : { isTracked: true }),
+          ...(groupIds
+            ? {
+                memberships: {
+                  some: {
+                    projectId: input.projectId,
+                    groupId: { in: [...groupIds] }
+                  }
+                }
+              }
+            : {})
+        },
+        orderBy: { id: "asc" },
+        take: trackingContextKeywordReplacementLimit + 1,
+        select: { id: true }
+      });
+      assertMaterializedScopeLimit(keywords.length);
+      return {
+        version: context.version,
+        keywordIds: keywords.map(({ id }) => id)
+      };
+    }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
   }
 
   private async changeKeywordAssignment(
@@ -1513,6 +1640,20 @@ function assertVersion(actual: number, expected: number): void {
       { currentVersion: actual }
     );
   }
+}
+
+function assertMaterializedScopeLimit(count: number): void {
+  if (count <= trackingContextKeywordReplacementLimit) return;
+  internalError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    "CONTEXT_TOO_LARGE",
+    "Tracking context scope exceeds the supported keyword limit"
+  );
+}
+
+function isVersionConflict(error: unknown): boolean {
+  return error instanceof HttpException &&
+    error.getStatus() === HttpStatus.PRECONDITION_FAILED;
 }
 
 function assertActive(status: string): void {

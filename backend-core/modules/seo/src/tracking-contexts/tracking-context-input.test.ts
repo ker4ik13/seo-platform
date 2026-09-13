@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalChangeTrackingContextKeywordInput,
   internalCreateTrackingContextInput,
+  internalMaterializeTrackingContextInput,
   internalReplaceTrackingContextKeywordsInput,
   trackingContextKeywordQuery
 } from "./tracking-context-input.js";
@@ -68,6 +69,29 @@ test("preserves the non-reusable execution marker", () => {
   });
 
   assert.equal(input.isReusable, false);
+});
+
+test("materialization accepts only trusted scope and capacity", () => {
+  const entitlement = {
+    planCode: "PRO",
+    planVersion: 2,
+    storedKeywords: 0,
+    keywordsPerProject: 0,
+    foldersPerProject: 0,
+    trackedContextPairs: 0
+  };
+  const value = {
+    workspaceId,
+    projectId,
+    contextId,
+    actorId,
+    entitlement
+  };
+  assert.deepEqual(internalMaterializeTrackingContextInput(value), value);
+  assert.throws(
+    () => internalMaterializeTrackingContextInput({ ...value, version: 1 }),
+    BadRequestException
+  );
 });
 
 test("rejects unknown fields and inconsistent domain rules", () => {

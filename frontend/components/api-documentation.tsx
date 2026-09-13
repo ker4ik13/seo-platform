@@ -721,6 +721,37 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
         <p>
           <UiText text="Для создания обязателен уникальный" after=" " /><code>Idempotency-Key</code><UiText text=". Для одноразового ручного запуска передайте isReusable=false: контекст сохранит неизменяемую историю, но не появится в каталоге профилей и расписаниях. GET-список возвращает только активные сохранённые профили. Для изменения передавайте ETag контекста через If-Match." /></p>
       </Section>
+      <Section title={uiText("Пересчитать охват контекста")}>
+        <EndpointHeader method="POST" path="/projects/{projectId}/tracking-contexts/{contextId}/materialize" scope="positions:run" />
+        <p>
+          <UiText text="Передайте пустой JSON. Сервер прочитает сохранённый охват, заново раскроет выбранные папки и их потомков, исключит удалённые и неотслеживаемые запросы согласно includeUntracked и вернёт актуальное количество. Keyword ID от клиента не принимаются. Регулярные и ручные запуски расписания выполняют этот пересчёт автоматически перед оценкой." />
+        </p>
+        <CodeBlock
+          code={`curl -X POST "${baseUrl}/projects/<projectId>/tracking-contexts/<contextId>/materialize" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{}'`}
+          language="bash"
+          title={uiText("Запрос")}
+        />
+        <CodeBlock
+          code={`{
+  "data": {
+    "contextId": "<contextId>",
+    "assignedKeywordCount": 894,
+    "addedKeywordCount": 12,
+    "removedKeywordCount": 3,
+    "unchangedKeywordCount": 882,
+    "keywordSetHash": { "algorithm": "SHA_256", "value": "..." },
+    "version": 5,
+    "changedAt": "2026-09-13T19:30:00.000Z"
+  },
+  "meta": { "requestId": "01J...", "version": 5 }
+}`}
+          language="json"
+          title={uiText("200 · Ответ")}
+        />
+      </Section>
       <Section title={uiText("2. Получить оценку")}>
         <EndpointHeader method="POST" path="/projects/{projectId}/rank-estimates" scope="positions:run" />
         <CodeBlock

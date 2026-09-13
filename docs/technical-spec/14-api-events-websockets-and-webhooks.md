@@ -551,7 +551,9 @@ versions; preset mutations требуют `semantic.update` и `If-Match`.
 - `GET|POST /api/v1/projects/{projectId}/tracking-contexts`;
 - `GET|PATCH /api/v1/projects/{projectId}/tracking-contexts/{contextId}`;
 - `POST .../{contextId}/archive|restore`;
+- `POST .../{contextId}/materialize`;
 - `GET .../{contextId}/keywords`;
+- `PUT .../{contextId}/keywords`;
 - `PUT|DELETE .../{contextId}/keywords/{keywordId}`.
 
 `POST` принимает необязательный `isReusable` (по умолчанию `true`). Значение
@@ -587,6 +589,13 @@ Read требует `ranking.view`; mutations — `ranking.configure`, browser s
 `contextsTruncated` и access projection. Keyword list использует opaque
 keyset cursor и limit `1..200`; point PUT/DELETE идемпотентны. Архивный
 проект блокирует mutations, billing read-only оставляет чтение доступным.
+
+`POST .../{contextId}/materialize` принимает строго пустой JSON `{}` и не
+доверяет browser keyword IDs. SEO Data читает сохранённый launch profile в
+tenant scope, заново строит `ALL/GROUPS` с потомками и текущим tracking-флагом,
+атомарно заменяет назначения с optimistic version retry и возвращает
+`TrackingContextKeywordReplacementResult` с новым count/hash/version. Этот же
+internal command вызывается Core перед estimate каждого rank automation run.
 
 Tenant/actor отсутствуют в public body. Platform API передаёт их в internal
 headers/body, SEO Data повторно сверяет route project, trusted context и

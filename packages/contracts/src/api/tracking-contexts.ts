@@ -215,6 +215,15 @@ export interface InternalReplaceTrackingContextKeywordsInput
   readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }
 
+/** Trusted request to rebuild a saved profile from its current launch scope. */
+export interface InternalMaterializeTrackingContextInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly contextId: string;
+  readonly actorId: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
+}
+
 export interface TrackingContextKeywordReplacementResult {
   readonly contextId: string;
   readonly assignedKeywordCount: number;

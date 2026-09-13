@@ -46,6 +46,7 @@ const MAX_BROWSER_API_BODY_READ_MS = 10_000;
 const MAX_CLUSTERING_RUN_BODY_READ_MS = 120_000;
 const DEFAULT_PLATFORM_API_TIMEOUT_MS = 10_000;
 const CLUSTERING_RUN_COMMAND_TIMEOUT_MS = 120_000;
+const TRACKING_CONTEXT_MATERIALIZE_TIMEOUT_MS = 75_000;
 const SEMANTIC_EXPORT_FILE_TIMEOUT_MS = 15 * 60_000;
 
 export async function proxyPlatformApi(
@@ -143,6 +144,8 @@ export async function proxyPlatformApi(
       AbortSignal.timeout(
         clusteringRunCreate
           ? CLUSTERING_RUN_COMMAND_TIMEOUT_MS
+          : isTrackingContextMaterializePath(upstreamPathSegments)
+          ? TRACKING_CONTEXT_MATERIALIZE_TIMEOUT_MS
           : isSemanticExportFilePath(upstreamPathSegments)
           ? SEMANTIC_EXPORT_FILE_TIMEOUT_MS
           : DEFAULT_PLATFORM_API_TIMEOUT_MS
@@ -324,6 +327,13 @@ function browserApiBodyLimit(pathSegments: readonly string[]): number {
 
 function isTrackingKeywordReplacementPath(segments: readonly string[]): boolean {
   return segments.length === 5 && segments[0] === "projects" && segments[2] === "tracking-contexts" && segments[4] === "keywords";
+}
+
+function isTrackingContextMaterializePath(segments: readonly string[]): boolean {
+  return segments.length === 5 &&
+    segments[0] === "projects" &&
+    segments[2] === "tracking-contexts" &&
+    segments[4] === "materialize";
 }
 
 function isClusteringRunCreatePath(

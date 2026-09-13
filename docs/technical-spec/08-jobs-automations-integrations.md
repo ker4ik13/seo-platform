@@ -518,7 +518,12 @@ Automation состоит из:
   если точная цена не превышает cap. В Jobs не хранится цена как authority и
   scheduler не списывает токены напрямую.
 - Rank schedule не хранит пользовательский `maxItems` и не обрезает контекст:
-  каждый запуск берёт все актуальные ключи выбранного tracking context.
+  каждый запуск берёт все актуальные ключи выбранного tracking context. После
+  tenant/RBAC/entitlement recheck и до fresh estimate Core вызывает trusted
+  SEO Data materializer: `ALL/GROUPS` заново разрешаются из активных запросов и
+  дерева папок, а `isTracked=false` исключается, если профиль не разрешает
+  `includeUntracked`. Scheduled и ручной automation-run поэтому не используют
+  сохранённое браузером число запросов.
   Provider/plan capacity по-прежнему проверяется estimate-ом и исполняется
   штатными chunk/batch-механизмами без скрытого сокращения scope.
 - DELETE rank schedule требует CAS, атомарно выключает definition и ставит

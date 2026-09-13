@@ -27,6 +27,7 @@ import { assertUuid } from "../common/identifier.js";
 import { CrawlAutomationDispatchGuard } from "../crawls/crawl-automation-dispatch.guard.js";
 import { requiredDispatchHeaders } from "../crawls/crawl-automation-dispatch.input.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { TenantService } from "../tenants/tenant.service.js";
 import { rankAutomationDispatchInput } from "./rank-automation-dispatch.input.js";
 
@@ -44,6 +45,7 @@ export class RankAutomationDispatchController {
     private readonly billing: BillingEntitlementService,
     private readonly tenants: TenantService,
     private readonly jobs: JobsClient,
+    private readonly seoData: SeoDataClient,
     private readonly audit: AuditService
   ) {}
 
@@ -90,11 +92,12 @@ export class RankAutomationDispatchController {
       scopeConflict("Rank automation execution scope is no longer active");
     }
     const tenant = authorization as AuthorizedProjectTenant;
-    const [workspace, project, runAccess, jobCapacity] = await Promise.all([
+    const [workspace, project, runAccess, jobCapacity, semanticCapacity] = await Promise.all([
       this.tenants.getWorkspace(input.actorId, input.workspaceId),
       this.tenants.getProject(input.projectId),
       this.billing.rankProviderRunAccess(input.workspaceId),
-      this.billing.jobCapacity(input.workspaceId)
+      this.billing.jobCapacity(input.workspaceId),
+      this.billing.semanticCapacity(input.workspaceId)
     ]);
     if (
       workspace.id !== input.workspaceId ||
@@ -143,6 +146,11 @@ export class RankAutomationDispatchController {
       outcome: "REQUESTED",
       requestId: request.id
     });
+    await this.seoData.materializeTrackingContext(
+      context,
+      input.trackingContextId,
+      semanticCapacity
+    );
     const estimate = await this.jobs.createRankEstimate(
       context,
       estimateCommand,

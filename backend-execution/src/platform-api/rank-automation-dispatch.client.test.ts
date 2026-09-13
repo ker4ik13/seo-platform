@@ -23,6 +23,7 @@ const input = {
 
 const config = {
   automationDispatchApiToken: "automation-secret",
+  internalCommandTimeoutMs: 60_000,
   platformApiCommandTimeoutMs: 2_500,
   services: { platformApi: "http://backend-core:4000" }
 } as AppConfig;

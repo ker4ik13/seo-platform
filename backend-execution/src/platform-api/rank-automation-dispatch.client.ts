@@ -64,7 +64,10 @@ export class RankAutomationDispatchClient {
           body: JSON.stringify(input),
           redirect: "error",
           signal: AbortSignal.timeout(
-            this.config.platformApiCommandTimeoutMs
+            Math.max(
+              this.config.platformApiCommandTimeoutMs,
+              this.config.internalCommandTimeoutMs * 2
+            )
           )
         }
       );

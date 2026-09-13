@@ -170,6 +170,10 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("contexts-list", "GET", "/projects/{projectId}/tracking-contexts", "positions:read", "Контексты съёма позиций", "positions"),
   endpoint("contexts-create", "POST", "/projects/{projectId}/tracking-contexts", "positions:run", "Создать контекст съёма", "positions"),
   endpoint("context-update", "PATCH", "/projects/{projectId}/tracking-contexts/{contextId}", "positions:run", "Изменить контекст", "positions"),
+  endpoint("context-materialize", "POST", "/projects/{projectId}/tracking-contexts/{contextId}/materialize", "positions:run", "Пересчитать актуальные запросы сохранённого контекста", "positions", {
+    request: "Пустой JSON: {}. Сервер использует сохранённый scope и не принимает keyword IDs от клиента.",
+    response: "200 · data: { contextId, assignedKeywordCount, addedKeywordCount, removedKeywordCount, unchangedKeywordCount, keywordSetHash, version, changedAt }."
+  }),
   endpoint("context-keywords", "PUT", "/projects/{projectId}/tracking-contexts/{contextId}/keywords", "positions:run", "Заменить точный набор ключей контекста", "positions"),
   endpoint("rank-estimate", "POST", "/projects/{projectId}/rank-estimates", "positions:run", "Рассчитать неизменяемую оценку позиций или выдачи конкурентов", "positions"),
   endpoint("rank-runs-list", "GET", "/projects/{projectId}/rank-runs", "positions:read", "История запусков позиций и выдачи конкурентов", "positions"),

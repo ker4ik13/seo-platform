@@ -431,5 +431,12 @@
   "Контекст обновлён и создано дополнительных профилей: {0}.": "Context updated and {0} additional profiles created.",
   "Создано профилей: {0}.": "Profiles created: {0}.",
   "Новый профиль сохранится после успешной подготовки запуска.": "The new profile will be saved after the run is prepared successfully.",
-  "Используются настройки выбранного сохранённого профиля.": "The selected saved profile settings are being used."
+  "Используются настройки выбранного сохранённого профиля.": "The selected saved profile settings are being used.",
+  "Пересчитываем запросы…": "Recalculating keywords…",
+  "Не удалось пересчитать запросы контекстов.": "Could not recalculate context keywords.",
+  "Настроенные съёмы": "Configured rank checks",
+  "Пересчитать охват контекста": "Recalculate context scope",
+  "Пересчитать актуальные запросы сохранённого контекста": "Recalculate the current keywords in a saved context",
+  "Пустой JSON: {}. Сервер использует сохранённый scope и не принимает keyword IDs от клиента.": "Empty JSON: {}. The server uses the saved scope and does not accept keyword IDs from the client.",
+  "Передайте пустой JSON. Сервер прочитает сохранённый охват, заново раскроет выбранные папки и их потомков, исключит удалённые и неотслеживаемые запросы согласно includeUntracked и вернёт актуальное количество. Keyword ID от клиента не принимаются. Регулярные и ручные запуски расписания выполняют этот пересчёт автоматически перед оценкой.": "Send an empty JSON object. The server reads the saved scope, expands the selected folders and their descendants again, excludes deleted and untracked keywords according to includeUntracked, and returns the current count. Client keyword IDs are not accepted. Scheduled and manual automation runs perform this recalculation automatically before estimating."
 }

@@ -35,6 +35,7 @@ import {
   internalChangeTrackingContextKeywordInput,
   internalChangeTrackingContextStatusInput,
   internalCreateTrackingContextInput,
+  internalMaterializeTrackingContextInput,
   internalReplaceTrackingContextKeywordsInput,
   internalUpdateTrackingContextInput,
   trackingContextKeywordQuery
@@ -130,6 +131,23 @@ export class TrackingContextController {
         internalUuid(contextId, "contextId"),
         input
       )
+    );
+  }
+
+  @Post(":contextId/materialize")
+  @HttpCode(200)
+  public async materialize(
+    @Param("projectId") projectId: string,
+    @Param("contextId") contextId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<TrackingContextKeywordReplacementResult>> {
+    const input = internalMaterializeTrackingContextInput(body);
+    assertKeywordReplacement(projectId, contextId, headers, input);
+    return response(
+      request,
+      await this.trackingContexts.materialize(input)
     );
   }
 

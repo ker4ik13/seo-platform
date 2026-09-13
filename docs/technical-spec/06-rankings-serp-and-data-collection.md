@@ -58,6 +58,14 @@ presentation-списка: Web debounce-ит быстрое переключен
 сохранённого tracking context также читаются bounded-страницами до 1000 строк;
 для охвата `ALL/GROUPS` их фоновое сравнение не блокирует открытие редактора.
 
+Настройки профилей вызывают серверную материализацию после загрузки и после
+сохранения. Для `ALL` сервер заново выбирает все активные запросы проекта, для
+`GROUPS` проверяет существование выбранных папок, раскрывает всех активных
+потомков и собирает distinct keyword ID. Если `includeUntracked=false`, запросы
+с `keywords.is_tracked=false` не входят в effective set. Архивные запросы и
+папки не попадают в новый состав. Пересчёт ограничен тем же пределом 300 000
+назначений и выполняется только в проверенном workspace/project scope.
+
 По ADR-2026-033 provider/credential принадлежат project connector binding, а
 schedule/timezone — automation. Экран может показывать их effective projection
 рядом с context, но они не входят в immutable tracking configuration.
@@ -99,7 +107,10 @@ failure-threshold одинаковы для UI и публичного API. Auto
 `maxPlatformChargeMicro` на один запуск: `0` означает BYOK-only. Перед каждым
 scheduled/manual run Jobs вызывает закрытый Core dispatch, а Core заново
 проверяет текущие RBAC, lifecycle, entitlement, quota, job capacity и trusted
-price book. Fresh estimate переходит в обычный RankRun reservation/settlement
+price book. До fresh estimate Core через SEO Data заново materialize-ит
+актуальный scope выбранного профиля; поэтому новые и перемещённые запросы,
+архивация и текущий `isTracked` учитываются даже без открытия Web. Fresh
+estimate переходит в обычный RankRun reservation/settlement
 только когда точная цена не превышает cap; старые definitions нормализуются в
 BYOK-only и не получают неявного права списывать внутренние токены.
 Удаление расписания является soft-delete: scheduler снимается, запись

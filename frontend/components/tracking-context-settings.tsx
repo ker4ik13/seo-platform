@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   parseRankDimensionMergeSettings,
   type RankDimensionMergeSettings,
   type RankDimensionMergeSummary,
   type SemanticRankDimension,
+  type TrackingContextKeywordReplacementResult,
   type TrackingContextSettings,
   type TrackingContextSummary
 } from "@seo-platform/contracts";
@@ -63,6 +64,9 @@ export function TrackingContextSettingsPanel({
   ]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const loadedProject = useRef("");
+  const materializedProject = useRef("");
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -98,6 +102,8 @@ export function TrackingContextSettingsPanel({
 
   useEffect(() => {
     const controller = new AbortController();
+    loadedProject.current = "";
+    materializedProject.current = "";
     setLoading(true);
     void Promise.all([
       browserApiRequest<TrackingContextSettings>(
@@ -115,6 +121,7 @@ export function TrackingContextSettingsPanel({
     ])
       .then(([contextSettings, contextGroups, mergeSettings]) => {
         if (controller.signal.aborted) return;
+        loadedProject.current = projectId;
         setSettings(contextSettings);
         setGroups(
           contextGroups.filter(({ systemKind }) => systemKind !== "TRASH")
@@ -143,6 +150,48 @@ export function TrackingContextSettingsPanel({
       });
     return () => controller.abort();
   }, [projectId]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      loadedProject.current !== projectId ||
+      !settings?.access.canConfigure ||
+      materializedProject.current === projectId
+    ) return;
+    materializedProject.current = projectId;
+    const controller = new AbortController();
+    setRecalculating(true);
+    void materializeTrackingContexts(
+      projectId,
+      settings.contexts,
+      controller.signal
+    )
+      .then((contexts) => {
+        if (controller.signal.aborted) return;
+        const byId = new Map(contexts.map((context) => [context.id, context]));
+        setSettings((current) => current ? {
+          ...current,
+          contexts: current.contexts.map((context) =>
+            byId.get(context.id) ?? context
+          )
+        } : current);
+        announceTrackingContextsChanged();
+      })
+      .catch((requestError: unknown) => {
+        if (!controller.signal.aborted) {
+          materializedProject.current = "";
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : "Не удалось пересчитать запросы контекстов."
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRecalculating(false);
+      });
+    return () => controller.abort();
+  }, [loading, projectId, settings?.access.canConfigure, settings?.contexts]);
 
   function choose(context: TrackingContextSummary): void {
     const nextDraft = trackingContextDraft(context);
@@ -189,7 +238,7 @@ export function TrackingContextSettingsPanel({
   }
 
   async function save(): Promise<void> {
-    if (saving || !settings?.access.canConfigure) return;
+    if (saving || recalculating || !settings?.access.canConfigure) return;
     if (!draft.name.trim()) {
       setError("Введите название контекста.");
       return;
@@ -219,7 +268,7 @@ export function TrackingContextSettingsPanel({
     try {
       const saved: TrackingContextSummary[] = [];
       for (const [index, targetDraft] of targetDrafts.entries()) {
-        const context = selected && index === 0
+        const savedContext = selected && index === 0
           ? await browserApiRequest<TrackingContextSummary>(
               trackingContextApiPath(projectId, selected.id),
               {
@@ -236,6 +285,15 @@ export function TrackingContextSettingsPanel({
                 body: trackingContextCreateInput(targetDraft)
               }
             );
+        const materialized = await materializeTrackingContext(
+          projectId,
+          savedContext
+        );
+        const context = {
+          ...savedContext,
+          assignedKeywordCount: materialized.assignedKeywordCount,
+          version: materialized.version
+        };
         saved.push(context);
         setSettings((current) =>
           current ? withTrackingContext(current, context) : current
@@ -266,7 +324,7 @@ export function TrackingContextSettingsPanel({
   }
 
   async function deleteContext(): Promise<void> {
-    if (!selected || saving || !settings?.access.canConfigure) return;
+    if (!selected || saving || recalculating || !settings?.access.canConfigure) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -376,6 +434,7 @@ export function TrackingContextSettingsPanel({
           <div>
             <span><UiText text="Профили запуска" /></span>
             <h2><UiText text="Контексты" /></h2>
+            {recalculating && <small role="status"><UiText text="Пересчитываем запросы…" /></small>}
           </div>
           <button aria-label={uiText("Создать контекст")} onClick={startNew} type="button">
             <Icon name="plus" />
@@ -510,7 +569,7 @@ export function TrackingContextSettingsPanel({
           {selected && (
             <button
               className="secondary-button danger-button"
-              disabled={saving || !settings?.access.canConfigure}
+              disabled={saving || recalculating || !settings?.access.canConfigure}
               onClick={() => {
                 setError(undefined);
                 setDeleteConfirmationOpen(true);
@@ -522,7 +581,7 @@ export function TrackingContextSettingsPanel({
           )}
           <button
             className="primary-button"
-            disabled={saving || !settings?.access.canConfigure}
+            disabled={saving || recalculating || !settings?.access.canConfigure}
             onClick={() => void save()}
             type="button"
           >
@@ -823,4 +882,46 @@ function trackingContextTarget(draft: TrackingContextDraft): RankTarget {
     regionLabel: draft.regionLabel,
     device: draft.device
   };
+}
+
+async function materializeTrackingContext(
+  projectId: string,
+  context: TrackingContextSummary,
+  signal?: AbortSignal
+): Promise<TrackingContextKeywordReplacementResult> {
+  return browserApiRequest<TrackingContextKeywordReplacementResult>(
+    `${trackingContextApiPath(projectId, context.id)}/materialize`,
+    {
+      method: "POST",
+      body: {},
+      ...(signal ? { signal } : {})
+    }
+  );
+}
+
+async function materializeTrackingContexts(
+  projectId: string,
+  contexts: readonly TrackingContextSummary[],
+  signal: AbortSignal
+): Promise<readonly TrackingContextSummary[]> {
+  const refreshed: TrackingContextSummary[] = [];
+  for (let offset = 0; offset < contexts.length; offset += 4) {
+    const chunk = contexts.slice(offset, offset + 4);
+    const results = await Promise.all(
+      chunk.map(async (context) => {
+        const result = await materializeTrackingContext(
+          projectId,
+          context,
+          signal
+        );
+        return {
+          ...context,
+          assignedKeywordCount: result.assignedKeywordCount,
+          version: result.version
+        };
+      })
+    );
+    refreshed.push(...results);
+  }
+  return refreshed;
 }

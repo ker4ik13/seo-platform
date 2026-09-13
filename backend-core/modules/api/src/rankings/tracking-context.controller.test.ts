@@ -117,6 +117,7 @@ test("declares ranking read and configure permission boundaries", () => {
     prototype.archive,
     prototype.restore,
     prototype.replaceKeywords,
+    prototype.materialize,
     prototype.assignKeyword,
     prototype.removeKeyword
   ]) {
@@ -139,6 +140,10 @@ test("declares ranking read and configure permission boundaries", () => {
   );
   assert.equal(
     Reflect.getMetadata(HTTP_CODE_METADATA, prototype.restore),
+    200
+  );
+  assert.equal(
+    Reflect.getMetadata(HTTP_CODE_METADATA, prototype.materialize),
     200
   );
 });
@@ -446,6 +451,50 @@ test("atomically replaces keyword assignments with CAS, idempotency and one audi
         contextId
       ],
       ["ranking.tracking_context.keywords_replaced", contextId]
+    ]
+  );
+});
+
+test("materializes the current saved scope without trusting browser keyword ids", async () => {
+  const calls: unknown[][] = [];
+  const records: AuditRecord[] = [];
+  const controller = controllerWith(
+    {
+      materializeTrackingContext: async (...args: unknown[]) => {
+        calls.push(args);
+        return {
+          contextId,
+          assignedKeywordCount: 17,
+          addedKeywordCount: 2,
+          removedKeywordCount: 1,
+          unchangedKeywordCount: 15,
+          keywordSetHash: { algorithm: "SHA_256", value: "b".repeat(64) },
+          version: 4,
+          changedAt: "2026-09-13T18:00:00.000Z"
+        };
+      }
+    },
+    records
+  );
+  const response = reply();
+
+  const result = await controller.materialize(
+    contextId,
+    {},
+    tenantRequest(),
+    response.value,
+    principal
+  );
+
+  assert.equal(result.data.assignedKeywordCount, 17);
+  assert.equal(response.headers.get("etag"), "\"v4\"");
+  assert.equal(calls[0]?.[1], contextId);
+  assert.deepEqual(calls[0]?.[2], entitlement);
+  assert.deepEqual(
+    records.map(({ action }) => action),
+    [
+      "ranking.tracking_context.materialize_requested",
+      "ranking.tracking_context.materialized"
     ]
   );
 });

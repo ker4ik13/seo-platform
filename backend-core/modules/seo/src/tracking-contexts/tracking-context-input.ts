@@ -11,6 +11,7 @@ import {
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
   type InternalCreateTrackingContextInput,
+  type InternalMaterializeTrackingContextInput,
   type InternalReplaceTrackingContextKeywordsInput,
   type InternalUpdateTrackingContextInput,
   type TrackingContextConfigurationInput,
@@ -218,6 +219,26 @@ export function internalReplaceTrackingContextKeywordsInput(
     version: positiveInteger(input.version, "version"),
     idempotencyKey: idempotencyKey(input.idempotencyKey),
     keywordIds,
+    entitlement: semanticCapacityEntitlement(input.entitlement)
+  };
+}
+
+export function internalMaterializeTrackingContextInput(
+  value: unknown
+): InternalMaterializeTrackingContextInput {
+  const input = strictRecord(value, [
+    "workspaceId",
+    "projectId",
+    "contextId",
+    "actorId",
+    "entitlement"
+  ]);
+  return {
+    ...scope(input),
+    contextId: internalUuid(
+      requiredString(input.contextId, "contextId"),
+      "contextId"
+    ),
     entitlement: semanticCapacityEntitlement(input.entitlement)
   };
 }
