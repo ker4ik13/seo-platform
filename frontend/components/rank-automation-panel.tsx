@@ -19,6 +19,9 @@ import {
   trackingContextsChangedEvent
 } from "../lib/tracking-contexts";
 import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
+import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticModal } from "./semantic-modal";
 import styles from "./rank-automation-panel.module.css";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -49,6 +52,8 @@ export function RankAutomationPanel({
   const [draft, setDraft] = useState<Draft>(() => newDraft());
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [automationToDelete, setAutomationToDelete] =
+    useState<RankTrackingAutomationSummary>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [browserTimezone, setBrowserTimezone] = useState("");
@@ -219,6 +224,43 @@ export function RankAutomationPanel({
     }
   }
 
+  async function removeAutomation(): Promise<void> {
+    if (!automationToDelete || busy || !settings?.access.canManage) return;
+    setBusy(true);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      await browserApiRequest(
+        `${path}/${encodeURIComponent(automationToDelete.id)}`,
+        {
+          method: "DELETE",
+          body: {},
+          ifMatch: automationToDelete.version
+        }
+      );
+      setSettings((current) => current ? {
+        ...current,
+        automations: current.automations.filter(
+          ({ id }) => id !== automationToDelete.id
+        ),
+        enabledCount: Math.max(
+          0,
+          current.enabledCount - (automationToDelete.enabled ? 1 : 0)
+        )
+      } : current);
+      if (editingId === automationToDelete.id) {
+        setEditingId(undefined);
+        setDraft(newDraft(activeContexts[0]?.id, defaultRunAt()));
+      }
+      setAutomationToDelete(undefined);
+      setNotice(uiText("Регулярный съём удалён."));
+    } catch (caught) {
+      setError(message(caught, uiText("Не удалось удалить регулярный съём.")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function edit(automation: RankTrackingAutomationSummary): void {
     const schedule = automation.schedule;
     setEditingId(automation.id);
@@ -251,6 +293,7 @@ export function RankAutomationPanel({
   }
 
   return (
+    <>
     <section className={`${styles.panel} panel`}>
       <header className={styles.header}>
         <div>
@@ -296,7 +339,15 @@ export function RankAutomationPanel({
               value={draft.trackingContextId}
             >
               {activeContexts.map((context) => (
-                <option key={context.id} value={context.id}>{trackingContextDisplayName(context)}</option>
+                <option key={context.id} value={context.id}>
+                  <span className="semantic-context-option">
+                    <SearchEngineLogo engine={context.configuration.searchEngine} size="compact" />
+                    <span>
+                      <strong>{trackingContextDisplayName(context)}</strong>
+                      <small>{context.assignedKeywordCount} <UiText text="запросов" before=" " /></small>
+                    </span>
+                  </span>
+                </option>
               ))}
             </CustomSelect>
           </label>
@@ -458,6 +509,18 @@ export function RankAutomationPanel({
                       : <UiText text="На паузе" />}
                 </span>
               </div>
+              {(() => {
+                const context = activeContexts.find(
+                  ({ id }) => id === automation.trackingContextId
+                );
+                return context ? (
+                  <div className={styles.contextBadge}>
+                    <SearchEngineLogo engine={context.configuration.searchEngine} size="compact" />
+                    <span>{trackingContextDisplayName(context)}</span>
+                    <small>{context.assignedKeywordCount} <UiText text="запросов" before=" " /></small>
+                  </div>
+                ) : null;
+              })()}
               <p>
                 {automation.nextRunAt
                   ? <UiText text="Следующий запуск: {0}" values={[String(dateLabel(automation.nextRunAt, uiLocale))]} />
@@ -494,6 +557,15 @@ export function RankAutomationPanel({
                     {automation.enabled ? <UiText text="Пауза" /> : <UiText text="Возобновить" />}
                   </button>
                 )}
+                <button
+                  className={`${styles.deleteAction} text-button`}
+                  disabled={busy || !settings.access.canManage}
+                  onClick={() => setAutomationToDelete(automation)}
+                  type="button"
+                >
+                  <Icon name="trash" />
+                  <UiText text="Удалить" />
+                </button>
               </div>
             </article>
           ))}
@@ -502,6 +574,41 @@ export function RankAutomationPanel({
         !loading && <p className={styles.empty}><UiText text="Расписаний пока нет." /></p>
       )}
     </section>
+    {automationToDelete && (
+      <SemanticModal
+        description={uiText("Расписание «{0}» больше не будет запускаться.", [automationToDelete.name])}
+        footer={
+          <>
+            <button
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => setAutomationToDelete(undefined)}
+              type="button"
+            >
+              <UiText text="Отмена" />
+            </button>
+            <button
+              className="danger-button"
+              disabled={busy}
+              onClick={() => void removeAutomation()}
+              type="button"
+            >
+              {busy ? <UiText text="Удаляем…" /> : <UiText text="Удалить регулярный съём" />}
+            </button>
+          </>
+        }
+        onClose={() => {
+          if (!busy) setAutomationToDelete(undefined);
+        }}
+        size="small"
+        title={uiText("Удалить регулярный съём?")}
+      >
+        <div className="inline-alert info">
+          <UiText text="Уже выполненные операции и результаты останутся в истории." />
+        </div>
+      </SemanticModal>
+    )}
+    </>
   );
 }
 

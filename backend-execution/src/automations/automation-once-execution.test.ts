@@ -110,6 +110,7 @@ function oneTimeAutomation(): Automation {
     createdBy: actorId,
     updatedBy: actorId,
     idempotencyKey: "once-automation-test-001",
+    deletedAt: null,
     version: 1,
     createdAt: new Date("2026-09-01T10:00:00.000Z"),
     updatedAt: new Date("2026-09-01T10:00:00.000Z")

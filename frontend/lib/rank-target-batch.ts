@@ -18,6 +18,9 @@ export interface RankTargetBatchInput {
   readonly yandexLiveTurbo: boolean;
   /** Saved profiles may be reused only after the user explicitly selects one. */
   readonly saveContexts?: boolean;
+  /** A new named profile must never attach to an older matching profile. */
+  readonly forceCreateContexts?: boolean;
+  readonly contextName?: string;
   readonly locale?: "ru" | "en";
 }
 export interface RankTargetBatchEntry {
@@ -43,7 +46,23 @@ export function rankTargetBatchSignature(input: RankTargetBatchInput): string {
   return JSON.stringify({ ...input, source: { id: input.source.id, mode: input.source.mode, provider: input.source.provider }, keywordIds: [...input.keywordIds].sort(), targets: uniqueRankTargets(input.targets) });
 }
 export function createRankTargetBatch(input: RankTargetBatchInput): RankTargetBatch {
-  return { signature: rankTargetBatchSignature(input), input, preparing: true, entries: uniqueRankTargets(input.targets).map(target => ({ draft: rankTargetDraft(input.base, target, input.competitorMode, input.locale), createKey: `semantic-tracking-context:${crypto.randomUUID()}`, assignmentKey: `semantic-tracking-scope:${crypto.randomUUID()}` })) };
+  const targets = uniqueRankTargets(input.targets);
+  return { signature: rankTargetBatchSignature(input), input, preparing: true, entries: targets.map(target => {
+    const targetDraft = rankTargetDraft(input.base, target, input.competitorMode, input.locale);
+    const contextName = input.contextName?.trim();
+    return {
+      draft: contextName
+        ? {
+            ...targetDraft,
+            name: targets.length === 1
+              ? contextName
+              : `${contextName} · ${targetDraft.name}`.slice(0, 160)
+          }
+        : targetDraft,
+      createKey: `semantic-tracking-context:${crypto.randomUUID()}`,
+      assignmentKey: `semantic-tracking-scope:${crypto.randomUUID()}`
+    };
+  }) };
 }
 export function rankTargetBatchCharge(batch: RankTargetBatch): string {
   return batch.entries.filter(entry => !entry.job).reduce((total, entry) => total + BigInt(entry.estimate?.platformChargeMicro ?? "0"), 0n).toString();
@@ -66,7 +85,7 @@ export async function prepareRankTargetBatch(batch: RankTargetBatch, settings: T
         const validation = Object.values(validateTrackingContextDraft(entry.draft))[0];
         if (validation) throw new Error(validation);
         if (!entry.context) {
-          const match = input.saveContexts
+          const match = input.saveContexts && !input.forceCreateContexts
             ? settings.contexts.find(context => context.status === "ACTIVE" && trackingContextMatchesDraft(context, entry.draft))
             : undefined;
           if (!match && !settings.access.canConfigure) throw new Error("Нет права создавать профили съёма.");

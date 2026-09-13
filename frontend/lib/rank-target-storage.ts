@@ -28,6 +28,10 @@ export function readRankTargetBatch(storage: StoragePort, workspaceId: string, p
       input.keywordIds.some(id => !uuid(id)) || new Set(input.keywordIds).size !== input.keywordIds.length ||
       !Number.isSafeInteger(input.selectedKeywordCount) || input.selectedKeywordCount < 1 || input.selectedKeywordCount > input.keywordIds.length ||
       !["ARSENKIN", "XMLSTOCK"].includes(input.source.provider) || typeof input.source.id !== "string" ||
+      (input.saveContexts !== undefined && typeof input.saveContexts !== "boolean") ||
+      (input.forceCreateContexts !== undefined && typeof input.forceCreateContexts !== "boolean") ||
+      (input.contextName !== undefined && (typeof input.contextName !== "string" || !input.contextName.trim() || input.contextName.length > 160)) ||
+      (input.forceCreateContexts === true && (input.saveContexts !== true || !input.contextName)) ||
       !Array.isArray(batch.entries) || batch.entries.length !== uniqueRankTargets(input.targets).length ||
       batch.signature !== rankTargetBatchSignature(input)) return undefined;
     const targets = uniqueRankTargets(input.targets);

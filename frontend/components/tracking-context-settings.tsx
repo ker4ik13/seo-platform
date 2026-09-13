@@ -10,6 +10,12 @@ import {
   type TrackingContextSummary
 } from "@seo-platform/contracts";
 import { browserApiRequest } from "../lib/browser-api";
+import { defaultSemanticSearchRegions } from "../lib/semantic-region-preference";
+import {
+  rankTargetDraft,
+  uniqueRankTargets,
+  type RankTarget
+} from "../lib/rank-targets";
 import {
   announceTrackingContextsChanged,
   defaultTrackingContextSettingsDraft,
@@ -24,8 +30,8 @@ import {
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticRankTargets } from "./semantic-rank-targets";
 import { SemanticRankContext } from "./semantic-rank-context";
-import { SearchableRegionSelect } from "./searchable-region-select";
 import { SemanticModal } from "./semantic-modal";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -42,7 +48,7 @@ interface ContextGroup {
 export function TrackingContextSettingsPanel({
   projectId
 }: Readonly<{ projectId: string }>) {
-  const { t: uiText } = useUiLocale();
+  const { t: uiText, locale: uiLocale } = useUiLocale();
   const [settings, setSettings] = useState<TrackingContextSettings>();
   const [rankMergeSettings, setRankMergeSettings] =
     useState<RankDimensionMergeSettings>();
@@ -52,6 +58,9 @@ export function TrackingContextSettingsPanel({
   const [groups, setGroups] = useState<readonly ContextGroup[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState(defaultTrackingContextSettingsDraft);
+  const [targets, setTargets] = useState<readonly RankTarget[]>(() => [
+    trackingContextTarget(defaultTrackingContextSettingsDraft())
+  ]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
@@ -117,6 +126,7 @@ export function TrackingContextSettingsPanel({
         if (first) {
           setSelectedId(first.id);
           setDraft(trackingContextDraft(first));
+          setTargets([trackingContextTarget(trackingContextDraft(first))]);
         }
       })
       .catch((requestError: unknown) => {
@@ -135,25 +145,70 @@ export function TrackingContextSettingsPanel({
   }, [projectId]);
 
   function choose(context: TrackingContextSummary): void {
+    const nextDraft = trackingContextDraft(context);
     setSelectedId(context.id);
-    setDraft(trackingContextDraft(context));
+    setDraft(nextDraft);
+    setTargets([trackingContextTarget(nextDraft)]);
     setDeleteConfirmationOpen(false);
     setError(undefined);
     setNotice(undefined);
   }
 
   function startNew(): void {
+    const nextDraft = defaultTrackingContextSettingsDraft();
     setSelectedId("");
-    setDraft(defaultTrackingContextSettingsDraft());
+    setDraft(nextDraft);
+    setTargets([trackingContextTarget(nextDraft)]);
     setDeleteConfirmationOpen(false);
     setError(undefined);
     setNotice(undefined);
   }
 
+  function changeTargets(nextTargets: readonly RankTarget[]): void {
+    const normalized = uniqueRankTargets(nextTargets);
+    const first = normalized[0]!;
+    setTargets(normalized);
+    setDraft((current) => ({ ...current, ...first }));
+  }
+
+  function changeSearchEngine(searchEngine: "YANDEX" | "GOOGLE"): void {
+    const region = defaultSemanticSearchRegions()[searchEngine];
+    const device = targets[0]?.device ?? "DESKTOP";
+    const nextTarget = {
+      regionCode: region.code,
+      regionLabel: region.label,
+      device
+    } satisfies RankTarget;
+    setTargets([nextTarget]);
+    setDraft((current) => ({
+      ...current,
+      ...nextTarget,
+      searchEngine,
+      searchSource: searchEngine === "GOOGLE" ? "LIVE" : current.searchSource
+    }));
+  }
+
   async function save(): Promise<void> {
     if (saving || !settings?.access.canConfigure) return;
-    const validation = validateTrackingContextDraft(draft);
-    const firstError = Object.values(validation)[0];
+    if (!draft.name.trim()) {
+      setError("Введите название контекста.");
+      return;
+    }
+    const normalizedTargets = uniqueRankTargets(targets);
+    const targetDrafts = normalizedTargets.map((target, index) => {
+      const targetDraft = rankTargetDraft(draft, target, false, uiLocale);
+      return {
+        ...targetDraft,
+        name:
+          normalizedTargets.length === 1 || (selected && index === 0)
+            ? draft.name
+            : `${draft.name.trim()} · ${targetDraft.name}`.slice(0, 160)
+      };
+    });
+    const firstError = targetDrafts
+      .flatMap((targetDraft) =>
+        Object.values(validateTrackingContextDraft(targetDraft))
+      )[0];
     if (firstError) {
       setError(firstError);
       return;
@@ -162,29 +217,42 @@ export function TrackingContextSettingsPanel({
     setError(undefined);
     setNotice(undefined);
     try {
-      const context = selected
-        ? await browserApiRequest<TrackingContextSummary>(
-            trackingContextApiPath(projectId, selected.id),
-            {
-              method: "PATCH",
-              ifMatch: selected.version,
-              body: trackingContextCreateInput(draft)
-            }
-          )
-        : await browserApiRequest<TrackingContextSummary>(
-            `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts`,
-            {
-              method: "POST",
-              idempotencyKey: `tracking-context-settings:${crypto.randomUUID()}`,
-              body: trackingContextCreateInput(draft)
-            }
-          );
-      setSettings((current) =>
-        current ? withTrackingContext(current, context) : current
-      );
-      setSelectedId(context.id);
-      setDraft(trackingContextDraft(context));
-      setNotice(selected ? "Контекст обновлён." : "Контекст создан.");
+      const saved: TrackingContextSummary[] = [];
+      for (const [index, targetDraft] of targetDrafts.entries()) {
+        const context = selected && index === 0
+          ? await browserApiRequest<TrackingContextSummary>(
+              trackingContextApiPath(projectId, selected.id),
+              {
+                method: "PATCH",
+                ifMatch: selected.version,
+                body: trackingContextCreateInput(targetDraft)
+              }
+            )
+          : await browserApiRequest<TrackingContextSummary>(
+              `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts`,
+              {
+                method: "POST",
+                idempotencyKey: `tracking-context-settings:${crypto.randomUUID()}`,
+                body: trackingContextCreateInput(targetDraft)
+              }
+            );
+        saved.push(context);
+        setSettings((current) =>
+          current ? withTrackingContext(current, context) : current
+        );
+      }
+      const primary = saved[0]!;
+      const primaryDraft = trackingContextDraft(primary);
+      setSelectedId(primary.id);
+      setDraft(primaryDraft);
+      setTargets([trackingContextTarget(primaryDraft)]);
+      setNotice(selected
+        ? targetDrafts.length === 1
+          ? "Контекст обновлён."
+          : uiText("Контекст обновлён и создано дополнительных профилей: {0}.", [String(targetDrafts.length - 1)])
+        : targetDrafts.length === 1
+          ? "Контекст создан."
+          : uiText("Создано профилей: {0}.", [String(targetDrafts.length)]));
       announceTrackingContextsChanged();
     } catch (requestError) {
       setError(
@@ -210,7 +278,11 @@ export function TrackingContextSettingsPanel({
       const next = remaining[0];
       setSettings({ ...settings, contexts: remaining });
       setSelectedId(next?.id ?? "");
-      setDraft(next ? trackingContextDraft(next) : defaultTrackingContextSettingsDraft());
+      const nextDraft = next
+        ? trackingContextDraft(next)
+        : defaultTrackingContextSettingsDraft();
+      setDraft(nextDraft);
+      setTargets([trackingContextTarget(nextDraft)]);
       setNotice("Контекст удалён из профилей запуска. История и результаты сохранены.");
       announceTrackingContextsChanged();
       setDeleteConfirmationOpen(false);
@@ -352,23 +424,23 @@ export function TrackingContextSettingsPanel({
               value={draft.name}
             />
           </label>
-          <label>
-            <span><UiText text="Поисковая система" /></span>
-            <CustomSelect
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  searchEngine: event.target.value as "YANDEX" | "GOOGLE",
-                  searchSource:
-                    event.target.value === "GOOGLE" ? "LIVE" : draft.searchSource
-                })
-              }
-              value={draft.searchEngine}
-            >
-              <option value="YANDEX"><UiText text="Яндекс" /></option>
-              <option value="GOOGLE">Google</option>
-            </CustomSelect>
-          </label>
+          <fieldset className="tracking-context-engine-field">
+            <legend><UiText text="Поисковая система" /></legend>
+            <div className="tracking-context-engine-options">
+              {(["YANDEX", "GOOGLE"] as const).map((engine) => (
+                <button
+                  aria-pressed={draft.searchEngine === engine}
+                  className={draft.searchEngine === engine ? "selected" : undefined}
+                  key={engine}
+                  onClick={() => changeSearchEngine(engine)}
+                  type="button"
+                >
+                  <SearchEngineLogo engine={engine} size="compact" />
+                  <span>{engine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
           <label>
             <span><UiText text="Источник выдачи" /></span>
             <CustomSelect
@@ -388,33 +460,14 @@ export function TrackingContextSettingsPanel({
               </option>
             </CustomSelect>
           </label>
-          <label className="field-span-2">
-            <span><UiText text="Регион" /></span>
-            <SearchableRegionSelect
-              kind={draft.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
-              onChange={({ code, label }) =>
-                setDraft({ ...draft, regionCode: code, regionLabel: label })
-              }
-              value={draft.regionCode}
-              valueLabel={draft.regionLabel}
+          <div className="field-span-2 tracking-context-targets-field">
+            <SemanticRankTargets
+              engine={draft.searchEngine}
+              onChange={changeTargets}
+              targets={targets}
             />
-          </label>
-          <fieldset>
-            <legend><UiText text="Устройство" /></legend>
-            <div className="tracking-context-segments">
-              {(["DESKTOP", "MOBILE"] as const).map((device) => (
-                <button
-                  className={draft.device === device ? "selected" : undefined}
-                  key={device}
-                  onClick={() => setDraft({ ...draft, device })}
-                  type="button"
-                >
-                  {device === "DESKTOP" ? <UiText text="Десктоп" /> : <UiText text="Мобильное" />}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-          <fieldset>
+          </div>
+          <fieldset className="field-span-2 tracking-context-depth-field">
             <legend><UiText text="Глубина" /></legend>
             <div className="tracking-context-segments">
               {([30, 50, 100] as const).map((depth) => (
@@ -762,4 +815,12 @@ function compatibleRankDimensions(
     source.countryCode === target.countryCode &&
     source.language === target.language &&
     source.device === target.device;
+}
+
+function trackingContextTarget(draft: TrackingContextDraft): RankTarget {
+  return {
+    regionCode: draft.regionCode,
+    regionLabel: draft.regionLabel,
+    device: draft.device
+  };
 }

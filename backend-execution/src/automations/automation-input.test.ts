@@ -3,6 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
   internalCreateAutomationInput,
+  internalDeleteAutomationInput,
   internalRunAutomationInput
 } from "./automation-input.js";
 
@@ -121,6 +122,21 @@ test("parses an idempotent manual run command", () => {
         ...value,
         idempotencyKey: "short"
       }),
+    BadRequestException
+  );
+});
+
+test("deletion accepts only tenant identity and the expected version", () => {
+  const value = {
+    workspaceId,
+    projectId,
+    actorId,
+    automationId,
+    expectedVersion: 4
+  };
+  assert.deepEqual(internalDeleteAutomationInput(value), value);
+  assert.throws(
+    () => internalDeleteAutomationInput({ ...value, billingCurrency: "RUB" }),
     BadRequestException
   );
 });

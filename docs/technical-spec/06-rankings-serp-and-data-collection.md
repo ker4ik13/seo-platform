@@ -76,6 +76,9 @@ Turbo для XMLStock Яндекс Live является launch-only execution o
 Экран позволяет:
 
 - создать контекст;
+- за одно сохранение создать отдельные профили для нескольких сочетаний
+  города и устройства тем же bounded target selector, что используется в
+  ручном мастере;
 - выбрать запросы по view/group/tag/filter;
 - сохранить в launch profile выбор `includeUntracked`;
 - включить/исключить SERP features;
@@ -99,6 +102,9 @@ scheduled/manual run Jobs вызывает закрытый Core dispatch, а Co
 price book. Fresh estimate переходит в обычный RankRun reservation/settlement
 только когда точная цена не превышает cap; старые definitions нормализуются в
 BYOK-only и не получают неявного права списывать внутренние токены.
+Удаление расписания является soft-delete: scheduler снимается, запись
+исключается из каталога и лимита активных расписаний, а связанные
+`automation_runs`, Jobs, биллинг и результаты остаются в истории.
 
 Изменение контекста не переписывает историю. Любое изменение поисковой
 конфигурации создаёт новую immutable configuration version; rename,

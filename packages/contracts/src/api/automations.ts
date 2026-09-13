@@ -91,6 +91,14 @@ export interface InternalAutomationStatusInput {
   readonly jobCapacity: JobCapacityEntitlement;
 }
 
+export interface InternalDeleteRankTrackingAutomationInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly automationId: string;
+  readonly expectedVersion: number;
+}
+
 export interface InternalRunRankTrackingAutomationInput {
   readonly workspaceId: string;
   readonly projectId: string;

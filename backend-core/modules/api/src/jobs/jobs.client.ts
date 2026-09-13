@@ -70,6 +70,7 @@ import type {
   InternalAutomationStatusInput,
   InternalCreateRankTrackingAutomationInput,
   InternalDeleteIntegrationCredentialInput,
+  InternalDeleteRankTrackingAutomationInput,
   InternalUpdateProjectConnectorBindingInput,
   InternalUpdateIntegrationCredentialInput,
   InternalUpdateRankTrackingAutomationInput,
@@ -1140,6 +1141,29 @@ export class JobsClient {
         projectId,
         input.automationId
       )}/${action}`,
+      context,
+      input
+    );
+    return scopedAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
+  }
+
+  public async deleteAutomation(
+    context: InternalContext,
+    input: InternalDeleteRankTrackingAutomationInput
+  ): Promise<RankTrackingAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "DELETE",
+      automationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      ),
       context,
       input
     );

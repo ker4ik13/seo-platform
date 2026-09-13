@@ -136,6 +136,39 @@ test("prepares every city/device estimate before sending the first paid run", as
   assert.ok(events.indexOf("run") > events.lastIndexOf("estimate"));
 });
 
+test("a named multi-target profile creates distinct readable context names", () => {
+  const batch = createRankTargetBatch({
+    workspaceId,
+    projectId,
+    base: {
+      ...defaultTrackingContextSettingsDraft(),
+      name: "Основной мониторинг",
+      scopeMode: "ALL"
+    },
+    targets: [
+      { regionCode: "213", regionLabel: "Москва", device: "DESKTOP" },
+      { regionCode: "2", regionLabel: "Санкт-Петербург", device: "MOBILE" }
+    ],
+    keywordIds,
+    selectedKeywordCount: keywordIds.length,
+    source: credential(),
+    competitorMode: false,
+    saveProjectPosition: false,
+    yandexLiveTurbo: false,
+    saveContexts: true,
+    forceCreateContexts: true,
+    contextName: "Основной мониторинг"
+  });
+
+  assert.deepEqual(
+    batch.entries.map(({ draft }) => draft.name),
+    [
+      "Основной мониторинг · Москва · Десктоп",
+      "Основной мониторинг · Санкт-Петербург · Мобильное"
+    ]
+  );
+});
+
 function credential(): ProjectConnectorCredentialOption {
   return {
     id: "01900000-0000-7000-8000-000000000004",

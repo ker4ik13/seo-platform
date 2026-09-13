@@ -1,5 +1,5 @@
 .panel {
-  padding: 24px;
+  padding: 16px;
 }
 
 .header,
@@ -19,14 +19,14 @@
 
 .header > div > span {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
 
 .header h2 {
-  font-size: 22px;
+  font-size: 18px;
   letter-spacing: -.025em;
   line-height: 1.2;
   margin: 4px 0 0;
@@ -42,9 +42,9 @@
 }
 
 .header p {
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1.55;
-  margin: 7px 0 0;
+  margin: 4px 0 0;
   max-width: 720px;
 }
 
@@ -52,9 +52,9 @@
 .active,
 .inactive {
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 6px 10px;
+  padding: 4px 8px;
   white-space: nowrap;
 }
 
@@ -71,20 +71,20 @@
 
 .form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 16px;
-  margin-top: 24px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .form > label:not(.enabled) {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
 }
 
 .form > label > span,
 .weekdays legend {
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -94,10 +94,10 @@
   border-radius: 10px;
   color: var(--text);
   font: inherit;
-  font-size: 14px;
-  min-height: 46px;
+  font-size: 12px;
+  min-height: 38px;
   outline: 0;
-  padding: 0 13px;
+  padding: 0 10px;
   width: 100%;
 }
 
@@ -107,23 +107,26 @@
 }
 
 .form :global(.custom-select-trigger) {
-  border-radius: 10px;
-  font-size: 14px;
-  min-height: 46px;
-  padding-inline: 13px;
+  border-radius: 8px;
+  font-size: 12px;
+  min-height: 38px;
+  padding-inline: 10px;
 }
 
 .form small {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.45;
 }
 
-.wide,
 .weekdays,
-.enabled,
 .formActions {
   grid-column: 1 / -1;
+}
+
+.wide,
+.enabled {
+  grid-column: span 2;
 }
 
 .weekdays {
@@ -146,10 +149,10 @@
   border: 1px solid var(--border-color, #e7e7ef);
   border-radius: 9px;
   display: flex;
-  font-size: 13px;
+  font-size: 11px;
   gap: 7px;
-  min-height: 38px;
-  padding: 7px 10px;
+  min-height: 32px;
+  padding: 5px 8px;
 }
 
 .enabled {
@@ -160,8 +163,8 @@
   cursor: pointer;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
-  min-height: 72px;
-  padding: 14px;
+  min-height: 54px;
+  padding: 10px;
 }
 
 .enabled:has(input:checked) {
@@ -181,7 +184,7 @@
 }
 
 .enabled strong {
-  font-size: 14px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -196,23 +199,24 @@
 
 .formActions :global(.primary-button),
 .formActions :global(.secondary-button) {
-  font-size: 14px;
-  min-height: 44px;
-  padding-inline: 17px;
+  font-size: 11px;
+  min-height: 36px;
+  padding-inline: 13px;
 }
 
 .list {
   border-top: 1px solid var(--border-color, #e7e7ef);
   display: grid;
-  gap: 10px;
-  margin-top: 24px;
-  padding-top: 20px;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+  padding-top: 14px;
 }
 
 .list article {
   border: 1px solid var(--border-color, #e7e7ef);
   border-radius: 12px;
-  padding: 15px;
+  padding: 11px;
 }
 
 .itemHead > div {
@@ -221,18 +225,61 @@
 }
 
 .list article > p {
-  margin: 9px 0 11px;
+  font-size: 10px;
+  margin: 7px 0 8px;
 }
+
+.contextBadge {
+  align-items: center;
+  background: #f7f6ff;
+  border: 1px solid #e3dfff;
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  margin-top: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.contextBadge > span {
+  font-size: 10px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextBadge > small { font-size: 9px; white-space: nowrap; }
+
+.deleteAction { color: #d6404d !important; margin-left: auto; }
+.deleteAction svg { height: 12px; width: 12px; }
 
 .empty {
   font-size: 14px;
   margin: 20px 0 0;
 }
 
+@media (max-width: 1180px) {
+  .form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wide,
+  .enabled { grid-column: span 1; }
+  .weekdays,
+  .formActions { grid-column: 1 / -1; }
+  .list { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 760px) {
   .form {
     grid-template-columns: 1fr;
   }
+
+  .wide,
+  .enabled,
+  .weekdays,
+  .formActions { grid-column: auto; }
+
+  .list { grid-template-columns: 1fr; }
 
   .header,
   .itemHead {

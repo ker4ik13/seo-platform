@@ -1123,10 +1123,13 @@ function Automations({ baseUrl }: Readonly<{ baseUrl: string }>) {
         <p>
           <UiText text="В WEEKLY дни недели нумеруются по ISO: 1 — понедельник, 7 — воскресенье. ONCE выполняется один раз и после завершения остаётся в истории. Лимита ключей в расписании нет: каждый запуск обрабатывает весь текущий список запросов выбранного контекста." /></p>
       </Section>
-      <Section title={uiText("Пауза, запуск и изменение")}>
+      <Section title={uiText("Пауза, запуск, изменение и удаление")}>
         <p>
           <UiText text="PATCH, pause, resume и ручной POST" after=" " /><code>/automations/{`{automationId}`}/runs</code>
           <UiText text="требуют актуальный" after=" " /><code>If-Match</code><UiText text=". Ручной запуск также требует новый Idempotency-Key. Пустое тело передавайте как" after=" " /><code>{`{}`}</code>.
+        </p>
+        <p>
+          <UiText text="DELETE /automations/{automationId} также требует If-Match и пустое тело. Расписание исчезает из активного каталога и больше не запускается; выполненные операции и результаты сохраняются." />
         </p>
       </Section>
     </article>

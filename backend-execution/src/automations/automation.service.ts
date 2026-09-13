@@ -10,6 +10,7 @@ import type {
   AutomationCapacityEntitlement,
   InternalAutomationStatusInput,
   InternalCreateRankTrackingAutomationInput,
+  InternalDeleteRankTrackingAutomationInput,
   InternalUpdateRankTrackingAutomationInput,
   RankTrackingAutomationCollection,
   RankTrackingAutomationSummary
@@ -105,12 +106,12 @@ export class AutomationService {
   ): Promise<RankTrackingAutomationCollection> {
     const [automations, rankEnabled, crawlEnabled] = await Promise.all([
       this.prisma.automation.findMany({
-        where: { workspaceId, projectId },
+        where: { workspaceId, projectId, deletedAt: null },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: AUTOMATION_LIST_LIMIT + 1
       }),
       this.prisma.automation.count({
-        where: { workspaceId, enabled: true }
+        where: { workspaceId, enabled: true, deletedAt: null }
       }),
       this.prisma.crawlAutomation.count({
         where: { workspaceId, enabled: true }
@@ -254,6 +255,35 @@ export class AutomationService {
     return this.syncAfterCommit(automation);
   }
 
+  public async remove(
+    input: InternalDeleteRankTrackingAutomationInput
+  ): Promise<RankTrackingAutomationSummary> {
+    const automation = await this.prisma.$transaction(
+      async (transaction) => {
+        await lockAutomationCapacity(transaction, input.workspaceId);
+        const current = await requiredAutomation(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.automationId
+        );
+        assertVersion(current, input.expectedVersion);
+        return transaction.automation.update({
+          where: { id: current.id },
+          data: {
+            enabled: false,
+            pausedReason: "MANUAL",
+            nextRunAt: null,
+            deletedAt: new Date(),
+            updatedBy: input.actorId,
+            version: { increment: 1 }
+          }
+        });
+      }
+    );
+    return this.syncAfterCommit(automation);
+  }
+
   public async reconcileSchedulers(limit = 100): Promise<number> {
     const automations = await this.prisma.automation.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
@@ -378,7 +408,7 @@ async function assertAutomationCapacity(
 ): Promise<void> {
   const [rank, crawl] = await Promise.all([
     transaction.automation.count({
-      where: { workspaceId, enabled: true }
+      where: { workspaceId, enabled: true, deletedAt: null }
     }),
     transaction.crawlAutomation.count({
       where: { workspaceId, enabled: true }
@@ -413,7 +443,7 @@ async function requiredAutomation(
   automationId: string
 ): Promise<Automation> {
   const automation = await transaction.automation.findFirst({
-    where: { id: automationId, workspaceId, projectId }
+    where: { id: automationId, workspaceId, projectId, deletedAt: null }
   });
   if (!automation) throw new NotFoundException("Automation not found");
   return automation;

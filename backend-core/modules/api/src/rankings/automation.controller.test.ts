@@ -109,6 +109,12 @@ test("declares exact automation permissions, guards and response codes", () => {
     TenantPermissionGuard
   ]);
   assertRoute(
+    prototype.remove,
+    "automation.manage",
+    [CsrfSessionGuard, TenantPermissionGuard],
+    204
+  );
+  assertRoute(
     prototype.run,
     "automation.enable",
     [CsrfSessionGuard, TenantPermissionGuard],
@@ -349,6 +355,48 @@ test("runs manually with a stable key and keeps requested audit fail-closed", as
     /audit unavailable/u
   );
   assert.equal(jobsCalled, false);
+});
+
+test("deletes a schedule with CAS while preserving audit history", async () => {
+  let captured: readonly unknown[] | undefined;
+  const records: AuditRecord[] = [];
+  const controller = controllerWith({
+    jobs: {
+      deleteAutomation: async (...args: unknown[]) => {
+        captured = args;
+        return { ...summary, enabled: false, version: 2 };
+      }
+    },
+    billing: {
+      automationCapacity: async () => {
+        throw new Error("delete must not require an active subscription");
+      }
+    },
+    records
+  });
+
+  await controller.remove(
+    automationId,
+    {},
+    request({ headers: { "if-match": "\"v1\"" } }),
+    principal
+  );
+
+  assert.equal(
+    (captured?.[1] as { automationId?: string })?.automationId,
+    automationId
+  );
+  assert.deepEqual(
+    Object.keys((captured?.[1] ?? {}) as Record<string, unknown>).sort(),
+    ["actorId", "automationId", "expectedVersion", "projectId", "workspaceId"]
+  );
+  assert.deepEqual(
+    records.map(({ action, outcome }) => ({ action, outcome })),
+    [
+      { action: "ranking.automation.delete_requested", outcome: "REQUESTED" },
+      { action: "ranking.automation.deleted", outcome: "SUCCESS" }
+    ]
+  );
 });
 
 test("blocks an enabled schedule before audit when execution is unavailable", async () => {

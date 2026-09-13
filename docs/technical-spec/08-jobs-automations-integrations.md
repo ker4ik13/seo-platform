@@ -521,6 +521,9 @@ Automation состоит из:
   каждый запуск берёт все актуальные ключи выбранного tracking context.
   Provider/plan capacity по-прежнему проверяется estimate-ом и исполняется
   штатными chunk/batch-механизмами без скрытого сокращения scope.
+- DELETE rank schedule требует CAS, атомарно выключает definition и ставит
+  `deleted_at`, после commit удаляет BullMQ scheduler. Исторические runs и Jobs
+  остаются связанными с soft-deleted Automation.
 - `AutomationCapacityEntitlement.scheduledAutomations` ограничивает только
   суммарное число включённых rank/crawl-расписаний workspace. Счётчик вида
   «N из M активных расписаний» не является лимитом ключей.

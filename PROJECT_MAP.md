@@ -381,6 +381,12 @@ failure-threshold остаются общей Automation-моделью, нов�
 платный Turbo только на текущий запуск. Режим не записывается в provider-neutral
 профиль: estimate фиксирует отдельный immutable mapping
 `xmlstock-yandex-live@3`, а отсутствие опции сохраняет стандартный Live.
+Редактор профилей переиспользует bounded multi-city/device selector ручного
+мастера: одно сохранение создаёт отдельный обычный tracking context для каждой
+пары «город + устройство», сохраняя прежний one-context estimate/run contract.
+Rank automations поддерживают CAS soft-delete через
+`automations.deleted_at`: удалённое расписание исключается из каталога и
+тарифного счётчика, BullMQ scheduler снимается, исторические runs/Jobs остаются.
 
 Каталог подписок v4 публикует лимиты `5/2/5k/1`, `20/10/20k/5`,
 `50/30/50k/15` и `100/100/unlimited/30` для

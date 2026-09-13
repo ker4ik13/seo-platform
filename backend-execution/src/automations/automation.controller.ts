@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -28,6 +29,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalAutomationStatusInput,
   internalCreateAutomationInput,
+  internalDeleteAutomationInput,
   internalRunAutomationInput,
   internalUpdateAutomationInput
 } from "./automation-input.js";
@@ -159,6 +161,21 @@ export class AutomationController {
     const input = internalAutomationStatusInput(body);
     assertStatusRoute(input.automationId, automationId, context, input);
     return response(request, await this.automations.resume(input));
+  }
+
+  @Delete(":automationId")
+  public async remove(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("automationId") automationId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<RankTrackingAutomationSummary>> {
+    const context = pathContext(workspaceId, projectId, headers);
+    const input = internalDeleteAutomationInput(body);
+    assertStatusRoute(input.automationId, automationId, context, input);
+    return response(request, await this.automations.remove(input));
   }
 }
 

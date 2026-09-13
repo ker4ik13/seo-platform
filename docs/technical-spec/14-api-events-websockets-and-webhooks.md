@@ -768,6 +768,7 @@ marker, preview и import state находятся в Jobs PostgreSQL.
 - `/projects/{projectId}/automations/{id}/runs`;
 - `/projects/{projectId}/automations/{id}/pause`;
 - `/projects/{projectId}/automations/{id}/resume`;
+- `DELETE /projects/{projectId}/automations/{id}`;
 
 Реализованный workspace vault использует:
 

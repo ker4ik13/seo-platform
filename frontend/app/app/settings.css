@@ -151,6 +151,10 @@
 .content.content-settings .settings-attention-row { padding: 14px 16px; }
 .content.content-settings .settings-attention-row strong { font-size: 13px; }
 .content.content-settings .settings-attention-row small { font-size: 11px; }
+.content.content-settings .ranking-contexts-settings-stack > .panel,
+.content.content-settings .tracking-context-settings > .panel {
+  padding: 16px;
+}
 
 @media (max-width: 1180px) {
   .content.content-settings:has(> .settings-tabs) { grid-template-columns: 200px minmax(0, 1fr); gap: 20px; }

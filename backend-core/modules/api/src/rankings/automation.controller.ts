@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
+  HttpStatus,
   Logger,
   Param,
   Patch,
@@ -18,6 +20,7 @@ import type {
   AutomationExecutionAccessSnapshot,
   InternalAutomationStatusInput,
   InternalCreateRankTrackingAutomationInput,
+  InternalDeleteRankTrackingAutomationInput,
   InternalRankEstimateProjectSnapshot,
   InternalRunRankTrackingAutomationInput,
   InternalUpdateRankTrackingAutomationInput,
@@ -345,6 +348,45 @@ export class AutomationController {
     );
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Delete(":automationId")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission("automation.manage")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async remove(
+    @Param("automationId") automationId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<void> {
+    assertEmptyAutomationStatusInput(body);
+    const tenant = requiredMutableProjectTenant(request);
+    const command: InternalDeleteRankTrackingAutomationInput = {
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      actorId: principal.userId,
+      automationId: assertUuid(automationId, "automationId"),
+      expectedVersion: requiredVersion(headerValue(request, "if-match"))
+    };
+    await this.recordRequested(
+      request,
+      principal.userId,
+      tenant,
+      "ranking.automation.delete_requested",
+      command.automationId
+    );
+    await this.jobs.deleteAutomation(
+      internalProjectContext(request, principal, tenant),
+      command
+    );
+    await this.recordSuccess(
+      request,
+      principal.userId,
+      tenant,
+      "ranking.automation.deleted",
+      command.automationId
+    );
   }
 
   private recordRequested(

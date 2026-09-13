@@ -108,6 +108,7 @@ import {
 } from "./semantic-operation-scope";
 import { UiText, useUiLocale } from "./ui-locale";
 
+const NEW_CONTEXT_VALUE = "__new_context__";
 
 export function SemanticPositionDialog({
   activeGroupId,
@@ -142,6 +143,7 @@ export function SemanticPositionDialog({
     useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [selectedContextId, setSelectedContextId] = useState("");
+  const [createSavedContext, setCreateSavedContext] = useState(false);
   const [lastUsedCredentialId, setLastUsedCredentialId] = useState<string>();
   const [assignedKeywordIds, setAssignedKeywordIds] = useState<
     ReadonlySet<string>
@@ -223,8 +225,11 @@ export function SemanticPositionDialog({
     projectId, workspaceId, base: contextDraft, targets, keywordIds: selections.map(({ id }) => id),
     selectedKeywordCount: selections.filter(({ isTracked }) => contextDraft.includeUntracked || isTracked !== false).length,
     source: selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo,
-    saveContexts: !competitorMode && Boolean(selectedContextId), locale: uiLocale
-  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, selectedContextId, uiLocale]);
+    saveContexts: !competitorMode && (createSavedContext || Boolean(selectedContextId)),
+    forceCreateContexts: createSavedContext,
+    ...(createSavedContext ? { contextName: contextDraft.name.trim() } : {}),
+    locale: uiLocale
+  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, selectedContextId, createSavedContext, uiLocale]);
   const batchSignature = useMemo(() => batchInput ? rankTargetBatchSignature(batchInput) : undefined, [batchInput]);
   const currentBatch = recoveringBatch || multiBatch.current?.signature === batchSignature ? multiBatch.current : undefined;
   const batchReady = currentBatch ? rankTargetBatchReady(currentBatch) : false;
@@ -285,11 +290,14 @@ export function SemanticPositionDialog({
     []
   );
 
-  function selectContext(contextId: string): void {
+  function selectContext(selection: string): void {
+    const creating = selection === NEW_CONTEXT_VALUE;
+    const contextId = creating ? "" : selection;
     setAdditionalTargets([]);
     multiBatch.current = undefined;
     setYandexLiveTurbo(false);
     setSelectedContextId(contextId);
+    setCreateSavedContext(creating);
     oneOffContext.current = undefined;
     const context = settings?.contexts.find(({ id }) => id === contextId);
     if (context) {
@@ -310,6 +318,7 @@ export function SemanticPositionDialog({
       setContextAssignmentError(undefined);
       setContextDraft({
         ...defaultContextDraft(preferredRegions.YANDEX, competitorMode, uiLocale),
+        ...(creating ? { name: "" } : {}),
         scopeMode:
           initialSelections.length > 0
             ? "KEYWORDS"
@@ -529,6 +538,10 @@ export function SemanticPositionDialog({
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (running) return;
+    if (createSavedContext && !contextDraft.name.trim()) {
+      setError(uiText("Введите название нового контекста."));
+      return;
+    }
     if (targets.length > 1 || recoveringBatch) {
       const effectiveInput = recoveringBatch ? multiBatch.current?.input : batchInput;
       if (!effectiveInput || !settings || (!recoveringBatch && (resolvingScope || keywordIds.length === 0))) return;
@@ -589,11 +602,13 @@ export function SemanticPositionDialog({
         ...contextDraft,
         name: contextName
       };
+      const shouldSaveContext =
+        !competitorMode && (createSavedContext || Boolean(selectedContextId));
       let selectedContext = selectedContextId
         ? settings?.contexts.find(
             ({ id, status }) => id === selectedContextId && status === "ACTIVE"
           )
-        : oneOffContext.current &&
+        : !shouldSaveContext && oneOffContext.current &&
             trackingContextMatchesDraft(oneOffContext.current, launchDraft)
           ? oneOffContext.current
           : undefined;
@@ -616,7 +631,7 @@ export function SemanticPositionDialog({
         );
       }
       if (!selectedContext && settings?.access.canConfigure) {
-        const isReusable = Boolean(selectedContextId) && !competitorMode;
+        const isReusable = shouldSaveContext;
         const signature = trackingContextPayloadSignature(launchDraft, {
           isReusable
         });
@@ -644,12 +659,12 @@ export function SemanticPositionDialog({
         ).current;
         createContextCommand.current = undefined;
         selectedContext = createdContext;
-        if (!selectedContextId || competitorMode) {
+        if (!shouldSaveContext) {
           oneOffContext.current = createdContext;
         } else {
           setSelectedContextId(createdContext.id);
         }
-        if (selectedContextId && !competitorMode) {
+        if (shouldSaveContext) {
           setSettings((current) =>
             current ? withTrackingContext(current, createdContext) : current
           );
@@ -690,10 +705,10 @@ export function SemanticPositionDialog({
         assignedKeywordCount: replacement.assignedKeywordCount,
         version: replacement.version
       };
-      if (!selectedContextId || competitorMode) {
+      if (!shouldSaveContext) {
         oneOffContext.current = selectedContext;
       }
-      if (selectedContextId && !competitorMode) {
+      if (shouldSaveContext) {
         setSettings((current) =>
           current ? withTrackingContext(current, selectedContext!) : current
         );
@@ -978,7 +993,7 @@ export function SemanticPositionDialog({
     >
       <form className="semantic-position-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         {recoverableBatch && !recoveringBatch && <div className="inline-alert warning"><p><UiText text="Предыдущий запуск не завершён. Можно продолжить его с сохранёнными командами, не повторяя принятые задачи." /></p><button type="button" className="secondary-button" disabled={running} onClick={() => {
-          multiBatch.current = recoverableBatch; setRecoveringBatch(true); setContextDraft(recoverableBatch.input.base); setAdditionalTargets(recoverableBatch.input.targets.slice(1)); setCredentialId(recoverableBatch.input.source.id); setBatchRevision(value => value + 1);
+          multiBatch.current = recoverableBatch; setRecoveringBatch(true); setCreateSavedContext(Boolean(recoverableBatch.input.forceCreateContexts)); setContextDraft(recoverableBatch.input.base); setAdditionalTargets(recoverableBatch.input.targets.slice(1)); setCredentialId(recoverableBatch.input.source.id); setBatchRevision(value => value + 1);
         }}><UiText text="Восстановить запуск" /></button></div>}
         {loading ? (
           <div className="semantic-dialog-loading" role="status"><UiText text="Проверяем доступные подключения…" /></div>
@@ -986,6 +1001,9 @@ export function SemanticPositionDialog({
           <fieldset className="semantic-rank-parameters" disabled={running || batchStarted > 0 || recoveringBatch}>
             <PositionContextSelector
               contexts={settings?.contexts ?? []}
+              createSavedContext={createSavedContext}
+              draft={contextDraft}
+              onDraftChange={setContextDraft}
               onSelect={selectContext}
               projectId={projectId}
               selectedContextId={selectedContextId}
@@ -996,12 +1014,20 @@ export function SemanticPositionDialog({
               competitorMode={competitorMode}
               onChange={draft => {
                 if (draft.searchEngine !== contextDraft.searchEngine) setAdditionalTargets([]);
-                setContextDraft(draft);
+                setContextDraft(createSavedContext
+                  ? { ...draft, name: contextDraft.name }
+                  : draft);
               }}
               targets={targets}
               onTargetsChange={targets => {
                 const [first, ...others] = uniqueRankTargets(targets);
-                setContextDraft(current => ({ ...current, ...first!, name: contextDisplayName(current.searchEngine, first!.regionLabel, first!.device, competitorMode, uiLocale) }));
+                setContextDraft(current => ({
+                  ...current,
+                  ...first!,
+                  name: createSavedContext
+                    ? current.name
+                    : contextDisplayName(current.searchEngine, first!.regionLabel, first!.device, competitorMode, uiLocale)
+                }));
                 setAdditionalTargets(others);
               }}
               credentialId={credentialId}
@@ -1125,12 +1151,18 @@ export function SemanticPositionDialog({
 function PositionContextSelector({
   competitorMode,
   contexts,
+  createSavedContext,
+  draft,
+  onDraftChange,
   onSelect,
   projectId,
   selectedContextId
 }: Readonly<{
   competitorMode: boolean;
   contexts: readonly TrackingContextSummary[];
+  createSavedContext: boolean;
+  draft: TrackingContextDraft;
+  onDraftChange: (draft: TrackingContextDraft) => void;
   onSelect: (contextId: string) => void;
   projectId: string;
   selectedContextId: string;
@@ -1147,7 +1179,11 @@ function PositionContextSelector({
           <small>
             {competitorMode
               ? <UiText text="Параметры применятся только к этому запуску и не сохранятся как профиль." />
-              : <UiText text="Без контекста параметры применятся только к текущему запуску." />}
+              : createSavedContext
+                ? <UiText text="Новый профиль сохранится после успешной подготовки запуска." />
+                : selectedContextId
+                  ? <UiText text="Используются настройки выбранного сохранённого профиля." />
+                  : <UiText text="Без контекста параметры применятся только к текущему запуску." />}
           </small>
         </div>
       </div>
@@ -1156,7 +1192,7 @@ function PositionContextSelector({
         <CustomSelect
           disabled={competitorMode}
           onChange={(event) => onSelect(event.target.value)}
-          value={selectedContextId}
+          value={createSavedContext ? NEW_CONTEXT_VALUE : selectedContextId}
         >
           <option value="">
             <span className="semantic-context-option semantic-context-option-none">
@@ -1164,6 +1200,14 @@ function PositionContextSelector({
               <UiText text="Без контекста" />
             </span>
           </option>
+          {!competitorMode && (
+            <option value={NEW_CONTEXT_VALUE}>
+              <span className="semantic-context-option semantic-context-option-new">
+                <Icon name="plus" />
+                <UiText text="Новый контекст" />
+              </span>
+            </option>
+          )}
           {!competitorMode && contexts
             .filter(({ status }) => status === "ACTIVE")
             .map((context) => (
@@ -1179,6 +1223,20 @@ function PositionContextSelector({
             ))}
         </CustomSelect>
       </label>
+      {createSavedContext && !competitorMode && (
+        <label className="semantic-position-context-name">
+          <span><UiText text="Название контекста" /></span>
+          <input
+            autoFocus
+            maxLength={160}
+            onChange={(event) =>
+              onDraftChange({ ...draft, name: event.target.value })
+            }
+            placeholder={uiText("Например, Основной мониторинг")}
+            value={draft.name}
+          />
+        </label>
+      )}
       <a
         aria-label={uiText("Настройки контекстов")}
         className="semantic-position-context-settings"

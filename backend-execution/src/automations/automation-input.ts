@@ -6,6 +6,7 @@ import type {
   RankTrackingAutomationSchedule,
   InternalAutomationStatusInput,
   InternalCreateRankTrackingAutomationInput,
+  InternalDeleteRankTrackingAutomationInput,
   InternalRankEstimateProjectSnapshot,
   InternalRunRankTrackingAutomationInput,
   InternalUpdateRankTrackingAutomationInput,
@@ -125,6 +126,28 @@ export function internalAutomationStatusInput(
     billingCurrency: currency(input.billingCurrency),
     entitlement: automationCapacityEntitlement(input.entitlement),
     jobCapacity: jobCapacityEntitlement(input.jobCapacity)
+  };
+}
+
+export function internalDeleteAutomationInput(
+  value: unknown
+): InternalDeleteRankTrackingAutomationInput {
+  const input = exactRecord(value, "body", [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "automationId",
+    "expectedVersion"
+  ]);
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId"),
+    automationId: uuid(input.automationId, "automationId"),
+    expectedVersion: positiveInteger(
+      input.expectedVersion,
+      "expectedVersion"
+    )
   };
 }
 

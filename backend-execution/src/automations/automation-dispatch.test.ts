@@ -87,6 +87,7 @@ function automation(): Automation {
     createdBy: actorId,
     updatedBy: actorId,
     idempotencyKey: "rank-automation-create-001",
+    deletedAt: null,
     version: 2,
     createdAt: scheduledFor,
     updatedAt: scheduledFor

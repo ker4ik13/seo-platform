@@ -417,5 +417,19 @@
   "Настройки контекстов": "Context settings",
   "запросов · активен": "keywords · active",
   "Результаты, история позиций и выполненные операции не удаляются. Профиль исчезнет из настроек и новых запусков.": "Results, rank history, and completed operations are kept. The profile will disappear from settings and new runs.",
-  ". Для одноразового ручного запуска передайте isReusable=false: контекст сохранит неизменяемую историю, но не появится в каталоге профилей и расписаниях. GET-список возвращает только активные сохранённые профили. Для изменения передавайте ETag контекста через If-Match.": ". For a one-time manual run, pass isReusable=false: the context keeps immutable history but does not appear in the profile catalog or schedules. The GET collection returns active saved profiles only. For updates, pass the context ETag through If-Match."
+  ". Для одноразового ручного запуска передайте isReusable=false: контекст сохранит неизменяемую историю, но не появится в каталоге профилей и расписаниях. GET-список возвращает только активные сохранённые профили. Для изменения передавайте ETag контекста через If-Match.": ". For a one-time manual run, pass isReusable=false: the context keeps immutable history but does not appear in the profile catalog or schedules. The GET collection returns active saved profiles only. For updates, pass the context ETag through If-Match.",
+  "Введите название нового контекста.": "Enter a name for the new context.",
+  "Например, Основной мониторинг": "For example, Primary monitoring",
+  "Регулярный съём удалён.": "Scheduled rank check deleted.",
+  "Не удалось удалить регулярный съём.": "Could not delete the scheduled rank check.",
+  "Расписание «{0}» больше не будет запускаться.": "The “{0}” schedule will no longer run.",
+  "Удалить регулярный съём": "Delete scheduled rank check",
+  "Удалить регулярный съём?": "Delete scheduled rank check?",
+  "Уже выполненные операции и результаты останутся в истории.": "Completed operations and results will remain in history.",
+  "Пауза, запуск, изменение и удаление": "Pause, run, update, and delete",
+  "DELETE /automations/{automationId} также требует If-Match и пустое тело. Расписание исчезает из активного каталога и больше не запускается; выполненные операции и результаты сохраняются.": "DELETE /automations/{automationId} also requires If-Match and an empty body. The schedule disappears from the active catalog and stops running; completed operations and results are retained.",
+  "Контекст обновлён и создано дополнительных профилей: {0}.": "Context updated and {0} additional profiles created.",
+  "Создано профилей: {0}.": "Profiles created: {0}.",
+  "Новый профиль сохранится после успешной подготовки запуска.": "The new profile will be saved after the run is prepared successfully.",
+  "Используются настройки выбранного сохранённого профиля.": "The selected saved profile settings are being used."
 }

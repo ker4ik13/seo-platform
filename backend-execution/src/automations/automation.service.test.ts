@@ -94,6 +94,46 @@ test("reconciliation also removes schedulers for disabled definitions", async ()
   );
 });
 
+test("soft-deletes a schedule and removes its queue scheduler", async () => {
+  const current = automation();
+  const deleted = {
+    ...current,
+    enabled: false,
+    pausedReason: "MANUAL",
+    nextRunAt: null,
+    deletedAt: new Date("2026-09-13T15:00:00.000Z"),
+    version: 2
+  };
+  let removedId: string | undefined;
+  const transaction = {
+    $executeRaw: async () => 1,
+    automation: {
+      findFirst: async () => current,
+      update: async () => deleted
+    }
+  } as unknown as Prisma.TransactionClient;
+  const service = new AutomationService(
+    {
+      $transaction: async (
+        callback: (client: Prisma.TransactionClient) => Promise<unknown>
+      ) => callback(transaction),
+      automation: { update: async () => deleted }
+    } as unknown as PrismaService,
+    {
+      removeRankAutomationScheduler: async (id: string) => {
+        removedId = id;
+        return true;
+      }
+    } as unknown as QueueService
+  );
+
+  const result = await service.remove(statusInput());
+
+  assert.equal(result.enabled, false);
+  assert.equal(result.version, 2);
+  assert.equal(removedId, automationId);
+});
+
 test("serializes enabled creates and rejects the authoritative plan limit", async () => {
   let created = false;
   const transaction = {
@@ -222,6 +262,7 @@ function automation(
     createdBy: actorId,
     updatedBy: actorId,
     idempotencyKey: input.idempotencyKey,
+    deletedAt: null,
     version: 1,
     createdAt: new Date("2026-07-31T10:00:00.000Z"),
     updatedAt: new Date("2026-07-31T10:00:00.000Z"),

@@ -194,6 +194,7 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("automation-run", "POST", "/projects/{projectId}/automations/{automationId}/runs", "automations:manage", "Запустить расписание сейчас", "automations"),
   endpoint("automation-pause", "POST", "/projects/{projectId}/automations/{automationId}/pause", "automations:manage", "Поставить расписание на паузу", "automations"),
   endpoint("automation-resume", "POST", "/projects/{projectId}/automations/{automationId}/resume", "automations:manage", "Возобновить расписание", "automations"),
+  endpoint("automation-delete", "DELETE", "/projects/{projectId}/automations/{automationId}", "automations:manage", "Удалить расписание", "automations"),
   endpoint("ai-answers", "GET", "/projects/{projectId}/ai-answer-collections", "ai:read", "История съёмов ответов и выдачи ИИ", "ai-answers"),
   endpoint("ai-answers-create", "POST", "/projects/{projectId}/ai-answer-collections", "ai:run", "Создать съём ответов или конкурентов ИИ", "ai-answers"),
   endpoint("ai-answers-get", "GET", "/projects/{projectId}/ai-answer-collections/{jobId}", "ai:read", "Состояние съёма ИИ", "ai-answers"),

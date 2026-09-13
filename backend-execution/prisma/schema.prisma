@@ -838,6 +838,7 @@ model Automation {
   createdBy      String?   @map("created_by") @db.Uuid
   updatedBy      String?   @map("updated_by") @db.Uuid
   idempotencyKey String?   @map("idempotency_key") @db.VarChar(180)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
   version        Int       @default(1)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -847,6 +848,7 @@ model Automation {
   @@unique([workspaceId, createdBy, idempotencyKey], map: "automations_workspace_actor_idempotency_key")
   @@unique([id, workspaceId, projectId], map: "automations_tenant_project_id_key")
   @@index([workspaceId, projectId, enabled, nextRunAt])
+  @@index([workspaceId, projectId, deletedAt, createdAt(sort: Desc), id], map: "automations_tenant_active_created_idx")
   @@map("automations")
 }
 
