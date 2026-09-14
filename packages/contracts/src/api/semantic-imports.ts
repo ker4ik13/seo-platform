@@ -58,6 +58,8 @@ export const semanticImportTargets = [
   "keyword.language",
   "keyword.priority",
   "keyword.favorite",
+  "keyword.tracked",
+  "keyword.note",
   "keyword.intent",
   "group.path",
   "page.target_url",
@@ -148,6 +150,8 @@ export interface SemanticImportMapping {
 }
 
 export interface SemanticPositionHistoryImportOptions {
+  /** WIDE reads one date per column; LONG reads date and position mappings per row. */
+  readonly layout?: "WIDE" | "LONG";
   /** One uploaded file represents exactly one search engine. */
   readonly searchEngine: "YANDEX" | "GOOGLE";
   readonly countryCode: string;
@@ -160,8 +164,9 @@ export interface SemanticPositionHistoryImportOptions {
 export function parseSemanticPositionHistoryImportOptions(value: unknown): SemanticPositionHistoryImportOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid position history options");
   const input = value as Record<string, unknown>;
-  const allowed = ["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
+  const allowed = ["layout", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
   if (Object.keys(input).some(key => !allowed.includes(key)) ||
+    (input.layout !== undefined && input.layout !== "WIDE" && input.layout !== "LONG") ||
     (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") ||
     typeof input.countryCode !== "string" || !/^[A-Za-z]{2}$/u.test(input.countryCode) ||
     typeof input.regionCode !== "string" || !input.regionCode.trim() || input.regionCode.length > 100 ||
@@ -171,6 +176,7 @@ export function parseSemanticPositionHistoryImportOptions(value: unknown): Seman
   let language: string;
   try { language = Intl.getCanonicalLocales(input.language.trim())[0]!; } catch { throw new TypeError("Invalid position history language"); }
   const result: SemanticPositionHistoryImportOptions = {
+    ...(input.layout ? { layout: input.layout as "WIDE" | "LONG" } : {}),
     searchEngine: input.searchEngine as "YANDEX" | "GOOGLE",
     countryCode: input.countryCode.toUpperCase(),
     regionCode: input.regionCode.normalize("NFKC").trim(),
@@ -350,6 +356,8 @@ export interface SemanticImportPublishRow {
   readonly language: string;
   readonly priority?: number;
   readonly isFavorite?: boolean;
+  readonly isTracked?: boolean;
+  readonly note?: string;
   readonly intent?: import("./keywords.js").SemanticKeywordIntent;
   readonly groupPath?: readonly string[];
   readonly groupPaths?: readonly (readonly string[])[];
@@ -360,6 +368,11 @@ export interface SemanticImportPublishRow {
   readonly observedAt?: string;
   readonly tags?: readonly string[];
   readonly customValues: Readonly<Record<string, string>>;
+}
+
+export interface SemanticImportGroupMetadata {
+  readonly path: readonly string[];
+  readonly color?: string;
 }
 
 export interface InternalBeginSemanticImportInput {
@@ -393,6 +406,7 @@ export interface InternalApplySemanticImportChunkInput {
   readonly duplicatePolicy: SemanticImportDuplicatePolicy;
   readonly createMissingKeywords: boolean;
   readonly groupPaths?: readonly (readonly string[])[];
+  readonly groupMetadata?: readonly SemanticImportGroupMetadata[];
   readonly rows: readonly SemanticImportPublishRow[];
 }
 

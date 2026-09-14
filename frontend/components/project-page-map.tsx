@@ -43,6 +43,7 @@ import {
 } from "../lib/project-pages";
 import { Icon } from "./icon";
 import { UiText, useUiLocale } from "./ui-locale";
+import { LanguageSelect } from "./locale-selects";
 
 
 interface PageFilters {
@@ -1218,9 +1219,8 @@ function PageEditor({
               />
             </EditorField>
             <EditorField error={errors.language} label={uiText("Язык")}>
-              <input
+              <LanguageSelect
                 onChange={(event) => onChange({ language: event.target.value })}
-                placeholder="ru-RU"
                 value={draft.language}
               />
             </EditorField>

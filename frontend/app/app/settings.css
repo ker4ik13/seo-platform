@@ -1,73 +1,112 @@
 /* Shared settings surface: account, workspace and project. Keep this after
    styles.css so screen-specific legacy rules cannot shrink the common UI. */
 .content.content-settings {
-  --settings-gap: 20px;
-  --settings-card-padding: 22px;
-  --settings-radius: 12px;
+  --settings-gap: 12px;
+  --settings-card-padding: 14px;
+  --settings-radius: 10px;
   --muted: #626b80;
-  padding: 24px clamp(16px, 2vw, 32px) 48px !important;
+  padding: 0 14px 24px 0 !important;
 }
 .content.content-settings:has(> .settings-tabs) {
-  gap: 24px;
-  grid-template-columns: 224px minmax(0, 1fr);
-  grid-template-rows: max-content max-content;
+  gap: 0;
+  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   grid-auto-rows: max-content;
 }
 .content.content-settings > .page-heading {
-  align-items: flex-start;
-  background: transparent;
+  align-items: center;
+  background: #fff;
   border: 0;
-  box-shadow: none;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 5px 15px rgba(28, 32, 45, .025);
   gap: 16px;
-  margin: 0;
-  min-height: 0;
-  padding: 0 0 2px;
-  position: static;
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0 -14px 0 0;
+  min-height: 58px;
+  padding: 8px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
-.content.content-settings > .page-heading h1 { font-size: 25px !important; line-height: 1.25; }
+.content.content-settings > .page-heading h1 { font-size: 22px !important; line-height: 1.2; }
 .content.content-settings > .page-heading > div:first-child > p:last-child {
-  font-size: 13px;
-  line-height: 1.6;
-  margin-top: 7px;
-  max-width: 760px;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 3px;
+  max-width: 860px;
 }
 .content.content-settings > .settings-tabs {
-  background: transparent;
+  align-self: stretch;
+  background: #fff;
   border: 0;
+  border-right: 1px solid #dfe1ea;
   border-radius: 0;
   box-shadow: none;
   display: block;
+  grid-column: 1;
+  grid-row: 1 / span 100;
+  height: calc(100dvh - 48px);
   margin: 0;
-  max-height: calc(100dvh - 188px);
-  overflow: auto;
+  max-height: calc(100dvh - 48px);
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 8px 8px 0;
+  padding: 8px 10px 14px;
   position: sticky;
   scrollbar-width: thin;
   top: 0;
 }
-.settings-navigation-toggle { display: none; }
+.settings-navigation-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  cursor: default;
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 7px;
+  min-height: 48px;
+  padding: 5px 8px 9px;
+  pointer-events: none;
+  width: 100%;
+}
+.settings-navigation-toggle > span:first-child { display: grid; gap: 2px; text-align: left; }
+.settings-navigation-toggle small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.settings-navigation-toggle strong { font-size: 13px; }
+.settings-navigation-toggle > span:last-child { display: none; }
+.settings-navigation-toggle > svg:last-child { display: none; }
 .settings-navigation-links { display: grid; gap: 4px; }
 .content.content-settings .settings-tabs a {
+  border: 1px solid transparent;
   border-radius: 8px;
-  font-size: 13px;
-  font-weight: 550;
-  gap: 10px;
-  line-height: 1.4;
-  min-height: 42px;
-  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 8px;
+  line-height: 1.3;
+  min-height: 34px;
+  padding: 7px 9px;
   white-space: normal;
 }
-.content.content-settings .settings-tabs a svg { margin: 0; }
-.content.content-settings .settings-tabs a.active { background: #ece8ff; color: #5130cf; font-weight: 700; }
+.content.content-settings .settings-tabs a svg { height: 14px; margin: 0; width: 14px; }
+.content.content-settings .settings-tabs a.active { background: #ece8ff; border-color: #d7d0ff; box-shadow: inset 3px 0 0 var(--brand); color: #5130cf; font-weight: 700; }
 .content.content-settings .settings-tabs-heading {
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .07em;
-  margin: 16px 12px 5px;
+  font-size: 9px;
+  font-weight: 800;
+  gap: 5px;
+  letter-spacing: .08em;
+  margin: 11px 9px 3px;
 }
-.content.content-settings > :not(.page-heading):not(.settings-tabs):not(.app-breadcrumbs) { max-width: 1120px; }
+.content.content-settings .settings-tabs-heading svg { height: 10px; width: 10px; }
+.content.content-settings > :not(.page-heading):not(.settings-tabs):not(.app-breadcrumbs) {
+  grid-column: 2;
+  margin: 12px 0 0 14px;
+  max-width: none;
+  min-width: 0;
+  width: auto;
+}
 .content.content-settings :is(.settings-stack, .billing-stack, .integration-settings-stack, .project-settings-stack) {
   align-content: start;
   gap: var(--settings-gap);
@@ -79,29 +118,29 @@
   min-width: 0;
 }
 .content.content-settings .panel { padding: var(--settings-card-padding); }
-.content.content-settings .panel-empty { min-height: 180px; }
-.content.content-settings :is(.security-card, .security-flow) { align-content: start; gap: 18px; }
+.content.content-settings .panel-empty { min-height: 140px; }
+.content.content-settings :is(.security-card, .security-flow) { align-content: start; gap: 12px; }
 /* aria-busy announces saving; it must not switch a populated card to two columns. */
 .content.content-settings .security-card[aria-busy="true"] { grid-template-columns: minmax(0, 1fr); }
-.content.content-settings .security-card-header { flex-wrap: wrap; gap: 12px; }
+.content.content-settings .security-card-header { flex-wrap: wrap; gap: 9px; }
 .content.content-settings .security-card-header > div { flex: 1 1 auto; }
-.content.content-settings :is(h2, .security-card-header h2) { font-size: 17px; line-height: 1.4; }
-.content.content-settings :is(p, .inline-alert, .checkbox-field, .security-flow > p) { font-size: 13px; line-height: 1.6; }
-.content.content-settings :is(small, .billing-label, .settings-card-eyebrow, .security-status) { font-size: 11px; line-height: 1.5; }
+.content.content-settings :is(h2, .security-card-header h2) { font-size: 14px; line-height: 1.35; }
+.content.content-settings :is(p, .inline-alert, .checkbox-field, .security-flow > p) { font-size: 11px; line-height: 1.45; }
+.content.content-settings :is(small, .billing-label, .settings-card-eyebrow, .security-status) { font-size: 9px; line-height: 1.45; }
 .content.content-settings :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
 .content.content-settings .custom-select-trigger {
   border-radius: 8px;
-  font-size: 14px;
-  min-height: 42px;
+  font-size: 12px;
+  min-height: 38px;
 }
-.content.content-settings :is(.form-field, .billing-form-grid > label) { font-size: 13px; gap: 8px; min-width: 0; }
-.content.content-settings .form-row { gap: 16px; }
+.content.content-settings :is(.form-field, .billing-form-grid > label) { font-size: 11px; gap: 6px; min-width: 0; }
+.content.content-settings .form-row { gap: 12px; }
 .content.content-settings :is(.primary-button, .secondary-button, .danger-button) {
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.35;
-  min-height: 40px;
-  padding: 9px 14px;
+  min-height: 38px;
+  padding: 8px 12px;
 }
 .content.content-settings .settings-savebar,
 .content.content-settings #project-settings-form .settings-savebar {
@@ -112,7 +151,7 @@
   box-shadow: none;
   gap: 12px;
   margin-top: 4px;
-  padding: 18px 0 0;
+  padding: 12px 0 0;
   position: static;
 }
 .content.content-settings .account-security-grid { gap: var(--settings-gap); grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -157,7 +196,7 @@
 }
 
 @media (max-width: 1180px) {
-  .content.content-settings:has(> .settings-tabs) { grid-template-columns: 200px minmax(0, 1fr); gap: 20px; }
+  .content.content-settings:has(> .settings-tabs) { grid-template-columns: 210px minmax(0, 1fr); gap: 0; }
   .content.content-settings .account-security-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1000px) {
@@ -168,6 +207,7 @@
     background: #fff;
     border: 1px solid var(--line);
     border-radius: var(--settings-radius);
+    height: auto;
     max-height: none;
     overflow: visible;
     padding: 0;
@@ -184,12 +224,14 @@
     min-height: 62px;
     padding: 12px 16px;
     text-align: left;
+    pointer-events: auto;
     width: 100%;
   }
   .settings-navigation-toggle > span:first-child { display: grid; gap: 3px; min-width: 0; }
   .settings-navigation-toggle small { color: var(--muted); }
   .settings-navigation-toggle strong { font-size: 14px; line-height: 1.4; }
-  .settings-navigation-toggle > span:last-child { color: var(--brand); font-size: 24px; }
+  .settings-navigation-toggle > svg:last-child { color: var(--brand); display: block; height: 18px; transition: transform .16s ease; width: 18px; }
+  .settings-navigation-toggle > svg.expanded { transform: rotate(180deg); }
   .settings-navigation-links { display: none; }
   .settings-tabs[data-expanded="true"] .settings-navigation-links { border-top: 1px solid var(--line); display: grid; gap: 4px; padding: 8px; }
   .content.content-settings .settings-tabs a { min-height: 44px; }

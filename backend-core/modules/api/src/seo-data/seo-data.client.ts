@@ -438,15 +438,19 @@ export class SeoDataClient {
   }
 
   public async projectPositionSummary(
-    context: InternalContext
+    context: InternalContext,
+    query: ProjectPositionHistoryQuery = { includeUntracked: false }
   ): Promise<ProjectPositionSummary> {
     const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/position-summary`,
+      this.config.services.seoData
+    );
+    if (query.includeUntracked) url.searchParams.set("includeUntracked", "true");
+    if (query.rankDimensionKey) url.searchParams.set("rankDimensionKey", query.rankDimensionKey);
     const payload = await this.request(
       "GET",
-      new URL(
-        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/position-summary`,
-        this.config.services.seoData
-      ),
+      url,
       context
     );
     return projectPositionSummary(responseData(payload));

@@ -196,6 +196,8 @@ test("maps independently selectable keyword fields and both search engines", () 
       "https://example.com/google",
       "83",
       "да",
+      "нет",
+      "Проверить страницу",
       "Коммерческий"
     ],
     [
@@ -208,6 +210,8 @@ test("maps independently selectable keyword fields and both search engines", () 
       "Google · URL выдачи",
       "Приоритет",
       "Избранное",
+      "Отслеживается",
+      "Заметка",
       "Интент"
     ],
     {
@@ -221,7 +225,9 @@ test("maps independently selectable keyword fields and both search engines", () 
         { sourceIndex: 6, target: "ranking.google.url" },
         { sourceIndex: 7, target: "keyword.priority" },
         { sourceIndex: 8, target: "keyword.favorite" },
-        { sourceIndex: 9, target: "keyword.intent" }
+        { sourceIndex: 9, target: "keyword.tracked" },
+        { sourceIndex: 10, target: "keyword.note" },
+        { sourceIndex: 11, target: "keyword.intent" }
       ],
       defaultLanguage: "ru",
       groupSeparator: "/",
@@ -239,6 +245,8 @@ test("maps independently selectable keyword fields and both search engines", () 
 
   assert.equal(result.priority, 83);
   assert.equal(result.isFavorite, true);
+  assert.equal(result.isTracked, false);
+  assert.equal(result.note, "Проверить страницу");
   assert.equal(result.intent, "COMMERCIAL");
   assert.deepEqual(result.positions, [
     {

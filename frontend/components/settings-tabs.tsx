@@ -72,7 +72,7 @@ export function SettingsTabs({
         type="button"
       >
         <span><small><UiText text="Настройки" /></small><strong><UiText text={activeTitle} /></strong></span>
-        <span aria-hidden="true">{expanded ? "−" : "+"}</span>
+        <Icon className={expanded ? "expanded" : undefined} name="chevronDown" />
       </button>
       <div
         className="settings-navigation-links"
@@ -90,7 +90,7 @@ export function SettingsTabs({
       >
         <Icon name="settings" />
         <UiText text="Общие настройки" /></Link>
-      <span className="settings-tabs-heading"><UiText text="Аккаунт" /></span>
+      <span className="settings-tabs-heading"><Icon name="projects" /><UiText text="Аккаунт" /></span>
       <Link
         aria-current={active === "security" ? "page" : undefined}
         className={active === "security" ? "active" : undefined}
@@ -114,7 +114,7 @@ export function SettingsTabs({
           <Icon name="tools" />
           <UiText text="API-ключи" /></Link>
       )}
-      <span className="settings-tabs-heading"><UiText text="Рабочая область" /></span>
+      <span className="settings-tabs-heading"><Icon name="projects" /><UiText text="Рабочая область" /></span>
       <Link
         aria-current={active === "workspace" ? "page" : undefined}
         className={active === "workspace" ? "active" : undefined}
@@ -167,7 +167,7 @@ export function SettingsTabs({
       )}
       {projectId && (
         <>
-          <span className="settings-tabs-heading"><UiText text="Текущий проект" /></span>
+          <span className="settings-tabs-heading"><Icon name="projects" /><UiText text="Текущий проект" /></span>
           <Link
             aria-current={active === "project" ? "page" : undefined}
             className={active === "project" ? "active" : undefined}

@@ -31,6 +31,10 @@ test("resolves a distinct target for every duplicate import mode", () => {
     semanticManualDuplicateTargetGroupId("CURRENT_GROUP", "primary", "current"),
     "current"
   );
+  assert.equal(
+    semanticManualDuplicateTargetGroupId("CURRENT_GROUP", "primary", ""),
+    "primary"
+  );
 });
 
 test("keeps the three-way duplicate choice isolated per project", () => {

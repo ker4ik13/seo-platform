@@ -17,6 +17,7 @@ import {
 import { copyText } from "../lib/clipboard";
 import styles from "./api-documentation.module.css";
 import { UiText, useUiLocale } from "./ui-locale";
+import { Icon } from "./icon";
 
 
 export function ApiDocumentation({
@@ -97,10 +98,7 @@ export function ApiDocumentation({
           >
             <label className={styles.searchField}>
               <span className={styles.visuallyHidden}><UiText text="Поиск по документации API" /></span>
-              <svg aria-hidden="true" viewBox="0 0 24 24">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m16.2 16.2 4 4" />
-              </svg>
+              <Icon name="search" />
               <input
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={uiText("Поиск по API")}

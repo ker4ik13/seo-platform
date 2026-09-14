@@ -13,6 +13,7 @@
   "dependencies": {
     "@seo-platform/contracts": "workspace:*",
     "@seo-platform/operational-alerts": "workspace:*",
+    "lucide-react": "^1.45.0",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8",

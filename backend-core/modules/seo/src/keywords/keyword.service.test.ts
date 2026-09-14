@@ -134,6 +134,33 @@ test("averages the latest found position once per active keyword", async () => {
     top50KeywordCount: 2
   });
   assert.match(summaryQuery?.sql ?? "", /rank_dimension_history_deletions/u);
+  assert.match(summaryQuery?.sql ?? "", /keyword\.is_tracked/u);
+});
+
+test("position summary stays inside one exact project rank dimension", async () => {
+  let summaryQuery: Prisma.Sql | undefined;
+  const service = new KeywordService(
+    {
+      rankDimensionMerge: { findMany: async () => [] },
+      $queryRaw: async (query: Prisma.Sql) => {
+        summaryQuery = query;
+        return [{ position: 7 }];
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.positionSummary(workspaceId, projectId, {
+    includeUntracked: true,
+    rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP"
+  });
+
+  assert.equal(result.averagePosition, 7);
+  assert.match(summaryQuery?.sql ?? "", /configuration\.search_engine/u);
+  assert.deepEqual(
+    (summaryQuery?.values ?? []).filter((value) => ["YANDEX", "RU", "213", "ru", "DESKTOP"].includes(String(value))),
+    ["YANDEX", "RU", "213", "ru", "DESKTOP"]
+  );
 });
 
 test("carries every keyword's latest known position through later capture days", async () => {
@@ -2112,6 +2139,160 @@ test("links an active canonical keyword to another regular group", async () => {
     beforeVersion: 1,
     afterVersion: 2
   });
+});
+
+test("moves an active duplicate into only the requested group", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000096";
+  const oldGroupId = "01900000-0000-7000-8000-000000000097";
+  const targetGroupId = "01900000-0000-7000-8000-000000000098";
+  const group = (id: string, name: string) => ({
+    id,
+    path: name,
+    name,
+    systemKind: null
+  });
+  let stored = {
+    ...keyword(keywordId, "2026-08-01T10:00:00Z"),
+    typedCustomValues: [],
+    tags: [],
+    memberships: [
+      { group: group(oldGroupId, "Старая") },
+      { group: group(targetGroupId, "Текущая") }
+    ]
+  };
+  let deletedWhere: unknown;
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [{ id: keywordId }],
+    keyword: {
+      findFirst: async () => stored,
+      findUnique: async () => stored,
+      updateMany: async () => {
+        stored = { ...stored, version: stored.version + 1 };
+        return { count: 1 };
+      },
+      count: async () => { throw new Error("Moving must not consume capacity"); },
+      create: async () => { throw new Error("Moving must not create a keyword"); }
+    },
+    keywordGroup: {
+      findFirst: async () => group(targetGroupId, "Текущая")
+    },
+    keywordGroupMembership: {
+      findFirst: async () => null,
+      deleteMany: async ({ where }: { where: unknown }) => {
+        deletedWhere = where;
+        stored = { ...stored, memberships: [] };
+        return { count: 2 };
+      },
+      create: async ({ data }: { data: { groupId: string } }) => {
+        stored = { ...stored, memberships: [{ group: group(data.groupId, "Текущая") }] };
+        return data;
+      }
+    },
+    page: { findFirst: async () => ({ url: "https://example.com/seo" }) },
+    trackingContextKeywordAssignment: { findFirst: async () => null }
+  };
+  const versions = {
+    ...semanticVersions(),
+    createWithKeywordChange: async () => ({})
+  } as unknown as SemanticVersionService;
+  const service = new KeywordService({
+    $transaction: async (callback: (client: typeof transaction) => unknown) => callback(transaction)
+  } as unknown as PrismaService, versions);
+
+  const result = await service.create({
+    ...createInput("MOVE_TO_GROUP"),
+    duplicateGroupId: targetGroupId
+  });
+
+  assert.equal(result.id, keywordId);
+  assert.equal(result.groupId, targetGroupId);
+  assert.equal(result.groupMembershipCount, undefined);
+  assert.equal(stored.memberships.length, 1);
+  assert.equal(result.createOutcome, "LINKED_EXISTING");
+  assert.deepEqual(deletedWhere, { projectId, keywordId });
+});
+
+test("moving a trashed keyword restores it in the target group", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000106";
+  const trashGroupId = "01900000-0000-7000-8000-000000000107";
+  const targetGroupId = "01900000-0000-7000-8000-000000000108";
+  let stored = {
+    ...keyword(keywordId, "2026-08-01T10:00:00Z"),
+    status: "DELETED" as "ACTIVE" | "DELETED",
+    deletedAt: new Date("2026-09-01T10:00:00Z") as Date | null,
+    typedCustomValues: [],
+    memberships: [{
+      group: {
+        id: trashGroupId,
+        path: "Корзина",
+        name: "Корзина",
+        systemKind: "TRASH" as "TRASH" | null
+      }
+    }]
+  };
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [{ id: keywordId }],
+    keyword: {
+      findUnique: async () => stored,
+      update: async ({ data }: { data: { status?: "ACTIVE"; deletedAt?: null } }) => {
+        stored = {
+          ...stored,
+          status: data.status ?? stored.status,
+          deletedAt: data.deletedAt === null ? null : stored.deletedAt,
+          version: stored.version + 1
+        };
+        return stored;
+      }
+    },
+    keywordGroup: {
+      findFirst: async () => ({ id: targetGroupId, systemKind: null })
+    },
+    keywordGroupMembership: {
+      deleteMany: async () => {
+        stored = { ...stored, memberships: [] };
+        return { count: 1 };
+      },
+      create: async () => {
+        stored = {
+          ...stored,
+          memberships: [{
+            group: {
+              id: targetGroupId,
+              path: "Активные",
+              name: "Активные",
+              systemKind: null
+            }
+          }]
+        };
+        return {};
+      }
+    },
+    page: { findFirst: async () => ({ url: "https://example.com/seo" }) },
+    trackingContextKeywordAssignment: { findFirst: async () => null }
+  };
+  const versions = {
+    ...semanticVersions(),
+    createWithKeywordChange: async () => ({})
+  } as unknown as SemanticVersionService;
+  const service = new KeywordService({
+    $transaction: async (callback: (client: typeof transaction) => unknown) => callback(transaction)
+  } as unknown as PrismaService, versions);
+
+  const result = await service.update(keywordId, {
+    workspaceId,
+    projectId,
+    actorId: "01900000-0000-7000-8000-000000000003",
+    version: 1,
+    groupId: targetGroupId
+  });
+
+  assert.equal(result.trashed, undefined);
+  assert.equal(result.groupId, targetGroupId);
+  assert.equal(stored.status, "ACTIVE");
+  assert.equal(stored.deletedAt, null);
+  assert.equal(stored.memberships.length, 1);
 });
 
 test("restores a trashed duplicate only with the explicit recovery policy", async () => {

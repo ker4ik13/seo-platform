@@ -149,7 +149,9 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
     request: "Query: limit, cursor?, search?, groupId/groupIds?, filters?, sort?, includeNotes=true|false. Полный note возвращается только при includeNotes=true; в этом режиме limit <= 200.",
     response: "200 · data: SemanticKeywordListItem[] с groupPath, optional groupMembershipCount для нескольких папок, targetUrl, tags, frequencies, positions, aiAnswers, hasNote и optional note; page: { hasNext, nextCursor?, totalApprox? }."
   }),
-  endpoint("position-summary", "GET", "/projects/{projectId}/keywords/position-summary", "semantics:read", "Текущая средняя позиция и число запросов в Топ-3/5/10/30/50", "positions"),
+  endpoint("position-summary", "GET", "/projects/{projectId}/keywords/position-summary", "semantics:read", "Текущая средняя позиция и число запросов в Топ-3/5/10/30/50", "positions", {
+    request: "Query: rankDimensionKey? — точный поисковик, город и устройство; includeUntracked? — учитывать неотслеживаемые запросы."
+  }),
   endpoint("position-history", "GET", "/projects/{projectId}/keywords/position-history", "semantics:read", "До 100 последних проектных срезов; includeUntracked=true включает активные неотслеживаемые запросы", "positions"),
   endpoint("keywords-create", "POST", "/projects/{projectId}/keywords", "semantics:write", "Создать ключевое слово", "semantics"),
   endpoint("keywords-bulk", "POST", "/projects/{projectId}/keywords/bulk", "semantics:write", "Пакетное создание ключей", "semantics", {

@@ -661,13 +661,10 @@ export function SemanticGroupTree({
           type="button"
         >
           {hasChildren && (
-            <svg
-              aria-hidden="true"
+            <Icon
               className={effectiveExpandedIds.has(group.id) ? undefined : "collapsed"}
-              viewBox="0 0 20 20"
-            >
-              <path d="m5.5 7.5 4.5 4.5 4.5-4.5 1.4 1.4-5.9 5.9-5.9-5.9 1.4-1.4Z" />
-            </svg>
+              name="chevronDown"
+            />
           )}
         </button>
         {inlineRename?.groupId === group.id ? (

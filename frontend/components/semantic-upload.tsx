@@ -2,8 +2,10 @@
 
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import type { IconName } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
+import { LanguageSelect } from "./locale-selects";
 import {
   semanticImportTargets,
   semanticPositionHistoryHeaderDate,
@@ -152,6 +154,55 @@ type UploadStage =
   | "rejected"
   | "cancelled";
 
+type SemanticImportSource =
+  | "KEY_COLLECTOR"
+  | "TOPVISOR"
+  | "UNIVERSAL"
+  | "POSITIONS";
+
+interface SemanticImportSourceOption {
+  accept: string;
+  badge?: string;
+  description: string;
+  disabled?: boolean;
+  icon?: IconName;
+  label: string;
+  value: SemanticImportSource;
+}
+
+const IMPORT_SOURCES: readonly Readonly<SemanticImportSourceOption>[] = [
+  {
+    value: "UNIVERSAL",
+    label: "Файл",
+    description: "Универсальный CSV, TSV или XLSX с сопоставлением колонок",
+    icon: "import",
+    accept: ".csv,.tsv,.xlsx"
+  },
+  {
+    value: "POSITIONS",
+    label: "Позиции",
+    description: "Таблица по датам или строки «запрос · дата · позиция»",
+    icon: "positions",
+    accept: ".csv,.tsv,.xlsx"
+  },
+  {
+    value: "KEY_COLLECTOR",
+    label: "Key Collector",
+    description: "Проект .kc4 целиком: дерево, цвета, заметки и метрики",
+    disabled: true,
+    badge: "KC",
+    accept: ".kc4,.csv,.tsv,.xlsx"
+  },
+  {
+    value: "TOPVISOR",
+    label: "Топвизор",
+    description: "Запросы, группы, теги, URL и позиции из экспорта",
+    disabled: true,
+    badge: "T",
+    accept: ".csv,.tsv,.xlsx"
+  }
+];
+
 const MAX_CONCURRENCY = 3;
 const INSPECTION_TIMEOUT_MS = 30 * 60 * 1_000;
 
@@ -164,6 +215,7 @@ export function SemanticUpload({
 }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
+  const [source, setSource] = useState<SemanticImportSource>("UNIVERSAL");
   const [file, setFile] = useState<File>();
   const [stage, setStage] = useState<UploadStage>("idle");
   const [progress, setProgress] = useState(0);
@@ -176,7 +228,7 @@ export function SemanticUpload({
   >([]);
   const [duplicatePolicy, setDuplicatePolicy] =
     useState("MERGE_NON_EMPTY");
-  const [createMissingKeywords, setCreateMissingKeywords] = useState(false);
+  const [createMissingKeywords, setCreateMissingKeywords] = useState(true);
   const [defaultLanguage, setDefaultLanguage] = useState("ru");
   const [groupSeparator, setGroupSeparator] = useState("/");
   const [positionHistory, setPositionHistory] = useState<SemanticPositionHistoryImportOptions>();
@@ -234,9 +286,8 @@ export function SemanticUpload({
     []
   );
 
-  function selectFile(event: ChangeEvent<HTMLInputElement>): void {
+  function resetSelectedFile(selected?: File): void {
     backgroundRequest.current?.abort();
-    const selected = event.target.files?.[0];
     const nativeKeyCollector =
       selected?.name.toLowerCase().endsWith(".kc4") ?? false;
     setFile(selected);
@@ -252,12 +303,38 @@ export function SemanticUpload({
     setDuplicatePolicy(
       nativeKeyCollector ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY"
     );
-    setCreateMissingKeywords(false);
+    setCreateMissingKeywords(source !== "POSITIONS");
     setValidation(undefined);
     setImportResult(undefined);
     setImportVersion(undefined);
     setMessage(undefined);
     setError(undefined);
+  }
+
+  function selectFile(event: ChangeEvent<HTMLInputElement>): void {
+    resetSelectedFile(event.target.files?.[0]);
+  }
+
+  function chooseSource(nextSource: SemanticImportSource): void {
+    const option = IMPORT_SOURCES.find(({ value }) => value === nextSource);
+    if (busy || option?.disabled || nextSource === source) return;
+    setSource(nextSource);
+    backgroundRequest.current?.abort();
+    setFile(undefined);
+    setStage("idle");
+    setProgress(0);
+    setCompletedUploadId(undefined);
+    setCompletedImportId(undefined);
+    setImportPreview(undefined);
+    setMappingColumns([]);
+    setPositionHistory(undefined);
+    setValidation(undefined);
+    setImportResult(undefined);
+    setImportVersion(undefined);
+    setMessage(undefined);
+    setError(undefined);
+    setCreateMissingKeywords(nextSource !== "POSITIONS");
+    setDuplicatePolicy(nextSource === "KEY_COLLECTOR" ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY");
   }
 
   async function trackSemanticImport(
@@ -289,17 +366,16 @@ export function SemanticUpload({
         semanticImport.preview
       ) {
         const detectedHistory = isPositionHistoryPreview(semanticImport.preview);
+        const sourcePreset = sourceMapping(semanticImport.preview, source, detectedHistory);
         const columns = semanticImport.mapping?.columns ??
-          (detectedHistory
-            ? positionHistoryMapping(semanticImport.preview)
-            : suggestedMapping(semanticImport.preview));
+          sourcePreset;
         const resolvedDuplicatePolicy =
           semanticImport.mapping?.duplicatePolicy ??
           (semanticImport.sourceFormat === "KC4"
             ? "OVERWRITE_MAPPED"
             : "MERGE_NON_EMPTY");
         const resolvedCreateMissingKeywords =
-          semanticImport.mapping?.createMissingKeywords ?? false;
+          semanticImport.mapping?.createMissingKeywords ?? source !== "POSITIONS";
         const resolvedLanguage =
           semanticImport.mapping?.defaultLanguage ??
           "ru";
@@ -313,7 +389,12 @@ export function SemanticUpload({
         setDefaultLanguage(resolvedLanguage);
         setGroupSeparator(resolvedGroupSeparator);
         setPositionHistory(semanticImport.mapping?.positionHistory ??
-          (detectedHistory ? defaultPositionHistoryOptions(file?.name) : undefined));
+          (source === "POSITIONS"
+            ? {
+                ...defaultPositionHistoryOptions(file?.name),
+                layout: detectedHistory ? "WIDE" : "LONG"
+              }
+            : undefined));
         setStage("preview");
         setMessage(
           semanticImport.sourceFormat === "KC4"
@@ -474,18 +555,24 @@ export function SemanticUpload({
     );
   }
 
-  function applyKeyCollectorPreset(): void {
+  function applySourcePreset(): void {
     if (!importPreview) return;
     const nativeProject = file?.name.toLowerCase().endsWith(".kc4") ?? false;
-    setMappingColumns(suggestedMapping(importPreview));
+    const detectedHistory = isPositionHistoryPreview(importPreview);
+    setMappingColumns(sourceMapping(importPreview, source, detectedHistory));
     setDefaultLanguage("ru");
-    setGroupSeparator(nativeProject ? "/" : "\\");
-    setDuplicatePolicy(nativeProject ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY");
-    setPositionHistory(undefined);
+    setGroupSeparator(source === "KEY_COLLECTOR" && !nativeProject ? "\\" : "/");
+    setDuplicatePolicy(source === "KEY_COLLECTOR" && nativeProject ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY");
+    setPositionHistory(source === "POSITIONS"
+      ? {
+          ...defaultPositionHistoryOptions(file?.name),
+          layout: detectedHistory ? "WIDE" : "LONG"
+        }
+      : undefined);
     setMessage(
-      nativeProject
+      source === "KEY_COLLECTOR" && nativeProject
         ? "Профиль Key Collector применён: иерархия групп, запросы, URL, частотности и сохранённые позиции Яндекса и Google импортируются из KC4."
-        : "Профиль Key Collector применён: запросы, группы, URL и три частотности сопоставлены, остальные колонки будут сохранены как пользовательские."
+        : `Автонастройка «${IMPORT_SOURCES.find((option) => option.value === source)?.label ?? "Файл"}» применена. Проверьте назначения колонок перед импортом.`
     );
   }
 
@@ -760,7 +847,69 @@ export function SemanticUpload({
   }
 
   return (
-    <section className="panel semantic-upload">
+    <section className="panel semantic-upload" data-stage={stage}>
+      <div className="semantic-import-workspace">
+        <nav aria-label={uiText("Источник импорта")} className="semantic-import-source-nav">
+          <header>
+            <strong><UiText text="Источник" /></strong>
+            <small><UiText text="Выберите формат — поля настроятся автоматически" /></small>
+          </header>
+          <div className="semantic-import-source-list">
+            {IMPORT_SOURCES.filter(({ disabled }) => !disabled).map((option) => (
+              <ImportSourceButton
+                active={source === option.value}
+                disabled={busy}
+                key={option.value}
+                onSelect={() => chooseSource(option.value)}
+                option={option}
+              />
+            ))}
+          </div>
+          <div className="semantic-import-source-bottom">
+            <section className="semantic-import-unavailable-sources">
+              <span><UiText text="Временно недоступно" /></span>
+              {IMPORT_SOURCES.filter(({ disabled }) => disabled).map((option) => (
+                <ImportSourceButton
+                  active={false}
+                  disabled
+                  key={option.value}
+                  onSelect={() => undefined}
+                  option={option}
+                  unavailable
+                />
+              ))}
+            </section>
+            <aside className="semantic-import-nav-info">
+              <div>
+                <Icon name="info" />
+                <span>
+                  <strong><UiText text="Перед публикацией" /></strong>
+                  <small><UiText text="Файл проверяется, а изменения показываются заранее." /></small>
+                </span>
+              </div>
+              <a
+                href={uiLocale.startsWith("en") ? "/en/imports" : "/ru/imports"}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <UiText text="Документация по импорту" />
+                <Icon name="chevronRight" />
+              </a>
+            </aside>
+          </div>
+        </nav>
+        <div className="semantic-import-source-pane">
+          <header className="semantic-import-pane-heading">
+            <div>
+              <strong>{IMPORT_SOURCES.find((option) => option.value === source)?.label}</strong>
+              <small>{sourceHelp(source)}</small>
+            </div>
+            <div className="semantic-import-examples">
+              {sourceExampleLinks(source).map((example) => (
+                <a download href={example.href} key={example.href}>{example.label}</a>
+              ))}
+            </div>
+          </header>
       {message && (
         <div className="inline-alert success" role="status">
           {<UiText text={message ?? ""} />}
@@ -773,20 +922,21 @@ export function SemanticUpload({
       )}
       <label className="upload-dropzone" data-disabled={busy || undefined}>
         <input
-          accept=".csv,.tsv,.xlsx,.kc4"
+          accept={IMPORT_SOURCES.find((option) => option.value === source)?.accept}
+          key={source}
           disabled={busy}
           onChange={selectFile}
           type="file"
         />
         <span aria-hidden="true" className="upload-dropzone-icon">
-          ↑
+          <Icon name="import" />
         </span>
         <span className="upload-dropzone-copy">
           <strong>{file ? file.name : <UiText text="Выберите файл семантики" />}</strong>
           <small>
             {file
               ? <UiText text="{0} · файл готов к загрузке" values={[String(formatBytes(file.size))]} />
-              : <UiText text="CSV, TSV, XLSX или проект .kc4 · до 5 ГБ" />}
+              : <UiText text="CSV, TSV или XLSX · до 5 ГБ" />}
           </small>
         </span>
         <span className="upload-dropzone-action">
@@ -833,12 +983,12 @@ export function SemanticUpload({
           )}
           {positionHistory && (
             <section className="import-position-history-settings">
-              <header><Icon name="history" /><div><strong><UiText text="Параметры истории позиций" /></strong><small><UiText text="Найдено колонок с датами: {0}" values={[String(positionHistoryDateCount(importPreview))]} /></small></div></header>
+              <header><Icon name="history" /><div><strong><UiText text="Параметры истории позиций" /></strong><small>{positionHistory.layout === "LONG" ? <UiText text="Построчный формат: дата и позиция берутся из каждой строки" /> : <UiText text="Найдено колонок с датами: {0}" values={[String(positionHistoryDateCount(importPreview))]} />}</small></div></header>
               <div>
                 <label><span><UiText text="Поисковая система файла" /></span><CustomSelect value={positionHistory.searchEngine} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, searchEngine: event.target.value as "YANDEX" | "GOOGLE" } : current)}><option value="YANDEX"><UiText text="Яндекс" /></option><option value="GOOGLE">Google</option></CustomSelect></label>
                 <label><span><UiText text="Город / регион по умолчанию" /></span><SearchableRegionSelect kind={positionHistory.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"} value={positionHistory.regionCode} valueLabel={positionHistory.regionLabel} onChange={({ code, label }) => setPositionHistory(current => current ? { ...current, regionCode: code, regionLabel: label } : current)} /></label>
                 <label><span><UiText text="Устройство по умолчанию" /></span><CustomSelect value={positionHistory.device} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, device: event.target.value as "DESKTOP" | "MOBILE" } : current)}><option value="DESKTOP"><UiText text="ПК" /></option><option value="MOBILE"><UiText text="Телефон" /></option></CustomSelect></label>
-                <label><span><UiText text="Язык выдачи" /></span><input value={positionHistory.language} maxLength={16} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, language: event.target.value } : current)} /></label>
+                <label><span><UiText text="Язык выдачи" /></span><LanguageSelect value={positionHistory.language} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, language: event.target.value } : current)} /></label>
               </div>
               <p><UiText text="Если файл экспортирован из Сеньориты, город, код региона, устройство, страна и язык берутся из каждой строки. Эти значения имеют приоритет над настройками выше." /></p>
             </section>
@@ -917,8 +1067,8 @@ export function SemanticUpload({
               : "Для каждой исходной колонки выберите поле назначения, «Своя колонка» или «Не импортировать». Таблица прокручивается по горизонтали."} /></small>
           {stage === "preview" && (
             <div className="import-mapping-options">
-              {!positionHistory && <button className="secondary-button import-keycollector-preset" onClick={applyKeyCollectorPreset} type="button">
-                <UiText text="Применить профиль Key Collector" /></button>
+              {!positionHistory && <button className="secondary-button import-keycollector-preset" onClick={applySourcePreset} type="button">
+                <UiText text="Вернуть автонастройку формата" /></button>
               }
               <label className="import-create-missing-option">
                 <input
@@ -939,13 +1089,11 @@ export function SemanticUpload({
                 </span>
               </label>
               <label>
-                <UiText text="Язык запросов" /><input
+                <UiText text="Язык запросов" /><LanguageSelect
                   aria-label={uiText("Язык запросов по умолчанию")}
-                  maxLength={35}
                   onChange={(event) =>
                     setDefaultLanguage(event.target.value)
                   }
-                  placeholder={uiText("ru, en или und")}
                   value={defaultLanguage}
                 />
                 <small>
@@ -1118,7 +1266,45 @@ export function SemanticUpload({
       </div>
       <small className="upload-note">
         <UiText text="После загрузки файл не публикуется сразу: сначала идут антивирусная проверка, распознавание колонок и preview конфликтов." /></small>
+        </div>
+      </div>
     </section>
+  );
+}
+
+function ImportSourceButton({
+  active,
+  disabled,
+  onSelect,
+  option,
+  unavailable = false
+}: Readonly<{
+  active: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  option: Readonly<SemanticImportSourceOption>;
+  unavailable?: boolean;
+}>) {
+  return (
+    <button
+      aria-current={active ? "page" : undefined}
+      className={`semantic-import-source-option${active ? " active" : ""}${unavailable ? " unavailable" : ""}`}
+      disabled={disabled}
+      onClick={onSelect}
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        className={`semantic-import-source-icon source-${option.value.toLowerCase()}`}
+      >
+        {option.icon ? <Icon name={option.icon} /> : option.badge}
+      </span>
+      <span>
+        <strong>{option.label}</strong>
+        <small>{option.description}</small>
+        {unavailable && <em><UiText text="Недоступно" /></em>}
+      </span>
+    </button>
   );
 }
 
@@ -1588,6 +1774,8 @@ function mappingTargetLabel(value: SemanticImportTarget): string {
     "keyword.language": "Язык",
     "keyword.priority": "Приоритет",
     "keyword.favorite": "Избранное",
+    "keyword.tracked": "Отслеживается",
+    "keyword.note": "Заметка",
     "keyword.intent": "Интент",
     "group.path": "Путь группы",
     "page.target_url": "Целевой URL",
@@ -1661,6 +1849,92 @@ function suggestedMapping(
         : {})
     };
   });
+}
+
+function sourceMapping(
+  preview: SemanticImportPreview,
+  source: SemanticImportSource,
+  detectedHistory: boolean
+): readonly SemanticImportMappingColumn[] {
+  if (source === "POSITIONS" && detectedHistory) {
+    return positionHistoryMapping(preview);
+  }
+  if (source === "TOPVISOR") return presetMapping(preview, "TOPVISOR");
+  if (source === "POSITIONS") return presetMapping(preview, "POSITIONS");
+  return suggestedMapping(preview);
+}
+
+function presetMapping(
+  preview: SemanticImportPreview,
+  preset: "TOPVISOR" | "POSITIONS"
+): readonly SemanticImportMappingColumn[] {
+  const assigned = new Set<string>();
+  return preview.columns.map((column) => {
+    const normalized = column.sourceName.normalize("NFKC").trim().toLowerCase();
+    const alias = importPresetTarget(normalized, preset);
+    const suggested = alias ?? (
+      MAPPING_TARGETS.includes(column.suggestedTarget as SemanticImportTarget)
+        ? column.suggestedTarget
+        : "custom"
+    );
+    const singleton = !["custom", "ignore"].includes(suggested);
+    const target = singleton && assigned.has(suggested) ? "custom" : suggested;
+    if (singleton) assigned.add(suggested);
+    return {
+      sourceIndex: column.index,
+      target,
+      ...(target === "custom" ? { customName: column.sourceName } : {})
+    };
+  });
+}
+
+function importPresetTarget(
+  value: string,
+  preset: "TOPVISOR" | "POSITIONS"
+): SemanticImportTarget | undefined {
+  if (/^(?:запрос|запросы|ключ|ключевая фраза|фраза|keyword|query)$/iu.test(value)) return "keyword.text";
+  if (/^(?:группа|путь группы|папка|group|group path)$/iu.test(value)) return "group.path";
+  if (/^(?:теги|метки|tags)$/iu.test(value)) return "keyword.tags";
+  if (/^(?:целевой url|целевая страница|посадочная страница|target url|landing page)$/iu.test(value)) return "page.target_url";
+  if (/^(?:язык|language|locale)$/iu.test(value)) return "keyword.language";
+  if (/^(?:заметка|комментарий|note|comment)$/iu.test(value)) return "keyword.note";
+  if (/^(?:избранное|favorite)$/iu.test(value)) return "keyword.favorite";
+  if (/^(?:отслеживается|отслеживать|tracked|tracking)$/iu.test(value)) return "keyword.tracked";
+  if (/^(?:дата|дата проверки|дата съема|date|checked at|observed at)$/iu.test(value)) return "metric.observed_at";
+  if (/^(?:поисковик|поисковая система|search engine)$/iu.test(value)) return "context.search_engine";
+  if (/^(?:регион|город|region|city)$/iu.test(value)) return "context.region";
+  if (/^(?:позиция яндекс|яндекс позиция|yandex position)$/iu.test(value)) return "ranking.yandex.position";
+  if (/^(?:url яндекс|яндекс url|yandex url)$/iu.test(value)) return "ranking.yandex.url";
+  if (/^(?:позиция google|google position)$/iu.test(value)) return "ranking.google.position";
+  if (/^(?:url google|google url)$/iu.test(value)) return "ranking.google.url";
+  if (preset === "POSITIONS" && /^(?:позиция|position|rank)$/iu.test(value)) return "ranking.position";
+  return undefined;
+}
+
+function sourceHelp(source: SemanticImportSource): string {
+  const messages: Readonly<Record<SemanticImportSource, string>> = {
+    KEY_COLLECTOR: "Загрузите нативный .kc4. Сеньорита перенесёт дерево групп, цвета, запросы, заметки, URL, частотности, позиции и остальные заполненные колонки.",
+    TOPVISOR: "Поддерживаются CSV, TSV и XLSX. Названия стандартных колонок Топвизора будут сопоставлены автоматически, остальные останутся доступными как свои поля.",
+    UNIVERSAL: "Загрузите таблицу с заголовками. Перед публикацией можно назначить каждой колонке поле Сеньориты и проверить конфликты.",
+    POSITIONS: "Поддерживаются широкая история с датами в колонках и построчный формат с колонками Запрос, Дата, Поисковик и Позиция."
+  };
+  return messages[source];
+}
+
+function sourceExampleLinks(source: SemanticImportSource): readonly Readonly<{ href: string; label: string }>[] {
+  if (source === "POSITIONS") return [
+    { href: "/examples/imports/positions-wide.csv", label: "Широкий CSV" },
+    { href: "/examples/imports/positions-long.csv", label: "Построчный CSV" }
+  ];
+  if (source === "TOPVISOR") return [
+    { href: "/examples/imports/topvisor.csv", label: "Пример CSV" }
+  ];
+  if (source === "KEY_COLLECTOR") return [
+    { href: "/examples/imports/key-collector-columns.csv", label: "Пример колонок" }
+  ];
+  return [
+    { href: "/examples/imports/keywords.csv", label: "Пример CSV" }
+  ];
 }
 
 function isPositionHistoryPreview(preview: SemanticImportPreview): boolean {

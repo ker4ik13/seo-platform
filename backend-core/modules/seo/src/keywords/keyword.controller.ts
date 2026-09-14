@@ -142,6 +142,7 @@ export class KeywordController {
   @Get("position-summary")
   public async positionSummary(
     @Param("projectId") projectId: string,
+    @Query() query: unknown,
     @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
     @Req() request: FastifyRequest
   ): Promise<ApiResponse<ProjectPositionSummary>> {
@@ -154,7 +155,8 @@ export class KeywordController {
     return {
       data: await this.keywords.positionSummary(
         context.workspaceId,
-        context.projectId
+        context.projectId,
+        projectPositionHistoryQuery(query)
       ),
       meta: { requestId: request.id }
     };

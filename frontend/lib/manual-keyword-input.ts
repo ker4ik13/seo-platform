@@ -41,6 +41,7 @@ export interface ManualKeywordDuplicatePolicyInput {
   readonly addDuplicatesToGroup: boolean;
   readonly inTargetGroup: boolean;
   readonly previewState?: SemanticKeywordBulkCreatePreviewState;
+  readonly replaceGroups?: boolean;
   readonly selectedForTargetGroup: boolean;
 }
 
@@ -49,10 +50,16 @@ type ManualKeywordDuplicatePreviewRow =
 
 export function manualKeywordDuplicateCanApply(
   row: ManualKeywordDuplicatePreviewRow,
-  targetGroupId?: string
+  targetGroupId?: string,
+  replaceGroups = false
 ): boolean {
   if (row.state === "TRASHED_DUPLICATE") return true;
   if (row.state !== "ACTIVE_DUPLICATE" || !targetGroupId) return false;
+  if (replaceGroups) {
+    return row.groupsTruncated ||
+      row.groups.length !== 1 ||
+      row.groups[0]?.id !== targetGroupId;
+  }
   return !row.inTargetGroup;
 }
 
@@ -60,13 +67,14 @@ export function manualKeywordDuplicatePolicy({
   addDuplicatesToGroup,
   inTargetGroup,
   previewState,
+  replaceGroups = false,
   selectedForTargetGroup
 }: ManualKeywordDuplicatePolicyInput): SemanticKeywordDuplicatePolicy {
   if (previewState === "TRASHED_DUPLICATE") {
     return selectedForTargetGroup ? "RESTORE_TRASHED" : "SKIP_EXISTING";
   }
   if (previewState === "ACTIVE_DUPLICATE" && selectedForTargetGroup) {
-    return "ADD_TO_GROUP";
+    return replaceGroups ? "MOVE_TO_GROUP" : "ADD_TO_GROUP";
   }
   if (previewState === "ACTIVE_DUPLICATE" && inTargetGroup) {
     return "SKIP_EXISTING";
@@ -75,7 +83,7 @@ export function manualKeywordDuplicatePolicy({
     (previewState === undefined || previewState === "NEW") &&
     addDuplicatesToGroup
   ) {
-    return "ADD_TO_GROUP";
+    return replaceGroups ? "MOVE_TO_GROUP" : "ADD_TO_GROUP";
   }
   return "SKIP_EXISTING";
 }

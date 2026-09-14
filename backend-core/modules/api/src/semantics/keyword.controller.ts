@@ -158,6 +158,7 @@ export class KeywordController {
   @RequirePermission("semantic.view")
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async positionSummary(
+    @Query() query: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<ProjectPositionSummary>> {
@@ -165,7 +166,8 @@ export class KeywordController {
     return apiResponse(
       request,
       await this.seoData.projectPositionSummary(
-        internalProjectContext(request, principal, tenant)
+        internalProjectContext(request, principal, tenant),
+        projectPositionHistoryQuery(query)
       )
     );
   }

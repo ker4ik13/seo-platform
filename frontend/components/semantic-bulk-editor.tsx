@@ -1,7 +1,9 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { ChoiceToggle } from "./choice-toggle";
 import { KeywordTagPicker } from "./keyword-tag-picker";
+import { LanguageSelect } from "./locale-selects";
 import { keywordTagChanges, keywordTagKey, uniqueKeywordTags } from "../lib/keyword-tags";
 import {
   SemanticGroupPickerField,
@@ -127,11 +129,8 @@ export function SemanticBulkEditor({
   const [clusterId, setClusterId] = useState<"KEEP" | "CLEAR" | string>(
     single?.clusterId ?? (single ? "CLEAR" : "KEEP")
   );
-  const [targetUrlMode, setTargetUrlMode] =
-    useState<"KEEP" | "CLEAR" | "SET">(
-      single ? (single.targetUrl ? "SET" : "CLEAR") : "KEEP"
-    );
   const [targetUrl, setTargetUrl] = useState(single?.targetUrl ?? "");
+  const [clearTargetUrl, setClearTargetUrl] = useState(false);
   const [tagNames, setTagNames] = useState<readonly string[]>(single?.tags ?? []);
   const [removeTagNames, setRemoveTagNames] = useState<readonly string[]>([]);
   const selectedTagNames = useMemo(
@@ -313,11 +312,11 @@ export function SemanticBulkEditor({
           ...(clusterId === "KEEP"
             ? {}
             : { clusterId: clusterId === "CLEAR" ? null : clusterId }),
-          ...(targetUrlMode === "KEEP"
-            ? {}
-            : {
-                targetUrl: targetUrlMode === "CLEAR" ? null : targetUrl
-              }),
+          ...(clearTargetUrl
+            ? { targetUrl: null }
+            : targetUrl.normalize("NFKC").trim()
+              ? { targetUrl: targetUrl.normalize("NFKC").trim() }
+              : {}),
           ...(nextTags.length ? { addTagNames: nextTags } : {}),
           ...(removeTagNames.length ? { removeTagNames } : {})
         };
@@ -370,8 +369,7 @@ export function SemanticBulkEditor({
             </label>
             <label className="semantic-bulk-language">
               <span><UiText text="Язык" /></span>
-              <input
-                maxLength={16}
+              <LanguageSelect
                 onChange={(event) => setLanguage(event.target.value)}
                 required
                 value={language}
@@ -391,32 +389,42 @@ export function SemanticBulkEditor({
             value={priority}
           />
         </label>
-        <label className="semantic-bulk-favorite">
+        <div className="semantic-bulk-choice semantic-bulk-favorite">
           <span><UiText text="Избранное" /></span>
-          <CustomSelect
-            onChange={(event) =>
-              setFavorite(event.target.value as typeof favorite)
-            }
+          <ChoiceToggle
+            ariaLabel={uiText("Избранное")}
+            onChange={setFavorite}
+            options={single
+              ? [
+                  { value: "YES", label: uiText("Да") },
+                  { value: "NO", label: uiText("Нет") }
+                ]
+              : [
+                  { value: "KEEP", label: uiText("Не менять") },
+                  { value: "YES", label: uiText("Добавить") },
+                  { value: "NO", label: uiText("Убрать") }
+                ]}
             value={favorite}
-          >
-            {!single && <option value="KEEP"><UiText text="Не менять" /></option>}
-            <option value="YES">{single ? <UiText text="Да" /> : <UiText text="Добавить" />}</option>
-            <option value="NO">{single ? <UiText text="Нет" /> : <UiText text="Убрать" />}</option>
-          </CustomSelect>
-        </label>
-        <label className="semantic-bulk-tracked">
+          />
+        </div>
+        <div className="semantic-bulk-choice semantic-bulk-tracked">
           <span><UiText text="Отслеживается" /></span>
-          <CustomSelect
-            onChange={(event) =>
-              setTracked(event.target.value as typeof tracked)
-            }
+          <ChoiceToggle
+            ariaLabel={uiText("Отслеживается")}
+            onChange={setTracked}
+            options={single
+              ? [
+                  { value: "YES", label: uiText("Да") },
+                  { value: "NO", label: uiText("Нет") }
+                ]
+              : [
+                  { value: "KEEP", label: uiText("Не менять") },
+                  { value: "YES", label: uiText("Да") },
+                  { value: "NO", label: uiText("Нет") }
+                ]}
             value={tracked}
-          >
-            {!single && <option value="KEEP"><UiText text="Не менять" /></option>}
-            <option value="YES"><UiText text="Да" /></option>
-            <option value="NO"><UiText text="Нет" /></option>
-          </CustomSelect>
-        </label>
+          />
+        </div>
         <label className="semantic-bulk-intent">
           <span><UiText text="Интент" /></span>
           <CustomSelect
@@ -460,47 +468,34 @@ export function SemanticBulkEditor({
             ))}
           </CustomSelect>
         </label>
-        {single ? (
-          <label className="semantic-bulk-url">
-            <span><UiText text="Целевой URL" /></span>
-            <input
-              maxLength={2_048}
-              onChange={(event) => {
-                const value = event.target.value;
-                setTargetUrl(value);
-                setTargetUrlMode(value ? "SET" : "CLEAR");
-              }}
-              placeholder="https://example.com/page"
-              type="url"
-              value={targetUrl}
-            />
-          </label>
-        ) : (
-          <label>
-            <span><UiText text="Целевой URL" /></span>
-            <CustomSelect
-              onChange={(event) =>
-                setTargetUrlMode(event.target.value as typeof targetUrlMode)
-              }
-              value={targetUrlMode}
-            >
-              <option value="KEEP"><UiText text="Не менять" /></option>
-              <option value="CLEAR"><UiText text="Очистить" /></option>
-              <option value="SET"><UiText text="Задать URL" /></option>
-            </CustomSelect>
-          </label>
-        )}
-        {!single && targetUrlMode === "SET" && (
-          <label className="semantic-bulk-url">
-            <span><UiText text="Новая URL" /></span>
-            <input
-              onChange={(event) => setTargetUrl(event.target.value)}
-              required
-              type="url"
-              value={targetUrl}
-            />
-          </label>
-        )}
+        <div className="semantic-bulk-url semantic-bulk-url-field">
+          <label htmlFor="semantic-bulk-target-url"><UiText text="Целевой URL" /></label>
+          <input
+            id="semantic-bulk-target-url"
+            disabled={!single && clearTargetUrl}
+            maxLength={2_048}
+            onChange={(event) => {
+              setTargetUrl(event.target.value);
+              if (event.target.value) setClearTargetUrl(false);
+            }}
+            placeholder={single ? "https://example.com/page" : uiText("Оставьте пустым, чтобы не менять")}
+            type="url"
+            value={targetUrl}
+          />
+          {!single && (
+            <label className="semantic-bulk-clear-url">
+              <input
+                checked={clearTargetUrl}
+                onChange={(event) => {
+                  setClearTargetUrl(event.target.checked);
+                  if (event.target.checked) setTargetUrl("");
+                }}
+                type="checkbox"
+              />
+              <span><UiText text="Очистить у выбранных" /></span>
+            </label>
+          )}
+        </div>
       </div>
       <div className={`semantic-bulk-tags${single ? "" : " has-removal"}`}>
         <KeywordTagPicker

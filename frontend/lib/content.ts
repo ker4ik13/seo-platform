@@ -262,7 +262,7 @@ const marketingPages: Record<Locale, MarketingPage> = {
       {
         question: "Можно ли собрать и вести семантическое ядро онлайн?",
         answer:
-          "Да. Запросы можно добавить вручную или импортировать из CSV/XLSX и проектов Key Collector, разложить по папкам и группам, дополнить URL и заметками. Импорт умеет обновлять частотность, позиции и другие параметры уже существующих ключей, не создавая новые без вашего разрешения."
+          "Да. Запросы можно добавить через форму или импортировать из CSV, TSV и XLSX, разложить по папкам и группам, дополнить URL и заметками. Импорт умеет обновлять частотность, позиции и другие параметры уже существующих ключей, не создавая новые без вашего разрешения. Прямые профили Key Collector и Топвизора временно отключены."
       },
       {
         question: "Как работает проверка частотности запросов Wordstat?",
@@ -432,7 +432,7 @@ const marketingPages: Record<Locale, MarketingPage> = {
     faqText: "How the platform handles keywords, Wordstat volume, rank tracking, integrations and project data.",
     faqs: [
       { question: "What is SEOnorita?", answer: "SEOnorita is an online SEO project workspace for keyword management, imports, search volume, Yandex and Google rankings, ranking history, page maps, site crawls, notes, operations and provider integrations." },
-      { question: "Can I manage an existing keyword set?", answer: "Yes. Add keywords manually or import CSV, XLSX and supported Key Collector project data. Imports can update metrics on existing keywords without creating missing phrases unless you explicitly allow it." },
+      { question: "Can I manage an existing keyword set?", answer: "Yes. Add keywords with the editor or import CSV, TSV and XLSX files. Imports can update metrics on existing keywords without creating missing phrases unless you explicitly allow it. Direct Key Collector and Topvisor profiles are temporarily disabled." },
       { question: "How does Wordstat volume collection work?", answer: "Choose a region, provider and volume types. The platform queues the bulk operation and stores broad, phrase and exact values beside every keyword using your XMLStock or Arsenkin connection." },
       { question: "How are Yandex and Google rankings checked?", answer: "Choose the engine, search mode, region, device, depth and provider route. The asynchronous run stores the ranking, URL, top competitors and full measurement context in keyword history." },
       { question: "Can regions and devices be tracked separately?", answer: "Yes. Region and device belong to a measurement context, so desktop and mobile rankings or different locations are not merged into one ambiguous value." },

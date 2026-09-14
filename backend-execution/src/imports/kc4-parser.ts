@@ -52,6 +52,10 @@ interface Kc4Group {
 
 export interface Kc4ParseMetadata {
   readonly groupPaths: readonly (readonly string[])[];
+  readonly groups: readonly Readonly<{
+    path: readonly string[];
+    color?: string;
+  }>[];
 }
 
 interface ScalarColumn {
@@ -241,12 +245,18 @@ export function* readKc4Database(
     const groups = readGroups(database);
     const activeGroups = orderedActiveGroups(groups);
     const groupPaths = groupPathMap(activeGroups, groups);
+    const metadataGroups = activeGroups.map((group) => {
+      const value = groupPaths.get(group.id);
+      if (!value) invalidKc4();
+      const color = kc4GroupColor(group.color);
+      return {
+        path: value,
+        ...(color ? { color } : {})
+      };
+    });
     onMetadata?.({
-      groupPaths: activeGroups.map((group) => {
-        const value = groupPaths.get(group.id);
-        if (!value) invalidKc4();
-        return value;
-      })
+      groupPaths: metadataGroups.map(({ path }) => path),
+      groups: metadataGroups
     });
     const selectedColumns = populatedScalarColumns(database, tables);
     const includeGroupColor = activeGroups.some(
@@ -321,6 +331,14 @@ export function* readKc4Database(
   } finally {
     database.close();
   }
+}
+
+function kc4GroupColor(value: string | undefined): string | undefined {
+  const normalized = value?.normalize("NFKC").trim();
+  if (!normalized || normalized.toLowerCase() === "transparent") return undefined;
+  if (/^#[0-9a-f]{6}$/iu.test(normalized)) return normalized.toLowerCase();
+  if (/^#[0-9a-f]{8}$/iu.test(normalized)) return `#${normalized.slice(3).toLowerCase()}`;
+  return undefined;
 }
 
 function readGroups(database: DatabaseSync): readonly Kc4Group[] {

@@ -184,8 +184,21 @@ export class KeywordService {
 
   public async positionSummary(
     workspaceId: string,
-    projectId: string
+    projectId: string,
+    query: ProjectPositionHistoryQuery = { includeUntracked: false }
   ): Promise<ProjectPositionSummary> {
+    const dimension = query.rankDimensionKey
+      ? parseSemanticRankDimensionKey(query.rankDimensionKey)
+      : undefined;
+    if (query.rankDimensionKey && !dimension) {
+      throw new BadRequestException("Invalid rank dimension");
+    }
+    const sourceDimensions = dimension
+      ? await rankDimensionSources(this.prisma, { workspaceId, projectId }, dimension)
+      : undefined;
+    const dimensionFilter = sourceDimensions
+      ? rankDimensionConfigurationPredicate(sourceDimensions)
+      : Prisma.empty;
     const rows = await this.prisma.$queryRaw<readonly { position: number }[]>(Prisma.sql`
       SELECT DISTINCT ON (current.keyword_id) current.position
       FROM current_ranks current
@@ -201,6 +214,7 @@ export class KeywordService {
       WHERE current.workspace_id = ${workspaceId}::uuid
         AND current.project_id = ${projectId}::uuid
         AND keyword.status::text = 'ACTIVE'
+        AND (${query.includeUntracked}::boolean OR keyword.is_tracked = TRUE)
         AND current.found
         AND current.position IS NOT NULL
         AND NOT EXISTS (
@@ -214,6 +228,7 @@ export class KeywordService {
             AND deletion.device = configuration.device::text
             AND current.observed_at <= deletion.excluded_through
         )
+        ${dimensionFilter}
       ORDER BY current.keyword_id, current.observed_at DESC, current.snapshot_id DESC
     `);
     const positions = rows.map(({ position }) => position);
@@ -1614,7 +1629,8 @@ export class KeywordService {
         if (
           existing &&
           isActiveDuplicate &&
-          input.duplicatePolicy === "ADD_TO_GROUP" &&
+          (input.duplicatePolicy === "ADD_TO_GROUP" ||
+            input.duplicatePolicy === "MOVE_TO_GROUP") &&
           duplicateGroupId
         ) {
           const linked = await linkActiveKeywordToGroup(
@@ -1624,7 +1640,8 @@ export class KeywordService {
             existing.id,
             duplicateGroupId,
             input.actorId,
-            existing.version
+            existing.version,
+            input.duplicatePolicy === "MOVE_TO_GROUP"
           );
           if (!linked.changed) {
             return {
@@ -1671,7 +1688,9 @@ export class KeywordService {
                 projectId: input.projectId,
                 actorId: input.actorId,
                 reason: "KEYWORD_CREATE",
-                summary: "Добавлен существующий запрос в папку"
+                summary: input.duplicatePolicy === "MOVE_TO_GROUP"
+                  ? "Существующий запрос перенесён в папку"
+                  : "Добавлен существующий запрос в папку"
               },
               change
             );
@@ -2234,7 +2253,8 @@ export class KeywordService {
           transaction,
           input.workspaceId,
           input.projectId,
-          keywordId
+          keywordId,
+          input.groupId !== undefined
         );
         const beforeState = keywordVersionState(current);
         assertKeywordVersion(current.version, input.version);
@@ -2326,6 +2346,9 @@ export class KeywordService {
               ? {}
               : { clusterId: input.clusterId }),
             ...(pageId === undefined ? {} : { targetPageId: pageId }),
+            ...(current.status === "DELETED" && input.groupId !== undefined
+              ? { status: "ACTIVE" as const, deletedAt: null }
+              : {}),
             updatedBy: input.actorId,
             version: { increment: 1 }
           }
@@ -2885,7 +2908,8 @@ async function requiredKeyword(
   transaction: Prisma.TransactionClient | PrismaService,
   workspaceId: string,
   projectId: string,
-  keywordId: string
+  keywordId: string,
+  allowTrashedMove = false
 ): Promise<KeywordMutationAggregate> {
   const keyword = await transaction.keyword.findUnique({
     where: {
@@ -2893,7 +2917,12 @@ async function requiredKeyword(
     },
     include: KEYWORD_MUTATION_INCLUDE
   });
-  if (!keyword || keyword.status !== "ACTIVE") {
+  const movableTrash = Boolean(
+    allowTrashedMove &&
+    keyword?.status === "DELETED" &&
+    keyword.memberships.some(({ group }) => group.systemKind === "TRASH")
+  );
+  if (!keyword || (keyword.status !== "ACTIVE" && !movableTrash)) {
     throw new HttpException(
       { code: "NOT_FOUND", message: "Semantic keyword not found" },
       HttpStatus.NOT_FOUND
@@ -2928,7 +2957,8 @@ async function linkActiveKeywordToGroup(
   keywordId: string,
   groupId: string,
   actorId: string,
-  expectedVersion: number
+  expectedVersion: number,
+  replaceGroups = false
 ): Promise<Readonly<{
   group: { id: string; path: string | null; name: string };
   before: KeywordMutationAggregate;
@@ -2956,7 +2986,10 @@ async function linkActiveKeywordToGroup(
     throw keywordVersionConflict(expectedVersion);
   }
   const selectedGroup = { id: group.id, path: group.path, name: group.name };
-  if (before.memberships.some(({ group: current }) => current.id === groupId)) {
+  if (
+    before.memberships.some(({ group: current }) => current.id === groupId) &&
+    (!replaceGroups || before.memberships.length === 1)
+  ) {
     return { group: selectedGroup, before, after: before, changed: false };
   }
   const updated = await transaction.keyword.updateMany({
@@ -2974,11 +3007,13 @@ async function linkActiveKeywordToGroup(
   });
   if (updated.count !== 1) throw keywordVersionConflict(expectedVersion);
   await transaction.keywordGroupMembership.deleteMany({
-    where: {
-      projectId,
-      keywordId,
-      group: { workspaceId, projectId, systemKind: "UNGROUPED" }
-    }
+    where: replaceGroups
+      ? { projectId, keywordId }
+      : {
+          projectId,
+          keywordId,
+          group: { workspaceId, projectId, systemKind: "UNGROUPED" }
+        }
   });
   await transaction.keywordGroupMembership.create({
     data: { projectId, keywordId, groupId }

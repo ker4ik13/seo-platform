@@ -139,13 +139,13 @@ export function ProjectPositionHistoryChart({
       <label className="dashboard-rank-dimension-filter">
         <span><UiText text="Поисковик, город и устройство" /></span>
         <CustomSelect
-          disabled={scopeLoading}
+          disabled={scopeLoading || dimensions.length === 0}
           onChange={(event) => onRankDimensionChange(event.target.value)}
           searchable
           searchPlaceholder={uiText("Найти город или устройство")}
           value={rankDimensionKey}
         >
-          <option value=""><UiText text="Все города и устройства" /></option>
+          {dimensions.length === 0 && <option value=""><UiText text="Срезов позиций пока нет" /></option>}
           {dimensions.map((dimension) => (
             <option key={dimension.key} value={dimension.key}>
               <SemanticRankContext

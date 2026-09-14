@@ -140,7 +140,20 @@ export class SemanticImportValidatorService {
     if (!keywordColumn || keywordColumn.sourceIndex >= headers.length) {
       throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
     }
-    if (mapping.positionHistory && positionHistoryDateColumns(headers).length === 0) {
+    if (
+      mapping.positionHistory &&
+      mapping.positionHistory.layout !== "LONG" &&
+      positionHistoryDateColumns(headers).length === 0
+    ) {
+      throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
+    }
+    if (
+      mapping.positionHistory?.layout === "LONG" &&
+      (!mapping.columns.some(({ target }) => target === "metric.observed_at") ||
+        !mapping.columns.some(({ target }) =>
+          ["ranking.position", "ranking.yandex.position", "ranking.google.position"].includes(target)
+        ))
+    ) {
       throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
     }
     await this.prisma.semanticImportValidatedRow.deleteMany({
@@ -480,6 +493,16 @@ export function canonicalImportRow(
     "INVALID_FAVORITE",
     issues
   );
+  const isTracked = optionalBoolean(
+    value("keyword.tracked"),
+    "INVALID_TRACKED",
+    issues
+  );
+  const note = importNote(
+    value("keyword.note") ??
+      (options.sourceFormat === "KC4" ? kc4KeywordNote(headers, values) : undefined),
+    issues
+  );
   const intent = optionalIntent(value("keyword.intent"), issues);
   const explicitPositions = mappedPositions(value, issues);
   const positions = mapping.positionHistory ? [] : explicitPositions.length > 0
@@ -488,7 +511,7 @@ export function canonicalImportRow(
       ? kc4Positions(headers, values, issues)
       : legacyMappedPosition(value, issues);
   const positionHistory = mapping.positionHistory
-    ? importedPositionHistory(headers, values, mapping.positionHistory, issues)
+    ? importedPositionHistory(headers, values, mapping.positionHistory, issues, mapping)
     : [];
   const customValues: Record<string, string> = {};
   for (const column of mapping.columns) {
@@ -526,6 +549,8 @@ export function canonicalImportRow(
     language: keyword.language,
     ...(priority === undefined ? {} : { priority }),
     ...(isFavorite === undefined ? {} : { isFavorite }),
+    ...(isTracked === undefined ? {} : { isTracked }),
+    ...(note === undefined ? {} : { note }),
     ...(intent === undefined ? {} : { intent }),
     ...(groupPath?.length ? { groupPath } : {}),
     ...(targetUrl ? { targetUrl } : {}),
@@ -536,6 +561,34 @@ export function canonicalImportRow(
     ...(tags.length > 0 ? { tags } : {}),
     customValues
   };
+}
+
+function kc4KeywordNote(
+  headers: readonly string[],
+  values: readonly string[]
+): string | undefined {
+  const comments = [
+    "Key Collector · Комментарий 1",
+    "Key Collector · Комментарий 2"
+  ].flatMap((header) => {
+    const index = headers.indexOf(header);
+    const value = index < 0 ? undefined : values[index]?.trim();
+    return value ? [value] : [];
+  });
+  return comments.length > 0 ? comments.join("\n\n") : undefined;
+}
+
+function importNote(
+  value: string | undefined,
+  issues: Set<string>
+): string | undefined {
+  if (!value?.trim()) return undefined;
+  const note = value.normalize("NFC").trim();
+  if (note.length > 1_000_000) {
+    issues.add("INVALID_NOTE");
+    return undefined;
+  }
+  return note;
 }
 
 function splitGroupPath(

@@ -6,6 +6,7 @@ import {
   type InternalSemanticImportReceipt,
   type SemanticCapacityEntitlement,
   type SemanticImportMapping,
+  type SemanticImportGroupMetadata,
   type SemanticImportPublishRow,
   type SemanticImportResultSummary
 } from "@seo-platform/contracts";
@@ -222,12 +223,20 @@ export class SemanticImportPublisherService {
           parsed as readonly SemanticImportPublishRow[]
         );
       });
-      const groupPaths =
+      const groupManifest =
         chunkIndex === 0 && mapping.createMissingKeywords
-          ? safeKc4GroupPaths(semanticImport.sourceMetadata)
+          ? safeKc4GroupManifest(semanticImport.sourceMetadata)
           : undefined;
+      const groupPaths = groupManifest?.groupPaths;
+      const groupMetadata = groupManifest?.groups;
       const payloadHash = hashJson(
-        groupPaths ? { groupPaths, rows } : rows
+        groupPaths || groupMetadata
+          ? {
+              ...(groupPaths ? { groupPaths } : {}),
+              ...(groupMetadata ? { groupMetadata } : {}),
+              rows
+            }
+          : rows
       );
       await this.seoData.applyChunk({
         workspaceId: semanticImport.workspaceId,
@@ -239,6 +248,7 @@ export class SemanticImportPublisherService {
         duplicatePolicy: mapping.duplicatePolicy,
         createMissingKeywords: mapping.createMissingKeywords,
         ...(groupPaths ? { groupPaths } : {}),
+        ...(groupMetadata ? { groupMetadata } : {}),
         rows
       });
       publishedRows += BigInt(rows.length);
@@ -730,6 +740,10 @@ export function mergeCanonicalPublishRows(
     ...(first.isFavorite === undefined
       ? {}
       : { isFavorite: first.isFavorite }),
+    ...(first.isTracked === undefined
+      ? {}
+      : { isTracked: first.isTracked }),
+    ...(first.note === undefined ? {} : { note: first.note }),
     ...(first.intent === undefined ? {} : { intent: first.intent }),
     ...(groupPaths.length > 0 ? { groupPaths } : {}),
     ...(first.targetUrl ? { targetUrl: first.targetUrl } : {}),
@@ -783,6 +797,8 @@ export function canonicalPublishRow(
         Number(row.priority) < 0 ||
         Number(row.priority) > 100)) ||
     (row.isFavorite !== undefined && typeof row.isFavorite !== "boolean") ||
+    (row.isTracked !== undefined && typeof row.isTracked !== "boolean") ||
+    (row.note !== undefined && (typeof row.note !== "string" || row.note.length > 1_000_000)) ||
     (row.intent !== undefined &&
       ![
         "INFORMATIONAL",
@@ -901,6 +917,10 @@ export function canonicalPublishRow(
     ...(row.isFavorite === undefined
       ? {}
       : { isFavorite: row.isFavorite as boolean }),
+    ...(row.isTracked === undefined
+      ? {}
+      : { isTracked: row.isTracked as boolean }),
+    ...(row.note === undefined ? {} : { note: row.note as string }),
     ...(row.intent === undefined
       ? {}
       : {
@@ -1005,9 +1025,12 @@ function hashJson(value: unknown): string {
     .digest("hex");
 }
 
-function safeKc4GroupPaths(
+function safeKc4GroupManifest(
   value: unknown
-): readonly (readonly string[])[] | undefined {
+): Readonly<{
+  groupPaths?: readonly (readonly string[])[];
+  groups?: readonly SemanticImportGroupMetadata[];
+}> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
@@ -1031,7 +1054,41 @@ function safeKc4GroupPaths(
     }
     return path as readonly string[];
   });
-  return parsed.length > 0 ? parsed : undefined;
+  const rawGroups = (value as Readonly<Record<string, unknown>>).groups;
+  const groups = rawGroups === undefined
+    ? undefined
+    : safeKc4GroupMetadata(rawGroups);
+  return parsed.length > 0 || groups?.length
+    ? {
+        ...(parsed.length > 0 ? { groupPaths: parsed } : {}),
+        ...(groups?.length ? { groups } : {})
+      }
+    : undefined;
+}
+
+function safeKc4GroupMetadata(value: unknown): readonly SemanticImportGroupMetadata[] {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw new Error("Stored KC4 group metadata is invalid");
+  }
+  return value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error("Stored KC4 group metadata is invalid");
+    }
+    const record = item as Readonly<Record<string, unknown>>;
+    if (
+      !Array.isArray(record.path) ||
+      record.path.length < 1 ||
+      record.path.length > semanticImportMaxGroupDepth ||
+      record.path.some((segment) => typeof segment !== "string" || !segment || segment.length > 255) ||
+      (record.color !== undefined && (typeof record.color !== "string" || !/^#[0-9a-f]{6}$/iu.test(record.color)))
+    ) {
+      throw new Error("Stored KC4 group metadata is invalid");
+    }
+    return {
+      path: record.path as readonly string[],
+      ...(record.color ? { color: String(record.color).toLowerCase() } : {})
+    };
+  });
 }
 
 function json(value: unknown): Prisma.InputJsonValue {

@@ -358,6 +358,9 @@ importers:
       '@seo-platform/operational-alerts':
         specifier: workspace:*
         version: link:../packages/operational-alerts
+      lucide-react:
+        specifier: ^1.45.0
+        version: 1.45.0(react@19.2.8)
       next:
         specifier: 16.2.12
         version: 16.2.12(@types/node@24.10.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -2159,6 +2162,11 @@ packages:
   lru.min@1.1.4:
     resolution: {integrity: sha512-DqC6n3QQ77zdFpCMASA1a3Jlb64Hv2N2DciFGkO/4L9+q/IpIAuRlKOvCXabtRW6cQf8usbmM6BE/TOPysCdIA==}
     engines: {bun: '>=1.0.0', deno: '>=1.30.0', node: '>=8.0.0'}
+
+  lucide-react@1.45.0:
+    resolution: {integrity: sha512-yH1ubCAduho9UR7oJhRXIQXogksRILBiTuZC4/bQIGeB9JOkxMlSuEHyyZpo1Z3S0yWJO2KTSUZbjiNvVxeOUw==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   luxon@3.7.2:
     resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
@@ -4521,6 +4529,10 @@ snapshots:
   longest-streak@3.1.0: {}
 
   lru.min@1.1.4: {}
+
+  lucide-react@1.45.0(react@19.2.8):
+    dependencies:
+      react: 19.2.8
 
   luxon@3.7.2: {}
 

@@ -2,7 +2,9 @@
 import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 
 import { CustomSelect } from "./custom-select";
+import { ChoiceToggle } from "./choice-toggle";
 import { KeywordTagPicker } from "./keyword-tag-picker";
+import { LanguageSelect } from "./locale-selects";
 import { uniqueKeywordTags } from "../lib/keyword-tags";
 import { rankColumnLabel, rankDimensionColumns, rankDimensionLabel } from "../lib/rank-dimension-presentation";
 import {
@@ -2274,10 +2276,7 @@ export function SemanticCoreTable({
       groups
     );
     const preferredDuplicateMode =
-      manualAddPreferencesRef.current.duplicateMode === "CURRENT_GROUP" &&
-      !initialGroupId
-        ? "SKIP_PROJECT"
-        : manualAddPreferencesRef.current.duplicateMode;
+      manualAddPreferencesRef.current.duplicateMode;
     setEditor({
       mode: "create",
       draft: {
@@ -2478,7 +2477,8 @@ export function SemanticCoreTable({
                   : preview.rows.flatMap((row) =>
                       manualKeywordDuplicateCanApply(
                         row,
-                        duplicateTargetGroupId
+                        duplicateTargetGroupId,
+                        draft.duplicateMode === "CURRENT_GROUP"
                       )
                         ? [row.index]
                         : []
@@ -2532,6 +2532,7 @@ export function SemanticCoreTable({
                         addDuplicatesToGroup:
                           addDuplicatesToGroupByDefault,
                         inTargetGroup: previewRow?.inTargetGroup ?? false,
+                        replaceGroups: submittedDraft.duplicateMode === "CURRENT_GROUP",
                         ...(previewRow
                           ? { previewState: previewRow.state }
                           : {}),
@@ -3343,7 +3344,8 @@ export function SemanticCoreTable({
     ? manualDuplicateRows.filter(
         (row) => manualKeywordDuplicateCanApply(
           row,
-          manualDuplicateTargetGroup.id
+          manualDuplicateTargetGroup.id,
+          editor?.draft.duplicateMode === "CURRENT_GROUP"
         )
       )
     : [];
@@ -4676,8 +4678,7 @@ export function SemanticCoreTable({
             </label>
             <label className="semantic-editor-language">
               <span><UiText text="Язык" /></span>
-              <input
-                maxLength={16}
+              <LanguageSelect
                 onChange={(event) =>
                   updateDraft({ language: event.target.value })
                 }
@@ -4760,26 +4761,30 @@ export function SemanticCoreTable({
             <div className="semantic-editor-tags">
               <KeywordTagPicker projectId={projectId} value={editor.draft.tagNames} onChange={tagNames => updateDraft({ tagNames })} disabled={saving} />
             </div>
-            <label className="semantic-editor-check">
-              <input
-                checked={editor.draft.isFavorite}
-                onChange={(event) =>
-                  updateDraft({ isFavorite: event.target.checked })
-                }
-                type="checkbox"
+            <div className="semantic-editor-choice">
+              <span><UiText text="Избранное" /></span>
+              <ChoiceToggle
+                ariaLabel={uiText("Избранное")}
+                onChange={(value) => updateDraft({ isFavorite: value === "YES" })}
+                options={[
+                  { value: "YES", label: uiText("Да") },
+                  { value: "NO", label: uiText("Нет") }
+                ]}
+                value={editor.draft.isFavorite ? "YES" : "NO"}
               />
-              <span><UiText text="Избранный запрос" /></span>
-            </label>
-            <label className="semantic-editor-check">
-              <input
-                checked={editor.draft.isTracked}
-                onChange={(event) =>
-                  updateDraft({ isTracked: event.target.checked })
-                }
-                type="checkbox"
-              />
+            </div>
+            <div className="semantic-editor-choice">
               <span><UiText text="Отслеживать позиции" /></span>
-            </label>
+              <ChoiceToggle
+                ariaLabel={uiText("Отслеживать позиции")}
+                onChange={(value) => updateDraft({ isTracked: value === "YES" })}
+                options={[
+                  { value: "YES", label: uiText("Да") },
+                  { value: "NO", label: uiText("Нет") }
+                ]}
+                value={editor.draft.isTracked ? "YES" : "NO"}
+              />
+            </div>
             {editor.mode === "create" && (
               <section className="semantic-duplicate-mode-field">
                 <span><UiText text="Дубли по проекту" /></span>
@@ -4796,7 +4801,6 @@ export function SemanticCoreTable({
                     <button
                       aria-selected={editor.draft.duplicateMode === mode}
                       className={editor.draft.duplicateMode === mode ? "active" : undefined}
-                      disabled={mode === "CURRENT_GROUP" && !manualCurrentGroup}
                       key={mode}
                       onClick={() => setManualDuplicateMode(mode)}
                       role="tab"
@@ -4813,9 +4817,14 @@ export function SemanticCoreTable({
                       ? manualDuplicateTargetGroup
                         ? <UiText text="Дубли добавятся в «{0}» из поля «Группа», а их текущие группы сохранятся." values={[String(manualDuplicateTargetGroup.name)]} />
                         : <UiText text="Выберите обычную группу выше: дубли добавятся в неё, сохранив текущие группы." />
-                      : manualCurrentGroup
-                        ? <UiText text="Дубли из других групп добавятся в текущую открытую группу «{0}»." values={[String(manualCurrentGroup.name)]} />
-                        : <UiText text="Сначала откройте обычную группу слева." />}
+                      : manualDuplicateTargetGroup
+                        ? <UiText
+                            text={manualCurrentGroup
+                              ? "Дубли будут перенесены в текущую открытую группу «{0}», а из остальных групп удалены."
+                              : "Дубли будут перенесены в выбранную группу «{0}», а из остальных групп удалены."}
+                            values={[String(manualDuplicateTargetGroup.name)]}
+                          />
+                        : <UiText text="Выберите обычную группу выше." />}
                 </small>
                 {manualDuplicateReview && manualDuplicateTargetGroup && (
                   <label className="semantic-duplicate-select-all">
@@ -4891,7 +4900,8 @@ export function SemanticCoreTable({
                         row.state === "ACTIVE_DUPLICATE" &&
                         manualKeywordDuplicateCanApply(
                           row,
-                          manualDuplicateTargetGroup?.id
+                          manualDuplicateTargetGroup?.id,
+                          editor.draft.duplicateMode === "CURRENT_GROUP"
                         );
                       const restorableFromTrash =
                         row.state === "TRASHED_DUPLICATE";
@@ -4922,7 +4932,9 @@ export function SemanticCoreTable({
                                         : <UiText text="Восстановить без группы" />
                                       : <UiText text="Оставить в корзине" />
                                     : selected
-                                      ? <UiText text="Добавить в «{0}», сохранив текущие папки" values={[String(manualDuplicateTargetGroup?.name ?? "выбранную папку")]} />
+                                      ? editor.draft.duplicateMode === "CURRENT_GROUP"
+                                        ? <UiText text="Перенести в «{0}» и убрать из остальных групп" values={[String(manualDuplicateTargetGroup?.name ?? "выбранную папку")]} />
+                                        : <UiText text="Добавить в «{0}», сохранив текущие папки" values={[String(manualDuplicateTargetGroup?.name ?? "выбранную папку")]} />
                                       : <UiText text="Не добавлять — оставить в текущих папках" />}
                                 </span>
                               </label>
@@ -6532,8 +6544,17 @@ function keywordColumn(
                 <Icon name="eyeOff" />
               </UiElement>
             )}
+            {item.isFavorite && (
+              <UiElement
+                tag="span"
+                uiLabels={{"aria-label": "Избранный запрос", "title": "Избранный запрос"}}
+                className="semantic-query-favorite"
+                role="img"
+              >
+                <Icon fill="currentColor" name="favorite" />
+              </UiElement>
+            )}
             <span className="semantic-query-text" title={item.textOriginal}>
-              {item.isFavorite ? "★ " : ""}
               {item.textOriginal}
             </span>
             <span className="semantic-query-actions">

@@ -379,6 +379,8 @@ function suggestedTarget(header: string): {
     [/^(язык|language|locale)$/u, "keyword.language", 0.9],
     [/(приоритет|priority)/u, "keyword.priority", 0.9],
     [/(избранн|favorite|favourite)/u, "keyword.favorite", 0.9],
+    [/(отслеж|tracked|tracking)/u, "keyword.tracked", 0.9],
+    [/^(заметк|коммент|note|comment)/u, "keyword.note", 0.88],
     [/(интент|intent)/u, "keyword.intent", 0.9],
     [/(^kei$|эффективност.*ключ)/u, "metric.kei", 0.84]
   ];

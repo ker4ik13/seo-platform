@@ -108,6 +108,7 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
     duplicatePolicy: "MERGE_NON_EMPTY",
     createMissingKeywords: true,
     groupPaths: [groupPath],
+    groupMetadata: [{ path: groupPath, color: "#22C55E" }],
     rows: [
       {
         sourceRowNumber: "1",
@@ -117,6 +118,8 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
         language: "ru",
         priority: 80,
         isFavorite: true,
+        isTracked: false,
+        note: "Импортированная заметка",
         intent: "COMMERCIAL",
         groupPath,
         positions: [
@@ -135,8 +138,11 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
   });
 
   assert.deepEqual(result.groupPaths, [groupPath]);
+  assert.deepEqual(result.groupMetadata, [{ path: groupPath, color: "#22c55e" }]);
   assert.equal(result.rows[0]?.priority, 80);
   assert.equal(result.rows[0]?.isFavorite, true);
+  assert.equal(result.rows[0]?.isTracked, false);
+  assert.equal(result.rows[0]?.note, "Импортированная заметка");
   assert.equal(result.rows[0]?.intent, "COMMERCIAL");
   assert.deepEqual(result.rows[0]?.positions, [
     {
@@ -162,6 +168,8 @@ test("rejects invalid imported keyword attributes", () => {
   for (const invalidAttributes of [
     { priority: 101 },
     { isFavorite: "true" },
+    { isTracked: "true" },
+    { note: "x".repeat(1_000_001) },
     { intent: "UNKNOWN" }
   ]) {
     assert.throws(

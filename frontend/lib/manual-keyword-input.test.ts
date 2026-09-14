@@ -56,6 +56,43 @@ test("target-group import wins when both duplicate options are enabled", () => {
   );
 });
 
+test("current-group mode replaces memberships instead of preserving folders", () => {
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: true,
+      previewState: "ACTIVE_DUPLICATE",
+      replaceGroups: true,
+      selectedForTargetGroup: true
+    }),
+    "MOVE_TO_GROUP"
+  );
+  const targetGroupId = "01900000-0000-7000-8000-000000000001";
+  assert.equal(
+    manualKeywordDuplicateCanApply({
+      index: 0,
+      state: "ACTIVE_DUPLICATE",
+      groups: [
+        { id: targetGroupId, name: "Новая", path: "Новая" },
+        { id: "01900000-0000-7000-8000-000000000002", name: "Старая", path: "Старая" }
+      ],
+      groupsTruncated: false,
+      inTargetGroup: true
+    }, targetGroupId, true),
+    true
+  );
+  assert.equal(
+    manualKeywordDuplicateCanApply({
+      index: 0,
+      state: "ACTIVE_DUPLICATE",
+      groups: [{ id: targetGroupId, name: "Новая", path: "Новая" }],
+      groupsTruncated: false,
+      inTargetGroup: true
+    }, targetGroupId, true),
+    false
+  );
+});
+
 test("trashed duplicates are restored only after an explicit row choice", () => {
   assert.equal(
     manualKeywordDuplicatePolicy({

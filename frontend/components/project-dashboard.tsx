@@ -6,6 +6,7 @@ import type {
   KeywordResearchCollection,
   ProjectPositionHistory,
   ProjectPositionSummary,
+  ProjectSearchCity,
   RankJobSummary,
   SemanticRankDimensionCatalog,
   SemanticKeywordListItem,
@@ -19,6 +20,11 @@ import {
 } from "../lib/browser-api";
 import type { OperationResultKind } from "../lib/operation-result-routes";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
+import {
+  preferredProjectRankDimensionKey,
+  readPreferredSeoDimensionKey,
+  writePreferredSeoDimensionKey
+} from "../lib/rankings-preferences";
 import {
   aiAnswerCollectionTitle,
   keywordResearchCollectionTitle,
@@ -54,13 +60,31 @@ interface DashboardData {
   readonly rankDimensions: SemanticRankDimensionCatalog;
 }
 
+const EMPTY_POSITION_SUMMARY: ProjectPositionSummary = {
+  positionedKeywordCount: 0,
+  top1KeywordCount: 0,
+  top3KeywordCount: 0,
+  top5KeywordCount: 0,
+  top10KeywordCount: 0,
+  top30KeywordCount: 0,
+  top50KeywordCount: 0
+};
+const EMPTY_POSITION_HISTORY: ProjectPositionHistory = {
+  points: [],
+  truncated: false
+};
+
 export function ProjectDashboard({
+  currentUserId,
   projectId,
   projectName,
+  projectSearchCity,
   userName
 }: Readonly<{
+  currentUserId: string;
   projectId: string;
   projectName: string;
+  projectSearchCity?: ProjectSearchCity;
   userName: string;
 }>) {
   const uiLocale = useUiLocale().locale;
@@ -85,7 +109,7 @@ export function ProjectDashboard({
   const load = useCallback(async (signal?: AbortSignal) => {
     const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
-      const [keywords, tracked, frequencies, aiAnswers, ranks, crawls, research, positionSummary, positionHistory, rankDimensions] =
+      const [keywords, tracked, frequencies, aiAnswers, ranks, crawls, research, rankDimensions] =
         await Promise.all([
           browserApiCollectionRequest<SemanticKeywordListItem>(
             `${base}/keywords?limit=1&sort=CREATED_DESC`,
@@ -113,19 +137,29 @@ export function ProjectDashboard({
             `${base}/keyword-research-runs`,
             signal ? { signal } : {}
           ),
-          browserApiRequest<ProjectPositionSummary>(
-            `${base}/keywords/position-summary`,
-            signal ? { signal } : {}
-          ),
-          browserApiRequest<ProjectPositionHistory>(
-            `${base}/keywords/position-history`,
-            signal ? { signal } : {}
-          ),
           browserApiRequest<SemanticRankDimensionCatalog>(
             `${base}/keyword-ranks/dimensions`,
             signal ? { signal } : {}
           )
         ]);
+      if (signal?.aborted) return;
+      const initialDimensionKey = preferredProjectRankDimensionKey(
+        rankDimensions.dimensions,
+        readPreferredSeoDimensionKey(projectId, currentUserId, window.localStorage),
+        projectSearchCity
+      );
+      const [positionSummary, positionHistory] = initialDimensionKey
+        ? await Promise.all([
+            browserApiRequest<ProjectPositionSummary>(
+              dashboardPositionScopeUrl(base, "position-summary", false, initialDimensionKey),
+              signal ? { signal } : {}
+            ),
+            browserApiRequest<ProjectPositionHistory>(
+              dashboardPositionScopeUrl(base, "position-history", false, initialDimensionKey),
+              signal ? { signal } : {}
+            )
+          ])
+        : [EMPTY_POSITION_SUMMARY, EMPTY_POSITION_HISTORY];
       if (signal?.aborted) return;
       setData({
         keywordCount: keywords.page.totalApprox ?? keywords.data.length,
@@ -140,7 +174,10 @@ export function ProjectDashboard({
         rankDimensions
       });
       setIncludeUntrackedHistory(false);
-      setPositionHistoryDimensionKey("");
+      setPositionHistoryDimensionKey(initialDimensionKey);
+      if (initialDimensionKey) {
+        writePreferredSeoDimensionKey(projectId, currentUserId, initialDimensionKey, window.localStorage);
+      }
       setScopedPositionHistory(undefined);
       setPositionHistoryScopeLoading(false);
       setPositionHistoryScopeError(undefined);
@@ -150,7 +187,7 @@ export function ProjectDashboard({
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [projectId]);
+  }, [currentUserId, projectId, projectSearchCity]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -166,31 +203,30 @@ export function ProjectDashboard({
     rankDimensionKey: string
   ) => {
     positionHistoryScopeRequest.current?.abort();
-    if (!includeUntracked && !rankDimensionKey) {
-      setIncludeUntrackedHistory(false);
-      setPositionHistoryDimensionKey("");
-      setScopedPositionHistory(undefined);
-      setPositionHistoryScopeLoading(false);
-      setPositionHistoryScopeError(undefined);
-      return;
-    }
+    if (!rankDimensionKey) return;
 
     const controller = new AbortController();
     positionHistoryScopeRequest.current = controller;
     setPositionHistoryScopeLoading(true);
     setPositionHistoryScopeError(undefined);
-    const query = new URLSearchParams();
-    if (includeUntracked) query.set("includeUntracked", "true");
-    if (rankDimensionKey) query.set("rankDimensionKey", rankDimensionKey);
+    const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
-      const history = await browserApiRequest<ProjectPositionHistory>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/position-history?${query.toString()}`,
-        { signal: controller.signal }
-      );
+      const [history, summary] = await Promise.all([
+        browserApiRequest<ProjectPositionHistory>(
+          dashboardPositionScopeUrl(base, "position-history", includeUntracked, rankDimensionKey),
+          { signal: controller.signal }
+        ),
+        browserApiRequest<ProjectPositionSummary>(
+          dashboardPositionScopeUrl(base, "position-summary", includeUntracked, rankDimensionKey),
+          { signal: controller.signal }
+        )
+      ]);
       if (controller.signal.aborted) return;
       setScopedPositionHistory(history);
+      setData((current) => current ? { ...current, positionSummary: summary } : current);
       setIncludeUntrackedHistory(includeUntracked);
       setPositionHistoryDimensionKey(rankDimensionKey);
+      writePreferredSeoDimensionKey(projectId, currentUserId, rankDimensionKey, window.localStorage);
     } catch (requestError) {
       if (!controller.signal.aborted) {
         setPositionHistoryScopeError(dashboardError(requestError));
@@ -198,7 +234,7 @@ export function ProjectDashboard({
     } finally {
       if (!controller.signal.aborted) setPositionHistoryScopeLoading(false);
     }
-  }, [projectId]);
+  }, [currentUserId, projectId]);
 
   const jobs = useMemo(() => data ? dashboardJobs(data) : [], [data]);
   const activeCount = jobs.filter(({ status }) => activeStatus(status)).length;
@@ -538,4 +574,15 @@ function dashboardError(error: unknown): string {
   return error instanceof BrowserApiError
     ? error.message
     : "Не удалось загрузить актуальные данные обзора.";
+}
+
+function dashboardPositionScopeUrl(
+  base: string,
+  resource: "position-history" | "position-summary",
+  includeUntracked: boolean,
+  rankDimensionKey: string
+): string {
+  const query = new URLSearchParams({ rankDimensionKey });
+  if (includeUntracked) query.set("includeUntracked", "true");
+  return `${base}/keywords/${resource}?${query.toString()}`;
 }

@@ -21,6 +21,7 @@ import {
   supportsAutomaticCredentialValidation
 } from "../lib/integration-credential-validation";
 import { UiText } from "./ui-locale";
+import { Icon } from "./icon";
 
 
 const VALIDATION_POLL_INTERVAL_MS = 2_000;
@@ -144,16 +145,7 @@ export function IntegrationCredentialValidation({
           {validation.busy ? (
             <span aria-hidden="true" className="spinner compact" />
           ) : (
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <path
-                d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.8"
-              />
-            </svg>
+            <Icon name="refresh" />
           )}
           <span className="visually-hidden">{buttonLabel}</span>
         </button>
@@ -214,34 +206,15 @@ function ValidationStateGlyph({
   tone: "danger" | "info" | "success" | "warning";
 }>) {
   if (tone === "success") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <path d="m5 10.2 3.1 3.1L15.4 6" />
-      </svg>
-    );
+    return <Icon name="check" />;
   }
   if (tone === "info") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <circle cx="10" cy="10" r="6.6" />
-        <path d="M10 9v4M10 6.6v.1" />
-      </svg>
-    );
+    return <Icon name="info" />;
   }
   if (tone === "warning") {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <path d="M10 3 2.8 16h14.4L10 3Z" />
-        <path d="M10 7.2v4.4M10 14.1v.1" />
-      </svg>
-    );
+    return <Icon name="warning" />;
   }
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <circle cx="10" cy="10" r="6.6" />
-      <path d="m7.6 7.6 4.8 4.8m0-4.8-4.8 4.8" />
-    </svg>
-  );
+  return <Icon name="close" />;
 }
 
 export function useIntegrationCredentialValidation({

@@ -146,7 +146,7 @@ export class SemanticImportService {
   public async applyChunk(
     input: InternalApplySemanticImportChunkInput
   ): Promise<InternalSemanticImportChunkResult> {
-    if (payloadHash(input.rows, input.groupPaths) !== input.payloadHash) {
+    if (payloadHash(input.rows, input.groupPaths, input.groupMetadata) !== input.payloadHash) {
       throw new BadRequestException("Semantic import payload hash mismatch");
     }
     const receipt = await this.requiredReceipt(input);
@@ -323,6 +323,10 @@ export class SemanticImportService {
             ...(row.isFavorite === undefined
               ? {}
               : { isFavorite: row.isFavorite }),
+            ...(row.isTracked === undefined
+              ? {}
+              : { isTracked: row.isTracked }),
+            ...(row.note === undefined ? {} : { note: row.note }),
             ...(row.intent === undefined ? {} : { intent: row.intent }),
             ...(row.targetUrl &&
             pages.ids.get(normalizePageUrl(row.targetUrl, "targetUrl").hash)
@@ -1008,6 +1012,11 @@ async function ensureGroups(
   rows: readonly SemanticImportPublishRow[],
   sourceGroupPaths: readonly (readonly string[])[]
 ): Promise<EnsuredEntities> {
+  const sourceColors = new Map(
+    (input.groupMetadata ?? []).flatMap(({ path, color }) =>
+      color ? [[groupPathKey(path.map(normalizeGroupName)), color] as const] : []
+    )
+  );
   const paths = new Map<
     string,
     { readonly segments: readonly string[]; readonly hash: string }
@@ -1049,8 +1058,10 @@ async function ensureGroups(
       },
       select: { id: true, status: true, systemKind: true }
     });
+    const sourceColor = sourceColors.get(groupPathKey(path.segments));
     if (existing) {
-      if (existing.status !== "ACTIVE" || existing.systemKind !== null) {
+      const restored = existing.status !== "ACTIVE" || existing.systemKind !== null;
+      if (restored || sourceColor) {
         const parentSegments = path.segments.slice(0, -1);
         await transaction.keywordGroup.update({
           where: { id: existing.id },
@@ -1059,13 +1070,14 @@ async function ensureGroups(
             systemKind: null,
             name: path.segments.at(-1)!,
             path: path.segments.join(" / "),
+            ...(sourceColor ? { color: sourceColor } : {}),
             ...(parentSegments.length > 0 &&
             ids.get(groupPathKey(parentSegments))
               ? { parentId: ids.get(groupPathKey(parentSegments))! }
               : { parentId: null })
           }
         });
-        created += 1;
+        if (restored) created += 1;
       }
       ids.set(groupPathKey(path.segments), existing.id);
       continue;
@@ -1081,7 +1093,8 @@ async function ensureGroups(
           : {}),
         name: path.segments.at(-1)!,
         path: path.segments.join(" / "),
-        pathHash: path.hash
+        pathHash: path.hash,
+        ...(sourceColor ? { color: sourceColor } : {})
       },
       select: { id: true }
     });
@@ -1163,6 +1176,10 @@ function keywordUpdate(
           ...(row.isFavorite === undefined
             ? {}
             : { isFavorite: row.isFavorite }),
+          ...(row.isTracked === undefined
+            ? {}
+            : { isTracked: row.isTracked }),
+          ...(row.note === undefined ? {} : { note: row.note }),
           ...(row.intent === undefined ? {} : { intent: row.intent }),
           ...(targetPageId ? { targetPageId } : {})
         }
@@ -1173,6 +1190,12 @@ function keywordUpdate(
               : {}),
             ...(!keyword.isFavorite && row.isFavorite !== undefined
               ? { isFavorite: row.isFavorite }
+              : {}),
+            ...(!keyword.isTracked && row.isTracked !== undefined
+              ? { isTracked: row.isTracked }
+              : {}),
+            ...(!keyword.note && row.note !== undefined
+              ? { note: row.note }
               : {}),
             ...(keyword.intent === null && row.intent !== undefined
               ? { intent: row.intent }
@@ -1185,6 +1208,12 @@ function keywordUpdate(
               : {}),
             ...(!keyword.isFavorite && row.isFavorite !== undefined
               ? { isFavorite: row.isFavorite }
+              : {}),
+            ...(!keyword.isTracked && row.isTracked !== undefined
+              ? { isTracked: row.isTracked }
+              : {}),
+            ...(!keyword.note && row.note !== undefined
+              ? { note: row.note }
               : {}),
             ...(keyword.intent === null && row.intent !== undefined
               ? { intent: row.intent }
@@ -1760,9 +1789,18 @@ async function ensureImportedHistoryContext(
 
 function payloadHash(
   rows: readonly SemanticImportPublishRow[],
-  groupPaths?: readonly (readonly string[])[]
+  groupPaths?: readonly (readonly string[])[],
+  groupMetadata?: InternalApplySemanticImportChunkInput["groupMetadata"]
 ): string {
-  return sha256(JSON.stringify(groupPaths ? { groupPaths, rows } : rows));
+  return sha256(JSON.stringify(
+    groupPaths || groupMetadata
+      ? {
+          ...(groupPaths ? { groupPaths } : {}),
+          ...(groupMetadata ? { groupMetadata } : {}),
+          rows
+        }
+      : rows
+  ));
 }
 
 function sha256(value: string): string {

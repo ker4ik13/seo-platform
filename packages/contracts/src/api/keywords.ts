@@ -24,6 +24,7 @@ export const semanticKeywordDuplicatePolicies = [
   "SKIP_EXISTING",
   "REJECT_EXISTING",
   "ADD_TO_GROUP",
+  "MOVE_TO_GROUP",
   "RESTORE_TRASHED"
 ] as const;
 
@@ -309,7 +310,7 @@ export type SemanticKeywordBulkCreateItemInput = Omit<
 > & Readonly<{
   /** Optional row-level override; the bulk policy remains the fallback. */
   duplicatePolicy?: SemanticKeywordDuplicatePolicy;
-  /** Folder used only when ADD_TO_GROUP resolves an existing canonical row. */
+  /** Folder used when ADD_TO_GROUP or MOVE_TO_GROUP resolves an existing row. */
   duplicateGroupId?: string;
 }>;
 

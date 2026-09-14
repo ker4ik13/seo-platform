@@ -17,7 +17,7 @@ export function semanticManualDuplicateTargetGroupId(
   currentGroupId: string
 ): string {
   if (mode === "PRESERVE_FOLDERS") return primaryGroupId;
-  if (mode === "CURRENT_GROUP") return currentGroupId;
+  if (mode === "CURRENT_GROUP") return currentGroupId || primaryGroupId;
   return "";
 }
 

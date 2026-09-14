@@ -46,3 +46,41 @@ test("rejects explicit unknown engine and device metadata instead of replacing i
     assert.deepEqual([...issues], ["POSITION_HISTORY_CONTEXT_INVALID"]);
   }
 });
+
+test("imports long position rows with their own date, engine and region", () => {
+  const headers = ["Запрос", "Дата", "Поисковик", "Город", "Код региона", "Устройство", "Позиция"];
+  const values = ["купить слона", "14.09.2026", "Google", "Москва", "1011969", "Телефон", "7"];
+  const issues = new Set<string>();
+  const points = importedPositionHistory(
+    headers,
+    values,
+    { ...defaults, layout: "LONG" },
+    issues,
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "metric.observed_at" },
+        { sourceIndex: 2, target: "context.search_engine" },
+        { sourceIndex: 3, target: "context.region" },
+        { sourceIndex: 6, target: "ranking.position" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: false,
+      positionHistory: { ...defaults, layout: "LONG" }
+    }
+  );
+  assert.deepEqual(points, [{
+    searchEngine: "GOOGLE",
+    countryCode: "RU",
+    regionCode: "1011969",
+    regionLabel: "Москва",
+    language: "ru",
+    device: "MOBILE",
+    observedAt: "2026-09-14T12:00:00.000Z",
+    found: true,
+    position: 7
+  }]);
+  assert.deepEqual([...issues], []);
+});

@@ -1114,11 +1114,21 @@ function ClusteringApplyPanel({
                         searchPlaceholder={uiText("Найти SEO-кластер")}
                         value={clusterAssignmentValue}
                       >
-                        <option value="NEW"><UiText text="Создать новый SEO-кластер" /></option>
+                        <option value="NEW">
+                          <span className={`${styles.clusteringSelectOption} ${styles.clusteringSelectCreate}`}>
+                            <Icon name="folderPlus" />
+                            <span><UiText text="Создать новый SEO-кластер" /></span>
+                          </span>
+                        </option>
                         <option value="KEEP">
-                          {cluster.currentClusterKeywordCount > 0
-                            ? <UiText text="Оставить текущие SEO-кластеры · {0}" values={[String(formatInteger(cluster.currentClusterKeywordCount, uiLocale))]} />
-                            : <UiText text="Оставить без SEO-кластера" />}
+                          <span className={`${styles.clusteringSelectOption} ${styles.clusteringSelectKeep}`}>
+                            <Icon name="minus" />
+                            <span>
+                              {cluster.currentClusterKeywordCount > 0
+                                ? <UiText text="Ничего не делать · оставить текущие SEO-кластеры · {0}" values={[String(formatInteger(cluster.currentClusterKeywordCount, uiLocale))]} />
+                                : <UiText text="Ничего не делать · оставить без SEO-кластера" />}
+                            </span>
+                          </span>
                         </option>
                         {semanticClusters.map((semanticCluster) => (
                           <option
@@ -1126,7 +1136,10 @@ function ClusteringApplyPanel({
                             key={semanticCluster.id}
                             value={`EXISTING:${semanticCluster.id}`}
                           >
-                            {<UiText text="В существующий: {0} · {1}" values={[String(semanticCluster.name), String(formatInteger(semanticCluster.keywordCount, uiLocale))]} />}
+                            <span className={`${styles.clusteringSelectOption} ${styles.clusteringSelectMove}`}>
+                              <Icon name="move" />
+                              <span><UiText text="Перенести в существующий: {0} · {1}" values={[String(semanticCluster.name), String(formatInteger(semanticCluster.keywordCount, uiLocale))]} /></span>
+                            </span>
                           </option>
                         ))}
                       </CustomSelect>}
@@ -1141,9 +1154,24 @@ function ClusteringApplyPanel({
                           }}
                           value={folderDecisionValue}
                         >
-                          <option value="NEW">{cluster ? <UiText text="Создать новую папку" /> : <UiText text="Создать папку «Некластеризовано»" />}</option>
-                          {cluster && <option value="EXISTING"><UiText text="Перенести в существующую папку" /></option>}
-                          <option value="KEEP"><UiText text="Оставить в текущих папках" /></option>
+                          <option value="NEW">
+                            <span className={`${styles.clusteringSelectOption} ${styles.clusteringSelectCreate}`}>
+                              <Icon name="folderPlus" />
+                              <span>{cluster ? <UiText text="Создать новую папку" /> : <UiText text="Создать папку «Некластеризовано»" />}</span>
+                            </span>
+                          </option>
+                          {cluster && <option value="EXISTING">
+                            <span className={`${styles.clusteringSelectOption} ${styles.clusteringSelectMove}`}>
+                              <Icon name="move" />
+                              <span><UiText text="Перенести в существующую папку" /></span>
+                            </span>
+                          </option>}
+                          <option value="KEEP">
+                            <span className={`${styles.clusteringSelectOption} ${styles.clusteringSelectKeep}`}>
+                              <Icon name="minus" />
+                              <span><UiText text="Ничего не делать · оставить в текущих папках" /></span>
+                            </span>
+                          </option>
                         </CustomSelect>
                         {cluster && folderDecisionValue !== "KEEP" && (
                           <button

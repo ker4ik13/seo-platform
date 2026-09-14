@@ -262,8 +262,9 @@ test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
     }
   ];
   const groupPaths = [["Статьи"], ["Статьи", "Пустая папка"]] as const;
+  const groupMetadata = [{ path: ["Статьи"], color: "#22c55e" }] as const;
   const payloadHash = createHash("sha256")
-    .update(JSON.stringify({ groupPaths, rows }))
+    .update(JSON.stringify({ groupPaths, groupMetadata, rows }))
     .digest("hex");
   const service = new SemanticImportService({
     semanticImportReceipt: {
@@ -302,6 +303,7 @@ test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
     duplicatePolicy: "SKIP_EXISTING",
     createMissingKeywords: true,
     groupPaths,
+    groupMetadata,
     rows
   });
 

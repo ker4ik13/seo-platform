@@ -1,3 +1,6 @@
+import type { ProjectSearchCity, SemanticRankDimension } from "@seo-platform/contracts";
+
+
 export const rankingsQueryColumnMinWidth = 210;
 export const rankingsQueryColumnMaxWidth = 520;
 export const rankingsQueryColumnDefaultWidth = 300;
@@ -77,6 +80,67 @@ export function writeRankingsPreferences(
   } catch {
     // The screen remains usable when browser storage is unavailable.
   }
+}
+
+export function readPreferredSeoDimensionKey(
+  projectId: string,
+  currentUserId: string,
+  storage: StorageLike
+): string {
+  try {
+    const value = JSON.parse(storage.getItem(storageKey(projectId, currentUserId)) ?? "null") as Record<string, unknown> | null;
+    return boundedString(value?.seoDimensionKey, 1_000) ??
+      boundedString(value?.dimensionKey, 1_000) ??
+      "";
+  } catch {
+    return "";
+  }
+}
+
+export function writePreferredSeoDimensionKey(
+  projectId: string,
+  currentUserId: string,
+  dimensionKey: string,
+  storage: StorageLike
+): void {
+  if (!dimensionKey || dimensionKey.length > 1_000) return;
+  try {
+    const parsed = JSON.parse(storage.getItem(storageKey(projectId, currentUserId)) ?? "null") as unknown;
+    const current = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+    storage.setItem(
+      storageKey(projectId, currentUserId),
+      JSON.stringify({ ...current, seoDimensionKey: dimensionKey })
+    );
+  } catch {
+    // The exact dashboard selection remains usable in memory.
+  }
+}
+
+export function preferredProjectRankDimensionKey(
+  dimensions: readonly SemanticRankDimension[],
+  savedDimensionKey: string,
+  projectSearchCity?: ProjectSearchCity
+): string {
+  if (savedDimensionKey && dimensions.some(({ key }) => key === savedDimensionKey)) {
+    return savedDimensionKey;
+  }
+  if (projectSearchCity) {
+    const matching = dimensions.filter((dimension) =>
+      dimension.regionCode === (
+        dimension.searchEngine === "YANDEX"
+          ? projectSearchCity.yandexRegionCode
+          : projectSearchCity.googleRegionCode
+      )
+    );
+    const preferred = [...matching].sort((left, right) =>
+      Number(right.device === "DESKTOP") - Number(left.device === "DESKTOP") ||
+      Number(right.searchEngine === "YANDEX") - Number(left.searchEngine === "YANDEX")
+    )[0];
+    if (preferred) return preferred.key;
+  }
+  return dimensions[0]?.key ?? "";
 }
 
 export function clampQueryColumnWidth(value: unknown): number {

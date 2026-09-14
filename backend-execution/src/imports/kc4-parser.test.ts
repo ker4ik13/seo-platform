@@ -70,11 +70,13 @@ test("reads native KC4 groups and fields while excluding trash", async () => {
     });
     const rows: (readonly string[])[] = [];
     let groupPaths: readonly (readonly string[])[] = [];
+    let groupMetadata: readonly Readonly<{ path: readonly string[]; color?: string }>[] = [];
     for await (const row of parseKc4Rows(
       chunks(archive),
       BigInt(archive.length),
       (metadata) => {
         groupPaths = metadata.groupPaths;
+        groupMetadata = metadata.groups;
       }
     )) {
       rows.push(row);
@@ -105,6 +107,11 @@ test("reads native KC4 groups and fields while excluding trash", async () => {
       ["Главная"],
       ["Главная", "Подгруппа"],
       ["Главная", "Пустая папка"]
+    ]);
+    assert.deepEqual(groupMetadata, [
+      { path: ["Главная"] },
+      { path: ["Главная", "Подгруппа"], color: "#6633ff" },
+      { path: ["Главная", "Пустая папка"] }
     ]);
   } finally {
     await rm(directory, { recursive: true, force: true });

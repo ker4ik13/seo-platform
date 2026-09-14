@@ -1309,6 +1309,23 @@ svg { display: block; }
   width: 14px;
 }
 .semantic-query-tracking-indicator svg { height: 13px; width: 13px; }
+.semantic-query-favorite {
+  align-items: center;
+  color: #f2b400;
+  display: inline-flex;
+  flex: 0 0 14px;
+  height: 14px;
+  justify-content: center;
+  width: 14px;
+}
+.app-shell .semantic-query-favorite svg.lucide {
+  fill: currentColor;
+  filter: drop-shadow(0 1px 0 rgba(151, 103, 0, .14));
+  height: 13px;
+  stroke: #c68c00;
+  stroke-width: 1.5;
+  width: 13px;
+}
 .semantic-query-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-query-actions { align-items: center; display: inline-flex; flex: 0 0 auto; gap: 4px; overflow: visible; }
 .semantic-query-actions .semantic-keyword-note-indicator,
@@ -2475,6 +2492,18 @@ svg { display: block; }
 @media (max-width: 620px) {
   .import-position-history-settings > div { grid-template-columns: 1fr; }
   .import-position-history-settings input, .import-position-history-settings .custom-select-trigger { min-height: 44px; }
+}
+
+.semantic-group-toggle svg { fill: none; }
+
+@media (min-width: 681px) {
+  .semantic-modal-fullscreen:has(.semantic-upload) {
+    height: min(78dvh, 780px);
+    min-height: 500px;
+  }
+  .semantic-modal-fullscreen:has(.semantic-upload) .semantic-import-workspace {
+    min-height: 100%;
+  }
 }
 
 .import-mapping-options .import-create-missing-option {
@@ -7511,6 +7540,7 @@ svg { display: block; }
   margin: 9px 10px 2px;
   text-transform: uppercase;
 }
+.settings-tabs-heading svg { height: 11px; width: 11px; }
 .settings-overview { display: grid; gap: 14px; min-width: 0; }
 .settings-overview-hero {
   align-items: center;
@@ -15214,4 +15244,456 @@ svg { display: block; }
   .semantic-inspector-tabs { top: 90px; }
   .semantic-keyword-inspector > header .semantic-sidebar-edit { display: none; }
   .semantic-keyword-inspector > section { padding: 11px; }
+}
+
+/* Shared compact choices used by single and bulk keyword editors. */
+.choice-toggle {
+  background: #ececf2;
+  border: 1px solid #e0e1e8;
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  min-height: 40px;
+  padding: 3px;
+  width: 100%;
+}
+.choice-toggle > button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+  padding: 6px 9px;
+}
+.choice-toggle > button:hover:not(:disabled) { color: var(--text); }
+.choice-toggle > button.selected {
+  background: #fff;
+  border-color: #c9bfff;
+  box-shadow: 0 1px 3px rgba(39, 32, 82, .08);
+  color: var(--brand);
+}
+.choice-toggle > button:focus-visible {
+  box-shadow: 0 0 0 3px rgba(103, 88, 239, .14);
+  outline: 0;
+}
+.choice-toggle > button:disabled { cursor: not-allowed; opacity: .55; }
+
+.semantic-bulk-grid > .semantic-bulk-choice,
+.semantic-bulk-url-field {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.semantic-bulk-grid > .semantic-bulk-choice > span,
+.semantic-bulk-url-field > label:first-child,
+.semantic-editor-choice > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.semantic-bulk-url-field > input {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
+.semantic-bulk-clear-url {
+  align-items: center !important;
+  color: var(--muted);
+  display: flex !important;
+  font-size: 10px;
+  gap: 6px !important;
+}
+.semantic-bulk-clear-url > span { color: inherit !important; font-size: inherit !important; font-weight: 600 !important; letter-spacing: 0 !important; text-transform: none !important; }
+.semantic-editor-choice { display: grid; gap: 6px; grid-column: span 3; min-width: 0; }
+.semantic-editor-language .custom-select-trigger,
+.semantic-bulk-language .custom-select-trigger { min-height: 39px; width: 100%; }
+.semantic-keyword-editor-modal .keyword-tag-picker .custom-select-trigger {
+  height: 39px;
+  min-height: 39px;
+}
+
+/* Import hub: explicit source modes share the existing inspected import pipeline. */
+.semantic-upload { height: 100%; min-height: 0; overflow: hidden; padding: 0 !important; }
+.semantic-import-workspace {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+.semantic-import-source-nav {
+  align-self: stretch;
+  background: #f8f8fc;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 13px 10px;
+}
+.semantic-import-source-nav > header { display: grid; gap: 3px; padding: 2px 8px 9px; }
+.semantic-import-source-nav > header strong { font-size: 12px; }
+.semantic-import-source-nav > header small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.semantic-import-source-list,
+.semantic-import-unavailable-sources { display: grid; gap: 4px; }
+.semantic-import-source-option {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  min-height: 58px;
+  padding: 7px 8px;
+  text-align: left;
+}
+.semantic-import-source-option:hover:not(:disabled) { background: #fff; border-color: var(--line); }
+.semantic-import-source-option.active { background: #f0edff; border-color: #cfc6ff; color: #4930cc; }
+.semantic-import-source-option > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.semantic-import-source-option strong { font-size: 11px; }
+.semantic-import-source-option small { color: var(--muted); font-size: 8px; line-height: 1.35; }
+.semantic-import-source-option.unavailable { cursor: not-allowed; opacity: .62; }
+.semantic-import-source-option em {
+  color: #8c6a21;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+  margin-top: 1px;
+}
+.semantic-import-source-icon {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dedfe7;
+  border-radius: 8px;
+  color: var(--brand);
+  display: flex;
+  font-size: 10px;
+  font-weight: 850;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+.semantic-import-source-icon.source-key_collector { background: #ecf7ef; border-color: #bee4c8; color: #16834b; }
+.semantic-import-source-icon.source-topvisor { background: #edf7ff; border-color: #c8e5fa; color: #1673a7; }
+.semantic-import-source-icon.source-positions { background: #fff5e8; border-color: #f0d8b4; color: #a56300; }
+.semantic-import-source-bottom { display: grid; gap: 10px; margin-top: auto; padding-top: 14px; }
+.semantic-import-unavailable-sources {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+.semantic-import-unavailable-sources > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  padding: 0 8px 2px;
+  text-transform: uppercase;
+}
+.semantic-import-nav-info {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+}
+.semantic-import-nav-info > div { align-items: start; display: grid; gap: 7px; grid-template-columns: 15px minmax(0, 1fr); }
+.semantic-import-nav-info > div > svg { color: var(--brand); height: 14px; margin-top: 1px; width: 14px; }
+.semantic-import-nav-info > div > span { display: grid; gap: 2px; }
+.semantic-import-nav-info strong { font-size: 9px; }
+.semantic-import-nav-info small { color: var(--muted); font-size: 8px; line-height: 1.4; }
+.semantic-import-nav-info > a {
+  align-items: center;
+  color: var(--brand);
+  display: flex;
+  font-size: 9px;
+  font-weight: 750;
+  gap: 5px;
+  justify-content: space-between;
+}
+.semantic-import-nav-info > a svg { height: 12px; width: 12px; }
+.semantic-import-source-pane { align-content: start; display: grid; gap: 12px; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
+.semantic-import-pane-heading { align-items: start; display: flex; gap: 14px; justify-content: space-between; }
+.semantic-import-pane-heading > div:first-child { display: grid; gap: 4px; max-width: 850px; }
+.semantic-import-pane-heading strong { font-size: 14px; }
+.semantic-import-pane-heading small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.semantic-import-examples { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+.semantic-import-examples a { background: #fff; border: 1px solid var(--line); border-radius: 7px; color: var(--brand); font-size: 9px; font-weight: 700; padding: 6px 8px; }
+
+/* Settings use a continuous two-pane workspace like Semantics and Positions. */
+@media (min-width: 901px) {
+  .content-settings:has(> .settings-tabs) {
+    align-content: start;
+    display: grid;
+    gap: 0;
+    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    padding: 0 14px 18px 0;
+  }
+  .content-settings:has(> .settings-tabs) > .settings-tabs {
+    align-content: start;
+    align-self: stretch;
+    background: #fff;
+    border: 0;
+    border-right: 1px solid #dfe1ea;
+    border-radius: 0;
+    box-shadow: none;
+    grid-column: 1;
+    grid-row: 1 / span 100;
+    height: calc(100dvh - 66px);
+    margin: 0;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 8px 10px 14px;
+    position: sticky;
+    top: 0;
+  }
+  .settings-navigation-toggle {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    color: var(--text);
+    cursor: default;
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 7px;
+    min-height: 48px;
+    padding: 5px 8px 9px;
+    pointer-events: none;
+    width: 100%;
+  }
+  .settings-navigation-toggle > span:first-child { display: grid; gap: 2px; text-align: left; }
+  .settings-navigation-toggle small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .settings-navigation-toggle strong { font-size: 13px; }
+  .settings-navigation-toggle > span:last-child { display: none; }
+  .settings-navigation-links { align-content: start; display: grid; gap: 3px; }
+  .content-settings:has(> .settings-tabs) > .settings-tabs a {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-size: 11px;
+    justify-content: flex-start;
+    min-height: 34px;
+    padding: 0 9px;
+  }
+  .content-settings:has(> .settings-tabs) > .settings-tabs a svg { height: 14px; width: 14px; }
+  .content-settings:has(> .settings-tabs) > .settings-tabs a.active {
+    background: #ece9ff;
+    border-color: #d7d0ff;
+    box-shadow: inset 3px 0 0 var(--brand);
+  }
+  .content-settings:has(> .settings-tabs) > .settings-tabs::-webkit-scrollbar { width: 7px; }
+  .content-settings:has(> .settings-tabs) > .settings-tabs::-webkit-scrollbar-thumb { background: #d7d8e2; border: 2px solid #fff; border-radius: 999px; }
+  .content-settings:has(> .settings-tabs) > .page-heading {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0 -14px 0 0;
+    min-height: 58px;
+    padding: 8px 16px;
+    position: sticky;
+    top: 0;
+  }
+  .content-settings:has(> .settings-tabs) > :not(.page-heading):not(.settings-tabs) {
+    grid-column: 2;
+    margin: 12px 0 0 14px;
+    max-width: none;
+    min-width: 0;
+    width: auto;
+  }
+  .content-settings :where(.settings-stack, .integration-settings-stack, .notification-settings-stack, .project-settings-stack, .settings-overview-dashboard) { gap: 10px; max-width: none; }
+  .content-settings :where(.panel, .project-card, .settings-overview-card) { border-radius: 10px; box-shadow: none; padding: 13px; }
+  .content-settings .security-card-header { margin-bottom: 10px; }
+  .content-settings .security-card-header h2 { font-size: 14px; }
+  .content-settings .security-card-header p { font-size: 10px; line-height: 1.4; margin-top: 3px; }
+}
+
+/* Semantic edit/import dialogs follow the compact workspace headers. */
+@media (min-width: 681px) {
+  .semantic-keyword-editor-modal > header,
+  .semantic-modal:has(.semantic-bulk-editor) > header,
+  .semantic-modal:has(.semantic-upload) > header {
+    min-height: 56px;
+    padding: 9px 16px;
+  }
+  .semantic-keyword-editor-modal > header h2,
+  .semantic-modal:has(.semantic-bulk-editor) > header h2,
+  .semantic-modal:has(.semantic-upload) > header h2 { font-size: 17px; }
+  .semantic-keyword-editor-modal > header p,
+  .semantic-modal:has(.semantic-bulk-editor) > header p,
+  .semantic-modal:has(.semantic-upload) > header p { font-size: 10px; margin-top: 2px; }
+  .semantic-modal:has(.semantic-upload) > .semantic-modal-body { padding: 0; }
+}
+
+@media (min-width: 901px) {
+  .semantic-modal:has(.semantic-upload) > .semantic-modal-body { overflow: hidden; }
+  .semantic-modal:has(.semantic-upload) .semantic-tool-modal-content,
+  .semantic-modal:has(.semantic-upload) .semantic-upload,
+  .semantic-modal:has(.semantic-upload) .semantic-import-workspace {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-navigation-toggle {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    display: flex;
+    justify-content: space-between;
+    min-height: 44px;
+    padding: 7px 10px;
+    width: 100%;
+  }
+  .settings-navigation-toggle > span:first-child { display: grid; gap: 1px; text-align: left; }
+  .settings-navigation-toggle small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+  .settings-navigation-toggle strong { font-size: 11px; }
+  .settings-navigation-links { display: none; }
+  .settings-tabs[data-expanded="true"] .settings-navigation-links { display: flex; }
+  .semantic-upload,
+  .semantic-import-workspace { height: auto; }
+  .semantic-import-workspace { grid-template-columns: 1fr; }
+  .semantic-import-source-nav {
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .semantic-import-source-nav > header,
+  .semantic-import-nav-info,
+  .semantic-import-unavailable-sources > span { display: none; }
+  .semantic-import-source-list,
+  .semantic-import-source-bottom,
+  .semantic-import-unavailable-sources { display: contents; }
+  .semantic-import-source-option { flex: 0 0 178px; min-height: 52px; }
+  .semantic-import-source-pane { overflow: visible; }
+}
+
+@media (max-width: 620px) {
+  .semantic-editor-choice { grid-column: 1; }
+  .choice-toggle { min-height: 44px; }
+  .semantic-import-pane-heading { display: grid; }
+  .semantic-import-examples { justify-content: flex-start; }
+  .semantic-import-source-pane { padding: 11px; }
+}
+
+/* One compact visual system for application surfaces and controls. */
+.app-shell {
+  --ui-control-height: 38px;
+  --ui-panel-radius: 10px;
+  --ui-control-radius: 8px;
+}
+.app-shell svg.lucide {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+/* Operation result bodies are edge-to-edge workspaces inside the modal shell. */
+.semantic-modal.operation-result-modal > .semantic-modal-body.operation-result-modal-body {
+  padding: 0;
+}
+@media (min-width: 681px) {
+  .app-shell :where(.primary-button, .secondary-button, .danger-button) {
+    border-radius: var(--ui-control-radius);
+    font-size: 11px;
+    min-height: var(--ui-control-height);
+    padding-block: 7px;
+  }
+  .app-shell :where(.custom-select-trigger, input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]), button.dashboard-date-range-trigger) {
+    border-radius: var(--ui-control-radius);
+    min-height: var(--ui-control-height);
+  }
+  .app-shell :where(.panel, .project-card, .settings-overview-card) {
+    border-radius: var(--ui-panel-radius);
+  }
+  .content:not(.content-workspace):not(.content-settings) {
+    padding: 12px 16px 28px;
+  }
+  .content:not(.content-workspace):not(.content-settings) > .page-heading {
+    align-items: center;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+    margin: -12px -16px 12px;
+    min-height: 58px;
+    padding: 8px 16px;
+  }
+  .content:not(.content-workspace):not(.content-settings) > .page-heading h1 {
+    font-size: clamp(19px, 1.55vw, 23px);
+  }
+  .content:not(.content-workspace):not(.content-settings) > .page-heading p {
+    font-size: 11px;
+    line-height: 1.4;
+    margin-top: 3px;
+  }
+}
+.semantic-import-source-icon svg { height: 15px; width: 15px; }
+.upload-dropzone-icon svg { height: 17px; width: 17px; }
+.semantic-group-toggle svg { fill: none !important; }
+
+@media (min-width: 681px) {
+  .semantic-bulk-editor:not(.single) .semantic-bulk-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .semantic-bulk-editor:not(.single) :is(.semantic-bulk-favorite, .semantic-bulk-tracked, .semantic-bulk-group, .semantic-bulk-cluster) {
+    grid-column: span 2;
+  }
+}
+.choice-toggle > button { white-space: nowrap; }
+
+@media (min-width: 681px) {
+  .semantic-modal-fullscreen:has(.semantic-upload[data-stage="idle"]) {
+    height: min(58dvh, 580px);
+  }
+}
+
+/* Selection sides are real reserved borders. Row rules meet them normally,
+   so the outline stays straight without pseudo-elements or painted gaps. */
+.semantic-table tr > :first-child {
+  border-left: 2px solid transparent;
+  box-sizing: border-box;
+}
+.semantic-table tr > :last-child {
+  border-right: 1px solid transparent;
+  box-sizing: border-box;
+}
+.semantic-table tbody tr.selected > td:first-child {
+  border-left-color: #8d7dff;
+  box-shadow: inset 0 1px 0 var(--selection-edge-top), inset 0 -1px 0 var(--selection-edge-bottom);
+}
+.semantic-table tbody tr.selected > td:last-child {
+  border-right-color: #8d7dff;
+  box-shadow: inset 0 1px 0 var(--selection-edge-top), inset 0 -1px 0 var(--selection-edge-bottom);
+}
+.semantic-table tbody tr.highlighted > td:first-child {
+  border-left-color: #5f46f5;
+  box-shadow: inset 0 1px 0 var(--highlight-edge-top), inset 0 -1px 0 var(--highlight-edge-bottom);
+}
+.semantic-table tbody tr.highlighted > td:last-child {
+  border-right-color: #5f46f5;
+  box-shadow: inset 0 1px 0 var(--highlight-edge-top), inset 0 -1px 0 var(--highlight-edge-bottom);
+}
+.semantic-table tbody tr:is(.remote-presence-selected, .remote-presence-highlighted) > td:first-child {
+  border-left-color: var(--presence-color);
+  box-shadow: inset 0 1px 0 var(--remote-presence-edge-top), inset 0 -1px 0 var(--remote-presence-edge-bottom);
+}
+.semantic-table tbody tr:is(.remote-presence-selected, .remote-presence-highlighted) > td:last-child {
+  border-right-color: var(--presence-color);
+  box-shadow: inset 0 1px 0 var(--remote-presence-edge-top), inset 0 -1px 0 var(--remote-presence-edge-bottom);
 }

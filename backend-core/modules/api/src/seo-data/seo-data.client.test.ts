@@ -1622,6 +1622,37 @@ test("forwards the optional untracked scope for project position history", async
   }
 });
 
+test("forwards the exact rank slice for the project position summary", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (input: string | URL | Request): Promise<Response> => {
+    capturedUrl = new URL(input instanceof Request ? input.url : input.toString());
+    return jsonResponse({ data: {
+      positionedKeywordCount: 1,
+      averagePosition: 7,
+      top1KeywordCount: 0,
+      top3KeywordCount: 0,
+      top5KeywordCount: 0,
+      top10KeywordCount: 1,
+      top30KeywordCount: 1,
+      top50KeywordCount: 1
+    } });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().projectPositionSummary(internalContext(), {
+      includeUntracked: false,
+      rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP"
+    });
+    assert.equal(result.averagePosition, 7);
+    assert.equal(capturedUrl?.pathname, `/internal/v1/projects/${projectId}/keywords/position-summary`);
+    assert.equal(capturedUrl?.searchParams.get("rankDimensionKey"), "YANDEX|RU|213|ru|DESKTOP");
+    assert.equal(capturedUrl?.searchParams.has("includeUntracked"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards an ordered semantic group batch and accepts an existing parent", async () => {
   const originalFetch = globalThis.fetch;
   const parentId = "01900000-0000-7000-8000-000000000030";

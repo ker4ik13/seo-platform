@@ -97,7 +97,7 @@ test("recognizes Key Collector headers and preserves unknown columns", () => {
       "frequency.fixed",
       "ranking.yandex.position",
       "page.target_url",
-      "custom"
+      "keyword.note"
     ]
   );
 });

@@ -50,7 +50,13 @@ export default async function DashboardPage({
               </div>
             </aside>
           )}
-          <ProjectDashboard projectId={context.project.id} projectName={context.project.name} userName={context.user.displayName} />
+          <ProjectDashboard
+            currentUserId={context.user.id}
+            projectId={context.project.id}
+            projectName={context.project.name}
+            {...(context.project.searchCity ? { projectSearchCity: context.project.searchCity } : {})}
+            userName={context.user.displayName}
+          />
         </>
       )}
     </>

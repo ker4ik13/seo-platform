@@ -84,6 +84,21 @@ test("keeps duplicate policy explicit across the trusted create boundary", () =>
       duplicatePolicy: "SKIP_EXISTING",
       items: [{
         ...bulk.items[0],
+        duplicatePolicy: "MOVE_TO_GROUP",
+        duplicateGroupId: "01900000-0000-7000-8000-000000000005"
+      }]
+    }).items[0]?.duplicatePolicy,
+    "MOVE_TO_GROUP"
+  );
+  assert.equal(
+    internalSemanticKeywordBulkCreateInput({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement,
+      duplicatePolicy: "SKIP_EXISTING",
+      items: [{
+        ...bulk.items[0],
         duplicateGroupId: "01900000-0000-7000-8000-000000000005"
       }]
     }).items[0]?.duplicateGroupId,

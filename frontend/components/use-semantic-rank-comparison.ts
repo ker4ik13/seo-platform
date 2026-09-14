@@ -8,6 +8,7 @@ import {
   type SemanticRankDimension
 } from "@seo-platform/contracts";
 import { browserApiRequest } from "../lib/browser-api";
+import { mergeRankComparisonItems } from "../lib/rank-comparison-cache";
 
 const emptyComparisonItems: ReadonlyMap<string, SemanticRankComparisonItem> = new Map();
 
@@ -20,7 +21,7 @@ type CatalogState = Readonly<{
 
 type ComparisonState = Readonly<{
   projectId: string;
-  requestKey: string;
+  scopeKey: string;
   items: ReadonlyMap<string, SemanticRankComparisonItem>;
   loading: boolean;
   error?: string;
@@ -40,7 +41,7 @@ export function useSemanticRankComparison(
   });
   const [comparison, setComparison] = useState<ComparisonState>({
     projectId,
-    requestKey: "",
+    scopeKey: "",
     items: emptyComparisonItems,
     loading: false
   });
@@ -55,6 +56,10 @@ export function useSemanticRankComparison(
     effectiveDimensionSignature,
     refreshKey,
     revision
+  ]);
+  const comparisonScopeKey = JSON.stringify([
+    projectId,
+    effectiveDimensionSignature
   ]);
 
   useEffect(() => {
@@ -101,7 +106,7 @@ export function useSemanticRankComparison(
     if (!keywordIds.length || !dimensionKeys.length) {
       setComparison({
         projectId,
-        requestKey: comparisonRequestKey,
+        scopeKey: comparisonScopeKey,
         items: emptyComparisonItems,
         loading: false
       });
@@ -109,8 +114,11 @@ export function useSemanticRankComparison(
     }
     setComparison(current => ({
       projectId,
-      requestKey: comparisonRequestKey,
-      items: current.projectId === projectId && current.requestKey === comparisonRequestKey
+      scopeKey: comparisonScopeKey,
+      // Keep already resolved cells while a different virtual viewport or a
+      // fresh server revision is loading. Rows may unmount during scrolling,
+      // but their values must not be replaced by an ellipsis when they return.
+      items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
         ? current.items
         : emptyComparisonItems,
       loading: true
@@ -144,15 +152,22 @@ export function useSemanticRankComparison(
           }
         }
         if (!controller.signal.aborted) {
-          setComparison({ projectId, requestKey: comparisonRequestKey, items: next, loading: false });
+          setComparison(current => ({
+            projectId,
+            scopeKey: comparisonScopeKey,
+            items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
+              ? mergeRankComparisonItems(current.items, next)
+              : next,
+            loading: false
+          }));
         }
       })()
         .catch(() => {
           if (!controller.signal.aborted) {
             setComparison(current => ({
               projectId,
-              requestKey: comparisonRequestKey,
-              items: current.projectId === projectId && current.requestKey === comparisonRequestKey
+              scopeKey: comparisonScopeKey,
+              items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
                 ? current.items
                 : emptyComparisonItems,
               loading: false,
@@ -165,12 +180,12 @@ export function useSemanticRankComparison(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [comparisonRequestKey, effectiveDimensionSignature, keywordSignature, projectId, refreshKey, revision]);
+  }, [comparisonRequestKey, comparisonScopeKey, effectiveDimensionSignature, keywordSignature, projectId, refreshKey, revision]);
 
   const currentComparison = comparison.projectId === projectId &&
-    comparison.requestKey === comparisonRequestKey
+    comparison.scopeKey === comparisonScopeKey
     ? comparison
-    : { projectId, requestKey: comparisonRequestKey, items: emptyComparisonItems, loading: true };
+    : { projectId, scopeKey: comparisonScopeKey, items: emptyComparisonItems, loading: true };
   return {
     dimensions,
     items: currentComparison.items,

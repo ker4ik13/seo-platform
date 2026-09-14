@@ -110,6 +110,25 @@ export function applySemanticImportChunkInput(
           return path;
         });
   if (groupPaths && groupPaths.length > 2_000) invalid("groupPaths");
+  const groupMetadata = input.groupMetadata === undefined
+    ? undefined
+    : array(input.groupMetadata, "groupMetadata").map((value, groupIndex) => {
+        const item = record(value);
+        const path = array(item.path, `groupMetadata.${groupIndex}.path`).map(
+          (segment, segmentIndex) => boundedString(
+            segment,
+            `groupMetadata.${groupIndex}.path.${segmentIndex}`,
+            255
+          )
+        );
+        if (path.length < 1 || path.length > semanticImportMaxGroupDepth) invalid("groupMetadata");
+        const color = item.color === undefined
+          ? undefined
+          : boundedString(item.color, `groupMetadata.${groupIndex}.color`, 7).toLowerCase();
+        if (color !== undefined && !/^#[0-9a-f]{6}$/u.test(color)) invalid(`groupMetadata.${groupIndex}.color`);
+        return { path, ...(color ? { color } : {}) };
+      });
+  if (groupMetadata && groupMetadata.length > 2_000) invalid("groupMetadata");
   const keys = parsedRows.map(
     ({ language: rowLanguage, normalizedHash }) =>
       `${rowLanguage}\u0000${normalizedHash}`
@@ -127,6 +146,7 @@ export function applySemanticImportChunkInput(
       "createMissingKeywords"
     ),
     ...(groupPaths ? { groupPaths } : {}),
+    ...(groupMetadata ? { groupMetadata } : {}),
     rows: parsedRows
   };
 }
@@ -183,6 +203,14 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
     input.isFavorite === undefined
       ? undefined
       : boolean(input.isFavorite, `${path}.isFavorite`);
+  const isTracked =
+    input.isTracked === undefined
+      ? undefined
+      : boolean(input.isTracked, `${path}.isTracked`);
+  const note =
+    input.note === undefined
+      ? undefined
+      : boundedString(input.note, `${path}.note`, 1_000_000);
   const intent =
     input.intent === undefined
       ? undefined
@@ -296,6 +324,8 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
     language: language(input.language, `${path}.language`),
     ...(priority === undefined ? {} : { priority }),
     ...(isFavorite === undefined ? {} : { isFavorite }),
+    ...(isTracked === undefined ? {} : { isTracked }),
+    ...(note === undefined ? {} : { note }),
     ...(intent === undefined ? {} : { intent }),
     ...(groupPath ? { groupPath } : {}),
     ...(groupPaths ? { groupPaths } : {}),

@@ -94,6 +94,17 @@ test("parses a bounded keyword bulk create with an explicit duplicate policy", (
       duplicatePolicy: "SKIP_EXISTING",
       items: [{
         text: "SEO аудит",
+        duplicatePolicy: "MOVE_TO_GROUP",
+        duplicateGroupId: "01900000-0000-7000-8000-000000000011"
+      }]
+    }).items[0]?.duplicatePolicy,
+    "MOVE_TO_GROUP"
+  );
+  assert.equal(
+    semanticKeywordBulkCreateInput({
+      duplicatePolicy: "SKIP_EXISTING",
+      items: [{
+        text: "SEO аудит",
         duplicateGroupId: "01900000-0000-7000-8000-000000000011"
       }]
     }).items[0]?.duplicateGroupId,

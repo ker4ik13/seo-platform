@@ -9,6 +9,7 @@ import {
 } from "../lib/browser-api";
 import { BrowserPushSettings } from "./browser-push-settings";
 import { UiText, useUiLocale } from "./ui-locale";
+import { TimezoneSelect } from "./locale-selects";
 
 
 export type NotificationChannel = "IN_APP" | "EMAIL" | "WEB_PUSH";
@@ -306,22 +307,13 @@ export function NotificationSettings({
         <div className="notification-time-grid">
           <label className="form-field">
             <span>Timezone</span>
-            <input
-              list="notification-timezones"
-              maxLength={64}
+            <TimezoneSelect
               onChange={(event) => {
                 setSaved(false);
                 setDraft({ ...draft, timezone: event.target.value });
               }}
               value={draft.timezone}
             />
-            <datalist id="notification-timezones">
-              <option value="UTC" />
-              <option value="Europe/Moscow" />
-              <option value="Europe/Berlin" />
-              <option value="America/New_York" />
-              <option value="Asia/Dubai" />
-            </datalist>
           </label>
           <label className="form-field">
             <span><UiText text="Время дневного дайджеста" /></span>

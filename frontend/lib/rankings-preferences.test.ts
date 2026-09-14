@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   readRankingsPreferences,
+  readPreferredSeoDimensionKey,
+  preferredProjectRankDimensionKey,
+  writePreferredSeoDimensionKey,
   writeRankingsPreferences,
   type RankingsPreferences
 } from "./rankings-preferences.ts";
@@ -59,5 +62,43 @@ test("migrates the old shared dimension into the SEO view", () => {
       ...fallback,
       seoDimensionKey: "YANDEX|RU|2|ru|MOBILE"
     }
+  );
+});
+
+test("dashboard reuses and updates the exact project SEO slice", () => {
+  const storage = new MemoryStorage();
+  writeRankingsPreferences("project-a", "user-a", fallback, storage);
+  writePreferredSeoDimensionKey(
+    "project-a",
+    "user-a",
+    "GOOGLE|RU|1011969|ru|MOBILE",
+    storage
+  );
+  assert.equal(
+    readPreferredSeoDimensionKey("project-a", "user-a", storage),
+    "GOOGLE|RU|1011969|ru|MOBILE"
+  );
+  assert.equal(
+    readRankingsPreferences("project-a", "user-a", fallback, storage).dateFrom,
+    fallback.dateFrom
+  );
+});
+
+test("project city chooses a desktop exact slice when no saved slice exists", () => {
+  const dimensions = [
+    { key: "GOOGLE|RU|1011969|ru|MOBILE", searchEngine: "GOOGLE", countryCode: "RU", regionCode: "1011969", language: "ru", device: "MOBILE" },
+    { key: "YANDEX|RU|213|ru|DESKTOP", searchEngine: "YANDEX", countryCode: "RU", regionCode: "213", language: "ru", device: "DESKTOP" }
+  ] as const;
+  assert.equal(
+    preferredProjectRankDimensionKey(dimensions, "", {
+      name: "Москва",
+      yandexRegionCode: "213",
+      googleRegionCode: "1011969"
+    }),
+    "YANDEX|RU|213|ru|DESKTOP"
+  );
+  assert.equal(
+    preferredProjectRankDimensionKey(dimensions, dimensions[0].key),
+    dimensions[0].key
   );
 });

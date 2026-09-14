@@ -208,7 +208,10 @@ export class SemanticImportParserService {
         observed.stream,
         semanticImport.totalBytes,
         (metadata) => {
-          sourceMetadata = { groupPaths: metadata.groupPaths };
+          sourceMetadata = {
+            groupPaths: metadata.groupPaths,
+            groups: metadata.groups
+          };
         }
       );
     } else {
@@ -550,6 +553,10 @@ interface ParseResult {
   readonly progressBytes: bigint;
   readonly sourceMetadata?: Readonly<{
     groupPaths: readonly (readonly string[])[];
+    groups: readonly Readonly<{
+      path: readonly string[];
+      color?: string;
+    }>[];
   }>;
 }
 

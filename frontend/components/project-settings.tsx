@@ -36,6 +36,7 @@ import {
 } from "../lib/tenant-settings";
 import { ProjectFavicon } from "./project-favicon";
 import { CustomSelect } from "./custom-select";
+import { LocaleSelect, TimezoneSelect } from "./locale-selects";
 import { russianSearchCities } from "../lib/seo-regions";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -812,15 +813,11 @@ export function ProjectSettings({
           <div className="form-row">
             <label className="form-field">
               <span><UiText text="Локаль" /></span>
-              <input
+              <LocaleSelect
                 aria-describedby={fieldErrors.locale ? "project-locale-error" : "project-locale-hint"}
                 aria-invalid={Boolean(fieldErrors.locale)}
-                autoCapitalize="none"
-                maxLength={16}
+                disabled={!editAllowed || Boolean(busy) || Boolean(confirmAction)}
                 onChange={(event) => updateDraft("locale", event.target.value)}
-                readOnly={
-                  !editAllowed || Boolean(busy) || Boolean(confirmAction)
-                }
                 required
                 value={draft.locale}
               />
@@ -834,15 +831,11 @@ export function ProjectSettings({
             </label>
             <label className="form-field">
               <span><UiText text="Часовой пояс" /></span>
-              <input
+              <TimezoneSelect
                 aria-describedby={fieldErrors.timezone ? "project-timezone-error" : "project-timezone-hint"}
                 aria-invalid={Boolean(fieldErrors.timezone)}
-                autoCapitalize="none"
-                maxLength={64}
+                disabled={!editAllowed || Boolean(busy) || Boolean(confirmAction)}
                 onChange={(event) => updateDraft("timezone", event.target.value)}
-                readOnly={
-                  !editAllowed || Boolean(busy) || Boolean(confirmAction)
-                }
                 required
                 value={draft.timezone}
               />
