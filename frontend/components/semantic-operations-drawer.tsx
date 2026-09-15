@@ -588,6 +588,15 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
   const done = value.completedKeywords + value.failedKeywords;
   const durationLabel = operationDurationLabel(value);
   const seasonality = value.mode === "SEASONALITY";
+  const providerRequestCount = value.provider === "XMLSTOCK" && !seasonality
+    ? value.selectedKeywords * value.types.length
+    : undefined;
+  const completedProviderRequests = providerRequestCount === undefined
+    ? undefined
+    : Math.min(providerRequestCount, done * value.types.length);
+  const remainingProviderSeconds = providerRequestCount === undefined || completedProviderRequests === undefined
+    ? undefined
+    : Math.ceil((providerRequestCount - completedProviderRequests) / 10);
   return {
     id: value.id,
     kind: "FREQUENCY",
@@ -597,7 +606,9 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     description: seasonality
       ? `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${frequencyCollectionParameters(value)}`
       : `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
-    statusLabel: operationStatusLabel(value.status, value.stage),
+    statusLabel: value.provider === "XMLSTOCK" && value.stage === "waiting_provider_capacity"
+      ? "Выполняется по лимиту XMLStock · до 10 запросов/с"
+      : operationStatusLabel(value.status, value.stage),
     progressLabel: `${done} из ${value.selectedKeywords}`,
     percent: value.selectedKeywords > 0 ? Math.round(done / value.selectedKeywords * 100) : 0,
     tab: operationTab(value.status),
@@ -612,14 +623,30 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
           routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`
         }
       : {}),
-    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    ...(value.failureCode && value.failureCode !== "PROVIDER_CONCURRENCY_LIMITED"
+      ? { errorCode: value.failureCode }
+      : {}),
     createdAt: value.createdAt,
     ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(durationLabel
       ? { durationLabel }
+      : {}),
+    ...(providerRequestCount !== undefined && completedProviderRequests !== undefined
+      ? {
+          resultLabel: `API-запросов: ${completedProviderRequests} из ${providerRequestCount}${remainingProviderSeconds && remainingProviderSeconds > 0 ? ` · минимум ${providerWaitLabel(remainingProviderSeconds)}` : ""}`
+        }
       : {})
   };
+}
+
+function providerWaitLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds} сек`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `${hours} ч${remainder > 0 ? ` ${remainder} мин` : ""}`;
 }
 
 function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Operation {

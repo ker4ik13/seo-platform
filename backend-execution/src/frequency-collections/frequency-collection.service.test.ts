@@ -154,11 +154,15 @@ test("creates all 10,000 Arsenkin items atomically in bounded SQL batches", asyn
 
 test("accepts 10,000 XMLStock keywords at the collection boundary", async () => {
   const reachedTransaction = new Error("transaction reached");
+  let resolveArguments: readonly unknown[] = [];
   const xmlStockRoute = {
-    resolve: async () => ({
-      ...(await route.resolve()),
-      provider: "XMLSTOCK" as const
-    })
+    resolve: async (...args: readonly unknown[]) => {
+      resolveArguments = args;
+      return ({
+        ...(await route.resolve()),
+        provider: "XMLSTOCK" as const
+      });
+    }
   };
   const service = new FrequencyCollectionService(
     {
@@ -185,12 +189,18 @@ test("accepts 10,000 XMLStock keywords at the collection boundary", async () => 
         id: `keyword-${index}`,
         version: 1
       })),
-      types: ["BASE"],
+      types: ["BASE", "EXACT"],
       regionCode: "225",
       device: "ALL"
     }),
     (error) => error === reachedTransaction
   );
+  assert.deepEqual(resolveArguments.at(-1), {
+    xmlStock: {
+      product: "WORDSTAT",
+      requestCount: 20_000
+    }
+  });
 });
 
 test("seasonality accepts both providers only with the reliable base series", async () => {

@@ -7,7 +7,7 @@ import {
   type SemanticRankComparisonItem,
   type SemanticRankDimension
 } from "@seo-platform/contracts";
-import { browserApiRequest } from "../lib/browser-api";
+import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import {
   mergeRankComparisonItems,
   unresolvedRankComparisonKeywordIds
@@ -178,13 +178,10 @@ export function useSemanticRankComparison(
               keywordIds: unresolvedKeywordIds.slice(start, start + pageSize),
               dimensionKeys: selectedDimensions
             };
-            const payload = await browserApiRequest<unknown>(
+            const payload = await loadRankComparison(
               `/app/api/projects/${encodeURIComponent(projectId)}/keyword-ranks/comparison`,
-              {
-                method: "POST",
-                body: scope,
-                signal: controller.signal
-              }
+              scope,
+              controller.signal
             );
             for (const item of parseSemanticRankComparisonItems(payload, scope)) {
               next.set(`${item.keywordId}:${item.dimensionKey}`, item);
@@ -252,4 +249,33 @@ export function useSemanticRankComparison(
     catalogError: catalog.projectId === projectId ? catalog.error : undefined,
     refresh: () => setRevision(value => value + 1)
   };
+}
+
+async function loadRankComparison(
+  path: string,
+  scope: Readonly<{
+    keywordIds: readonly string[];
+    dimensionKeys: readonly string[];
+  }>,
+  signal: AbortSignal
+): Promise<unknown> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await browserApiRequest<unknown>(path, {
+        method: "POST",
+        body: scope,
+        signal
+      });
+    } catch (error) {
+      if (
+        signal.aborted ||
+        !(error instanceof BrowserApiError) ||
+        !error.retryable ||
+        attempt >= 2
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+    }
+  }
 }

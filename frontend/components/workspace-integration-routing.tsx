@@ -24,6 +24,7 @@ import { Icon } from "./icon";
 import { IntegrationStatusBadge } from "./integration-status-badge";
 import { ProviderLogo } from "./provider-logo";
 import { UiText, useUiLocale } from "./ui-locale";
+import { workspaceRouteCredentialIdsAfterSelection } from "../lib/project-integration-settings";
 
 
 type RouteDraft = {
@@ -47,9 +48,12 @@ export function WorkspaceIntegrationRouting({
     new Map()
   );
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<IntegrationCapability>();
+  const [saving, setSaving] = useState<ReadonlySet<IntegrationCapability>>(
+    new Set()
+  );
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<IntegrationCapability>();
+  const [failed, setFailed] = useState<IntegrationCapability>();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -112,25 +116,30 @@ export function WorkspaceIntegrationRouting({
     update: (current: RouteDraft) => RouteDraft
   ): void {
     setSuccess(undefined);
-    setDrafts((current) => {
-      const next = new Map(current);
-      next.set(capability, update(current.get(capability) ?? emptyDraft()));
-      return next;
-    });
+    setFailed(undefined);
+    const nextDraft = update(drafts.get(capability) ?? emptyDraft());
+    setDrafts((current) => new Map(current).set(capability, nextDraft));
+    if (nextDraft.credentialIds.length > 0) {
+      void save(capability, nextDraft);
+    }
   }
 
-  async function save(capability: IntegrationCapability): Promise<void> {
-    const draft = drafts.get(capability) ?? emptyDraft();
+  async function save(
+    capability: IntegrationCapability,
+    draft = drafts.get(capability) ?? emptyDraft()
+  ): Promise<void> {
     if (draft.enabled && draft.credentialIds.length === 0) {
       setError("Для включённой операции выберите хотя бы одно подключение.");
+      setFailed(capability);
       return;
     }
     const current = settings?.bindings.find(
       (binding) => binding.capability === capability
     );
-    setSaving(capability);
+    setSaving((current) => new Set(current).add(capability));
     setError(undefined);
     setSuccess(undefined);
+    setFailed(undefined);
     try {
       const saved = await browserApiRequest<WorkspaceConnectorBinding>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing/${encodeURIComponent(capability)}`,
@@ -172,8 +181,13 @@ export function WorkspaceIntegrationRouting({
       setSuccess(capability);
     } catch (cause) {
       setError(requestErrorMessage(cause));
+      setFailed(capability);
     } finally {
-      setSaving(undefined);
+      setSaving((current) => {
+        const next = new Set(current);
+        next.delete(capability);
+        return next;
+      });
     }
   }
 
@@ -226,7 +240,8 @@ export function WorkspaceIntegrationRouting({
             onChange={(update) => updateDraft(capability, update)}
             onSave={() => void save(capability)}
             options={optionsByCapability.get(capability) ?? []}
-            saving={saving === capability}
+            failed={failed === capability}
+            saving={saving.has(capability)}
             success={success === capability}
           />
         ))}
@@ -245,6 +260,7 @@ function CapabilityRoutingRow({
   canManageFallback,
   canUpdate,
   draft,
+  failed,
   onChange,
   onSave,
   options,
@@ -256,6 +272,7 @@ function CapabilityRoutingRow({
   canManageFallback: boolean;
   canUpdate: boolean;
   draft: RouteDraft;
+  failed: boolean;
   onChange: (update: (current: RouteDraft) => RouteDraft) => void;
   onSave: () => void;
   options: readonly ProjectConnectorCredentialOption[];
@@ -269,6 +286,11 @@ function CapabilityRoutingRow({
   const available = options.filter(
     (option) => !draft.credentialIds.includes(option.id)
   );
+  const availableSelected = selected.filter(
+    (credential) => !routeIsUnavailable(binding, credential.id)
+  );
+  const replacingUnavailableRoute =
+    selected.length > 0 && availableSelected.length === 0;
   const move = (index: number, direction: -1 | 1): void => {
     const target = index + direction;
     if (target < 0 || target >= draft.credentialIds.length) return;
@@ -283,7 +305,10 @@ function CapabilityRoutingRow({
   };
 
   return (
-    <article className="integration-routing-row">
+    <article
+      className="integration-routing-row"
+      id={`routing-${capability.toLocaleLowerCase("en").replaceAll("_", "-")}`}
+    >
       <div className="integration-routing-title">
         <div>
           <strong>{<UiText text={integrationCapabilityLabel(capability) ?? ""} />}</strong>
@@ -292,7 +317,7 @@ function CapabilityRoutingRow({
         <label className="integration-routing-switch">
           <input
             checked={draft.enabled}
-            disabled={!canUpdate || saving}
+            disabled={!canUpdate || saving || selected.length === 0}
             onChange={(event) =>
               onChange((current) => ({ ...current, enabled: event.target.checked }))
             }
@@ -323,7 +348,7 @@ function CapabilityRoutingRow({
                 <button
                   aria-label={uiText("Убрать подключение {0}", [String(credential.label)])}
                   className="integration-route-remove"
-                  disabled={saving}
+                  disabled={saving || selected.length === 1}
                   onClick={() =>
                     onChange((current) => ({
                       ...current,
@@ -333,6 +358,7 @@ function CapabilityRoutingRow({
                     }))
                   }
                   type="button"
+                  title={selected.length === 1 ? uiText("Сначала добавьте новое подключение") : undefined}
                 >
                   ×
                 </button>
@@ -347,23 +373,33 @@ function CapabilityRoutingRow({
       </div>
       {canUpdate && available.length > 0 && (
         <label className="form-field integration-route-add">
-          <span>{selected.length === 0 ? <UiText text="Основное подключение" /> : <UiText text="Добавить резерв" />}</span>
+          <span>{selected.length === 0
+            ? <UiText text="Основное подключение" />
+            : replacingUnavailableRoute
+              ? <UiText text="Заменить недоступное подключение" />
+              : <UiText text="Добавить резерв" />}</span>
           <CustomSelect
-            disabled={saving || (selected.length > 0 && !canManageFallback)}
-            onChange={(event) =>
-              onChange((current) => ({
+            disabled={saving || (!replacingUnavailableRoute && selected.length > 0 && !canManageFallback)}
+            onChange={(event) => onChange((current) => {
+              const credentialIds = workspaceRouteCredentialIdsAfterSelection(
+                current.credentialIds,
+                binding,
+                event.target.value
+              );
+              return {
                 ...current,
-                credentialIds: [...current.credentialIds, event.target.value],
+                enabled: true,
+                credentialIds,
                 fallbackReasons:
-                  current.fallbackReasons.length > 0
-                    ? current.fallbackReasons
-                    : [...connectorFallbackReasons]
-              }))
-            }
+                  credentialIds.length > 1 && current.fallbackReasons.length === 0
+                    ? [...connectorFallbackReasons]
+                    : current.fallbackReasons
+              };
+            })}
             searchable
             value=""
           >
-            <option value=""><UiText text="Выберите подключение" /></option>
+            <option disabled value=""><UiText text="Выберите подключение" /></option>
             {available.map((credential) => (
               <option
                 disabled={
@@ -408,17 +444,21 @@ function CapabilityRoutingRow({
         </fieldset>
       )}
       <div className="integration-routing-actions">
-        <span className={success ? "integration-save-success" : ""}>
-          {success ? <UiText text="Сохранено" /> : <UiText text="{0} источников в цепочке" values={[String(selected.length)]} />}
+        <span aria-live="polite" className={success ? "integration-save-success" : ""}>
+          {saving
+            ? <UiText text="Сохраняем маршрут…" />
+            : success
+              ? <UiText text="Сохранено автоматически" />
+              : <UiText text="{0} источников в цепочке" values={[String(selected.length)]} />}
         </span>
-        {canUpdate && (
+        {canUpdate && failed && (
           <button
             className="secondary-button"
             disabled={saving || (draft.enabled && selected.length === 0)}
             onClick={onSave}
             type="button"
           >
-            {saving ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить маршрут" />}
+            <UiText text="Повторить сохранение" />
           </button>
         )}
       </div>
@@ -437,7 +477,7 @@ function draftFromBinding(binding: WorkspaceConnectorBinding | undefined): Route
 }
 
 function emptyDraft(): RouteDraft {
-  return { enabled: true, credentialIds: [], fallbackReasons: [] };
+  return { enabled: false, credentialIds: [], fallbackReasons: [] };
 }
 
 function routeIsUnavailable(
@@ -457,7 +497,7 @@ function capabilityDescription(capability: IntegrationCapability): string {
     WORDSTAT: "Базовая, фразовая и точная частотность",
     CLUSTERING: "Группировка запросов по пересечению выдачи",
     INDEXATION: "Проверка наличия страниц в индексе",
-    KEYWORD_RESEARCH: "Расширение семантики и подсказки",
+    KEYWORD_RESEARCH: "Расширение семантики через Wordstat",
     COMPETITOR_RESEARCH: "Домены конкурентов и их запросы"
   };
   return descriptions[capability];

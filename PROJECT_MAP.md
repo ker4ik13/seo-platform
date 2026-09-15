@@ -174,7 +174,9 @@ latest `aiAnswers[].rankingUrl`, то есть только из найденн�
 транспортного префикса; конкурентская выдача в этот modal не подмешивается.
 Dimension-specific keyword insights читает весь сохранённый depth до Top-100,
 поэтому второй URL проекта на позиции 43 не исчезает из модалки; общий
-инспектор сохраняет компактный Top-10 preview. Диалог имеет единое внешнее
+инспектор сохраняет компактный Top-10 preview. Platform API принимает те же
+100 строк dimension-specific snapshot и не отбрасывает ответ старым лимитом
+Top-10. Диалог имеет единое внешнее
 закругление и обрезает edge-layout внутри своей границы.
 Индикатор нескольких страниц выводится независимо от индикатора нецелевого
 URL, поэтому при одновременном выполнении обоих условий видны две кнопки.
@@ -463,8 +465,10 @@ file dropzone и progress bar; незавершённый preview защищён
 
 Execution import worker читает текст KC4 как сырые bytes: сначала strict UTF-8,
 затем Windows-1251 для старых проектов, а невосстановимый replacement character
-не допускается в canonical keyword. Публикация использует до 5 000 строк на
-chunk; `semantic_imports.stage` содержит безопасные счётчики разобранных,
+не допускается в canonical keyword. Табличная публикация использует до 5 000
+строк на chunk, а насыщенный позициями и SERP нативный KC4 — до 1 000, чтобы
+одна Core transaction не упиралась в сетевой timeout на production-БД;
+`semantic_imports.stage` содержит безопасные счётчики разобранных,
 проверенных и опубликованных строк/чанков. Web показывает эти счётчики, хранит
 ID активного импорта в sessionStorage для возобновления наблюдения и требует
 подтверждение перед закрытием активного импорта.
@@ -481,8 +485,9 @@ Jobs и Core SEO используют общий `semanticImportPublishMaxRows=5
 Core создаёт manifest-папки пакетами по уровням дерева и сохраняет миллионы
 KC4 custom values bounded SQL-upsert пакетами вместо отдельных запросов.
 Повторный `OVERWRITE_MAPPED` обновляет existing keywords tenant-scoped
-`jsonb_to_recordset` пакетами; 300-секундная Core transaction укладывается в
-330-секундный Jobs caller timeout.
+`jsonb_to_recordset` пакетами; 300-секундная Core transaction вместе с
+30-секундным ожиданием соединения укладывается в 360-секундный Jobs caller
+timeout.
 Повторные исторические строки одного поисковика и даты дедуплицируются дважды:
 при validation и в publish canonicalizer; найденный замер сохраняет позицию и
 не может превратиться в противоречивое `found=false + position`.
@@ -498,7 +503,9 @@ Rank dimension catalog использует configuration-first lateral probe п
 после крупного KC4-импорта. Platform API оставляет общий короткий dependency
 timeout, но для тяжёлых bounded reads семантики использует единую 30-секундную
 границу: `GET keywords`, body-only `keywords/list|search`, облегчённый
-`keywords/operation-scope` и агрегаты позиций. Прогретый целевой p95 остаётся
+`keywords/operation-scope`, `keyword-ranks/comparison` и агрегаты позиций.
+Web повторяет transient comparison-запрос до двух раз, сохраняя уже полученные
+ячейки. Прогретый целевой p95 остаётся
 1,5 секунды.
 Same-origin BFF ждёт те же тяжёлые SEO Data reads до 35 секунд, то есть дольше
 внутренней 30-секундной границы и успевает передать её нормальный ответ. На
@@ -1403,6 +1410,11 @@ Search API — `48 / 50`, Wordstat — `10 / 10`. Throttling адаптивно 
 `seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
 предпочитает менее занятую пару credential/project, оставаясь source of truth
 для Job, lease и progress.
+Каждый connector process выполняет до четырёх frequency claims одновременно;
+три штатных процесса заполняют Wordstat bucket до его реальных `10 RPS`, а
+Redis не позволяет превысить границу провайдера. Capacity wait показывается
+как нормальная фаза с количеством HTTP-запросов и минимальным оставшимся
+временем, без ложного error code.
 Credential validation версии `xmlstock@1.3.0` дополнительно читает бесплатные
 `/api/?info=user` и `/api/?info=status`. В `provider_meta` проходят только
 строго проверенные ставки, тарифный код, безопасные счётчики доступности и
@@ -1648,6 +1660,17 @@ validation Job, но не отклоняет корректный XMLStock/Arsen
 Маршрутизация операций настраивается только в `/app/settings/integrations` на
 уровне workspace. Цепочка credentials упорядочивается кнопками вверх/вниз;
 первый provider основной, остальные — fallback по выбранным причинам.
+Изменения маршрута сохраняются сразу после выбора, перестановки, переключения
+или удаления. Если прежний credential уже недоступен, выбор нового заменяет
+его одной командой, поэтому невалидная старая строка не блокирует сохранение.
+Сам маршрут можно сохранить независимо от текущего денежного баланса. Перед
+созданием XMLStock Wordstat Job resolver рассчитывает верхнюю стоимость всего
+запуска по сохранённому тарифу и числу `keywords × frequency types`: если
+основной BYOK credential не покрывает её, фиксируется `LOW_BALANCE` и до
+создания Job выбирается следующий разрешённый workspace fallback. Web тем же
+расчётом заранее показывает фактически подходящий credential и его тариф.
+Частотности и расширение семантики обозначены в Web как `Wordstat` и
+`Парсинг Wordstat`, поскольку это независимые route capabilities.
 Project connector routes остаются внутренней materialized reference-проекцией:
 использованные строки сохраняются для execution history с `retiredAt`, а любой
 legacy project override перед новым запуском заменяется актуальной workspace
@@ -1836,6 +1859,10 @@ XMLStock. Это platform safety bound, а не лимит XMLStock: Arsenkin о
 resolve/persist chunks и per-credential `WORDSTAT` concurrency/RPS остаются
 bounded, поэтому снятие прежнего UI/API-предела 200 не создаёт один гигантский
 provider request и не связывает между собой разные BYOK-ключи.
+До создания XMLStock Job проверяется баланс на полный максимум обращений, а не
+только состояние ключа. Недостаточный основной баланс переводит запуск на
+настроенный `LOW_BALANCE` fallback; поэтому частичная обработка не начинается
+на заведомо неподходящем аккаунте.
 Первый запуск wizard выбирает регион «Россия» (`225`), после успешного запуска
 восстанавливается последний Wordstat-регион этого проекта; в списке далее идут
 Москва и Санкт-Петербург. Настройки проекта хранят nullable согласованную пару
@@ -2125,9 +2152,12 @@ contexts архивируются после успешной географич
 диапазон с Unix epoch, а не с даты создания Keyword в SEOньорите: KC4 snapshot
 может быть старше самой записи после переноса проекта. Точный keyword,
 dimension и keyset-page по 5 сохраняют запрос bounded. Execution хранит
-`publishing_attempts` и после пяти
+`publishing_attempts` и после десяти
 неудачных claims завершает импорт контролируемой terminal-ошибкой вместо
-бесконечного цикла; уже принятые chunks остаются idempotent. BullMQ-lock
+бесконечного цикла; уже принятые chunks остаются idempotent. Временный
+`INVALID_COMMAND` во время смены версии Core/Execution считается retryable,
+чтобы rolling restart не превращал валидный KC4 в окончательный отказ.
+BullMQ-lock
 import/export worker равен 30-минутному DB lease, поэтому синхронный разбор
 крупного SQLite `.kc4` не освобождает queue job через стандартные 30 секунд.
 Широкий XLSX с историей распознаётся по колонкам дат. Один файл относится к

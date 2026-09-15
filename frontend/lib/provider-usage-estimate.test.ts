@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProjectConnectorCredentialOption } from "@seo-platform/contracts";
 import {
+  frequencyRouteSource,
   frequencyProviderUsageEstimate,
   rankProviderUsageEstimate
 } from "./provider-usage-estimate.ts";
@@ -40,6 +41,46 @@ test("estimates XMLStock Wordstat calls and shows current account capacity", () 
   assert.match(estimate.usage, /^Базовый тариф · 25 ₽ за 1000 · 36 запросов · 0,90\s₽$/u);
   assert.match(estimate.available, /27,39/u);
   assert.match(estimate.available, /420 запросов/u);
+});
+
+test("selects the first workspace fallback that can fund the complete frequency run", () => {
+  const lowBalance = {
+    ...xmlStock,
+    id: "019fc000-0000-7000-8000-000000000010",
+    quota: {
+      ...xmlStock.quota,
+      balance: { amount: "1", currency: "RUB" as const }
+    }
+  } satisfies ProjectConnectorCredentialOption;
+  const funded = {
+    ...xmlStock,
+    id: "019fc000-0000-7000-8000-000000000011",
+    label: "Резервный XMLStock",
+    quota: {
+      ...xmlStock.quota,
+      balance: { amount: "4150.99", currency: "RUB" as const },
+      xmlStockPricing: {
+        ...xmlStock.quota.xmlStockPricing,
+        tariffCode: "OPTIMAL" as const,
+        pricesPerThousand: {
+          YANDEX_SEARCH_API: "27",
+          YANDEX_LIVE: "20",
+          YANDEX_TURBO: "30",
+          GOOGLE_LIVE: "20",
+          WORDSTAT: "23"
+        }
+      }
+    }
+  } satisfies ProjectConnectorCredentialOption;
+
+  assert.equal(
+    frequencyRouteSource([lowBalance, funded], 3_642, 3, true)?.id,
+    funded.id
+  );
+  assert.equal(
+    frequencyRouteSource([lowBalance, funded], 3_642, 3, false)?.id,
+    lowBalance.id
+  );
 });
 
 test("estimates XMLStock Google pages by selected depth", () => {

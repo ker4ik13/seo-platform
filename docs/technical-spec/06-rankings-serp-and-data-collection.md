@@ -394,6 +394,10 @@ PostgreSQL. Базовые окна одного credential: Yandex Live — `20
 dispatcher может подготовить до 48 keyword chunks одного Job за тик, после
 чего Redis и connector worker concurrency задают фактический предел внешних
 HTTP-вызовов. Лимит пяти provider tasks остаётся только у Arsenkin.
+Штатные три connector process используют по четыре frequency worker slot и
+тем самым заполняют Wordstat bucket до реальных `10 RPS`. Ожидание permit не
+расходует попытку JobItem и отображается как фаза выполнения с расчётным
+числом provider requests, а не как terminal/error state.
 
 XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос
 явно получает `tbm=turbo`, а внешняя пропускная способность остаётся
@@ -1218,6 +1222,12 @@ Fallback запрещён:
 - при юридическом ограничении региона.
 
 Каждый fallback фиксируется в job и snapshot.
+
+Для XMLStock Wordstat `LOW_BALANCE` определяется до создания Job по полной
+верхней стоимости `keywords × выбранные виды частотности` и сохранённой ставке
+аккаунта. Resolver выбирает первый credential в workspace chain, чей денежный
+баланс покрывает весь запуск. Поле XMLStock `requestLimit=0` у тарифа с оплатой
+за запрос не трактуется как нулевая квота.
 
 ## 20. Частичные результаты
 

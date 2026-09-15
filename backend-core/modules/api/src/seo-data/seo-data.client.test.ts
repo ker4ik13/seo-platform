@@ -428,6 +428,20 @@ test("validates safe interactive rank history metadata", () => {
     importedCompetitors.competitorSnapshots?.[0]?.provider,
     "KEY_COLLECTOR"
   );
+  const fullDepthCompetitors = semanticKeywordInsights({
+    ...withCompetitors,
+    competitorSnapshots: [{
+      ...withCompetitors.competitorSnapshots![0]!,
+      results: Array.from({ length: 50 }, (_, index) => ({
+        position: index + 1,
+        url: `https://competitor-${index + 1}.example/result`
+      }))
+    }]
+  }, keywordId);
+  assert.equal(
+    fullDepthCompetitors.competitorSnapshots?.[0]?.results.length,
+    50
+  );
   const withAiHistory = semanticKeywordInsights({
     ...withCompetitors,
     aiPositionHistory: [{
@@ -2038,7 +2052,7 @@ test("allows a bounded semantic keyword page read to finish on a large project",
   assert.equal(timeoutMs, 30_000);
 });
 
-test("uses the same bounded-read timeout for GETs, body keyword pages and operation scopes", async () => {
+test("uses the same bounded-read timeout for GETs, body keyword pages, rank comparisons and operation scopes", async () => {
   const requests: Array<Readonly<{ url: URL; timeoutMs: number }>> = [];
   const transport = {
     request: async (input: { readonly url: URL; readonly timeoutMs: number }) => {
@@ -2051,6 +2065,11 @@ test("uses the same bounded-read timeout for GETs, body keyword pages and operat
               data: { contexts: [], contextsTruncated: false },
               meta: { requestId: "seo-data-read-timeout-test" }
             }
+          : input.url.pathname.endsWith("/keyword-ranks/comparison")
+            ? {
+                data: [],
+                meta: { requestId: "seo-data-read-timeout-test" }
+              }
           : {
               data: [],
               page: { hasNext: false, totalApprox: 0 },
@@ -2081,6 +2100,10 @@ test("uses the same bounded-read timeout for GETs, body keyword pages and operat
   });
   await seoData.listOperationScope(internalContext(), {});
   await seoData.listTrackingContexts(internalContext());
+  await seoData.keywordRankComparison(internalContext(), {
+    keywordIds: [projectId],
+    dimensionKeys: ["YANDEX|RU|213|ru|DESKTOP"]
+  });
 
   assert.deepEqual(
     requests.map(({ url, timeoutMs }) => ({
@@ -2098,6 +2121,10 @@ test("uses the same bounded-read timeout for GETs, body keyword pages and operat
       },
       {
         pathname: `/internal/v1/projects/${projectId}/tracking-contexts`,
+        timeoutMs: 30_000
+      },
+      {
+        pathname: `/internal/v1/projects/${projectId}/keyword-ranks/comparison`,
         timeoutMs: 30_000
       }
     ]

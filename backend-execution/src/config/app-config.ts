@@ -1442,7 +1442,7 @@ export function loadAppConfig(
   );
   const frequencyCollectionConcurrency = boundedInteger(
     env.FREQUENCY_COLLECTION_CONCURRENCY,
-    1,
+    4,
     "FREQUENCY_COLLECTION_CONCURRENCY",
     1,
     64

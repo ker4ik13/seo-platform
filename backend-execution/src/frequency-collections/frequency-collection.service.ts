@@ -67,7 +67,13 @@ export class FrequencyCollectionService {
       "WORDSTAT",
       input.actorId,
       input.billing?.provider,
-      input.billing?.credentialId
+      input.billing?.credentialId,
+      {
+        xmlStock: {
+          product: "WORDSTAT",
+          requestCount: input.items.length * input.types.length
+        }
+      }
     );
     if (route.provider !== "XMLSTOCK" && route.provider !== "ARSENKIN") {
       throw new Error("Resolved Wordstat provider is unsupported");

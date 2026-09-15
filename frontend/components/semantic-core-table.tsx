@@ -5220,6 +5220,8 @@ export function SemanticCoreTable({
 
       {!editor && mutationIds.size > 0 && bulkEditorOpen && (
         <SemanticModal
+          bodyClassName="semantic-bulk-editor-modal-body"
+          className="semantic-bulk-editor-modal"
           description={mutationIds.size === 1 ? uiText("Все основные свойства запроса сохраняются вместе с проверкой версии.") : uiText("Изменяйте только нужные поля сразу у всех выбранных запросов. Версии строк проверяются отдельно.")}
           onClose={() => {
             setBulkEditorOpen(false);

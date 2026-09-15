@@ -53,6 +53,72 @@ test("uses the next workspace route for an explicitly allowed low-balance fallba
   );
 });
 
+test("skips an active XMLStock credential that cannot fund the complete Wordstat operation", async () => {
+  const primary = projectRoute(
+    0,
+    "XMLSTOCK",
+    "ACTIVE",
+    "WORKSPACE_DEFAULT",
+    xmlStockWordstatCredential("1", "000000000010")
+  );
+  const reserve = projectRoute(
+    1,
+    "XMLSTOCK",
+    "ACTIVE",
+    "WORKSPACE_DEFAULT",
+    xmlStockWordstatCredential("4150.99", "000000000011")
+  );
+  const binding = inheritedProjectBinding({
+    capability: "WORDSTAT",
+    fallbackMode: "NEXT_AVAILABLE",
+    fallbackReasons: ["LOW_BALANCE"],
+    routes: [primary, reserve]
+  });
+  const workspace = workspaceBinding({
+    capability: "WORDSTAT",
+    fallbackMode: "NEXT_AVAILABLE",
+    fallbackReasons: ["LOW_BALANCE"],
+    routes: [workspaceRoute(0, primary), workspaceRoute(1, reserve)]
+  });
+
+  const configured = await service(binding, workspace).resolve(
+    workspaceId,
+    projectId,
+    "WORDSTAT",
+    actorId
+  );
+  assert.equal(
+    configured.credentialId,
+    "0190abcd-1000-7000-9000-000000000010",
+    "saving a route must not depend on the balance needed by a future operation"
+  );
+
+  const result = await service(binding, workspace).resolve(
+    workspaceId,
+    projectId,
+    "WORDSTAT",
+    actorId,
+    undefined,
+    undefined,
+    {
+      xmlStock: {
+        product: "WORDSTAT",
+        requestCount: 10_926
+      }
+    }
+  );
+
+  assert.equal(result.credentialId, "0190abcd-1000-7000-9000-000000000011");
+  assert.equal(result.xmlStockPricing?.tariffCode, "OPTIMAL");
+  assert.deepEqual(result.attempts.map(({ outcome, reasonCode }) => ({
+    outcome,
+    reasonCode
+  })), [
+    { outcome: "FALLBACK", reasonCode: "LOW_BALANCE" },
+    { outcome: "SELECTED", reasonCode: undefined }
+  ]);
+});
+
 test("starts an explicit launch from the selected credential without mutating the binding", async () => {
   const first = projectRoute(0, "XMLSTOCK", "ACTIVE", "WORKSPACE_DEFAULT");
   const second = projectRoute(1, "ARSENKIN", "ACTIVE", "WORKSPACE_DEFAULT");
@@ -290,7 +356,8 @@ function projectRoute(
   position: number,
   provider: "XMLSTOCK" | "ARSENKIN",
   status: "ACTIVE" | "DEGRADED" | "LOW_BALANCE",
-  routingScope: "PROJECT_OVERRIDE" | "WORKSPACE_DEFAULT" = "PROJECT_OVERRIDE"
+  routingScope: "PROJECT_OVERRIDE" | "WORKSPACE_DEFAULT" = "PROJECT_OVERRIDE",
+  credentialValue?: unknown
 ): unknown {
   const suffix = String(position + 10).padStart(12, "0");
   return {
@@ -305,7 +372,7 @@ function projectRoute(
     workspaceRouteId: routingScope === "PROJECT_OVERRIDE" ? null : `0190abcd-1000-7000-a000-${suffix}`,
     createdAt: now,
     updatedAt: now,
-    credential: credential(provider, status, suffix)
+    credential: credentialValue ?? credential(provider, status, suffix)
   };
 }
 
@@ -322,11 +389,59 @@ function credential(
     mode: "BYOK_API_KEY",
     status,
     capabilities: ["SERP_RANK_TRACKING"],
+    providerMeta: null,
+    lastSuccessAt: null,
     deletedAt: null
   };
 }
 
-function workspaceBinding(): unknown {
+function xmlStockWordstatCredential(balance: string, suffix: string): unknown {
+  return {
+    ...(credential(
+      "XMLSTOCK",
+      "ACTIVE",
+      suffix
+    ) as Readonly<Record<string, unknown>>),
+    capabilities: ["WORDSTAT"],
+    providerMeta: {
+      account: {
+        requestLimit: 0,
+        balance
+      },
+      xmlStockPricing: {
+        tariffCode: balance === "1" ? "BASIC" : "OPTIMAL",
+        currency: "RUB",
+        priceUnit: "PER_1000_REQUESTS",
+        pricesPerThousand: {
+          YANDEX_SEARCH_API: balance === "1" ? "28" : "27",
+          YANDEX_LIVE: balance === "1" ? "25" : "20",
+          YANDEX_TURBO: balance === "1" ? "35" : "30",
+          GOOGLE_LIVE: balance === "1" ? "25" : "20",
+          WORDSTAT: balance === "1" ? "25" : "23"
+        }
+      }
+    },
+    lastSuccessAt: now
+  };
+}
+
+function workspaceRoute(position: number, projectValue: unknown): unknown {
+  const project = projectValue as Readonly<Record<string, unknown>>;
+  return {
+    id: `0190abcd-1000-7000-b000-${String(position + 1).padStart(12, "0")}`,
+    workspaceId,
+    bindingId: workspaceBindingId,
+    position,
+    credentialId: project.credentialId,
+    createdAt: now,
+    updatedAt: now,
+    credential: project.credential
+  };
+}
+
+function workspaceBinding(
+  overrides: Readonly<Record<string, unknown>> = {}
+): unknown {
   const route = {
     id: "0190abcd-1000-7000-b000-000000000001",
     workspaceId,
@@ -349,6 +464,7 @@ function workspaceBinding(): unknown {
     updatedBy: actorId,
     createdAt: now,
     updatedAt: now,
-    routes: [route]
+    routes: [route],
+    ...overrides
   };
 }

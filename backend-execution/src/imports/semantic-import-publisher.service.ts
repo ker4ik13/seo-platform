@@ -47,7 +47,8 @@ interface SemanticImportPublishPlan {
   readonly entitlement: SemanticCapacityEntitlement;
 }
 
-const SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS = 5;
+const SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS = 10;
+const KC4_PUBLISH_MAX_ROWS = 1_000;
 
 @Injectable()
 export class SemanticImportPublisherService {
@@ -150,14 +151,12 @@ export class SemanticImportPublisherService {
     try {
       return await this.publishClaimed(semanticImport, claimedAt);
     } catch (error) {
-      if (error instanceof SeoDataClientError && !error.retryable) {
+      if (!semanticImportPublishErrorIsRetryable(error)) {
         try {
           return await this.fail(
             semanticImport,
             claimedAt,
-            error.code === "QUOTA_EXCEEDED"
-              ? "QUOTA_EXCEEDED"
-              : "SEO_DATA_PUBLISH_REJECTED"
+            semanticImportPublishFailureCode(error)
           );
         } catch (finalizationError) {
           await this.releaseForRetry(semanticImport.id, claimedAt);
@@ -173,7 +172,9 @@ export class SemanticImportPublisherService {
           return await this.fail(
             semanticImport,
             claimedAt,
-            "IMPORT_PUBLISH_RETRY_EXHAUSTED"
+            error instanceof SeoDataClientError && error.code === "INVALID_COMMAND"
+              ? "SEO_DATA_COMMAND_INVALID"
+              : "IMPORT_PUBLISH_RETRY_EXHAUSTED"
           );
         } catch (finalizationError) {
           // Do not abandon the Core receipt: it owns the capacity
@@ -342,10 +343,10 @@ export class SemanticImportPublisherService {
     if (mapping.positionHistory && historyDateCount === 0) {
       return { code: "IMPORT_MAPPING_INVALID" };
     }
-    const batchSize = Math.min(
-      Math.max(this.config.imports.publishBatchRows, 1),
-      semanticImportPublishMaxRows,
-      Math.max(1, Math.floor(10_000 / historyDateCount))
+    const batchSize = semanticImportPublishBatchSize(
+      this.config.imports.publishBatchRows,
+      semanticImport.sourceFormat,
+      historyDateCount
     );
     const expectedChunksBig =
       (uniqueRows + BigInt(batchSize) - 1n) / BigInt(batchSize);
@@ -673,6 +674,36 @@ export function semanticImportPublishRetryExhausted(
   attempts: number
 ): boolean {
   return attempts >= SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS;
+}
+
+export function semanticImportPublishErrorIsRetryable(error: unknown): boolean {
+  return !(error instanceof SeoDataClientError) ||
+    error.retryable ||
+    error.code === "INVALID_COMMAND";
+}
+
+export function semanticImportPublishFailureCode(error: unknown): string {
+  if (!(error instanceof SeoDataClientError)) {
+    return "IMPORT_PUBLISH_RETRY_EXHAUSTED";
+  }
+  if (error.code === "QUOTA_EXCEEDED") return "QUOTA_EXCEEDED";
+  if (error.code === "CONFLICT") return "SEO_DATA_PUBLISH_CONFLICT";
+  if (error.code === "NOT_FOUND") return "SEO_DATA_RECEIPT_NOT_FOUND";
+  if (error.code === "INVALID_COMMAND") return "SEO_DATA_COMMAND_INVALID";
+  return "IMPORT_PUBLISH_RETRY_EXHAUSTED";
+}
+
+export function semanticImportPublishBatchSize(
+  configuredRows: number,
+  sourceFormat: string,
+  historyDateCount: number
+): number {
+  return Math.min(
+    Math.max(configuredRows, 1),
+    semanticImportPublishMaxRows,
+    Math.max(1, Math.floor(10_000 / Math.max(historyDateCount, 1))),
+    sourceFormat === "KC4" ? KC4_PUBLISH_MAX_ROWS : semanticImportPublishMaxRows
+  );
 }
 
 async function validatedBatch(

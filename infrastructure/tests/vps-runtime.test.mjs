@@ -233,7 +233,7 @@ test("VPS rank and connector runtimes run multiple bounded processes", async () 
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_CONCURRENCY=1/u);
   assert.match(connectorBlock, /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000/u);
   assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=4/u);
-  assert.match(connectorBlock, /FREQUENCY_COLLECTION_CONCURRENCY=1/u);
+  assert.match(connectorBlock, /FREQUENCY_COLLECTION_CONCURRENCY=4/u);
   assert.match(connectorBlock, /KEYWORD_RESEARCH_CONCURRENCY=1/u);
   assert.match(startSource, /rank-worker-2/u);
   assert.match(startSource, /connector-worker-2/u);

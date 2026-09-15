@@ -83,7 +83,15 @@ export class KeywordResearchService {
       capability,
       input.actorId,
       expectedProvider,
-      input.billing?.credentialId
+      input.billing?.credentialId,
+      input.source === "XMLSTOCK_WORDSTAT"
+        ? {
+            xmlStock: {
+              product: "WORDSTAT",
+              requestCount: input.queries.length
+            }
+          }
+        : undefined
     );
     const providerUsage = input.source === "XMLSTOCK_WORDSTAT"
       ? xmlStockOperationUsage(

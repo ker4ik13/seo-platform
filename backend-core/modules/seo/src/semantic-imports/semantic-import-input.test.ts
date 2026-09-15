@@ -293,7 +293,32 @@ test("rejects invalid imported keyword attributes", () => {
     { isFavorite: "true" },
     { isTracked: "true" },
     { note: "x".repeat(1_000_001) },
-    { intent: "UNKNOWN" }
+    { intent: "UNKNOWN" },
+    { positions: [{ searchEngine: "YANDEX", found: true, position: 101 }] },
+    {
+      positions: [{
+        searchEngine: "YANDEX",
+        found: true,
+        position: 1,
+        serpResults: [{
+          position: 1,
+          rankingUrl: "https://example.com",
+          title: "x".repeat(2_049)
+        }]
+      }]
+    },
+    {
+      positions: [{
+        searchEngine: "GOOGLE",
+        found: true,
+        position: 1,
+        serpResults: [{
+          position: 1,
+          rankingUrl: "https://example.com",
+          snippet: "x".repeat(8_193)
+        }]
+      }]
+    }
   ]) {
     assert.throws(
       () =>

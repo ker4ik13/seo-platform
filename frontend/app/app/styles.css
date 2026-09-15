@@ -5592,7 +5592,7 @@ svg { display: block; }
 }
 .semantic-core > .semantic-table-skeleton,
 .semantic-core > .semantic-table-empty { grid-column: 2 !important; grid-row: 4; min-height: 0; }
-.semantic-core > .semantic-table-alert { align-self: start; grid-column: 2 !important; grid-row: 4; margin: 8px; position: relative; z-index: 4; }
+.semantic-core > .semantic-table-alert { align-self: start; grid-column: 2 !important; grid-row: 4; margin: 8px; position: relative; z-index: 30; }
 .semantic-load-sentinel { height: 1px; width: 100%; }
 .semantic-virtual-spacer td { border: 0 !important; padding: 0 !important; }
 .semantic-virtual-spacer:hover td { background: transparent !important; }
@@ -9871,6 +9871,21 @@ svg { display: block; }
   padding: 0;
 }
 
+.semantic-provider-card:disabled {
+  cursor: not-allowed;
+  opacity: .72;
+}
+
+.semantic-provider-card:disabled:hover {
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
+
+.semantic-provider-card.insufficient-balance .semantic-provider-card-copy b {
+  background: #fff4e5;
+  color: #9a5d00;
+}
+
 .semantic-provider-field {
   display: grid;
   gap: 8px;
@@ -14147,25 +14162,25 @@ svg { display: block; }
 
 /* Shared modal rhythm and edge-to-edge data surfaces. */
 @media (min-width: 681px) {
-  .semantic-modal { border-radius: 18px; }
-  .semantic-modal-header { min-height: 70px; padding: 15px 22px 14px; }
-  .semantic-modal-header h2 { font-size: 20px; line-height: 1.2; }
-  .semantic-modal-header p { font-size: 12px; line-height: 1.45; margin-top: 4px; }
-  .semantic-modal-close { font-size: 25px; height: 36px; width: 36px; }
-  .semantic-modal-body { padding: 20px 22px; }
-  .semantic-modal-footer { padding: 13px 22px; }
+  .semantic-modal { border-radius: 16px; }
+  .semantic-modal-header { min-height: 60px; padding: 12px 16px 11px; }
+  .semantic-modal-header h2 { font-size: 18px; line-height: 1.2; }
+  .semantic-modal-header p { font-size: 11px; line-height: 1.4; margin-top: 3px; }
+  .semantic-modal-close { font-size: 24px; height: 34px; width: 34px; }
+  .semantic-modal-body { padding: 16px; }
+  .semantic-modal-footer { padding: 10px 16px; }
   .operation-result-modal .semantic-modal-header,
   .semantic-modal:has(.semantic-workflow-dialog) .semantic-modal-header {
-    min-height: 70px;
-    padding: 15px 22px 14px;
+    min-height: 60px;
+    padding: 12px 16px 11px;
   }
   .operation-result-modal .semantic-modal-header h2,
   .semantic-modal:has(.semantic-workflow-dialog) .semantic-modal-header h2 {
-    font-size: 20px;
+    font-size: 18px;
   }
   .operation-result-modal .semantic-modal-header p,
   .semantic-modal:has(.semantic-workflow-dialog) .semantic-modal-header p {
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 .semantic-modal-body-edge { padding: 0 !important; }
@@ -15895,17 +15910,11 @@ svg { display: block; }
 .semantic-bulk-merge fieldset > label > span { display: grid; gap: 2px; min-width: 0; }
 .semantic-bulk-merge fieldset small { color: var(--muted); font-size: 8px; }
 .semantic-bulk-merge fieldset strong { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.semantic-modal-body > .semantic-modal-actions,
-.semantic-modal-body > form > .semantic-modal-actions,
-.semantic-modal-body > div > .semantic-modal-actions,
+.semantic-bulk-editor-modal-body { padding: 12px 14px; }
 .semantic-bulk-editor > .semantic-editor-actions:last-child {
-  background: rgba(255, 255, 255, .97);
-  border-top: 1px solid var(--line);
-  bottom: 0;
-  margin-top: 10px;
-  padding: 10px 14px;
-  position: sticky;
-  z-index: 8;
+  border-top: 1px solid #dedaf8;
+  margin-top: 0;
+  padding-top: 12px;
 }
 
 /* Operations, History and table layout use one in-flow sidebar shell. */

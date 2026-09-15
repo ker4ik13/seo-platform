@@ -645,8 +645,8 @@ function kc4HistoricalSerpRows(
         position > MAX_KC4_SERP_RESULTS ||
         !rankingUrl
       ) return undefined;
-      const title = kc4SerpText(row.title, 8_000);
-      const snippet = kc4SerpText(row.snippet, 32_000);
+      const title = kc4SerpText(row.title, 2_048);
+      const snippet = kc4SerpText(row.snippet, 8_192);
       return {
         context,
         observedAt,
@@ -973,8 +973,8 @@ function kc4SerpRows(
       if (!searchEngine || !rankingUrl || position === undefined || position < 1 || position > MAX_KC4_SERP_RESULTS) {
         return undefined;
       }
-      const title = kc4SerpText(row.title, 8_000);
-      const snippet = kc4SerpText(row.snippet, 32_000);
+      const title = kc4SerpText(row.title, 2_048);
+      const snippet = kc4SerpText(row.snippet, 8_192);
       return {
         searchEngine,
         result: {

@@ -476,8 +476,14 @@ function positionValue(
     input.previousPosition === undefined
       ? undefined
       : positiveInteger(input.previousPosition, `${path}.previousPosition`);
-  if ((found && position === undefined) || (!found && position !== undefined)) {
+  if (
+    (found && (position === undefined || position > 100)) ||
+    (!found && position !== undefined)
+  ) {
     invalid(`${path}.position`);
+  }
+  if (previousPosition !== undefined && previousPosition > 100) {
+    invalid(`${path}.previousPosition`);
   }
   const rankingUrl =
     input.rankingUrl === undefined
@@ -517,10 +523,10 @@ function serpResultValues(
       rankingUrl: webUrl(item.rankingUrl, `${path}.${index}.rankingUrl`),
       ...(item.title === undefined
         ? {}
-        : { title: boundedString(item.title, `${path}.${index}.title`, 8_000) }),
+        : { title: boundedString(item.title, `${path}.${index}.title`, 2_048) }),
       ...(item.snippet === undefined
         ? {}
-        : { snippet: boundedString(item.snippet, `${path}.${index}.snippet`, 32_000) })
+        : { snippet: boundedString(item.snippet, `${path}.${index}.snippet`, 8_192) })
     };
   });
 }

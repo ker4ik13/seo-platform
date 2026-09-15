@@ -40,7 +40,7 @@ import { normalizePageUrl } from "../pages/page-url.js";
 import { ensureKeywordSystemGroupIds } from "../keyword-groups/semantic-system-groups.js";
 import { KeywordService } from "../keywords/keyword.service.js";
 
-const SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS = 5_000;
+const SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS = 30_000;
 const SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS = 300_000;
 const SEMANTIC_IMPORT_CUSTOM_VALUE_BATCH_SIZE = 2_000;
 const SEMANTIC_IMPORT_KEYWORD_UPDATE_BATCH_SIZE = 1_000;

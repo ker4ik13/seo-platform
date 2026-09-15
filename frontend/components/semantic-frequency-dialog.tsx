@@ -22,7 +22,11 @@ import {
   workspaceConnectorOptions
 } from "../lib/project-integration-settings";
 import { integrationProviderLabel } from "../lib/integration-presentation";
-import { frequencyProviderUsageEstimate } from "../lib/provider-usage-estimate";
+import {
+  frequencyProviderUsageEstimate,
+  frequencyRouteSource,
+  frequencySourceCanFund
+} from "../lib/provider-usage-estimate";
 import {
   defaultSemanticRegion,
   readLastSemanticRegion,
@@ -113,6 +117,10 @@ export function SemanticFrequencyDialog({
       : [],
     [routing]
   );
+  const lowBalanceFallbackEnabled = Boolean(
+    routing?.bindings.find(({ capability }) => capability === "WORDSTAT")
+      ?.fallbackPolicy.reasons?.includes("LOW_BALANCE")
+  );
   const connectedWordstatSources = useMemo<readonly ProjectConnectorCredentialOption[]>(
     () => (routing?.credentialOptions ?? []).filter((source) =>
       isProjectConnectorCredentialEligible(source, "WORDSTAT")
@@ -128,6 +136,13 @@ export function SemanticFrequencyDialog({
     [granularity, seasonalityAvailableRange]
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
+  const selectedSourceCanFund = selectedSource
+    ? frequencySourceCanFund(
+        selectedSource,
+        scopeCount ?? selections.length,
+        orderedTypes.length
+      )
+    : false;
   const providerUsage = frequencyProviderUsageEstimate(
     selectedSource,
     scopeCount ?? selections.length,
@@ -175,8 +190,18 @@ export function SemanticFrequencyDialog({
       .then((result) => {
         if (controller.signal.aborted) return;
         const options = workspaceConnectorOptions(result, "WORDSTAT");
-        const selectedCredentialId =
-          (initialConfiguration && options.find(option => option.provider === initialConfiguration.provider && (!initialConfiguration.credentialMode || option.mode === initialConfiguration.credentialMode)))?.id ?? options[0]?.id ?? "";
+        const fallbackEnabled = Boolean(
+          result.bindings.find(({ capability }) => capability === "WORDSTAT")
+            ?.fallbackPolicy.reasons?.includes("LOW_BALANCE")
+        );
+        const selectedCredentialId = frequencyRouteSource(
+          options,
+          initialSelections.length,
+          seasonalityMode
+            ? 1
+            : initialConfiguration?.types.length ?? 3,
+          fallbackEnabled
+        )?.id ?? "";
         setRouting(result);
         setCredentialId(selectedCredentialId);
         if (seasonalityMode) {
@@ -190,7 +215,27 @@ export function SemanticFrequencyDialog({
         if (!controller.signal.aborted) setLoadingSources(false);
       });
     return () => controller.abort();
-  }, [initialConfiguration, seasonalityMode, workspaceId]);
+  }, [initialConfiguration, initialSelections.length, seasonalityMode, workspaceId]);
+
+  useEffect(() => {
+    const source = frequencyRouteSource(
+      sources,
+      scopeCount ?? selections.length,
+      orderedTypes.length,
+      lowBalanceFallbackEnabled
+    );
+    if (!source) return;
+    setCredentialId((current) => {
+      const selected = sources.find(({ id }) => id === current);
+      return selected && frequencySourceCanFund(
+        selected,
+        scopeCount ?? selections.length,
+        orderedTypes.length
+      )
+        ? current
+        : source.id;
+    });
+  }, [lowBalanceFallbackEnabled, orderedTypes.length, scopeCount, selections.length, sources]);
 
   function toggleType(type: SemanticFrequencyType): void {
     setTypes((current) => {
@@ -270,7 +315,7 @@ export function SemanticFrequencyDialog({
           </dl>
           <div className="semantic-modal-actions">
             <button className="secondary-button" disabled={running} onClick={onClose} type="button"><UiText text="Отмена" /></button>
-            <button className="primary-button" disabled={loadingSources || resolvingScope || running || !selectedSource || selections.length === 0 || orderedTypes.length === 0 || !seasonalityRangeReady} form={formId} type="submit">
+            <button className="primary-button" disabled={loadingSources || resolvingScope || running || !selectedSource || !selectedSourceCanFund || selections.length === 0 || orderedTypes.length === 0 || !seasonalityRangeReady} form={formId} type="submit">
               {resolvingScope ? <UiText text="Загружаем запросы…" /> : running ? <UiText text="Запускаем…" /> : <UiText text="Запустить сбор ({0})" values={[String(selections.length)]} />}
             </button>
           </div>
@@ -294,10 +339,17 @@ export function SemanticFrequencyDialog({
               <div className="semantic-dialog-loading" role="status"><UiText text="Загружаем подключения…" /></div>
             ) : sources.length ? (
               <div className="semantic-provider-list" role="radiogroup" aria-label={uiText("Источник Wordstat")}>
-                {sources.map((source) => (
-                  <button
+                {sources.map((source) => {
+                  const canFund = frequencySourceCanFund(
+                    source,
+                    scopeCount ?? selections.length,
+                    orderedTypes.length
+                  );
+                  return (
+                    <button
                     aria-checked={source.id === credentialId}
-                    className={`semantic-provider-card ${source.id === credentialId ? "selected" : ""}`}
+                    className={`semantic-provider-card ${source.id === credentialId ? "selected" : ""} ${canFund ? "" : "insufficient-balance"}`}
+                    disabled={!canFund}
                     key={source.id}
                     onClick={() => {
                       setCredentialId(source.id);
@@ -312,17 +364,24 @@ export function SemanticFrequencyDialog({
                     <span className="semantic-provider-card-copy">
                       <strong>{<UiText text={integrationProviderLabel(source.provider) ?? ""} />}</strong>
                       <small>{source.label} · Wordstat API</small>
-                      <b><UiText text="Подключено" /></b>
+                      <b><UiText text={canFund ? "Подключено" : "Недостаточно баланса для запуска"} /></b>
                     </span>
                     <i aria-hidden="true" className="semantic-provider-radio" />
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="inline-alert warning">
                 <span>{connectedWordstatSources.length > 0
                   ? <UiText text="Подключение Wordstat доступно, но для операции не выбран маршрут рабочей области." />
                   : <UiText text="Нет проверенного подключения с функцией Wordstat." />}</span>{" "}
+                <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+              </div>
+            )}
+            {!loadingSources && selectedSource && !selectedSourceCanFund && (
+              <div className="inline-alert warning">
+                <span><UiText text="Ни один настроенный маршрут не покрывает стоимость всего запуска." /></span>{" "}
                 <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
               </div>
             )}

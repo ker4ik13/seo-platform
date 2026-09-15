@@ -17,14 +17,16 @@ import {
   type InternalUpsertWorkspaceConnectorBindingInput,
   type ProjectConnectorBindingAvailability,
   type ProjectConnectorCredentialOption,
+  type XmlStockOperationProduct,
   type XmlStockPricingSummary,
   type WorkspaceConnectorBinding,
   type WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
-import { Prisma, type CredentialStatus } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeIntegrationCredentialCapabilities } from "./integration-credential-capabilities.js";
 import { safeCredentialQuota } from "./integration-credential.service.js";
+import { xmlStockOperationUsage } from "./xmlstock-pricing.js";
 import { replaceActiveProjectConnectorRoutes } from "./project-connector-route-lifecycle.js";
 
 const CAPABILITIES = new Set<string>(integrationCapabilities);
@@ -81,6 +83,13 @@ export interface ResolvedConnectorRoute {
   readonly position: number;
   readonly attempts: readonly ConnectorOperationAttemptSummary[];
   readonly xmlStockPricing?: XmlStockPricingSummary;
+}
+
+export interface ConnectorRouteRequirement {
+  readonly xmlStock?: {
+    readonly product: XmlStockOperationProduct;
+    readonly requestCount: number;
+  };
 }
 
 @Injectable()
@@ -193,7 +202,8 @@ export class WorkspaceConnectorRoutingService {
     capability: IntegrationCapability,
     actorId: string,
     requestedProvider?: IntegrationProvider,
-    requestedCredentialId?: string
+    requestedCredentialId?: string,
+    requirement?: ConnectorRouteRequirement
   ): Promise<ResolvedConnectorRoute> {
     const project = await this.ensureEffectiveProjectBinding(
       workspaceId,
@@ -220,7 +230,11 @@ export class WorkspaceConnectorRoutingService {
       : allCandidates.slice(requestedIndex);
     const attempts: ConnectorOperationAttemptSummary[] = [];
     for (const [index, candidate] of candidates.entries()) {
-      const availability = routeAvailability(capability, candidate.route.credential);
+      const availability = routeAvailability(
+        capability,
+        candidate.route.credential,
+        requirement
+      );
       if (availability === "READY") {
         attempts.push(attempt(index + 1, candidate, "SELECTED"));
         const quota = safeCredentialQuota(
@@ -243,7 +257,10 @@ export class WorkspaceConnectorRoutingService {
             : {})
         };
       }
-      const reason = fallbackReason(candidate.route.credential.status);
+      const reason = fallbackReason(
+        candidate.route.credential,
+        requirement
+      );
       attempts.push(attempt(index + 1, candidate, "FALLBACK", reason));
       if (!candidate.allowedReasons.includes(reason)) break;
     }
@@ -473,7 +490,8 @@ function credentialOption(credential: CredentialRecord): ProjectConnectorCredent
 
 function routeAvailability(
   capabilityValue: IntegrationCapability,
-  credential: CredentialRecord
+  credential: CredentialRecord,
+  requirement?: ConnectorRouteRequirement
 ): ProjectConnectorBindingAvailability {
   if (credential.deletedAt) return "CREDENTIAL_UNAVAILABLE";
   if (credential.status === "PENDING_VERIFICATION") return "CREDENTIAL_PENDING";
@@ -483,12 +501,15 @@ function routeAvailability(
   ) {
     return "CREDENTIAL_UNAVAILABLE";
   }
-  return safeIntegrationCredentialCapabilities(
+  if (!safeIntegrationCredentialCapabilities(
     provider(credential.provider),
     credential.capabilities
-  ).includes(capabilityValue)
-    ? "READY"
-    : "CAPABILITY_MISMATCH";
+  ).includes(capabilityValue)) {
+    return "CAPABILITY_MISMATCH";
+  }
+  return xmlStockBalanceInsufficient(credential, requirement)
+    ? "CREDENTIAL_UNAVAILABLE"
+    : "READY";
 }
 
 async function lockedCredentials(
@@ -529,11 +550,58 @@ function fallbackReasons(value: Prisma.JsonValue): readonly ConnectorFallbackRea
   return value as unknown as ConnectorFallbackReason[];
 }
 
-function fallbackReason(status: CredentialStatus): ConnectorFallbackReason {
-  if (status === "LOW_BALANCE") return "LOW_BALANCE";
-  if (status === "RATE_LIMITED") return "RATE_LIMITED";
-  if (status === "DEGRADED") return "RETRYABLE_PROVIDER_ERROR";
+function fallbackReason(
+  credential: CredentialRecord,
+  requirement?: ConnectorRouteRequirement
+): ConnectorFallbackReason {
+  if (
+    credential.status === "LOW_BALANCE" ||
+    xmlStockBalanceInsufficient(credential, requirement)
+  ) return "LOW_BALANCE";
+  if (credential.status === "RATE_LIMITED") return "RATE_LIMITED";
+  if (credential.status === "DEGRADED") return "RETRYABLE_PROVIDER_ERROR";
   return "CREDENTIAL_UNAVAILABLE";
+}
+
+function xmlStockBalanceInsufficient(
+  credential: CredentialRecord,
+  requirement?: ConnectorRouteRequirement
+): boolean {
+  if (
+    credential.provider !== "XMLSTOCK" ||
+    credential.mode !== "BYOK_API_KEY" ||
+    requirement?.xmlStock === undefined
+  ) return false;
+  const requested = requirement.xmlStock;
+  if (!requested || !Number.isSafeInteger(requested.requestCount) || requested.requestCount < 1) {
+    return false;
+  }
+  const quota = safeCredentialQuota(
+    "XMLSTOCK",
+    credential.providerMeta,
+    credential.lastSuccessAt
+  );
+  if (quota.status !== "AVAILABLE" || !quota.balance || !quota.xmlStockPricing) {
+    return false;
+  }
+  const usage = xmlStockOperationUsage(
+    quota.xmlStockPricing,
+    requested.product,
+    requested.requestCount,
+    requested.requestCount
+  );
+  const balanceUnits = decimalRublesToProviderUnits(quota.balance.amount);
+  return Boolean(
+    usage &&
+    balanceUnits !== undefined &&
+    balanceUnits < BigInt(usage.estimatedCostMicro.maximum) * 100n
+  );
+}
+
+function decimalRublesToProviderUnits(value: string): bigint | undefined {
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/u.test(value)) return undefined;
+  const [whole = "0", fraction = ""] = value.split(".");
+  return BigInt(whole) * 100_000_000n + BigInt(fraction.padEnd(8, "0"));
 }
 
 function attempt(

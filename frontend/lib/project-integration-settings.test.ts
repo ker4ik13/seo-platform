@@ -4,6 +4,7 @@ import type {
   ProjectConnectorBinding,
   ProjectConnectorCredentialOption,
   ProjectConnectorSettings,
+  WorkspaceConnectorBinding,
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import {
@@ -22,7 +23,8 @@ import {
   reconcileProjectConnectorCreate,
   sameProjectConnectorBindingRevision,
   stableProjectConnectorCreateCommand,
-  workspaceConnectorOptions
+  workspaceConnectorOptions,
+  workspaceRouteCredentialIdsAfterSelection
 } from "./project-integration-settings.ts";
 
 const activeCredential: ProjectConnectorCredentialOption = {
@@ -270,6 +272,51 @@ test("dirty and submission rules allow disabling an unavailable current route", 
       RANK_TRACKING_CAPABILITY
     ),
     true
+  );
+});
+
+test("selecting a replacement drops persisted unavailable routes before autosave", () => {
+  const readyWorkspaceBinding = {
+    id: "00000000-0000-7000-8000-000000000091",
+    workspaceId: activeCredential.workspaceId,
+    capability: RANK_TRACKING_CAPABILITY,
+    enabled: true,
+    routes: [{
+      id: "00000000-0000-7000-8000-000000000092",
+      bindingId: "00000000-0000-7000-8000-000000000091",
+      workspaceId: activeCredential.workspaceId,
+      position: 0,
+      credentialId: "00000000-0000-7000-8000-000000000093",
+      provider: "XMLSTOCK",
+      credentialMode: "BYOK_API_KEY",
+      availability: "READY",
+      createdAt: "2026-09-15T00:00:00.000Z",
+      updatedAt: "2026-09-15T00:00:00.000Z"
+    }],
+    fallbackPolicy: { mode: "NONE" },
+    version: 1,
+    createdBy: binding.createdBy,
+    updatedBy: binding.updatedBy,
+    createdAt: "2026-09-15T00:00:00.000Z",
+    updatedAt: "2026-09-15T00:00:00.000Z"
+  } satisfies WorkspaceConnectorBinding;
+  const unavailableCredentialId = readyWorkspaceBinding.routes[0]!.credentialId;
+  const replacementCredentialId = "00000000-0000-7000-8000-000000000099";
+  const unsavedReadyCredentialId = activeCredential.id;
+
+  assert.deepEqual(
+    workspaceRouteCredentialIdsAfterSelection(
+      [unavailableCredentialId, unsavedReadyCredentialId],
+      {
+        ...readyWorkspaceBinding,
+        routes: readyWorkspaceBinding.routes.map((route) => ({
+          ...route,
+          availability: "CREDENTIAL_UNAVAILABLE" as const
+        }))
+      },
+      replacementCredentialId
+    ),
+    [unsavedReadyCredentialId, replacementCredentialId]
   );
 });
 

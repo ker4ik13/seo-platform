@@ -9,6 +9,27 @@ export interface ProviderUsageEstimate {
   readonly available: string;
 }
 
+export function frequencyRouteSource(
+  sources: readonly ProjectConnectorCredentialOption[],
+  keywordCount: number,
+  typeCount: number,
+  allowLowBalanceFallback: boolean
+): ProjectConnectorCredentialOption | undefined {
+  const primary = sources[0];
+  if (!primary || !allowLowBalanceFallback) return primary;
+  return sources.find((source) =>
+    frequencySourceCanFund(source, keywordCount, typeCount)
+  ) ?? primary;
+}
+
+export function frequencySourceCanFund(
+  source: ProjectConnectorCredentialOption,
+  keywordCount: number,
+  typeCount: number
+): boolean {
+  return xmlStockFrequencyBalanceSufficient(source, keywordCount, typeCount);
+}
+
 export function frequencyProviderUsageEstimate(
   source: ProjectConnectorCredentialOption | undefined,
   keywordCount: number,
@@ -129,6 +150,40 @@ function xmlStockUsageLabel(
     ? formatMoney(String(minimumCost), "RUB", uiLocale)
     : `${formatMoney(String(minimumCost), "RUB", uiLocale)}–${formatMoney(String(maximumCost), "RUB", uiLocale)}`;
   return `${xmlStockTariffLabel(pricing.tariffCode)} · ${price} ₽ за 1000 · ${requestLabel} · ${cost}`;
+}
+
+function xmlStockFrequencyBalanceSufficient(
+  source: ProjectConnectorCredentialOption,
+  keywordCount: number,
+  typeCount: number
+): boolean {
+  if (source.provider !== "XMLSTOCK" || source.mode !== "BYOK_API_KEY") {
+    return true;
+  }
+  const quota = source.quota;
+  if (
+    quota?.status !== "AVAILABLE" ||
+    !quota.balance ||
+    !quota.xmlStockPricing ||
+    !Number.isSafeInteger(keywordCount) ||
+    keywordCount < 1 ||
+    !Number.isSafeInteger(typeCount) ||
+    typeCount < 1
+  ) return true;
+  const balance = decimalUnits(quota.balance.amount);
+  const pricePerThousand = decimalUnits(
+    quota.xmlStockPricing.pricesPerThousand.WORDSTAT
+  );
+  return balance === undefined || pricePerThousand === undefined
+    ? true
+    : balance * 1_000n >=
+        pricePerThousand * BigInt(keywordCount) * BigInt(typeCount);
+}
+
+function decimalUnits(value: string): bigint | undefined {
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/u.test(value)) return undefined;
+  const [whole = "0", fraction = ""] = value.split(".");
+  return BigInt(whole) * 100_000_000n + BigInt(fraction.padEnd(8, "0"));
 }
 
 function xmlStockTariffLabel(

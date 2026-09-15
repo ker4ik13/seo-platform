@@ -4,13 +4,35 @@ import test from "node:test";
 import {
   canonicalPublishRow,
   mergeCanonicalPublishRows,
+  semanticImportPublishBatchSize,
+  semanticImportPublishErrorIsRetryable,
+  semanticImportPublishFailureCode,
   semanticImportPublishRetryExhausted
 } from "./semantic-import-publisher.service.js";
+import { SeoDataClientError } from "../seo-data/seo-data.client.js";
 
-test("stops scheduling a semantic publish after five claimed attempts", () => {
-  assert.equal(semanticImportPublishRetryExhausted(4), false);
-  assert.equal(semanticImportPublishRetryExhausted(5), true);
-  assert.equal(semanticImportPublishRetryExhausted(6), true);
+test("keeps a bounded retry window for production publish handovers", () => {
+  assert.equal(semanticImportPublishRetryExhausted(9), false);
+  assert.equal(semanticImportPublishRetryExhausted(10), true);
+  assert.equal(semanticImportPublishRetryExhausted(11), true);
+});
+
+test("retries a temporary import command mismatch during a rolling deployment", () => {
+  const invalid = new SeoDataClientError("INVALID_COMMAND", false);
+  assert.equal(semanticImportPublishErrorIsRetryable(invalid), true);
+  assert.equal(semanticImportPublishFailureCode(invalid), "SEO_DATA_COMMAND_INVALID");
+  assert.equal(
+    semanticImportPublishErrorIsRetryable(
+      new SeoDataClientError("NOT_FOUND", false)
+    ),
+    false
+  );
+});
+
+test("publishes rich KC4 rows in short transactions", () => {
+  assert.equal(semanticImportPublishBatchSize(5_000, "KC4", 1), 1_000);
+  assert.equal(semanticImportPublishBatchSize(5_000, "CSV", 1), 5_000);
+  assert.equal(semanticImportPublishBatchSize(5_000, "KC4", 25), 400);
 });
 
 test("canonicalizes PostgreSQL JSON field order before hashing a publish chunk", () => {

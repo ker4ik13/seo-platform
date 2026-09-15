@@ -2887,7 +2887,10 @@ function isSeoDataBoundedRead(
   if (method === "GET") return true;
   return (
     method === "POST" &&
-    /\/keywords\/(?:list|search|operation-scope)\/?$/u.test(pathname)
+    (
+      /\/keywords\/(?:list|search|operation-scope)\/?$/u.test(pathname) ||
+      /\/keyword-ranks\/comparison\/?$/u.test(pathname)
+    )
   );
 }
 
@@ -3479,7 +3482,7 @@ export function semanticKeywordInsights(
         !validDate(item.observedAt) ||
         !Array.isArray(item.results) ||
         item.results.length < 1 ||
-        item.results.length > 10
+        item.results.length > 100
       ) throw invalidResponse();
       let previousPosition = 0;
       const results = item.results.map((value) => {

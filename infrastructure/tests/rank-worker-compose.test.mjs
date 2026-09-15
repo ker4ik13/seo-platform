@@ -37,7 +37,7 @@ test("rank work is a scoped child role of backend-execution", async () => {
   );
   assert.match(
     execution,
-    /FREQUENCY_COLLECTION_CONCURRENCY: \$\{FREQUENCY_COLLECTION_CONCURRENCY:-1\}/u
+    /FREQUENCY_COLLECTION_CONCURRENCY: \$\{FREQUENCY_COLLECTION_CONCURRENCY:-4\}/u
   );
   assert.match(
     execution,

@@ -999,7 +999,7 @@ export function WordstatExpansionDialog({
                 <span>{connectedWordstatSources.length > 0
                   ? <UiText text="Подключение Wordstat доступно, но для парсинга не выбран маршрут рабочей области." />
                   : <UiText text="Нет доступного подключения XMLStock или Arsenkin для парсинга Wordstat." />}</span>{" "}
-                <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+                <a href="/app/settings/integrations#routing-keyword-research"><UiText text="Настроить маршрут парсинга Wordstat" /></a>
               </div>
             )}
             <div className="inline-alert info compact keyword-research-wordstat-preview-note">

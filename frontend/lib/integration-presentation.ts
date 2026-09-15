@@ -30,7 +30,7 @@ export function integrationCapabilityLabel(
     WORDSTAT: "Wordstat",
     CLUSTERING: "Кластеризация",
     INDEXATION: "Индексация",
-    KEYWORD_RESEARCH: "Ключевые слова",
+    KEYWORD_RESEARCH: "Парсинг Wordstat",
     COMPETITOR_RESEARCH: "Конкуренты"
   };
   return labels[capability];
