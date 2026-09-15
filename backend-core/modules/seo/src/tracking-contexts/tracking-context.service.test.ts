@@ -44,6 +44,7 @@ const configuration: TrackingContextConfigurationInput = {
 test("keeps imported rank contexts out of runnable settings", async () => {
   let observedWhere: unknown;
   const service = new TrackingContextService({
+    $queryRaw: async () => [],
     trackingContext: {
       findMany: async ({ where }: { where: unknown }) => {
         observedWhere = where;
@@ -63,6 +64,31 @@ test("keeps imported rank contexts out of runnable settings", async () => {
     status: "ACTIVE",
     rankManifests: { none: { provider: { in: ["KEY_COLLECTOR", "MANUAL_IMPORT"] } } }
   });
+});
+
+test("reads a legacy whole-project profile without descendant expansion errors", async () => {
+  const service = new TrackingContextService({
+    $queryRaw: async () => [{ contextId, assignmentCount: 42n }],
+    trackingContext: {
+      findMany: async () => [{
+        ...aggregate(),
+        isReusable: true,
+        launchProfile: {
+          searchSource: "LIVE",
+          includeUntracked: false,
+          scope: { mode: "ALL", groupIds: [] }
+        }
+      }]
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.list(workspaceId, projectId);
+
+  assert.deepEqual(
+    result.contexts[0]?.launchProfile?.scope.descendantGroupIds,
+    []
+  );
+  assert.equal(result.contexts[0]?.assignedKeywordCount, 42);
 });
 
 test("marks a manual execution context as non-reusable", async () => {
@@ -557,15 +583,17 @@ function keywordIdAt(value: number): string {
     .padStart(12, "0")}`;
 }
 
-test("materializes current tracked keywords from selected folders and descendants", async () => {
+test("materializes descendants independently for each selected folder", async () => {
   const parentGroupId = "01900000-0000-7000-8000-000000000101";
   const childGroupId = "01900000-0000-7000-8000-000000000102";
   const unrelatedGroupId = "01900000-0000-7000-8000-000000000103";
   const removedGroupId = "01900000-0000-7000-8000-000000000104";
+  const unrelatedChildGroupId = "01900000-0000-7000-8000-000000000105";
   const firstKeywordId = keywordIdAt(201);
   const secondKeywordId = keywordIdAt(202);
   let keywordWhere: unknown;
   let replacement: InternalReplaceTrackingContextKeywordsInput | undefined;
+  let scopeSelection: Record<string, unknown> = {};
   const transaction = {
     trackingContext: {
       findFirst: async () => ({
@@ -575,7 +603,8 @@ test("materializes current tracked keywords from selected folders and descendant
           includeUntracked: false,
           scope: {
             mode: "GROUPS",
-            groupIds: [parentGroupId, removedGroupId]
+            groupIds: [parentGroupId, unrelatedGroupId, removedGroupId],
+            ...scopeSelection
           }
         }
       })
@@ -584,7 +613,8 @@ test("materializes current tracked keywords from selected folders and descendant
       findMany: async () => [
         { id: parentGroupId, parentId: null },
         { id: childGroupId, parentId: parentGroupId },
-        { id: unrelatedGroupId, parentId: null }
+        { id: unrelatedGroupId, parentId: null },
+        { id: unrelatedChildGroupId, parentId: unrelatedGroupId }
       ]
     },
     keyword: {
@@ -646,7 +676,56 @@ test("materializes current tracked keywords from selected folders and descendant
     (keywordWhere as {
       memberships?: { some?: { groupId?: { in?: string[] } } };
     }).memberships?.some?.groupId?.in?.sort(),
-    [childGroupId, parentGroupId].sort()
+    [
+      childGroupId,
+      parentGroupId,
+      unrelatedChildGroupId,
+      unrelatedGroupId
+    ].sort()
+  );
+
+  scopeSelection = { descendantGroupIds: [parentGroupId] };
+  await service.materialize({
+    workspaceId,
+    projectId,
+    contextId,
+    actorId,
+    entitlement: {
+      planCode: "PRO",
+      planVersion: 2,
+      storedKeywords: 0,
+      keywordsPerProject: 0,
+      foldersPerProject: 0,
+      trackedContextPairs: 0
+    }
+  });
+  assert.deepEqual(
+    (keywordWhere as {
+      memberships?: { some?: { groupId?: { in?: string[] } } };
+    }).memberships?.some?.groupId?.in?.sort(),
+    [childGroupId, parentGroupId, unrelatedGroupId].sort()
+  );
+
+  scopeSelection = { includeDescendants: false };
+  await service.materialize({
+    workspaceId,
+    projectId,
+    contextId,
+    actorId,
+    entitlement: {
+      planCode: "PRO",
+      planVersion: 2,
+      storedKeywords: 0,
+      keywordsPerProject: 0,
+      foldersPerProject: 0,
+      trackedContextPairs: 0
+    }
+  });
+  assert.deepEqual(
+    (keywordWhere as {
+      memberships?: { some?: { groupId?: { in?: string[] } } };
+    }).memberships?.some?.groupId?.in?.sort(),
+    [parentGroupId, unrelatedGroupId].sort()
   );
 });
 

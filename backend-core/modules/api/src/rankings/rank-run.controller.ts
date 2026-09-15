@@ -132,6 +132,7 @@ export class RankRunController {
     return apiResponse(request, {
       ...safe,
       job,
+      ...(scope.providerUsage ? { providerUsage: scope.providerUsage } : {}),
       rows: safe.rows.map((row, index) => {
         const item = scope.items[index];
         if (!item || item.sequence !== row.sequence) {

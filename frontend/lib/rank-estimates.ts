@@ -5,6 +5,7 @@ import {
   rankExecutionPolicyShape,
   rankPolicyTaskCount,
   rankEstimateBlockerCodes,
+  parseXmlStockOperationUsageSummary,
   type CreateRankEstimateInput,
   type RankEstimate,
   type RankEstimateBlockerCode,
@@ -339,6 +340,14 @@ export function parseRankEstimate(
     typeof estimate.executionAllowed === "boolean"
       ? estimate.executionAllowed
       : undefined;
+  let providerUsage: RankEstimate["providerUsage"];
+  try {
+    providerUsage = estimate.providerUsage === undefined
+      ? undefined
+      : parseXmlStockOperationUsageSummary(estimate.providerUsage);
+  } catch {
+    throw invalidEstimate();
+  }
   const calculatedAt = isoDateString(estimate.calculatedAt);
   const expiresAt = isoDateString(estimate.expiresAt);
   const billingCurrency =
@@ -379,7 +388,8 @@ export function parseRankEstimate(
     (status === "READY" &&
       (!executionAllowed || blockers.length !== 0)) ||
     (status === "BLOCKED" &&
-      (executionAllowed || blockers.length === 0))
+      (executionAllowed || blockers.length === 0)) ||
+    (providerUsage !== undefined && provider !== "XMLSTOCK")
   ) {
     throw invalidEstimate();
   }
@@ -399,6 +409,7 @@ export function parseRankEstimate(
     workload,
     providerLimits: { status: "NOT_AVAILABLE" },
     expectedDuration: { status: "NOT_AVAILABLE" },
+    ...(providerUsage ? { providerUsage } : {}),
     platformChargeMicro,
     billingCurrency,
     quota,

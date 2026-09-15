@@ -2,7 +2,9 @@
 
 import {
   useMemo,
+  useRef,
   useState,
+  type CSSProperties,
   type HTMLAttributes,
   type ReactNode
 } from "react";
@@ -19,6 +21,8 @@ import {
   semanticQueryIndicatorsFor
 } from "./semantic-view-types";
 import { Icon } from "./icon";
+import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticSideDrawer } from "./semantic-side-drawer";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
@@ -50,7 +54,11 @@ export function SemanticLayoutDrawer({
   activeView: SemanticSavedView | undefined;
   config: SemanticViewConfig;
   customColumns: readonly SemanticCustomColumn[];
-  rankColumns?: readonly Readonly<{ key: SemanticViewColumn; label: string }>[];
+  rankColumns?: readonly Readonly<{
+    key: SemanticViewColumn;
+    label: string;
+    searchEngine?: "YANDEX" | "GOOGLE";
+  }>[];
   rankError?: string | undefined;
   onRefreshRanks?: () => void;
   onApply: () => void;
@@ -99,16 +107,23 @@ export function SemanticLayoutDrawer({
   const queryIndicators = semanticQueryIndicatorsFor(config);
 
   return (
-    <aside
-      aria-label={uiText("Колонки и представления")}
+    <SemanticSideDrawer
+      ariaLabel="Колонки и представления"
       className="semantic-layout-drawer"
-      data-presence-cursor-anchor="true"
-      data-presence-key="semantic-layout-drawer"
+      closeLabel="Закрыть настройки таблицы"
+      eyebrow="Таблица"
+      footer={(
+        <>
+          <button className="secondary-button" disabled={saving} onClick={onReset} type="button"><UiText text="Сбросить" /></button>
+          <button className="primary-button" disabled={saving} onClick={onApply} type="button">
+            {saving ? <UiText text="Сохраняем…" /> : <UiText text="Применить" />}
+          </button>
+        </>
+      )}
+      onClose={onClose}
+      presenceKey="semantic-layout-drawer"
+      title="Колонки и представления"
     >
-      <header>
-        <div><span><UiText text="Таблица" /></span><h2><UiText text="Колонки и представления" /></h2></div>
-        <button aria-label={uiText("Закрыть настройки таблицы")} onClick={onClose} type="button">×</button>
-      </header>
       <div className="semantic-layout-tabs" role="tablist">
         {(["COLUMNS", "PRESENTATION"] as const).map((value) => (
           <button aria-selected={tab === value} key={value} onClick={() => setTab(value)} role="tab" type="button">
@@ -215,13 +230,7 @@ export function SemanticLayoutDrawer({
         </div>
       )}
 
-      <footer>
-        <button className="secondary-button" disabled={saving} onClick={onReset} type="button"><UiText text="Сбросить" /></button>
-        <button className="primary-button" disabled={saving} onClick={onApply} type="button">
-          {saving ? <UiText text="Сохраняем…" /> : <UiText text="Применить" />}
-        </button>
-      </footer>
-    </aside>
+    </SemanticSideDrawer>
   );
 }
 
@@ -237,7 +246,11 @@ function ColumnRow({
   ...dragProps
 }: Readonly<{
   checked: boolean;
-  column: Readonly<{ key: SemanticViewColumn; label: string }>;
+  column: Readonly<{
+    key: SemanticViewColumn;
+    label: string;
+    searchEngine?: "YANDEX" | "GOOGLE";
+  }>;
   disabled?: boolean;
   onToggle: () => void;
 }> & HTMLAttributes<HTMLLabelElement>) {
@@ -245,9 +258,61 @@ function ColumnRow({
     <label className="semantic-layout-column-row" {...dragProps}>
       <span aria-hidden="true" className="semantic-column-grip">⋮⋮</span>
       <input checked={checked} disabled={disabled || column.key === "query"} onChange={onToggle} type="checkbox" />
-      <span>{column.label}</span>
+      <ColumnVisualName column={column} />
       <Icon name={checked ? "eye" : "eyeOff"} />
     </label>
+  );
+}
+
+function ColumnVisualName({
+  column
+}: Readonly<{
+  column: Readonly<{
+    label: string;
+    searchEngine?: "YANDEX" | "GOOGLE";
+  }>;
+}>) {
+  const viewportRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [scrollDistance, setScrollDistance] = useState(0);
+  const visualLabel = column.searchEngine
+    ? column.label.replace(/^(?:Яндекс|Google)\s*·\s*/u, "")
+    : column.label;
+  const style = {
+    "--semantic-column-scroll-distance": `-${scrollDistance}px`
+  } as CSSProperties;
+  return (
+    <span
+      className="semantic-layout-column-name"
+      onMouseEnter={() => {
+        const viewport = viewportRef.current;
+        const text = textRef.current;
+        setScrollDistance(
+          viewport && text
+            ? Math.max(0, text.scrollWidth - viewport.clientWidth)
+            : 0
+        );
+      }}
+      title={column.label}
+    >
+      <span className="visually-hidden">{column.label}</span>
+      {column.searchEngine && (
+        <span aria-hidden="true" className="semantic-layout-column-engine">
+          <SearchEngineLogo engine={column.searchEngine} size="compact" />
+        </span>
+      )}
+      <span aria-hidden="true" className="semantic-layout-column-label-viewport" ref={viewportRef}>
+        <span
+          className={scrollDistance > 0
+            ? "semantic-layout-column-label-text is-overflowing"
+            : "semantic-layout-column-label-text"}
+          ref={textRef}
+          style={style}
+        >
+          {visualLabel}
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -255,24 +320,28 @@ function layoutTabLabel(tab: LayoutTab): string {
   return { COLUMNS: "Колонки", PRESENTATION: "Представление и плотность" }[tab];
 }
 
-const systemColumns: readonly Readonly<{ key: SemanticViewColumn; label: string }>[] = [
+const systemColumns: readonly Readonly<{
+  key: SemanticViewColumn;
+  label: string;
+  searchEngine?: "YANDEX" | "GOOGLE";
+}>[] = [
   { key: "query", label: "Запрос" },
-  { key: "frequency", label: "Частотность: базовая" },
-  { key: "frequencyExact", label: "Частотность: фразовая" },
-  { key: "frequencyFixed", label: "Частотность: точная" },
+  { key: "frequency", label: "Яндекс · Частотность · Базовая", searchEngine: "YANDEX" },
+  { key: "frequencyExact", label: "Яндекс · Частотность · Фразовая", searchEngine: "YANDEX" },
+  { key: "frequencyFixed", label: "Яндекс · Частотность · Точная", searchEngine: "YANDEX" },
   { key: "wordCount", label: "Количество слов" },
-  { key: "yandexPosition", label: "Позиция Яндекс" },
-  { key: "yandexRelevantUrl", label: "URL из съёма Яндекс" },
-  { key: "googlePosition", label: "Позиция Google" },
-  { key: "googleRelevantUrl", label: "URL из съёма Google" },
-  { key: "yandexAiPosition", label: "ИИ-позиция Яндекс" },
-  { key: "yandexAiRelevantUrl", label: "URL ИИ-выдачи Яндекс" },
-  { key: "googleAiPosition", label: "ИИ-позиция Google" },
-  { key: "googleAiRelevantUrl", label: "URL ИИ-выдачи Google" },
-  { key: "yandexCheckedAt", label: "Дата съёма Яндекс" },
-  { key: "googleCheckedAt", label: "Дата съёма Google" },
-  { key: "yandexAiCheckedAt", label: "Дата ИИ-съёма Яндекс" },
-  { key: "googleAiCheckedAt", label: "Дата ИИ-съёма Google" },
+  { key: "yandexPosition", label: "Яндекс · Позиция", searchEngine: "YANDEX" },
+  { key: "yandexRelevantUrl", label: "Яндекс · Найденный URL", searchEngine: "YANDEX" },
+  { key: "googlePosition", label: "Google · Позиция", searchEngine: "GOOGLE" },
+  { key: "googleRelevantUrl", label: "Google · Найденный URL", searchEngine: "GOOGLE" },
+  { key: "yandexAiPosition", label: "Яндекс · ИИ-позиция", searchEngine: "YANDEX" },
+  { key: "yandexAiRelevantUrl", label: "Яндекс · URL в ИИ", searchEngine: "YANDEX" },
+  { key: "googleAiPosition", label: "Google · ИИ-позиция", searchEngine: "GOOGLE" },
+  { key: "googleAiRelevantUrl", label: "Google · URL в ИИ", searchEngine: "GOOGLE" },
+  { key: "yandexCheckedAt", label: "Яндекс · Дата съёма", searchEngine: "YANDEX" },
+  { key: "googleCheckedAt", label: "Google · Дата съёма", searchEngine: "GOOGLE" },
+  { key: "yandexAiCheckedAt", label: "Яндекс · Дата ИИ-съёма", searchEngine: "YANDEX" },
+  { key: "googleAiCheckedAt", label: "Google · Дата ИИ-съёма", searchEngine: "GOOGLE" },
   { key: "visibility", label: "Видимость" },
   { key: "group", label: "Группа" },
   { key: "cluster", label: "Кластер" },

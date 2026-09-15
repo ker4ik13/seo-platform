@@ -69,9 +69,11 @@ export class SeoDataClient {
   public async normalizeKeywords(
     input: InternalNormalizeSemanticKeywordsInput
   ): Promise<InternalNormalizeSemanticKeywordsResult> {
-    const payload = await this.request(
+    const payload = await this.requestBounded(
       `/internal/v1/semantic-imports/${encodeURIComponent(input.importId)}/normalize`,
-      input
+      input,
+      SEMANTIC_NORMALIZE_RESPONSE_MAX_BYTES,
+      120_000
     );
     const result = normalizedKeywords(payload);
     if (
@@ -108,7 +110,8 @@ export class SeoDataClient {
   ): Promise<InternalSemanticImportChunkResult> {
     const payload = await this.request(
       `/internal/v1/semantic-imports/${encodeURIComponent(input.importId)}/chunks`,
-      input
+      input,
+      SEMANTIC_IMPORT_CHUNK_COMMAND_TIMEOUT_MS
     );
     const result = chunkResult(payload);
     if (!result || result.chunkIndex !== input.chunkIndex) {
@@ -540,9 +543,10 @@ export class SeoDataClient {
       readonly workspaceId: string;
       readonly projectId: string;
       readonly actorId: string;
-    }
+    },
+    timeoutMs = this.config.internalCommandTimeoutMs
   ): Promise<unknown> {
-    const response = await this.fetch(path, body);
+    const response = await this.fetch(path, body, timeoutMs);
     const payload = await response.json().catch(() => undefined);
     if (!response.ok) throw clientError(response.status, payload);
     if (
@@ -722,6 +726,8 @@ export class SeoDataClient {
 }
 
 const RANK_SCOPE_RESPONSE_MAX_BYTES = 64 * 1_024;
+const SEMANTIC_NORMALIZE_RESPONSE_MAX_BYTES = 32 * 1_024 * 1_024;
+export const SEMANTIC_IMPORT_CHUNK_COMMAND_TIMEOUT_MS = 330_000;
 const FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 const FREQUENCY_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
 const AI_ANSWER_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
@@ -1230,6 +1236,7 @@ function appendAdvancedKeywordQuery(url: URL, query: KeywordListQuery): void {
     "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
     "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
     "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
+    , "rankSortDimensionKey"
   ] as const) {
     const value = query[field];
     if (value !== undefined) url.searchParams.set(field, String(value));

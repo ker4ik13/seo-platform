@@ -7,8 +7,10 @@ import type {
 import type { PrismaService } from "../database/prisma.service.js";
 import type { QueueService } from "../queue/queue.service.js";
 import {
+  encodeSemanticImportPreviewCursor,
   safeMapping,
   safeValidation,
+  semanticImportPreviewCursor,
   SemanticImportService
 } from "./semantic-import.service.js";
 
@@ -53,6 +55,7 @@ test("keeps legacy import mappings resumable and reads new skip counters", () =>
 test("creates an idempotent import only from a READY project upload", async () => {
   const events: unknown[] = [];
   const enqueued: string[] = [];
+  let createdData: Readonly<Record<string, unknown>> | undefined;
   const semanticImport = importRecord();
   const prisma = {
     upload: {
@@ -69,7 +72,10 @@ test("creates an idempotent import only from a READY project upload", async () =
         job: { count: async () => 0 },
         semanticImport: {
           count: async () => 0,
-          create: async () => semanticImport
+          create: async ({ data }: { data: Readonly<Record<string, unknown>> }) => {
+            createdData = data;
+            return semanticImport;
+          }
         },
         outboxEvent: {
           create: async ({ data }: { data: unknown }) => {
@@ -90,6 +96,7 @@ test("creates an idempotent import only from a READY project upload", async () =
     {
       workspaceId: semanticImport.workspaceId,
       projectId: semanticImport.projectId,
+      projectDomain: "example.com",
       actorId: semanticImport.actorId,
       uploadId: semanticImport.uploadId,
       idempotencyKey: semanticImport.idempotencyKey,
@@ -97,6 +104,14 @@ test("creates an idempotent import only from a READY project upload", async () =
         planCode: "TRIAL",
         planVersion: 1,
         concurrentJobs: 1
+      },
+      semanticCapacity: {
+        planCode: "TRIAL",
+        planVersion: 1,
+        storedKeywords: 100_000,
+        keywordsPerProject: 50_000,
+        foldersPerProject: 5_000,
+        trackedContextPairs: 10_000
       },
       parse: {
         encoding: "AUTO",
@@ -110,6 +125,80 @@ test("creates an idempotent import only from a READY project upload", async () =
   assert.equal(result.status, "QUEUED");
   assert.deepEqual(enqueued, [semanticImport.id]);
   assert.equal(events.length, 1);
+  assert.equal(createdData?.billingPlanCode, "TRIAL");
+  assert.equal(createdData?.storedKeywordsLimit, 100_000n);
+  assert.equal(createdData?.foldersPerProjectLimit, 5_000n);
+});
+
+test("pages semantic import preview rows in fixed batches of 100", async () => {
+  const semanticImport = {
+    ...importRecord(),
+    status: "AWAITING_MAPPING" as const,
+    headers: ["Phrase", "Frequency"],
+    suggestedMapping: [
+      { index: 0, sourceName: "Phrase", suggestedTarget: "keyword.text", confidence: 0.99 },
+      { index: 1, sourceName: "Frequency", suggestedTarget: "frequency.base", confidence: 0.9 }
+    ],
+    totalRows: 101n
+  };
+  const batches = [
+    Array.from({ length: 101 }, (_, index) => ({
+      row_number: BigInt(index + 1),
+      raw_values: [`phrase ${index + 1}`, String(index + 1)]
+    })),
+    [{ row_number: 101n, raw_values: ["phrase 101", "101"] }]
+  ];
+  const prisma = {
+    semanticImport: { findFirst: async () => semanticImport },
+    $queryRaw: async () => batches.shift() ?? []
+  } as unknown as PrismaService;
+  const service = new SemanticImportService(
+    prisma,
+    {} as QueueService
+  );
+
+  const first = await service.previewRows(
+    semanticImport.id,
+    semanticImport.workspaceId,
+    semanticImport.projectId,
+    {}
+  );
+  assert.equal(first.rows.length, 100);
+  assert.equal(first.rows[0]?.rowNumber, "1");
+  assert.equal(first.page.hasNext, true);
+  assert.ok(first.page.nextCursor);
+
+  const second = await service.previewRows(
+    semanticImport.id,
+    semanticImport.workspaceId,
+    semanticImport.projectId,
+    { cursor: first.page.nextCursor }
+  );
+  assert.deepEqual(second.rows, [{
+    rowNumber: "101",
+    values: ["phrase 101", "101"]
+  }]);
+  assert.equal(second.page.hasNext, false);
+  assert.equal(second.page.totalRows, "101");
+});
+
+test("binds semantic import preview cursors to the requested sorting", () => {
+  const cursor = encodeSemanticImportPreviewCursor({
+    offset: 100,
+    sortColumn: 1,
+    sortDirection: "DESC"
+  });
+  assert.deepEqual(
+    semanticImportPreviewCursor(cursor, {
+      sortColumn: 1,
+      sortDirection: "DESC"
+    }),
+    { offset: 100, sortColumn: 1, sortDirection: "DESC" }
+  );
+  assert.throws(() => semanticImportPreviewCursor(cursor, {
+    sortColumn: 1,
+    sortDirection: "ASC"
+  }));
 });
 
 function importRecord(): SemanticImport {
@@ -118,6 +207,7 @@ function importRecord(): SemanticImport {
     id: "01900000-0000-7000-8000-000000000010",
     workspaceId: "01900000-0000-7000-8000-000000000001",
     projectId: "01900000-0000-7000-8000-000000000002",
+    projectDomain: "example.com",
     uploadId: "01900000-0000-7000-8000-000000000005",
     actorId: "01900000-0000-7000-8000-000000000003",
     status: "QUEUED",

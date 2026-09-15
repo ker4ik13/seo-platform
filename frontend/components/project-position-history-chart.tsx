@@ -161,7 +161,7 @@ export function ProjectPositionHistoryChart({
         </CustomSelect>
       </label>
       <div className="dashboard-position-controls">
-        <div aria-label={uiText("Период графика")} className="dashboard-chart-button-group" role="group">
+        <div aria-label={uiText("Выбор периода")} className="dashboard-chart-button-group" role="group">
           {projectPositionHistoryPeriods.map((value) => (
             <button
               aria-pressed={period === value}

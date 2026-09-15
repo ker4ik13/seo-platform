@@ -1,10 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NextRequest } from "next/server.js";
-import { proxyPlatformApi } from "./platform-api-proxy.ts";
+import {
+  browserApiUpstreamTimeoutMs,
+  proxyPlatformApi
+} from "./platform-api-proxy.ts";
 
 process.env.WEB_PUBLIC_URL = "https://app.example.test";
 process.env.PLATFORM_API_INTERNAL_URL = "http://backend-core:4000";
+
+test("gives every large semantic read one consistent upstream timeout", () => {
+  for (const suffix of [
+    [],
+    ["list"],
+    ["search"],
+    ["operation-scope"],
+    ["position-history"],
+    ["position-summary"]
+  ]) {
+    assert.equal(
+      browserApiUpstreamTimeoutMs([
+        "projects",
+        "project-id",
+        "keywords",
+        ...suffix
+      ]),
+      35_000
+    );
+  }
+  for (const resource of [
+    "tracking-contexts",
+    "keyword-groups",
+    "keyword-ranks",
+    "rank-workbench"
+  ]) {
+    assert.equal(
+      browserApiUpstreamTimeoutMs(["projects", "project-id", resource]),
+      35_000
+    );
+  }
+  assert.equal(
+    browserApiUpstreamTimeoutMs(["projects", "project-id", "semantic-saved-views"]),
+    10_000
+  );
+});
 
 test("proxies an assignment PUT through the safe same-origin BFF", async () => {
   const originalFetch = globalThis.fetch;

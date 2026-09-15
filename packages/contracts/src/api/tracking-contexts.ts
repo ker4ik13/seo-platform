@@ -34,6 +34,13 @@ export interface TrackingContextLaunchProfile {
   readonly scope: {
     readonly mode: TrackingContextScopeMode;
     readonly groupIds: readonly string[];
+    /** Selected roots whose current active descendants are also included. */
+    readonly descendantGroupIds?: readonly string[];
+    /**
+     * Legacy all-roots switch. New mutations use descendantGroupIds so each
+     * selected folder can make the choice independently.
+     */
+    readonly includeDescendants?: boolean;
   };
 }
 

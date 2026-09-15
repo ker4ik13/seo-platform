@@ -56,6 +56,7 @@ import {
   frequencyCollectionTitle
 } from "../lib/frequency-operation-presentation";
 import { useUiLocale, UiText } from "./ui-locale";
+import { SemanticSideDrawer } from "./semantic-side-drawer";
 
 
 type OperationTab = "ACTIVE" | "COMPLETED" | "ERROR";
@@ -65,6 +66,7 @@ export function SemanticOperationsDrawer({
   onClusteringApplied,
   onFrequencySettled,
   projectId,
+  workspaceId,
   refreshToken = 0,
   watchedFrequencyId
 }: Readonly<{
@@ -72,6 +74,7 @@ export function SemanticOperationsDrawer({
   onClusteringApplied?: () => void;
   onFrequencySettled?: () => void;
   projectId: string;
+  workspaceId: string;
   refreshToken?: number;
   watchedFrequencyId?: string;
 }>) {
@@ -348,17 +351,16 @@ export function SemanticOperationsDrawer({
   return (
     <>
     {rankRetry && <SemanticPositionDialog projectId={projectId} workspaceId={rankRetry.result.job.workspaceId} groups={rankRetry.groups} initialSelections={rankRetry.selections} initialRun={rankRetry.result} mode={rankRetry.result.execution.purpose === "COMPETITOR_SERP" ? "competitors" : "positions"} onClose={() => setRankRetry(undefined)} onStarted={() => { setRankRetry(undefined); void load(); }} />}
-      {frequencyRetry && <SemanticFrequencyDialog projectId={projectId} groups={frequencyRetry.groups} initialSelections={frequencyRetry.selections} initialConfiguration={frequencyRetry.collection} onClose={() => setFrequencyRetry(undefined)} onStarted={() => { setFrequencyRetry(undefined); void load(); }} />}
-    <aside
-      aria-label={uiText("Задачи и операции")}
+      {frequencyRetry && <SemanticFrequencyDialog projectId={projectId} workspaceId={workspaceId} groups={frequencyRetry.groups} initialSelections={frequencyRetry.selections} initialConfiguration={frequencyRetry.collection} onClose={() => setFrequencyRetry(undefined)} onStarted={() => { setFrequencyRetry(undefined); void load(); }} />}
+    <SemanticSideDrawer
+      ariaLabel="Задачи и операции"
       className="semantic-operations-drawer"
-      data-presence-cursor-anchor="true"
-      data-presence-key="semantic-operations-drawer"
+      closeLabel="Закрыть операции"
+      eyebrow="Прогресс обновляется автоматически"
+      onClose={onClose}
+      presenceKey="semantic-operations-drawer"
+      title="Задачи и операции"
     >
-      <header>
-        <div><h2><UiText text="Задачи и операции" /></h2><span><UiText text="Прогресс обновляется автоматически" /></span></div>
-        <button aria-label={uiText("Закрыть операции")} onClick={onClose} type="button">×</button>
-      </header>
       <div className="semantic-operation-tabs" role="tablist">
         {(["ACTIVE", "COMPLETED", "ERROR"] as const).map((value) => (
           <button aria-selected={tab === value} key={value} onClick={() => setTab(value)} role="tab" type="button">
@@ -476,7 +478,7 @@ export function SemanticOperationsDrawer({
             <UiText text="Открыть журнал операций" /></Link>
         )}
       </div>
-    </aside>
+    </SemanticSideDrawer>
     {openedOperation && (
       openedOperation.kind === "FREQUENCY" ||
       openedOperation.kind === "RANK" ||

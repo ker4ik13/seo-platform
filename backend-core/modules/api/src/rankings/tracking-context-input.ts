@@ -155,7 +155,7 @@ function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
   ) as TrackingContextLaunchProfile["searchSource"];
   const scope = exactRecord(
     input.scope,
-    ["mode", "groupIds"],
+    ["mode", "groupIds", "descendantGroupIds", "includeDescendants"],
     "launchProfile.scope"
   );
   const mode = enumValue(
@@ -174,6 +174,75 @@ function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
   });
   if (new Set(groupIds).size !== groupIds.length) {
     invalid("launchProfile.scope.groupIds", "Must not contain duplicates");
+  }
+  if (
+    scope.descendantGroupIds !== undefined &&
+    !Array.isArray(scope.descendantGroupIds)
+  ) {
+    invalid(
+      "launchProfile.scope.descendantGroupIds",
+      "Must be an array of UUIDs"
+    );
+  }
+  const descendantGroupIds = (scope.descendantGroupIds ?? []).map(
+    (groupId, index) => {
+      if (typeof groupId !== "string" || !UUID_PATTERN.test(groupId)) {
+        invalid(
+          `launchProfile.scope.descendantGroupIds.${index}`,
+          "Must be a UUID"
+        );
+      }
+      return groupId.toLowerCase();
+    }
+  );
+  if (new Set(descendantGroupIds).size !== descendantGroupIds.length) {
+    invalid(
+      "launchProfile.scope.descendantGroupIds",
+      "Must not contain duplicates"
+    );
+  }
+  if (
+    scope.includeDescendants !== undefined &&
+    typeof scope.includeDescendants !== "boolean"
+  ) {
+    invalid("launchProfile.scope.includeDescendants", "Must be a boolean");
+  }
+  if (mode !== "GROUPS" && scope.includeDescendants === true) {
+    invalid(
+      "launchProfile.scope.includeDescendants",
+      "Must be false unless scope mode is GROUPS"
+    );
+  }
+  if (
+    scope.descendantGroupIds !== undefined &&
+    scope.includeDescendants !== undefined
+  ) {
+    invalid(
+      "launchProfile.scope",
+      "Use descendantGroupIds without the legacy includeDescendants flag"
+    );
+  }
+  const normalizedDescendantGroupIds =
+    scope.descendantGroupIds === undefined
+      ? scope.includeDescendants === true
+        ? groupIds
+        : []
+      : descendantGroupIds;
+  if (
+    mode !== "GROUPS" && normalizedDescendantGroupIds.length > 0
+  ) {
+    invalid(
+      "launchProfile.scope.descendantGroupIds",
+      "Must be empty unless scope mode is GROUPS"
+    );
+  }
+  if (
+    normalizedDescendantGroupIds.some((groupId) => !groupIds.includes(groupId))
+  ) {
+    invalid(
+      "launchProfile.scope.descendantGroupIds",
+      "Every descendant root must also be present in groupIds"
+    );
   }
   if (
     (mode === "GROUPS" && groupIds.length === 0) ||
@@ -195,7 +264,12 @@ function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
   return {
     searchSource,
     includeUntracked: input.includeUntracked ?? false,
-    scope: { mode, groupIds }
+    scope: {
+      mode,
+      groupIds,
+      descendantGroupIds:
+        mode === "GROUPS" ? normalizedDescendantGroupIds : []
+    }
   };
 }
 

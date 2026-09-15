@@ -48,6 +48,7 @@ const DEFAULT_PLATFORM_API_TIMEOUT_MS = 10_000;
 const CLUSTERING_RUN_COMMAND_TIMEOUT_MS = 120_000;
 const TRACKING_CONTEXT_MATERIALIZE_TIMEOUT_MS = 75_000;
 const SEMANTIC_EXPORT_FILE_TIMEOUT_MS = 15 * 60_000;
+const SEMANTIC_LARGE_READ_TIMEOUT_MS = 35_000;
 
 export async function proxyPlatformApi(
   request: NextRequest,
@@ -141,15 +142,7 @@ export async function proxyPlatformApi(
     redirect: "manual",
     signal: AbortSignal.any([
       request.signal,
-      AbortSignal.timeout(
-        clusteringRunCreate
-          ? CLUSTERING_RUN_COMMAND_TIMEOUT_MS
-          : isTrackingContextMaterializePath(upstreamPathSegments)
-          ? TRACKING_CONTEXT_MATERIALIZE_TIMEOUT_MS
-          : isSemanticExportFilePath(upstreamPathSegments)
-          ? SEMANTIC_EXPORT_FILE_TIMEOUT_MS
-          : DEFAULT_PLATFORM_API_TIMEOUT_MS
-      )
+      AbortSignal.timeout(browserApiUpstreamTimeoutMs(upstreamPathSegments))
     ])
   };
 
@@ -179,6 +172,55 @@ export async function proxyPlatformApi(
     status: upstream.status,
     headers: responseHeaders
   });
+}
+
+export function browserApiUpstreamTimeoutMs(
+  pathSegments: readonly string[]
+): number {
+  if (
+    isClusteringRunCreatePath(pathSegments) ||
+    isTrackingKeywordReplacementPath(pathSegments)
+  ) {
+    return CLUSTERING_RUN_COMMAND_TIMEOUT_MS;
+  }
+  if (isTrackingContextMaterializePath(pathSegments)) {
+    return TRACKING_CONTEXT_MATERIALIZE_TIMEOUT_MS;
+  }
+  if (isSemanticExportFilePath(pathSegments)) {
+    return SEMANTIC_EXPORT_FILE_TIMEOUT_MS;
+  }
+  if (isSemanticLargeReadPath(pathSegments)) {
+    return SEMANTIC_LARGE_READ_TIMEOUT_MS;
+  }
+  return DEFAULT_PLATFORM_API_TIMEOUT_MS;
+}
+
+function isSemanticLargeReadPath(
+  pathSegments: readonly string[]
+): boolean {
+  if (pathSegments[0] !== "projects") {
+    return false;
+  }
+  if ([
+    "tracking-contexts",
+    "keyword-groups",
+    "keyword-ranks",
+    "rank-workbench"
+  ].includes(pathSegments[2] ?? "")) {
+    return true;
+  }
+  if (pathSegments[2] !== "keywords") return false;
+  if (pathSegments.length === 3) return true;
+  return (
+    pathSegments.length === 4 &&
+    [
+      "list",
+      "search",
+      "operation-scope",
+      "position-summary",
+      "position-history"
+    ].includes(pathSegments[3] ?? "")
+  );
 }
 
 function isSemanticExportFilePath(

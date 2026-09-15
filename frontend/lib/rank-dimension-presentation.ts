@@ -13,7 +13,9 @@ export function rankDimensionColumns(dimensions: readonly SemanticRankDimension[
     (["position", "url", "checkedAt", "aiPosition", "aiUrl", "aiCheckedAt"] as const)
       .map(metric => ({
         key: semanticRankColumnKey(dimension.key, metric),
-        label: `${rankDimensionLabel(dimension, locale)} · ${labels[metric]}`
+        label: `${rankDimensionLabel(dimension, locale)} · ${labels[metric]}`,
+        searchEngine: dimension.searchEngine,
+        metric
       }))
   );
 }

@@ -12,6 +12,7 @@ import {
   type InternalSemanticKeywordBulkCreatePreviewInput,
   type InternalSemanticKeywordBulkInput,
   type InternalSemanticKeywordCleaningInput,
+  type InternalSemanticKeywordMergeInput,
   type InternalUpdateSemanticKeywordInput,
   type SemanticKeywordCleaningRules,
   type SemanticKeywordIntent
@@ -258,6 +259,19 @@ export function internalSemanticKeywordBulkInput(
       ...tagChanges(patch)
     }
   };
+}
+
+export function internalSemanticKeywordMergeInput(
+  value: unknown
+): InternalSemanticKeywordMergeInput {
+  const input = exactRecord(value, [...scopeFields(), "keeper", "sources"]);
+  const trustedScope = scope(input);
+  const keeper = semanticKeywordSelections([input.keeper])[0]!;
+  const sources = semanticKeywordSelections(input.sources);
+  if (sources.length > 50 || sources.some(({ id }) => id === keeper.id)) {
+    invalid("sources");
+  }
+  return { ...trustedScope, keeper, sources };
 }
 
 export function internalSemanticKeywordCleaningInput(

@@ -77,3 +77,21 @@ export function treeIdsWithDescendants<Group extends SemanticOperationTreeNode>(
   }
   return [...result].sort();
 }
+
+export function resolvedFolderSelectionIds<
+  Group extends SemanticOperationTreeNode
+>(
+  groups: readonly Group[],
+  selectedIds: ReadonlySet<string>,
+  descendantRootIds: ReadonlySet<string> = new Set()
+): readonly string[] {
+  const selectedDescendantRoots = new Set(
+    [...descendantRootIds].filter((groupId) => selectedIds.has(groupId))
+  );
+  return [
+    ...new Set([
+      ...selectedIds,
+      ...treeIdsWithDescendants(groups, selectedDescendantRoots)
+    ])
+  ].sort();
+}

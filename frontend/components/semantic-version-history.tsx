@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 import { SemanticModal } from "./semantic-modal";
 import { UiText, useUiLocale } from "./ui-locale";
+import { SemanticSideDrawer } from "./semantic-side-drawer";
 
 
 interface SemanticHistoryGroup {
@@ -42,7 +43,6 @@ export function SemanticVersionHistory({
   refreshVersion: number;
 }>) {
   const uiLocale = useUiLocale().locale;
-  const { t: uiText } = useUiLocale();
   const [versions, setVersions] = useState<readonly SemanticVersionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -149,21 +149,17 @@ export function SemanticVersionHistory({
   return (
     <>
       {drawer ? (
-        <aside
-          aria-label={uiText("История семантического ядра")}
+        <SemanticSideDrawer
+          ariaLabel="История семантического ядра"
           className="semantic-history-drawer"
-          data-presence-cursor-anchor="true"
-          data-presence-key="semantic-history-drawer"
+          closeLabel="Закрыть историю"
+          eyebrow="Изменения проекта"
+          onClose={() => onClose?.()}
+          presenceKey="semantic-history-drawer"
+          title="История семантики"
         >
-          <header className="semantic-sidebar-header">
-            <div>
-              <span><UiText text="Изменения проекта" /></span>
-              <h2><UiText text="История семантики" /></h2>
-            </div>
-            <button aria-label={uiText("Закрыть историю")} onClick={onClose} type="button">×</button>
-          </header>
           <div className="semantic-history-body semantic-versions">{content}</div>
-        </aside>
+        </SemanticSideDrawer>
       ) : (
         <section className="panel semantic-versions">{content}</section>
       )}

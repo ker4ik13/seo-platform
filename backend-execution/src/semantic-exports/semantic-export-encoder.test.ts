@@ -34,6 +34,7 @@ test("streams 2,002 rows into a valid XLSX workbook", async () => {
   );
   const archive = unzipSync(await collect(file.bytes));
   const sheet = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
+  assertArial10Styles(archive);
   assert.equal(sheet.match(/<row r=/gu)?.length, 2_003);
   assert.match(sheet, /<t xml:space="preserve">запрос 2002<\/t>/u);
   assert.ok(archive["xl/workbook.xml"]);
@@ -93,6 +94,7 @@ test("builds a linked folder-map workbook with one data sheet per non-empty fold
   const map = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
   const rootSheet = new TextDecoder().decode(archive["xl/worksheets/sheet2.xml"]);
   const childSheet = new TextDecoder().decode(archive["xl/worksheets/sheet3.xml"]);
+  assertArial10Styles(archive);
 
   assert.match(workbook, /<sheet name="Карта"/u);
   assert.match(workbook, /<sheet name="Каталог Морозильники"/u);
@@ -319,6 +321,7 @@ test("builds a position-history workbook with formulas and comparison colors", a
   const archive = unzipSync(bytes);
   const yandex = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
   const workbook = new TextDecoder().decode(archive["xl/workbook.xml"]);
+  assertArial10Styles(archive);
   assert.match(workbook, /<sheet name="Яндекс"/u);
   assert.match(workbook, /<sheet name="Google"/u);
   assert.ok(archive["xl/worksheets/sheet2.xml"]);
@@ -594,4 +597,17 @@ async function collect(source: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
     offset += chunk.byteLength;
   }
   return result;
+}
+
+function assertArial10Styles(
+  archive: Readonly<Record<string, Uint8Array>>
+): void {
+  const styles = new TextDecoder().decode(archive["xl/styles.xml"]);
+  const fonts = styles.match(/<font>.*?<\/font>/gu) ?? [];
+  assert.ok(fonts.length > 0);
+  for (const font of fonts) {
+    assert.match(font, /<sz val="10"\/>/u);
+    assert.match(font, /<name val="Arial"\/>/u);
+  }
+  assert.doesNotMatch(styles, /Calibri/u);
 }

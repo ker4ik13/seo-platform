@@ -168,6 +168,32 @@ export function effectiveProjectConnectorOptions(
     );
 }
 
+/**
+ * Returns only the active workspace route, in its explicit fallback order.
+ * Connected credentials which are not assigned to this capability remain
+ * visible on the integration screen but cannot be selected by an operation.
+ */
+export function workspaceConnectorOptions(
+  settings: WorkspaceConnectorRoutingSettings,
+  capability: IntegrationCapability
+): readonly ProjectConnectorCredentialOption[] {
+  const binding = settings.bindings.find(
+    (candidate) => candidate.capability === capability
+  );
+  if (!binding?.enabled) return [];
+  const optionsById = new Map(
+    settings.credentialOptions.map((option) => [option.id, option])
+  );
+  return binding.routes.flatMap((route) => {
+    const option = optionsById.get(route.credentialId);
+    return option &&
+      route.availability === "READY" &&
+      isProjectConnectorCredentialEligible(option, capability)
+      ? [option]
+      : [];
+  });
+}
+
 export function projectConnectorIncompatibleOptions(
   settings: ProjectConnectorSettings,
   capability: IntegrationCapability

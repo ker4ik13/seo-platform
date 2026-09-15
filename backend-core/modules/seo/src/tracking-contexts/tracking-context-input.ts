@@ -108,7 +108,12 @@ export function launchProfileInput(
   ) {
     invalid("launchProfile.searchSource");
   }
-  const scope = strictRecord(input.scope, ["mode", "groupIds"]);
+  const scope = strictRecord(input.scope, [
+    "mode",
+    "groupIds",
+    "descendantGroupIds",
+    "includeDescendants"
+  ]);
   if (typeof scope.mode !== "string" || !SCOPE_MODES.has(scope.mode)) {
     invalid("launchProfile.scope.mode");
   }
@@ -125,6 +130,56 @@ export function launchProfileInput(
     invalid("launchProfile.scope.groupIds");
   }
   if (
+    scope.descendantGroupIds !== undefined &&
+    !Array.isArray(scope.descendantGroupIds)
+  ) {
+    invalid("launchProfile.scope.descendantGroupIds");
+  }
+  const descendantGroupIds = (scope.descendantGroupIds ?? []).map(
+    (groupId, index) =>
+      internalUuid(
+        requiredString(
+          groupId,
+          `launchProfile.scope.descendantGroupIds.${index}`
+        ),
+        `launchProfile.scope.descendantGroupIds.${index}`
+      )
+  );
+  if (new Set(descendantGroupIds).size !== descendantGroupIds.length) {
+    invalid("launchProfile.scope.descendantGroupIds");
+  }
+  if (
+    scope.includeDescendants !== undefined &&
+    typeof scope.includeDescendants !== "boolean"
+  ) {
+    invalid("launchProfile.scope.includeDescendants");
+  }
+  if (scope.mode !== "GROUPS" && scope.includeDescendants === true) {
+    invalid("launchProfile.scope.includeDescendants");
+  }
+  if (
+    scope.descendantGroupIds !== undefined &&
+    scope.includeDescendants !== undefined
+  ) {
+    invalid("launchProfile.scope");
+  }
+  const normalizedDescendantGroupIds =
+    scope.descendantGroupIds === undefined
+      ? scope.includeDescendants === true
+        ? groupIds
+        : []
+      : descendantGroupIds;
+  if (
+    scope.mode !== "GROUPS" && normalizedDescendantGroupIds.length > 0
+  ) {
+    invalid("launchProfile.scope.descendantGroupIds");
+  }
+  if (
+    normalizedDescendantGroupIds.some((groupId) => !groupIds.includes(groupId))
+  ) {
+    invalid("launchProfile.scope.descendantGroupIds");
+  }
+  if (
     (scope.mode === "GROUPS" && groupIds.length === 0) ||
     (scope.mode !== "GROUPS" && groupIds.length > 0)
   ) {
@@ -139,7 +194,9 @@ export function launchProfileInput(
         : booleanValue(input.includeUntracked, "launchProfile.includeUntracked"),
     scope: {
       mode: scope.mode as TrackingContextLaunchProfile["scope"]["mode"],
-      groupIds
+      groupIds,
+      descendantGroupIds:
+        scope.mode === "GROUPS" ? normalizedDescendantGroupIds : []
     }
   };
 }

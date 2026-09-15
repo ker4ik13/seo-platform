@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   domainEventTypes,
+  semanticImportTargets,
   type SemanticImportColumnPreview,
   type SemanticImportDelimiter,
   type SemanticImportEncoding,
-  type SemanticImportHeaderMode
+  type SemanticImportHeaderMode,
+  type SemanticImportMapping
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -30,7 +32,10 @@ import {
   resolveHeaderMode,
   suggestColumnMapping
 } from "./delimited-parser.js";
-import { parseKc4Rows } from "./kc4-parser.js";
+import {
+  KC4_NATIVE_INTERNAL_HEADERS,
+  parseKc4Rows
+} from "./kc4-parser.js";
 import { parseXlsxRows } from "./xlsx-parser.js";
 
 const TERMINAL_PARSE_CODES = new Set([
@@ -46,6 +51,7 @@ const TERMINAL_PARSE_CODES = new Set([
   "UNSUPPORTED_IMPORT_FORMAT",
   "UNTERMINATED_QUOTE",
   "KC4_ARCHIVE_TOO_LARGE",
+  "KC4_TOO_MANY_GROUPS",
   "KC4_TOO_LARGE",
   "XLSX_ARCHIVE_TOO_LARGE",
   "XLSX_SHARED_STRINGS_TOO_LARGE",
@@ -54,8 +60,9 @@ const TERMINAL_PARSE_CODES = new Set([
 
 export interface SemanticImportParseOutcome {
   readonly importId: string;
-  readonly status: "AWAITING_MAPPING" | "FAILED" | "SKIPPED";
+  readonly status: "AWAITING_MAPPING" | "VALIDATING" | "FAILED" | "SKIPPED";
   readonly code?: string;
+  readonly version?: number;
 }
 
 interface StagingRow {
@@ -64,6 +71,55 @@ interface StagingRow {
   readonly rawValues: readonly string[];
   readonly issues: readonly string[];
   readonly fingerprint: string;
+}
+
+export function automaticKc4Mapping(
+  columns: readonly SemanticImportColumnPreview[]
+): SemanticImportMapping {
+  const assignedTargets = new Set<string>();
+  const customNames = new Set<string>();
+  return {
+    columns: columns.map((column) => {
+      const suggested = semanticImportTargets.includes(
+        column.suggestedTarget as (typeof semanticImportTargets)[number]
+      )
+        ? column.suggestedTarget as (typeof semanticImportTargets)[number]
+        : "custom";
+      const singleton = !["custom", "ignore"].includes(suggested);
+      const target = suggested === "ignore" || (
+        singleton && assignedTargets.has(suggested)
+      )
+        ? "custom"
+        : suggested;
+      if (singleton && target !== "custom") assignedTargets.add(target);
+      return {
+        sourceIndex: column.index,
+        target,
+        ...(target === "custom"
+          ? { customName: uniqueKc4CustomName(column.sourceName, customNames) }
+          : {})
+      };
+    }),
+    defaultLanguage: "ru",
+    groupSeparator: "/",
+    duplicatePolicy: "OVERWRITE_MAPPED",
+    createMissingKeywords: true
+  };
+}
+
+function uniqueKc4CustomName(sourceName: string, used: Set<string>): string {
+  const normalized = sourceName.normalize("NFKC").trim() || "Key Collector · Поле";
+  let sequence = 1;
+  while (true) {
+    const suffix = sequence === 1 ? "" : ` (${sequence})`;
+    const name = `${normalized.slice(0, 160 - suffix.length)}${suffix}`;
+    const key = name.toLocaleLowerCase("ru-RU");
+    if (!used.has(key)) {
+      used.add(key);
+      return name;
+    }
+    sequence += 1;
+  }
 }
 
 @Injectable()
@@ -212,7 +268,13 @@ export class SemanticImportParserService {
             groupPaths: metadata.groupPaths,
             groups: metadata.groups
           };
-        }
+        },
+        (progress) => this.kc4Heartbeat(
+          semanticImport.id,
+          claimedAt,
+          progress.stage,
+          progress.compressedBytes ?? observed.bytes()
+        )
       );
     } else {
       const prepared = await prepareDelimitedText(
@@ -309,7 +371,8 @@ export class SemanticImportParserService {
           await this.heartbeat(
             semanticImport.id,
             claimedAt,
-            observed.bytes()
+            observed.bytes(),
+            totalRows
           );
           lastHeartbeatAt = Date.now();
         }
@@ -335,7 +398,9 @@ export class SemanticImportParserService {
         ...(detectedDelimiter ? { delimiter: detectedDelimiter } : {}),
         headerMode: resolvedHeaderMode,
         headers,
-        suggestedMapping: suggestColumnMapping(headers),
+        suggestedMapping: suggestColumnMapping(headers).filter(
+          ({ index }) => !KC4_NATIVE_INTERNAL_HEADERS.has(headers[index] ?? "")
+        ),
         sampleRows,
         totalRows,
         validRows,
@@ -369,6 +434,9 @@ export class SemanticImportParserService {
   ): Promise<SemanticImportParseOutcome> {
     return this.prisma.$transaction(async (transaction) => {
       const completedAt = new Date();
+      const automaticMapping = semanticImport.sourceFormat === "KC4"
+        ? automaticKc4Mapping(result.suggestedMapping)
+        : undefined;
       const changed = await transaction.semanticImport.updateMany({
         where: {
           id: semanticImport.id,
@@ -376,8 +444,8 @@ export class SemanticImportParserService {
           parsingStartedAt: claimedAt
         },
         data: {
-          status: "AWAITING_MAPPING",
-          stage: "mapping",
+          status: automaticMapping ? "VALIDATING" : "AWAITING_MAPPING",
+          stage: automaticMapping ? "validating_rows" : "mapping",
           detectedEncoding: result.encoding ?? null,
           detectedDelimiter: result.delimiter ?? null,
           headerMode: result.headerMode,
@@ -388,6 +456,13 @@ export class SemanticImportParserService {
           suggestedMapping: result.suggestedMapping.map((column) => ({
             ...column
           })),
+          confirmedMapping: automaticMapping
+            ? (automaticMapping as unknown as Prisma.InputJsonValue)
+            : Prisma.DbNull,
+          validationSummary: Prisma.DbNull,
+          validationStartedAt: null,
+          validationHeartbeatAt: null,
+          validationCompletedAt: null,
           sampleRows: result.sampleRows.map((row) => [...row]),
           totalRows: result.totalRows,
           validRows: result.validRows,
@@ -428,7 +503,8 @@ export class SemanticImportParserService {
       });
       return {
         importId: semanticImport.id,
-        status: "AWAITING_MAPPING" as const
+        status: automaticMapping ? "VALIDATING" as const : "AWAITING_MAPPING" as const,
+        ...(automaticMapping ? { version: semanticImport.version + 1 } : {})
       };
     });
   }
@@ -512,6 +588,30 @@ export class SemanticImportParserService {
   private async heartbeat(
     importId: string,
     claimedAt: Date,
+    progressBytes: bigint,
+    processedRows: bigint
+  ): Promise<void> {
+    const updated = await this.prisma.semanticImport.updateMany({
+      where: {
+        id: importId,
+        status: "PARSING",
+        parsingStartedAt: claimedAt
+      },
+      data: {
+        stage: `parsing_rows:${processedRows}`,
+        progressBytes,
+        parsingHeartbeatAt: new Date()
+      }
+    });
+    if (updated.count === 0) {
+      throw new Error("Semantic import parsing lease was lost");
+    }
+  }
+
+  private async kc4Heartbeat(
+    importId: string,
+    claimedAt: Date,
+    stage: string,
     progressBytes: bigint
   ): Promise<void> {
     const updated = await this.prisma.semanticImport.updateMany({
@@ -521,7 +621,7 @@ export class SemanticImportParserService {
         parsingStartedAt: claimedAt
       },
       data: {
-        stage: "parsing_rows",
+        stage,
         progressBytes,
         parsingHeartbeatAt: new Date()
       }

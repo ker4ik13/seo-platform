@@ -22,6 +22,7 @@ import type {
   Prisma,
   RankJobRun
 } from "../generated/prisma/client.js";
+import type { XmlStockOperationUsageSummary } from "@seo-platform/contracts";
 
 export const MANUAL_RANK_CHECK_JOB_TYPE = "MANUAL_RANK_CHECK";
 export const RANK_JOB_INPUT_SCHEMA = "manual-rank-check@1";
@@ -122,7 +123,10 @@ export function rankJobScopeJson(
     InternalRankExecutionParameters,
     "countryCode" | "regionCode" | "language" | "device"
   >>,
-  estimate?: Pick<RankEstimate, "routingScope" | "connectorAttempts">
+  estimate?: Pick<
+    RankEstimate,
+    "routingScope" | "connectorAttempts" | "providerUsage"
+  >
 ): Prisma.InputJsonValue {
   const searchSource = rankSearchSourceFromProviderMappingVersion(
     execution.searchEngine,
@@ -154,6 +158,9 @@ export function rankJobScopeJson(
     ...(estimate?.routingScope ? { routingScope: estimate.routingScope } : {}),
     ...(estimate?.connectorAttempts
       ? { connectorAttempts: [...estimate.connectorAttempts] }
+      : {}),
+    ...(estimate?.providerUsage
+      ? { providerUsage: estimate.providerUsage as XmlStockOperationUsageSummary }
       : {})
   });
 }

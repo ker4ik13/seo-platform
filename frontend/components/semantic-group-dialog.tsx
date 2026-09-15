@@ -67,7 +67,7 @@ export function SemanticGroupDialog({
   const [saving, setSaving] = useState(false);
   const [deleteKeywords, setDeleteKeywords] = useState(false);
   const [promoteChildren, setPromoteChildren] = useState(false);
-  const [includeDescendants, setIncludeDescendants] = useState(true);
+  const [includeDescendants, setIncludeDescendants] = useState(false);
   const [includeKeywords, setIncludeKeywords] = useState(false);
   const [error, setError] = useState<string>();
   const formId = useId();

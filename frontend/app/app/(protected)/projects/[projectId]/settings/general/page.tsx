@@ -4,6 +4,7 @@ import { ProjectTransferSettings } from "../../../../../../../components/project
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
 import { UiText } from "../../../../../../../components/ui-locale";
+import { SemanticKeywordMergeSettings } from "../../../../../../../components/semantic-keyword-merge-settings";
 
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,7 @@ export default async function ProjectSettingsPage({
         workspaceRoleCode={workspace.roleCode}
         workspaceStatus={workspace.status}
       >
+        <SemanticKeywordMergeSettings projectId={project.id} />
         <ProjectTransferSettings
           currentUserId={context.user.id}
           project={project}

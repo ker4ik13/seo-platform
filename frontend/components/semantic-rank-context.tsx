@@ -10,19 +10,23 @@ export function SemanticRankContext({
   device,
   regionCode,
   regionLabel,
-  searchEngine
+  searchEngine,
+  showEngineName = true
 }: Readonly<{
   device: SemanticRankDimension["device"];
   regionCode: string;
   regionLabel?: string;
   searchEngine: SemanticRankDimension["searchEngine"];
+  showEngineName?: boolean;
 }>) {
   return (
     <span className="semantic-rank-context">
       <SearchEngineLogo engine={searchEngine} size="compact" />
-      <span className="semantic-rank-context-engine">
-        {searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}
-      </span>
+      {showEngineName && (
+        <span className="semantic-rank-context-engine">
+          {searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}
+        </span>
+      )}
       <span className="semantic-rank-context-region">
         {rankRegionDisplayName(searchEngine, regionCode, regionLabel)}
       </span>

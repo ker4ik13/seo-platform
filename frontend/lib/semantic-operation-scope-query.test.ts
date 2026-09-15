@@ -1,35 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  semanticOperationScopeCountPageSize,
-  semanticOperationScopePageSize,
-  semanticOperationScopeQuery
-} from "./semantic-operation-scope-query.ts";
+import { semanticOperationScopePageInput } from "./semantic-operation-scope-query.ts";
 
-test("builds one bounded union query for multiple operation folders", () => {
-  const query = semanticOperationScopeQuery(["folder-a", "folder-b"]);
+test("builds one lightweight operation-scope page for multiple folders", () => {
+  const input = semanticOperationScopePageInput(["folder-a", "folder-b"]);
 
-  assert.equal(query.get("limit"), String(semanticOperationScopeCountPageSize));
-  assert.equal(query.get("sort"), "CREATED_ASC");
-  assert.equal(query.get("includeUntracked"), "true");
-  assert.equal(query.get("groupId"), null);
-  assert.equal(query.get("groupIds"), "folder-a,folder-b");
+  assert.deepEqual(input, { groupIds: ["folder-a", "folder-b"] });
 });
 
-test("uses the canonical single-folder filter and keeps pagination cursor", () => {
-  const query = semanticOperationScopeQuery(["folder-a"], "cursor-value");
+test("keeps a single folder and pagination cursor", () => {
+  const input = semanticOperationScopePageInput(["folder-a"], "cursor-value");
 
-  assert.equal(query.get("groupId"), "folder-a");
-  assert.equal(query.get("groupIds"), null);
-  assert.equal(query.get("cursor"), "cursor-value");
-  assert.equal(query.get("limit"), String(semanticOperationScopePageSize));
-  assert.equal(query.get("includeUntracked"), "true");
+  assert.deepEqual(input, {
+    groupIds: ["folder-a"],
+    cursor: "cursor-value"
+  });
 });
 
-test("builds the project-wide query without a folder filter", () => {
-  const query = semanticOperationScopeQuery(undefined);
+test("builds the project-wide first page without empty fields", () => {
+  const input = semanticOperationScopePageInput(undefined);
 
-  assert.equal(query.get("groupId"), null);
-  assert.equal(query.get("groupIds"), null);
-  assert.equal(query.get("includeUntracked"), "true");
+  assert.deepEqual(input, {});
 });

@@ -1088,6 +1088,7 @@ model SemanticImport {
   id                       String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId              String               @map("workspace_id") @db.Uuid
   projectId                String               @map("project_id") @db.Uuid
+  projectDomain            String?              @map("project_domain") @db.VarChar(253)
   uploadId                 String               @map("upload_id") @db.Uuid
   actorId                  String               @map("actor_id") @db.Uuid
   status                   SemanticImportStatus @default(QUEUED)

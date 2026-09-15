@@ -268,6 +268,26 @@ export class SemanticVersionService {
     );
   }
 
+  public async createIrreversibleVersion(
+    transaction: Prisma.TransactionClient,
+    input: CreateVersionInput,
+    affectedCount: number,
+    manifest: Readonly<Record<string, string>>
+  ): Promise<SemanticVersionListItem> {
+    const version = await this.createVersion(transaction, input, false);
+    return versionItem(
+      await transaction.semanticVersion.update({
+        where: { id: version.id },
+        data: {
+          affectedCount,
+          reversible: false,
+          manifest: { schemaVersion: 1, state: "FINALIZED", ...manifest },
+          finalizedAt: new Date()
+        }
+      })
+    );
+  }
+
   public async appendBulkKeywordChange(
     transaction: Prisma.TransactionClient,
     version: SemanticVersionIdentity,

@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 14 сентября 2026 года.
+Актуально на 15 сентября 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -109,7 +109,13 @@ append-only snapshots остаются источником истины. Core S
 съёмы одного UTC-дня, а затем переносит последнюю известную позицию каждого
 keyword на следующие дни, где снимались любые запросы. Поэтому частичный съём
 обновляет только затронутые ключи и не обнуляет остальные позиции; повторные
-проверки внутри выбранного среза не умножают число запросов. Tooltip графика
+проверки внутри выбранного среза не умножают число запросов. Готовые bounded
+точки сохраняются в `project_position_history_projections`. Монотонная
+`project_position_history_revisions` инвалидируется statement-level triggers
+при каждом изменении входных данных; совпадающая revision читается без
+повторного сканирования истории. После rank finalization и semantic import
+tracked-проекция прогревается асинхронно, а stale payload никогда не считается
+fresh. Решение описано в ADR-2026-049. Tooltip графика
 изначально скрыт и появляется только после hover или keyboard focus точки.
 `project-position-date-range-picker.tsx` добавляет inclusive custom range без
 нативного browser date UI: на широком экране это двухмесячный popover, на
@@ -166,6 +172,10 @@ latest `aiAnswers[].rankingUrl`, то есть только из найденн�
 проекта, таблица показывает отдельный индикатор и modal только с этими
 страницами: позиция, favicon, title, description и URL без визуального
 транспортного префикса; конкурентская выдача в этот modal не подмешивается.
+Dimension-specific keyword insights читает весь сохранённый depth до Top-100,
+поэтому второй URL проекта на позиции 43 не исчезает из модалки; общий
+инспектор сохраняет компактный Top-10 preview. Диалог имеет единое внешнее
+закругление и обрезает edge-layout внутри своей границы.
 Индикатор нескольких страниц выводится независимо от индикатора нецелевого
 URL, поэтому при одновременном выполнении обоих условий видны две кнопки.
 История отображает
@@ -371,13 +381,19 @@ project-shared «Общее для проекта» (либо первый об�
 Сбор конкурентов всегда использует тот же execution-only режим. Сохранённый
 профиль мастер переиспользует только после явного выбора; удалённые профили
 сразу исчезают из каталога, оставаясь доступными историческим manifests.
+Списочная проекция профилей получает последние configuration rows отдельно, а
+`assignedKeywordCount` для всех профилей считает одним tenant-scoped
+`GROUP BY context_id`; Prisma relation-count больше не повторяет большой
+assignment scan для каждой строки.
 Additive backfill переводит в execution-only также прежние контексты, чьи
 manifests использовались исключительно для `COMPETITOR_SERP`; профили с хотя бы
 одним обычным позиционным запуском не скрываются.
-Профили умеют раскрывать вложенное дерево папок и materialize родительский
-scope вместе с потомками. В
-`tracking_contexts.launch_profile` сохраняются только provider-neutral тип
-выдачи, режим/UUID папок и явный `includeUntracked`; SEO Data повторно
+Профили умеют раскрывать вложенное дерево папок. Обычная отметка папки
+materialize-ит только её прямые запросы; компактная кнопка «Вложенные» отдельно
+включает потомков и визуально отмечает их checkbox. В
+`tracking_contexts.launch_profile` сохраняются provider-neutral тип выдачи,
+режим/UUID папок, `descendantGroupIds` для выбранных корней и
+`includeUntracked`; SEO Data повторно
 подтверждает tenant ownership
 каждой папки. Выбор сохранённого профиля восстанавливает его полный assignment
 как актуальные `keywordId/text/version`, а «Без контекста» materialize переданное
@@ -386,9 +402,19 @@ project-scoped локальное предпочтение точного creden
 его среди актуальных подключений workspace, помечает ровно одно подключение и
 предупреждает, если после прошлого запуска в выбранных папках появились новые
 canonical keywords. Credential ID не попадает в публичный context/job summary.
+Для rolling compatibility прежний сохранённый профиль без
+`includeDescendants` читается как включавший поддеревья всех выбранных корней;
+новая mutation записывает `descendantGroupIds`, поэтому разные выбранные папки
+могут независимо включать или не включать потомков.
+Единый контрол находится в
+`frontend/components/semantic-folder-descendants-toggle.tsx`, а direct/expanded
+набор вычисляет `frontend/lib/semantic-operation-tree.ts`; его используют
+съём позиций, частотность, ИИ, кластеризация, Wordstat, минус-слова, дубли,
+карта папок и редактор профилей.
 Экран настроек после загрузки пересобирает effective keyword set каждого
 доступного профиля через серверный `POST .../materialize`: `ALL` читает все
-активные запросы, `GROUPS` заново раскрывает активных потомков выбранных папок,
+активные запросы, `GROUPS` раскрывает активных потомков только при
+корень присутствует в `descendantGroupIds`,
 а выключенные через `keywords.is_tracked` запросы исключаются, если профиль не
 разрешает `includeUntracked`. Тот же trusted materializer выполняется внутри
 Core непосредственно перед fresh estimate каждого scheduled или ручного
@@ -400,6 +426,100 @@ automation-run, поэтому расписание не зависит от р�
 если серверная конфигурация не менялась и новая revision появилась из-за
 фонового пересчёта assignment. Реальное параллельное изменение полей остаётся
 явным конфликтом и не перезаписывается.
+
+Объединение запросов хранится в `seo_db.keyword_merges`: основной keyword
+остаётся активным, исходные keyword ID становятся скрытыми алиасами. Папки,
+теги, заметки, flags, typed/legacy custom values и активные назначения
+переносятся транзакционно; immutable rank/SERP/AI/frequency snapshots не
+переписываются. List, comparison, dashboard history и keyword insights читают
+их через target ID. Повторный импорт строки, ставшей алиасом, обновляет основной
+keyword и никогда не возвращает повреждённое имя. В основных настройках проекта
+есть bounded поиск строк с ошибками кодировки и явный выбор каждой пары/имени;
+ручное объединение доступно также в редакторе одного запроса.
+
+Правые панели семантики «Операции», «История» и «Колонки и представления»
+используют один `frontend/components/semantic-side-drawer.tsx`: общий grid-slot,
+header, Lucide close action, scroll boundary и optional fixed footer. На desktop
+все панели занимают третью колонку semantic workspace без absolute overlay и
+тени. Строки поисковых колонок показывают SearchEngineLogo и единый порядок
+engine → регион → устройство → метрика; имя engine визуально не дублируется,
+а длинная подпись прокручивается при hover без движения логотипа.
+
+`frontend/lib/date-range-selection.ts` содержит чистую логику общего календаря:
+первый клик выбирает один день, второй завершает диапазон, а быстрые пресеты
+ограничиваются доступной историей. Панель фильтров Семантики читает управляемые
+теги через `GET /projects/:projectId/keywords/tags`; удаление тега и кластера
+атомарно снимает соответствующую связь со всех keywords и требует отдельного
+modal-подтверждения с фактическим количеством связей.
+`GET /projects/:projectId/imports/:importId/preview-rows` отдаёт staging
+табличного импорта страницами по 100 строк и связывает opaque cursor с
+выбранной серверной сортировкой. `SemanticUpload` подгружает следующую страницу
+у нижней границы двумерного scroll, держит header таблицы на месте и позволяет
+прокрутить общую рабочую область до правил публикации. После parsing
+полноэкранный preview CSV/TSV/XLSX скрывает уже ненужные source navigation,
+file dropzone и progress bar; незавершённый preview защищён подтверждением
+перед закрытием. Нативный KC4 не монтирует таблицу preview: Web показывает
+только текущую фазу и результат автоматической публикации.
+
+Execution import worker читает текст KC4 как сырые bytes: сначала strict UTF-8,
+затем Windows-1251 для старых проектов, а невосстановимый replacement character
+не допускается в canonical keyword. Публикация использует до 5 000 строк на
+chunk; `semantic_imports.stage` содержит безопасные счётчики разобранных,
+проверенных и опубликованных строк/чанков. Web показывает эти счётчики, хранит
+ID активного импорта в sessionStorage для возобновления наблюдения и требует
+подтверждение перед закрытием активного импорта.
+После разбора нативного KC4 worker сам сохраняет полный mapping и ставит
+validation: типизированные поля направляются в SEO targets, остальные видимые
+колонки автоматически становятся `LONG_TEXT` custom columns, а внутренние
+история/SERP проходят отдельный immutable rank path. Platform API сохраняет в
+операции доверенный semantic-capacity snapshot уже при создании. После
+успешной validation worker атомарно переводит KC4 в `ready_to_publish` и сразу
+ставит publish job, поэтому ни API-клиент, ни Web не подтверждают mapping или
+preview вручную. Legacy-операция без полного snapshot остаётся fail-safe на
+ручном подтверждении.
+Jobs и Core SEO используют общий `semanticImportPublishMaxRows=5000`.
+Core создаёт manifest-папки пакетами по уровням дерева и сохраняет миллионы
+KC4 custom values bounded SQL-upsert пакетами вместо отдельных запросов.
+Повторный `OVERWRITE_MAPPED` обновляет existing keywords tenant-scoped
+`jsonb_to_recordset` пакетами; 300-секундная Core transaction укладывается в
+330-секундный Jobs caller timeout.
+Повторные исторические строки одного поисковика и даты дедуплицируются дважды:
+при validation и в publish canonicalizer; найденный замер сохраняет позицию и
+не может превратиться в противоречивое `found=false + position`.
+Platform API принимает дерево папок до общего KC4 manifest-предела 20 000.
+Обычный list не берёт group-tree advisory lock при уже существующих системных
+папках, поэтому 5 000+ папок читаются во время фонового publish без 502/503.
+Rank dimension catalog использует configuration-first lateral probe по
+`rank_snapshots_context_history_idx`; объём импортированной истории больше не
+увеличивает стоимость полного `DISTINCT`-скана при загрузке таблицы.
+Пакетный расчёт предыдущей позиции связывает anchor с составным ключом
+`rank_snapshots(observed_at, id)`, а не ищет snapshot только по второй части
+ключа. Поэтому страница на 500 строк не выполняет тысячи неполных index scan
+после крупного KC4-импорта. Platform API оставляет общий короткий dependency
+timeout, но для тяжёлых bounded reads семантики использует единую 30-секундную
+границу: `GET keywords`, body-only `keywords/list|search`, облегчённый
+`keywords/operation-scope` и агрегаты позиций. Прогретый целевой p95 остаётся
+1,5 секунды.
+Same-origin BFF ждёт те же тяжёлые SEO Data reads до 35 секунд, то есть дольше
+внутренней 30-секундной границы и успевает передать её нормальный ответ. На
+крупной импортированной истории или странице 1 000 строк холодный PostgreSQL
+cache поэтому не превращает корректный результат в ложный 503; остальные
+browser API routes сохраняют 10-секундный timeout.
+Все tenant-scoped GET-вызовы Platform API → SEO Data используют эту же
+30-секундную bounded read-границу; BFF применяет 35 секунд к keywords,
+tracking contexts, дереву групп, rank catalog и rank workbench. Поэтому
+большой assignment count контекста не обрывается прежними 1,5 секундами.
+Страницы 100/200/500/1000 используют один двухфазный read path: cursor-query
+получает ID плюс один lookahead, а полная keyword aggregate projection
+последовательно гидратируется порциями по 250 без lookahead. Так relation
+includes не превышают PostgreSQL/Prisma parameter limit и не создают лишнюю
+нагрузку при малых страницах.
+Сортировка по позиции ищет предыдущее состояние через небольшой набор
+совместимых tracking contexts и `rank_snapshots_keyword_history_idx`, а для
+уже найденной текущей позиции вообще не выполняет historical lookup.
+VPS-конфигурация ClamAV держит `StreamMaxLength`, `MaxScanSize` и
+`MaxFileSize` на том же пределе 5 GiB, который объявлен upload API; поэтому
+крупные `.kc4` проходят inspection вместо бесконечного retry после 100 MiB.
 Проектный экран `/app/projects/{projectId}/rankings/contexts` называется
 «Съём позиций» и рядом с профилями показывает связанные rank automations.
 Регулярные режимы `DAILY/WEEKLY` используют timezone-aware BullMQ Job
@@ -1043,9 +1163,13 @@ Core API открывает tenant-scoped `keyword-ranks/dimensions` и body-onl
 Один запрос ограничен 1000 ключами и 24 сравниваемыми срезами; чтение истории
 использует существующий индекс keyword/context/observed_at. Контракты и
 ключи динамических колонок находятся в `packages/contracts/api/rank-dimensions`.
-Frontend запрашивает только ключи из виртуального viewport и только включённые
-географические колонки. Уже разрешённые ячейки сохраняются в project/dimension
-cache при смене виртуального viewport и обновляются поверх прежних значений;
+Frontend сразу после получения каждой cursor-страницы запрашивает все её
+ключи и только включённые географические колонки; virtual viewport отвечает
+только за отрисовку и больше не запускает первое чтение значения при скролле.
+Запросы делятся по прежним пределам 1000 × 24, а уже разрешённые ячейки
+и подтверждённые отсутствия сохраняются в project/dimension/revision cache.
+При следующей cursor-странице API получает только ещё не разрешённые keyword
+ID, а каждый bounded batch отображается сразу, не дожидаясь остальных;
 прокрутка вниз и возврат к строке не заменяют известную позицию временным
 плейсхолдером. В layout drawer для каждого среза доступны обычные и
 ИИ-позиция, найденный URL и дата; одновременно сохраняется не более 128 видимых колонок.
@@ -1143,6 +1267,10 @@ collision-safe палитра сохраняет один контрастный
 цвета, пока в ней остаются свободные варианты. Логика находится в
 `frontend/lib/serp-domain-highlights.ts`. Запуск использует штатный мастер конкурентной выдачи, поэтому
 результаты остаются в семантике и общем rank-history.
+Обычная выдача принимает один canonical provider enum
+`ARSENKIN|XMLSTOCK|KEY_COLLECTOR`; импортированная `.kc4` SERP читается из тех
+же `rank_snapshots/rank_serp_results`, а raw KC module/column names до Web не
+доходят.
 Органические результаты и ИИ-источники показаны в отдельных переключаемых
 режимах; checkbox «ИИ-выдача» также открывает соответствующий мастер сбора.
 Последние выбранные срезы, папка и режим сохраняются локально по паре
@@ -1166,6 +1294,9 @@ disabled.
 `rank_snapshots` не переписываются: catalog скрывает source, а comparison,
 dashboard, rank-workbench, history, URL modal и экспорт читают source и target
 как один целевой dimension. Удаление правила снова показывает исходный срез.
+Последовательные правила разрешаются транзитивно с защитой от циклов, поэтому
+цепочка `global → kc4-import → Москва` скрывает оба источника и добавляет их
+rank/SERP history к конечной Москве.
 Миграция добавляет таблицу в allowlist переноса проекта между workspace.
 
 `rank_dimension_history_deletions` — append-only пользовательская граница
@@ -1272,6 +1403,21 @@ Search API — `48 / 50`, Wordstat — `10 / 10`. Throttling адаптивно 
 `seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
 предпочитает менее занятую пару credential/project, оставаясь source of truth
 для Job, lease и progress.
+Credential validation версии `xmlstock@1.3.0` дополнительно читает бесплатные
+`/api/?info=user` и `/api/?info=status`. В `provider_meta` проходят только
+строго проверенные ставки, тарифный код, безопасные счётчики доступности и
+нагрузки; возвращаемые XMLStock персональные method URL вместе с USER ID/KEY
+отбрасываются. Migration
+`20260915093000_xmlstock_account_pricing_metadata` расширяет существующий
+fenced success guard этими двумя bounded объектами, а следующая
+`20260915094500_xmlstock_pricing_guard_object_counts` использует доступный в
+PostgreSQL подсчёт через `jsonb_object_keys`. Safe quota projection
+передаёт account-specific прайс в настройки и мастера запуска. Rank estimate,
+frequency collection и XMLStock Wordstat expansion фиксируют product/rate,
+момент цены и диапазон provider requests в уже существующем immutable
+snapshot операции. Result endpoints соединяют его с durable attempt evidence
+и показывают фактический либо честный bounded диапазон расходов; новой
+таблицы, очереди или deployable для этого не добавлено.
 Platform-paid XMLStock/Arsenkin поддерживает до 64 operator-owned credentials
 в comma-separated plural env. Management-role Jobs HTTP формирует
 HMAC-derived opaque UUID каждого физического ключа (через самый старый
@@ -1302,7 +1448,7 @@ concurrency, lease fencing и PostgreSQL claim остаются bounded safety �
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users (включая bounded account avatar до 512 KiB), sessions, hashed personal API tokens и project allowlists, workspaces (включая bounded workspace avatar до 512 KiB), projects, их общий `display_order` и bounded project logos до 512 KiB, project transfer requests, RBAC, billing ledger/usage reservations, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая keyword notes, saved views, проектные легенды цветов и персональные read receipts, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes, saved views, проектные легенды цветов и персональные read receipts, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin/Key Collector SERP results, persistent project position-history projections и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -1499,20 +1645,20 @@ JavaScript execution evidence — миллисекундную; migration
 канонической миллисекундной границе. Это сохраняет строгую привязку к тому же
 validation Job, но не отклоняет корректный XMLStock/Arsenkin grant из-за
 скрытых микросекунд.
-Project connector routes заменяются через retirement: использованные строки
-сохраняются для execution history с `retiredAt`, а новые estimate/routing
-queries видят только активную проекцию. Поэтому смена project override,
-сокращение fallback и переход на workspace inheritance не нарушают FK
-завершённых или выполняющихся provider executions.
+Маршрутизация операций настраивается только в `/app/settings/integrations` на
+уровне workspace. Цепочка credentials упорядочивается кнопками вверх/вниз;
+первый provider основной, остальные — fallback по выбранным причинам.
+Project connector routes остаются внутренней materialized reference-проекцией:
+использованные строки сохраняются для execution history с `retiredAt`, а любой
+legacy project override перед новым запуском заменяется актуальной workspace
+chain. Страница project integrations перенаправляет в workspace settings и не
+показывается в навигации.
 Для rank route позиции `1..7` являются допустимыми явно выбранными
 provider/credential маршрутами; grant, claim и submit проверяют exact route
 из estimate, не подменяя его project default с позицией `0`.
-После передачи проекта отключённый binding намеренно остаётся как
-tenant-scoped audit/configuration row без активного маршрута: публичная
-проекция возвращает `routes: []` и не возвращает `route`. Это состояние
-означает «провайдер не настроен», а не сбой Jobs; интерфейс позволяет новому
-владельцу явно выбрать credential его workspace, не восстанавливая прежний
-provider route автоматически.
+После передачи проекта отключённый binding остаётся tenant-scoped audit row
+без активного маршрута; следующий запуск разрешается только после настройки
+соответствующего workspace route.
 
 ### Проверка ИИ-ответов
 
@@ -1652,7 +1798,9 @@ Cluster descriptors и общая первая cursor-страница загр�
    destination активного режима. Для новой папки parent выбирается прямо
 в карточке конкретного кластера, а корень проекта является значением по
 умолчанию. Опции обоих селектов повторяют действие иконкой из общего Lucide
-набора: создание папки, перенос или явное «Ничего не делать». Embedded result
+набора: создание папки, перенос или явное «Ничего не делать». Их portal-popover
+имеет отдельную широкую границу до 680 px в пределах viewport, а длинные имена
+и подписи действий переносятся целиком вместо многоточия. Embedded result
 workspace примыкает ко всем четырём краям body модалки; глобальный modal padding
 не сужает кластерную таблицу. Выбранным запросам можно назначить другую существующую папку; такое
 точечное решение имеет приоритет над решением кластера. «Некластеризовано»
@@ -1774,10 +1922,14 @@ Arsenkin submit/transition и fail broker-функции; прямой дост�
 геометрию таблицы семантики и cursor/infinite scroll. Raw provider payload,
 credential ID и внутренние quality codes в основной таблице не показываются.
 
-Охват запросов в мастерах позиций/частотности/Wordstat сначала получает точный
-distinct count запросом `limit=1`, а допустимый набор materialize-ится одним
-union по папкам страницами по 1000. Это убирает прежний N-folders × pages
-обход. Если пользователь ещё не владеет workspace, tenant switcher показывает
+Охват запросов в мастерах позиций/частотности/Wordstat/кластеризации/ИИ
+materialize-ится через `POST keywords/operation-scope`: первая страница
+возвращает точный distinct count, а до 10 000 записей за cursor-page содержат
+только `id/version/isTracked`. Проектный scope и union до 20 000 папок не
+загружают табличные метрики, теги, memberships и custom values; лимит
+операции проверяется до продолжения пагинации. Это убирает прежний
+N-folders × pages обход и ошибки Prisma на крупных scopes. Если пользователь
+ещё не владеет workspace, tenant switcher показывает
 в popover явное действие создания и ведёт в существующий onboarding, даже при
 наличии членства в областях других владельцев.
 
@@ -1851,8 +2003,9 @@ additive migration `20260820213000_negative_keyword_preset_limit` синхрон
 совпадение всей фразы. Для стоп-фраз отдельно сохраняются флаги игнорирования
 порядка слов и пунктуации; прежние пресеты после additive migration получают
 оба значения `false` и не меняют поведение. Scope можно задать всем проектом,
-optimistic selection либо union до 2 000 выбранных папок. Web разворачивает
-выбранных родителей до всех вложенных папок, а Core устраняет повторное
+optimistic selection либо union до 2 000 выбранных папок. По умолчанию Web
+передаёт только явно отмеченные папки; компактная кнопка «Вложенные» добавляет
+потомков и отмечает каждую включённую строку. Core устраняет повторное
 попадание запроса через несколько membership. Применение всегда двухфазное:
 preview фиксирует scope/version/hash и отдаёт все совпадения страницами по 100
 строк вместе с UTF-16 диапазонами для inline-подсветки. Web накапливает страницы
@@ -1867,7 +2020,8 @@ lock. Пресеты включены в allowlist передачи проект
 точный либо улучшенный русскоязычный формонезависимый режим, опциональный
 учёт регистра/пунктуации и до 100 слов-исключений. Scope ограничен всем
 проектом, union до 2 000 выбранных папок или optimistic selection; Web
-раскрывает выбранных родителей до полного набора вложенных папок, а Core
+использует прямой набор папок по умолчанию, а потомков добавляет только после
+явного включения «Вложенные», отмечая весь effective набор. Core
 устраняет повторное попадание запроса через несколько membership. Синхронный
 анализ не сканирует больше 50 000 активных строк. Preview отдаёт группы страницами по 100
 с единым стабильным hash для всего анализа; Web накапливает их бесконечной
@@ -1891,9 +2045,9 @@ project write lock; большой выбор Web применяет после�
 
 Upload хранится в S3 и при включённой inspection role проходит ClamAV. Import
 role стримит CSV/XLSX/KC4 в staging и публикует bounded idempotent chunks.
-Web показывает два доступных входа в тот же безопасный pipeline: универсальную
-таблицу и позиции. Key Collector и Топвизор временно перечислены отдельным
-нижним disabled-блоком, а ручного режима в файловом wizard нет. Полноразмерная
+Web показывает три доступных входа в тот же безопасный pipeline: нативный
+Key Collector, универсальную таблицу и позиции. Топвизор временно перечислен
+в отдельном нижнем disabled-блоке, а ручного режима в файловом wizard нет. Полноразмерная
 левая панель остаётся неподвижной, содержит доступные форматы сверху и
 справочный блок снизу; содержимое выбранного формата прокручивается отдельно.
 Справочная ссылка ведёт на локализованную публичную документацию
@@ -1915,23 +2069,67 @@ CSV и XLSX используют один табличный набор: пол�
 guard внутри транзакции публикации. XLSX mapping распознаёт как канонические
 названия, так и экспортные суффиксы Key Collector (`[Yandex]`, `[YW]`), включая
 текущую/относительную позицию, URL позиции и базовую/фразовую частотность. При
-нативном `.kc4` Execution также передаёт ограниченный manifest цветов групп,
-обе keyword-комментарий колонки объединяются в обычную заметку запроса, а
-исходные комментарии и остальные заполненные колонки остаются доступными как
-пользовательские поля. Manifest входит в idempotency hash каждого первого
-publish chunk и повторно валидируется Core SEO до применения.
-При
-обновлении существующего запроса Core
+нативном `.kc4` Execution также передаёт ограниченный 20 000 активных путей
+manifest цветов групп, обе keyword-комментарий колонки объединяются в обычную
+заметку запроса, а исходные комментарии и остальные заполненные one-to-one
+колонки остаются доступными как пользовательские поля. Комментарии,
+hidden/inherit-meta признаки и bounded `KeywordGroupMetaTags` папок также
+проецируются в пользовательские поля их запросов. Многострочные таблицы
+истории позиций, текущего/исторического SERP и релевантных страниц читаются отдельными bounded
+итераторами; gzip-тексты SERP декодируются безопасно, а повреждённая
+необязательная запись пропускается. Имя папки с `/` сохраняется JSON-путём и
+не смешивается с разделителем табличного импорта. Manifest входит в
+idempotency hash каждого первого publish chunk и повторно валидируется Core
+SEO до применения. Publisher после чтения PostgreSQL JSONB заново собирает
+вложенные SERP-поля в каноническом порядке
+`position/rankingUrl/title/snippet`, поэтому перестановка ключей JSONB не
+создаёт ложный payload-hash conflict. Тот же canonicalizer сохраняет
+`source/country/region/language/device/observedAt` текущей KC4-позиции и
+собирает её объект в том же порядке, что входной canonicalizer Core; иначе
+проверка SHA-256 отклонила бы корректный chunk. Без этого контекста текущий
+SERP ошибочно попал бы в legacy `global` context отдельно от истории.
+Повторный `OVERWRITE_MAPPED` для той же даты заменяет mutable `current_ranks`
+новым KC4 snapshot, а migration
+`20260915114500_kc4_current_rank_projection_repair` выбирает в активном срезе
+последнюю дату и предпочитает снимок с сохранённым SERP. Immutable история при
+этом не переписывается.
+Execution сохраняет доверенный `project_domain` в `semantic_imports`
+(migration `20260914131500_semantic_import_project_domain`); Jobs передаёт его
+только из авторизованного Platform project snapshot. Core SEO включает домен
+в hash chunk-команды и immutable rank manifest, записывает KC4 SERP в
+`rank_serp_results` и использует отдельный лимит 32 MiB только для внутреннего
+маршрута публикации semantic-import chunk.
+Task settings `SERPPositionParsingTask_Yandex` и
+`SERPPositionParsingTask_Google` задают реальный регион и устройство каждой
+папки; ближайшая настройка предка наследуется дочерней папкой. Google canonical
+location переводится через проверенный snapshot
+`backend-execution/src/imports/kc4-google-regions.generated.ts`, Яндекс — через
+штатный каталог LR. Scheduler timestamp текущей позиции связывается с
+историческим снимком того же дня, поэтому позиция и `Module_SERP_Data`
+публикуются одним измерением. `Module_SERP_Data_History` связывается с
+`Module_SERP_Position_History` по поисковику, географии и времени.
+При обновлении существующего запроса Core
 использует возвращённую Prisma запись с уже увеличенной `keyword.version`,
 поэтому импортированная позиция привязывается к актуальной версии в immutable
-rank manifest. Создаваемые для Key Collector import contexts остаются
-техническими: они участвуют в keyword insights и графике импортированной
+rank manifest. Создаваемые для Key Collector import contexts детерминированы
+полным сочетанием поисковика, страны, региона, языка и устройства. Текущий и
+исторический снимок используют один context; прежние `global`/`kc4-import`
+contexts архивируются после успешной географической публикации, а их
+устаревший current-rank остаётся immutable audit-проекцией и исключается из
+чтения по статусу контекста. Контексты остаются техническими: они
+участвуют в keyword insights и графике импортированной
 истории, но исключены из пользовательского каталога профилей live-съёма,
-операций над tracking context и квоты отслеживаемых пар. Канонический BYOK
-rank-history endpoint также не смешивает импорт с воспроизводимыми
-провайдерскими замерами. Execution хранит `publishing_attempts` и после пяти
+операций над tracking context и квоты отслеживаемых пар. Rank-history endpoint
+принимает provider `KEY_COLLECTOR` для импортированного SERP и сохраняет его
+явное происхождение и quality flag. Keyword-scoped SERP history начинает
+диапазон с Unix epoch, а не с даты создания Keyword в SEOньорите: KC4 snapshot
+может быть старше самой записи после переноса проекта. Точный keyword,
+dimension и keyset-page по 5 сохраняют запрос bounded. Execution хранит
+`publishing_attempts` и после пяти
 неудачных claims завершает импорт контролируемой terminal-ошибкой вместо
-бесконечного цикла; уже принятые chunks остаются idempotent.
+бесконечного цикла; уже принятые chunks остаются idempotent. BullMQ-lock
+import/export worker равен 30-минутному DB lease, поэтому синхронный разбор
+крупного SQLite `.kc4` не освобождает queue job через стандартные 30 секунд.
 Широкий XLSX с историей распознаётся по колонкам дат. Один файл относится к
 одной поисковой системе; пустая ячейка означает отсутствие замера, а одиночное
 `-`, `–` или `—` — выполненный замер без найденной позиции. Контекст строки
@@ -1955,8 +2153,13 @@ filter/sort/column/format snapshot и передаёт только Job ID в Bu
 формирует CSV/TSV/JSON/NDJSON/XLSX
 без материализации полного ядра в HTTP или памяти и multipart-записью сохраняет
 артефакт в S3. XLSX автоматически делится по ограничению строк листа, а все
-spreadsheet-форматы защищены от formula injection. Состояние и row progress
+spreadsheet-форматы защищены от formula injection. Обычная таблица, карта
+папок и история позиций задают Arial 10 для каждой базовой и цветной ячейки.
+Состояние и row progress
 остаются PostgreSQL-owned; истёкший lease восстанавливается dispatcher-ом.
+Диалог экспорта использует широкий modal: длинные системные и Key Collector
+поля расположены в двухколоночных строках, не перекрывают соседние checkbox и
+прокручиваются внутри bounded списка при закреплённом действии экспорта.
 Scope `FOLDER_MAP` переиспользует тот же Job и read boundary: manifest хранит
 выбранные UUID папок и флаг включения потомков, worker сверяет их с актуальным
 деревом `keyword-groups`, исключает системные узлы и строит относительный
@@ -1988,13 +2191,18 @@ SERP-конкурентов, их `Title` / `Description`, URL ИИ-конкур
 `Title` / `Description`. SEO-owned bounded read service
 `semantic-competitor-export.service.ts` и internal endpoint
 `/internal/v1/projects/:projectId/semantic-exports/competitors` постранично
-обогащают те же строки запросов последним сохранённым XMLStock/Arsenkin SERP и
+обогащают те же строки запросов последним сохранённым
+XMLStock/Arsenkin/Key Collector SERP и
 последним Arsenkin AI-answer snapshot с источниками отдельно для каждого
 keyword/search engine. Собственный домен проекта исключается, одинаковые
 нормализованные URL дедуплицируются внутри одного keyword и источника. Один
 keyword остаётся одной строкой файла; несколько URL и SERP-блоков разделяются
 переводами строк внутри соответствующей ячейки. CSV/TSV экранируют такие
-ячейки, XLSX использует wrap-text. Дополнительный режим `COMPETITORS` создаёт
+переводы строк внутри ячейки, XLSX использует wrap-text. При
+`RANK_POSITION_*|RANK_CHECKED_AT_*` Jobs-клиент передаёт обязательный
+`rankSortDimensionKey` во всех keyword/competitor/history GET, поэтому SEO Data
+получает полный cursor/filter hash и не отклоняет export как
+`INVALID_COMMAND`. Дополнительный режим `COMPETITORS` создаёт
 одну строку на organic result и явно выводит поисковик, город/код, устройство,
 позицию SERP, URL, title, description, время и provider. Один URL в разных
 географических срезах сохраняется как разные наблюдения. Отдельные queue,

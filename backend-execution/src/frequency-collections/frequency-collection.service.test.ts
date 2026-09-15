@@ -265,6 +265,10 @@ test("returns an exact tenant-scoped result scope without provider payloads", as
       findFirst: async ({ where }: { where: unknown }) => {
         observedWhere = where;
         return {
+          provider: "ARSENKIN",
+          scopeSnapshot: {},
+          inputSnapshot: { types: ["BASE"] },
+          progressCurrent: 1n,
           items: [
             {
               sequence: 0,
@@ -284,6 +288,9 @@ test("returns an exact tenant-scoped result scope without provider payloads", as
           ]
         };
       }
+    },
+    jobItem: {
+      aggregate: async () => ({ _sum: { attempt: 2 } })
     }
   };
   const result = await new FrequencyCollectionService(

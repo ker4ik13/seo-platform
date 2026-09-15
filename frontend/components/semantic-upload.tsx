@@ -9,6 +9,8 @@ import { LanguageSelect } from "./locale-selects";
 import {
   semanticImportTargets,
   semanticPositionHistoryHeaderDate,
+  type SemanticImportPreviewRow,
+  type SemanticImportPreviewRowsPage,
   type SemanticPositionHistoryImportOptions,
   type SemanticImportTarget
 } from "@seo-platform/contracts";
@@ -18,7 +20,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent
+  type ChangeEvent,
+  type UIEvent
 } from "react";
 import {
   browserApiRequest,
@@ -172,6 +175,13 @@ interface SemanticImportSourceOption {
 
 const IMPORT_SOURCES: readonly Readonly<SemanticImportSourceOption>[] = [
   {
+    value: "KEY_COLLECTOR",
+    label: "Key Collector",
+    description: "Нативный проект .kc4: дерево, цвета, заметки, метрики и позиции",
+    badge: "KC",
+    accept: ".kc4"
+  },
+  {
     value: "UNIVERSAL",
     label: "Файл",
     description: "Универсальный CSV, TSV или XLSX с сопоставлением колонок",
@@ -186,14 +196,6 @@ const IMPORT_SOURCES: readonly Readonly<SemanticImportSourceOption>[] = [
     accept: ".csv,.tsv,.xlsx"
   },
   {
-    value: "KEY_COLLECTOR",
-    label: "Key Collector",
-    description: "Проект .kc4 целиком: дерево, цвета, заметки и метрики",
-    disabled: true,
-    badge: "KC",
-    accept: ".kc4,.csv,.tsv,.xlsx"
-  },
-  {
     value: "TOPVISOR",
     label: "Топвизор",
     description: "Запросы, группы, теги, URL и позиции из экспорта",
@@ -205,20 +207,26 @@ const IMPORT_SOURCES: readonly Readonly<SemanticImportSourceOption>[] = [
 
 const MAX_CONCURRENCY = 3;
 const INSPECTION_TIMEOUT_MS = 30 * 60 * 1_000;
+const SEMANTIC_IMPORT_TRACKING_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
 
 export function SemanticUpload({
+  onBusyChange,
+  onExpandedChange,
   projectId,
   onPublished
 }: Readonly<{
+  onBusyChange?: (busy: boolean) => void;
+  onExpandedChange?: (expanded: boolean) => void;
   projectId: string;
   onPublished?: (result: SemanticImportResult) => void;
 }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
-  const [source, setSource] = useState<SemanticImportSource>("UNIVERSAL");
+  const [source, setSource] = useState<SemanticImportSource>("KEY_COLLECTOR");
   const [file, setFile] = useState<File>();
   const [stage, setStage] = useState<UploadStage>("idle");
   const [progress, setProgress] = useState(0);
+  const [progressDetail, setProgressDetail] = useState<string>();
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
   const [importPreview, setImportPreview] =
@@ -239,6 +247,24 @@ export function SemanticUpload({
   const [importVersion, setImportVersion] = useState<number>();
   const [completedUploadId, setCompletedUploadId] = useState<string>();
   const [completedImportId, setCompletedImportId] = useState<string>();
+  const [activeImportSourceFormat, setActiveImportSourceFormat] =
+    useState<string>();
+  const [previewSort, setPreviewSort] = useState<Readonly<{
+    columnIndex: number;
+    direction: "ASC" | "DESC";
+  }>>();
+  const [previewRows, setPreviewRows] = useState<
+    readonly SemanticImportPreviewRow[]
+  >([]);
+  const [previewRowsPage, setPreviewRowsPage] = useState<
+    SemanticImportPreviewRowsPage["page"]
+  >();
+  const [previewRowsLoading, setPreviewRowsLoading] = useState(false);
+  const [previewRowsLoaded, setPreviewRowsLoaded] = useState(false);
+  const [previewRowsError, setPreviewRowsError] = useState<string>();
+  const [previewReloadNonce, setPreviewReloadNonce] = useState(0);
+  const previewRowsRequest = useRef<AbortController | undefined>(undefined);
+  const previewTable = useRef<HTMLDivElement | null>(null);
   const activeRequests = useRef(new Set<XMLHttpRequest>());
   const backgroundRequest = useRef<AbortController | undefined>(undefined);
   const cancelled = useRef(false);
@@ -256,6 +282,47 @@ export function SemanticUpload({
     "rejected",
     "cancelled"
   ].includes(stage);
+  const importInProgress = [
+    "preparing",
+    "uploading",
+    "completing",
+    "scanning",
+    "parsing",
+    "validating",
+    "publishing",
+    "import-pending"
+  ].includes(stage);
+  const closeProtectionRequired = importInProgress || (
+    Boolean(file || completedImportId) &&
+    !["completed", "rejected", "cancelled"].includes(stage)
+  );
+  const mappingWorkspaceActive = Boolean(importPreview) &&
+    ["preview", "validating", "validation-ready", "publishing"].includes(stage);
+  const automaticKeyCollectorActive =
+    activeImportSourceFormat === "KC4" && importInProgress;
+  const focusedWorkspaceActive =
+    mappingWorkspaceActive || automaticKeyCollectorActive;
+  const progressVisible = [
+    "preparing",
+    "uploading",
+    "completing",
+    "scanning",
+    "parsing",
+    "validating",
+    "publishing",
+    "import-pending",
+    "uploaded"
+  ].includes(stage);
+  const expandedWorkspace = mappingWorkspaceActive || (
+    activeImportSourceFormat !== "KC4" &&
+    Boolean(importPreview || validation || importResult)
+  );
+  const visiblePreviewRows = previewRowsLoaded
+    ? previewRows
+    : (importPreview?.sampleRows ?? []).map((values, index) => ({
+        rowNumber: String(index + 1),
+        values
+      }));
   const semanticCancellationStages: readonly UploadStage[] = [
     "parsing",
     "import-pending",
@@ -281,21 +348,98 @@ export function SemanticUpload({
     onPublished?.(result);
   }
 
+  useEffect(() => {
+    onBusyChange?.(closeProtectionRequired);
+    return () => onBusyChange?.(false);
+  }, [closeProtectionRequired, onBusyChange]);
+
+  useEffect(() => {
+    onExpandedChange?.(expandedWorkspace);
+    return () => onExpandedChange?.(false);
+  }, [expandedWorkspace, onExpandedChange]);
+
   useEffect(
-    () => () => backgroundRequest.current?.abort(),
+    () => () => {
+      backgroundRequest.current?.abort();
+      previewRowsRequest.current?.abort();
+    },
     []
   );
 
+  useEffect(() => {
+    previewRowsRequest.current?.abort();
+    setPreviewRows([]);
+    setPreviewRowsPage(undefined);
+    setPreviewRowsError(undefined);
+    setPreviewRowsLoaded(false);
+    if (
+      !["preview", "validating", "validation-ready", "publishing"].includes(stage) ||
+      !completedImportId ||
+      !importPreview ||
+      positionHistory
+    ) {
+      setPreviewRowsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    previewRowsRequest.current = controller;
+    setPreviewRowsLoading(true);
+    void fetchSemanticImportPreviewRows(
+      projectId,
+      completedImportId,
+      previewSort,
+      undefined,
+      controller.signal
+    ).then((page) => {
+      if (controller.signal.aborted) return;
+      setPreviewRows(page.rows);
+      setPreviewRowsPage(page.page);
+      setPreviewRowsLoaded(true);
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setPreviewRowsError(
+        "Не удалось загрузить строки предпросмотра. Повторите прокрутку или сортировку."
+      );
+    }).finally(() => {
+      if (previewRowsRequest.current === controller) {
+        previewRowsRequest.current = undefined;
+        setPreviewRowsLoading(false);
+      }
+    });
+    return () => controller.abort();
+  }, [
+    completedImportId,
+    importPreview,
+    positionHistory,
+    previewSort,
+    previewReloadNonce,
+    projectId,
+    stage
+  ]);
+
+  useEffect(() => {
+    const importId = sessionStorage.getItem(activeImportKey(projectId));
+    if (!importId) return;
+    setCompletedImportId(importId);
+    void trackSemanticImport(importId);
+    // Recovery runs only when this project's importer is mounted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   function resetSelectedFile(selected?: File): void {
     backgroundRequest.current?.abort();
+    sessionStorage.removeItem(activeImportKey(projectId));
     const nativeKeyCollector =
       selected?.name.toLowerCase().endsWith(".kc4") ?? false;
     setFile(selected);
     setStage("idle");
     setProgress(0);
+    setProgressDetail(undefined);
     setCompletedUploadId(undefined);
     setCompletedImportId(undefined);
+    setActiveImportSourceFormat(nativeKeyCollector ? "KC4" : undefined);
     setImportPreview(undefined);
+    setPreviewSort(undefined);
     setMappingColumns([]);
     setDefaultLanguage("ru");
     setGroupSeparator("/");
@@ -307,6 +451,7 @@ export function SemanticUpload({
     setValidation(undefined);
     setImportResult(undefined);
     setImportVersion(undefined);
+    setPreviewSort(undefined);
     setMessage(undefined);
     setError(undefined);
   }
@@ -320,13 +465,17 @@ export function SemanticUpload({
     if (busy || option?.disabled || nextSource === source) return;
     setSource(nextSource);
     backgroundRequest.current?.abort();
+    sessionStorage.removeItem(activeImportKey(projectId));
     setFile(undefined);
     setStage("idle");
     setProgress(0);
+    setProgressDetail(undefined);
     setCompletedUploadId(undefined);
     setCompletedImportId(undefined);
+    setActiveImportSourceFormat(undefined);
     setImportPreview(undefined);
     setMappingColumns([]);
+    setPreviewSort(undefined);
     setPositionHistory(undefined);
     setValidation(undefined);
     setImportResult(undefined);
@@ -349,17 +498,23 @@ export function SemanticUpload({
         projectId,
         importId,
         controller.signal,
-        (current, total) => {
-          if (total > 0) {
-            setProgress(Math.min(100, (current / total) * 100));
-          }
+        (summary) => {
+          setActiveImportSourceFormat(summary.sourceFormat);
+          const nextStage = semanticImportActiveStage(summary.status);
+          if (nextStage) setStage(nextStage);
+          const next = semanticImportProgress(summary, uiLocale);
+          setProgress(next.percent);
+          setProgressDetail(next.detail);
         }
       );
       if (controller.signal.aborted) return;
       setCompletedImportId(semanticImport.id);
       setImportVersion(semanticImport.version);
-      if (semanticImport.preview) {
+      setActiveImportSourceFormat(semanticImport.sourceFormat);
+      if (semanticImport.preview && semanticImport.sourceFormat !== "KC4") {
         setImportPreview(semanticImport.preview);
+      } else if (semanticImport.sourceFormat === "KC4") {
+        setImportPreview(undefined);
       }
       if (
         semanticImport.status === "AWAITING_MAPPING" &&
@@ -428,6 +583,8 @@ export function SemanticUpload({
         semanticImport.status === "COMPLETED" &&
         semanticImport.result
       ) {
+        sessionStorage.removeItem(activeImportKey(projectId));
+        setValidation(semanticImport.validation);
         setImportResult(semanticImport.result);
         notifyPublished(semanticImport.result);
         setStage("completed");
@@ -435,6 +592,8 @@ export function SemanticUpload({
           `Импорт завершён. Создана версия ядра №${semanticImport.result.semanticVersionNumber}.`
         );
       } else if (semanticImport.status === "CANCELLED") {
+        sessionStorage.removeItem(activeImportKey(projectId));
+        setValidation(semanticImport.validation);
         setImportResult(semanticImport.result);
         if (semanticImport.result?.partial) {
           notifyPublished(semanticImport.result);
@@ -446,6 +605,12 @@ export function SemanticUpload({
             : "Импорт отменён до публикации данных."
         );
       } else {
+        sessionStorage.removeItem(activeImportKey(projectId));
+        setValidation(semanticImport.validation);
+        setImportResult(semanticImport.result);
+        if (semanticImport.result?.partial) {
+          notifyPublished(semanticImport.result);
+        }
         setStage(
           [
             "SEO_DATA_PUBLISH_REJECTED",
@@ -454,7 +619,10 @@ export function SemanticUpload({
             ? "publish-failed"
             : "import-failed"
         );
-        setError(importFailureMessage(semanticImport.failureCode));
+        setError(importFailureMessage(
+          semanticImport.failureCode,
+          Boolean(semanticImport.result?.partial)
+        ));
       }
     } catch (importError) {
       if (controller.signal.aborted) return;
@@ -466,6 +634,7 @@ export function SemanticUpload({
         importError instanceof BrowserApiError &&
         importError.code === "NOT_FOUND"
       ) {
+        sessionStorage.removeItem(activeImportKey(projectId));
         setCompletedImportId(undefined);
         setStage("ready");
         setMessage(undefined);
@@ -498,6 +667,7 @@ export function SemanticUpload({
         );
       if (signal?.aborted) return;
       setCompletedImportId(semanticImport.id);
+      sessionStorage.setItem(activeImportKey(projectId), semanticImport.id);
       await trackSemanticImport(semanticImport.id, undefined, uiLocale);
     } catch (importError) {
       if (signal?.aborted) return;
@@ -555,6 +725,66 @@ export function SemanticUpload({
     );
   }
 
+  function togglePreviewSort(columnIndex: number): void {
+    if (previewTable.current) previewTable.current.scrollTop = 0;
+    setPreviewSort((current) => ({
+      columnIndex,
+      direction:
+        current?.columnIndex === columnIndex && current.direction === "ASC"
+          ? "DESC"
+          : "ASC"
+    }));
+  }
+
+  function loadMorePreviewRows(): void {
+    const cursor = previewRowsPage?.nextCursor;
+    if (
+      !completedImportId ||
+      !cursor ||
+      previewRowsRequest.current ||
+      !previewRowsPage.hasNext
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    previewRowsRequest.current = controller;
+    setPreviewRowsLoading(true);
+    setPreviewRowsError(undefined);
+    void fetchSemanticImportPreviewRows(
+      projectId,
+      completedImportId,
+      previewSort,
+      cursor,
+      controller.signal
+    ).then((page) => {
+      if (controller.signal.aborted) return;
+      setPreviewRows((current) => mergePreviewRows(current, page.rows));
+      setPreviewRowsPage(page.page);
+      setPreviewRowsLoaded(true);
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setPreviewRowsError(
+        "Не удалось загрузить следующую сотню строк. Прокрутите вниз, чтобы повторить."
+      );
+    }).finally(() => {
+      if (previewRowsRequest.current === controller) {
+        previewRowsRequest.current = undefined;
+        setPreviewRowsLoading(false);
+      }
+    });
+  }
+
+  function previewTableScrolled(
+    event: UIEvent<HTMLDivElement>
+  ): void {
+    const target = event.currentTarget;
+    if (
+      target.scrollHeight - target.scrollTop - target.clientHeight <= 180
+    ) {
+      loadMorePreviewRows();
+    }
+  }
+
   function applySourcePreset(): void {
     if (!importPreview) return;
     const nativeProject = file?.name.toLowerCase().endsWith(".kc4") ?? false;
@@ -585,6 +815,8 @@ export function SemanticUpload({
       return;
     }
     setStage("validating");
+    setProgress(0);
+    setProgressDetail("Готовим проверку строк…");
     setMessage(undefined);
     setError(undefined);
     setValidation(undefined);
@@ -620,6 +852,8 @@ export function SemanticUpload({
   async function publishImport(uiLocale: string = "ru-RU"): Promise<void> {
     if (!completedImportId || importVersion === undefined) return;
     setStage("publishing");
+    setProgress(0);
+    setProgressDetail("Готовим публикацию…");
     setMessage(undefined);
     setError(undefined);
     try {
@@ -654,6 +888,7 @@ export function SemanticUpload({
         );
       setImportVersion(semanticImport.version);
       if (semanticImport.status === "CANCELLED") {
+        sessionStorage.removeItem(activeImportKey(projectId));
         setImportResult(semanticImport.result);
         if (semanticImport.result?.partial) {
           notifyPublished(semanticImport.result);
@@ -744,6 +979,7 @@ export function SemanticUpload({
     cancelled.current = false;
     setStage("preparing");
     setProgress(0);
+    setProgressDetail(undefined);
     setError(undefined);
     setMessage(undefined);
     setCompletedImportId(undefined);
@@ -844,12 +1080,13 @@ export function SemanticUpload({
     }
     setStage("cancelled");
     setProgress(0);
+    setProgressDetail(undefined);
   }
 
   return (
-    <section className="panel semantic-upload" data-stage={stage}>
-      <div className="semantic-import-workspace">
-        <nav aria-label={uiText("Источник импорта")} className="semantic-import-source-nav">
+    <section className="panel semantic-upload" data-source={source} data-stage={stage}>
+      <div className={`semantic-import-workspace${focusedWorkspaceActive ? " is-mapping" : ""}${automaticKeyCollectorActive ? " is-automatic" : ""}`}>
+        {!focusedWorkspaceActive && <nav aria-label={uiText("Источник импорта")} className="semantic-import-source-nav">
           <header>
             <strong><UiText text="Источник" /></strong>
             <small><UiText text="Выберите формат — поля настроятся автоматически" /></small>
@@ -884,7 +1121,9 @@ export function SemanticUpload({
                 <Icon name="info" />
                 <span>
                   <strong><UiText text="Перед публикацией" /></strong>
-                  <small><UiText text="Файл проверяется, а изменения показываются заранее." /></small>
+                  <small><UiText text={source === "KEY_COLLECTOR"
+                    ? "После проверки KC4 импортируется автоматически."
+                    : "Файл проверяется, а изменения показываются заранее."} /></small>
                 </span>
               </div>
               <a
@@ -897,9 +1136,9 @@ export function SemanticUpload({
               </a>
             </aside>
           </div>
-        </nav>
+        </nav>}
         <div className="semantic-import-source-pane">
-          <header className="semantic-import-pane-heading">
+          {!focusedWorkspaceActive && <header className="semantic-import-pane-heading">
             <div>
               <strong>{IMPORT_SOURCES.find((option) => option.value === source)?.label}</strong>
               <small>{sourceHelp(source)}</small>
@@ -909,8 +1148,8 @@ export function SemanticUpload({
                 <a download href={example.href} key={example.href}>{example.label}</a>
               ))}
             </div>
-          </header>
-      {message && (
+          </header>}
+      {message && !focusedWorkspaceActive && (
         <div className="inline-alert success" role="status">
           {<UiText text={message ?? ""} />}
         </div>
@@ -920,7 +1159,7 @@ export function SemanticUpload({
           {<UiText text={error ?? ""} />}
         </div>
       )}
-      <label className="upload-dropzone" data-disabled={busy || undefined}>
+      {!focusedWorkspaceActive && <label className="upload-dropzone" data-disabled={busy || undefined}>
         <input
           accept={IMPORT_SOURCES.find((option) => option.value === source)?.accept}
           key={source}
@@ -932,18 +1171,24 @@ export function SemanticUpload({
           <Icon name="import" />
         </span>
         <span className="upload-dropzone-copy">
-          <strong>{file ? file.name : <UiText text="Выберите файл семантики" />}</strong>
+          <strong>{file
+            ? file.name
+            : source === "KEY_COLLECTOR"
+              ? <UiText text="Выберите проект Key Collector" />
+              : <UiText text="Выберите файл семантики" />}</strong>
           <small>
             {file
               ? <UiText text="{0} · файл готов к загрузке" values={[String(formatBytes(file.size))]} />
-              : <UiText text="CSV, TSV или XLSX · до 5 ГБ" />}
+              : source === "KEY_COLLECTOR"
+                ? <UiText text="Нативный проект .kc4 · до 1 ГБ" />
+                : <UiText text="CSV, TSV или XLSX · до 5 ГБ" />}
           </small>
         </span>
         <span className="upload-dropzone-action">
           {file ? <UiText text="Заменить" /> : <UiText text="Выбрать" />}
         </span>
-      </label>
-      {stage !== "idle" && stage !== "cancelled" && (
+      </label>}
+      {progressVisible && (
         <div className="upload-progress" aria-live="polite">
           <div>
             <span>{statusText}</span>
@@ -952,6 +1197,7 @@ export function SemanticUpload({
           <span className="upload-progress-track">
             <i style={{ width: `${progress}%` }} />
           </span>
+          {progressDetail && <small>{progressDetail}</small>}
         </div>
       )}
       {importPreview && (
@@ -993,7 +1239,13 @@ export function SemanticUpload({
               <p><UiText text="Если файл экспортирован из Сеньориты, город, код региона, устройство, страна и язык берутся из каждой строки. Эти значения имеют приоритет над настройками выше." /></p>
             </section>
           )}
-          {!positionHistory && <div className="import-preview-table" tabIndex={0}>
+          {!positionHistory && <div
+            aria-busy={previewRowsLoading}
+            className="import-preview-table"
+            onScroll={previewTableScrolled}
+            ref={previewTable}
+            tabIndex={0}
+          >
             <table>
               <thead>
                 <tr>
@@ -1004,44 +1256,80 @@ export function SemanticUpload({
                       ) ?? {
                         sourceIndex: column.index,
                         target: column.suggestedTarget
-                      };
+                    };
                     return (
                       <th key={column.index}>
-                        <span>{column.sourceName}</span>
-                        <CustomSelect
-                          aria-label={uiText("Назначение колонки {0}", [String(column.sourceName)])}
-                          disabled={stage !== "preview"}
-                          onChange={(event) =>
-                            updateMapping(
-                              column.index,
-                              event.target.value,
-                              column.sourceName
-                            )
-                          }
-                          value={selected.target}
-                        >
-                          {MAPPING_TARGETS.map((target) => (
-                            <option key={target} value={target}>
-                              <span className="import-mapping-target-option">
-                                {mappingTargetIcon(target)}
-                                <span>{<UiText text={mappingTargetLabel(target) ?? ""} />}</span>
-                              </span>
-                            </option>
-                          ))}
-                        </CustomSelect>
-                        {selected.target === "custom" && (
-                          <input
-                            aria-label={uiText("Имя пользовательской колонки {0}", [String(column.sourceName)])}
-                            disabled={stage !== "preview"}
-                            maxLength={160}
-                            onChange={(event) =>
-                              updateCustomName(
-                                column.index,
-                                event.target.value
-                              )
-                            }
-                            value={selected.customName ?? column.sourceName}
-                          />
+                        <div className="import-preview-column-heading">
+                          <span title={column.sourceName}>{column.sourceName}</span>
+                          <button
+                            aria-label={uiText(
+                              previewSort?.columnIndex === column.index && previewSort.direction === "ASC"
+                                ? "Сортировать колонку {0} по убыванию"
+                                : "Сортировать колонку {0} по возрастанию",
+                              [column.sourceName]
+                            )}
+                            aria-pressed={previewSort?.columnIndex === column.index}
+                            className={previewSort?.columnIndex === column.index ? "active" : undefined}
+                            onClick={() => togglePreviewSort(column.index)}
+                            title={uiText(
+                              previewSort?.columnIndex === column.index
+                                ? previewSort.direction === "ASC"
+                                  ? "По возрастанию · нажмите для убывания"
+                                  : "По убыванию · нажмите для возрастания"
+                                : "Сортировать значения"
+                            )}
+                            type="button"
+                          >
+                            <Icon name={previewSort?.columnIndex === column.index && previewSort.direction === "DESC" ? "arrowDown" : "arrowUp"} />
+                          </button>
+                        </div>
+                        {stage === "preview" ? (
+                          <>
+                            <small className="import-mapping-field-label"><UiText text="Поле назначения" /></small>
+                            <CustomSelect
+                              aria-label={uiText("Назначение колонки {0}", [String(column.sourceName)])}
+                              onChange={(event) =>
+                                updateMapping(
+                                  column.index,
+                                  event.target.value,
+                                  column.sourceName
+                                )
+                              }
+                              value={selected.target}
+                            >
+                              {MAPPING_TARGETS.map((target) => (
+                                <option key={target} value={target}>
+                                  <span className="import-mapping-target-option">
+                                    {mappingTargetIcon(target)}
+                                    <span>{<UiText text={mappingTargetLabel(target) ?? ""} />}</span>
+                                  </span>
+                                </option>
+                              ))}
+                            </CustomSelect>
+                            {selected.target === "custom" && (
+                              <label className="import-custom-column-name">
+                                <span><UiText text="Название своей колонки" /></span>
+                                <input
+                                  aria-label={uiText("Имя пользовательской колонки {0}", [String(column.sourceName)])}
+                                  maxLength={160}
+                                  onChange={(event) =>
+                                    updateCustomName(
+                                      column.index,
+                                      event.target.value
+                                    )
+                                  }
+                                  value={selected.customName ?? column.sourceName}
+                                />
+                              </label>
+                            )}
+                          </>
+                        ) : (
+                          <span className="import-mapping-readonly">
+                            {mappingTargetIcon(selected.target as SemanticImportTarget)}
+                            <span>{selected.target === "custom"
+                              ? selected.customName ?? column.sourceName
+                              : <UiText text={mappingTargetLabel(selected.target as SemanticImportTarget)} />}</span>
+                          </span>
                         )}
                       </th>
                     );
@@ -1049,11 +1337,11 @@ export function SemanticUpload({
                 </tr>
               </thead>
               <tbody>
-                {importPreview.sampleRows.slice(0, 5).map((row, rowIndex) => (
-                  <tr key={rowIndex}>
+                {visiblePreviewRows.map((row) => (
+                  <tr key={row.rowNumber}>
                     {importPreview.columns.map((column) => (
                       <td key={column.index}>
-                        {row[column.index] || "—"}
+                        {row.values[column.index] || "—"}
                       </td>
                     ))}
                   </tr>
@@ -1061,15 +1349,79 @@ export function SemanticUpload({
               </tbody>
             </table>
           </div>}
-          <small className="upload-note">
+          {!positionHistory && (
+            <div className="import-preview-pagination-status" role="status">
+              <span>
+                <UiText text="Показано {0} из {1}" values={[
+                  String(visiblePreviewRows.length),
+                  String(formatInteger(previewRowsPage?.totalRows ?? importPreview.totalRows, uiLocale))
+                ]} />
+              </span>
+              {previewRowsLoading && <span><UiText text="Загружаем 100 строк…" /></span>}
+              {previewRowsError && (
+                <button onClick={() => setPreviewReloadNonce((value) => value + 1)} type="button">
+                  <UiText text="Повторить загрузку" />
+                </button>
+              )}
+              {!previewRowsLoading && previewRowsPage?.hasNext && !previewRowsError && (
+                <span><UiText text="Прокрутите ниже — загрузятся следующие 100" /></span>
+              )}
+            </div>
+          )}
+          <small className="upload-note import-preview-note">
             <UiText text={positionHistory
               ? "Колонки с датами распознаны автоматически; сопоставлять их вручную не нужно."
-              : "Для каждой исходной колонки выберите поле назначения, «Своя колонка» или «Не импортировать». Таблица прокручивается по горизонтали."} /></small>
+              : stage === "preview"
+                ? "Для каждой исходной колонки выберите поле назначения, «Своя колонка» или «Не импортировать». Таблица прокручивается по горизонтали и вертикали; её шапка остаётся на месте."
+                : source === "KEY_COLLECTOR"
+                  ? "Нативный профиль Key Collector применён автоматически; нестандартные данные сохранятся в пользовательских колонках."
+                  : "Сопоставление проверено и готово к публикации."} /></small>
           {stage === "preview" && (
-            <div className="import-mapping-options">
-              {!positionHistory && <button className="secondary-button import-keycollector-preset" onClick={applySourcePreset} type="button">
-                <UiText text="Вернуть автонастройку формата" /></button>
-              }
+            <section className="import-mapping-settings">
+              <header>
+                <div>
+                  <strong><UiText text="Правила публикации" /></strong>
+                  <small><UiText text="Настройте язык, дерево групп и поведение при совпадении запросов." /></small>
+                </div>
+                {!positionHistory && (
+                  <button className="secondary-button import-keycollector-preset" onClick={applySourcePreset} type="button">
+                    <Icon name="refresh" /><UiText text="Вернуть автонастройку" />
+                  </button>
+                )}
+              </header>
+              <div className="import-mapping-settings-grid">
+                <label>
+                  <span><UiText text="Язык запросов" /></span>
+                  <LanguageSelect
+                    aria-label={uiText("Язык запросов по умолчанию")}
+                    onChange={(event) => setDefaultLanguage(event.target.value)}
+                    value={defaultLanguage}
+                  />
+                  <small><UiText text="Применяется, если язык отсутствует в исходной строке." /></small>
+                </label>
+                <label>
+                  <span><UiText text="Разделитель пути групп" /></span>
+                  <input
+                    aria-label={uiText("Разделитель пути групп")}
+                    maxLength={8}
+                    onChange={(event) => setGroupSeparator(event.target.value)}
+                    value={groupSeparator}
+                  />
+                  <small><UiText text="Для нативного KC4 используется «/»; вложенность дерева сохраняется." /></small>
+                </label>
+                <label>
+                  <span><UiText text="Если запрос уже существует" /></span>
+                  <CustomSelect
+                    onChange={(event) => setDuplicatePolicy(event.target.value)}
+                    value={duplicatePolicy}
+                  >
+                    <option disabled={!createMissingKeywords} value="SKIP_EXISTING"><UiText text="Пропустить существующие" /></option>
+                    <option value="MERGE_NON_EMPTY"><UiText text="Заполнить только пустые поля" /></option>
+                    <option value="OVERWRITE_MAPPED"><UiText text="Обновить сопоставленные поля" /></option>
+                  </CustomSelect>
+                  <small><UiText text="Нативный KC4 по умолчанию обновляет только выбранные поля." /></small>
+                </label>
+              </div>
               <label className="import-create-missing-option">
                 <input
                   checked={createMissingKeywords}
@@ -1083,51 +1435,13 @@ export function SemanticUpload({
                   type="checkbox"
                 />
                 <span>
-                  <strong><UiText text="Добавлять новые запросы" /></strong>
-                  <small>
-                    <UiText text="Выключено по умолчанию: строки без совпадения будут пропущены." /></small>
+                  <strong><UiText text="Добавлять отсутствующие запросы" /></strong>
+                  <small><UiText text={createMissingKeywords
+                    ? "Новые фразы будут созданы; найденные совпадения обработаются по правилу выше."
+                    : "Будут обновлены только уже существующие фразы, новые строки пропустятся."} /></small>
                 </span>
               </label>
-              <label>
-                <UiText text="Язык запросов" /><LanguageSelect
-                  aria-label={uiText("Язык запросов по умолчанию")}
-                  onChange={(event) =>
-                    setDefaultLanguage(event.target.value)
-                  }
-                  value={defaultLanguage}
-                />
-                <small>
-                  <UiText text="Должен совпадать с языком существующих запросов; по умолчанию — ru." /></small>
-              </label>
-              <label>
-                <UiText text="Разделитель групп" /><input
-                  aria-label={uiText("Разделитель пути групп")}
-                  maxLength={8}
-                  onChange={(event) =>
-                    setGroupSeparator(event.target.value)
-                  }
-                  value={groupSeparator}
-                />
-              </label>
-              <label>
-                <UiText text="Обработка существующих запросов" /><CustomSelect
-                  onChange={(event) =>
-                    setDuplicatePolicy(event.target.value)
-                  }
-                  value={duplicatePolicy}
-                >
-                  <option
-                    disabled={!createMissingKeywords}
-                    value="SKIP_EXISTING"
-                  >
-                    <UiText text="Пропустить существующие" /></option>
-                  <option value="MERGE_NON_EMPTY">
-                    <UiText text="Заполнить только пустые поля" /></option>
-                  <option value="OVERWRITE_MAPPED">
-                    <UiText text="Обновить сопоставленные поля" /></option>
-                </CustomSelect>
-              </label>
-            </div>
+            </section>
           )}
         </div>
       )}
@@ -1264,12 +1578,46 @@ export function SemanticUpload({
             <UiText text="Отменить" /></button>
         )}
       </div>
-      <small className="upload-note">
-        <UiText text="После загрузки файл не публикуется сразу: сначала идут антивирусная проверка, распознавание колонок и preview конфликтов." /></small>
+      {!focusedWorkspaceActive && <small className="upload-note">
+        <UiText text={source === "KEY_COLLECTOR"
+          ? "После проверки безопасности поля KC4 сопоставляются и публикуются автоматически."
+          : "После загрузки файл не публикуется сразу: сначала идут антивирусная проверка, распознавание колонок и preview конфликтов."} /></small>
+      }
         </div>
       </div>
     </section>
   );
+}
+
+async function fetchSemanticImportPreviewRows(
+  projectId: string,
+  importId: string,
+  sort: Readonly<{ columnIndex: number; direction: "ASC" | "DESC" }> | undefined,
+  cursor: string | undefined,
+  signal: AbortSignal
+): Promise<SemanticImportPreviewRowsPage> {
+  const query = new URLSearchParams();
+  if (sort) {
+    query.set("sortColumn", String(sort.columnIndex));
+    query.set("sortDirection", sort.direction);
+  }
+  if (cursor) query.set("cursor", cursor);
+  return browserApiRequest<SemanticImportPreviewRowsPage>(
+    `/app/api/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(importId)}/preview-rows${query.size > 0 ? `?${query.toString()}` : ""}`,
+    { signal }
+  );
+}
+
+export function mergePreviewRows(
+  current: readonly SemanticImportPreviewRow[],
+  incoming: readonly SemanticImportPreviewRow[]
+): readonly SemanticImportPreviewRow[] {
+  if (incoming.length === 0) return current;
+  const seen = new Set(current.map(({ rowNumber }) => rowNumber));
+  return [
+    ...current,
+    ...incoming.filter(({ rowNumber }) => !seen.has(rowNumber))
+  ];
 }
 
 function ImportSourceButton({
@@ -1503,6 +1851,10 @@ function sessionKey(projectId: string, file: File): string {
   ].join(":");
 }
 
+function activeImportKey(projectId: string): string {
+  return `semantic-import-active:${projectId}`;
+}
+
 function readSession(key: string): StoredUploadSession | undefined {
   try {
     const value = sessionStorage.getItem(key);
@@ -1599,19 +1951,16 @@ async function waitForSemanticImport(
   projectId: string,
   importId: string,
   signal: AbortSignal,
-  onProgress: (current: number, total: number) => void
+  onProgress: (summary: SemanticImportSummary) => void
 ): Promise<SemanticImportSummary> {
   const startedAt = Date.now();
   let delayMs = 1_000;
-  while (Date.now() - startedAt < INSPECTION_TIMEOUT_MS) {
+  while (Date.now() - startedAt < SEMANTIC_IMPORT_TRACKING_TIMEOUT_MS) {
     const semanticImport = await browserApiRequest<SemanticImportSummary>(
       `/app/api/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(importId)}`,
       { signal }
     );
-    onProgress(
-      Number(semanticImport.progressBytes),
-      Number(semanticImport.totalBytes)
-    );
+    onProgress(semanticImport);
     if (
       [
         "AWAITING_MAPPING",
@@ -1641,6 +1990,68 @@ async function waitForSemanticImport(
     delayMs = Math.min(5_000, Math.ceil(delayMs * 1.5));
   }
   throw new Error("Semantic import is still running");
+}
+
+function semanticImportActiveStage(
+  status: string
+): "parsing" | "validating" | "publishing" | undefined {
+  if (["QUEUED", "PARSING"].includes(status)) return "parsing";
+  if (status === "VALIDATING") return "validating";
+  if (
+    ["READY_TO_PUBLISH", "PUBLISHING", "CANCEL_REQUESTED"].includes(status)
+  ) {
+    return "publishing";
+  }
+  return undefined;
+}
+
+function semanticImportProgress(
+  summary: SemanticImportSummary,
+  uiLocale: string
+): Readonly<{ percent: number; detail?: string }> {
+  const parts = summary.stage.split(":");
+  const current = Number(parts[1]);
+  const total = Number(parts[2]);
+  if (parts[0] === "validating_rows" && !(total > 0)) {
+    return { percent: 0, detail: "Готовим проверку строк…" };
+  }
+  if (parts[0] === "validating_rows" && total > 0) {
+    return {
+      percent: Math.min(100, (current / total) * 100),
+      detail: `Проверено ${formatInteger(String(current), uiLocale)} из ${formatInteger(String(total), uiLocale)} строк`
+    };
+  }
+  if (parts[0] === "publishing_chunks" && total > 0) {
+    const chunk = Number(parts[3]);
+    const chunks = Number(parts[4]);
+    return {
+      percent: Math.min(100, (current / total) * 100),
+      detail: `Опубликовано ${formatInteger(String(current), uiLocale)} из ${formatInteger(String(total), uiLocale)} запросов${chunks > 0 ? ` · чанк ${formatInteger(String(chunk), uiLocale)} из ${formatInteger(String(chunks), uiLocale)}` : ""}`
+    };
+  }
+  if (parts[0] === "publishing_chunks") {
+    return { percent: 0, detail: "Готовим публикацию…" };
+  }
+  const progressBytes = Number(summary.progressBytes);
+  const totalBytes = Number(summary.totalBytes);
+  const percent = totalBytes > 0
+    ? Math.min(100, (progressBytes / totalBytes) * 100)
+    : 0;
+  const kc4Stages: Readonly<Record<string, string>> = {
+    downloading_kc4: `Скачано ${formatBytes(progressBytes)} из ${formatBytes(totalBytes)}`,
+    extracting_kc4: "Распаковываем базу Key Collector…",
+    checking_kc4_database: "Проверяем целостность SQLite…",
+    reading_kc4_schema: "Читаем дерево, колонки и историю позиций…"
+  };
+  const kc4Detail = kc4Stages[parts[0]!];
+  if (kc4Detail) return { percent, detail: kc4Detail };
+  if (parts[0] === "parsing_rows" && current > 0) {
+    return {
+      percent,
+      detail: `Разобрано ${formatInteger(String(current), uiLocale)} строк`
+    };
+  }
+  return { percent };
 }
 
 function pause(durationMs: number, signal: AbortSignal): Promise<void> {
@@ -1718,7 +2129,10 @@ function importCommandErrorMessage(error: unknown): string {
   return "Не удалось выполнить действие с импортом. Повторите позже.";
 }
 
-function importFailureMessage(code: string | undefined): string {
+function importFailureMessage(
+  code: string | undefined,
+  partial = false
+): string {
   const messages: Readonly<Record<string, string>> = {
     EMPTY_IMPORT: "В файле не найдено строк для импорта.",
     UNTERMINATED_QUOTE:
@@ -1747,6 +2161,8 @@ function importFailureMessage(code: string | undefined): string {
       "Проект .kc4 превышает безопасный лимит нативного импорта.",
     KC4_ARCHIVE_TOO_LARGE:
       "Проект .kc4 отклонён: распакованная база превышает безопасный лимит.",
+    KC4_TOO_MANY_GROUPS:
+      "В проекте .kc4 больше 20 000 активных папок. Разделите проект перед импортом.",
     IMPORT_MAPPING_INVALID:
       "Сопоставление колонок устарело или повреждено. Вернитесь к настройке импорта.",
     SEO_DATA_VALIDATION_REJECTED:
@@ -1762,6 +2178,12 @@ function importFailureMessage(code: string | undefined): string {
     IMPORT_PUBLISH_RETRY_EXHAUSTED:
       "Публикацию не удалось завершить после нескольких попыток. Повтор остановлен автоматически; данные проекта не удалены."
   };
+  if (partial && code === "SEO_DATA_PUBLISH_REJECTED") {
+    return "Публикация остановлена. Уже применённая часть сохранена отдельной версией; повторно загрузите файл, чтобы дополнить проект.";
+  }
+  if (partial && code === "IMPORT_PUBLISH_RETRY_EXHAUSTED") {
+    return "Публикация остановлена после нескольких попыток. Уже применённая часть сохранена отдельной версией; повторно загрузите файл, чтобы продолжить полным импортом.";
+  }
   return (
     (code && messages[code]) ||
     "Файл не удалось разобрать. Проверьте формат, кодировку и разделитель."
@@ -1913,7 +2335,7 @@ function importPresetTarget(
 
 function sourceHelp(source: SemanticImportSource): string {
   const messages: Readonly<Record<SemanticImportSource, string>> = {
-    KEY_COLLECTOR: "Загрузите нативный .kc4. Сеньорита перенесёт дерево групп, цвета, запросы, заметки, URL, частотности, позиции и остальные заполненные колонки.",
+    KEY_COLLECTOR: "Загрузите нативный .kc4. Поля сопоставятся автоматически, после проверки Сеньорита сразу перенесёт дерево, цвета, заметки, колонки, частотности, позиции, URL и сохранённую выдачу.",
     TOPVISOR: "Поддерживаются CSV, TSV и XLSX. Названия стандартных колонок Топвизора будут сопоставлены автоматически, остальные останутся доступными как свои поля.",
     UNIVERSAL: "Загрузите таблицу с заголовками. Перед публикацией можно назначить каждой колонке поле Сеньориты и проверить конфликты.",
     POSITIONS: "Поддерживаются широкая история с датами в колонках и построчный формат с колонками Запрос, Дата, Поисковик и Позиция."

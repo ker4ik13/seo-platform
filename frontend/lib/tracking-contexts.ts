@@ -36,6 +36,7 @@ export interface TrackingContextDraft {
   readonly includeUntracked: boolean;
   readonly scopeMode: TrackingContextScopeMode;
   readonly groupIds: readonly string[];
+  readonly descendantGroupIds: readonly string[];
 }
 
 export type TrackingContextDraftField =
@@ -77,7 +78,8 @@ export function emptyTrackingContextDraft(): TrackingContextDraft {
     searchSource: "LIVE",
     includeUntracked: false,
     scopeMode: "KEYWORDS",
-    groupIds: []
+    groupIds: [],
+    descendantGroupIds: []
   };
 }
 
@@ -119,7 +121,14 @@ export function trackingContextDraft(
     searchSource: context.launchProfile?.searchSource ?? "LIVE",
     includeUntracked: context.launchProfile?.includeUntracked ?? false,
     scopeMode: context.launchProfile?.scope.mode ?? "ALL",
-    groupIds: context.launchProfile?.scope.groupIds ?? []
+    groupIds: context.launchProfile?.scope.groupIds ?? [],
+    descendantGroupIds:
+      context.launchProfile?.scope.mode === "GROUPS"
+        ? context.launchProfile.scope.descendantGroupIds ??
+          (context.launchProfile.scope.includeDescendants ?? true
+            ? context.launchProfile.scope.groupIds
+            : [])
+        : []
   };
 }
 
@@ -363,6 +372,12 @@ function trackingContextMutationInput(
         groupIds:
           draft.scopeMode === "GROUPS"
             ? [...new Set(draft.groupIds)].sort()
+            : [],
+        descendantGroupIds:
+          draft.scopeMode === "GROUPS"
+            ? [...new Set(draft.descendantGroupIds)]
+                .filter((groupId) => draft.groupIds.includes(groupId))
+                .sort()
             : []
       }
     }

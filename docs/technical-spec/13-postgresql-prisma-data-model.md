@@ -646,6 +646,19 @@ step отзывает `PUBLIC EXECUTE` у member functions и выдаёт их 
 
 При необходимости строгий dedup заменяется отдельной `keyword_unique_keys`, чтобы поддержать variants.
 
+#### `keyword_merges`
+
+- `id`, `workspace_id`, `project_id`;
+- уникальный `source_keyword_id` и индексированный `target_keyword_id`;
+- snapshot исходных `source_text`, `source_language`;
+- `created_by`, `created_at`.
+
+Обе ссылки имеют составной tenant FK на `keywords`; source и target обязаны
+различаться. Перед созданием правила все прежние алиасы source-target
+перенаправляются непосредственно на конечный target, поэтому чтение не требует
+рекурсивного обхода. Immutable snapshots сохраняют исходный keyword ID, а read
+models соединяют его с активным target через эту таблицу.
+
 #### `semantic_negative_keyword_presets`
 
 - `id`, `workspace_id`, `project_id`;
@@ -993,6 +1006,28 @@ Projection:
 - quality.
 
 Primary key `(keyword_id, context_id)`.
+
+#### `project_position_history_revisions` и `project_position_history_projections`
+
+Постоянная read-проекция главного графика принадлежит Core SEO. Revision table
+имеет tenant primary key `(workspace_id, project_id)` и монотонный `BIGINT`.
+Statement-level triggers с transition tables увеличивают revision один раз на
+SQL statement при добавлении rank snapshots и при изменении tracked/status,
+контекстов, history deletions, keyword merges или rank-dimension merges.
+
+Projection table имеет primary key
+`(workspace_id, project_id, scope_hash)` и хранит:
+
+- version алгоритма;
+- exact source revision;
+- bounded JSON до 100 дневных точек;
+- время построения.
+
+Read использует payload только при полном совпадении revision и версии схемы.
+После rank finalization и semantic import tracked-проекция прогревается; для
+других dimension/include-untracked scopes действует lazy rebuild. Решение и
+freshness protocol зафиксированы в
+`ADR-2026-049-project-position-history-projection.md`.
 
 ### 5.6. Frequency snapshots
 

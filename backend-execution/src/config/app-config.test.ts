@@ -196,9 +196,9 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.uploads.inspectionConcurrency, 2);
   assert.equal(config.imports.parseLeaseMinutes, 30);
   assert.equal(config.imports.parseConcurrency, 2);
-  assert.equal(config.imports.stagingBatchRows, 1_000);
+  assert.equal(config.imports.stagingBatchRows, 5_000);
   assert.equal(config.imports.previewRows, 20);
-  assert.equal(config.imports.publishBatchRows, 200);
+  assert.equal(config.imports.publishBatchRows, 5_000);
   assert.equal(config.services.seoData, "http://127.0.0.1:4001");
   assert.equal(config.services.platformApi, "http://127.0.0.1:4000");
   assert.equal(config.platformApiCommandTimeoutMs, 5_000);

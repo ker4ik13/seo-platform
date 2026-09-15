@@ -11,8 +11,7 @@ import {
   type KeywordResearchRowPage,
   type KeywordResearchRunSummary,
   type KeysSoDatabase,
-  type ProjectConnectorBinding,
-  type ProjectConnectorSettings,
+  type ProjectConnectorCredentialOption,
   type ProjectSearchCity,
   type SemanticImportDuplicatePolicy,
   type SemanticKeywordGroup,
@@ -31,20 +30,13 @@ import {
 } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { seoRegionDisplayName } from "../lib/seo-regions";
-import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import { integrationProviderLabel } from "../lib/integration-presentation";
+import { frequencyProviderUsageEstimate } from "../lib/provider-usage-estimate";
 import {
-  createProjectConnectorBindingInput,
-  type IdempotentCreateCommand,
-  projectConnectorBinding,
-  projectConnectorCreatePayloadSignature,
-  type ProjectConnectorDraft,
-  stableProjectConnectorCreateCommand,
-  updateProjectConnectorBindingInput,
-  withProjectConnectorBinding
+  isProjectConnectorCredentialEligible,
+  workspaceConnectorOptions
 } from "../lib/project-integration-settings";
 import {
-  wordstatExpansionSourceOptions,
   wordstatResultLimit,
   wordstatScopeIsResolving
 } from "../lib/wordstat-expansion-form";
@@ -814,7 +806,6 @@ export function WordstatExpansionDialog({
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
   const formId = useId();
-  const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [workspaceRouting, setWorkspaceRouting] =
     useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
@@ -841,14 +832,21 @@ export function WordstatExpansionDialog({
   const [maxKeywords, setMaxKeywords] = useState("5000");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const bindingCommand = useRef<IdempotentCreateCommand | undefined>(undefined);
-  const sourceOptions = useMemo(
-    () => settings && workspaceRouting
-      ? wordstatExpansionSourceOptions(settings, workspaceRouting)
-      : { requiresProjectBinding: false, sources: [] },
-    [settings, workspaceRouting]
+  const sources = useMemo(
+    () => workspaceRouting
+      ? workspaceConnectorOptions(workspaceRouting, "KEYWORD_RESEARCH").filter(
+          ({ provider }) => provider === "XMLSTOCK" || provider === "ARSENKIN"
+        )
+      : [],
+    [workspaceRouting]
   );
-  const sources = sourceOptions.sources;
+  const connectedWordstatSources = useMemo<readonly ProjectConnectorCredentialOption[]>(
+    () => (workspaceRouting?.credentialOptions ?? []).filter((source) =>
+      (source.provider === "XMLSTOCK" || source.provider === "ARSENKIN") &&
+      isProjectConnectorCredentialEligible(source, "KEYWORD_RESEARCH")
+    ),
+    [workspaceRouting]
+  );
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const provider: "XMLSTOCK" | "ARSENKIN" =
     selectedSource?.provider === "ARSENKIN" ? "ARSENKIN" : "XMLSTOCK";
@@ -857,26 +855,29 @@ export function WordstatExpansionDialog({
   const maximumResultCount = wordstatResultLimit(provider, maxKeywords);
   const maximumResultCountValid = maximumResultCount !== undefined;
   const projectScopeResolving = wordstatScopeIsResolving(mode, scopeResolving);
+  const providerUsage = frequencyProviderUsageEstimate(
+    selectedSource,
+    queries.length,
+    1,
+    uiLocale
+  );
 
   useEffect(() => {
     const controller = new AbortController();
     setLoadingProviders(true);
     setProviderError(undefined);
-    const preparedSources = preparedProjectIntegrations(projectId, controller.signal);
-    void Promise.all([
-      preparedSources,
-      preparedSources.then(() => browserApiRequest<WorkspaceConnectorRoutingSettings>(
-        `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
-        { signal: controller.signal }
-      ))
-    ])
-      .then(([result, workspaceResult]) => {
+    void browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
+      { signal: controller.signal }
+    )
+      .then((workspaceResult) => {
         if (controller.signal.aborted) return;
-        const configured = wordstatExpansionSourceOptions(
-          result,
-          workspaceResult
-        ).sources;
-        setSettings(result);
+        const configured = workspaceConnectorOptions(
+          workspaceResult,
+          "KEYWORD_RESEARCH"
+        ).filter(
+          ({ provider }) => provider === "XMLSTOCK" || provider === "ARSENKIN"
+        );
         setWorkspaceRouting(workspaceResult);
         setCredentialId((current) =>
           configured.some(({ id }) => id === current)
@@ -893,7 +894,7 @@ export function WordstatExpansionDialog({
         if (!controller.signal.aborted) setLoadingProviders(false);
       });
     return () => controller.abort();
-  }, [projectId, workspaceId]);
+  }, [workspaceId]);
 
   async function submit(event?: FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
@@ -908,9 +909,6 @@ export function WordstatExpansionDialog({
     setBusy(true);
     setError(undefined);
     try {
-      if (sourceOptions.requiresProjectBinding) {
-        await ensureWordstatExpansionBinding(selectedSource.id);
-      }
       await onSubmit({
         source: provider === "XMLSTOCK" ? "XMLSTOCK_WORDSTAT" : "ARSENKIN_WORDSTAT",
         queries,
@@ -928,51 +926,6 @@ export function WordstatExpansionDialog({
     }
   }
 
-  async function ensureWordstatExpansionBinding(
-    selectedCredentialId: string
-  ): Promise<void> {
-    if (!settings) return;
-    const capability = "KEYWORD_RESEARCH" as const;
-    const current = projectConnectorBinding(settings, capability);
-    const draft = { credentialId: selectedCredentialId, enabled: true };
-    const updated = current
-      ? await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings/${encodeURIComponent(current.id)}`,
-          {
-            method: "PATCH",
-            ifMatch: current.version,
-            body: updateProjectConnectorBindingInput(draft)
-          }
-        )
-      : await createWordstatExpansionBinding(capability, draft);
-    setSettings(withProjectConnectorBinding(settings, updated));
-    bindingCommand.current = undefined;
-  }
-
-  async function createWordstatExpansionBinding(
-    capability: "KEYWORD_RESEARCH",
-    draft: ProjectConnectorDraft
-  ): Promise<ProjectConnectorBinding> {
-    const signature = projectConnectorCreatePayloadSignature(
-      capability,
-      draft
-    );
-    const command = stableProjectConnectorCreateCommand(
-      bindingCommand.current,
-      signature,
-      () => `wordstat-expansion-binding:${globalThis.crypto.randomUUID()}`
-    );
-    bindingCommand.current = command;
-    return browserApiRequest<ProjectConnectorBinding>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-      {
-        method: "POST",
-        idempotencyKey: command.key,
-        body: createProjectConnectorBindingInput(capability, draft)
-      }
-    );
-  }
-
   return (
     <SemanticModal
       description={uiText("До 500 исходных фраз. Результат сначала появится в предпросмотре и не изменит ядро без подтверждения.")}
@@ -982,6 +935,7 @@ export function WordstatExpansionDialog({
             <div><Icon name="semantic" /><div><dt><UiText text="Исходных запросов" /></dt><dd>{queries.length}</dd></div></div>
             <div><ProviderLogo provider={provider} /><div><dt><UiText text="Подключение" /></dt><dd>{selectedSource ? `${selectedSource.label} · ${integrationProviderLabel(selectedSource.provider)}` : loadingProviders ? <UiText text="Загружаем…" /> : <UiText text="Не выбрано" />}</dd></div></div>
             <div><Icon name="operations" /><div><dt><UiText text="Результат" /></dt><dd>{provider === "ARSENKIN" ? <UiText text="Все данные Arsenkin" /> : maximumResultCountValid ? <UiText text="до {0}" values={[String(formatInteger(maximumResultCount, uiLocale))]} /> : <UiText text="Укажите от 1 до 10 000" />}</dd></div></div>
+            <div><Icon name="frequency" /><div><dt><UiText text="Расход" /></dt><dd>{providerUsage.usage}</dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
             <button className="secondary-button" disabled={busy} onClick={onClose} type="button"><UiText text="Отмена" /></button>
@@ -1012,7 +966,7 @@ export function WordstatExpansionDialog({
               <h3><UiText text="Источник данных" /></h3>
               <a
                 className="semantic-dialog-link"
-                href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}
+                href="/app/settings/integrations"
               >
                 <UiText text="Управлять" /></a>
               <p><UiText text="Выберите подключённый сервис, через который будет выполнен сбор Wordstat." /></p>
@@ -1041,7 +995,12 @@ export function WordstatExpansionDialog({
                 ))}
               </div>
             ) : (
-              <div className="inline-alert warning"><UiText text="Нет доступного маршрута XMLStock или Arsenkin для парсинга Wordstat." /></div>
+              <div className="inline-alert warning">
+                <span>{connectedWordstatSources.length > 0
+                  ? <UiText text="Подключение Wordstat доступно, но для парсинга не выбран маршрут рабочей области." />
+                  : <UiText text="Нет доступного подключения XMLStock или Arsenkin для парсинга Wordstat." />}</span>{" "}
+                <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+              </div>
             )}
             <div className="inline-alert info compact keyword-research-wordstat-preview-note">
               <UiText text="Результат сначала попадёт в предпросмотр. Запросы появятся в ядре только после вашего подтверждения." /></div>

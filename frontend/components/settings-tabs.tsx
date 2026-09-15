@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useId, useRef, useState } from "react";
 import {
-  canViewProjectIntegrations,
   canViewWorkspaceBilling,
   canViewWorkspaceTeam,
   canViewWorkspaceIntegrations
@@ -15,7 +14,6 @@ import { useUiLocale, UiText } from "./ui-locale";
 
 export function SettingsTabs({
   active,
-  projectAccessLevel,
   projectId,
   workspaceRoleCode
 }: Readonly<{
@@ -32,8 +30,7 @@ export function SettingsTabs({
     | "notifications"
     | "integrations"
     | "project-notifications"
-    | "ranking-contexts"
-    | "project-integrations";
+    | "ranking-contexts";
   projectId?: string;
   projectAccessLevel?: AppProject["projectAccessLevel"];
   workspaceRoleCode: string | undefined;
@@ -47,8 +44,7 @@ export function SettingsTabs({
     workspace: "Рабочая область", team: "Команда", roles: "Роли и права",
     project: "Основные настройки проекта", security: "Профиль и безопасность",
     api: "API-ключи", notifications: "Уведомления", integrations: "Интеграции",
-    "project-notifications": "Уведомления проекта", "ranking-contexts": "Съём позиций",
-    "project-integrations": "Интеграции проекта"
+    "project-notifications": "Уведомления проекта", "ranking-contexts": "Съём позиций"
   }[active];
   return (
     <nav
@@ -175,22 +171,6 @@ export function SettingsTabs({
           >
             <Icon name="projects" />
             <UiText text="Основные настройки" /></Link>
-          {canViewProjectIntegrations(
-            workspaceRoleCode,
-            projectAccessLevel
-          ) && (
-            <Link
-              aria-current={
-                active === "project-integrations" ? "page" : undefined
-              }
-              className={
-                active === "project-integrations" ? "active" : undefined
-              }
-              href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}
-            >
-              <Icon name="tools" />
-              <UiText text="Интеграции проекта" /></Link>
-          )}
           <Link
             aria-current={
               active === "project-notifications" ? "page" : undefined

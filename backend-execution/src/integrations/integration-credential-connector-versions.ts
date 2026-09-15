@@ -2,4 +2,4 @@ export const ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION =
   "arsenkin@1.0.0";
 
 export const XMLSTOCK_CREDENTIAL_VALIDATION_CONNECTOR_VERSION =
-  "xmlstock@1.2.0";
+  "xmlstock@1.3.0";

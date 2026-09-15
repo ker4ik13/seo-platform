@@ -13,6 +13,7 @@ import {
 import type { AppProject } from "../lib/app-types";
 import { announceProjectSemanticMutation } from "../lib/semantic-realtime";
 import { useProjectPresence } from "./project-presence-provider";
+import { UiText } from "./ui-locale";
 
 type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS";
 
@@ -39,6 +40,9 @@ export function SemanticsWorkspace({
   const [clusterRefreshVersion, setClusterRefreshVersion] = useState(0);
   const [columnRefreshVersion, setColumnRefreshVersion] = useState(0);
   const [activeTool, setActiveTool] = useState<SemanticTool>();
+  const [importInProgress, setImportInProgress] = useState(false);
+  const [importExpanded, setImportExpanded] = useState(false);
+  const [confirmImportClose, setConfirmImportClose] = useState(false);
   const [trashRecoveryItems, setTrashRecoveryItems] = useState<
     readonly SemanticTrashRecoveryItem[]
   >([]);
@@ -54,6 +58,14 @@ export function SemanticsWorkspace({
             : null
     );
   }, [activeTool, publishActivity, trashRecoveryItems.length]);
+
+  function closeTool(): void {
+    if (activeTool === "IMPORT" && importInProgress) {
+      setConfirmImportClose(true);
+      return;
+    }
+    setActiveTool(undefined);
+  }
 
   return (
     <div className="semantic-workspace">
@@ -75,8 +87,11 @@ export function SemanticsWorkspace({
       />
       {activeTool && (
         <SemanticModal
+          {...(activeTool === "IMPORT"
+            ? { className: `semantic-import-modal${importExpanded ? " is-expanded" : ""}` }
+            : {})}
           description={toolDescription(activeTool)}
-          onClose={() => setActiveTool(undefined)}
+          onClose={closeTool}
           presenceKey={`semantic-modal:${activeTool.toLocaleLowerCase("en")}`}
           size={activeTool === "IMPORT" ? "fullscreen" : "large"}
           title={toolLabel(activeTool)}
@@ -84,6 +99,8 @@ export function SemanticsWorkspace({
           <div className="semantic-tool-modal-content">
             {activeTool === "IMPORT" && (
               <SemanticUpload
+                onBusyChange={setImportInProgress}
+                onExpandedChange={setImportExpanded}
                 onPublished={(result) => {
                   setRefreshVersion((value) => value + 1);
                   setGroupRefreshVersion((value) => value + 1);
@@ -120,6 +137,31 @@ export function SemanticsWorkspace({
                 projectId={projectId}
               />
             )}
+          </div>
+        </SemanticModal>
+      )}
+      {confirmImportClose && (
+        <SemanticModal
+          description="Обработка и подготовленные настройки сохранятся, но окно текущего импорта закроется."
+          footer={
+            <div className="semantic-modal-actions">
+              <button autoFocus className="secondary-button" onClick={() => setConfirmImportClose(false)} type="button"><UiText text="Остаться" /></button>
+              <button className="danger-button" onClick={() => {
+                setConfirmImportClose(false);
+                setActiveTool(undefined);
+              }} type="button"><UiText text="Закрыть окно" /></button>
+            </div>
+          }
+          onClose={() => setConfirmImportClose(false)}
+          presenceKey="semantic-modal:confirm-import-close"
+          size="small"
+          title="Закрыть текущий импорт?"
+        >
+          <div className="semantic-confirm-dialog">
+            <div className="inline-alert warning" role="alert">
+              <strong>Импорт ещё не завершён</strong>
+              <span>При следующем открытии можно продолжить с сохранённого этапа.</span>
+            </div>
           </div>
         </SemanticModal>
       )}

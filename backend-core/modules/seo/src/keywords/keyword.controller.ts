@@ -31,6 +31,11 @@ import type {
   SemanticKeywordCleaningResult,
   SemanticKeywordListItem,
   SemanticKeywordInsights,
+  SemanticKeywordMergeResult,
+  SemanticKeywordMergeSuggestion,
+  SemanticOperationScopeKeyword,
+  SemanticKeywordTagDeleteResult,
+  SemanticKeywordTagOption,
   ProjectPositionHistory,
   ProjectPositionSummary
 } from "@seo-platform/contracts";
@@ -48,11 +53,13 @@ import {
   internalSemanticKeywordBulkCreatePreviewInput,
   internalSemanticKeywordBulkInput,
   internalSemanticKeywordCleaningInput,
+  internalSemanticKeywordMergeInput,
   internalUpdateSemanticKeywordInput
 } from "./keyword-input.js";
 import {
   keywordListQuery,
   keywordBodyListInput,
+  keywordOperationScopeInput,
   keywordMultiSearchInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
@@ -107,12 +114,54 @@ export class KeywordController {
     );
   }
 
+  @Post("merge")
+  @HttpCode(HttpStatus.OK)
+  public async merge(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordMergeResult>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return {
+      data: await this.keywords.merge(internalSemanticKeywordMergeInput(body)),
+      meta: { requestId: request.id }
+    };
+  }
+
   @Post("list")
   @HttpCode(HttpStatus.OK)
   public async bodyList(@Param("projectId") projectId: string, @Body() body: unknown, @Headers() headers: Readonly<Record<string, string | string[] | undefined>>, @Req() request: FastifyRequest): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
     const context = internalCommandContext(headers);
     if (internalUuid(projectId, "projectId") !== context.projectId) throw new BadRequestException("Route project identifier does not match trusted context");
     return this.keywords.list(context.workspaceId, context.projectId, keywordBodyListInput(body), request.id);
+  }
+
+  @Post("operation-scope")
+  @HttpCode(HttpStatus.OK)
+  public async operationScope(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiCollectionResponse<SemanticOperationScopeKeyword>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return this.keywords.operationScope(
+      context.workspaceId,
+      context.projectId,
+      keywordOperationScopeInput(body),
+      request.id
+    );
   }
 
   @Get("tag-options")
@@ -134,6 +183,73 @@ export class KeywordController {
         context.workspaceId,
         context.projectId,
         search
+      ),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get("tags")
+  public async tagManagementOptions(
+    @Param("projectId") projectId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly SemanticKeywordTagOption[]>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return {
+      data: await this.keywords.tagManagementOptions(
+        context.workspaceId,
+        context.projectId
+      ),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Delete("tags/:tagId")
+  @HttpCode(HttpStatus.OK)
+  public async deleteTag(
+    @Param("projectId") projectId: string,
+    @Param("tagId") tagId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordTagDeleteResult>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return {
+      data: await this.keywords.deleteTag(
+        context.workspaceId,
+        context.projectId,
+        context.actorId,
+        internalUuid(tagId, "tagId")
+      ),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get("merge-suggestions")
+  public async mergeSuggestions(
+    @Param("projectId") projectId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly SemanticKeywordMergeSuggestion[]>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return {
+      data: await this.keywords.mergeSuggestions(
+        context.workspaceId,
+        context.projectId
       ),
       meta: { requestId: request.id }
     };
@@ -279,7 +395,8 @@ export class KeywordController {
     @Param("keywordId") keywordId: string,
     @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
     @Req() request: FastifyRequest,
-    @Query("dimensionKey") dimensionKey?: unknown
+    @Query("dimensionKey") dimensionKey?: unknown,
+    @Query("snapshotId") snapshotId?: unknown
   ): Promise<ApiResponse<SemanticKeywordInsights>> {
     const context = internalCommandContext(headers);
     if (internalUuid(projectId, "projectId") !== context.projectId) {
@@ -288,12 +405,19 @@ export class KeywordController {
       );
     }
     if (dimensionKey !== undefined && !parseSemanticRankDimensionKey(dimensionKey)) throw new BadRequestException("Invalid rank dimension");
+    if (snapshotId !== undefined && typeof snapshotId !== "string") {
+      throw new BadRequestException("Invalid snapshot identifier");
+    }
+    const canonicalSnapshotId = snapshotId === undefined
+      ? undefined
+      : internalUuid(snapshotId as string, "snapshotId");
     return {
       data: await this.keywords.insights(
         context.workspaceId,
         context.projectId,
         internalUuid(keywordId, "keywordId"),
-        dimensionKey as string | undefined
+        dimensionKey as string | undefined,
+        canonicalSnapshotId
       ),
       meta: { requestId: request.id }
     };

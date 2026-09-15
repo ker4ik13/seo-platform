@@ -5,7 +5,6 @@ import { SemanticRankTargets } from "./semantic-rank-targets";
 import { clearRankTargetBatch, persistRankTargetBatch, readRankTargetBatch, readRankTargetPreference, writeRankTargetPreference } from "../lib/rank-target-storage";
 import { uniqueRankTargets, type RankTarget } from "../lib/rank-targets";
 import { createRankTargetBatch, launchRankTargetBatch, prepareRankTargetBatch, rankTargetBatchCharge, rankTargetBatchReady, rankTargetBatchSignature, type RankTargetBatch, type RankTargetBatchInput } from "../lib/rank-target-batch";
-import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import { rankRetryContextDraft } from "../lib/rank-retry";
 import { searchRegionDisplayName } from "../lib/seo-regions";
 import { normalizedUiLocale, translateUi } from "../lib/ui-i18n";
@@ -23,7 +22,6 @@ import {
 } from "react";
 import type {
   ProjectConnectorCredentialOption,
-  ProjectConnectorSettings,
   RankEstimate,
   RankJobSummary,
   TrackingContextKeywordReplacementResult,
@@ -41,7 +39,8 @@ import {
   browserApiRequest
 } from "../lib/browser-api";
 import {
-  effectiveProjectConnectorOptions
+  isProjectConnectorCredentialEligible,
+  workspaceConnectorOptions
 } from "../lib/project-integration-settings";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import { rankProviderUsageEstimate } from "../lib/provider-usage-estimate";
@@ -137,8 +136,6 @@ export function SemanticPositionDialog({
   const competitorMode = mode === "competitors";
   const formId = useId();
   const [settings, setSettings] = useState<TrackingContextSettings>();
-  const [connectorSettings, setConnectorSettings] =
-    useState<ProjectConnectorSettings>();
   const [workspaceRouting, setWorkspaceRouting] =
     useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
@@ -205,9 +202,8 @@ export function SemanticPositionDialog({
       ? keywordIds.filter((keywordId) => !assignedKeywordIds.has(keywordId)).length
       : 0;
   const sources = useMemo(
-    () => connectorSettings && workspaceRouting
-      ? effectiveProjectConnectorOptions(
-          connectorSettings,
+    () => workspaceRouting
+      ? workspaceConnectorOptions(
           workspaceRouting,
           "SERP_RANK_TRACKING"
         ).filter(
@@ -215,7 +211,15 @@ export function SemanticPositionDialog({
             source.provider === "ARSENKIN" || source.provider === "XMLSTOCK"
         )
       : [],
-    [connectorSettings, workspaceRouting]
+    [workspaceRouting]
+  );
+  const connectedRankSources = useMemo(
+    () => (workspaceRouting?.credentialOptions ?? []).filter(
+      (source) =>
+        (source.provider === "ARSENKIN" || source.provider === "XMLSTOCK") &&
+        isProjectConnectorCredentialEligible(source, "SERP_RANK_TRACKING")
+    ),
+    [workspaceRouting]
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const provider = selectedSource?.provider === "ARSENKIN"
@@ -278,12 +282,21 @@ export function SemanticPositionDialog({
       setContextDraft((current) => {
         const currentGroups = [...current.groupIds].sort().join(":");
         const nextGroups = [...scope.groupIds].sort().join(":");
-        return current.scopeMode === scope.mode && currentGroups === nextGroups
+        const currentDescendants = [...current.descendantGroupIds]
+          .sort()
+          .join(":");
+        const nextDescendants = [...(scope.descendantGroupIds ?? [])]
+          .sort()
+          .join(":");
+        return current.scopeMode === scope.mode &&
+          currentGroups === nextGroups &&
+          currentDescendants === nextDescendants
           ? current
           : {
               ...current,
               scopeMode: scope.mode,
-              groupIds: scope.groupIds
+              groupIds: scope.groupIds,
+              descendantGroupIds: scope.descendantGroupIds ?? []
             };
       });
     },
@@ -337,26 +350,23 @@ export function SemanticPositionDialog({
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    const preparedSources = preparedProjectIntegrations(projectId, controller.signal);
     void Promise.all([
       browserApiRequest<TrackingContextSettings>(
         `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts`,
         { signal: controller.signal }
       ),
-      preparedSources,
-      preparedSources.then(() => browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      browserApiRequest<WorkspaceConnectorRoutingSettings>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
         { signal: controller.signal }
-      )),
+      ),
       browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
         rankRunsApiPath(projectId),
         { signal: controller.signal }
       )
     ])
-      .then(([trackingResult, integrationResult, workspaceResult, rankRuns]) => {
+      .then(([trackingResult, workspaceResult, rankRuns]) => {
         if (controller.signal.aborted) return;
-        const options = effectiveProjectConnectorOptions(
-          integrationResult,
+        const options = workspaceConnectorOptions(
           workspaceResult,
           "SERP_RANK_TRACKING"
         ).filter(
@@ -458,7 +468,6 @@ export function SemanticPositionDialog({
           );
         }
         setSettings(trackingResult);
-        setConnectorSettings(integrationResult);
         setWorkspaceRouting(workspaceResult);
         setCredentialId(preferredSource?.id ?? "");
         setLastUsedCredentialId(exactCredentialId);
@@ -579,7 +588,7 @@ export function SemanticPositionDialog({
     setError(undefined);
     setEstimate(undefined);
     try {
-      if (!connectorSettings || !selectedSource) {
+      if (!workspaceRouting || !selectedSource) {
         throw new Error(
           competitorMode
             ? "Нет активного подключения XMLStock или Arsenkin для сбора конкурентов."
@@ -961,7 +970,7 @@ export function SemanticPositionDialog({
                 (!recoveringBatch && keywordIds.length === 0) ||
                 !contextDraft.regionCode.trim() ||
                 !settings ||
-                !connectorSettings ||
+                !workspaceRouting ||
                 (!recoveringBatch && !selectedSource)
               }
               form={formId}
@@ -1031,6 +1040,7 @@ export function SemanticPositionDialog({
                 setAdditionalTargets(others);
               }}
               credentialId={credentialId}
+              hasConnectedSource={connectedRankSources.length > 0}
               lastUsedCredentialId={lastUsedCredentialId}
               yandexLiveTurbo={yandexLiveTurbo}
               sources={sources}
@@ -1093,7 +1103,8 @@ export function SemanticPositionDialog({
                   groups={groups}
                   initialScope={{
                     mode: contextDraft.scopeMode,
-                    groupIds: contextDraft.groupIds
+                    groupIds: contextDraft.groupIds,
+                    descendantGroupIds: contextDraft.descendantGroupIds
                   }}
                   initialSelections={
                     selectedContextId
@@ -1256,6 +1267,7 @@ function PositionRunParameters({
   targets,
   onTargetsChange,
   credentialId,
+  hasConnectedSource,
   lastUsedCredentialId,
   yandexLiveTurbo,
   sources,
@@ -1275,6 +1287,7 @@ function PositionRunParameters({
   targets: readonly RankTarget[];
   onTargetsChange: (targets: readonly RankTarget[]) => void;
   credentialId: string;
+  hasConnectedSource: boolean;
   lastUsedCredentialId: string | undefined;
   yandexLiveTurbo: boolean;
   sources: readonly ProjectConnectorCredentialOption[];
@@ -1430,9 +1443,14 @@ function PositionRunParameters({
             </div>
           ) : (
             <div className="inline-alert warning">
-              {competitorMode
-                ? <UiText text="Нет проверенного подключения для сбора конкурентов." />
-                : <UiText text="Нет проверенного подключения для съёма позиций." />}
+              <span>
+                {hasConnectedSource
+                  ? <UiText text="Подключение доступно, но для этой операции не выбран маршрут рабочей области." />
+                  : competitorMode
+                    ? <UiText text="Нет проверенного подключения для сбора конкурентов." />
+                    : <UiText text="Нет проверенного подключения для съёма позиций." />}
+              </span>{" "}
+              <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
             </div>
           )}
           </div>

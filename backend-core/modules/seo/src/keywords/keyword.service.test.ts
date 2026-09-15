@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import type {
   InternalCreateSemanticKeywordInput,
+  InternalSemanticKeywordMergeInput,
   InternalUpdateSemanticKeywordInput,
   SemanticKeywordListItem
 } from "@seo-platform/contracts";
@@ -21,6 +22,234 @@ const sha256ForTest = (value: string): string =>
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
+
+test("suggests the closest intact keyword without invoking extension functions", async () => {
+  const brokenId = "01900000-0000-7000-8000-000000000006";
+  const candidateId = "01900000-0000-7000-8000-000000000007";
+  let calls = 0;
+  const service = new KeywordService({
+    keyword: {
+      findMany: async () => {
+        calls += 1;
+        return calls === 1
+          ? [{
+              id: brokenId,
+              version: 2,
+              textOriginal: "гербицид г��ейдер купить",
+              textNormalized: "гербицид г��ейдер купить",
+              language: "ru"
+            }]
+          : [{
+              id: candidateId,
+              version: 4,
+              textOriginal: "гербицид грейдер купить",
+              textNormalized: "гербицид грейдер купить"
+            }];
+      }
+    }
+  } as unknown as PrismaService, {} as SemanticVersionService);
+
+  const result = await service.mergeSuggestions(workspaceId, projectId);
+
+  assert.equal(result[0]?.source.id, brokenId);
+  assert.equal(result[0]?.candidate.id, candidateId);
+  assert.ok((result[0]?.similarity ?? 0) > 0.8);
+});
+
+test("lists tag usage and deletes a tag from every linked keyword atomically", async () => {
+  const tagId = "01900000-0000-7000-8000-000000000008";
+  const actorId = "01900000-0000-7000-8000-000000000009";
+  const writes: unknown[] = [];
+  const transaction = {
+    $executeRaw: async () => 1,
+    tag: {
+      findFirst: async () => ({ id: tagId, name: "Важный" }),
+      update: async (value: unknown) => {
+        writes.push(value);
+        return { id: tagId };
+      }
+    },
+    keywordTag: {
+      count: async () => 3,
+      deleteMany: async (value: unknown) => {
+        writes.push(value);
+        return { count: 3 };
+      }
+    },
+    keyword: {
+      updateMany: async (value: unknown) => {
+        writes.push(value);
+        return { count: 3 };
+      }
+    }
+  };
+  let versionCount = -1;
+  const service = new KeywordService({
+    tag: {
+      findMany: async () => [{ id: tagId, name: "Важный" }]
+    },
+    keywordTag: {
+      groupBy: async () => [{ tagId, _count: { _all: 3 } }]
+    },
+    $transaction: async (work: (client: typeof transaction) => unknown) =>
+      work(transaction)
+  } as unknown as PrismaService, {
+    createIrreversibleVersion: async (
+      _transaction: unknown,
+      _input: unknown,
+      count: number
+    ) => {
+      versionCount = count;
+      return undefined;
+    }
+  } as unknown as SemanticVersionService);
+
+  assert.deepEqual(await service.tagManagementOptions(workspaceId, projectId), [{
+    id: tagId,
+    name: "Важный",
+    keywordCount: 3
+  }]);
+  assert.deepEqual(
+    await service.deleteTag(workspaceId, projectId, actorId, tagId),
+    { tagId, name: "Важный", detachedKeywordCount: 3 }
+  );
+  assert.equal(versionCount, 3);
+  assert.deepEqual(writes[0], {
+    where: {
+      workspaceId,
+      projectId,
+      tags: { some: { projectId, tagId } }
+    },
+    data: { updatedBy: actorId, version: { increment: 1 } }
+  });
+});
+
+test("merges mutable keyword data while keeping immutable history on aliases", async () => {
+  const keeperId = "01900000-0000-7000-8000-000000000010";
+  const sourceId = "01900000-0000-7000-8000-000000000011";
+  const groupId = "01900000-0000-7000-8000-000000000012";
+  const tagId = "01900000-0000-7000-8000-000000000013";
+  const columnId = "01900000-0000-7000-8000-000000000014";
+  const actorId = "01900000-0000-7000-8000-000000000015";
+  const calls: Record<string, unknown[]> = {};
+  const record = (name: string, value: unknown) => {
+    (calls[name] ??= []).push(value);
+  };
+  const keyword = (id: string, source: boolean) => ({
+    id,
+    workspaceId,
+    projectId,
+    textOriginal: source ? "гербицид г��ейдер купить" : "гербицид грейдер купить",
+    textNormalized: source ? "гербицид г��ейдер купить" : "гербицид грейдер купить",
+    normalizedHash: sha256ForTest(source ? "broken" : "correct"),
+    language: "ru",
+    priority: source ? 9 : 2,
+    isFavorite: source,
+    isTracked: true,
+    showAiAnswerButton: false,
+    intent: null,
+    note: source ? "Историческая заметка" : null,
+    status: "ACTIVE",
+    clusterId: null,
+    targetPageId: null,
+    customValues: source ? { kc: "42" } : {},
+    sourceMode: "IMPORT",
+    sourceId: null,
+    createdBy: actorId,
+    updatedBy: actorId,
+    version: source ? 5 : 3,
+    createdAt: new Date("2026-09-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+    deletedAt: null,
+    memberships: source ? [{ group: { id: groupId, name: "Импорт", path: "Импорт", systemKind: null } }] : [],
+    tags: source ? [{ tag: { id: tagId, name: "KC" } }] : [],
+    typedCustomValues: source ? [{
+      workspaceId,
+      projectId,
+      keywordId: id,
+      columnId,
+      textValue: "значение",
+      integerValue: null,
+      decimalValue: null,
+      booleanValue: null,
+      dateValue: null,
+      datetimeValue: null,
+      stringArrayValue: [],
+      userId: null,
+      version: 1,
+      updatedBy: actorId,
+      createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+      column: { type: "TEXT" }
+    }] : [],
+    _count: { memberships: source ? 1 : 0 }
+  });
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [],
+    keyword: {
+      findMany: async () => [keyword(keeperId, false), keyword(sourceId, true)],
+      update: async ({ data }: { data: unknown }) => {
+        record("keeperUpdate", data);
+        return { ...keyword(keeperId, false), version: 4 };
+      },
+      updateMany: async (value: unknown) => {
+        record("sourceUpdate", value);
+        return { count: 1 };
+      }
+    },
+    keywordMerge: {
+      findMany: async () => [],
+      updateMany: async (value: unknown) => {
+        record("mergeReparent", value);
+        return { count: 0 };
+      },
+      createMany: async (value: unknown) => {
+        record("mergeCreate", value);
+        return { count: 1 };
+      }
+    },
+    keywordGroupMembership: {
+      createMany: async (value: unknown) => { record("groupCreate", value); return { count: 1 }; },
+      deleteMany: async (value: unknown) => { record("groupDelete", value); return { count: 1 }; }
+    },
+    keywordTag: {
+      createMany: async (value: unknown) => { record("tagCreate", value); return { count: 1 }; },
+      deleteMany: async (value: unknown) => { record("tagDelete", value); return { count: 1 }; }
+    },
+    semanticKeywordCustomValue: {
+      createMany: async (value: unknown) => { record("customCreate", value); return { count: 1 }; },
+      deleteMany: async (value: unknown) => { record("customDelete", value); return { count: 1 }; }
+    },
+    trackingContextKeywordAssignment: {
+      findMany: async () => [],
+      createMany: async (value: unknown) => { record("assignmentCreate", value); return { count: 0 }; },
+      updateMany: async (value: unknown) => { record("assignmentUpdate", value); return { count: 0 }; }
+    },
+    outboxEvent: { create: async (value: unknown) => { record("outbox", value); return value; } }
+  };
+  const service = new KeywordService({
+    $transaction: async (work: (client: typeof transaction) => unknown) => work(transaction)
+  } as unknown as PrismaService, {} as SemanticVersionService);
+  const input: InternalSemanticKeywordMergeInput = {
+    workspaceId,
+    projectId,
+    actorId,
+    keeper: { id: keeperId, version: 3 },
+    sources: [{ id: sourceId, version: 5 }]
+  };
+
+  const result = await service.merge(input);
+
+  assert.deepEqual(result.mergedKeywordIds, [sourceId]);
+  assert.equal(result.keeperVersion, 4);
+  const mergeCreate = calls.mergeCreate?.[0] as { data: unknown[] } | undefined;
+  assert.ok(mergeCreate);
+  assert.equal(mergeCreate.data.length, 1);
+  assert.match(JSON.stringify(calls.keeperUpdate?.[0]), /Историческая заметка/u);
+  assert.match(JSON.stringify(calls.sourceUpdate?.[0]), /DELETED/u);
+  assert.equal("rankSnapshot" in transaction, false);
+});
 
 test("previews existing keyword memberships without mutating them", async () => {
   const targetGroupId = "01900000-0000-7000-8000-000000000020";
@@ -262,6 +491,70 @@ test("can include active untracked keywords in project position history", async 
   assert.equal(observedQuery?.values.includes(true), true);
 });
 
+test("reuses a persistent position-history projection until its source revision changes", async () => {
+  let revision = 1n;
+  let rawReads = 0;
+  let projection: Readonly<{
+    schemaVersion: string;
+    sourceRevision: bigint;
+    payload: unknown;
+  }> | undefined;
+  const service = new KeywordService({
+    projectPositionHistoryRevision: {
+      upsert: async () => ({ revision })
+    },
+    projectPositionHistoryProjection: {
+      findUnique: async () => projection,
+      upsert: async (input: {
+        readonly create: {
+          readonly schemaVersion: string;
+          readonly sourceRevision: bigint;
+          readonly payload: unknown;
+        };
+        readonly update: {
+          readonly schemaVersion: string;
+          readonly sourceRevision: bigint;
+          readonly payload: unknown;
+        };
+      }) => {
+        const stored = projection ? input.update : input.create;
+        projection = {
+          schemaVersion: stored.schemaVersion,
+          sourceRevision: stored.sourceRevision,
+          payload: stored.payload
+        };
+        return projection;
+      }
+    },
+    $queryRaw: async () => {
+      rawReads += 1;
+      return [{
+        dayKey: "2026-09-15",
+        observedAt: new Date("2026-09-15T10:00:00.000Z"),
+        measuredKeywordCount: BigInt(100 + rawReads),
+        positionedKeywordCount: 80n,
+        top1KeywordCount: 10n,
+        top3KeywordCount: 20n,
+        top5KeywordCount: 30n,
+        top10KeywordCount: 40n,
+        top30KeywordCount: 60n,
+        top50KeywordCount: 80n
+      }];
+    }
+  } as unknown as PrismaService, semanticVersions());
+
+  const first = await service.positionHistory(workspaceId, projectId);
+  const cached = await service.positionHistory(workspaceId, projectId);
+  assert.equal(rawReads, 1);
+  assert.deepEqual(cached, first);
+
+  revision = 2n;
+  const refreshed = await service.positionHistory(workspaceId, projectId);
+  assert.equal(rawReads, 2);
+  assert.equal(refreshed.points[0]?.measuredKeywordCount, 102);
+  assert.equal(projection?.sourceRevision, 2n);
+});
+
 test("returns a scoped cursor page with groups, tags and target URLs", async () => {
   const snapshotId = "01900000-0000-7000-8000-000000000074";
   let observedWhere: unknown;
@@ -477,6 +770,100 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         "request-2"
       ),
     BadRequestException
+  );
+});
+
+test("hydrates every selectable keyword page size in bounded Prisma batches", async () => {
+  const rows = Array.from({ length: 1_001 }, (_, index) => ({
+    ...keyword(
+      `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`,
+      "2026-07-29T08:00:00Z"
+    ),
+    targetPageId: null,
+    typedCustomValues: [],
+    _count: { memberships: 1 }
+  }));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const [limit, expectedBatches] of [
+    [100, [100]],
+    [200, [200]],
+    [500, [250, 250]],
+    [1_000, [250, 250, 250, 250]]
+  ] as const) {
+    const hydrationBatchSizes: number[] = [];
+    const service = new KeywordService({
+      keyword: {
+        findMany: async (input: {
+          readonly select?: { readonly id?: boolean };
+          readonly where?: { readonly id?: { readonly in?: readonly string[] } };
+        }) => {
+          if (input.select?.id) return rows.map(({ id }) => ({ id }));
+          const ids = input.where?.id?.in ?? [];
+          hydrationBatchSizes.push(ids.length);
+          return ids.flatMap((id) => {
+            const row = byId.get(id);
+            return row ? [row] : [];
+          });
+        },
+        count: async () => rows.length
+      },
+      keywordMerge: { findMany: async () => [] },
+      page: { findMany: async () => [] },
+      cluster: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] },
+      keywordGroupMembership: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      trackingContextVersion: { findMany: async () => [] },
+      rankSnapshot: { findMany: async () => [] }
+    } as unknown as PrismaService, semanticVersions());
+
+    const result = await service.list(
+      workspaceId,
+      projectId,
+      { limit, sort: "CREATED_ASC" },
+      `request-page-${limit}`
+    );
+
+    assert.equal(result.data.length, limit);
+    assert.equal(result.page.hasNext, true);
+    assert.deepEqual(hydrationBatchSizes, expectedBatches);
+  }
+});
+
+test("returns a lightweight ten-thousand-keyword operation scope page", async () => {
+  const rows = Array.from({ length: 10_001 }, (_, index) => ({
+    id: `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`,
+    version: index + 1,
+    isTracked: index % 2 === 0
+  }));
+  const findManyInputs: unknown[] = [];
+  const service = new KeywordService({
+    keyword: {
+      findMany: async (input: unknown) => {
+        findManyInputs.push(input);
+        return rows;
+      },
+      count: async () => 161_624
+    }
+  } as unknown as PrismaService, semanticVersions());
+
+  const result = await service.operationScope(
+    workspaceId,
+    projectId,
+    {},
+    "request-operation-scope"
+  );
+
+  assert.equal(result.data.length, 10_000);
+  assert.equal(result.page.hasNext, true);
+  assert.equal(result.page.nextCursor, rows[9_999]!.id);
+  assert.equal(result.page.totalApprox, 161_624);
+  assert.equal(findManyInputs.length, 1);
+  assert.deepEqual(
+    (findManyInputs[0] as { readonly select: unknown }).select,
+    { id: true, version: true, isTracked: true }
   );
 });
 
@@ -871,6 +1258,95 @@ test("projects every SEO SERP slice and keeps competitor evidence out of positio
       }]
     }
   ]);
+});
+
+test("dimension insights keep project URLs below TOP-10", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000012";
+  const mergedSourceId = "01900000-0000-7000-8000-000000000013";
+  const contextId = "01900000-0000-7000-8000-000000000072";
+  const snapshotId = "01900000-0000-7000-8000-000000000073";
+  let serpWhere: Record<string, unknown> | undefined;
+  let rankWhere: Record<string, unknown> | undefined;
+  const service = new KeywordService(
+    {
+      keyword: {
+        findFirst: async () => ({ id: keywordId, note: null, memberships: [] })
+      },
+      keywordMerge: {
+        findMany: async () => [{ sourceKeywordId: mergedSourceId }]
+      },
+      rankDimensionMerge: { findMany: async () => [] },
+      rankDimensionHistoryDeletion: { findMany: async () => [] },
+      frequencySeasonalityPoint: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] },
+      rankSnapshot: {
+        findMany: async (input: { where: Record<string, unknown> }) => {
+          rankWhere = input.where;
+          return [{
+          id: snapshotId,
+          keywordId: mergedSourceId,
+          trackingContextId: contextId,
+          configurationVersion: 1,
+          provider: "XMLSTOCK",
+          positionTrackingEnabled: true,
+          found: true,
+          position: 1,
+          observedAt: new Date("2026-09-08T13:08:00.000Z"),
+          manifest: {
+            projectDomain: "example.com",
+            execution: { providerMappingVersion: "xmlstock-google@1" }
+          }
+          }];
+        }
+      },
+      rankSerpResult: {
+        findMany: async (input: { where: Record<string, unknown> }) => {
+          serpWhere = input.where;
+          return [
+            { snapshotId, position: 1, rankingUrl: "https://example.com/first", faviconUrl: null, title: "Первый URL", snippet: null },
+            { snapshotId, position: 43, rankingUrl: "https://example.com/second", faviconUrl: null, title: "Второй URL", snippet: null }
+          ];
+        }
+      },
+      trackingContext: {
+        findMany: async () => [{ id: contextId, name: "Google · Москва" }]
+      },
+      trackingContextVersion: {
+        findMany: async () => [{
+          contextId,
+          configurationVersion: 1,
+          searchEngine: "GOOGLE",
+          device: "DESKTOP",
+          regionCode: "213",
+          regionLabel: "Москва",
+          countryCode: "RU",
+          language: "ru",
+          depth: 50
+        }]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.insights(
+    workspaceId,
+    projectId,
+    keywordId,
+    "GOOGLE|RU|213|ru|DESKTOP",
+    snapshotId
+  );
+
+  assert.equal(rankWhere?.id, snapshotId);
+  assert.deepEqual(rankWhere?.keywordId, {
+    in: [keywordId, mergedSourceId]
+  });
+  assert.equal(Object.hasOwn(serpWhere ?? {}, "position"), false);
+  assert.deepEqual(
+    (result.competitorSnapshots ?? [])[0]?.results.map(({ position }) => position),
+    [1, 43]
+  );
 });
 
 test("serializes a small seasonality share without exponent notation", async () => {
@@ -1300,6 +1776,13 @@ test("projects imported Key Collector positions without poisoning keyword insigh
       keyword: {
         findFirst: async () => ({ id: keywordId, note: null })
       },
+      rankDimensionMerge: {
+        findMany: async () => [{
+          sourceDimensionKey: "YANDEX|RU|global|ru|DESKTOP",
+          targetDimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+          targetRegionLabel: "Москва"
+        }]
+      },
       rankDimensionHistoryDeletion: { findMany: async () => [] },
       frequencySeasonalityPoint: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
@@ -1320,6 +1803,7 @@ test("projects imported Key Collector positions without poisoning keyword insigh
           }
         }]
       },
+      rankSerpResult: { findMany: async () => [] },
       trackingContext: {
         findMany: async () => [{
           id: contextId,
@@ -1351,11 +1835,11 @@ test("projects imported Key Collector positions without poisoning keyword insigh
     contextName: "Импорт Key Collector · Яндекс",
     searchEngine: "YANDEX",
     device: "DESKTOP",
-    regionCode: "global",
-    regionLabel: "Импорт Key Collector",
+    regionCode: "213",
+    regionLabel: "Москва",
     countryCode: "RU",
     language: "ru",
-    dimensionKey: "YANDEX|RU|global|ru|DESKTOP",
+    dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
     depth: 100,
     provider: "KEY_COLLECTOR",
     found: true,
@@ -1624,13 +2108,28 @@ test("sorts engine positions in four stable capture-state buckets", async () => 
     assert.match(query.sql, /historical_position/u);
     assert.match(
       query.sql,
-      /WHEN previous\.found = TRUE AND previous\.position IS NOT NULL/u
+      /WHEN candidate\.found = TRUE AND candidate\.position IS NOT NULL/u
     );
-    assert.match(query.sql, /FROM rank_snapshots previous/u);
     assert.match(
       query.sql,
-      /\(previous\.observed_at, previous\.id\) </u
+      /WHEN cr\.found = TRUE AND cr\.position IS NOT NULL THEN NULL/u
     );
+    assert.match(query.sql, /FROM rank_snapshots snapshot/u);
+    assert.match(
+      query.sql,
+      /\(snapshot\.observed_at, snapshot\.id\) </u
+    );
+    assert.match(
+      query.sql,
+      /snapshot\.tracking_context_id = previous_tcv\.context_id/u
+    );
+  }
+  for (const query of historyQueries) {
+    assert.match(
+      query.sql,
+      /current_snapshot\.observed_at = anchors\.observed_at/u
+    );
+    assert.match(query.sql, /current_snapshot\.id = anchors\.snapshot_id/u);
   }
   assert.ok(metricQueries[0]?.values.includes(3_000_000n));
   assert.ok(metricQueries[1]?.values.includes(0n));

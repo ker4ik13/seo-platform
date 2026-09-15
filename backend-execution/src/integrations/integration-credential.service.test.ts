@@ -192,6 +192,19 @@ test("projects XMLStock request quota, balance and usage without raw metadata", 
         frozenBalance: "1.50",
         tariffDaysRemaining: 12,
         rawAccountSecret: "must-not-cross-boundary"
+      },
+      xmlStockPricing: {
+        tariffCode: "OPTIMAL",
+        currency: "RUB",
+        priceUnit: "PER_1000_REQUESTS",
+        pricesPerThousand: {
+          YANDEX_SEARCH_API: "27",
+          YANDEX_LIVE: "20",
+          YANDEX_TURBO: "30",
+          GOOGLE_LIVE: "20",
+          WORDSTAT: "23"
+        },
+        method: "must-not-cross-boundary"
       }
     },
     lastSuccessAt: new Date("2026-08-04T12:00:00.000Z")
@@ -214,9 +227,23 @@ test("projects XMLStock request quota, balance and usage without raw metadata", 
     usedToday: 7,
     usedMonth: 81,
     tariffDaysRemaining: 12,
+    xmlStockPricing: {
+      tariffCode: "OPTIMAL",
+      currency: "RUB",
+      priceUnit: "PER_1000_REQUESTS",
+      pricesPerThousand: {
+        YANDEX_SEARCH_API: "27",
+        YANDEX_LIVE: "20",
+        YANDEX_TURBO: "30",
+        GOOGLE_LIVE: "20",
+        WORDSTAT: "23"
+      },
+      observedAt: "2026-08-04T12:00:00.000Z"
+    },
     observedAt: "2026-08-04T12:00:00.000Z"
   });
   assert.equal(JSON.stringify(result).includes("rawAccountSecret"), false);
+  assert.equal(JSON.stringify(result).includes("must-not-cross-boundary"), false);
 });
 
 test("fails closed for an active validation projection from another material version", async () => {

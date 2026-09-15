@@ -409,7 +409,7 @@ export function RankingsWorkspace({
             {activeDimensions.map((dimension) => (
               <option key={dimension.key} value={dimension.key}>
                 <span className="rankings-dimension-option">
-                  <SemanticRankContext {...dimension} />
+                  <SemanticRankContext {...dimension} showEngineName={false} />
                   <span className="visually-hidden">{rankDimensionLabel(dimension, locale)}</span>
                 </span>
               </option>
@@ -687,7 +687,6 @@ export function RankingsWorkspace({
       )}
       {serpHistory && selectedDimension && (
         <SemanticKeywordSerpHistory
-          createdAt={serpHistory.createdAt}
           currentUserId={currentUserId}
           dimensionKey={selectedDimension.key}
           keywordId={serpHistory.keywordId}
@@ -732,6 +731,7 @@ export function RankingsWorkspace({
           }}
           projectDomain={projectDomain}
           projectId={projectId}
+          workspaceId={workspaceId}
         />
       )}
       {deleteConfirm && selectedDimension && (

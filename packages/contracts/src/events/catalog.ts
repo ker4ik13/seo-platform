@@ -38,6 +38,7 @@ export const domainEventTypes = {
   semanticImportCancelled: "semantic.import.cancelled.v1",
   semanticImportFailed: "semantic.import.failed.v1",
   semanticVersionCreated: "semantics.version.created.v1",
+  semanticKeywordMerged: "semantics.keyword.merged.v1",
   projectConnectorBindingCreated:
     "integration.project-connector-binding.created.v1",
   projectConnectorBindingUpdated:

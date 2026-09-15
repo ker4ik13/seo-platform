@@ -56,12 +56,12 @@
 ### 2.1. Маршрутизация интеграций
 
 Секретный credential всегда принадлежит workspace. Для каждой capability
-workspace хранит упорядоченную цепочку credentials, а проект выбирает один из
-режимов:
-
-- наследовать workspace default;
-- использовать project override;
-- использовать project override и затем workspace fallback.
+workspace хранит единственную упорядоченную цепочку credentials. Пользовательский
+project override отсутствует: все проекты рабочей области исполняют один
+workspace route. Сохранённые ранее project bindings остаются только внутренней
+immutable ссылочной проекцией для execution history; перед новым запуском
+resolver переводит её в `WORKSPACE_INHERITED` и materialize-ит актуальную
+workspace chain.
 
 Resolver сохраняет в operation snapshot фактический provider, routing scope и
 последовательность попыток. Каждая попытка содержит только provider, scope,
@@ -74,10 +74,11 @@ outcome и нормализованный reason code; credential/route ID и se
 операция переходит в retry/action-required согласно connector contract, чтобы
 не допустить повторную платную команду.
 
-Настройка основного маршрута требует `integration.update`, использование
-workspace credentials в проекте — `integration.use_system_credentials`, а
-нескольких routes или fallback — `integration.manage_fallback`. Effective
-project permission является пересечением workspace role и project access.
+Настройка основного маршрута требует `integration.update`, а нескольких routes
+или fallback — `integration.manage_fallback`. Порядок routes меняется явно и
+определяет основной и резервные providers. Если credential подключён, но не
+включён в route нужной capability, мастер операции не предлагает его как
+исполняемый и ведёт пользователя в `/app/settings/integrations`.
 
 ## 3. Статусы Job
 
@@ -830,19 +831,21 @@ per-workspace/provider quotas и fair scheduling. Terminal validation result
 transactional outbox event для durable audit и email/Web Push; audit записей
 `requested/queued` в Platform API для этого недостаточно.
 
-### 17.2. Реализованная проектная привязка connector
+### 17.2. Внутренняя проектная проекция connector
 
 Jobs/integrations владеет нормализованными
 `project_connector_bindings`, `project_connector_routes` и
 `project_connector_binding_create_receipts`. На
-`workspace + project + capability` разрешён один binding; удаление в
-пользовательском flow отсутствует, выключение выполняется через
-`enabled=false`.
+`workspace + project + capability` разрешён один binding. Он не является
+пользовательской настройкой: новый resolver всегда materialize-ит в него
+workspace binding, чтобы существующие estimate/execution FK оставались
+неизменными. Legacy mutation routes сохраняются для rolling compatibility, но
+созданный ими `PROJECT_OVERRIDE` больше не участвует в новом выполнении.
 
-Базовый route использует `position=0`. Для `SERP_RANK_TRACKING` дополнительно
-разрешены bounded routes `position=1..7`: они используются только при явном
-выборе provider/credential и не меняют route проекта по умолчанию. Для каждого
-route обязательны:
+Базовый route использует `position=0`. Bounded routes `position=1..7`
+повторяют workspace fallback chain и позволяют операции явно начать с
+выбранного credential, не меняя сохранённый порядок. Для каждого route
+обязательны:
 
 - `sourceKind=WORKSPACE_CREDENTIAL`;
 - non-deleted credential того же workspace;
@@ -857,13 +860,9 @@ capability, GET сохраняет binding и возвращает явный av
 или замена credential всегда проверяются заново. Автоматическое переключение
 на системный ключ запрещено.
 
-Отдельное допустимое состояние возникает после cross-workspace transfer:
-Execution сохраняет выключенный project binding, retire-ит все его routes и
-возвращает `routes: []` без legacy-поля `route`. Такая проекция обязана иметь
-`enabled=false`, `availability=DISABLED`, `PROJECT_OVERRIDE`, отсутствие
-workspace binding и fallback. API и frontend трактуют её как ненастроенный
-маршрут и предлагают владельцу выбрать credential текущей workspace; прежняя
-привязка не включается автоматически.
+После cross-workspace transfer Execution сохраняет выключенный project binding
+и retire-ит routes. Он остаётся audit-состоянием до появления workspace route;
+прежний provider автоматически не восстанавливается.
 
 Bindings и credential options читаются в одной interactive transaction с
 `RepeatableRead`, чтобы rotate/revoke не формировал взаимоисключающие
@@ -1389,8 +1388,12 @@ Connector учитывает provider quotas и не подменяет офиц
   хранятся раздельно. Для expansion один seed передаётся одним GET,
   `groupby=1..2000` ограничивает `results`, а `associations` нормализуется как
   правая колонка. `groupby` не является batch входных keyword;
-- credential validation использует read-only `pagetype=regionsTree` и не
-  выполняет платный SERP/Wordstat запрос;
+- credential validation использует бесплатные read-only запросы
+  `/api/?info=user`, `/api/?info=status` и `pagetype=regionsTree`. Из
+  `info=user` сохраняются только текущие account-specific цены инструментов,
+  тариф определяется по официальной сетке ставок, а персональные method URL,
+  USER ID и KEY отбрасываются на границе parser/DB guard. `info=status`
+  добавляет только числовую доступность и нагрузку инструментов;
 - ответы разбираются потоковым bounded XML parser либо bounded JSON parser;
   raw provider payload не сохраняется, наружу выходят только нормализованные
   позиции, релевантные URL, частотности и безопасные error codes;
@@ -1402,9 +1405,13 @@ Connector учитывает provider quotas и не подменяет офиц
   specification;
 - `soft_id`/партнёрская атрибуция не передаётся без отдельной коммерческой
   конфигурации владельца платформы;
-- отдельный продукт сохранения raw SERP, Yandex Live, HTML response и provider
-  balance/tariff metadata не входит в текущий нормализованный rank/Wordstat
-  контур и не должен показываться как выполненная пользовательская операция.
+- raw SERP и HTML response не сохраняются. Безопасные баланс, тариф и ставки
+  XMLStock показываются в настройках и перед запуском. В immutable scope
+  rank/frequency/Wordstat-expansion операции фиксируются продукт, ставка,
+  время получения цены и диапазон ожидаемых оплачиваемых запросов. Result
+  workspace показывает фактическое либо доказуемое по durable attempts число
+  запросов и рассчитанный расход; polling готовности Search API не считается
+  новым оплачиваемым поисковым запросом.
 
 ### 21.4. Keys.so
 
@@ -1714,6 +1721,11 @@ backoff остаются общими.
 Кнопка результата открывает modal именно выбранной операции: status,
 безопасный input snapshot, прогресс, итоговые счётчики и finite error; она не
 перенаправляет пользователя в текущую семантику без контекста запуска.
+Для XMLStock там же показываются сохранённый тариф и ставка за 1000 запросов,
+число provider-запросов и стоимость в рублях по цене, зафиксированной при
+создании операции. При восстановлении или ошибках, когда точное число нельзя
+доказать, API возвращает явный минимальный и максимальный диапазон вместо
+одного выдуманного значения.
 Все result/log modal используют единый semantics-like workspace: компактную
 таблицу с устойчивыми колонками и sticky состоянием загрузки. Над сводкой
 показываются сохранённый контекст запуска, когда он существует, и безопасная

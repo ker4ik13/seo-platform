@@ -2,6 +2,7 @@ import {
   keysSoDatabases,
   keywordResearchSources,
   keywordResearchStatuses,
+  parseXmlStockOperationUsageSummary,
   wordstatExpansionDevices,
   type KeysSoDatabase,
   type KeywordResearchRowPage,
@@ -51,7 +52,8 @@ export function scopedKeywordResearchRun(
       "retryAt",
       "failureCode",
       "finishedAt",
-      "actorId"
+      "actorId",
+      "providerUsage"
     ]
   );
   const id = uuid(input.id);
@@ -71,6 +73,9 @@ export function scopedKeywordResearchRun(
     invalid();
   }
   const source = input.source as KeywordResearchRunSummary["source"];
+  const providerUsage = input.providerUsage === undefined
+    ? undefined
+    : providerUsageSummary(input.providerUsage);
   if (
     (source === "KEYS_SO" &&
       (input.provider !== "KEYS_SO" ||
@@ -89,7 +94,8 @@ export function scopedKeywordResearchRun(
         !wordstatExpansionDevices.includes(
           input.device as NonNullable<KeywordResearchRunSummary["device"]>
         ) ||
-        typeof input.includeRightColumn !== "boolean"))
+        typeof input.includeRightColumn !== "boolean")) ||
+    (providerUsage !== undefined && source !== "XMLSTOCK_WORDSTAT")
   ) {
     invalid();
   }
@@ -104,6 +110,7 @@ export function scopedKeywordResearchRun(
       : source === "ARSENKIN_WORDSTAT"
         ? "ARSENKIN"
         : "XMLSTOCK",
+    ...(providerUsage ? { providerUsage } : {}),
     ...(source === "KEYS_SO"
       ? {
           domain: input.domain as string,
@@ -142,6 +149,14 @@ export function scopedKeywordResearchRun(
       ? {}
       : { finishedAt: iso(input.finishedAt) })
   };
+}
+
+function providerUsageSummary(value: unknown) {
+  try {
+    return parseXmlStockOperationUsageSummary(value);
+  } catch {
+    invalid();
+  }
 }
 
 export function scopedKeywordResearchRowPage(

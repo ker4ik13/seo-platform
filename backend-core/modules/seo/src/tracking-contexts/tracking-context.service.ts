@@ -61,11 +61,14 @@ const SAVED_ACTIVE_TRACKING_CONTEXT_FILTER: Prisma.TrackingContextWhereInput = {
 const ASSIGNMENT_CREATE_BATCH_SIZE = 5_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const CONTEXT_INCLUDE = {
+const CONTEXT_CONFIGURATION_INCLUDE = {
   configurations: {
     orderBy: { configurationVersion: "desc" as const },
     take: 1
-  },
+  }
+} satisfies Prisma.TrackingContextInclude;
+const CONTEXT_INCLUDE = {
+  ...CONTEXT_CONFIGURATION_INCLUDE,
   _count: {
     select: {
       keywordAssignments: {
@@ -81,6 +84,15 @@ const CONTEXT_INCLUDE = {
 type ContextAggregate = Prisma.TrackingContextGetPayload<{
   include: typeof CONTEXT_INCLUDE;
 }>;
+
+type ContextListAggregate = Prisma.TrackingContextGetPayload<{
+  include: typeof CONTEXT_CONFIGURATION_INCLUDE;
+}>;
+
+interface TrackingContextAssignmentCountRow {
+  readonly contextId: string;
+  readonly assignmentCount: bigint;
+}
 
 interface AssignmentCursor {
   readonly version: 1;
@@ -98,18 +110,45 @@ export class TrackingContextService {
     workspaceId: string,
     projectId: string
   ): Promise<TrackingContextCollection> {
-    const rows = await this.prisma.trackingContext.findMany({
-      where: {
-        workspaceId,
-        projectId,
-        ...SAVED_ACTIVE_TRACKING_CONTEXT_FILTER
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: CONTEXT_LIMIT + 1,
-      include: CONTEXT_INCLUDE
-    });
+    const [rows, assignmentCounts] = await Promise.all([
+      this.prisma.trackingContext.findMany({
+        where: {
+          workspaceId,
+          projectId,
+          ...SAVED_ACTIVE_TRACKING_CONTEXT_FILTER
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: CONTEXT_LIMIT + 1,
+        include: CONTEXT_CONFIGURATION_INCLUDE
+      }),
+      this.prisma.$queryRaw<readonly TrackingContextAssignmentCountRow[]>(Prisma.sql`
+        SELECT assignment.context_id AS "contextId",
+          count(*)::bigint AS "assignmentCount"
+        FROM tracking_context_keyword_assignments assignment
+        INNER JOIN keywords keyword
+          ON keyword.workspace_id = assignment.workspace_id
+         AND keyword.project_id = assignment.project_id
+         AND keyword.id = assignment.keyword_id
+         AND keyword.status::text = 'ACTIVE'
+        WHERE assignment.workspace_id = ${workspaceId}::uuid
+          AND assignment.project_id = ${projectId}::uuid
+          AND assignment.removed_at IS NULL
+        GROUP BY assignment.context_id
+      `)
+    ]);
+    const assignmentCountByContextId = new Map(
+      assignmentCounts.map(({ contextId, assignmentCount }) => [
+        contextId,
+        safeAssignmentCount(assignmentCount)
+      ])
+    );
     return {
-      contexts: rows.slice(0, CONTEXT_LIMIT).map(contextSummary),
+      contexts: rows.slice(0, CONTEXT_LIMIT).map((context) =>
+        contextSummary(withAssignmentCount(
+          context,
+          assignmentCountByContextId.get(context.id) ?? 0
+        ))
+      ),
       contextsTruncated: rows.length > CONTEXT_LIMIT
     };
   }
@@ -760,19 +799,27 @@ export class TrackingContextService {
         const included = new Set(
           profile.scope.groupIds.filter((groupId) => available.has(groupId))
         );
-        const children = new Map<string, string[]>();
-        for (const group of groups) {
-          if (!group.parentId) continue;
-          const siblings = children.get(group.parentId) ?? [];
-          siblings.push(group.id);
-          children.set(group.parentId, siblings);
-        }
-        const pending = [...included];
-        for (let index = 0; index < pending.length; index += 1) {
-          for (const groupId of children.get(pending[index]!) ?? []) {
-            if (included.has(groupId)) continue;
-            included.add(groupId);
-            pending.push(groupId);
+        const descendantRoots = new Set(
+          profile.scope.descendantGroupIds ??
+            (profile.scope.includeDescendants ? profile.scope.groupIds : [])
+        );
+        if (descendantRoots.size > 0) {
+          const children = new Map<string, string[]>();
+          for (const group of groups) {
+            if (!group.parentId) continue;
+            const siblings = children.get(group.parentId) ?? [];
+            siblings.push(group.id);
+            children.set(group.parentId, siblings);
+          }
+          const pending = [...descendantRoots].filter((groupId) =>
+            included.has(groupId)
+          );
+          for (let index = 0; index < pending.length; index += 1) {
+            for (const groupId of children.get(pending[index]!) ?? []) {
+              if (included.has(groupId)) continue;
+              included.add(groupId);
+              pending.push(groupId);
+            }
           }
         }
         groupIds = [...included];
@@ -989,6 +1036,23 @@ export class TrackingContextService {
       where: keywordReplacementReceiptWhere(input)
     });
   }
+}
+
+function withAssignmentCount(
+  context: ContextListAggregate,
+  assignmentCount: number
+): ContextAggregate {
+  return {
+    ...context,
+    _count: { keywordAssignments: assignmentCount }
+  } as ContextAggregate;
+}
+
+function safeAssignmentCount(value: bigint): number {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Tracking context assignment count is invalid");
+  }
+  return Number(value);
 }
 
 function contextSummary(context: ContextAggregate): TrackingContextSummary {
@@ -1418,7 +1482,14 @@ function launchProfileSnapshot(
     : booleanValue(input.includeUntracked, "launchProfile.includeUntracked");
   const scope = record(input.scope, "tracking context launch scope");
   if (
-    Object.keys(scope).some((key) => !["mode", "groupIds"].includes(key)) ||
+    Object.keys(scope).some((key) =>
+      ![
+        "mode",
+        "groupIds",
+        "descendantGroupIds",
+        "includeDescendants"
+      ].includes(key)
+    ) ||
     !Array.isArray(scope.groupIds)
   ) {
     throw new Error("Stored tracking context launch scope is invalid");
@@ -1432,14 +1503,46 @@ function launchProfileSnapshot(
     stringValue(groupId, "launchProfile.scope.groupIds")
   );
   if (
+    scope.includeDescendants !== undefined &&
+    typeof scope.includeDescendants !== "boolean"
+  ) {
+    throw new Error("Stored tracking context launch scope is invalid");
+  }
+  if (
+    scope.descendantGroupIds !== undefined &&
+    !Array.isArray(scope.descendantGroupIds)
+  ) {
+    throw new Error("Stored tracking context launch scope is invalid");
+  }
+  const descendantGroupIds = scope.descendantGroupIds === undefined
+    ? scope.includeDescendants === false || mode !== "GROUPS"
+      ? []
+      : groupIds
+    : scope.descendantGroupIds.map((groupId) =>
+        stringValue(groupId, "launchProfile.scope.descendantGroupIds")
+      );
+  if (
     new Set(groupIds).size !== groupIds.length ||
+    new Set(descendantGroupIds).size !== descendantGroupIds.length ||
     groupIds.some((groupId) => !UUID_PATTERN.test(groupId)) ||
+    descendantGroupIds.some(
+      (groupId) => !UUID_PATTERN.test(groupId) || !groupIds.includes(groupId)
+    ) ||
+    (mode !== "GROUPS" && descendantGroupIds.length > 0) ||
     (mode === "GROUPS" && groupIds.length === 0) ||
     (mode !== "GROUPS" && groupIds.length > 0)
   ) {
     throw new Error("Stored tracking context launch scope is invalid");
   }
-  return { searchSource, includeUntracked, scope: { mode, groupIds } };
+  return {
+    searchSource,
+    includeUntracked,
+    scope: {
+      mode,
+      groupIds,
+      descendantGroupIds
+    }
+  };
 }
 
 async function assertLaunchProfileGroupScope(

@@ -5,11 +5,13 @@ import {
   semanticKeywordNotesMaxPageSize,
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
+  semanticOperationScopeGroupLimit,
   semanticKeywordSorts,
   isSemanticRankDimensionSort,
   parseSemanticRankDimensionKey,
   type KeywordListQuery,
   type ProjectPositionHistoryQuery,
+  type SemanticOperationScopePageInput,
   type SemanticKeywordMultiSearchInput
 } from "@seo-platform/contracts";
 import { assertUuid } from "../common/identifier.js";
@@ -24,6 +26,44 @@ const BODY_QUERY_FIELDS = [
   "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore",
   "rankSortDimensionKey"
 ] as const;
+
+export function keywordOperationScopeInput(
+  value: unknown
+): SemanticOperationScopePageInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid("body", "Must be an object");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(input).some((key) => key !== "groupIds" && key !== "cursor")) {
+    invalid("body", "Contains unsupported fields");
+  }
+  const groupIds = input.groupIds === undefined
+    ? undefined
+    : Array.isArray(input.groupIds)
+      ? input.groupIds.map((groupId, index) =>
+          typeof groupId === "string"
+            ? assertUuid(groupId, `groupIds.${index}`)
+            : invalid(`groupIds.${index}`, "Must be a UUID")
+        )
+      : invalid("groupIds", "Must be an array");
+  if (
+    groupIds &&
+    (groupIds.length < 1 ||
+      groupIds.length > semanticOperationScopeGroupLimit ||
+      new Set(groupIds).size !== groupIds.length)
+  ) {
+    invalid("groupIds", "Contains an invalid group selection");
+  }
+  const cursor = input.cursor === undefined
+    ? undefined
+    : typeof input.cursor === "string"
+      ? assertUuid(input.cursor, "cursor")
+      : invalid("cursor", "Must be a UUID");
+  return {
+    ...(groupIds ? { groupIds } : {}),
+    ...(cursor ? { cursor } : {})
+  };
+}
 
 export function keywordMultiSearchInput(
   value: unknown

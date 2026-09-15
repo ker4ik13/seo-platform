@@ -67,6 +67,7 @@ test("exports unique latest SERP and AI competitors without the project domain",
   );
 
   assert.equal(queries.length, 2);
+  assert.match(queries[0]?.sql ?? "", /'KEY_COLLECTOR'/u);
   assert.deepEqual(result, {
     data: [{
       keywordId,

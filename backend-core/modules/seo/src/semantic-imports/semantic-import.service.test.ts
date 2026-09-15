@@ -3,7 +3,12 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { BadRequestException } from "@nestjs/common";
 import type { PrismaService } from "../database/prisma.service.js";
-import { SemanticImportService } from "./semantic-import.service.js";
+import {
+  archiveLegacyKeyCollectorContexts,
+  semanticImportCustomValueUpsertSql,
+  semanticImportKeywordOverwriteSql,
+  SemanticImportService
+} from "./semantic-import.service.js";
 
 const context = {
   workspaceId: "01900000-0000-7000-8000-000000000001",
@@ -19,6 +24,84 @@ const entitlement = {
   foldersPerProject: 500,
   trackedContextPairs: 50_000
 } as const;
+
+test("archives legacy KC4 contexts without mutating immutable current ranks", async () => {
+  let update: Readonly<Record<string, unknown>> | undefined;
+  const transaction = {
+    trackingContext: {
+      findMany: async () => [
+        {
+          id: "01900000-0000-7000-8000-000000000010",
+          configurations: [{
+            regionCode: "global",
+            regionLabel: "Импорт Key Collector"
+          }]
+        },
+        {
+          id: "01900000-0000-7000-8000-000000000011",
+          configurations: [{ regionCode: "213", regionLabel: "Москва" }]
+        }
+      ],
+      updateMany: async (input: Readonly<Record<string, unknown>>) => {
+        update = input;
+        return { count: 1 };
+      }
+    },
+    currentRank: {
+      deleteMany: async () => {
+        throw new Error("current rank must remain immutable");
+      }
+    }
+  };
+
+  await archiveLegacyKeyCollectorContexts(
+    transaction as never,
+    context
+  );
+
+  assert.deepEqual(
+    (update?.where as { id?: { in?: readonly string[] } })?.id?.in,
+    ["01900000-0000-7000-8000-000000000010"]
+  );
+  assert.equal(
+    (update?.data as { status?: string })?.status,
+    "ARCHIVED"
+  );
+});
+
+test("bulk custom-value upsert supplies the required update timestamp", () => {
+  const query = semanticImportCustomValueUpsertSql([{
+    workspaceId: context.workspaceId,
+    projectId: context.projectId,
+    keywordId: "01900000-0000-7000-8000-000000000010",
+    columnId: "01900000-0000-7000-8000-000000000011",
+    textValue: "данные Key Collector",
+    updatedBy: context.actorId
+  }]);
+  assert.match(query.sql, /"updated_at"/u);
+  assert.match(query.sql, /CURRENT_TIMESTAMP/u);
+  assert.equal(query.values.length, 6);
+});
+
+test("bulk keyword overwrite is tenant-scoped and increments versions", () => {
+  const query = semanticImportKeywordOverwriteSql(context, [{
+    id: "01900000-0000-7000-8000-000000000010",
+    textOriginal: "обновлённый запрос",
+    priority: 7,
+    isFavorite: true,
+    isTracked: false,
+    note: "заметка",
+    intent: null,
+    targetPageId: null,
+    customValues: { source: "Key Collector" }
+  }]);
+  assert.match(query.sql, /jsonb_to_recordset/u);
+  assert.match(query.sql, /"workspace_id"/u);
+  assert.match(query.sql, /"project_id"/u);
+  assert.match(query.sql, /"version" = "keyword"\."version" \+ 1/u);
+  assert.match(query.sql, /"updated_at" = CURRENT_TIMESTAMP/u);
+  assert.equal(query.values.length, 7);
+});
 
 test("normalizes keywords canonically and marks existing project rows", async () => {
   let observedWhere: unknown;
@@ -310,7 +393,7 @@ test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
   assert.equal(result.createdGroups, "2");
 });
 
-test("seals imported positions with the keyword version produced by the same update", async () => {
+test("seals one contextual KC4 snapshot with current SERP and matching history", async () => {
   const now = new Date("2026-08-07T12:00:00.000Z");
   const keywordId = "01900000-0000-7000-8000-000000000010";
   const contextId = "01900000-0000-7000-8000-000000000011";
@@ -367,6 +450,9 @@ test("seals imported positions with the keyword version produced by the same upd
     deletedAt: null
   };
   let manifestKeywordVersion: number | undefined;
+  let manifestProjectDomain: string | undefined;
+  let manifestCount = 0;
+  const persistedSerpPositions: number[] = [];
   const receipt = {
     ...context,
     status: "RECEIVING",
@@ -389,6 +475,7 @@ test("seals imported positions with the keyword version produced by the same upd
   } as const;
   const transaction = {
     $executeRaw: async () => 1,
+    $queryRaw: async () => [{ keywordId }],
     semanticImportReceipt: {
       findUnique: async () => receipt,
       update: async () => receipt
@@ -437,20 +524,29 @@ test("seals imported positions with the keyword version produced by the same upd
       })
     },
     trackingContext: {
-      findFirst: async () => ({ id: contextId, version: 1 })
+      findFirst: async () => ({ id: contextId, version: 1 }),
+      findUnique: async () => null,
+      create: async ({ data }: { data: { id: string } }) => ({
+        id: data.id,
+        version: 1
+      })
     },
     trackingContextVersion: {
       findFirst: async () => ({
         configurationVersion: 1,
         configurationHash: "a".repeat(64)
-      })
+      }),
+      create: async () => undefined
     },
     trackingContextKeywordAssignment: {
       findMany: async () => [{ id: assignmentId, keywordId }],
       createMany: async () => ({ count: 0 })
     },
     rankExecutionManifest: {
-      create: async () => undefined,
+      create: async ({ data }: { data: { projectDomain: string } }) => {
+        manifestCount += 1;
+        manifestProjectDomain = data.projectDomain;
+      },
       update: async () => {
         assert.equal(manifestKeywordVersion, currentKeyword.version);
         return undefined;
@@ -469,6 +565,12 @@ test("seals imported positions with the keyword version produced by the same upd
       createMany: async ({ data }: { data: readonly unknown[] }) => ({
         count: data.length
       })
+    },
+    rankSerpResult: {
+      createMany: async ({ data }: { data: readonly { position: number }[] }) => {
+        persistedSerpPositions.push(...data.map(({ position }) => position));
+        return { count: data.length };
+      }
     },
     currentRank: {
       findMany: async () => [],
@@ -496,22 +598,49 @@ test("seals imported positions with the keyword version produced by the same upd
       language: "ru",
       positions: [
         {
+          source: "KEY_COLLECTOR" as const,
           searchEngine: "YANDEX" as const,
+          countryCode: "RU",
+          regionCode: "213",
+          regionLabel: "Москва",
+          language: "ru",
+          device: "DESKTOP" as const,
+          observedAt: "2026-08-01T12:00:00.000Z",
           found: true,
-          position: 9
+          position: 9,
+          rankingUrl: "https://example.com/first",
+          serpResults: [
+            { position: 9, rankingUrl: "https://example.com/first" },
+            { position: 43, rankingUrl: "https://example.com/second" }
+          ]
         }
       ],
+      positionHistory: [{
+        source: "KEY_COLLECTOR" as const,
+        searchEngine: "YANDEX" as const,
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP" as const,
+        observedAt: "2026-08-01T12:00:00.000Z",
+        found: true,
+        position: 9,
+        rankingUrl: "https://example.com/first"
+      }],
       customValues: {}
     }
   ];
+  const projectDomain = "example.com";
   const payloadHash = createHash("sha256")
-    .update(JSON.stringify(rows))
+    .update(JSON.stringify({ projectDomain, rows }))
     .digest("hex");
 
   const result = await new SemanticImportService(
     prisma as unknown as PrismaService
   ).applyChunk({
     ...context,
+    projectDomain,
     chunkIndex: 0,
     payloadHash,
     duplicatePolicy: "MERGE_NON_EMPTY",
@@ -521,4 +650,7 @@ test("seals imported positions with the keyword version produced by the same upd
 
   assert.equal(result.updatedKeywords, "1");
   assert.equal(manifestKeywordVersion, 8);
+  assert.equal(manifestProjectDomain, projectDomain);
+  assert.equal(manifestCount, 1);
+  assert.deepEqual(persistedSerpPositions, [9, 43]);
 });

@@ -6,15 +6,56 @@ import {
   semanticKeywordNotesMaxPageSize,
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
+  semanticOperationScopeGroupLimit,
   semanticKeywordSorts,
   isSemanticRankDimensionSort,
   parseSemanticRankDimensionKey,
   type KeywordListQuery,
   type ProjectPositionHistoryQuery,
+  type SemanticOperationScopePageInput,
   type SemanticKeywordMultiSearchInput
 } from "@seo-platform/contracts";
+import { internalUuid } from "../internal/internal-command-context.js";
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
+
+export function keywordOperationScopeInput(
+  value: unknown
+): SemanticOperationScopePageInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid("body");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(input).some((key) => key !== "groupIds" && key !== "cursor")) {
+    invalid("body");
+  }
+  const groupIds = input.groupIds === undefined
+    ? undefined
+    : Array.isArray(input.groupIds)
+      ? input.groupIds.map((groupId, index) =>
+          typeof groupId === "string"
+            ? internalUuid(groupId, `groupIds.${index}`)
+            : invalid(`groupIds.${index}`)
+        )
+      : invalid("groupIds");
+  if (
+    groupIds &&
+    (groupIds.length < 1 ||
+      groupIds.length > semanticOperationScopeGroupLimit ||
+      new Set(groupIds).size !== groupIds.length)
+  ) {
+    invalid("groupIds");
+  }
+  const cursor = input.cursor === undefined
+    ? undefined
+    : typeof input.cursor === "string"
+      ? internalUuid(input.cursor, "cursor")
+      : invalid("cursor");
+  return {
+    ...(groupIds ? { groupIds } : {}),
+    ...(cursor ? { cursor } : {})
+  };
+}
 const BODY_QUERY_FIELDS = [
   "limit", "cursor", "includeNotes", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"

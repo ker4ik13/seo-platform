@@ -15,6 +15,7 @@ import {
   type RankEstimateScopeHash
 } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
+import { storedXmlStockOperationUsage } from "../integrations/xmlstock-pricing.js";
 
 const TOP_LEVEL_FIELDS = [
   "id",
@@ -33,6 +34,7 @@ const TOP_LEVEL_FIELDS = [
   "workload",
   "providerLimits",
   "expectedDuration",
+  "providerUsage",
   "platformChargeMicro",
   "billingCurrency",
   "quota",
@@ -54,7 +56,8 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
       "routingScope",
       "connectorAttempts",
       "purpose",
-      "saveProjectPosition"
+      "saveProjectPosition",
+      "providerUsage"
     ]
   );
   const scope = exactRecord(input.scope, [
@@ -87,6 +90,9 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
   const calculatedAt = timestamp(input.calculatedAt);
   const expiresAt = timestamp(input.expiresAt);
   const provider = rankProvider(input.provider);
+  const providerUsage = input.providerUsage === undefined
+    ? undefined
+    : storedXmlStockOperationUsage(input.providerUsage);
   const purpose = input.purpose === undefined
     ? "POSITION_TRACKING"
     : member(
@@ -162,7 +168,9 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     !/^[A-Z]{3}$/u.test(input.billingCurrency) ||
     retention.normalizedRankHistory !== "LONG_TERM" ||
     retention.rawSerp !== "NOT_COLLECTED" ||
-    expiresAt.getTime() - calculatedAt.getTime() !== 5 * 60 * 1_000
+    expiresAt.getTime() - calculatedAt.getTime() !== 5 * 60 * 1_000 ||
+    (input.providerUsage !== undefined && !providerUsage) ||
+    (providerUsage !== undefined && provider !== "XMLSTOCK")
   ) {
     invalid();
   }
@@ -206,6 +214,7 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     },
     providerLimits: { status: "NOT_AVAILABLE" },
     expectedDuration: { status: "NOT_AVAILABLE" },
+    ...(providerUsage ? { providerUsage } : {}),
     platformChargeMicro: "0",
     billingCurrency: input.billingCurrency,
     quota: quota(input.quota),

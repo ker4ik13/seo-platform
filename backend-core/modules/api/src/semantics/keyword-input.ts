@@ -14,6 +14,7 @@ import {
   type SemanticKeywordCleaningInput,
   type SemanticKeywordCleaningRules,
   type SemanticKeywordIntent,
+  type SemanticKeywordMergeInput,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
@@ -170,6 +171,18 @@ export function semanticKeywordCleaningInput(
     items: semanticKeywordSelections(input.items),
     rules: semanticKeywordCleaningRules(input.rules)
   };
+}
+
+export function semanticKeywordMergeInput(
+  value: unknown
+): SemanticKeywordMergeInput {
+  const input = exactRecord(value, ["keeper", "sources"], "$");
+  const keeper = semanticKeywordSelections([input.keeper])[0]!;
+  const sources = semanticKeywordSelections(input.sources);
+  if (sources.length > 50 || sources.some(({ id }) => id === keeper.id)) {
+    invalid("sources", "Choose up to 50 different source keywords");
+  }
+  return { keeper, sources };
 }
 
 function semanticKeywordSelections(

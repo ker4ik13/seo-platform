@@ -113,7 +113,7 @@ export class SemanticCompetitorExportService {
         WHERE rs.workspace_id = ${context.workspaceId}::uuid
           AND rs.project_id = ${context.projectId}::uuid
           AND rs.keyword_id IN (${ids})
-          AND rs.provider IN ('ARSENKIN', 'XMLSTOCK')
+          AND rs.provider IN ('ARSENKIN', 'XMLSTOCK', 'KEY_COLLECTOR')
           AND NOT EXISTS (
             SELECT 1 FROM rank_dimension_history_deletions deletion
             WHERE deletion.workspace_id = rs.workspace_id

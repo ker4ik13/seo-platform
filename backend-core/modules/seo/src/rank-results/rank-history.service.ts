@@ -138,6 +138,22 @@ export class RankHistoryService {
     const cursor = query.cursor
       ? this.decodeCursor(query.cursor, query, filterHash)
       : undefined;
+    const mergedSources = query.keywordId
+      ? await this.prisma.keywordMerge?.findMany({
+          where: {
+            workspaceId: query.workspaceId,
+            projectId: query.projectId,
+            targetKeywordId: query.keywordId
+          },
+          select: { sourceKeywordId: true }
+        }) ?? []
+      : [];
+    const keywordIds = query.keywordId
+      ? [
+          query.keywordId,
+          ...mergedSources.map(({ sourceKeywordId }) => sourceKeywordId)
+        ]
+      : undefined;
     const deletions = await this.prisma.rankDimensionHistoryDeletion.findMany({
       where: {
         workspaceId: query.workspaceId,
@@ -159,17 +175,18 @@ export class RankHistoryService {
         workspaceId: query.workspaceId,
         projectId: query.projectId,
         sourceMode: { in: ["BYOK", "PLATFORM", "IMPORT"] },
-        provider: { in: ["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"] },
+        provider: { in: ["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR", "MANUAL_IMPORT"] },
         ...(query.mode === "SERP" ? { serpResults: { some: {} } } : { positionTrackingEnabled: true }),
-        ...(sourceDimensions
-          ? {
-              manifest: {
+        manifest: {
+          context: { status: "ACTIVE" },
+          ...(sourceDimensions
+            ? {
                 configuration: rankDimensionConfigurationWhereAny(
                   sourceDimensions
                 )
               }
-            }
-          : {}),
+            : {})
+        },
         observedAt: {
           gte: new Date(query.observedFrom),
           lt: new Date(query.observedBefore)
@@ -177,7 +194,7 @@ export class RankHistoryService {
         ...(query.trackingContextId
           ? { trackingContextId: query.trackingContextId }
           : {}),
-        ...(query.keywordId ? { keywordId: query.keywordId } : {}),
+        ...(keywordIds ? { keywordId: { in: keywordIds } } : {}),
         ...(deletions.length === 0
           ? {}
           : { AND: deletions.map(rankDeletionExclusionWhere) }),
@@ -204,7 +221,11 @@ export class RankHistoryService {
       workspaceId: query.workspaceId,
       projectId: query.projectId,
       items: pageRows.map((row) =>
-        storedHistoryItem(row, query, selectedDimension)
+        storedHistoryItem(
+          query.keywordId ? { ...row, keywordId: query.keywordId } : row,
+          query,
+          selectedDimension
+        )
       ),
       page: {
         hasNext,
@@ -311,15 +332,17 @@ function storedHistoryItem(
   query: InternalRankHistoryQuery,
   resolvedDimension?: ReturnType<typeof parseSemanticRankDimensionKey>
 ): RankHistoryItem {
-  const technicalIdPattern = record.provider === "MANUAL_IMPORT"
+  const technicalIdPattern = record.provider === "MANUAL_IMPORT" || record.provider === "KEY_COLLECTOR"
     ? UUID_PATTERN
     : UUID_V7_PATTERN;
   if (
     record.workspaceId !== query.workspaceId ||
     record.projectId !== query.projectId ||
-    !["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"].includes(record.provider) ||
+    !["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR", "MANUAL_IMPORT"].includes(record.provider) ||
     !["BYOK", "PLATFORM", "IMPORT"].includes(record.sourceMode) ||
-    (record.sourceMode === "IMPORT" && record.provider !== "MANUAL_IMPORT") ||
+    (record.sourceMode === "IMPORT" &&
+      record.provider !== "MANUAL_IMPORT" &&
+      record.provider !== "KEY_COLLECTOR") ||
     !technicalIdPattern.test(record.id) ||
     !UUID_V7_PATTERN.test(record.keywordId) ||
     !technicalIdPattern.test(record.trackingContextId) ||
@@ -358,7 +381,7 @@ function storedHistoryItem(
     keywordId: record.keywordId,
     trackingContextId: record.trackingContextId,
     configurationVersion: record.configurationVersion,
-    provider: record.provider as "ARSENKIN" | "XMLSTOCK" | "MANUAL_IMPORT",
+    provider: record.provider as "ARSENKIN" | "XMLSTOCK" | "KEY_COLLECTOR" | "MANUAL_IMPORT",
     connectorVersion: record.connectorVersion,
     contextName: record.manifest.context.name,
     searchEngine,
@@ -422,6 +445,33 @@ function storedHistoryItem(
       provider: "MANUAL_IMPORT",
       found: true,
       position: record.position
+    });
+  }
+  if (record.provider === "KEY_COLLECTOR") {
+    if (
+      record.position === null ||
+      record.position < 1 ||
+      record.position > 100 ||
+      record.absolutePosition !== null ||
+      record.pixelPosition !== null ||
+      record.rankingUrl === null ||
+      record.normalizedRankingUrl === null ||
+      record.title !== null ||
+      record.snippet !== null ||
+      record.resultType !== "ORGANIC" ||
+      !emptyJsonArray(record.serpFeatures)
+    ) {
+      throw new Error("Stored Key Collector rank history row is invalid");
+    }
+    return redactRankHistoryItem({
+      ...common,
+      provider: "KEY_COLLECTOR",
+      found: true,
+      position: record.position,
+      rankingUrl: record.rankingUrl,
+      normalizedRankingUrl: record.normalizedRankingUrl,
+      resultType: "ORGANIC",
+      serpFeatures: []
     });
   }
   if (

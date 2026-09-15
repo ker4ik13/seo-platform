@@ -189,6 +189,8 @@ model Keyword {
   rankSnapshots       RankSnapshot[]                     @relation("RankSnapshotKeyword")
   aiAnswerSnapshots   AiAnswerSnapshot[]                 @relation("AiAnswerSnapshotKeyword")
   typedCustomValues   SemanticKeywordCustomValue[]
+  mergedInto          KeywordMerge?                       @relation("KeywordMergeSource")
+  mergedSources       KeywordMerge[]                      @relation("KeywordMergeTarget")
   cluster             Cluster?                           @relation(fields: [workspaceId, projectId, clusterId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
   targetPage          Page?                              @relation(fields: [workspaceId, projectId, targetPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -206,6 +208,25 @@ model Keyword {
   @@index([projectId, targetPageId, id])
   @@index([projectId, isTracked, id])
   @@map("keywords")
+}
+
+model KeywordMerge {
+  id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  sourceKeywordId String   @map("source_keyword_id") @db.Uuid
+  targetKeywordId String   @map("target_keyword_id") @db.Uuid
+  sourceText      String   @map("source_text") @db.Text
+  sourceLanguage  String   @map("source_language") @db.VarChar(16)
+  createdBy       String   @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  source Keyword @relation("KeywordMergeSource", fields: [workspaceId, projectId, sourceKeywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  target Keyword @relation("KeywordMergeTarget", fields: [workspaceId, projectId, targetKeywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workspaceId, projectId, sourceKeywordId], map: "keyword_merges_source_key")
+  @@index([workspaceId, projectId, targetKeywordId], map: "keyword_merges_target_idx")
+  @@map("keyword_merges")
 }
 
 model SemanticCustomColumn {
@@ -1266,6 +1287,30 @@ model RankDimensionMerge {
   @@unique([workspaceId, projectId, id], map: "rank_dimension_merges_tenant_project_id_key")
   @@index([workspaceId, projectId, targetDimensionKey], map: "rank_dimension_merges_target_idx")
   @@map("rank_dimension_merges")
+}
+
+model ProjectPositionHistoryRevision {
+  workspaceId String   @map("workspace_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  revision    BigInt   @default(1)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([workspaceId, projectId])
+  @@map("project_position_history_revisions")
+}
+
+model ProjectPositionHistoryProjection {
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  scopeHash      String   @map("scope_hash") @db.Char(64)
+  schemaVersion  String   @map("schema_version") @db.VarChar(64)
+  sourceRevision BigInt   @map("source_revision")
+  payload        Json
+  builtAt        DateTime @map("built_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([workspaceId, projectId, scopeHash])
+  @@map("project_position_history_projections")
 }
 
 model FrequencySnapshot {

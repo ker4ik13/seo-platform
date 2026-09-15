@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException
 } from "@nestjs/common";
 import {
@@ -18,6 +19,7 @@ import {
 import { rankCheckFinalizationHash } from "@seo-platform/contracts/rank-results-canonical";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { KeywordService } from "../keywords/keyword.service.js";
 
 const FINALIZE_SCHEMA = "rank-finalize@1";
 const FINALIZATION_TRANSACTION_MAX_WAIT_MS = 5_000;
@@ -72,13 +74,18 @@ interface IngestAggregate {
 
 @Injectable()
 export class RankFinalizationService {
-  public constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(RankFinalizationService.name);
+
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly keywords?: KeywordService
+  ) {}
 
   public async finalize(
     input: InternalFinalizeRankCheckInput
   ): Promise<InternalRankCheckFinalizationReceipt> {
     const requestHash = hashBytes(rankCheckFinalizationHash(input));
-    return this.prisma.$transaction(
+    const receipt = await this.prisma.$transaction(
       async (transaction) => {
         const manifest = await lockManifest(transaction, input);
         if (!manifest) {
@@ -174,6 +181,18 @@ export class RankFinalizationService {
         timeout: FINALIZATION_TRANSACTION_TIMEOUT_MS
       }
     );
+    if (this.keywords) {
+      void this.keywords
+        .warmPositionHistory(input.workspaceId, input.projectId)
+        .catch(() => {
+          this.logger.warn({
+            event: "position_history_projection_warm_failed",
+            source: "rank_finalization",
+            projectId: input.projectId
+          });
+        });
+    }
+    return receipt;
   }
 }
 

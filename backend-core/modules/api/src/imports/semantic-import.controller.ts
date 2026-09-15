@@ -2,13 +2,16 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  SemanticImportPreviewRowsPage,
   SemanticImportSummary
 } from "@seo-platform/contracts";
 import { RequirePermission } from "../authorization/require-permission.js";
@@ -31,16 +34,19 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { PrismaService } from "../database/prisma.service.js";
 import {
   configureSemanticImportInput,
-  createSemanticImportInput
+  createSemanticImportInput,
+  semanticImportPreviewRowsQuery
 } from "./semantic-import-input.js";
 
 @Controller("api/v1/projects/:projectId/imports")
 export class SemanticImportController {
   public constructor(
     private readonly jobs: JobsClient,
-    private readonly billingEntitlements: BillingEntitlementService
+    private readonly billingEntitlements: BillingEntitlementService,
+    private readonly prisma: PrismaService
   ) {}
 
   @Post()
@@ -53,6 +59,19 @@ export class SemanticImportController {
   ): Promise<ApiResponse<SemanticImportSummary>> {
     const context = requestContext(request);
     const tenant = requiredTenant(request);
+    const [project, jobCapacity, semanticCapacity] = await Promise.all([
+      this.prisma.project.findFirst({
+        where: {
+          id: tenant.projectId,
+          workspaceId: tenant.workspaceId,
+          status: { notIn: ["DELETING", "DELETED"] }
+        },
+        select: { domain: true }
+      }),
+      this.billingEntitlements.jobCapacity(tenant.workspaceId),
+      this.billingEntitlements.semanticCapacity(tenant.workspaceId)
+    ]);
+    if (!project) throw new NotFoundException("Project not found");
     return apiResponse(
       request,
       await this.jobs.createSemanticImport(
@@ -62,10 +81,12 @@ export class SemanticImportController {
           requestId: context.requestId
         },
         createSemanticImportInput(body),
+        project.domain,
         requiredIdempotencyKey(
           headerValue(request, "idempotency-key")
         ),
-        await this.billingEntitlements.jobCapacity(tenant.workspaceId)
+        jobCapacity,
+        semanticCapacity
       )
     );
   }
@@ -89,6 +110,33 @@ export class SemanticImportController {
           requestId: context.requestId
         },
         importId
+      )
+    );
+  }
+
+  @Get(":importId/preview-rows")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async previewRows(
+    @Param("importId") importId: string,
+    @Query("cursor") cursor: unknown,
+    @Query("sortColumn") sortColumn: unknown,
+    @Query("sortDirection") sortDirection: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticImportPreviewRowsPage>> {
+    assertUuid(importId, "importId");
+    const context = requestContext(request);
+    return apiResponse(
+      request,
+      await this.jobs.getSemanticImportPreviewRows(
+        {
+          tenant: requiredTenant(request),
+          actorId: principal.userId,
+          requestId: context.requestId
+        },
+        importId,
+        semanticImportPreviewRowsQuery(cursor, sortColumn, sortDirection)
       )
     );
   }
@@ -177,10 +225,12 @@ export class SemanticImportController {
   }
 }
 
-function requiredTenant(request: TenantRequest): TenantAuthorization {
+function requiredTenant(
+  request: TenantRequest
+): TenantAuthorization & { readonly projectId: string } {
   const tenant = request.tenantAuthorization;
   if (!tenant?.projectId) {
     throw new Error("Project authorization is missing");
   }
-  return tenant;
+  return tenant as TenantAuthorization & { readonly projectId: string };
 }

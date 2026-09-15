@@ -51,7 +51,7 @@ test("returns tenant-scoped history and authenticates its keyset cursor", async 
   assert.equal(harness.wheres[0]?.workspaceId, workspaceId);
   assert.equal(harness.wheres[0]?.projectId, projectId);
   assert.deepEqual(harness.wheres[0]?.sourceMode, { in: ["BYOK", "PLATFORM", "IMPORT"] });
-  assert.deepEqual(harness.wheres[0]?.provider, { in: ["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"] });
+  assert.deepEqual(harness.wheres[0]?.provider, { in: ["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR", "MANUAL_IMPORT"] });
 
   const second = await service.list({
     ...query(),
@@ -136,6 +136,34 @@ test("returns an imported manual position without inventing a result URL", async
     },
     { provider: "MANUAL_IMPORT", found: true, position: 100, hasUrl: false }
   );
+});
+
+test("returns imported Key Collector SERP history", async () => {
+  const row = {
+    ...foundRow(),
+    id: "2c64b96f-0747-5cc4-8477-43bade090d31",
+    trackingContextId: "c53bcb2b-c890-5ed0-97cb-c8ba4bb975e3",
+    jobId: "4223aa99-a200-5efa-a377-0dca071ebd5c",
+    provider: "KEY_COLLECTOR",
+    sourceMode: "IMPORT",
+    dataQualityFlags: ["IMPORTED_KC4"],
+    connectorVersion: "key-collector@import",
+    manifest: {
+      ...foundRow().manifest,
+      execution: { source: "KC4", searchEngine: "YANDEX" },
+      context: { name: "Импорт Key Collector · Яндекс · Москва · ПК" }
+    }
+  };
+  const service = new RankHistoryService({
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
+    rankSnapshot: { findMany: async () => [row] }
+  } as unknown as PrismaService, config());
+
+  const result = await service.list({ ...query(), mode: "SERP", limit: 10 });
+
+  assert.equal(result.items[0]?.provider, "KEY_COLLECTOR");
+  assert.equal(result.items[0]?.serpResults?.length, 3);
+  assert.equal(result.items[0]?.serpResults?.[0]?.rankingUrl, "https://competitor.test/");
 });
 
 function query(): InternalRankHistoryQuery {

@@ -5,6 +5,7 @@ import {
   rankCommandKeywordLimit,
   rankCommandOverflowCount,
   rankEstimateBlockerCodes,
+  parseXmlStockOperationUsageSummary,
   type RankEstimate,
   type RankEstimateBlocker,
   type RankEstimateCredentialFreshness,
@@ -47,6 +48,7 @@ export function scopedRankEstimate(
     "workload",
     "providerLimits",
     "expectedDuration",
+    "providerUsage",
     "platformChargeMicro",
     "billingCurrency",
     "quota",
@@ -89,6 +91,9 @@ export function scopedRankEstimate(
   const calculatedAt = isoDate(estimate.calculatedAt);
   const expiresAt = isoDate(estimate.expiresAt);
   const executionAllowed = estimate.executionAllowed;
+  const providerUsage = estimate.providerUsage === undefined
+    ? undefined
+    : providerUsageSummary(estimate.providerUsage);
   const credentialMode =
     estimate.credentialMode === "BYOK_API_KEY" ||
     estimate.credentialMode === "PLATFORM_PAID"
@@ -122,7 +127,8 @@ export function scopedRankEstimate(
         ({ code }) =>
           code === "SCOPE_HASH_UNAVAILABLE" ||
           code === "KEYWORD_LIMIT_EXCEEDED"
-      ))
+      )) ||
+    (providerUsage !== undefined && provider !== "XMLSTOCK")
   ) {
     throw invalidResponse();
   }
@@ -149,6 +155,7 @@ export function scopedRankEstimate(
     workload,
     providerLimits: { status: "NOT_AVAILABLE" },
     expectedDuration: { status: "NOT_AVAILABLE" },
+    ...(providerUsage ? { providerUsage } : {}),
     platformChargeMicro: "0",
     billingCurrency: estimate.billingCurrency,
     quota: quota(estimate.quota),
@@ -162,6 +169,14 @@ export function scopedRankEstimate(
     calculatedAt,
     expiresAt
   };
+}
+
+function providerUsageSummary(value: unknown) {
+  try {
+    return parseXmlStockOperationUsageSummary(value);
+  } catch {
+    throw invalidResponse();
+  }
 }
 
 function connectorAttempts(value: unknown): NonNullable<RankEstimate["connectorAttempts"]> {

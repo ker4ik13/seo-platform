@@ -1923,7 +1923,7 @@ export function loadAppConfig(
       ),
       stagingBatchRows: positiveInteger(
         env.IMPORT_STAGING_BATCH_ROWS,
-        1_000,
+        5_000,
         "IMPORT_STAGING_BATCH_ROWS"
       ),
       previewRows: positiveInteger(
@@ -1933,7 +1933,7 @@ export function loadAppConfig(
       ),
       publishBatchRows: positiveInteger(
         env.IMPORT_PUBLISH_BATCH_ROWS,
-        200,
+        5_000,
         "IMPORT_PUBLISH_BATCH_ROWS"
       )
     }

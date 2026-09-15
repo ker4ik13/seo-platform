@@ -60,6 +60,7 @@ test("normalizes the explicit untracked launch override and defaults legacy inpu
     }
   });
   assert.equal(explicit.launchProfile?.includeUntracked, true);
+  assert.deepEqual(explicit.launchProfile?.scope.descendantGroupIds, []);
 
   const legacy = createTrackingContextInput({
     ...validInput,
@@ -69,6 +70,59 @@ test("normalizes the explicit untracked launch override and defaults legacy inpu
     }
   });
   assert.equal(legacy.launchProfile?.includeUntracked, false);
+  assert.deepEqual(legacy.launchProfile?.scope.descendantGroupIds, []);
+});
+
+test("keeps descendant expansion as an explicit folder choice", () => {
+  const groupId = "01900000-0000-7000-8000-000000000099";
+  const directGroupId = "01900000-0000-7000-8000-000000000098";
+  const result = createTrackingContextInput({
+    ...validInput,
+    launchProfile: {
+      searchSource: "LIVE",
+      includeUntracked: false,
+      scope: {
+        mode: "GROUPS",
+        groupIds: [groupId],
+        includeDescendants: true
+      }
+    }
+  });
+
+  assert.deepEqual(result.launchProfile?.scope, {
+    mode: "GROUPS",
+    groupIds: [groupId],
+    descendantGroupIds: [groupId]
+  });
+  assert.deepEqual(createTrackingContextInput({
+    ...validInput,
+    launchProfile: {
+      searchSource: "LIVE",
+      scope: {
+        mode: "GROUPS",
+        groupIds: [groupId, directGroupId],
+        descendantGroupIds: [groupId]
+      }
+    }
+  }).launchProfile?.scope, {
+    mode: "GROUPS",
+    groupIds: [groupId, directGroupId],
+    descendantGroupIds: [groupId]
+  });
+  assert.throws(
+    () => createTrackingContextInput({
+      ...validInput,
+      launchProfile: {
+        searchSource: "LIVE",
+        scope: {
+          mode: "ALL",
+          groupIds: [],
+          includeDescendants: true
+        }
+      }
+    }),
+    DomainError
+  );
 });
 
 test("accepts a matching mode without a URL value", () => {

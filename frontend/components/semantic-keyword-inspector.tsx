@@ -1258,7 +1258,7 @@ export function SemanticKeywordInspector({
           </div>
         </SemanticModal>
       )}
-      {serpHistoryOpen && <SemanticKeywordSerpHistory currentUserId={currentUserId} projectId={projectId} keywordId={item.id} keywordText={item.textOriginal} createdAt={item.createdAt} projectDomain={projectDomain} dimensionKey={serpDimensionKey || undefined} onClose={() => setSerpHistoryOpen(false)} />}
+      {serpHistoryOpen && <SemanticKeywordSerpHistory currentUserId={currentUserId} projectId={projectId} keywordId={item.id} keywordText={item.textOriginal} projectDomain={projectDomain} dimensionKey={serpDimensionKey || undefined} onClose={() => setSerpHistoryOpen(false)} />}
       {historyOpen && (
         <SemanticKeywordPositionHistoryModal
           dimensionKey={rankDimensionKey || undefined}
@@ -1611,7 +1611,7 @@ function InspectorSliceSelector({
               <SearchEngineLogo engine={slice.searchEngine} size="compact" />
               <span>
                 <strong>
-                  {slice.searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"} · {slice.regionLabel}
+                  {slice.regionLabel}
                 </strong>
                 <small>
                   {inspectorSliceStatus(slice, t)} · {formatDateTime(slice.observedAt, locale)}

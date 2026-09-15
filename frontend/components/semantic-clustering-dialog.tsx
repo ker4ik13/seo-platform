@@ -9,18 +9,14 @@ import {
   type ClusteringMethod,
   type ClusteringRunSummary,
   type ClusteringSearchEngine,
-  type ProjectConnectorBinding,
-  type ProjectConnectorSettings
+  type ProjectConnectorCredentialOption,
+  type WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
-import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import {
-  createProjectConnectorBindingInput,
-  projectConnectorBinding,
-  projectConnectorOptions,
-  updateProjectConnectorBindingInput,
-  withProjectConnectorBinding
+  isProjectConnectorCredentialEligible,
+  workspaceConnectorOptions
 } from "../lib/project-integration-settings";
 import {
   defaultSemanticClusteringFrequencyTypes,
@@ -52,7 +48,8 @@ export function SemanticClusteringDialog({
   initialSelections,
   onClose,
   onStarted,
-  projectId
+  projectId,
+  workspaceId
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
@@ -60,11 +57,12 @@ export function SemanticClusteringDialog({
   onClose: () => void;
   onStarted: (run: ClusteringRunSummary) => void;
   projectId: string;
+  workspaceId: string;
 }>) {
   const { t: uiText } = useUiLocale();
   const formId = useId();
   const operationAttempt = useRef<OperationAttempt | undefined>(undefined);
-  const [settings, setSettings] = useState<ProjectConnectorSettings>();
+  const [routing, setRouting] = useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [searchEngine, setSearchEngine] = useState<ClusteringSearchEngine>("YANDEX");
   const [regions, setRegions] = useState(defaultSemanticSearchRegions);
@@ -85,14 +83,20 @@ export function SemanticClusteringDialog({
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string>();
-  const binding = settings ? projectConnectorBinding(settings, "CLUSTERING") : undefined;
   const sources = useMemo(
-    () => settings
-      ? projectConnectorOptions(settings, "CLUSTERING").filter(
-          ({ provider, status }) => provider === "ARSENKIN" && status === "ACTIVE"
+    () => routing
+      ? workspaceConnectorOptions(routing, "CLUSTERING").filter(
+          ({ provider }) => provider === "ARSENKIN"
         )
       : [],
-    [settings]
+    [routing]
+  );
+  const connectedClusteringSources = useMemo<readonly ProjectConnectorCredentialOption[]>(
+    () => (routing?.credentialOptions ?? []).filter((source) =>
+      source.provider === "ARSENKIN" &&
+      isProjectConnectorCredentialEligible(source, "CLUSTERING")
+    ),
+    [routing]
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const stopDomains = splitDomains(stopDomainsText);
@@ -120,19 +124,17 @@ export function SemanticClusteringDialog({
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void preparedProjectIntegrations(projectId, controller.signal)
+    void browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
+      { signal: controller.signal }
+    )
       .then((result) => {
         if (controller.signal.aborted) return;
-        const current = projectConnectorBinding(result, "CLUSTERING");
-        const options = projectConnectorOptions(result, "CLUSTERING").filter(
-          ({ provider, status }) => provider === "ARSENKIN" && status === "ACTIVE"
+        const options = workspaceConnectorOptions(result, "CLUSTERING").filter(
+          ({ provider }) => provider === "ARSENKIN"
         );
-        setSettings(result);
-        setCredentialId(
-          options.some(({ id }) => id === current?.route?.credentialId)
-            ? current?.route?.credentialId ?? ""
-            : options[0]?.id ?? ""
-        );
+        setRouting(result);
+        setCredentialId(options[0]?.id ?? "");
       })
       .catch((requestError: unknown) => {
         if (!controller.signal.aborted) setError(clusteringErrorMessage(requestError));
@@ -141,7 +143,7 @@ export function SemanticClusteringDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [projectId]);
+  }, [workspaceId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -153,10 +155,9 @@ export function SemanticClusteringDialog({
     }
     setRunning(true);
     try {
-      if (!settings || !selectedSource) {
+      if (!routing || !selectedSource) {
         throw new Error("Нет активного подключения Arsenkin с доступом к кластеризации.");
       }
-      await ensureBinding(settings, binding, selectedSource.id);
       const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`;
       const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
@@ -188,37 +189,6 @@ export function SemanticClusteringDialog({
     } finally {
       setRunning(false);
     }
-  }
-
-  async function ensureBinding(
-    currentSettings: ProjectConnectorSettings,
-    currentBinding: ProjectConnectorBinding | undefined,
-    selectedCredentialId: string
-  ): Promise<void> {
-    if (
-      currentBinding?.enabled &&
-      currentBinding.route?.credentialId === selectedCredentialId &&
-      currentBinding.availability === "READY"
-    ) return;
-    const draft = { credentialId: selectedCredentialId, enabled: true };
-    const updated = currentBinding
-      ? await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings/${encodeURIComponent(currentBinding.id)}`,
-          {
-            method: "PATCH",
-            ifMatch: currentBinding.version,
-            body: updateProjectConnectorBindingInput(draft)
-          }
-        )
-      : await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-          {
-            method: "POST",
-            idempotencyKey: `semantic-clustering-binding:${crypto.randomUUID()}`,
-            body: createProjectConnectorBindingInput("CLUSTERING", draft)
-          }
-        );
-    setSettings(withProjectConnectorBinding(currentSettings, updated));
   }
 
   return (
@@ -309,7 +279,12 @@ export function SemanticClusteringDialog({
                   ))}
                 </div>
               ) : (
-                <div className="inline-alert warning"><UiText text="Нет проверенного подключения Arsenkin с функцией кластеризации." /></div>
+                <div className="inline-alert warning">
+                  <span>{connectedClusteringSources.length > 0
+                    ? <UiText text="Arsenkin подключён, но для кластеризации не выбран маршрут рабочей области." />
+                    : <UiText text="Нет проверенного подключения Arsenkin с функцией кластеризации." />}</span>{" "}
+                  <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+                </div>
               )}
             </div>
           </section>

@@ -18,13 +18,26 @@ const xmlStock = {
     status: "AVAILABLE",
     unit: "XMLSTOCK_REQUESTS",
     remaining: 420,
-    balance: { amount: "27.39", currency: "RUB" }
+    balance: { amount: "27.39", currency: "RUB" },
+    xmlStockPricing: {
+      tariffCode: "BASIC",
+      currency: "RUB",
+      priceUnit: "PER_1000_REQUESTS",
+      pricesPerThousand: {
+        YANDEX_SEARCH_API: "28",
+        YANDEX_LIVE: "25",
+        YANDEX_TURBO: "35",
+        GOOGLE_LIVE: "25",
+        WORDSTAT: "25"
+      },
+      observedAt: "2026-09-15T09:00:00.000Z"
+    }
   }
 } as const satisfies ProjectConnectorCredentialOption;
 
 test("estimates XMLStock Wordstat calls and shows current account capacity", () => {
   const estimate = frequencyProviderUsageEstimate(xmlStock, 12, 3);
-  assert.equal(estimate.usage, "до 36 запросов XMLStock");
+  assert.match(estimate.usage, /^Базовый тариф · 25 ₽ за 1000 · 36 запросов · 0,90\s₽$/u);
   assert.match(estimate.available, /27,39/u);
   assert.match(estimate.available, /420 запросов/u);
 });
@@ -32,7 +45,7 @@ test("estimates XMLStock Wordstat calls and shows current account capacity", () 
 test("estimates XMLStock Google pages by selected depth", () => {
   assert.match(
     rankProviderUsageEstimate(xmlStock, 12, "GOOGLE", 30, "LIVE").usage,
-    /^до 36 запросов XMLStock · от 0,90\s₽$/u
+    /^Базовый тариф · 25 ₽ за 1000 · 36 запросов · 0,90\s₽$/u
   );
   assert.match(
     rankProviderUsageEstimate(
@@ -42,7 +55,7 @@ test("estimates XMLStock Google pages by selected depth", () => {
       30,
       "SEARCH_API"
     ).usage,
-    /^до 12 запросов XMLStock · от 0,34\s₽$/u
+    /^Базовый тариф · 28 ₽ за 1000 · 12 запросов · 0,34\s₽$/u
   );
 });
 
@@ -57,7 +70,7 @@ test("shows the selected XMLStock competitor depth", () => {
       undefined,
       "COMPETITOR_SERP"
     ).usage,
-    /^до 12 запросов XMLStock · Топ-100 · от 0,30\s₽$/u
+    /^Базовый тариф · 25 ₽ за 1000 · 120 запросов · 3,00\s₽$/u
   );
   assert.match(
     rankProviderUsageEstimate(
@@ -69,7 +82,7 @@ test("shows the selected XMLStock competitor depth", () => {
       undefined,
       "COMPETITOR_SERP"
     ).usage,
-    /^до 12 запросов XMLStock · Топ-100 · от 0,34\s₽$/u
+    /^Базовый тариф · 28 ₽ за 1000 · 12 запросов · 0,34\s₽$/u
   );
 });
 
@@ -82,9 +95,9 @@ test("shows the documented Turbo page range and higher tariff", () => {
     "LIVE",
     "TURBO"
   );
-  assert.equal(
+  assert.match(
     estimate.usage,
-    "24–120 запросов XMLStock Turbo · повышенный тариф"
+    /^Базовый тариф · 35 ₽ за 1000 · 24–120 запросов · 0,84\s₽–4,20\s₽$/u
   );
 });
 

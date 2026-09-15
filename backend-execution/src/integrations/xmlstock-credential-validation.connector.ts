@@ -10,6 +10,7 @@ import {
   providerJsonRequest,
   ProviderTransportError
 } from "./provider-json-request.js";
+import { xmlStockPricingMetadata } from "./xmlstock-pricing.js";
 
 const XMLSTOCK_ACCOUNT_URL = "https://xmlstock.com/api/";
 const XMLSTOCK_WORDSTAT_URL = "https://xmlstock.com/wordstat/json/";
@@ -29,7 +30,11 @@ export class XmlStockCredentialValidationConnector
   ): Promise<CredentialValidationResult> {
     if (!secret.accountIdentifier) return invalidCredential();
     const accountUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
+    const userInfoUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
+    const statusInfoUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
     const regionUrl = authenticatedUrl(XMLSTOCK_WORDSTAT_URL, secret);
+    userInfoUrl.searchParams.set("info", "user");
+    statusInfoUrl.searchParams.set("info", "status");
     // XMLStock selects the response shape through `pagetype`. The legacy
     // `regionsTree=1` query is ignored by the current API and can therefore
     // make a valid credential look like an invalid provider response.
@@ -46,6 +51,29 @@ export class XmlStockCredentialValidationConnector
         account.retryAfterSeconds
       );
       if (!accountResult.ok) return accountResult;
+
+      const providerMeta: Record<string, unknown> = {
+        ...accountResult.providerMeta
+      };
+      for (const [url, parser] of [
+        [userInfoUrl, xmlStockUserInfoValidationResult],
+        [statusInfoUrl, xmlStockStatusInfoValidationResult]
+      ] as const) {
+        try {
+          const response = await providerJsonRequest(
+            url,
+            { method: "GET", headers: { Accept: "application/json" } },
+            timeoutMs,
+            this.fetcher
+          );
+          const result = parser(response.status, response.value);
+          if (result.ok && result.providerMeta) {
+            Object.assign(providerMeta, result.providerMeta);
+          }
+        } catch (error) {
+          if (!(error instanceof ProviderTransportError)) throw error;
+        }
+      }
 
       // Wordstat availability is useful capability metadata, but it must not
       // hide a valid account balance when the auxiliary region catalogue is
@@ -65,13 +93,15 @@ export class XmlStockCredentialValidationConnector
           ? {
               ok: true,
               providerMeta: {
-                ...accountResult.providerMeta,
+                ...providerMeta,
                 ...regionResult.providerMeta
               }
             }
-          : accountResult;
+          : { ok: true, providerMeta };
       } catch (error) {
-        if (error instanceof ProviderTransportError) return accountResult;
+        if (error instanceof ProviderTransportError) {
+          return { ok: true, providerMeta };
+        }
         throw error;
       }
     } catch (error) {
@@ -79,6 +109,71 @@ export class XmlStockCredentialValidationConnector
       throw error;
     }
   }
+}
+
+export function xmlStockUserInfoValidationResult(
+  status: number,
+  value: unknown
+): CredentialValidationResult {
+  const failure = xmlStockMetadataFailure(status, value);
+  if (failure) return failure;
+  const pricing = xmlStockPricingMetadata(value);
+  return pricing
+    ? { ok: true, providerMeta: { xmlStockPricing: pricing } }
+    : unavailable();
+}
+
+export function xmlStockStatusInfoValidationResult(
+  status: number,
+  value: unknown
+): CredentialValidationResult {
+  const failure = xmlStockMetadataFailure(status, value);
+  if (failure) return failure;
+  const body = record(value);
+  if (!body) return unavailable();
+  const availableRequests = {
+    GOOGLE_LIVE: providerInteger(body["google-queries"]),
+    YANDEX_LIVE: providerInteger(body["yandex-live-queries"]),
+    YANDEX_TURBO: providerInteger(body["yandex-live-turbo-queries"]),
+    YANDEX_SEARCH_API: providerInteger(body["yandex-xml-queries"])
+  };
+  const loadPercent = {
+    GOOGLE_LIVE: providerInteger(body["google-load"]),
+    YANDEX_LIVE: providerInteger(body["yandex-live-load"])
+  };
+  if (
+    Object.values(availableRequests).some((item) => item === undefined) ||
+    Object.values(loadPercent).some(
+      (item) => item === undefined || item < 0 || item > 100
+    )
+  ) {
+    return unavailable();
+  }
+  return {
+    ok: true,
+    providerMeta: {
+      xmlStockStatus: {
+        availableRequests,
+        loadPercent
+      }
+    }
+  };
+}
+
+function xmlStockMetadataFailure(
+  status: number,
+  value: unknown
+): CredentialValidationResult | undefined {
+  if (status === 401 || status === 403) return invalidCredential();
+  if (status === 429) return rateLimited();
+  if (status >= 500) return unavailable();
+  if (status < 200 || status >= 300) return requestRejected();
+  const error = providerError(record(value)?.error);
+  if (!error) return undefined;
+  if (error === "-34" || error === "401" || error === "403") {
+    return invalidCredential();
+  }
+  return requestRejected();
 }
 
 export function xmlStockAccountValidationResult(

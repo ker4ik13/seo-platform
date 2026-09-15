@@ -2,6 +2,9 @@ import { BadRequestException } from "@nestjs/common";
 import {
   semanticImportDuplicatePolicies,
   semanticImportMaxGroupDepth,
+  semanticImportMaxGroupManifestEntries,
+  semanticImportNormalizeMaxRows,
+  semanticImportPublishMaxRows,
   semanticKeywordIntents,
   type InternalApplySemanticImportChunkInput,
   type InternalAbortSemanticImportInput,
@@ -12,6 +15,7 @@ import {
   type SemanticImportFrequencyValue,
   type SemanticImportPositionValue,
   type SemanticImportRankHistoryValue,
+  type SemanticImportSerpResultValue,
   type SemanticImportPublishRow
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -20,6 +24,7 @@ import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const INTEGER_PATTERN = /^(0|[1-9]\d*)$/u;
 const LANGUAGE_PATTERN = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u;
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
 const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 
 export function normalizeSemanticKeywordsInput(
@@ -27,7 +32,9 @@ export function normalizeSemanticKeywordsInput(
 ): InternalNormalizeSemanticKeywordsInput {
   const input = record(value);
   const rows = array(input.rows, "rows");
-  if (rows.length === 0 || rows.length > 500) invalid("rows");
+  if (rows.length === 0 || rows.length > semanticImportNormalizeMaxRows) {
+    invalid("rows");
+  }
   const parsedRows = rows.map((row, index) => {
     const item = record(row);
     return {
@@ -85,7 +92,9 @@ export function applySemanticImportChunkInput(
 ): InternalApplySemanticImportChunkInput {
   const input = record(value);
   const rows = array(input.rows, "rows");
-  if (rows.length === 0 || rows.length > 500) invalid("rows");
+  if (rows.length === 0 || rows.length > semanticImportPublishMaxRows) {
+    invalid("rows");
+  }
   const parsedRows = rows.map((row, index) =>
     publishRow(row, `rows.${index}`)
   );
@@ -109,7 +118,7 @@ export function applySemanticImportChunkInput(
           }
           return path;
         });
-  if (groupPaths && groupPaths.length > 2_000) invalid("groupPaths");
+  if (groupPaths && groupPaths.length > semanticImportMaxGroupManifestEntries) invalid("groupPaths");
   const groupMetadata = input.groupMetadata === undefined
     ? undefined
     : array(input.groupMetadata, "groupMetadata").map((value, groupIndex) => {
@@ -128,7 +137,7 @@ export function applySemanticImportChunkInput(
         if (color !== undefined && !/^#[0-9a-f]{6}$/u.test(color)) invalid(`groupMetadata.${groupIndex}.color`);
         return { path, ...(color ? { color } : {}) };
       });
-  if (groupMetadata && groupMetadata.length > 2_000) invalid("groupMetadata");
+  if (groupMetadata && groupMetadata.length > semanticImportMaxGroupManifestEntries) invalid("groupMetadata");
   const keys = parsedRows.map(
     ({ language: rowLanguage, normalizedHash }) =>
       `${rowLanguage}\u0000${normalizedHash}`
@@ -136,6 +145,9 @@ export function applySemanticImportChunkInput(
   if (new Set(keys).size !== keys.length) invalid("rows.normalizedHash");
   return {
     ...context(input),
+    ...(input.projectDomain === undefined
+      ? {}
+      : { projectDomain: domain(input.projectDomain, "projectDomain") }),
     importId: uuid(input.importId, "importId"),
     chunkIndex: nonNegativeInteger(input.chunkIndex, "chunkIndex"),
     payloadHash: hash(input.payloadHash, "payloadHash"),
@@ -149,6 +161,12 @@ export function applySemanticImportChunkInput(
     ...(groupMetadata ? { groupMetadata } : {}),
     rows: parsedRows
   };
+}
+
+function domain(value: unknown, path: string): string {
+  const normalized = boundedString(value, path, 253).toLowerCase();
+  if (!DOMAIN_PATTERN.test(normalized)) invalid(path);
+  return normalized;
 }
 
 function optionalBoolean(
@@ -341,7 +359,8 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
 
 function historyPositionValue(value: unknown, path: string): SemanticImportRankHistoryValue {
   const input = record(value);
-  if (Object.keys(input).some(key => !["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "observedAt", "found", "position"].includes(key))) invalid(path);
+  if (Object.keys(input).some(key => !["source", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "observedAt", "found", "position", "rankingUrl", "serpResults"].includes(key))) invalid(path);
+  if (input.source !== undefined && input.source !== "KEY_COLLECTOR") invalid(`${path}.source`);
   if (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") invalid(`${path}.searchEngine`);
   const countryCode = boundedString(input.countryCode, `${path}.countryCode`, 2).toUpperCase();
   if (!/^[A-Z]{2}$/u.test(countryCode)) invalid(`${path}.countryCode`);
@@ -353,7 +372,26 @@ function historyPositionValue(value: unknown, path: string): SemanticImportRankH
   const found = boolean(input.found, `${path}.found`);
   const position = input.position === undefined ? undefined : positiveInteger(input.position, `${path}.position`);
   if ((found && (position === undefined || position > 100)) || (!found && position !== undefined)) invalid(`${path}.position`);
-  return { searchEngine: input.searchEngine, countryCode, regionCode, regionLabel, language: lang, device: input.device, observedAt: date, found, ...(position === undefined ? {} : { position }) };
+  const rankingUrl = input.rankingUrl === undefined
+    ? undefined
+    : webUrl(input.rankingUrl, `${path}.rankingUrl`);
+  const serpResults = input.serpResults === undefined
+    ? undefined
+    : serpResultValues(input.serpResults, `${path}.serpResults`);
+  return {
+    ...(input.source === undefined ? {} : { source: "KEY_COLLECTOR" as const }),
+    searchEngine: input.searchEngine,
+    countryCode,
+    regionCode,
+    regionLabel,
+    language: lang,
+    device: input.device,
+    observedAt: date,
+    found,
+    ...(position === undefined ? {} : { position }),
+    ...(rankingUrl === undefined ? {} : { rankingUrl }),
+    ...(serpResults === undefined ? {} : { serpResults })
+  };
 }
 
 function positionValue(
@@ -361,8 +399,73 @@ function positionValue(
   path: string
 ): SemanticImportPositionValue {
   const input = record(value);
+  if (Object.keys(input).some((key) => ![
+    "source",
+    "searchEngine",
+    "countryCode",
+    "regionCode",
+    "regionLabel",
+    "language",
+    "device",
+    "observedAt",
+    "found",
+    "position",
+    "previousPosition",
+    "rankingUrl",
+    "serpResults"
+  ].includes(key))) {
+    invalid(path);
+  }
   if (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") {
     invalid(`${path}.searchEngine`);
+  }
+  const hasImportedContext = [
+    input.source,
+    input.countryCode,
+    input.regionCode,
+    input.regionLabel,
+    input.language,
+    input.device,
+    input.observedAt
+  ].some((candidate) => candidate !== undefined);
+  let importedContext: Pick<
+    SemanticImportPositionValue,
+    "source" | "countryCode" | "regionCode" | "regionLabel" | "language" | "device" | "observedAt"
+  > = {};
+  if (hasImportedContext) {
+    if (input.source !== "KEY_COLLECTOR") invalid(`${path}.source`);
+    const countryCode = boundedString(
+      input.countryCode,
+      `${path}.countryCode`,
+      2
+    ).toUpperCase();
+    if (!/^[A-Z]{2}$/u.test(countryCode)) invalid(`${path}.countryCode`);
+    const regionCode = boundedString(
+      input.regionCode,
+      `${path}.regionCode`,
+      100
+    );
+    const regionLabel = boundedString(
+      input.regionLabel,
+      `${path}.regionLabel`,
+      160
+    );
+    const lang = language(input.language, `${path}.language`);
+    if (input.device !== "DESKTOP" && input.device !== "MOBILE") {
+      invalid(`${path}.device`);
+    }
+    const observedAt = input.observedAt === undefined
+      ? undefined
+      : isoDate(input.observedAt, `${path}.observedAt`);
+    importedContext = {
+      source: "KEY_COLLECTOR",
+      countryCode,
+      regionCode,
+      regionLabel,
+      language: lang,
+      device: input.device,
+      ...(observedAt === undefined ? {} : { observedAt })
+    };
   }
   const found = boolean(input.found, `${path}.found`);
   const position =
@@ -380,13 +483,46 @@ function positionValue(
     input.rankingUrl === undefined
       ? undefined
       : webUrl(input.rankingUrl, `${path}.rankingUrl`);
+  const serpResults = input.serpResults === undefined
+    ? undefined
+    : serpResultValues(input.serpResults, `${path}.serpResults`);
   return {
+    ...importedContext,
     searchEngine: input.searchEngine,
     found,
     ...(position === undefined ? {} : { position }),
     ...(previousPosition === undefined ? {} : { previousPosition }),
-    ...(rankingUrl === undefined ? {} : { rankingUrl })
+    ...(rankingUrl === undefined ? {} : { rankingUrl }),
+    ...(serpResults === undefined ? {} : { serpResults })
   };
+}
+
+function serpResultValues(
+  value: unknown,
+  path: string
+): readonly SemanticImportSerpResultValue[] {
+  const values = array(value, path);
+  if (values.length > 100) invalid(path);
+  const positions = new Set<number>();
+  return values.map((value, index) => {
+    const item = record(value);
+    if (Object.keys(item).some((key) =>
+      !["position", "rankingUrl", "title", "snippet"].includes(key)
+    )) invalid(`${path}.${index}`);
+    const position = positiveInteger(item.position, `${path}.${index}.position`);
+    if (position > 100 || positions.has(position)) invalid(`${path}.${index}.position`);
+    positions.add(position);
+    return {
+      position,
+      rankingUrl: webUrl(item.rankingUrl, `${path}.${index}.rankingUrl`),
+      ...(item.title === undefined
+        ? {}
+        : { title: boundedString(item.title, `${path}.${index}.title`, 8_000) }),
+      ...(item.snippet === undefined
+        ? {}
+        : { snippet: boundedString(item.snippet, `${path}.${index}.snippet`, 32_000) })
+    };
+  });
 }
 
 function frequencyValue(

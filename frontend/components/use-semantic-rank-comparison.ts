@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   parseSemanticRankComparisonItems,
   parseSemanticRankDimensionCatalog,
@@ -8,7 +8,10 @@ import {
   type SemanticRankDimension
 } from "@seo-platform/contracts";
 import { browserApiRequest } from "../lib/browser-api";
-import { mergeRankComparisonItems } from "../lib/rank-comparison-cache";
+import {
+  mergeRankComparisonItems,
+  unresolvedRankComparisonKeywordIds
+} from "../lib/rank-comparison-cache";
 
 const emptyComparisonItems: ReadonlyMap<string, SemanticRankComparisonItem> = new Map();
 
@@ -46,6 +49,15 @@ export function useSemanticRankComparison(
     loading: false
   });
   const [revision, setRevision] = useState(0);
+  const comparisonCache = useRef<Readonly<{
+    contextKey: string;
+    items: ReadonlyMap<string, SemanticRankComparisonItem>;
+    resolvedKeys: ReadonlySet<string>;
+  }>>({
+    contextKey: "",
+    items: emptyComparisonItems,
+    resolvedKeys: new Set()
+  });
   const dimensions = catalog.projectId === projectId ? catalog.dimensions : [];
   const effectiveDimensionSignature = dimensionSignature === "ALL"
     ? JSON.stringify(dimensions.map(dimension => dimension.key))
@@ -60,6 +72,11 @@ export function useSemanticRankComparison(
   const comparisonScopeKey = JSON.stringify([
     projectId,
     effectiveDimensionSignature
+  ]);
+  const comparisonDataContextKey = JSON.stringify([
+    comparisonScopeKey,
+    refreshKey,
+    revision
   ]);
 
   useEffect(() => {
@@ -112,6 +129,28 @@ export function useSemanticRankComparison(
       });
       return () => controller.abort();
     }
+    const reusable = comparisonCache.current.contextKey ===
+      comparisonDataContextKey;
+    const cachedItems = reusable
+      ? comparisonCache.current.items
+      : emptyComparisonItems;
+    const resolvedKeys = new Set(
+      reusable ? comparisonCache.current.resolvedKeys : []
+    );
+    const unresolvedKeywordIds = unresolvedRankComparisonKeywordIds(
+      keywordIds,
+      dimensionKeys,
+      resolvedKeys
+    );
+    if (unresolvedKeywordIds.length === 0) {
+      setComparison({
+        projectId,
+        scopeKey: comparisonScopeKey,
+        items: cachedItems,
+        loading: false
+      });
+      return () => controller.abort();
+    }
     setComparison(current => ({
       projectId,
       scopeKey: comparisonScopeKey,
@@ -123,19 +162,20 @@ export function useSemanticRankComparison(
         : emptyComparisonItems,
       loading: true
     }));
-    const timer = setTimeout(() => {
-      void (async () => {
+    void (async () => {
         const next = new Map<string, SemanticRankComparisonItem>();
-        // Bound both axes. The table supplies only its virtual viewport rows.
+        // Bound both axes. The table supplies all rows from pages already
+        // received from the server, so values are warm before they scroll
+        // into the virtual viewport.
         for (let offset = 0; offset < dimensionKeys.length; offset += 24) {
           const selectedDimensions = dimensionKeys.slice(offset, offset + 24);
           const pageSize = Math.min(
             1_000,
             Math.floor(2_000 / selectedDimensions.length)
           );
-          for (let start = 0; start < keywordIds.length; start += pageSize) {
+          for (let start = 0; start < unresolvedKeywordIds.length; start += pageSize) {
             const scope = {
-              keywordIds: keywordIds.slice(start, start + pageSize),
+              keywordIds: unresolvedKeywordIds.slice(start, start + pageSize),
               dimensionKeys: selectedDimensions
             };
             const payload = await browserApiRequest<unknown>(
@@ -149,38 +189,56 @@ export function useSemanticRankComparison(
             for (const item of parseSemanticRankComparisonItems(payload, scope)) {
               next.set(`${item.keywordId}:${item.dimensionKey}`, item);
             }
+            for (const keywordId of scope.keywordIds) {
+              for (const dimensionKey of scope.dimensionKeys) {
+                resolvedKeys.add(`${keywordId}:${dimensionKey}`);
+              }
+            }
+            if (!controller.signal.aborted) {
+              const items = mergeRankComparisonItems(cachedItems, next);
+              comparisonCache.current = {
+                contextKey: comparisonDataContextKey,
+                items,
+                resolvedKeys
+              };
+              setComparison({
+                projectId,
+                scopeKey: comparisonScopeKey,
+                items,
+                loading: true
+              });
+            }
           }
         }
+        if (!controller.signal.aborted) {
+          const items = mergeRankComparisonItems(cachedItems, next);
+          comparisonCache.current = {
+            contextKey: comparisonDataContextKey,
+            items,
+            resolvedKeys
+          };
+          setComparison({
+            projectId,
+            scopeKey: comparisonScopeKey,
+            items,
+            loading: false
+          });
+        }
+      })().catch(() => {
         if (!controller.signal.aborted) {
           setComparison(current => ({
             projectId,
             scopeKey: comparisonScopeKey,
             items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
-              ? mergeRankComparisonItems(current.items, next)
-              : next,
-            loading: false
+              ? current.items
+              : emptyComparisonItems,
+            loading: false,
+            error: "Не удалось загрузить сравнение позиций. Повторите загрузку."
           }));
         }
-      })()
-        .catch(() => {
-          if (!controller.signal.aborted) {
-            setComparison(current => ({
-              projectId,
-              scopeKey: comparisonScopeKey,
-              items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
-                ? current.items
-                : emptyComparisonItems,
-              loading: false,
-              error: "Не удалось загрузить сравнение позиций. Повторите загрузку."
-            }));
-          }
-        });
-    }, 150);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [comparisonRequestKey, comparisonScopeKey, effectiveDimensionSignature, keywordSignature, projectId, refreshKey, revision]);
+      });
+    return () => controller.abort();
+  }, [comparisonDataContextKey, comparisonRequestKey, comparisonScopeKey, effectiveDimensionSignature, keywordSignature, projectId, refreshKey, revision]);
 
   const currentComparison = comparison.projectId === projectId &&
     comparison.scopeKey === comparisonScopeKey

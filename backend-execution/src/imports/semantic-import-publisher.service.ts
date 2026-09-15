@@ -3,12 +3,16 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   domainEventTypes,
   semanticImportMaxGroupDepth,
+  semanticImportMaxGroupManifestEntries,
+  semanticImportPublishMaxRows,
   type InternalSemanticImportReceipt,
   type SemanticCapacityEntitlement,
   type SemanticImportMapping,
   type SemanticImportGroupMetadata,
   type SemanticImportPublishRow,
-  type SemanticImportResultSummary
+  type SemanticImportRankHistoryValue,
+  type SemanticImportResultSummary,
+  type SemanticImportSerpResultValue
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -22,6 +26,7 @@ import {
 } from "../seo-data/seo-data.client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
+  semanticImportEntitlement,
   safeMapping,
   safeValidation
 } from "./semantic-import.service.js";
@@ -229,9 +234,11 @@ export class SemanticImportPublisherService {
           : undefined;
       const groupPaths = groupManifest?.groupPaths;
       const groupMetadata = groupManifest?.groups;
+      const projectDomain = semanticImport.projectDomain ?? undefined;
       const payloadHash = hashJson(
-        groupPaths || groupMetadata
+        projectDomain || groupPaths || groupMetadata
           ? {
+              ...(projectDomain ? { projectDomain } : {}),
               ...(groupPaths ? { groupPaths } : {}),
               ...(groupMetadata ? { groupMetadata } : {}),
               rows
@@ -241,6 +248,7 @@ export class SemanticImportPublisherService {
       await this.seoData.applyChunk({
         workspaceId: semanticImport.workspaceId,
         projectId: semanticImport.projectId,
+        ...(projectDomain ? { projectDomain } : {}),
         actorId: semanticImport.actorId,
         importId: semanticImport.id,
         chunkIndex,
@@ -254,7 +262,14 @@ export class SemanticImportPublisherService {
       publishedRows += BigInt(rows.length);
       afterHash = batch.at(-1)!.normalized_hash;
       chunkIndex += 1;
-      await this.heartbeat(semanticImport.id, claimedAt);
+      await this.heartbeat(
+        semanticImport.id,
+        claimedAt,
+        publishedRows,
+        uniqueRows,
+        chunkIndex,
+        expectedChunks
+      );
     }
     if (chunkIndex !== expectedChunks || publishedRows !== uniqueRows) {
       throw new Error("Semantic import publish row count mismatch");
@@ -329,7 +344,7 @@ export class SemanticImportPublisherService {
     }
     const batchSize = Math.min(
       Math.max(this.config.imports.publishBatchRows, 1),
-      500,
+      semanticImportPublishMaxRows,
       Math.max(1, Math.floor(10_000 / historyDateCount))
     );
     const expectedChunksBig =
@@ -343,7 +358,7 @@ export class SemanticImportPublisherService {
     if (existingKeywords > uniqueRows) {
       return { code: "IMPORT_VALIDATION_INVALID" };
     }
-    const entitlement = importEntitlement(semanticImport);
+    const entitlement = semanticImportEntitlement(semanticImport);
     if (!entitlement) {
       return { code: "IMPORT_ENTITLEMENT_MISSING" };
     }
@@ -607,7 +622,11 @@ export class SemanticImportPublisherService {
 
   private async heartbeat(
     importId: string,
-    claimedAt: Date
+    claimedAt: Date,
+    publishedRows: bigint,
+    totalRows: bigint,
+    publishedChunks: number,
+    totalChunks: number
   ): Promise<void> {
     const updated = await this.prisma.semanticImport.updateMany({
       where: {
@@ -617,7 +636,7 @@ export class SemanticImportPublisherService {
       },
       data: {
         publishingHeartbeatAt: new Date(),
-        stage: "publishing_chunks"
+        stage: `publishing_chunks:${publishedRows}:${totalRows}:${publishedChunks}:${totalChunks}`
       }
     });
     if (updated.count === 0) {
@@ -713,18 +732,46 @@ export function mergeCanonicalPublishRows(
     {},
     ...rows.map(({ customValues }) => customValues)
   ) as Readonly<Record<string, string>>;
-  const positions = [...new Map(
-    rows.flatMap((row) => row.positions ?? []).map((position) => [
-      position.searchEngine,
-      position
+  const positionsByEngine = new Map<
+    "YANDEX" | "GOOGLE",
+    NonNullable<SemanticImportPublishRow["positions"]>[number]
+  >();
+  for (const position of rows.flatMap((row) => row.positions ?? [])) {
+    const current = positionsByEngine.get(position.searchEngine);
+    const scalar = !current || position.position !== undefined || position.rankingUrl
+      ? position
+      : current;
+    const serpResults = mergeImportSerpResults(
+      current?.serpResults ?? [],
+      position.serpResults ?? []
+    );
+    positionsByEngine.set(position.searchEngine, {
+      ...scalar,
+      ...(serpResults.length > 0 ? { serpResults } : {})
+    });
+  }
+  const positions = [...positionsByEngine.values()];
+  const historyByKey = new Map<
+    string,
+    NonNullable<SemanticImportPublishRow["positionHistory"]>[number]
+  >();
+  for (const position of rows.flatMap((row) => row.positionHistory ?? [])) {
+    const key = `${position.searchEngine}:${position.countryCode}:${position.regionCode}:${position.language}:${position.device}:${position.observedAt}`;
+    const current = historyByKey.get(key);
+    historyByKey.set(key, mergeImportHistoryPosition(current, position));
+  }
+  const positionHistory = [...historyByKey.values()].sort(
+    (left, right) => left.observedAt.localeCompare(right.observedAt)
+  );
+  const notes = [...new Set(rows.flatMap((row) => row.note?.trim() ? [row.note.trim()] : []))];
+  const note = notes.join("\n\n").slice(0, 1_000_000) || undefined;
+  const frequencies = [...new Map(
+    rows.flatMap((row) => row.frequencies ?? []).map((frequency) => [
+      frequency.type,
+      frequency
     ])
   ).values()];
-  const positionHistory = [...new Map(
-    rows.flatMap((row) => row.positionHistory ?? []).map((position) => [
-      `${position.searchEngine}:${position.countryCode}:${position.regionCode}:${position.language}:${position.device}:${position.observedAt}`,
-      position
-    ])
-  ).values()].sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+  const targetUrl = rows.find((row) => row.targetUrl)?.targetUrl;
 
   // Keep the exact field order used by the receiving input canonicalizer.
   // The payload hash is deliberately calculated over canonical JSON, so
@@ -743,17 +790,100 @@ export function mergeCanonicalPublishRows(
     ...(first.isTracked === undefined
       ? {}
       : { isTracked: first.isTracked }),
-    ...(first.note === undefined ? {} : { note: first.note }),
+    ...(note === undefined ? {} : { note }),
     ...(first.intent === undefined ? {} : { intent: first.intent }),
     ...(groupPaths.length > 0 ? { groupPaths } : {}),
-    ...(first.targetUrl ? { targetUrl: first.targetUrl } : {}),
-    ...(first.frequencies ? { frequencies: first.frequencies } : {}),
+    ...(targetUrl ? { targetUrl } : {}),
+    ...(frequencies.length > 0 ? { frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
     ...(positionHistory.length > 0 ? { positionHistory } : {}),
     ...(first.observedAt ? { observedAt: first.observedAt } : {}),
     ...(tags.length > 0 ? { tags } : {}),
     customValues
   };
+}
+
+function mergeImportSerpResults(
+  current: readonly SemanticImportSerpResultValue[],
+  incoming: readonly SemanticImportSerpResultValue[]
+): readonly SemanticImportSerpResultValue[] {
+  const byPosition = new Map<number, SemanticImportSerpResultValue>();
+  for (const rawResult of [...current, ...incoming]) {
+    const result = canonicalImportSerpResult(rawResult);
+    const previous = byPosition.get(result.position);
+    byPosition.set(
+      result.position,
+      previous?.rankingUrl === result.rankingUrl
+        ? {
+            ...previous,
+            ...result,
+            ...(result.title ?? previous.title
+              ? { title: result.title ?? previous.title }
+              : {}),
+            ...(result.snippet ?? previous.snippet
+              ? { snippet: result.snippet ?? previous.snippet }
+              : {})
+          }
+        : result
+    );
+  }
+  return [...byPosition.values()]
+    .sort((left, right) => left.position - right.position)
+    .slice(0, 100);
+}
+
+function mergeImportHistoryPosition(
+  current: SemanticImportRankHistoryValue | undefined,
+  incoming: SemanticImportRankHistoryValue
+): SemanticImportRankHistoryValue {
+  const preferred = !current
+    ? incoming
+    : incoming.found !== current.found
+      ? incoming.found ? incoming : current
+      : incoming.position !== undefined || incoming.rankingUrl
+        ? incoming
+        : current;
+  const serpResults = mergeImportSerpResults(
+    current?.serpResults ?? [],
+    incoming.serpResults ?? []
+  );
+  return {
+    ...preferred,
+    ...(serpResults.length > 0 ? { serpResults } : {})
+  };
+}
+
+function canonicalImportHistoryPositions(
+  values: readonly SemanticImportRankHistoryValue[]
+): readonly SemanticImportRankHistoryValue[] {
+  const byKey = new Map<string, SemanticImportRankHistoryValue>();
+  for (const value of values) {
+    const key = `${value.searchEngine}:${value.countryCode}:${value.regionCode}:${value.language}:${value.device}:${value.observedAt}`;
+    byKey.set(key, mergeImportHistoryPosition(byKey.get(key), value));
+  }
+  return [...byKey.values()].sort(
+    (left, right) => left.observedAt.localeCompare(right.observedAt) ||
+      left.searchEngine.localeCompare(right.searchEngine)
+  );
+}
+
+function canonicalImportSerpResult(
+  result: SemanticImportSerpResultValue
+): SemanticImportSerpResultValue {
+  return {
+    position: result.position,
+    rankingUrl: result.rankingUrl,
+    ...(result.title === undefined ? {} : { title: result.title }),
+    ...(result.snippet === undefined ? {} : { snippet: result.snippet })
+  };
+}
+
+function canonicalImportSerpResults(
+  value: unknown
+): readonly SemanticImportSerpResultValue[] {
+  return (value as readonly SemanticImportSerpResultValue[]).map(
+    canonicalImportSerpResult
+  );
 }
 
 function uniquePaths(
@@ -844,30 +974,14 @@ export function canonicalPublishRow(
     row.positions !== undefined &&
     (!Array.isArray(row.positions) ||
       row.positions.length > 2 ||
-      row.positions.some(
-        (item) =>
-          typeof item !== "object" ||
-          item === null ||
-          !("searchEngine" in item) ||
-          !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) ||
-          !("found" in item) ||
-          typeof item.found !== "boolean" ||
-          (item.position !== undefined &&
-            (!Number.isSafeInteger(item.position) || Number(item.position) < 1)) ||
-          (item.previousPosition !== undefined &&
-            (!Number.isSafeInteger(item.previousPosition) ||
-              Number(item.previousPosition) < 1)) ||
-          (item.rankingUrl !== undefined &&
-            typeof item.rankingUrl !== "string")
-      ))
+      row.positions.some((item) => !validImportPosition(item)))
   ) {
     return undefined;
   }
   if (
     row.positionHistory !== undefined &&
     (!Array.isArray(row.positionHistory) || row.positionHistory.length > 1_100 ||
-      row.positionHistory.some(item => !validHistoryPosition(item)) ||
-      new Set((row.positionHistory as readonly Record<string, unknown>[]).map(item => `${item.searchEngine}:${item.countryCode}:${item.regionCode}:${item.language}:${item.device}:${item.observedAt}`)).size !== row.positionHistory.length)
+      row.positionHistory.some(item => !validHistoryPosition(item)))
   ) return undefined;
   const frequencies = row.frequencies
     ? (row.frequencies as readonly Readonly<Record<string, unknown>>[]).map(
@@ -878,8 +992,31 @@ export function canonicalPublishRow(
       )
     : undefined;
   const positions = row.positions
-    ? (row.positions as readonly Readonly<Record<string, unknown>>[]).map(
+      ? (row.positions as readonly Readonly<Record<string, unknown>>[]).map(
         (position) => ({
+          ...(position.source === undefined
+            ? {}
+            : { source: position.source as "KEY_COLLECTOR" }),
+          ...(position.countryCode === undefined
+            ? {}
+            : { countryCode: position.countryCode as string }),
+          ...(position.regionCode === undefined
+            ? {}
+            : { regionCode: position.regionCode as string }),
+          ...(position.regionLabel === undefined
+            ? {}
+            : { regionLabel: position.regionLabel as string }),
+          ...(position.language === undefined
+            ? {}
+            : { language: position.language as string }),
+          ...(position.device === undefined
+            ? {}
+            : { device: position.device as "DESKTOP" | "MOBILE" }),
+          ...(position.observedAt === undefined
+            ? {}
+            : { observedAt: position.observedAt as string }),
+          // Keep this order aligned with Core's positionValue canonicalizer.
+          // The receipt hash intentionally covers the parsed command shape.
           searchEngine: position.searchEngine as "YANDEX" | "GOOGLE",
           found: position.found as boolean,
           ...(position.position === undefined
@@ -890,12 +1027,21 @@ export function canonicalPublishRow(
             : { previousPosition: position.previousPosition as number }),
           ...(position.rankingUrl === undefined
             ? {}
-            : { rankingUrl: position.rankingUrl as string })
+            : { rankingUrl: position.rankingUrl as string }),
+          ...(position.serpResults === undefined
+            ? {}
+            : {
+                serpResults: canonicalImportSerpResults(
+                  position.serpResults
+                )
+              })
         })
       )
     : undefined;
   const positionHistory = row.positionHistory
-    ? (row.positionHistory as readonly Readonly<Record<string, unknown>>[]).map((item) => ({
+      ? canonicalImportHistoryPositions(
+          (row.positionHistory as readonly Readonly<Record<string, unknown>>[]).map((item) => ({
+        ...(item.source === undefined ? {} : { source: item.source as "KEY_COLLECTOR" }),
         searchEngine: item.searchEngine as "YANDEX" | "GOOGLE",
         countryCode: item.countryCode as string,
         regionCode: item.regionCode as string,
@@ -904,8 +1050,15 @@ export function canonicalPublishRow(
         device: item.device as "DESKTOP" | "MOBILE",
         observedAt: item.observedAt as string,
         found: item.found as boolean,
-        ...(item.position === undefined ? {} : { position: item.position as number })
-      }))
+        ...(item.position === undefined ? {} : { position: item.position as number }),
+        ...(item.rankingUrl === undefined ? {} : { rankingUrl: item.rankingUrl as string }),
+        ...(item.serpResults === undefined
+          ? {}
+          : {
+              serpResults: canonicalImportSerpResults(item.serpResults)
+            })
+          }))
+        )
     : undefined;
   return {
     sourceRowNumber: row.sourceRowNumber as string,
@@ -942,81 +1095,100 @@ export function canonicalPublishRow(
   };
 }
 
+function validImportPosition(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  if (Object.keys(item).some((key) => ![
+    "source", "searchEngine", "countryCode", "regionCode", "regionLabel",
+    "language", "device", "observedAt", "found", "position",
+    "previousPosition", "rankingUrl", "serpResults"
+  ].includes(key))) return false;
+  const contextValues = [
+    item.source,
+    item.countryCode,
+    item.regionCode,
+    item.regionLabel,
+    item.language,
+    item.device,
+    item.observedAt
+  ];
+  const hasContext = contextValues.some((candidate) => candidate !== undefined);
+  if (hasContext && (
+    item.source !== "KEY_COLLECTOR" ||
+    typeof item.countryCode !== "string" ||
+    !/^[A-Z]{2}$/u.test(item.countryCode) ||
+    typeof item.regionCode !== "string" ||
+    item.regionCode.length < 1 ||
+    item.regionCode.length > 100 ||
+    typeof item.regionLabel !== "string" ||
+    item.regionLabel.length < 1 ||
+    item.regionLabel.length > 160 ||
+    typeof item.language !== "string" ||
+    item.language.length < 2 ||
+    item.language.length > 16 ||
+    (item.device !== "DESKTOP" && item.device !== "MOBILE") ||
+    (item.observedAt !== undefined && (
+      typeof item.observedAt !== "string" ||
+      Number.isNaN(Date.parse(item.observedAt)) ||
+      new Date(item.observedAt).toISOString() !== item.observedAt
+    ))
+  )) return false;
+  if (
+    (item.searchEngine !== "YANDEX" && item.searchEngine !== "GOOGLE") ||
+    typeof item.found !== "boolean" ||
+    (item.position !== undefined && (
+      !Number.isSafeInteger(item.position) ||
+      Number(item.position) < 1 ||
+      Number(item.position) > 100
+    )) ||
+    (item.found ? item.position === undefined : item.position !== undefined) ||
+    (item.previousPosition !== undefined && (
+      !Number.isSafeInteger(item.previousPosition) ||
+      Number(item.previousPosition) < 1 ||
+      Number(item.previousPosition) > 100
+    )) ||
+    (item.rankingUrl !== undefined && typeof item.rankingUrl !== "string") ||
+    (item.serpResults !== undefined && !validImportSerpResults(item.serpResults))
+  ) return false;
+  return true;
+}
+
 function validHistoryPosition(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
-  if (Object.keys(item).some(key => !["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "observedAt", "found", "position"].includes(key)) ||
+  if (Object.keys(item).some(key => !["source", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device", "observedAt", "found", "position", "rankingUrl", "serpResults"].includes(key)) ||
+    (item.source !== undefined && item.source !== "KEY_COLLECTOR") ||
     !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) || typeof item.countryCode !== "string" || !/^[A-Z]{2}$/u.test(item.countryCode) ||
     typeof item.regionCode !== "string" || !item.regionCode || item.regionCode.length > 100 || typeof item.regionLabel !== "string" || !item.regionLabel || item.regionLabel.length > 160 ||
     typeof item.language !== "string" || !item.language || item.language.length > 16 || !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
     typeof item.observedAt !== "string" || Number.isNaN(Date.parse(item.observedAt)) || new Date(item.observedAt).toISOString() !== item.observedAt ||
-    typeof item.found !== "boolean") return false;
+    typeof item.found !== "boolean" ||
+    (item.rankingUrl !== undefined && typeof item.rankingUrl !== "string") ||
+    (item.serpResults !== undefined && !validImportSerpResults(item.serpResults))) return false;
   return item.found
     ? Number.isSafeInteger(item.position) && Number(item.position) >= 1 && Number(item.position) <= 100
     : item.position === undefined;
 }
 
-function importEntitlement(
-  semanticImport: SemanticImport
-): SemanticCapacityEntitlement | undefined {
-  const {
-    billingPlanCode,
-    billingPlanVersion,
-    storedKeywordsLimit,
-    keywordsPerProjectLimit,
-    foldersPerProjectLimit,
-    trackedContextPairsLimit
-  } = semanticImport;
-  if (
-    !billingPlanCode ||
-    billingPlanVersion === null ||
-    storedKeywordsLimit === null ||
-    keywordsPerProjectLimit === null ||
-    foldersPerProjectLimit === null ||
-    trackedContextPairsLimit === null
-  ) {
-    return undefined;
-  }
-  const storedKeywords = safePlanLimit(storedKeywordsLimit);
-  const keywordsPerProject = safePlanLimit(
-    keywordsPerProjectLimit
-  );
-  const trackedContextPairs = safePlanLimit(
-    trackedContextPairsLimit
-  );
-  const foldersPerProject = safeNonNegativePlanLimit(
-    foldersPerProjectLimit
-  );
-  if (
-    !Number.isSafeInteger(billingPlanVersion) ||
-    billingPlanVersion <= 0 ||
-    storedKeywords === undefined ||
-    keywordsPerProject === undefined ||
-    foldersPerProject === undefined ||
-    trackedContextPairs === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    planCode: billingPlanCode,
-    planVersion: billingPlanVersion,
-    storedKeywords,
-    keywordsPerProject,
-    foldersPerProject,
-    trackedContextPairs
-  };
-}
-
-function safeNonNegativePlanLimit(value: bigint): number | undefined {
-  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number(value)
-    : undefined;
-}
-
-function safePlanLimit(value: bigint): number | undefined {
-  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number(value)
-    : undefined;
+function validImportSerpResults(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 100) return false;
+  const positions = new Set<number>();
+  return value.every((result) => {
+      if (!result || typeof result !== "object" || Array.isArray(result)) return false;
+      const row = result as Record<string, unknown>;
+      const position = Number(row.position);
+      if (positions.has(position)) return false;
+      positions.add(position);
+      return !Object.keys(row).some((key) =>
+        !["position", "rankingUrl", "title", "snippet"].includes(key)
+      ) &&
+        Number.isSafeInteger(row.position) &&
+        position >= 1 &&
+        position <= 100 &&
+        typeof row.rankingUrl === "string" &&
+        (row.title === undefined || typeof row.title === "string") &&
+        (row.snippet === undefined || typeof row.snippet === "string");
+    });
 }
 
 function hashJson(value: unknown): string {
@@ -1035,7 +1207,7 @@ function safeKc4GroupManifest(
     return undefined;
   }
   const groupPaths = (value as Readonly<Record<string, unknown>>).groupPaths;
-  if (!Array.isArray(groupPaths) || groupPaths.length > 2_000) {
+  if (!Array.isArray(groupPaths) || groupPaths.length > semanticImportMaxGroupManifestEntries) {
     return undefined;
   }
   const parsed = groupPaths.map((path) => {
@@ -1067,7 +1239,7 @@ function safeKc4GroupManifest(
 }
 
 function safeKc4GroupMetadata(value: unknown): readonly SemanticImportGroupMetadata[] {
-  if (!Array.isArray(value) || value.length > 2_000) {
+  if (!Array.isArray(value) || value.length > semanticImportMaxGroupManifestEntries) {
     throw new Error("Stored KC4 group metadata is invalid");
   }
   return value.map((item) => {

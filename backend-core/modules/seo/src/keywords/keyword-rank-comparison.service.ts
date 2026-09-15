@@ -248,6 +248,16 @@ export class KeywordRankComparisonService {
           ${rankDimensionConfigurationPredicate(sources)}
       ), selected_keywords AS (
         SELECT unnest(ARRAY[${Prisma.join(keywordIds.map(id => Prisma.sql`${id}::uuid`))}]) AS id
+      ), keyword_identities AS MATERIALIZED (
+        SELECT keyword.id AS target_id, keyword.id AS source_id
+        FROM selected_keywords keyword
+        UNION ALL
+        SELECT keyword.id AS target_id, merge.source_keyword_id AS source_id
+        FROM selected_keywords keyword
+        JOIN keyword_merges merge
+          ON merge.workspace_id = ${scope.workspaceId}::uuid
+          AND merge.project_id = ${scope.projectId}::uuid
+          AND merge.target_keyword_id = keyword.id
       )
       SELECT keyword.id AS "keywordId", latest.id AS "snapshotId", latest.tracking_context_id AS "trackingContextId",
         latest.configuration_version AS "configurationVersion", latest.job_id AS "jobId", latest.observed_at AS "observedAt",
@@ -264,7 +274,10 @@ export class KeywordRankComparisonService {
         CROSS JOIN LATERAL (
           SELECT snapshot.* FROM rank_snapshots snapshot
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
-            AND snapshot.keyword_id = keyword.id AND snapshot.tracking_context_id = configuration.context_id
+            AND snapshot.keyword_id IN (
+              SELECT identity.source_id FROM keyword_identities identity
+              WHERE identity.target_id = keyword.id
+            ) AND snapshot.tracking_context_id = configuration.context_id
             AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled
             ${visibleSnapshot(scope, dimension)}
           ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
@@ -308,7 +321,10 @@ export class KeywordRankComparisonService {
             snapshot.id
           FROM rank_snapshots snapshot
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
-            AND snapshot.keyword_id = keyword.id AND snapshot.tracking_context_id = configuration.context_id
+            AND snapshot.keyword_id IN (
+              SELECT identity.source_id FROM keyword_identities identity
+              WHERE identity.target_id = keyword.id
+            ) AND snapshot.tracking_context_id = configuration.context_id
             AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled
             AND (snapshot.observed_at, snapshot.id) < (latest.observed_at, latest.id)
             ${visibleSnapshot(scope, dimension)}
@@ -328,8 +344,21 @@ export class KeywordRankComparisonService {
   ): Promise<StoredAiComparison[]> {
     const regionCodes = [...new Set(sources.map(({ regionCode }) => regionCode))];
     return this.prisma.$queryRaw<StoredAiComparison[]>(Prisma.sql`
-      SELECT DISTINCT ON (snapshot.keyword_id)
-        snapshot.keyword_id AS "keywordId",
+      WITH selected_keywords AS (
+        SELECT unnest(ARRAY[${Prisma.join(keywordIds.map(id => Prisma.sql`${id}::uuid`))}]) AS id
+      ), keyword_identities AS MATERIALIZED (
+        SELECT keyword.id AS target_id, keyword.id AS source_id
+        FROM selected_keywords keyword
+        UNION ALL
+        SELECT keyword.id AS target_id, merge.source_keyword_id AS source_id
+        FROM selected_keywords keyword
+        JOIN keyword_merges merge
+          ON merge.workspace_id = ${scope.workspaceId}::uuid
+          AND merge.project_id = ${scope.projectId}::uuid
+          AND merge.target_keyword_id = keyword.id
+      )
+      SELECT
+        keyword.id AS "keywordId",
         snapshot.id AS "snapshotId",
         snapshot.answer_present AS "answerPresent",
         snapshot.site_found AS "siteFound",
@@ -338,7 +367,23 @@ export class KeywordRankComparisonService {
         snapshot.ranking_url AS "rankingUrl",
         snapshot.brand_found AS "brandFound",
         snapshot.observed_at AS "observedAt"
-      FROM ai_answer_snapshots snapshot
+      FROM selected_keywords keyword
+      CROSS JOIN LATERAL (
+        SELECT candidate.*
+        FROM ai_answer_snapshots candidate
+        WHERE candidate.workspace_id = ${scope.workspaceId}::uuid
+          AND candidate.project_id = ${scope.projectId}::uuid
+          AND candidate.keyword_id IN (
+            SELECT identity.source_id FROM keyword_identities identity
+            WHERE identity.target_id = keyword.id
+          )
+          AND candidate.search_engine::text = ${dimension.searchEngine}
+          AND candidate.region_code IN (${Prisma.join(regionCodes)})
+          AND candidate.device::text = ${dimension.device}
+          AND candidate.position_tracking_enabled
+        ORDER BY candidate.observed_at DESC, candidate.id DESC
+        LIMIT 1
+      ) snapshot
       LEFT JOIN LATERAL (
         SELECT
           CASE
@@ -349,7 +394,10 @@ export class KeywordRankComparisonService {
         FROM ai_answer_snapshots candidate
         WHERE candidate.workspace_id = snapshot.workspace_id
           AND candidate.project_id = snapshot.project_id
-          AND candidate.keyword_id = snapshot.keyword_id
+          AND candidate.keyword_id IN (
+            SELECT identity.source_id FROM keyword_identities identity
+            WHERE identity.target_id = keyword.id
+          )
           AND candidate.search_engine = snapshot.search_engine
           AND candidate.region_code = snapshot.region_code
           AND candidate.device = snapshot.device
@@ -359,14 +407,7 @@ export class KeywordRankComparisonService {
         ORDER BY candidate.observed_at DESC, candidate.id DESC
         LIMIT 1
       ) previous ON true
-      WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
-        AND snapshot.project_id = ${scope.projectId}::uuid
-        AND snapshot.keyword_id IN (${Prisma.join(keywordIds.map((id) => Prisma.sql`${id}::uuid`))})
-        AND snapshot.search_engine::text = ${dimension.searchEngine}
-        AND snapshot.region_code IN (${Prisma.join(regionCodes)})
-        AND snapshot.device::text = ${dimension.device}
-        AND snapshot.position_tracking_enabled
-      ORDER BY snapshot.keyword_id, snapshot.observed_at DESC, snapshot.id DESC
+      ORDER BY keyword.id
     `);
   }
 }

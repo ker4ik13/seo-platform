@@ -17,6 +17,7 @@ import {
   type InternalUpsertWorkspaceConnectorBindingInput,
   type ProjectConnectorBindingAvailability,
   type ProjectConnectorCredentialOption,
+  type XmlStockPricingSummary,
   type WorkspaceConnectorBinding,
   type WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
@@ -79,6 +80,7 @@ export interface ResolvedConnectorRoute {
   readonly routingScope: ConnectorRoutingScope;
   readonly position: number;
   readonly attempts: readonly ConnectorOperationAttemptSummary[];
+  readonly xmlStockPricing?: XmlStockPricingSummary;
 }
 
 @Injectable()
@@ -122,7 +124,10 @@ export class WorkspaceConnectorRoutingService {
       );
       for (const route of input.routes) {
         const credential = credentials.get(route.credentialId);
-        if (!credential || routeAvailability(input.capability, credential) !== "READY") {
+        if (!credential || (
+          input.enabled &&
+          routeAvailability(input.capability, credential) !== "READY"
+        )) {
           throw connectorNotReady();
         }
       }
@@ -181,11 +186,7 @@ export class WorkspaceConnectorRoutingService {
     });
   }
 
-  /**
-   * Resolves the effective route without exposing credentials. Project routes
-   * win; an absent override inherits the workspace chain. A project may opt
-   * into appending the workspace chain after its own routes.
-   */
+  /** Resolves the workspace route and materialises its immutable project reference graph. */
   public async resolve(
     workspaceId: string,
     projectId: string,
@@ -222,6 +223,11 @@ export class WorkspaceConnectorRoutingService {
       const availability = routeAvailability(capability, candidate.route.credential);
       if (availability === "READY") {
         attempts.push(attempt(index + 1, candidate, "SELECTED"));
+        const quota = safeCredentialQuota(
+          provider(candidate.route.credential.provider),
+          candidate.route.credential.providerMeta,
+          candidate.route.credential.lastSuccessAt
+        );
         return {
           bindingId: candidate.binding.id,
           bindingVersion: candidate.binding.version,
@@ -231,7 +237,10 @@ export class WorkspaceConnectorRoutingService {
           credentialMode: candidate.route.credential.mode,
           routingScope: candidate.scope,
           position: candidate.route.position,
-          attempts
+          attempts,
+          ...(quota.status === "AVAILABLE" && quota.xmlStockPricing
+            ? { xmlStockPricing: quota.xmlStockPricing }
+            : {})
         };
       }
       const reason = fallbackReason(candidate.route.credential.status);
@@ -272,16 +281,7 @@ export class WorkspaceConnectorRoutingService {
           })
         ]);
 
-        if (current?.configurationScope === "PROJECT_OVERRIDE") {
-          return syncWorkspaceFallback(
-            transaction,
-            current,
-            workspace,
-            actorId
-          );
-        }
         if (!workspace?.enabled || workspace.routes.length === 0) {
-          if (current) return current;
           throw connectorNotReady();
         }
         return syncInheritedProjectBinding(
@@ -371,46 +371,6 @@ async function syncInheritedProjectBinding(
   return requiredProjectBinding(transaction, binding.id, workspace.workspaceId, projectId);
 }
 
-async function syncWorkspaceFallback(
-  transaction: RoutingTransaction,
-  project: ProjectBindingRecord,
-  workspace: WorkspaceBindingRecord | null,
-  actorId: string
-): Promise<ProjectBindingRecord> {
-  const overrideRoutes = project.routes.filter(
-    ({ routingScope: value }) => value === "PROJECT_OVERRIDE"
-  );
-  const fallbackRoutes =
-    project.fallbackMode === "NEXT_AVAILABLE_THEN_WORKSPACE" && workspace?.enabled
-      ? workspace.routes.slice(0, Math.max(0, 8 - overrideRoutes.length))
-      : [];
-  const storedFallback = project.routes.filter(
-    ({ routingScope: value }) => value !== "PROJECT_OVERRIDE"
-  );
-  if (sameWorkspaceRoutes(storedFallback, fallbackRoutes, overrideRoutes.length)) {
-    return project;
-  }
-  await replaceMaterializedRoutes(
-    transaction,
-    project.id,
-    project.workspaceId,
-    project.projectId,
-    overrideRoutes,
-    fallbackRoutes,
-    "WORKSPACE_FALLBACK"
-  );
-  await transaction.projectConnectorBinding.update({
-    where: { id: project.id },
-    data: { updatedBy: actorId, version: { increment: 1 } }
-  });
-  return requiredProjectBinding(
-    transaction,
-    project.id,
-    project.workspaceId,
-    project.projectId
-  );
-}
-
 async function replaceMaterializedRoutes(
   transaction: RoutingTransaction,
   bindingId: string,
@@ -432,19 +392,6 @@ async function replaceMaterializedRoutes(
       workspaceRouteId: route.id
     })),
     retainedIds
-  );
-}
-
-function sameWorkspaceRoutes(
-  stored: readonly ProjectBindingRecord["routes"][number][],
-  desired: readonly WorkspaceBindingRecord["routes"][number][],
-  offset: number
-): boolean {
-  return stored.length === desired.length && stored.every((route, index) =>
-    route.position === offset + index &&
-    route.workspaceRouteId === desired[index]?.id &&
-    route.credentialId === desired[index]?.credentialId &&
-    route.routingScope === "WORKSPACE_FALLBACK"
   );
 }
 
@@ -550,7 +497,7 @@ async function lockedCredentials(
   ids: readonly string[]
 ): Promise<Map<string, CredentialRecord>> {
   const rows = await transaction.integrationCredential.findMany({
-    where: { workspaceId, id: { in: [...ids] }, deletedAt: null },
+    where: { workspaceId, id: { in: [...ids] } },
     select: CREDENTIAL_SELECT
   });
   return new Map(rows.map((row) => [row.id, row]));

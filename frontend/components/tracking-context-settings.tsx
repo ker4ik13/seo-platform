@@ -29,12 +29,14 @@ import {
   withTrackingContext,
   type TrackingContextDraft
 } from "../lib/tracking-contexts";
+import { resolvedFolderSelectionIds } from "../lib/semantic-operation-tree";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticRankTargets } from "./semantic-rank-targets";
 import { SemanticRankContext } from "./semantic-rank-context";
 import { SemanticModal } from "./semantic-modal";
+import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { UiText, useUiLocale } from "./ui-locale";
 
 
@@ -43,6 +45,7 @@ interface ContextGroup {
   readonly parentId?: string;
   readonly name: string;
   readonly path: string;
+  readonly color?: string;
   readonly keywordCount: number;
   readonly systemKind?: "UNGROUPED" | "TRASH";
 }
@@ -748,12 +751,52 @@ function ContextScopeEditor({
     () => contextFolderRows(groups, expandedIds),
     [expandedIds, groups]
   );
+  const availableGroups = useMemo(
+    () => groups.filter(({ systemKind }) => systemKind !== "TRASH"),
+    [groups]
+  );
+  const includedGroupIds = useMemo(
+    () => new Set(
+      resolvedFolderSelectionIds(
+        availableGroups,
+        new Set(draft.groupIds),
+        new Set(draft.descendantGroupIds)
+      )
+    ),
+    [availableGroups, draft.descendantGroupIds, draft.groupIds]
+  );
+  useEffect(() => {
+    if (draft.groupIds.length === 0 && draft.descendantGroupIds.length > 0) {
+      onChange({ ...draft, descendantGroupIds: [] });
+    }
+  }, [draft, onChange]);
 
   function toggleGroup(groupId: string): void {
     const groupIds = new Set(draft.groupIds);
-    if (groupIds.has(groupId)) groupIds.delete(groupId);
-    else groupIds.add(groupId);
-    onChange({ ...draft, scopeMode: "GROUPS", groupIds: [...groupIds] });
+    const descendantGroupIds = new Set(draft.descendantGroupIds);
+    if (groupIds.has(groupId)) {
+      groupIds.delete(groupId);
+      descendantGroupIds.delete(groupId);
+    } else groupIds.add(groupId);
+    onChange({
+      ...draft,
+      scopeMode: "GROUPS",
+      groupIds: [...groupIds],
+      descendantGroupIds: [...descendantGroupIds]
+    });
+  }
+
+  function toggleDescendants(groupId: string): void {
+    const groupIds = new Set([...draft.groupIds, groupId]);
+    const descendantGroupIds = new Set(draft.descendantGroupIds);
+    if (descendantGroupIds.has(groupId)) descendantGroupIds.delete(groupId);
+    else descendantGroupIds.add(groupId);
+    onChange({
+      ...draft,
+      scopeMode: "GROUPS",
+      groupIds: [...groupIds],
+      descendantGroupIds: [...descendantGroupIds]
+    });
   }
 
   return (
@@ -761,12 +804,12 @@ function ContextScopeEditor({
       <header>
         <div>
           <h3><UiText text="Охват контекста" /></h3>
-          <p><UiText text="Родительская папка автоматически включает все вложенные папки." /></p>
+          <p><UiText text="Обычный выбор включает только запросы самой папки; кнопка справа добавляет её поддерево." /></p>
         </div>
         <div className="tracking-context-segments">
           <button
             className={draft.scopeMode === "ALL" ? "selected" : undefined}
-            onClick={() => onChange({ ...draft, scopeMode: "ALL", groupIds: [] })}
+            onClick={() => onChange({ ...draft, scopeMode: "ALL", groupIds: [], descendantGroupIds: [] })}
             type="button"
           >
             <UiText text="Весь проект" /></button>
@@ -778,50 +821,75 @@ function ContextScopeEditor({
             <UiText text="Папки" /></button>
           <button
             className={draft.scopeMode === "KEYWORDS" ? "selected" : undefined}
-            onClick={() => onChange({ ...draft, scopeMode: "KEYWORDS", groupIds: [] })}
+            onClick={() => onChange({ ...draft, scopeMode: "KEYWORDS", groupIds: [], descendantGroupIds: [] })}
             type="button"
           >
             <UiText text="Запросы" /></button>
         </div>
       </header>
       {draft.scopeMode === "GROUPS" ? (
-        <div className="tracking-context-folder-tree">
-          {rows.map(({ group, depth, hasChildren }) => (
-            <div
-              key={group.id}
-              style={{ "--folder-depth": depth } as CSSProperties}
-            >
-              {hasChildren ? (
-                <button
-                  aria-expanded={expandedIds.has(group.id)}
-                  className="tracking-context-folder-toggle"
-                  onClick={() =>
-                    setExpandedIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(group.id)) next.delete(group.id);
-                      else next.add(group.id);
-                      return next;
-                    })
-                  }
-                  type="button"
+        <div className="tracking-context-folder-picker">
+          <div className="semantic-operation-folder-options">
+            <span><UiText text="Выбрано папок:" after=" " />{includedGroupIds.size}</span>
+          </div>
+          <div className="tracking-context-folder-tree">
+            {rows.map(({ group, depth, hasChildren }) => {
+              const selected = draft.groupIds.includes(group.id);
+              const includedByParent = !selected && includedGroupIds.has(group.id);
+              return (
+                <div
+                  className={`semantic-operation-folder-row${includedByParent ? " included-by-parent" : ""}`}
+                  key={group.id}
+                  style={{ "--folder-depth": depth } as CSSProperties}
                 >
-                  <Icon name="chevronRight" />
-                </button>
-              ) : (
-                <span />
-              )}
-              <label>
-                <input
-                  checked={draft.groupIds.includes(group.id)}
-                  onChange={() => toggleGroup(group.id)}
-                  type="checkbox"
-                />
-                <Icon name="projects" />
-                <strong>{group.name}</strong>
-                <small>{group.keywordCount}</small>
-              </label>
-            </div>
-          ))}
+                  {hasChildren ? (
+                    <button
+                      aria-expanded={expandedIds.has(group.id)}
+                      className="semantic-operation-folder-toggle"
+                      onClick={() =>
+                        setExpandedIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(group.id)) next.delete(group.id);
+                          else next.add(group.id);
+                          return next;
+                        })
+                      }
+                      type="button"
+                    >
+                      <Icon name="chevronRight" />
+                    </button>
+                  ) : (
+                    <span className="semantic-operation-folder-toggle-spacer" />
+                  )}
+                  <label>
+                    <input
+                      checked={selected || includedByParent}
+                      disabled={includedByParent}
+                      onChange={() => toggleGroup(group.id)}
+                      type="checkbox"
+                    />
+                    <i
+                      aria-hidden="true"
+                      className="semantic-operation-folder-color"
+                      style={{ background: group.color ?? "#a8a5b8" }}
+                    />
+                    <span>{group.name}</span>
+                    <b>{group.keywordCount}</b>
+                  </label>
+                  {hasChildren ? (
+                    <SemanticFolderDescendantsToggle
+                      disabled={includedByParent}
+                      enabled={draft.descendantGroupIds.includes(group.id)}
+                      folderName={group.name}
+                      onChange={() => toggleDescendants(group.id)}
+                    />
+                  ) : (
+                    <span className="semantic-folder-descendants-spacer" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <div className="tracking-context-scope-note">
@@ -893,7 +961,10 @@ function editableTrackingContextDraft(
   const available = new Set(groups.map(({ id }) => id));
   return {
     ...draft,
-    groupIds: draft.groupIds.filter((groupId) => available.has(groupId))
+    groupIds: draft.groupIds.filter((groupId) => available.has(groupId)),
+    descendantGroupIds: draft.descendantGroupIds.filter((groupId) =>
+      available.has(groupId)
+    )
   };
 }
 

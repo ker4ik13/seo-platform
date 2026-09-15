@@ -5,9 +5,32 @@ import {
   keywordListQuery,
   keywordBodyListInput,
   keywordMultiSearchInput,
+  keywordOperationScopeInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
 } from "./keyword-query.js";
+
+test("parses a bounded lightweight operation scope", () => {
+  const first = "01900000-0000-7000-8000-000000000001";
+  const second = "01900000-0000-7000-8000-000000000002";
+  assert.deepEqual(keywordOperationScopeInput({}), {});
+  assert.deepEqual(
+    keywordOperationScopeInput({ groupIds: [first, second], cursor: first }),
+    { groupIds: [first, second], cursor: first }
+  );
+  assert.throws(
+    () => keywordOperationScopeInput({ groupIds: [first, first] }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordOperationScopeInput({ groupIds: [1] }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordOperationScopeInput({ unsupported: true }),
+    BadRequestException
+  );
+});
 
 test("parses bounded keyword list query", () => {
   const clusterId = "01900000-0000-7000-8000-000000000002";

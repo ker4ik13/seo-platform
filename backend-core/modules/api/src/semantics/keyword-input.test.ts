@@ -8,6 +8,7 @@ import {
   semanticKeywordBulkCreatePreviewInput,
   semanticKeywordBulkInput,
   semanticKeywordCleaningInput,
+  semanticKeywordMergeInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import {
@@ -389,6 +390,24 @@ test("accepts only explicit non-empty keyword cleaning rules", () => {
       }),
     DomainError
   );
+});
+test("validates a bounded keyword merge with one explicit keeper", () => {
+  const keeperId = "01900000-0000-7000-8000-000000000040";
+  const sourceId = "01900000-0000-7000-8000-000000000041";
+  assert.deepEqual(
+    semanticKeywordMergeInput({
+      keeper: { id: keeperId, version: 3 },
+      sources: [{ id: sourceId, version: 5 }]
+    }),
+    {
+      keeper: { id: keeperId, version: 3 },
+      sources: [{ id: sourceId, version: 5 }]
+    }
+  );
+  assert.throws(() => semanticKeywordMergeInput({
+    keeper: { id: keeperId, version: 3 },
+    sources: [{ id: keeperId, version: 3 }]
+  }), DomainError);
 });
 test("tag deltas are exact and bulk additions cannot implicitly remove other tags", () => {
   const id = "01900000-0000-7000-8000-000000000001";

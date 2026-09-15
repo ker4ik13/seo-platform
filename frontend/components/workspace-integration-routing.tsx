@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   connectorFallbackReasons,
+  credentialModeSupportsCapability,
   integrationCapabilities,
   type ConnectorFallbackReason,
   type IntegrationCapability,
@@ -19,6 +20,7 @@ import {
   integrationProviderLabel
 } from "../lib/integration-presentation";
 import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
 import { IntegrationStatusBadge } from "./integration-status-badge";
 import { ProviderLogo } from "./provider-logo";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -87,9 +89,19 @@ export function WorkspaceIntegrationRouting({
       new Map(
         integrationCapabilities.map((capability) => [
           capability,
-          (settings?.credentialOptions ?? []).filter((credential) =>
-            credential.capabilities.includes(capability)
-          )
+          (settings?.credentialOptions ?? []).filter((credential) => {
+            const configured = settings?.bindings
+              .find((binding) => binding.capability === capability)
+              ?.routes.some((route) => route.credentialId === credential.id);
+            return configured || (
+              credential.capabilities.includes(capability) &&
+              credentialModeSupportsCapability(
+                credential.mode,
+                capability,
+                credential.provider
+              )
+            );
+          })
         ])
       ),
     [settings]
@@ -199,6 +211,13 @@ export function WorkspaceIntegrationRouting({
       <div className="integration-routing-list">
         {integrationCapabilities.map((capability) => (
           <CapabilityRoutingRow
+            {...(settings.bindings.find(
+              (binding) => binding.capability === capability
+            ) ? {
+                binding: settings.bindings.find(
+                  (binding) => binding.capability === capability
+                )!
+              } : {})}
             capability={capability}
             canManageFallback={settings.access.canManageFallback}
             canUpdate={settings.access.canUpdateBindings}
@@ -221,6 +240,7 @@ export function WorkspaceIntegrationRouting({
 }
 
 function CapabilityRoutingRow({
+  binding,
   capability,
   canManageFallback,
   canUpdate,
@@ -231,6 +251,7 @@ function CapabilityRoutingRow({
   saving,
   success
 }: Readonly<{
+  binding?: WorkspaceConnectorBinding;
   capability: IntegrationCapability;
   canManageFallback: boolean;
   canUpdate: boolean;
@@ -248,6 +269,18 @@ function CapabilityRoutingRow({
   const available = options.filter(
     (option) => !draft.credentialIds.includes(option.id)
   );
+  const move = (index: number, direction: -1 | 1): void => {
+    const target = index + direction;
+    if (target < 0 || target >= draft.credentialIds.length) return;
+    onChange((current) => {
+      const credentialIds = [...current.credentialIds];
+      [credentialIds[index], credentialIds[target]] = [
+        credentialIds[target]!,
+        credentialIds[index]!
+      ];
+      return { ...current, credentialIds };
+    });
+  };
 
   return (
     <article className="integration-routing-row">
@@ -277,26 +310,33 @@ function CapabilityRoutingRow({
               <strong>{credential.label}</strong>
               <span>
                 {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} · {index === 0 ? <UiText text="основной" /> : <UiText text="резерв" />}
+                {routeIsUnavailable(binding, credential.id)
+                  ? <UiText text="· маршрут недоступен" before=" " />
+                  : null}
               </span>
             </div>
-            <IntegrationStatusBadge status={credential.status} />
+            <IntegrationStatusBadge status={routeIsUnavailable(binding, credential.id) ? "DEGRADED" : credential.status} />
             {canUpdate && (
-              <button
-                aria-label={uiText("Убрать подключение {0}", [String(credential.label)])}
-                className="icon-button"
-                disabled={saving}
-                onClick={() =>
-                  onChange((current) => ({
-                    ...current,
-                    credentialIds: current.credentialIds.filter(
-                      (id) => id !== credential.id
-                    )
-                  }))
-                }
-                type="button"
-              >
-                ×
-              </button>
+              <div className="integration-route-controls">
+                <button aria-label={uiText("Поднять подключение {0}", [String(credential.label)])} disabled={saving || index === 0} onClick={() => move(index, -1)} type="button"><Icon name="arrowUp" /></button>
+                <button aria-label={uiText("Опустить подключение {0}", [String(credential.label)])} disabled={saving || index === selected.length - 1} onClick={() => move(index, 1)} type="button"><Icon name="arrowDown" /></button>
+                <button
+                  aria-label={uiText("Убрать подключение {0}", [String(credential.label)])}
+                  className="integration-route-remove"
+                  disabled={saving}
+                  onClick={() =>
+                    onChange((current) => ({
+                      ...current,
+                      credentialIds: current.credentialIds.filter(
+                        (id) => id !== credential.id
+                      )
+                    }))
+                  }
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
             )}
           </div>
         ))}
@@ -326,7 +366,15 @@ function CapabilityRoutingRow({
             <option value=""><UiText text="Выберите подключение" /></option>
             {available.map((credential) => (
               <option
-                disabled={credential.status !== "ACTIVE"}
+                disabled={
+                  credential.status !== "ACTIVE" ||
+                  !credential.capabilities.includes(capability) ||
+                  !credentialModeSupportsCapability(
+                    credential.mode,
+                    capability,
+                    credential.provider
+                  )
+                }
                 key={credential.id}
                 value={credential.id}
               >
@@ -390,6 +438,16 @@ function draftFromBinding(binding: WorkspaceConnectorBinding | undefined): Route
 
 function emptyDraft(): RouteDraft {
   return { enabled: true, credentialIds: [], fallbackReasons: [] };
+}
+
+function routeIsUnavailable(
+  binding: WorkspaceConnectorBinding | undefined,
+  credentialId: string
+): boolean {
+  const route = binding?.routes.find(
+    (candidate) => candidate.credentialId === credentialId
+  );
+  return route !== undefined && route.availability !== "READY";
 }
 
 function capabilityDescription(capability: IntegrationCapability): string {

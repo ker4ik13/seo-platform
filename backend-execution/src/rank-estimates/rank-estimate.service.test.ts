@@ -136,6 +136,39 @@ test("derives an executable XMLStock Google workload from the bound route", asyn
   assert.equal(harness.createdData?.minimumGetRequestCount, 9);
 });
 
+test("keeps a one-hundred-sixty-thousand-keyword XMLStock workload executable", async () => {
+  const keywordCount = 161_624;
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: String(keywordCount),
+      pairCount: String(keywordCount)
+    }),
+    binding: binding({ provider: "XMLSTOCK", verifiedAt }),
+    validation: validation(verifiedAt, { provider: "XMLSTOCK" })
+  });
+
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      provider: "XMLSTOCK",
+      access: { ...input.access, entitlementStatus: "ALLOWED" }
+    },
+    "rank-estimate-xmlstock-large-project"
+  );
+
+  assert.equal(estimate.status, "READY");
+  assert.equal(estimate.scope.keywordCount, String(keywordCount));
+  assert.equal(estimate.workload.taskCount, String(keywordCount));
+  assert.equal(estimate.workload.minimumRequestCount, String(keywordCount * 3));
+  assert.equal(estimate.workload.keywordLimitPerTask, "1");
+  assert.equal(estimate.workload.keywordLimitPerCommand, "300000");
+  assert.equal(
+    harness.createdData?.providerPolicyVersion,
+    "manual-xmlstock-serp@2.0.0"
+  );
+});
+
 test("estimates XMLStock Yandex Live Turbo with up to fifty results per GET", async () => {
   const verifiedAt = new Date(Date.now() - 60_000);
   const harness = estimateHarness({
@@ -986,7 +1019,7 @@ function validation(
       credentialMaterialVersion: materialVersion,
       connectorVersion:
         overrides.provider === "XMLSTOCK"
-          ? "xmlstock@1.2.0"
+          ? "xmlstock@1.3.0"
           : "arsenkin@1.0.0"
     },
     version: 5,

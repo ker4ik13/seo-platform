@@ -8,7 +8,10 @@ import type {
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { ObjectStoragePort } from "../storage/object-storage.port.js";
-import { SemanticImportParserService } from "./semantic-import-parser.service.js";
+import {
+  automaticKc4Mapping,
+  SemanticImportParserService
+} from "./semantic-import-parser.service.js";
 
 const importId = "01900000-0000-7000-8000-000000000010";
 const uploadId = "01900000-0000-7000-8000-000000000005";
@@ -95,6 +98,34 @@ test("streams one XLSX sheet with a deeply nested group path", async () => {
   assert.deepEqual(update.headers, ["Фраза", "Группа", "Частотность"]);
   assert.equal(update.totalRows, 2n);
   assert.equal(update.progressBytes, BigInt(xlsx.length));
+});
+
+test("builds a complete native KC4 mapping without manual API input", () => {
+  const mapping = automaticKc4Mapping([
+    { index: 0, sourceName: "Фраза", suggestedTarget: "keyword.text", confidence: 0.99 },
+    { index: 1, sourceName: "Группа", suggestedTarget: "group.path", confidence: 0.99 },
+    { index: 2, sourceName: "Key Collector · Цвет группы", suggestedTarget: "custom", confidence: 0.99 },
+    { index: 3, sourceName: "Key Collector · YandexDirect · Budget", suggestedTarget: "custom", confidence: 0.99 },
+    { index: 4, sourceName: "Яндекс · Позиция", suggestedTarget: "ranking.yandex.position", confidence: 0.99 },
+    { index: 5, sourceName: "Google · Позиция", suggestedTarget: "ranking.google.position", confidence: 0.99 },
+    { index: 6, sourceName: "Ещё одна фраза", suggestedTarget: "keyword.text", confidence: 0.8 }
+  ]);
+
+  assert.deepEqual(mapping, {
+    columns: [
+      { sourceIndex: 0, target: "keyword.text" },
+      { sourceIndex: 1, target: "group.path" },
+      { sourceIndex: 2, target: "custom", customName: "Key Collector · Цвет группы" },
+      { sourceIndex: 3, target: "custom", customName: "Key Collector · YandexDirect · Budget" },
+      { sourceIndex: 4, target: "ranking.yandex.position" },
+      { sourceIndex: 5, target: "ranking.google.position" },
+      { sourceIndex: 6, target: "custom", customName: "Ещё одна фраза" }
+    ],
+    defaultLanguage: "ru",
+    groupSeparator: "/",
+    duplicatePolicy: "OVERWRITE_MAPPED",
+    createMissingKeywords: true
+  });
 });
 
 test("marks a malformed CSV as FAILED without retrying dependencies", async () => {
@@ -206,6 +237,7 @@ function importRecord(
     id: importId,
     workspaceId: "01900000-0000-7000-8000-000000000001",
     projectId: "01900000-0000-7000-8000-000000000002",
+    projectDomain: "example.com",
     uploadId,
     actorId: "01900000-0000-7000-8000-000000000003",
     status: "QUEUED",

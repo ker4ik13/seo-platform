@@ -5,11 +5,13 @@ import {
   Headers,
   Param,
   Post,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  SemanticImportPreviewRowsPage,
   SemanticImportSummary
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -23,7 +25,8 @@ import {
   internalCancelSemanticImportInput,
   internalConfigureSemanticImportInput,
   internalConfirmSemanticImportInput,
-  internalCreateSemanticImportInput
+  internalCreateSemanticImportInput,
+  semanticImportPreviewRowsQuery
 } from "./semantic-import-input.js";
 import { SemanticImportService } from "./semantic-import.service.js";
 
@@ -61,6 +64,27 @@ export class SemanticImportController {
         internalUuid(importId, "importId"),
         context.workspaceId,
         context.projectId
+      )
+    );
+  }
+
+  @Get(":importId/preview-rows")
+  public async previewRows(
+    @Param("importId") importId: string,
+    @Query("cursor") cursor: unknown,
+    @Query("sortColumn") sortColumn: unknown,
+    @Query("sortDirection") sortDirection: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticImportPreviewRowsPage>> {
+    const context = internalCommandContext(headers);
+    return response(
+      request,
+      await this.semanticImports.previewRows(
+        internalUuid(importId, "importId"),
+        context.workspaceId,
+        context.projectId,
+        semanticImportPreviewRowsQuery(cursor, sortColumn, sortDirection)
       )
     );
   }

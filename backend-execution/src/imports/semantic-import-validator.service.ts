@@ -1,13 +1,16 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   domainEventTypes,
   semanticImportMaxGroupDepth,
+  semanticImportNormalizeMaxRows,
+  semanticPositionHistoryHeaderDate,
   semanticKeywordIntents,
   type SemanticImportMapping,
   type SemanticImportPositionValue,
   type SemanticImportPublishRow,
+  type SemanticImportRankHistoryValue,
+  type SemanticImportSerpResultValue,
   type SemanticImportValidationSummary
-  , semanticPositionHistoryHeaderDate
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -15,14 +18,22 @@ import {
 } from "../generated/prisma/client.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import { Inject } from "@nestjs/common";
 import {
   SeoDataClient,
   SeoDataClientError
 } from "../seo-data/seo-data.client.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { safeMapping } from "./semantic-import.service.js";
+import {
+  safeMapping,
+  semanticImportEntitlement
+} from "./semantic-import.service.js";
 import { importedPositionHistory, isPositionHistorySummary, positionHistoryDateColumns, positionHistoryMetadataHeader } from "./position-history-import.js";
+import {
+  KC4_NATIVE_INTERNAL_HEADERS,
+  KC4_POSITION_CONTEXTS_HEADER,
+  KC4_POSITION_HISTORY_HEADER,
+  KC4_SERP_RESULTS_HEADER
+} from "./kc4-parser.js";
 
 const TERMINAL_VALIDATION_CODES = new Set([
   "IMPORT_MAPPING_INVALID",
@@ -31,7 +42,12 @@ const TERMINAL_VALIDATION_CODES = new Set([
 
 export interface SemanticImportValidationOutcome {
   readonly importId: string;
-  readonly status: "AWAITING_CONFIRMATION" | "FAILED" | "SKIPPED";
+  readonly status:
+    | "AWAITING_CONFIRMATION"
+    | "READY_TO_PUBLISH"
+    | "FAILED"
+    | "SKIPPED";
+  readonly version?: number;
   readonly code?: string;
 }
 
@@ -161,10 +177,11 @@ export class SemanticImportValidatorService {
     });
     const issueCounts = new Map<string, bigint>();
     let cursor: bigint | undefined;
+    let processedRows = 0n;
     let lastHeartbeatAt = Date.now();
     const batchSize = Math.min(
       Math.max(this.config.imports.stagingBatchRows, 1),
-      500
+      semanticImportNormalizeMaxRows
     );
     while (true) {
       const rows = await this.prisma.semanticImportStagingRow.findMany({
@@ -261,11 +278,17 @@ export class SemanticImportValidatorService {
         skipDuplicates: true
       });
       cursor = rows.at(-1)!.rowNumber;
+      processedRows += BigInt(rows.length);
       if (
         Date.now() - lastHeartbeatAt >=
         this.config.imports.parseHeartbeatSeconds * 1_000
       ) {
-        await this.heartbeat(semanticImport.id, claimedAt);
+        await this.heartbeat(
+          semanticImport.id,
+          claimedAt,
+          processedRows,
+          semanticImport.totalRows
+        );
         lastHeartbeatAt = Date.now();
       }
     }
@@ -300,6 +323,10 @@ export class SemanticImportValidatorService {
     claimedAt: Date,
     summary: SemanticImportValidationSummary
   ): Promise<SemanticImportValidationOutcome> {
+    const destination = semanticImportValidationDestination(
+      semanticImport,
+      summary
+    );
     return this.prisma.$transaction(async (transaction) => {
       const completedAt = new Date();
       const changed = await transaction.semanticImport.updateMany({
@@ -309,8 +336,8 @@ export class SemanticImportValidatorService {
           validationStartedAt: claimedAt
         },
         data: {
-          status: "AWAITING_CONFIRMATION",
-          stage: "validation_ready",
+          status: destination.status,
+          stage: destination.stage,
           validationSummary: json(summary),
           validationHeartbeatAt: completedAt,
           validationCompletedAt: completedAt,
@@ -343,7 +370,8 @@ export class SemanticImportValidatorService {
       });
       return {
         importId: semanticImport.id,
-        status: "AWAITING_CONFIRMATION" as const
+        status: destination.status,
+        version: semanticImport.version + 1
       };
     });
   }
@@ -424,7 +452,12 @@ export class SemanticImportValidatorService {
     });
   }
 
-  private async heartbeat(importId: string, claimedAt: Date): Promise<void> {
+  private async heartbeat(
+    importId: string,
+    claimedAt: Date,
+    processedRows: bigint,
+    totalRows: bigint
+  ): Promise<void> {
     const updated = await this.prisma.semanticImport.updateMany({
       where: {
         id: importId,
@@ -433,7 +466,7 @@ export class SemanticImportValidatorService {
       },
       data: {
         validationHeartbeatAt: new Date(),
-        stage: "validating_rows"
+        stage: `validating_rows:${processedRows}:${totalRows}`
       }
     });
     if (updated.count === 0) {
@@ -447,6 +480,32 @@ export class SemanticImportValidatorService {
         this.config.imports.parseLeaseMinutes * 60 * 1_000
     );
   }
+}
+
+export function semanticImportValidationDestination(
+  semanticImport: Pick<
+    SemanticImport,
+    | "sourceFormat"
+    | "billingPlanCode"
+    | "billingPlanVersion"
+    | "storedKeywordsLimit"
+    | "keywordsPerProjectLimit"
+    | "foldersPerProjectLimit"
+    | "trackedContextPairsLimit"
+  >,
+  summary: Pick<SemanticImportValidationSummary, "uniqueKeywordsToProcess">
+): Readonly<{
+  status: "AWAITING_CONFIRMATION" | "READY_TO_PUBLISH";
+  stage: "validation_ready" | "publish_queued";
+}> {
+  if (
+    semanticImport.sourceFormat === "KC4" &&
+    BigInt(summary.uniqueKeywordsToProcess) > 0n &&
+    semanticImportEntitlement(semanticImport)
+  ) {
+    return { status: "READY_TO_PUBLISH", stage: "publish_queued" };
+  }
+  return { status: "AWAITING_CONFIRMATION", stage: "validation_ready" };
 }
 
 export function canonicalImportRow(
@@ -475,7 +534,8 @@ export function canonicalImportRow(
   const groupPath = splitGroupPath(
     value("group.path"),
     options.sourceFormat === "KC4" ? "/" : mapping.groupSeparator,
-    issues
+    issues,
+    options.sourceFormat === "KC4"
   );
   const targetUrl = validUrl(value("page.target_url"), issues);
   const frequencies = [
@@ -505,14 +565,29 @@ export function canonicalImportRow(
   );
   const intent = optionalIntent(value("keyword.intent"), issues);
   const explicitPositions = mappedPositions(value, issues);
-  const positions = mapping.positionHistory ? [] : explicitPositions.length > 0
+  const basePositions = mapping.positionHistory ? [] : explicitPositions.length > 0
     ? explicitPositions
     : options.sourceFormat === "KC4" && value("ranking.position")
       ? kc4Positions(headers, values, issues)
       : legacyMappedPosition(value, issues);
+  const mergedPositions = options.sourceFormat === "KC4"
+    ? mergeKc4SerpPositions(
+        basePositions,
+        kc4SerpSnapshots(headers, values, issues)
+      )
+    : basePositions;
+  const positionContexts = options.sourceFormat === "KC4"
+    ? kc4PositionContexts(headers, values, issues)
+    : new Map();
+  const positions = mergedPositions.map((position) => {
+    const context = positionContexts.get(position.searchEngine);
+    return context ? { ...position, ...context } : position;
+  });
   const positionHistory = mapping.positionHistory
     ? importedPositionHistory(headers, values, mapping.positionHistory, issues, mapping)
-    : [];
+    : options.sourceFormat === "KC4"
+      ? kc4PositionHistory(headers, values, issues)
+      : [];
   const customValues: Record<string, string> = {};
   for (const column of mapping.columns) {
     const raw = values[column.sourceIndex]?.trim();
@@ -520,7 +595,8 @@ export function canonicalImportRow(
     if (mapping.positionHistory && (semanticPositionHistoryHeaderDate(headers[column.sourceIndex] ?? "") || positionHistoryMetadataHeader(headers[column.sourceIndex] ?? ""))) continue;
     if (
       options.sourceFormat === "KC4" &&
-      KC4_NATIVE_POSITION_HEADERS.has(headers[column.sourceIndex] ?? "")
+      (KC4_NATIVE_POSITION_HEADERS.has(headers[column.sourceIndex] ?? "") ||
+        KC4_NATIVE_INTERNAL_HEADERS.has(headers[column.sourceIndex] ?? ""))
     ) {
       continue;
     }
@@ -594,9 +670,32 @@ function importNote(
 function splitGroupPath(
   value: string | undefined,
   separator: string,
-  issues: Set<string>
+  issues: Set<string>,
+  nativeKc4 = false
 ): readonly string[] | undefined {
   if (!value) return undefined;
+  if (nativeKc4 && value.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        parsed.length <= semanticImportMaxGroupDepth &&
+        parsed.every((segment) =>
+          typeof segment === "string" &&
+          segment.trim().length > 0 &&
+          segment.trim().length <= 255
+        )
+      ) {
+        return parsed.map((segment) => String(segment).normalize("NFC").trim());
+      }
+    } catch {
+      // The warning below keeps the keyword importable without trusting a
+      // malformed optional native path value.
+    }
+    issues.add("INVALID_KC4_GROUP_PATH");
+    return undefined;
+  }
   const segments = value
     .split(separator)
     .map((segment) => segment.trim())
@@ -607,6 +706,299 @@ function splitGroupPath(
     return segments.slice(0, semanticImportMaxGroupDepth);
   }
   return segments;
+}
+
+function kc4PositionHistory(
+  headers: readonly string[],
+  values: readonly string[],
+  issues: Set<string>
+): readonly SemanticImportRankHistoryValue[] {
+  const raw = nativeKc4Json(
+    headers,
+    values,
+    KC4_POSITION_HISTORY_HEADER,
+    issues
+  );
+  if (!Array.isArray(raw)) return [];
+  const result: SemanticImportRankHistoryValue[] = [];
+  for (const item of raw.slice(0, 1_100)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      issues.add("INVALID_KC4_POSITION_HISTORY");
+      continue;
+    }
+    const row = item as Record<string, unknown>;
+    const searchEngine = row.searchEngine === "YANDEX" || row.searchEngine === "GOOGLE"
+      ? row.searchEngine
+      : undefined;
+    const observedAt = typeof row.observedAt === "string" &&
+      !Number.isNaN(Date.parse(row.observedAt)) &&
+      new Date(row.observedAt).toISOString() === row.observedAt
+        ? row.observedAt
+        : undefined;
+    const found = typeof row.found === "boolean" ? row.found : undefined;
+    const position = Number.isSafeInteger(row.position) &&
+      Number(row.position) >= 1 &&
+      Number(row.position) <= 100
+        ? Number(row.position)
+        : undefined;
+    if (!searchEngine || !observedAt || found === undefined || (found && !position)) {
+      issues.add("INVALID_KC4_POSITION_HISTORY");
+      continue;
+    }
+    const rankingUrl = typeof row.rankingUrl === "string"
+      ? validRankingUrl(row.rankingUrl, issues)
+      : undefined;
+    const context = kc4RankContextValue(row, searchEngine, issues);
+    if (!context) continue;
+    const serpResults = row.serpResults === undefined
+      ? []
+      : kc4SerpResultValues(row.serpResults, issues);
+    result.push({
+      ...context,
+      searchEngine,
+      observedAt,
+      found,
+      ...(found && position ? { position } : {}),
+      ...(rankingUrl ? { rankingUrl } : {}),
+      ...(serpResults.length > 0 ? { serpResults } : {})
+    });
+  }
+  const byMeasurement = new Map<string, SemanticImportRankHistoryValue>();
+  for (const point of result) {
+    const key = `${point.searchEngine}:${point.countryCode}:${point.regionCode}:${point.language}:${point.device}:${point.observedAt}`;
+    const current = byMeasurement.get(key);
+    const preferred = !current
+      ? point
+      : point.found !== current.found
+        ? point.found ? point : current
+        : point.position !== undefined || point.rankingUrl
+          ? point
+          : current;
+    byMeasurement.set(key, preferred);
+  }
+  return [...byMeasurement.values()].sort(
+    (left, right) => left.observedAt.localeCompare(right.observedAt) ||
+      left.searchEngine.localeCompare(right.searchEngine)
+  );
+}
+
+function kc4PositionContexts(
+  headers: readonly string[],
+  values: readonly string[],
+  issues: Set<string>
+): ReadonlyMap<"YANDEX" | "GOOGLE", Readonly<{
+  source: "KEY_COLLECTOR";
+  countryCode: string;
+  regionCode: string;
+  regionLabel: string;
+  language: string;
+  device: "DESKTOP" | "MOBILE";
+  observedAt?: string;
+}>> {
+  const raw = nativeKc4Json(
+    headers,
+    values,
+    KC4_POSITION_CONTEXTS_HEADER,
+    issues
+  );
+  const result = new Map<"YANDEX" | "GOOGLE", Readonly<{
+    source: "KEY_COLLECTOR";
+    countryCode: string;
+    regionCode: string;
+    regionLabel: string;
+    language: string;
+    device: "DESKTOP" | "MOBILE";
+    observedAt?: string;
+  }>>();
+  if (!Array.isArray(raw)) return result;
+  for (const value of raw.slice(0, 2)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      issues.add("INVALID_KC4_POSITION_CONTEXT");
+      continue;
+    }
+    const row = value as Record<string, unknown>;
+    const searchEngine = row.searchEngine === "YANDEX" || row.searchEngine === "GOOGLE"
+      ? row.searchEngine
+      : undefined;
+    if (!searchEngine || result.has(searchEngine)) {
+      issues.add("INVALID_KC4_POSITION_CONTEXT");
+      continue;
+    }
+    const context = kc4RankContextValue(row, searchEngine, issues, true);
+    if (context) result.set(searchEngine, context);
+  }
+  return result;
+}
+
+function kc4RankContextValue(
+  row: Readonly<Record<string, unknown>>,
+  searchEngine: "YANDEX" | "GOOGLE",
+  issues: Set<string>,
+  allowObservedAt = false
+): Readonly<{
+  source: "KEY_COLLECTOR";
+  countryCode: string;
+  regionCode: string;
+  regionLabel: string;
+  language: string;
+  device: "DESKTOP" | "MOBILE";
+  observedAt?: string;
+}> | undefined {
+  const countryCode = typeof row.countryCode === "string"
+    ? row.countryCode.toUpperCase()
+    : "";
+  const regionCode = typeof row.regionCode === "string" ? row.regionCode.trim() : "";
+  const regionLabel = typeof row.regionLabel === "string" ? row.regionLabel.trim() : "";
+  const language = typeof row.language === "string" ? row.language.trim().toLowerCase() : "";
+  const device = row.device === "DESKTOP" || row.device === "MOBILE"
+    ? row.device
+    : undefined;
+  const observedAt = allowObservedAt && row.observedAt !== undefined &&
+    typeof row.observedAt === "string" &&
+    !Number.isNaN(Date.parse(row.observedAt)) &&
+    new Date(row.observedAt).toISOString() === row.observedAt
+      ? row.observedAt
+      : undefined;
+  if (
+    row.source !== "KEY_COLLECTOR" ||
+    row.searchEngine !== searchEngine ||
+    !/^[A-Z]{2}$/u.test(countryCode) ||
+    !regionCode ||
+    regionCode.length > 100 ||
+    !regionLabel ||
+    regionLabel.length > 160 ||
+    !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/u.test(language) ||
+    !device ||
+    (allowObservedAt && row.observedAt !== undefined && observedAt === undefined)
+  ) {
+    issues.add("INVALID_KC4_POSITION_CONTEXT");
+    return undefined;
+  }
+  return {
+    source: "KEY_COLLECTOR",
+    countryCode,
+    regionCode,
+    regionLabel,
+    language,
+    device,
+    ...(observedAt ? { observedAt } : {})
+  };
+}
+
+function kc4SerpSnapshots(
+  headers: readonly string[],
+  values: readonly string[],
+  issues: Set<string>
+): readonly Readonly<{
+  searchEngine: "YANDEX" | "GOOGLE";
+  results: readonly SemanticImportSerpResultValue[];
+}>[] {
+  const raw = nativeKc4Json(headers, values, KC4_SERP_RESULTS_HEADER, issues);
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      issues.add("INVALID_KC4_SERP");
+      return [];
+    }
+    const value = item as Record<string, unknown>;
+    const searchEngine = value.searchEngine === "YANDEX" || value.searchEngine === "GOOGLE"
+      ? value.searchEngine
+      : undefined;
+    if (!searchEngine || !Array.isArray(value.results)) {
+      issues.add("INVALID_KC4_SERP");
+      return [];
+    }
+    const results = kc4SerpResultValues(value.results, issues);
+    return results.length > 0 ? [{ searchEngine, results }] : [];
+  });
+}
+
+function kc4SerpResultValues(
+  value: unknown,
+  issues: Set<string>
+): readonly SemanticImportSerpResultValue[] {
+  if (!Array.isArray(value)) {
+    issues.add("INVALID_KC4_SERP");
+    return [];
+  }
+  const positions = new Set<number>();
+  return value.slice(0, 100).flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        issues.add("INVALID_KC4_SERP");
+        return [];
+      }
+      const row = candidate as Record<string, unknown>;
+      const position = Number(row.position);
+      const rankingUrl = typeof row.rankingUrl === "string"
+        ? validRankingUrl(row.rankingUrl, issues)
+        : undefined;
+      if (
+        !Number.isSafeInteger(position) ||
+        position < 1 ||
+        position > 100 ||
+        positions.has(position) ||
+        !rankingUrl
+      ) {
+        issues.add("INVALID_KC4_SERP");
+        return [];
+      }
+      positions.add(position);
+      const title = boundedKc4SerpCopy(row.title, 8_000, issues);
+      const snippet = boundedKc4SerpCopy(row.snippet, 32_000, issues);
+      return [{
+        position,
+        rankingUrl,
+        ...(title ? { title } : {}),
+        ...(snippet ? { snippet } : {})
+      }];
+  });
+}
+
+function mergeKc4SerpPositions(
+  positions: readonly SemanticImportPositionValue[],
+  snapshots: ReturnType<typeof kc4SerpSnapshots>
+): readonly SemanticImportPositionValue[] {
+  const byEngine = new Map(
+    positions.map((position) => [position.searchEngine, position])
+  );
+  for (const snapshot of snapshots) {
+    const current = byEngine.get(snapshot.searchEngine);
+    byEngine.set(snapshot.searchEngine, {
+      ...(current ?? { searchEngine: snapshot.searchEngine, found: false }),
+      serpResults: snapshot.results
+    });
+  }
+  return [...byEngine.values()];
+}
+
+function nativeKc4Json(
+  headers: readonly string[],
+  values: readonly string[],
+  header: string,
+  issues: Set<string>
+): unknown {
+  const index = headers.indexOf(header);
+  const raw = index < 0 ? undefined : values[index]?.trim();
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    issues.add("INVALID_KC4_NATIVE_DATA");
+    return undefined;
+  }
+}
+
+function boundedKc4SerpCopy(
+  value: unknown,
+  maximumLength: number,
+  issues: Set<string>
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.length > maximumLength) {
+    issues.add("INVALID_KC4_SERP");
+    return undefined;
+  }
+  return value.normalize("NFC");
 }
 
 type ImportValue = (target: string) => string | undefined;

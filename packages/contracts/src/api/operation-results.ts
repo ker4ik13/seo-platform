@@ -2,6 +2,7 @@ import type {
   TechnicalCrawlSummary,
   CrawlIssueSeverity
 } from "./crawls.js";
+import type { XmlStockOperationUsageSummary } from "./integrations.js";
 import type { PageIndexability } from "./pages.js";
 import type {
   FrequencyCollectionSummary,
@@ -66,6 +67,7 @@ export interface InternalFrequencyOperationScope {
   readonly projectId: string;
   readonly jobId: string;
   readonly items: readonly InternalFrequencyOperationScopeItem[];
+  readonly providerUsage?: XmlStockOperationUsageSummary;
   readonly page: OperationResultPageInfo;
 }
 
@@ -104,6 +106,7 @@ export interface FrequencyOperationResultRow
 
 export interface FrequencyOperationResult {
   readonly collection: FrequencyCollectionSummary;
+  readonly providerUsage?: XmlStockOperationUsageSummary;
   readonly rows: readonly FrequencyOperationResultRow[];
   readonly page: OperationResultPageInfo;
 }
@@ -193,6 +196,7 @@ export interface InternalRankOperationScope {
   readonly projectId: string;
   readonly jobId: string;
   readonly items: readonly InternalRankOperationScopeItem[];
+  readonly providerUsage?: XmlStockOperationUsageSummary;
   readonly page: OperationResultPageInfo;
 }
 
@@ -252,6 +256,7 @@ export interface InternalRankOperationResult {
 export interface RankOperationResult
   extends Omit<InternalRankOperationResult, "workspaceId" | "projectId"> {
   readonly job: RankJobSummary;
+  readonly providerUsage?: XmlStockOperationUsageSummary;
 }
 
 export interface CrawlOperationIssue {

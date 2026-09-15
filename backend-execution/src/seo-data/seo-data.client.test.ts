@@ -45,7 +45,8 @@ test("accepts a complete normalized batch and forwards trusted context", async (
             existsInProject: false
           }
         ]
-      }
+      },
+      meta: { requestId: "normalize" }
     });
   }) as typeof fetch;
   try {
@@ -255,6 +256,59 @@ test("uses body-only export reads for a large folder union", async () => {
     assert.equal(observed.every(item => item.method === "POST"), true);
     assert.ok(observed[0]);
     assert.deepEqual((observed[0].body as { query: { groupIds: string[] } }).query.groupIds, groupIds);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("keeps exact rank sorting complete on every GET export read", async () => {
+  const originalFetch = globalThis.fetch;
+  const observed: URL[] = [];
+  const dimensionKey = "YANDEX|RU|213|ru|DESKTOP";
+  globalThis.fetch = (async (input) => {
+    const url = new URL(String(input));
+    observed.push(url);
+    if (url.pathname.endsWith("/competitors")) {
+      return Response.json({
+        data: [],
+        page: { hasNext: false, totalApprox: 0 },
+        meta: { requestId: "rank-sort-competitors" }
+      });
+    }
+    if (url.pathname.endsWith("/position-history")) {
+      return Response.json({
+        data: [],
+        page: { hasNext: false, totalApprox: 0 },
+        meta: { requestId: "rank-sort-history" }
+      });
+    }
+    return Response.json({
+      data: [],
+      page: { hasNext: false, totalApprox: 0 },
+      meta: { requestId: "rank-sort-keywords" }
+    });
+  }) as typeof fetch;
+  try {
+    const client = new SeoDataClient(config);
+    const query = {
+      limit: 50,
+      sort: "RANK_POSITION_ASC" as const,
+      rankSortDimensionKey: dimensionKey
+    };
+    await client.listExportKeywords(context, query);
+    await client.listExportCompetitors(context, query, { sources: ["SERP"] });
+    await client.listExportPositionHistory(context, query, {
+      observedFrom: "2026-08-01T00:00:00.000Z",
+      observedBefore: "2026-09-01T00:00:00.000Z",
+      searchEngines: ["YANDEX"],
+      dimensionKeys: [dimensionKey]
+    });
+
+    assert.equal(observed.length, 3);
+    for (const url of observed) {
+      assert.equal(url.searchParams.get("sort"), "RANK_POSITION_ASC");
+      assert.equal(url.searchParams.get("rankSortDimensionKey"), dimensionKey);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

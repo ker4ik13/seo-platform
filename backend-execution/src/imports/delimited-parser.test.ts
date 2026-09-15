@@ -129,6 +129,19 @@ test("recognizes Key Collector XLSX headers with bracketed provider suffixes", (
   );
 });
 
+test("keeps native Key Collector service columns as custom values", () => {
+  const headers = [
+    "Key Collector · Комментарий группы",
+    "Key Collector · CustomMetric · Label",
+    "Key Collector · YandexDirect_Forecast · Position"
+  ];
+
+  assert.deepEqual(
+    suggestColumnMapping(headers).map(({ suggestedTarget }) => suggestedTarget),
+    ["custom", "custom", "custom"]
+  );
+});
+
 async function* textChunks(values: readonly string[]): AsyncGenerator<string> {
   for (const value of values) yield value;
 }

@@ -6,10 +6,10 @@ import type {
   FrequencyCollectionMode,
   FrequencyCollectionSummary,
   FrequencySeasonalityGranularity,
-  ProjectConnectorBinding,
-  ProjectConnectorSettings,
+  ProjectConnectorCredentialOption,
   SemanticFrequencyDevice,
-  SemanticFrequencyType
+  SemanticFrequencyType,
+  WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import {
   arsenkinWordstatKeywordLimit,
@@ -17,13 +17,9 @@ import {
   parseFrequencySeasonalityRequest
 } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
-import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import {
-  createProjectConnectorBindingInput,
-  projectConnectorBinding,
-  projectConnectorOptions,
-  updateProjectConnectorBindingInput,
-  withProjectConnectorBinding
+  isProjectConnectorCredentialEligible,
+  workspaceConnectorOptions
 } from "../lib/project-integration-settings";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import { frequencyProviderUsageEstimate } from "../lib/provider-usage-estimate";
@@ -54,12 +50,14 @@ export function SemanticFrequencyDialog({
   groups,
   initialSelections,
   initialConfiguration,
+  workspaceId,
   mode: requestedMode = "FREQUENCY"
 }: Readonly<{
   mode?: FrequencyCollectionMode;
   onClose: () => void;
   onStarted: (collection: FrequencyCollectionSummary) => void;
   projectId: string;
+  workspaceId: string;
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
@@ -90,7 +88,7 @@ export function SemanticFrequencyDialog({
     () => initialConfiguration?.regionCode ?? defaultSemanticRegion("WORDSTAT").code
   );
   const [device, setDevice] = useState<SemanticFrequencyDevice>(initialConfiguration?.device ?? "ALL");
-  const [settings, setSettings] = useState<ProjectConnectorSettings>();
+  const [routing, setRouting] = useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [loadingSources, setLoadingSources] = useState(true);
   const [running, setRunning] = useState(false);
@@ -109,16 +107,17 @@ export function SemanticFrequencyDialog({
     ),
     [seasonalityMode, types]
   );
-  const wordstatBinding = settings
-    ? projectConnectorBinding(settings, "WORDSTAT")
-    : undefined;
   const sources = useMemo(
-    () => settings
-      ? projectConnectorOptions(settings, "WORDSTAT").filter(
-          ({ status }) => status === "ACTIVE"
-        )
+    () => routing
+      ? workspaceConnectorOptions(routing, "WORDSTAT")
       : [],
-    [settings]
+    [routing]
+  );
+  const connectedWordstatSources = useMemo<readonly ProjectConnectorCredentialOption[]>(
+    () => (routing?.credentialOptions ?? []).filter((source) =>
+      isProjectConnectorCredentialEligible(source, "WORDSTAT")
+    ),
+    [routing]
   );
   const seasonalityAvailableRange = useMemo(
     () => availableSeasonalityRange(granularity),
@@ -169,18 +168,16 @@ export function SemanticFrequencyDialog({
   useEffect(() => {
     const controller = new AbortController();
     setLoadingSources(true);
-    void preparedProjectIntegrations(projectId, controller.signal)
+    void browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
+      { signal: controller.signal }
+    )
       .then((result) => {
         if (controller.signal.aborted) return;
-        const binding = projectConnectorBinding(result, "WORDSTAT");
-        const options = projectConnectorOptions(result, "WORDSTAT").filter(
-          ({ status }) => status === "ACTIVE"
-        );
+        const options = workspaceConnectorOptions(result, "WORDSTAT");
         const selectedCredentialId =
-          (initialConfiguration && options.find(option => option.provider === initialConfiguration.provider && (!initialConfiguration.credentialMode || option.mode === initialConfiguration.credentialMode)))?.id ?? (options.some(({ id }) => id === binding?.route?.credentialId)
-            ? binding?.route?.credentialId ?? ""
-            : options[0]?.id ?? "");
-        setSettings(result);
+          (initialConfiguration && options.find(option => option.provider === initialConfiguration.provider && (!initialConfiguration.credentialMode || option.mode === initialConfiguration.credentialMode)))?.id ?? options[0]?.id ?? "";
+        setRouting(result);
         setCredentialId(selectedCredentialId);
         if (seasonalityMode) {
           setTypes(new Set(["BASE"]));
@@ -193,7 +190,7 @@ export function SemanticFrequencyDialog({
         if (!controller.signal.aborted) setLoadingSources(false);
       });
     return () => controller.abort();
-  }, [projectId, initialConfiguration, seasonalityMode]);
+  }, [initialConfiguration, seasonalityMode, workspaceId]);
 
   function toggleType(type: SemanticFrequencyType): void {
     setTypes((current) => {
@@ -210,12 +207,11 @@ export function SemanticFrequencyDialog({
     setRunning(true);
     setError(undefined);
     try {
-      if (!settings || !selectedSource) {
+      if (!routing || !selectedSource) {
         throw new Error(
           "Нет активного подключения XMLStock или Arsenkin с доступом к Wordstat."
         );
       }
-      await ensureWordstatBinding(settings, wordstatBinding, selectedSource.id);
       const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`;
       const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
@@ -323,7 +319,12 @@ export function SemanticFrequencyDialog({
                 ))}
               </div>
             ) : (
-              <div className="inline-alert warning"><UiText text="Нет проверенного подключения с функцией Wordstat." /></div>
+              <div className="inline-alert warning">
+                <span>{connectedWordstatSources.length > 0
+                  ? <UiText text="Подключение Wordstat доступно, но для операции не выбран маршрут рабочей области." />
+                  : <UiText text="Нет проверенного подключения с функцией Wordstat." />}</span>{" "}
+                <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+              </div>
             )}
           </section>
           <section className="semantic-workflow-panel semantic-settings-panel">
@@ -451,7 +452,7 @@ export function SemanticFrequencyDialog({
             <div className="inline-alert danger" role="alert">
               <span>{<UiText text={error.message ?? ""} />}</span>{" "}
               {error.showRoutingLink && (
-                <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}><UiText text="Настроить маршрут Wordstat" /></a>
+                <a href="/app/settings/integrations"><UiText text="Настроить маршрут Wordstat" /></a>
               )}
             </div>
           )}
@@ -460,37 +461,6 @@ export function SemanticFrequencyDialog({
       </form>
     </SemanticModal>
   );
-
-  async function ensureWordstatBinding(
-    currentSettings: ProjectConnectorSettings,
-    binding: ProjectConnectorBinding | undefined,
-    selectedCredentialId: string
-  ): Promise<void> {
-    if (
-      binding?.enabled &&
-      binding.route?.credentialId === selectedCredentialId &&
-      binding.availability === "READY"
-    ) return;
-    const draft = { credentialId: selectedCredentialId, enabled: true };
-    const updated = binding
-      ? await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings/${encodeURIComponent(binding.id)}`,
-          {
-            method: "PATCH",
-            ifMatch: binding.version,
-            body: updateProjectConnectorBindingInput(draft)
-          }
-        )
-      : await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-          {
-            method: "POST",
-            idempotencyKey: `semantic-wordstat-binding:${crypto.randomUUID()}`,
-            body: createProjectConnectorBindingInput("WORDSTAT", draft)
-          }
-        );
-    setSettings(withProjectConnectorBinding(currentSettings, updated));
-  }
 }
 
 interface FrequencyDialogError {
@@ -502,7 +472,7 @@ function frequencyErrorMessage(error: unknown): FrequencyDialogError {
   if (error instanceof BrowserApiError) {
     if (error.code === "CONNECTOR_NOT_READY") {
       return {
-        message: "Подключите XMLStock или Arsenkin, подтвердите ключ и назначьте проекту маршрут Wordstat.",
+        message: "Подключите XMLStock или Arsenkin и назначьте маршрут Wordstat в настройках рабочей области.",
         showRoutingLink: true
       };
     }

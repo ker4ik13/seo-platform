@@ -25,6 +25,12 @@ export type SemanticImportDelimiter =
  * bounding recursive validation and group creation work.
  */
 export const semanticImportMaxGroupDepth = 64;
+/**
+ * Native projects carry empty folders outside keyword rows. Keep the manifest
+ * bounded independently from the per-project entitlement while accepting
+ * real multi-thousand-folder Key Collector projects.
+ */
+export const semanticImportMaxGroupManifestEntries = 20_000;
 
 export const semanticImportHeaderModes = [
   "AUTO",
@@ -81,6 +87,11 @@ export const semanticImportTargets = [
   "custom"
 ] as const;
 
+/** Bounded normalization batch shared by Jobs and the SEO data owner. */
+export const semanticImportNormalizeMaxRows = 5_000;
+/** Bounded publication transaction shared by Jobs and the SEO data owner. */
+export const semanticImportPublishMaxRows = 5_000;
+
 export type SemanticImportTarget =
   (typeof semanticImportTargets)[number];
 
@@ -106,9 +117,13 @@ export interface InternalCreateSemanticImportInput
   extends CreateSemanticImportInput {
   readonly workspaceId: string;
   readonly projectId: string;
+  /** Trusted normalized project host captured by Platform API. */
+  readonly projectDomain: string;
   readonly actorId: string;
   readonly idempotencyKey: string;
   readonly jobCapacity: import("./billing.js").JobCapacityEntitlement;
+  /** Trusted capacity snapshot used by automatic native KC4 publication. */
+  readonly semanticCapacity?: import("./billing.js").SemanticCapacityEntitlement;
 }
 
 export interface SemanticImportColumnPreview {
@@ -125,6 +140,34 @@ export interface SemanticImportPreview {
   readonly validRows: string;
   readonly warningRows: string;
   readonly errorRows: string;
+}
+
+/** Preview rows are streamed in fixed pages so even very large native projects stay responsive. */
+export const semanticImportPreviewPageSize = 100 as const;
+
+export const semanticImportPreviewSortDirections = ["ASC", "DESC"] as const;
+
+export type SemanticImportPreviewSortDirection =
+  (typeof semanticImportPreviewSortDirections)[number];
+
+export interface SemanticImportPreviewRowsQuery {
+  readonly cursor?: string;
+  readonly sortColumn?: number;
+  readonly sortDirection?: SemanticImportPreviewSortDirection;
+}
+
+export interface SemanticImportPreviewRow {
+  readonly rowNumber: string;
+  readonly values: readonly string[];
+}
+
+export interface SemanticImportPreviewRowsPage {
+  readonly rows: readonly SemanticImportPreviewRow[];
+  readonly page: {
+    readonly hasNext: boolean;
+    readonly nextCursor?: string;
+    readonly totalRows: string;
+  };
 }
 
 export interface SemanticImportMappingColumn {
@@ -329,14 +372,30 @@ export interface SemanticImportFrequencyValue {
 }
 
 export interface SemanticImportPositionValue {
+  readonly source?: "KEY_COLLECTOR";
   readonly searchEngine: "YANDEX" | "GOOGLE";
+  readonly countryCode?: string;
+  readonly regionCode?: string;
+  readonly regionLabel?: string;
+  readonly language?: string;
+  readonly device?: "DESKTOP" | "MOBILE";
+  readonly observedAt?: string;
   readonly found: boolean;
   readonly position?: number;
   readonly previousPosition?: number;
   readonly rankingUrl?: string;
+  readonly serpResults?: readonly SemanticImportSerpResultValue[];
+}
+
+export interface SemanticImportSerpResultValue {
+  readonly position: number;
+  readonly rankingUrl: string;
+  readonly title?: string;
+  readonly snippet?: string;
 }
 
 export interface SemanticImportRankHistoryValue {
+  readonly source?: "KEY_COLLECTOR";
   readonly searchEngine: "YANDEX" | "GOOGLE";
   readonly countryCode: string;
   readonly regionCode: string;
@@ -346,6 +405,8 @@ export interface SemanticImportRankHistoryValue {
   readonly observedAt: string;
   readonly found: boolean;
   readonly position?: number;
+  readonly rankingUrl?: string;
+  readonly serpResults?: readonly SemanticImportSerpResultValue[];
 }
 
 export interface SemanticImportPublishRow {
@@ -399,6 +460,8 @@ export interface InternalSemanticImportReceipt {
 export interface InternalApplySemanticImportChunkInput {
   readonly workspaceId: string;
   readonly projectId: string;
+  /** Optional only for compatibility with imports created before this field. */
+  readonly projectDomain?: string;
   readonly actorId: string;
   readonly importId: string;
   readonly chunkIndex: number;

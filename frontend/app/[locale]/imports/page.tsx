@@ -50,6 +50,7 @@ export default async function ImportDocumentationPage({ params }: Props) {
             <nav>
               <a href="#available">{en ? "Available formats" : "Доступные форматы"}</a>
               <a href="#steps">{en ? "Import steps" : "Порядок импорта"}</a>
+              <a href="#key-collector">Key Collector</a>
               <a href="#columns">{en ? "Columns" : "Колонки"}</a>
               <a href="#duplicates">{en ? "Existing keywords" : "Существующие запросы"}</a>
               <a href="#rankings">{en ? "Ranking history" : "История позиций"}</a>
@@ -59,17 +60,18 @@ export default async function ImportDocumentationPage({ params }: Props) {
 
           <article className="public-document-copy public-import-copy">
             <aside className="public-import-notice" role="note">
-              <strong>{en ? "Temporarily unavailable" : "Временно недоступно"}</strong>
+              <strong>{en ? "Topvisor is coming later" : "Топвизор появится позже"}</strong>
               <p>
                 {en
-                  ? "Direct Key Collector and Topvisor modes are disabled while compatibility is being finalized. Use a universal CSV, TSV or XLSX file for now."
-                  : "Прямые режимы Key Collector и Топвизора отключены на время доработки совместимости. Пока используйте универсальный CSV, TSV или XLSX."}
+                  ? "Native Key Collector projects are available now. The dedicated Topvisor profile remains disabled while compatibility is finalized."
+                  : "Нативные проекты Key Collector уже доступны. Отдельный профиль Топвизора пока отключён на время проверки совместимости."}
               </p>
             </aside>
 
             <section id="available">
               <h2>{en ? "Available formats" : "Доступные форматы"}</h2>
               <ul>
+                <li>{en ? "Key Collector: one native, unencrypted .kc4 project up to 1 GB." : "Key Collector: нативный незашифрованный проект .kc4 до 1 ГБ."}</li>
                 <li>{en ? "File: CSV, TSV or XLSX with a header row." : "Файл: CSV, TSV или XLSX с заголовками в первой строке."}</li>
                 <li>{en ? "Rankings: a wide date table or one observation per row." : "Позиции: широкая таблица по датам или отдельная строка для каждого замера."}</li>
               </ul>
@@ -83,12 +85,26 @@ export default async function ImportDocumentationPage({ params }: Props) {
             <section id="steps">
               <h2>{en ? "Import steps" : "Порядок импорта"}</h2>
               <ol>
-                <li>{en ? "Choose File or Rankings and upload a file up to 5 GB." : "Выберите «Файл» или «Позиции» и загрузите файл до 5 ГБ."}</li>
+                <li>{en ? "Choose Key Collector, File or Rankings and upload a supported file." : "Выберите Key Collector, «Файл» или «Позиции» и загрузите поддерживаемый файл."}</li>
                 <li>{en ? "Wait for malware inspection and format detection." : "Дождитесь антивирусной проверки и распознавания формата."}</li>
                 <li>{en ? "Review every detected column and change incorrect mappings." : "Проверьте назначение каждой колонки и исправьте неверные совпадения."}</li>
                 <li>{en ? "Choose how to handle new and existing keywords." : "Выберите правила для новых и уже существующих запросов."}</li>
                 <li>{en ? "Run validation, review warnings, then publish." : "Запустите проверку, изучите предупреждения и только затем подтвердите импорт."}</li>
               </ol>
+            </section>
+
+            <section id="key-collector">
+              <h2>Key Collector</h2>
+              <p>
+                {en
+                  ? "Upload the original .kc4 project. The importer reads its SQLite database in read-only mode and preserves the active folder tree, empty folders, colors, keyword notes, populated metrics, current and historical Yandex and Google rankings, relevant URLs and saved SERP rows when present. Trash and removed folders are skipped."
+                  : "Загрузите исходный проект .kc4. Импорт читает его SQLite-базу только для чтения и сохраняет активное дерево, пустые папки, цвета, заметки запросов, заполненные показатели, текущую и историческую выдачу Яндекса и Google, релевантные URL и сохранённые строки SERP, если они есть. Корзина и удалённые папки пропускаются."}
+              </p>
+              <p>
+                {en
+                  ? "Missing optional tables or damaged optional SERP text do not stop the remaining project data. Review detected columns and duplicate handling before publishing."
+                  : "Отсутствие необязательной таблицы или повреждённый необязательный текст SERP не останавливают перенос остальных данных. Перед публикацией проверьте найденные колонки и правила обработки дублей."}
+              </p>
             </section>
 
             <section id="columns">

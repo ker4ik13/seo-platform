@@ -10,6 +10,7 @@ import {
   parseRankPositionReportInput,
   parseSemanticRankDimensionKey,
   parseSerpWorkbenchInput,
+  serpWorkbenchSnapshotProviders,
   type DeleteRankDimensionHistoryInput,
   type RankDimensionHistoryDeletion,
   type RankPositionReport,
@@ -19,7 +20,8 @@ import {
   type RankPositionReportTrendPoint,
   type SemanticRankDimension,
   type SerpWorkbenchInput,
-  type SerpWorkbenchReport
+  type SerpWorkbenchReport,
+  type SerpWorkbenchSnapshotProvider
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -944,7 +946,7 @@ export class RankWorkbenchService {
       WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
         AND snapshot.project_id = ${scope.projectId}::uuid
         AND snapshot.keyword_id IN (${Prisma.join(keywordIds.map((id) => Prisma.sql`${id}::uuid`))})
-        AND snapshot.provider IN ('ARSENKIN', 'XMLSTOCK')
+        AND snapshot.provider IN ('ARSENKIN', 'XMLSTOCK', 'KEY_COLLECTOR')
         AND EXISTS (
           SELECT 1 FROM rank_serp_results result
           WHERE result.snapshot_id = snapshot.id
@@ -1139,8 +1141,10 @@ function safeCount(value: bigint): number {
   return Number(value);
 }
 
-function storedSerpProvider(value: string): "ARSENKIN" | "XMLSTOCK" {
-  if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
+function storedSerpProvider(value: string): SerpWorkbenchSnapshotProvider {
+  if (serpWorkbenchSnapshotProviders.includes(value as SerpWorkbenchSnapshotProvider)) {
+    return value as SerpWorkbenchSnapshotProvider;
+  }
   throw new Error("Stored SERP provider is unsupported");
 }
 

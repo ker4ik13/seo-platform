@@ -14,12 +14,15 @@ import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import {
   type SemanticKeywordCleaningCase,
   type SemanticKeywordCleaningPreview,
+  type SemanticKeywordListItem,
+  type SemanticKeywordMergeResult,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
 import { useMemo, useState, type FormEvent } from "react";
 import {
   browserApiRequest,
-  BrowserApiError
+  BrowserApiError,
+  browserApiCollectionRequest
 } from "../lib/browser-api";
 import {
   cleanSemanticKeywordsInBatches,
@@ -157,6 +160,12 @@ export function SemanticBulkEditor({
     useState<SemanticKeywordCleaningPreview>();
   const [cleaningBusy, setCleaningBusy] = useState<"PREVIEW" | "APPLY">();
   const [cleaningError, setCleaningError] = useState<string>();
+  const [mergeSearch, setMergeSearch] = useState("");
+  const [mergeResults, setMergeResults] = useState<readonly SemanticKeywordListItem[]>([]);
+  const [mergeCandidate, setMergeCandidate] = useState<SemanticKeywordListItem>();
+  const [mergeKeeper, setMergeKeeper] = useState<"CURRENT" | "CANDIDATE">("CANDIDATE");
+  const [mergeBusy, setMergeBusy] = useState<"SEARCH" | "APPLY">();
+  const [mergeError, setMergeError] = useState<string>();
   const sourceClusterId = selections[0]?.clusterId;
   const sourceCluster = sourceClusterId && selections.every(
     ({ clusterId: itemClusterId }) => itemClusterId === sourceClusterId
@@ -179,6 +188,53 @@ export function SemanticBulkEditor({
     normalizeYo ||
     removeSearchOperators ||
     cleaningCase !== "KEEP";
+
+  async function searchMergeCandidates(): Promise<void> {
+    if (!single || !mergeSearch.trim() || mergeBusy) return;
+    setMergeBusy("SEARCH");
+    setMergeError(undefined);
+    try {
+      const page = await browserApiCollectionRequest<SemanticKeywordListItem>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords?limit=20&search=${encodeURIComponent(mergeSearch.trim())}`
+      );
+      setMergeResults(page.data.filter(({ id, trashed }) => id !== single.id && !trashed));
+    } catch (requestError) {
+      setMergeError(bulkErrorMessage(requestError));
+    } finally {
+      setMergeBusy(undefined);
+    }
+  }
+
+  async function mergeKeyword(): Promise<void> {
+    if (!single || !mergeCandidate || mergeBusy) return;
+    const keeper = mergeKeeper === "CURRENT" ? single : mergeCandidate;
+    const merged = mergeKeeper === "CURRENT" ? mergeCandidate : single;
+    setMergeBusy("APPLY");
+    setMergeError(undefined);
+    try {
+      await browserApiRequest<SemanticKeywordMergeResult>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/merge`,
+        {
+          method: "POST",
+          body: {
+            keeper: { id: keeper.id, version: keeper.version },
+            sources: [{ id: merged.id, version: merged.version }]
+          }
+        }
+      );
+      onCompleted({
+        selected: 2,
+        changed: 2,
+        skipped: 0,
+        failed: 0,
+        conflicted: 0
+      });
+    } catch (requestError) {
+      setMergeError(bulkErrorMessage(requestError));
+    } finally {
+      setMergeBusy(undefined);
+    }
+  }
 
   function invalidateCleaning(): void {
     setCleaningPreview(undefined);
@@ -522,6 +578,60 @@ export function SemanticBulkEditor({
           availableTags={selectedTagNames}
         />}
       </div>
+      {single && (
+        <details className="semantic-bulk-merge">
+          <summary>
+            <span><UiText text="Объединить с другим запросом" /></span>
+            <small><UiText text="История, папки, теги и значения сохранятся у выбранного запроса" /></small>
+          </summary>
+          <div className="semantic-bulk-merge-body">
+            <div className="semantic-bulk-merge-search">
+              <input
+                disabled={Boolean(mergeBusy)}
+                onChange={(event) => {
+                  setMergeSearch(event.target.value);
+                  setMergeCandidate(undefined);
+                }}
+                placeholder="Найдите второй запрос по названию"
+                type="search"
+                value={mergeSearch}
+              />
+              <button className="secondary-button" disabled={!mergeSearch.trim() || Boolean(mergeBusy)} onClick={() => void searchMergeCandidates()} type="button">
+                {mergeBusy === "SEARCH" ? <UiText text="Ищем…" /> : <UiText text="Найти" />}
+              </button>
+            </div>
+            {mergeResults.length > 0 && (
+              <div className="semantic-bulk-merge-results">
+                {mergeResults.map((candidate) => (
+                  <button className={mergeCandidate?.id === candidate.id ? "selected" : undefined} key={candidate.id} onClick={() => setMergeCandidate(candidate)} type="button">
+                    <strong>{candidate.textOriginal}</strong>
+                    <small>{candidate.groupPath ?? "Без группы"}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+            {mergeCandidate && (
+              <fieldset>
+                <legend><UiText text="Какое название сохранить" /></legend>
+                <label className={mergeKeeper === "CURRENT" ? "selected" : undefined}>
+                  <input checked={mergeKeeper === "CURRENT"} name={`single-merge-${single.id}`} onChange={() => setMergeKeeper("CURRENT")} type="radio" />
+                  <span><small><UiText text="Текущий запрос" /></small><strong>{single.text}</strong></span>
+                </label>
+                <label className={mergeKeeper === "CANDIDATE" ? "selected" : undefined}>
+                  <input checked={mergeKeeper === "CANDIDATE"} name={`single-merge-${single.id}`} onChange={() => setMergeKeeper("CANDIDATE")} type="radio" />
+                  <span><small><UiText text="Найденный запрос" /></small><strong>{mergeCandidate.textOriginal}</strong></span>
+                </label>
+              </fieldset>
+            )}
+            {mergeError && <div className="inline-alert danger" role="alert">{mergeError}</div>}
+            <div className="semantic-editor-actions">
+              <button className="danger-button" disabled={!mergeCandidate || Boolean(mergeBusy)} onClick={() => void mergeKeyword()} type="button">
+                {mergeBusy === "APPLY" ? <UiText text="Объединяем…" /> : <UiText text="Объединить запросы" />}
+              </button>
+            </div>
+          </div>
+        </details>
+      )}
       {!single && (
         <>
       <details className="semantic-bulk-split">

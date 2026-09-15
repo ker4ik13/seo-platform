@@ -4,6 +4,7 @@ import {
   Children,
   Fragment,
   isValidElement,
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -70,6 +71,7 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly optionOrderLabel?: string;
   readonly popoverFooter?: ReactNode;
   readonly popoverClassName?: string;
+  readonly popoverMinWidth?: number;
   readonly searchPlaceholder?: string;
   readonly searchable?: boolean;
   readonly showSelectedCheck?: boolean;
@@ -96,6 +98,7 @@ export function CustomSelect({
   onFocus,
   popoverFooter,
   popoverClassName,
+  popoverMinWidth = 220,
   placeholder = "Выберите значение",
   required = false,
   searchPlaceholder = "Поиск…",
@@ -111,8 +114,10 @@ export function CustomSelect({
   const listboxId = `${selectId}-listbox`;
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const revealActiveOptionRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [opensUpward, setOpensUpward] = useState(false);
@@ -163,7 +168,41 @@ export function CustomSelect({
       ? [{ ...created, key: `${selectId}-create`, disabled: false, searchText: normalizeSelectSearchText(created.value) }, ...matches]
       : matches;
   }, [orderedOptions, query, createOption, selectId]);
+  const filteredOptionSignature = JSON.stringify(
+    filteredOptions.map(({ disabled: optionDisabled, value: optionValue }) => [
+      optionValue,
+      optionDisabled
+    ])
+  );
+  const filteredOptionsRef = useRef(filteredOptions);
+  filteredOptionsRef.current = filteredOptions;
   useEffect(() => { onSearchChange?.(query); }, [query, onSearchChange]);
+
+  const updatePopoverPosition = useCallback((): void => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const gap = 6;
+    const viewportPadding = 8;
+    const width = Math.min(
+      Math.max(rect.width, popoverMinWidth),
+      window.innerWidth - viewportPadding * 2
+    );
+    const left = Math.min(
+      Math.max(viewportPadding, rect.left),
+      window.innerWidth - width - viewportPadding
+    );
+    const spaceBelow = window.innerHeight - rect.bottom - gap - viewportPadding;
+    const spaceAbove = rect.top - gap - viewportPadding;
+    const upward = spaceBelow < 220 && spaceAbove > spaceBelow;
+    setOpensUpward(upward);
+    setPopoverPosition({
+      bottom: upward ? window.innerHeight - rect.top + gap : undefined,
+      left,
+      maxHeight: Math.max(120, Math.min(320, upward ? spaceAbove : spaceBelow)),
+      top: upward ? undefined : rect.bottom + gap,
+      width
+    });
+  }, [popoverMinWidth]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -191,6 +230,9 @@ export function CustomSelect({
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      // The first Escape belongs to the open select. Do not let the same
+      // keystroke close an enclosing modal or side drawer as well.
+      event.stopImmediatePropagation();
       close(true);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
@@ -204,7 +246,7 @@ export function CustomSelect({
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);
     };
-  }, [open]);
+  }, [open, updatePopoverPosition]);
 
   useEffect(() => {
     const closeForAnotherDropdown = (event: Event) => {
@@ -233,18 +275,31 @@ export function CustomSelect({
 
   useEffect(() => {
     if (!open) return;
-    const selectedIndex = filteredOptions.findIndex(
+    const currentOptions = filteredOptionsRef.current;
+    const selectedIndex = currentOptions.findIndex(
       (option) => option.value === selectedValue && !option.disabled
     );
-    setActiveIndex(
-      selectedIndex >= 0
+    const nextIndex = query
+      ? nextSelectIndex(currentOptions, -1, 1)
+      : selectedIndex >= 0
         ? selectedIndex
-        : nextSelectIndex(filteredOptions, -1, 1)
-    );
-  }, [filteredOptions, open, selectedValue]);
+        : nextSelectIndex(currentOptions, -1, 1);
+    setActiveIndex(nextIndex);
+    const frame = requestAnimationFrame(() => {
+      if (query) {
+        optionsRef.current?.scrollTo({ top: 0 });
+        return;
+      }
+      document
+        .getElementById(`${listboxId}-option-${nextIndex}`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [filteredOptionSignature, listboxId, open, query, selectedValue]);
 
   useEffect(() => {
-    if (!open || activeIndex < 0) return;
+    if (!open || activeIndex < 0 || !revealActiveOptionRef.current) return;
+    revealActiveOptionRef.current = false;
     document
       .getElementById(`${listboxId}-option-${activeIndex}`)
       ?.scrollIntoView({ block: "nearest" });
@@ -312,6 +367,7 @@ export function CustomSelect({
         show();
         return;
       }
+      revealActiveOptionRef.current = true;
       setActiveIndex((current) =>
         nextSelectIndex(
           filteredOptions,
@@ -324,6 +380,7 @@ export function CustomSelect({
     if (event.key === "Home" || event.key === "End") {
       if (!open) return;
       event.preventDefault();
+      revealActiveOptionRef.current = true;
       setActiveIndex(
         nextSelectIndex(
           filteredOptions,
@@ -443,32 +500,6 @@ export function CustomSelect({
     onBlur?.(event as unknown as FocusEvent<HTMLSelectElement>);
   }
 
-  function updatePopoverPosition(): void {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const gap = 6;
-    const viewportPadding = 8;
-    const width = Math.min(
-      Math.max(rect.width, 220),
-      window.innerWidth - viewportPadding * 2
-    );
-    const left = Math.min(
-      Math.max(viewportPadding, rect.left),
-      window.innerWidth - width - viewportPadding
-    );
-    const spaceBelow = window.innerHeight - rect.bottom - gap - viewportPadding;
-    const spaceAbove = rect.top - gap - viewportPadding;
-    const upward = spaceBelow < 220 && spaceAbove > spaceBelow;
-    setOpensUpward(upward);
-    setPopoverPosition({
-      bottom: upward ? window.innerHeight - rect.top + gap : undefined,
-      left,
-      maxHeight: Math.max(120, Math.min(320, upward ? spaceAbove : spaceBelow)),
-      top: upward ? undefined : rect.bottom + gap,
-      width
-    });
-  }
-
   return (
     <div
       className={`custom-select${open ? " is-open" : ""}${opensUpward ? " opens-upward" : ""}${disabled ? " is-disabled" : ""}${className ? ` ${className}` : ""}`}
@@ -522,7 +553,7 @@ export function CustomSelect({
               />
             </div>
           )}
-          <div aria-label={ariaLabel} className="custom-select-options" id={listboxId} role="listbox">
+          <div aria-label={ariaLabel} className="custom-select-options" id={listboxId} ref={optionsRef} role="listbox">
             {filteredOptions.length === 0 ? (
               <div className="custom-select-empty"><UiText text={emptyMessage} /></div>
             ) : (
@@ -540,7 +571,10 @@ export function CustomSelect({
                   onDragOver={(event) => updateOptionDropTarget(event, option)}
                   onDragStart={(event) => startOptionDrag(event, option)}
                   onDrop={(event) => dropOption(event, option)}
-                  onMouseEnter={() => setActiveIndex(index)}
+                  onMouseEnter={() => {
+                    revealActiveOptionRef.current = false;
+                    setActiveIndex(index);
+                  }}
                   role="option"
                   tabIndex={-1}
                   type="button"

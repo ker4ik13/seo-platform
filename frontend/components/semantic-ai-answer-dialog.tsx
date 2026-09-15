@@ -5,18 +5,14 @@ import {
   aiAnswerCollectionKeywordLimit,
   type AiAnswerCollectionSummary,
   type AiAnswerSearchEngine,
-  type ProjectConnectorBinding,
-  type ProjectConnectorSettings
+  type ProjectConnectorCredentialOption,
+  type WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
-import { preparedProjectIntegrations } from "../lib/prepared-project-integrations";
 import {
-  createProjectConnectorBindingInput,
-  projectConnectorBinding,
-  projectConnectorOptions,
-  updateProjectConnectorBindingInput,
-  withProjectConnectorBinding
+  isProjectConnectorCredentialEligible,
+  workspaceConnectorOptions
 } from "../lib/project-integration-settings";
 import {
   defaultSemanticSearchRegions,
@@ -46,7 +42,8 @@ export function SemanticAiAnswerDialog({
   onClose,
   onStarted,
   projectDomain,
-  projectId
+  projectId,
+  workspaceId
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
@@ -56,12 +53,13 @@ export function SemanticAiAnswerDialog({
   onStarted: (collection: AiAnswerCollectionSummary) => void;
   projectDomain: string;
   projectId: string;
+  workspaceId: string;
 }>) {
   const { t: uiText } = useUiLocale();
   const competitorMode = mode === "competitors";
   const formId = useId();
   const operationAttempts = useRef(new Map<string, OperationAttempt>());
-  const [settings, setSettings] = useState<ProjectConnectorSettings>();
+  const [routing, setRouting] = useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [searchEngine, setSearchEngine] = useState<AiAnswerSearchEngine>("YANDEX");
   const [regions, setRegions] = useState(defaultSemanticSearchRegions);
@@ -81,14 +79,20 @@ export function SemanticAiAnswerDialog({
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string>();
-  const binding = settings ? projectConnectorBinding(settings, "SERP_COLLECTION") : undefined;
   const sources = useMemo(
-    () => settings
-      ? projectConnectorOptions(settings, "SERP_COLLECTION").filter(
-          ({ provider, status }) => provider === "ARSENKIN" && status === "ACTIVE"
+    () => routing
+      ? workspaceConnectorOptions(routing, "SERP_COLLECTION").filter(
+          ({ provider }) => provider === "ARSENKIN"
         )
       : [],
-    [settings]
+    [routing]
+  );
+  const connectedAiSources = useMemo<readonly ProjectConnectorCredentialOption[]>(
+    () => (routing?.credentialOptions ?? []).filter((source) =>
+      source.provider === "ARSENKIN" &&
+      isProjectConnectorCredentialEligible(source, "SERP_COLLECTION")
+    ),
+    [routing]
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const brands = splitBrands(brandsText);
@@ -119,19 +123,17 @@ export function SemanticAiAnswerDialog({
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void preparedProjectIntegrations(projectId, controller.signal)
+    void browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
+      { signal: controller.signal }
+    )
       .then((result) => {
         if (controller.signal.aborted) return;
-        const current = projectConnectorBinding(result, "SERP_COLLECTION");
-        const options = projectConnectorOptions(result, "SERP_COLLECTION").filter(
-          ({ provider, status }) => provider === "ARSENKIN" && status === "ACTIVE"
+        const options = workspaceConnectorOptions(result, "SERP_COLLECTION").filter(
+          ({ provider }) => provider === "ARSENKIN"
         );
-        setSettings(result);
-        setCredentialId(
-          options.some(({ id }) => id === current?.route?.credentialId)
-            ? current?.route?.credentialId ?? ""
-            : options[0]?.id ?? ""
-        );
+        setRouting(result);
+        setCredentialId(options[0]?.id ?? "");
       })
       .catch((requestError: unknown) => {
         if (!controller.signal.aborted) setError(aiAnswerErrorMessage(requestError));
@@ -140,7 +142,7 @@ export function SemanticAiAnswerDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [projectId]);
+  }, [workspaceId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -157,10 +159,9 @@ export function SemanticAiAnswerDialog({
     }
     setRunning(true);
     try {
-      if (!settings || !selectedSource) {
+      if (!routing || !selectedSource) {
         throw new Error("Нет активного подключения Arsenkin с доступом к сбору выдачи.");
       }
-      await ensureBinding(settings, binding, selectedSource.id);
       const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`;
       const collections: AiAnswerCollectionSummary[] = [];
       for (const target of targets) {
@@ -206,37 +207,6 @@ export function SemanticAiAnswerDialog({
     } finally {
       setRunning(false);
     }
-  }
-
-  async function ensureBinding(
-    currentSettings: ProjectConnectorSettings,
-    currentBinding: ProjectConnectorBinding | undefined,
-    selectedCredentialId: string
-  ): Promise<void> {
-    if (
-      currentBinding?.enabled &&
-      currentBinding.route?.credentialId === selectedCredentialId &&
-      currentBinding.availability === "READY"
-    ) return;
-    const draft = { credentialId: selectedCredentialId, enabled: true };
-    const updated = currentBinding
-      ? await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings/${encodeURIComponent(currentBinding.id)}`,
-          {
-            method: "PATCH",
-            ifMatch: currentBinding.version,
-            body: updateProjectConnectorBindingInput(draft)
-          }
-        )
-      : await browserApiRequest<ProjectConnectorBinding>(
-          `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
-          {
-            method: "POST",
-            idempotencyKey: `semantic-ai-answer-binding:${crypto.randomUUID()}`,
-            body: createProjectConnectorBindingInput("SERP_COLLECTION", draft)
-          }
-        );
-    setSettings(withProjectConnectorBinding(currentSettings, updated));
   }
 
   return (
@@ -337,7 +307,12 @@ export function SemanticAiAnswerDialog({
                 ))}
               </div>
             ) : (
-              <div className="inline-alert warning"><UiText text="Нет проверенного подключения Arsenkin с функцией сбора выдачи." /></div>
+              <div className="inline-alert warning">
+                <span>{connectedAiSources.length > 0
+                  ? <UiText text="Arsenkin подключён, но для сбора выдачи не выбран маршрут рабочей области." />
+                  : <UiText text="Нет проверенного подключения Arsenkin с функцией сбора выдачи." />}</span>{" "}
+                <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+              </div>
             )}
             </div>
           </section>

@@ -187,6 +187,7 @@ export function SemanticGroupColorLegendControl({
       </button>
       {open && typeof document !== "undefined" && createPortal(
         <SemanticModal
+          bodyClassName="semantic-group-color-legend-modal-body"
           className="semantic-group-color-legend-modal"
           description={legend?.access.canManage ? uiText("Общее для проекта. Пустые цвета не будут считаться настроенными.") : uiText("Общее для проекта. Изменять может SEO Lead, Admin или Owner.")}
           footer={

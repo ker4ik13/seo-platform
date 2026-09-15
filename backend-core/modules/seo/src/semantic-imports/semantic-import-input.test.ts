@@ -60,6 +60,58 @@ test("keeps pre-deployment internal commands create-enabled", () => {
   );
 });
 
+test("accepts a five-thousand-row normalization batch and rejects overflow", () => {
+  const rows = Array.from({ length: 5_000 }, (_, index) => ({
+    rowNumber: String(index + 1),
+    text: `запрос ${index + 1}`,
+    language: "ru"
+  }));
+  assert.equal(normalizeSemanticKeywordsInput({ ...context, rows }).rows.length, 5_000);
+  assert.throws(
+    () => normalizeSemanticKeywordsInput({
+      ...context,
+      rows: [...rows, { rowNumber: "5001", text: "лишний", language: "ru" }]
+    }),
+    BadRequestException
+  );
+});
+
+test("accepts the shared five-thousand-row publication chunk and rejects overflow", () => {
+  const rows = Array.from({ length: 5_000 }, (_, index) => ({
+    sourceRowNumber: String(index + 1),
+    textOriginal: `SEO ${index + 1}`,
+    textNormalized: `seo ${index + 1}`,
+    normalizedHash: (index + 1).toString(16).padStart(64, "0"),
+    language: "ru",
+    customValues: {}
+  }));
+  const command = {
+    ...context,
+    chunkIndex: 0,
+    payloadHash: "c".repeat(64),
+    duplicatePolicy: "OVERWRITE_MAPPED" as const,
+    createMissingKeywords: true
+  };
+  assert.equal(
+    applySemanticImportChunkInput({ ...command, rows }).rows.length,
+    5_000
+  );
+  assert.throws(
+    () => applySemanticImportChunkInput({
+      ...command,
+      rows: [
+        ...rows,
+        {
+          ...rows[0],
+          sourceRowNumber: "5001",
+          normalizedHash: "f".repeat(64)
+        }
+      ]
+    }),
+    BadRequestException
+  );
+});
+
 test("rejects duplicate chunk keys and values outside PostgreSQL bigint", () => {
   const row = {
     sourceRowNumber: "1",
@@ -103,6 +155,7 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
   );
   const result = applySemanticImportChunkInput({
     ...context,
+    projectDomain: "Example.COM",
     chunkIndex: 0,
     payloadHash: "d".repeat(64),
     duplicatePolicy: "MERGE_NON_EMPTY",
@@ -124,20 +177,52 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
         groupPath,
         positions: [
           {
+            source: "KEY_COLLECTOR",
             searchEngine: "YANDEX",
+            countryCode: "RU",
+            regionCode: "213",
+            regionLabel: "Москва",
+            language: "ru",
+            device: "DESKTOP",
+            observedAt: "2026-08-02T12:00:00.000Z",
             found: true,
             position: 25,
             previousPosition: 27,
-            rankingUrl: "https://example.com/yandex-result"
+            rankingUrl: "https://example.com/yandex-result",
+            serpResults: [
+              {
+                position: 1,
+                rankingUrl: "https://example.com/first",
+                title: "Первый результат"
+              },
+              {
+                position: 43,
+                rankingUrl: "https://example.com/second"
+              }
+            ]
           },
           { searchEngine: "GOOGLE", found: false }
         ],
+        positionHistory: [{
+          source: "KEY_COLLECTOR",
+          searchEngine: "YANDEX",
+          countryCode: "RU",
+          regionCode: "kc4-import",
+          regionLabel: "Импорт Key Collector",
+          language: "ru",
+          device: "DESKTOP",
+          observedAt: "2026-08-01T12:00:00.000Z",
+          found: true,
+          position: 31,
+          rankingUrl: "https://example.com/history"
+        }],
         customValues: {}
       }
     ]
   });
 
   assert.deepEqual(result.groupPaths, [groupPath]);
+  assert.equal(result.projectDomain, "example.com");
   assert.deepEqual(result.groupMetadata, [{ path: groupPath, color: "#22c55e" }]);
   assert.equal(result.rows[0]?.priority, 80);
   assert.equal(result.rows[0]?.isFavorite, true);
@@ -146,14 +231,52 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
   assert.equal(result.rows[0]?.intent, "COMMERCIAL");
   assert.deepEqual(result.rows[0]?.positions, [
     {
+      source: "KEY_COLLECTOR",
       searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP",
+      observedAt: "2026-08-02T12:00:00.000Z",
       found: true,
       position: 25,
       previousPosition: 27,
-      rankingUrl: "https://example.com/yandex-result"
+      rankingUrl: "https://example.com/yandex-result",
+      serpResults: [
+        {
+          position: 1,
+          rankingUrl: "https://example.com/first",
+          title: "Первый результат"
+        },
+        {
+          position: 43,
+          rankingUrl: "https://example.com/second"
+        }
+      ]
     },
     { searchEngine: "GOOGLE", found: false }
   ]);
+  assert.deepEqual(Object.keys(result.rows[0]!.positions![0]!), [
+    "source",
+    "countryCode",
+    "regionCode",
+    "regionLabel",
+    "language",
+    "device",
+    "observedAt",
+    "searchEngine",
+    "found",
+    "position",
+    "previousPosition",
+    "rankingUrl",
+    "serpResults"
+  ]);
+  assert.equal(result.rows[0]?.positionHistory?.[0]?.source, "KEY_COLLECTOR");
+  assert.equal(
+    result.rows[0]?.positionHistory?.[0]?.rankingUrl,
+    "https://example.com/history"
+  );
 });
 
 test("rejects invalid imported keyword attributes", () => {

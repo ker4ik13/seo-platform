@@ -7,6 +7,7 @@ import {
   semanticFrequencyDevices,
   semanticFrequencyTypes,
   parseFrequencySeasonalityRequest,
+  parseXmlStockOperationUsageSummary,
   type FrequencyCollectionStatus,
   type FrequencyCollectionSummary,
   type ConnectorOperationAttemptSummary,
@@ -65,6 +66,9 @@ export function scopedFrequencyCollection(
   const hasConnectorAttempts = input.connectorAttempts !== undefined;
   if (input.requiresUsageReview !== undefined && typeof input.requiresUsageReview !== "boolean") invalid();
   if (hasRoutingScope !== hasConnectorAttempts) invalid();
+  const providerUsage = input.providerUsage === undefined
+    ? undefined
+    : safeProviderUsage(input.providerUsage);
   return {
     id,
     workspaceId,
@@ -79,6 +83,7 @@ export function scopedFrequencyCollection(
     ...(!hasConnectorAttempts
       ? {}
       : { connectorAttempts: connectorAttempts(input.connectorAttempts) }),
+    ...(providerUsage ? { providerUsage } : {}),
     status: member(input.status, frequencyCollectionStatuses),
     ...optionalString(input.stage, "stage", 64),
     selectedKeywords: integer(
@@ -139,6 +144,9 @@ export function scopedFrequencyOperationScope(
   cursor?: string
 ): InternalFrequencyOperationScope {
   const input = record(value);
+  const providerUsage = input.providerUsage === undefined
+    ? undefined
+    : safeProviderUsage(input.providerUsage);
   const page = record(input.page);
   if (
     input.workspaceId !== workspaceId ||
@@ -207,6 +215,7 @@ export function scopedFrequencyOperationScope(
     workspaceId,
     projectId,
     jobId,
+    ...(providerUsage ? { providerUsage } : {}),
     items,
     page: {
       hasNext: page.hasNext,
@@ -215,6 +224,14 @@ export function scopedFrequencyOperationScope(
         : {})
     }
   };
+}
+
+function safeProviderUsage(value: unknown) {
+  try {
+    return parseXmlStockOperationUsageSummary(value);
+  } catch {
+    invalid();
+  }
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

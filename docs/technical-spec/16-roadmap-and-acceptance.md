@@ -815,13 +815,19 @@ Owner создаёт workspace, приглашает Admin, SEO Specialist и Cl
 - source provenance;
 - export roundtrip на выбранных полях.
 
-Отдельно проверяется нативный `.kc4` в пределах опубликованного лимита:
+Отдельно проверяется нативный `.kc4` до 1 GiB и 20 000 активных папок:
 
 - container/signature/SQLite `quick_check` и fail-closed rejection;
+- автоматический mapping, validation и публикация без preview-таблицы и
+  пользовательского подтверждения при полном trusted entitlement snapshot;
 - активные строки без Key Collector trash;
 - пустые и вложенные группы из manifest;
 - одна фраза в нескольких группах без потери членства;
-- BASE/EXACT/FIXED, позиции, релевантные URL, KEI и неизвестные custom fields;
+- BASE/EXACT/FIXED, текущие и исторические позиции, релевантные URL, KEI и
+  неизвестные custom fields;
+- сохранённый Top-100 SERP с URL/title/snippet и пропуск повреждённых
+  необязательных SERP-значений без отказа всего импорта;
+- имя папки со знаком `/` без ошибочного разбиения пути;
 - идемпотентный повтор publish.
 
 ### AC-05. Одновременная работа

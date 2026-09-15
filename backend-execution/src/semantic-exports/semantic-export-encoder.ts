@@ -1154,7 +1154,7 @@ function contentTypes(sheetCount: number): string {
 function stylesXml(): string {
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+    '<fonts count="1"><font><sz val="10"/><name val="Arial"/><family val="2"/></font></fonts>' +
     '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
     '<borders count="1"><border/></borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
@@ -1168,10 +1168,10 @@ function folderMapStylesXml(): string {
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
     '<fonts count="4">' +
-      '<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>' +
-      '<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>' +
-      '<font><u/><color rgb="FF5B3DF5"/><sz val="11"/><name val="Calibri"/></font>' +
-      '<font><b/><color rgb="FF1A2030"/><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><u/><color rgb="FF5B3DF5"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FF1A2030"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
     '</fonts>' +
     '<fills count="5">' +
       '<fill><patternFill patternType="none"/></fill>' +
@@ -1201,11 +1201,11 @@ function positionHistoryStylesXml(): string {
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
     '<fonts count="5">' +
-      '<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>' +
-      '<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>' +
-      '<font><b/><color rgb="FF16803A"/><sz val="11"/><name val="Calibri"/></font>' +
-      '<font><b/><color rgb="FFDC2626"/><sz val="11"/><name val="Calibri"/></font>' +
-      '<font><color rgb="FF6F778A"/><sz val="10"/><name val="Calibri"/></font>' +
+      '<font><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FF16803A"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FFDC2626"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
+      '<font><color rgb="FF6F778A"/><sz val="10"/><name val="Arial"/><family val="2"/></font>' +
     '</fonts>' +
     '<fills count="4">' +
       '<fill><patternFill patternType="none"/></fill>' +

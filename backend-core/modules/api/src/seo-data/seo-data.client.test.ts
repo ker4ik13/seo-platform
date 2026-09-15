@@ -20,6 +20,7 @@ import {
   projectPositionHistory,
   semanticAiAnswerHistoryCollection,
   semanticKeywordPage,
+  semanticOperationScopePage,
   semanticClusterPageBulkPreview,
   semanticClusterPageBulkResult,
   semanticClusterMergePreview,
@@ -35,6 +36,30 @@ import {
   semanticSavedViews,
   SeoDataClient
 } from "./seo-data.client.js";
+
+test("validates a lightweight operation scope cursor page", () => {
+  const first = "01900000-0000-7000-8000-000000000001";
+  const page = semanticOperationScopePage({
+    data: [{ id: first, version: 3, isTracked: true }],
+    page: { hasNext: false, totalApprox: 1 }
+  });
+  assert.deepEqual(page.data, [{ id: first, version: 3, isTracked: true }]);
+  assert.equal(page.page.totalApprox, 1);
+  assert.throws(
+    () => semanticOperationScopePage({
+      data: [{ id: first, version: 0, isTracked: true }],
+      page: { hasNext: false }
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => semanticOperationScopePage({
+      data: [{ id: first, version: 1, isTracked: true }],
+      page: { hasNext: true, nextCursor: first }
+    }),
+    DomainError
+  );
+});
 
 test("validates ordered bounded project TOP history", () => {
   const first = {
@@ -392,6 +417,17 @@ test("validates safe interactive rank history metadata", () => {
     withCompetitors.competitorSnapshots?.[0]?.results[0]?.faviconUrl,
     "https://search-assets.example/competitor.png"
   );
+  const importedCompetitors = semanticKeywordInsights({
+    ...withCompetitors,
+    competitorSnapshots: [{
+      ...withCompetitors.competitorSnapshots![0]!,
+      provider: "KEY_COLLECTOR"
+    }]
+  }, keywordId);
+  assert.equal(
+    importedCompetitors.competitorSnapshots?.[0]?.provider,
+    "KEY_COLLECTOR"
+  );
   const withAiHistory = semanticKeywordInsights({
     ...withCompetitors,
     aiPositionHistory: [{
@@ -681,6 +717,22 @@ test("validates a complete semantic group tree", () => {
       ]),
     DomainError
   );
+});
+
+test("accepts a native Key Collector tree beyond the legacy two-thousand-folder cap", () => {
+  const groups = semanticKeywordGroups(
+    Array.from({ length: 5_011 }, (_, index) => ({
+      id: `01900000-0000-7000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+      name: `Папка ${index + 1}`,
+      path: `Папка ${index + 1}`,
+      position: index,
+      keywordCount: 0,
+      version: 1,
+      createdAt: "2026-09-15T00:00:00.000Z",
+      updatedAt: "2026-09-15T00:00:00.000Z"
+    }))
+  );
+  assert.equal(groups.length, 5_011);
 });
 
 test("validates unique manual semantic clusters", () => {
@@ -1588,6 +1640,47 @@ test("forwards normalized tag suggestions through the trusted project route", as
   }
 });
 
+test("lists tag usage and deletes one tag through the tenant-scoped route", async () => {
+  const originalFetch = globalThis.fetch;
+  const tagId = "01900000-0000-7000-8000-000000000044";
+  const requests: Array<{ method: string; pathname: string }> = [];
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    requests.push({ method, pathname: url.pathname });
+    return jsonResponse(method === "DELETE"
+      ? { data: { tagId, name: "Бренд", detachedKeywordCount: 12 } }
+      : { data: [{ id: tagId, name: "Бренд", keywordCount: 12 }] });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(await client().listKeywordTags(internalContext()), [{
+      id: tagId,
+      name: "Бренд",
+      keywordCount: 12
+    }]);
+    assert.deepEqual(
+      await client().deleteKeywordTag(internalContext(), tagId),
+      { tagId, name: "Бренд", detachedKeywordCount: 12 }
+    );
+    assert.deepEqual(requests, [
+      {
+        method: "GET",
+        pathname: `/internal/v1/projects/${projectId}/keywords/tags`
+      },
+      {
+        method: "DELETE",
+        pathname: `/internal/v1/projects/${projectId}/keywords/tags/${tagId}`
+      }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards the optional untracked scope for project position history", async () => {
   const originalFetch = globalThis.fetch;
   let capturedUrl: URL | undefined;
@@ -1912,6 +2005,138 @@ test("sends a large folder union through the body-only keyword route", async () 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("allows a bounded semantic keyword page read to finish on a large project", async () => {
+  let timeoutMs: number | undefined;
+  const transport = {
+    request: async (input: { readonly timeoutMs: number }) => {
+      timeoutMs = input.timeoutMs;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [], page: { hasNext: false } })
+      };
+    }
+  };
+  const seoData = new SeoDataClient(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTERNAL_REQUEST_TIMEOUT_MS: "1500",
+      PLATFORM_API_TO_SEO_DATA_TOKEN: "i".repeat(32),
+      SEO_DATA_INTERNAL_URL: "http://seo-data.test:4001"
+    }),
+    transport
+  );
+
+  await seoData.listKeywords(internalContext(), {
+    limit: 500,
+    sort: "YANDEX_AI_POSITION_ASC"
+  });
+
+  assert.equal(timeoutMs, 30_000);
+});
+
+test("uses the same bounded-read timeout for GETs, body keyword pages and operation scopes", async () => {
+  const requests: Array<Readonly<{ url: URL; timeoutMs: number }>> = [];
+  const transport = {
+    request: async (input: { readonly url: URL; readonly timeoutMs: number }) => {
+      requests.push(input);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => input.url.pathname.endsWith("/tracking-contexts")
+          ? {
+              data: { contexts: [], contextsTruncated: false },
+              meta: { requestId: "seo-data-read-timeout-test" }
+            }
+          : {
+              data: [],
+              page: { hasNext: false, totalApprox: 0 },
+              meta: { requestId: "seo-data-read-timeout-test" }
+            }
+      };
+    }
+  };
+  const seoData = new SeoDataClient(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTERNAL_REQUEST_TIMEOUT_MS: "1500",
+      PLATFORM_API_TO_SEO_DATA_TOKEN: "i".repeat(32),
+      SEO_DATA_INTERNAL_URL: "http://seo-data.test:4001"
+    }),
+    transport
+  );
+
+  await seoData.listKeywords(internalContext(), {
+    limit: 1_000,
+    groupIds: Array.from(
+      { length: 21 },
+      (_, index) =>
+        `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`
+    ),
+    sort: "CREATED_ASC"
+  });
+  await seoData.listOperationScope(internalContext(), {});
+  await seoData.listTrackingContexts(internalContext());
+
+  assert.deepEqual(
+    requests.map(({ url, timeoutMs }) => ({
+      pathname: url.pathname,
+      timeoutMs
+    })),
+    [
+      {
+        pathname: `/internal/v1/projects/${projectId}/keywords/list`,
+        timeoutMs: 30_000
+      },
+      {
+        pathname: `/internal/v1/projects/${projectId}/keywords/operation-scope`,
+        timeoutMs: 30_000
+      },
+      {
+        pathname: `/internal/v1/projects/${projectId}/tracking-contexts`,
+        timeoutMs: 30_000
+      }
+    ]
+  );
+});
+
+test("allows bounded project position aggregates to finish after a cold cache miss", async () => {
+  const timeouts: number[] = [];
+  const transport = {
+    request: async (input: { readonly url: URL; readonly timeoutMs: number }) => {
+      timeouts.push(input.timeoutMs);
+      const isHistory = input.url.pathname.endsWith("/position-history");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: isHistory
+            ? { points: [], truncated: false }
+            : { positionedKeywordCount: 0, top1KeywordCount: 0, top3KeywordCount: 0, top5KeywordCount: 0, top10KeywordCount: 0, top30KeywordCount: 0, top50KeywordCount: 0 },
+          meta: { requestId: "position-aggregate-timeout-test" }
+        })
+      };
+    }
+  };
+  const seoData = new SeoDataClient(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTERNAL_REQUEST_TIMEOUT_MS: "1500",
+      PLATFORM_API_TO_SEO_DATA_TOKEN: "i".repeat(32),
+      SEO_DATA_INTERNAL_URL: "http://seo-data.test:4001"
+    }),
+    transport
+  );
+
+  await seoData.projectPositionSummary(internalContext());
+  await seoData.projectPositionHistory(internalContext());
+
+  assert.deepEqual(timeouts, [30_000, 30_000]);
 });
 
 test("forwards the explicit full-note projection to SEO data", async () => {

@@ -3,6 +3,7 @@ import {
   semanticImportDelimiters,
   semanticImportEncodings,
   semanticImportHeaderModes,
+  semanticImportPreviewSortDirections,
   semanticImportTargets,
   parseSemanticPositionHistoryImportOptions,
   type ConfigureSemanticImportInput,
@@ -12,11 +13,44 @@ import {
   type SemanticImportEncoding,
   type SemanticImportHeaderMode,
   type SemanticImportMappingColumn,
+  type SemanticImportPreviewRowsQuery,
+  type SemanticImportPreviewSortDirection,
   type SemanticImportTarget
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 import { assertUuid } from "../common/identifier.js";
 import { inputObject } from "../common/input.js";
+
+export function semanticImportPreviewRowsQuery(
+  cursor: unknown,
+  sortColumn: unknown,
+  sortDirection: unknown
+): SemanticImportPreviewRowsQuery {
+  const parsedCursor = optionalQueryToken(cursor, "cursor");
+  const parsedColumn = optionalQueryInteger(
+    sortColumn,
+    "sortColumn",
+    0,
+    499
+  );
+  if (parsedColumn === undefined && sortDirection !== undefined) {
+    invalid("sortDirection");
+  }
+  return {
+    ...(parsedCursor === undefined ? {} : { cursor: parsedCursor }),
+    ...(parsedColumn === undefined
+      ? {}
+      : {
+          sortColumn: parsedColumn,
+          sortDirection: enumValue<SemanticImportPreviewSortDirection>(
+            sortDirection,
+            semanticImportPreviewSortDirections,
+            "ASC",
+            "sortDirection"
+          )
+        })
+  };
+}
 
 export function createSemanticImportInput(
   value: unknown
@@ -180,6 +214,36 @@ function booleanValue(
   if (value === undefined) return fallback;
   if (typeof value !== "boolean") invalid(path);
   return value;
+}
+
+function optionalQueryToken(value: unknown, path: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 512 ||
+    !/^[A-Za-z0-9_-]+$/u.test(value)
+  ) {
+    invalid(path);
+  }
+  return value;
+}
+
+function optionalQueryInteger(
+  value: unknown,
+  path: string,
+  minimum: number,
+  maximum: number
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/u.test(value)) {
+    invalid(path);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    invalid(path);
+  }
+  return parsed;
 }
 
 function invalid(path: string): never {

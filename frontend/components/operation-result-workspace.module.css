@@ -586,6 +586,20 @@
 .clusteringSelectCreate > svg { color: #6247e8; }
 .clusteringSelectMove > svg { color: #2879bd; }
 .clusteringSelectKeep > svg { color: #8c919e; }
+.clusteringActionPopover :global(.custom-select-option) {
+  align-items: flex-start;
+  min-height: 42px;
+  padding-block: 9px;
+}
+.clusteringActionPopover :global(.custom-select-option) .clusteringSelectOption {
+  align-items: flex-start;
+}
+.clusteringActionPopover :global(.custom-select-option) .clusteringSelectOption > span {
+  line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
 .clusteringClusterDestination > button { align-items: center; background: #efedff; border: 1px solid transparent; border-radius: 8px; color: #5d49df; display: flex; font-size: 9px; font-weight: 750; gap: 6px; justify-content: flex-start; max-width: 100%; min-height: 36px; min-width: 0; overflow: hidden; padding: 0 8px; white-space: nowrap; }
 .clusteringClusterDestination > button:hover,
 .clusteringClusterDestination > button[aria-expanded="true"] { background: #e9e5ff; border-color: #cfc8ff; }

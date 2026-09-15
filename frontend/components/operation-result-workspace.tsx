@@ -29,7 +29,8 @@ import type {
   RankRuntimeDiagnostics,
   SemanticCluster,
   SemanticKeywordGroup,
-  SemanticFrequencyType
+  SemanticFrequencyType,
+  XmlStockOperationUsageSummary
 } from "@seo-platform/contracts";
 import {
   useCallback,
@@ -1110,6 +1111,8 @@ function ClusteringApplyPanel({
                         disabled={groupsLoading}
                         emptyMessage={uiText("SEO-кластеры не найдены")}
                         onChange={(event) => updateClusterAssignment(cluster, event.target.value)}
+                        popoverClassName={styles.clusteringActionPopover ?? ""}
+                        popoverMinWidth={680}
                         searchable={semanticClusters.length > 8}
                         searchPlaceholder={uiText("Найти SEO-кластер")}
                         value={clusterAssignmentValue}
@@ -1152,6 +1155,8 @@ function ClusteringApplyPanel({
                             if (cluster) updateClusterFolderDecision(cluster.id, value);
                             else setUnclusteredFolderAction(value === "NEW" ? "NEW" : "KEEP");
                           }}
+                          popoverClassName={styles.clusteringActionPopover ?? ""}
+                          popoverMinWidth={680}
                           value={folderDecisionValue}
                         >
                           <option value="NEW">
@@ -2552,6 +2557,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
         { label: "Ошибок", value: formatInteger(value.failedKeywords, uiLocale) },
         { label: "Регион", value: seoRegionDisplayName("WORDSTAT", value.regionCode) },
         { label: "Устройство", value: deviceLabel(value.device) },
+        ...xmlStockUsageFacts(data.value.providerUsage, uiLocale),
         ...(value.failureCode
           ? [{ label: "Код ошибки", value: value.failureCode }]
           : [])
@@ -2661,6 +2667,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
         { label: "Ошибок", value: formatInteger(failed, uiLocale) },
         { label: "Регион", value: searchRegionDisplayName(value.execution.searchEngine, value.execution.regionCode) },
         { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—" },
+        ...xmlStockUsageFacts(value.providerUsage, uiLocale),
         ...("failure" in value.job && value.job.failure
           ? [{ label: "Код ошибки", value: value.job.failure.code }]
           : [])
@@ -2706,11 +2713,73 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
       { label: "Выбрано", value: formatInteger(value.selectedKeywords, uiLocale) },
       { label: "Импортировано", value: formatInteger(value.importedKeywords, uiLocale) },
       { label: "Доступно", value: value.totalAvailable === undefined ? "—" : formatInteger(value.totalAvailable, uiLocale) },
+      ...xmlStockUsageFacts(value.providerUsage, uiLocale),
       ...(value.failureCode
         ? [{ label: "Код ошибки", value: value.failureCode }]
         : [])
     ]
   };
+}
+
+function xmlStockUsageFacts(
+  usage: XmlStockOperationUsageSummary | undefined,
+  uiLocale: string
+): readonly Readonly<{ label: string; value: string }>[] {
+  if (!usage) return [];
+  const requests = usage.actualRequestCount ?? usage.estimatedRequestCount;
+  const cost = usage.actualCostMicro ?? usage.estimatedCostMicro;
+  return [
+    {
+      label: "Тариф XMLStock",
+      value: `${xmlStockTariffName(usage.tariffCode)} · ${usage.pricePerThousand} ₽ / 1000`
+    },
+    {
+      label: usage.actualRequestCount ? "Запросов к провайдеру" : "Запросов по оценке",
+      value: formatDecimalRange(requests, uiLocale)
+    },
+    {
+      label: usage.actualCostMicro ? "Расход XMLStock" : "Максимальная стоимость",
+      value: formatMicroRange(cost, uiLocale)
+    }
+  ];
+}
+
+function xmlStockTariffName(
+  code: XmlStockOperationUsageSummary["tariffCode"]
+): string {
+  if (code === "BASIC") return "Базовый";
+  if (code === "OPTIMAL") return "Оптимальный";
+  if (code === "MAXIMUM") return "Максимум";
+  if (code === "PREMIUM") return "Премиум";
+  return "По ставкам аккаунта";
+}
+
+function formatDecimalRange(
+  range: Readonly<{ minimum: string; maximum: string }>,
+  uiLocale: string
+): string {
+  const minimum = new Intl.NumberFormat(uiLocale).format(BigInt(range.minimum));
+  const maximum = new Intl.NumberFormat(uiLocale).format(BigInt(range.maximum));
+  return range.minimum === range.maximum ? minimum : `${minimum}–${maximum}`;
+}
+
+function formatMicroRange(
+  range: Readonly<{ minimum: string; maximum: string }>,
+  uiLocale: string
+): string {
+  const format = (value: string): string => {
+    const micro = BigInt(value);
+    const rubles = Number(micro) / 1_000_000;
+    return new Intl.NumberFormat(uiLocale, {
+      style: "currency",
+      currency: "RUB",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4
+    }).format(rubles);
+  };
+  const minimum = format(range.minimum);
+  const maximum = format(range.maximum);
+  return range.minimum === range.maximum ? minimum : `${minimum}–${maximum}`;
 }
 
 function summaryStatus(status: string, current: number, total: number, stage?: string, uiLocale: string = "ru-RU"): Pick<SummaryView, "status" | "tone" | "progress" | "progressPercent"> {

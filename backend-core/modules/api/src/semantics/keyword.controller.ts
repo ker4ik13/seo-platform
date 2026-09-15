@@ -23,6 +23,11 @@ import type {
   SemanticKeywordBulkCreateResult,
   SemanticKeywordListItem,
   SemanticKeywordInsights,
+  SemanticKeywordMergeResult,
+  SemanticKeywordMergeSuggestion,
+  SemanticOperationScopeKeyword,
+  SemanticKeywordTagDeleteResult,
+  SemanticKeywordTagOption,
   SemanticAiAnswerDetail,
   SemanticAiAnswerHistoryItem
 } from "@seo-platform/contracts";
@@ -60,6 +65,7 @@ import {
   deleteSemanticKeywordInput,
   semanticKeywordBulkCreateInput,
   semanticKeywordBulkCreatePreviewInput,
+  semanticKeywordMergeInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import { semanticFrequencyContextRoute } from "./frequency-collection-input.js";
@@ -67,6 +73,7 @@ import { aiAnswerHistoryQuery } from "./ai-answer-history-query.js";
 import {
   keywordListQuery,
   keywordBodyListInput,
+  keywordOperationScopeInput,
   keywordMultiSearchInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
@@ -125,6 +132,33 @@ export class KeywordController {
     };
   }
 
+  @Post("merge")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async merge(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticKeywordMergeResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const result = await this.seoData.mergeKeywords(
+      internalProjectContext(request, principal, tenant),
+      semanticKeywordMergeInput(body)
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.keyword.merged",
+      resourceType: "semantic_keyword",
+      resourceId: result.keeperKeywordId,
+      outcome: "SUCCESS",
+      requestId: requestContext(request).requestId
+    });
+    return apiResponse(request, result);
+  }
+
   @Post("list")
   @HttpCode(HttpStatus.OK)
   @RequirePermission("semantic.view")
@@ -133,6 +167,28 @@ export class KeywordController {
     const context = requestContext(request), tenant = requiredProjectTenant(request);
     const result = await this.seoData.listKeywords(internalProjectContext(request, principal, tenant), keywordBodyListInput(body));
     return { data: result.data, page: result.page, meta: { requestId: context.requestId } };
+  }
+
+  @Post("operation-scope")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.view")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async operationScope(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiCollectionResponse<SemanticOperationScopeKeyword>> {
+    const context = requestContext(request);
+    const tenant = requiredProjectTenant(request);
+    const result = await this.seoData.listOperationScope(
+      internalProjectContext(request, principal, tenant),
+      keywordOperationScopeInput(body)
+    );
+    return {
+      data: result.data,
+      page: result.page,
+      meta: { requestId: context.requestId }
+    };
   }
 
   @Get("tag-options")
@@ -150,6 +206,77 @@ export class KeywordController {
       await this.seoData.listKeywordTagOptions(
         internalProjectContext(request, principal, tenant),
         search
+      )
+    );
+  }
+
+  @Get("tags")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async tagManagementOptions(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<readonly SemanticKeywordTagOption[]>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.seoData.listKeywordTags(
+        internalProjectContext(request, principal, tenant)
+      )
+    );
+  }
+
+  @Delete("tags/:tagId")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async deleteTag(
+    @Param("tagId") tagId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticKeywordTagDeleteResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const canonicalTagId = assertUuid(tagId, "tagId");
+    const context = requestContext(request);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.tag.delete_requested",
+      resourceType: "semantic_tag",
+      resourceId: canonicalTagId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.deleteKeywordTag(
+      internalProjectContext(request, principal, tenant),
+      canonicalTagId
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.tag.deleted",
+      resourceType: "semantic_tag",
+      resourceId: canonicalTagId,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
+  }
+
+  @Get("merge-suggestions")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async mergeSuggestions(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<readonly SemanticKeywordMergeSuggestion[]>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.seoData.keywordMergeSuggestions(
+        internalProjectContext(request, principal, tenant)
       )
     );
   }
@@ -306,17 +433,29 @@ export class KeywordController {
     @Param("keywordId") keywordId: string,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Query("dimensionKey") dimensionKey?: unknown
+    @Query("dimensionKey") dimensionKey?: unknown,
+    @Query("snapshotId") snapshotId?: unknown
   ): Promise<ApiResponse<SemanticKeywordInsights>> {
     const tenant = requiredProjectTenant(request);
     const canonicalKeywordId = assertUuid(keywordId, "keywordId");
     if (dimensionKey !== undefined && !parseSemanticRankDimensionKey(dimensionKey)) throw validationError("dimensionKey", "INVALID_DIMENSION", "Choose a valid rank dimension");
+    if (snapshotId !== undefined && typeof snapshotId !== "string") {
+      throw validationError(
+        "snapshotId",
+        "INVALID_SNAPSHOT",
+        "Choose a valid rank snapshot"
+      );
+    }
+    const canonicalSnapshotId = snapshotId === undefined
+      ? undefined
+      : assertUuid(snapshotId as string, "snapshotId");
     return apiResponse(
       request,
       await this.seoData.keywordInsights(
         internalProjectContext(request, principal, tenant),
         canonicalKeywordId,
-        dimensionKey as string | undefined
+        dimensionKey as string | undefined,
+        canonicalSnapshotId
       )
     );
   }

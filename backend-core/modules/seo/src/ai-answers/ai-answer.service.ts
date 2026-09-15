@@ -180,11 +180,19 @@ export class AiAnswerService {
       select: { id: true }
     });
     if (!keyword) throw new NotFoundException("Keyword not found");
+    const mergedSources = await this.prisma.keywordMerge?.findMany({
+      where: { workspaceId, projectId, targetKeywordId: keywordId },
+      select: { sourceKeywordId: true }
+    }) ?? [];
+    const keywordIds = [
+      keywordId,
+      ...mergedSources.map(({ sourceKeywordId }) => sourceKeywordId)
+    ];
     const snapshots = await this.prisma.aiAnswerSnapshot.findMany({
       where: {
         workspaceId,
         projectId,
-        keywordId,
+        keywordId: { in: keywordIds },
         positionTrackingEnabled: true,
         ...(dimension ? {
           searchEngine: dimension.searchEngine,
@@ -215,7 +223,7 @@ export class AiAnswerService {
     );
     return snapshots.map((snapshot) => ({
       snapshotId: snapshot.id,
-      keywordId: snapshot.keywordId,
+      keywordId,
       searchEngine: snapshot.searchEngine as SemanticAiAnswerDetail["searchEngine"],
       regionCode: snapshot.regionCode,
       device: snapshot.device as SemanticAiAnswerDetail["device"],
@@ -263,11 +271,23 @@ export class AiAnswerService {
       select: { id: true }
     });
     if (!keyword) throw new NotFoundException("Keyword not found");
+    const mergedSources = await this.prisma.keywordMerge?.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        targetKeywordId: input.keywordId
+      },
+      select: { sourceKeywordId: true }
+    }) ?? [];
+    const keywordIds = [
+      input.keywordId,
+      ...mergedSources.map(({ sourceKeywordId }) => sourceKeywordId)
+    ];
     const rows = await this.prisma.aiAnswerSnapshot.findMany({
       where: {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
-        keywordId: input.keywordId,
+        keywordId: { in: keywordIds },
         sourceMode: { in: ["BYOK", "PLATFORM"] },
         positionTrackingEnabled: true,
         ...(cursor
@@ -335,7 +355,7 @@ export class AiAnswerService {
         }
         const searchEngine = storedSearchEngine(row.searchEngine);
         return aiAnswerHistoryItem(
-          row,
+          { ...row, keywordId: input.keywordId },
           searchEngine,
           previousPositions.get(
             previousAiAnswerPositionKey(

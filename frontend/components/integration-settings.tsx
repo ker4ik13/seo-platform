@@ -1261,6 +1261,14 @@ function IntegrationCredentialQuota({
           <UiText text="Баланс:" after=" " />{formatMoney(quota.balance.amount, quota.balance.currency, uiLocale)}
         </strong>
       )}
+      {quota.xmlStockPricing && (
+        <section className="integration-xmlstock-pricing">
+          <strong>{xmlStockTariffName(quota.xmlStockPricing.tariffCode)}</strong>
+          <small>
+            Google {quota.xmlStockPricing.pricesPerThousand.GOOGLE_LIVE} · Яндекс Live {quota.xmlStockPricing.pricesPerThousand.YANDEX_LIVE} · Search API {quota.xmlStockPricing.pricesPerThousand.YANDEX_SEARCH_API} · Wordstat {quota.xmlStockPricing.pricesPerThousand.WORDSTAT} ₽ / 1000
+          </small>
+        </section>
+      )}
       {(quota.usedToday !== undefined || quota.usedMonth !== undefined) && (
         <small>
           <UiText text="Расход:" after=" " />{formatNumber(quota.usedToday ?? 0, uiLocale)} <UiText text="сегодня ·" before=" " after=" " />{formatNumber(quota.usedMonth ?? 0, uiLocale)} <UiText text="за месяц" before=" " /></small>
@@ -1285,6 +1293,16 @@ function IntegrationCredentialQuota({
       )}
     </div>
   );
+}
+
+function xmlStockTariffName(
+  code: "BASIC" | "OPTIMAL" | "MAXIMUM" | "PREMIUM" | "CUSTOM"
+): string {
+  if (code === "BASIC") return "Базовый тариф XMLStock";
+  if (code === "OPTIMAL") return "Оптимальный тариф XMLStock";
+  if (code === "MAXIMUM") return "Тариф XMLStock Максимум";
+  if (code === "PREMIUM") return "Премиум тариф XMLStock";
+  return "Тариф XMLStock по ставкам аккаунта";
 }
 
 function formatNumber(value: number, uiLocale: string = "ru-RU"): string {

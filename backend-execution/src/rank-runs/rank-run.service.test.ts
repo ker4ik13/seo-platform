@@ -199,6 +199,7 @@ test("returns the paged per-key XMLStock result scope with the latest poll count
   const prisma = {
     job: {
       findFirst: async () => ({
+        scopeSnapshot: {},
         items: [
           { sequence: 0, status: "COMPLETED", error: null },
           {
@@ -210,6 +211,9 @@ test("returns the paged per-key XMLStock result scope with the latest poll count
       })
     },
     rankConnectorExecution: {
+      aggregate: async () => ({
+        _sum: { submitAttemptCount: 2, pollAttemptCount: 55 }
+      }),
       findMany: async () => [
         {
           manifestChunkIndex: 0,

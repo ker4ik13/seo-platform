@@ -163,7 +163,12 @@ function trackingLaunchProfile(
     "includeUntracked",
     "scope"
   ]);
-  const scope = exactRecord(input.scope, ["mode", "groupIds"]);
+  const scope = exactRecord(input.scope, [
+    "mode",
+    "groupIds",
+    "descendantGroupIds",
+    "includeDescendants"
+  ]);
   const searchSource = enumValue(
     input.searchSource,
     SEARCH_SOURCES
@@ -175,9 +180,31 @@ function trackingLaunchProfile(
   if (!Array.isArray(scope.groupIds)) throw invalidResponse();
   const groupIds = scope.groupIds.map(uuidValue);
   if (
+    scope.descendantGroupIds !== undefined &&
+    !Array.isArray(scope.descendantGroupIds)
+  ) {
+    throw invalidResponse();
+  }
+  const explicitDescendantGroupIds = (scope.descendantGroupIds ?? []).map(
+    uuidValue
+  );
+  const descendantGroupIds = scope.descendantGroupIds !== undefined
+    ? explicitDescendantGroupIds
+    : scope.includeDescendants === false
+      ? []
+      : mode === "GROUPS"
+        ? groupIds
+        : [];
+  if (
     new Set(groupIds).size !== groupIds.length ||
+    new Set(descendantGroupIds).size !== descendantGroupIds.length ||
     (input.includeUntracked !== undefined &&
       typeof input.includeUntracked !== "boolean") ||
+    (scope.includeDescendants !== undefined &&
+      typeof scope.includeDescendants !== "boolean") ||
+    (mode !== "GROUPS" && scope.includeDescendants === true) ||
+    (mode !== "GROUPS" && descendantGroupIds.length > 0) ||
+    descendantGroupIds.some((groupId) => !groupIds.includes(groupId)) ||
     (mode === "GROUPS" && groupIds.length === 0) ||
     (mode !== "GROUPS" && groupIds.length > 0)
   ) {
@@ -186,7 +213,11 @@ function trackingLaunchProfile(
   return {
     searchSource,
     includeUntracked: input.includeUntracked ?? false,
-    scope: { mode, groupIds }
+    scope: {
+      mode,
+      groupIds,
+      descendantGroupIds
+    }
   };
 }
 

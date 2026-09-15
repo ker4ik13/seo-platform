@@ -6,7 +6,8 @@ import type {
 import { trackingSearchSources } from "./tracking-contexts.js";
 import type {
   ConnectorOperationAttemptSummary,
-  ConnectorRoutingScope
+  ConnectorRoutingScope,
+  XmlStockOperationUsageSummary
 } from "./integrations.js";
 import { batchedArsenkinRankPolicyVersion, largeXmlStockRankPolicyVersion } from "./rank-policy.js";
 
@@ -378,6 +379,7 @@ export interface RankEstimate {
   readonly workload: RankEstimateProviderWorkload;
   readonly providerLimits: RankEstimateProviderLimits;
   readonly expectedDuration: RankEstimateExpectedDuration;
+  readonly providerUsage?: XmlStockOperationUsageSummary;
   readonly platformChargeMicro: string;
   readonly billingCurrency: string;
   readonly quota: RankEstimateQuota;

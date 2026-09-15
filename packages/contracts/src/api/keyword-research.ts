@@ -124,6 +124,7 @@ export interface KeywordResearchRunSummary {
   readonly actorId?: string;
   readonly source: KeywordResearchSource;
   readonly provider: "KEYS_SO" | "ARSENKIN" | "XMLSTOCK";
+  readonly providerUsage?: import("./integrations.js").XmlStockOperationUsageSummary;
   readonly domain?: string;
   readonly database?: KeysSoDatabase;
   readonly regionCode?: string;

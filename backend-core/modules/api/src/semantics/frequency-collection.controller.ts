@@ -107,7 +107,12 @@ export class FrequencyCollectionController {
         onlyFailed === "true"
       )
     ]);
-    if (scope.items.length === 0) return apiResponse(request, { collection, page: scope.page, rows: [] });
+    if (scope.items.length === 0) return apiResponse(request, {
+      collection,
+      ...(scope.providerUsage ? { providerUsage: scope.providerUsage } : {}),
+      page: scope.page,
+      rows: []
+    });
     if (!this.seoData) throw new Error("SEO data client is not available");
     const result = await this.seoData.frequencyOperationResult(
       context,
@@ -119,6 +124,7 @@ export class FrequencyCollectionController {
     );
     return apiResponse(request, {
       collection,
+      ...(scope.providerUsage ? { providerUsage: scope.providerUsage } : {}),
       page: scope.page,
       rows: scope.items.map((item) => {
         const row = byKeywordId.get(item.keywordId);

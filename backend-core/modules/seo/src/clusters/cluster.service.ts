@@ -290,6 +290,7 @@ export class ClusterService {
   ): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       await lockClusterSet(transaction, input.projectId);
+      await lockSemanticKeywordWrites(transaction, input.projectId);
       await lockCluster(transaction, input.projectId, clusterId);
       const current = await requiredCluster(
         transaction,
@@ -302,14 +303,22 @@ export class ClusterService {
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
-          clusterId,
-          status: "ACTIVE"
+          clusterId
         }
       });
       if (keywordCount > 0) {
-        throw clusterConflict(
-          "Move keywords to another cluster before deleting this cluster"
-        );
+        await transaction.keyword.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            clusterId
+          },
+          data: {
+            clusterId: null,
+            updatedBy: input.actorId,
+            version: { increment: 1 }
+          }
+        });
       }
       const deleted = await transaction.cluster.update({
         where: {
@@ -322,23 +331,17 @@ export class ClusterService {
         data: { status: "DELETED", version: { increment: 1 } },
         include: CLUSTER_INCLUDE
       });
-      await this.semanticVersions.createWithClusterChange(
+      await this.semanticVersions.createIrreversibleVersion(
         transaction,
         {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           actorId: input.actorId,
           reason: "CLUSTER_DELETE",
-          summary: `Удалён кластер «${current.name}»`
+          summary: `Удалён кластер «${current.name}» и снят с ${keywordCount} запросов`
         },
-        {
-          entityId: deleted.id,
-          operation: "DELETE",
-          beforeState: clusterVersionState(current),
-          afterState: clusterVersionState(deleted),
-          beforeVersion: current.version,
-          afterVersion: deleted.version
-        }
+        keywordCount + 1,
+        { action: "CLUSTER_DELETE", clusterId: deleted.id }
       );
     });
   }
@@ -1336,12 +1339,5 @@ function assertVersion(current: number, expected: number): void {
       currentVersion: current
     },
     HttpStatus.PRECONDITION_FAILED
-  );
-}
-
-function clusterConflict(message: string): HttpException {
-  return new HttpException(
-    { code: "RESOURCE_STATE_CONFLICT", message },
-    HttpStatus.CONFLICT
   );
 }

@@ -2,13 +2,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type RankHistoryItem, type SemanticKeywordCompetitorSnapshot } from "@seo-platform/contracts";
 import { browserApiCollectionRequest } from "../lib/browser-api";
+import { semanticSerpHistoryQuery } from "../lib/semantic-serp-history";
 import { serpMovementKey, serpMovements } from "../lib/serp-movement";
 import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
 import { SemanticModal } from "./semantic-modal";
 import { UiText, useUiLocale } from "./ui-locale";
 
-export function SemanticKeywordSerpHistory({ projectId, keywordId, keywordText, createdAt, currentUserId, projectDomain, dimensionKey, onClose }: {
-  projectId: string; keywordId: string; keywordText: string; createdAt: string; currentUserId: string; projectDomain: string; dimensionKey?: string | undefined; onClose: () => void;
+export function SemanticKeywordSerpHistory({ projectId, keywordId, keywordText, currentUserId, projectDomain, dimensionKey, onClose }: {
+  projectId: string; keywordId: string; keywordText: string; currentUserId: string; projectDomain: string; dimensionKey?: string | undefined; onClose: () => void;
 }) {
   const { t } = useUiLocale();
   const [items, setItems] = useState<readonly RankHistoryItem[]>([]), [loading, setLoading] = useState(false);
@@ -24,7 +25,15 @@ export function SemanticKeywordSerpHistory({ projectId, keywordId, keywordText, 
     busy.current = true; setLoading(true); setError(undefined);
     const controller = new AbortController(); request.current = controller;
     try {
-      const query = new URLSearchParams({ keywordId, observedFrom: new Date(createdAt).toISOString(), observedBefore: before, limit: "5", mode: "SERP", ...(dimensionKey ? { dimensionKey } : {}), ...(next ? { cursor: next } : {}) });
+      // Imported snapshots may predate the moment when the keyword record was
+      // created in SEOньорита. The exact keyword + dimension index and the
+      // five-row keyset page keep this full-history lookup bounded.
+      const query = semanticSerpHistoryQuery({
+        keywordId,
+        before,
+        ...(dimensionKey ? { dimensionKey } : {}),
+        ...(next ? { cursor: next } : {})
+      });
       const page = await browserApiCollectionRequest<RankHistoryItem>(`/app/api/projects/${projectId}/rank-history?${query}`, { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (page.data.some(row => !row.searchEngine || !row.serpResults?.length)) throw new Error("Invalid SERP history");
@@ -32,7 +41,7 @@ export function SemanticKeywordSerpHistory({ projectId, keywordId, keywordText, 
       setCursor(page.page.nextCursor);
     } catch { if (!controller.signal.aborted) setError("Не удалось загрузить историю выдачи. Повторите загрузку."); }
     finally { if (request.current === controller) { busy.current = false; if (!controller.signal.aborted) setLoading(false); } }
-  }, [before, createdAt, dimensionKey, keywordId, projectId]);
+  }, [before, dimensionKey, keywordId, projectId]);
   useEffect(() => { void load(); return () => { request.current?.abort(); request.current = undefined; busy.current = false; }; }, [load]);
   const snapshots = useMemo<readonly SemanticKeywordCompetitorSnapshot[]>(() =>
     items.flatMap(item => item.searchEngine && item.provider !== "MANUAL_IMPORT" ? [{

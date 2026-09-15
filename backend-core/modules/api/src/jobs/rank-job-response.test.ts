@@ -176,6 +176,21 @@ test("preserves competitor collection policy in every lifecycle", () => {
   );
 });
 
+test("accepts current position-tracking Jobs without a redundant save flag", () => {
+  const mapped = scopedRankJobSummary(
+    {
+      ...preparing,
+      purpose: "POSITION_TRACKING"
+    },
+    workspaceId,
+    projectId,
+    jobId
+  );
+
+  assert.equal(mapped.purpose, "POSITION_TRACKING");
+  assert.equal(mapped.saveProjectPosition, undefined);
+});
+
 test("rejects unsupported rank execution presentation", () => {
   for (const value of [
     { ...preparing, searchEngine: "BING" },

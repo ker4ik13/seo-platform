@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SemanticImportMapping } from "@seo-platform/contracts";
-import { canonicalImportRow } from "./semantic-import-validator.service.js";
+import {
+  KC4_POSITION_HISTORY_HEADER,
+  KC4_SERP_RESULTS_HEADER
+} from "./kc4-parser.js";
+import {
+  canonicalImportRow,
+  semanticImportValidationDestination
+} from "./semantic-import-validator.service.js";
 
 const mapping: SemanticImportMapping = {
   columns: [
@@ -18,6 +25,46 @@ const mapping: SemanticImportMapping = {
   duplicatePolicy: "SKIP_EXISTING",
   createMissingKeywords: true
 };
+
+test("publishes a fully mapped native KC4 immediately after validation", () => {
+  const capacity = {
+    billingPlanCode: "TEAM",
+    billingPlanVersion: 3,
+    storedKeywordsLimit: 2_000_000n,
+    keywordsPerProjectLimit: 2_000_000n,
+    foldersPerProjectLimit: 20_000n,
+    trackedContextPairsLimit: 50_000n
+  };
+  assert.deepEqual(
+    semanticImportValidationDestination(
+      { sourceFormat: "KC4", ...capacity },
+      { uniqueKeywordsToProcess: "42" }
+    ),
+    { status: "READY_TO_PUBLISH", stage: "publish_queued" }
+  );
+  assert.deepEqual(
+    semanticImportValidationDestination(
+      { sourceFormat: "XLSX", ...capacity },
+      { uniqueKeywordsToProcess: "42" }
+    ),
+    { status: "AWAITING_CONFIRMATION", stage: "validation_ready" }
+  );
+  assert.deepEqual(
+    semanticImportValidationDestination(
+      {
+        sourceFormat: "KC4",
+        billingPlanCode: null,
+        billingPlanVersion: null,
+        storedKeywordsLimit: null,
+        keywordsPerProjectLimit: null,
+        foldersPerProjectLimit: null,
+        trackedContextPairsLimit: null
+      },
+      { uniqueKeywordsToProcess: "42" }
+    ),
+    { status: "AWAITING_CONFIRMATION", stage: "validation_ready" }
+  );
+});
 
 test("builds a canonical publish row without losing unsupported values", () => {
   const issues = new Set<string>();
@@ -92,13 +139,53 @@ test("preserves native KC4 hierarchy and imports search engine positions", () =>
     4n,
     [
       "SEO",
-      "Корень/Раздел/Подраздел",
+      JSON.stringify(["Корень", "Раздел / услуги", "Подраздел"]),
       "25",
       "-2",
       "https://example.com/yandex-result",
       "2147483647",
       "0",
-      ""
+      "",
+      JSON.stringify([
+        {
+          source: "KEY_COLLECTOR",
+          searchEngine: "YANDEX",
+          countryCode: "RU",
+          regionCode: "kc4-import",
+          regionLabel: "Импорт Key Collector",
+          language: "ru",
+          device: "DESKTOP",
+          observedAt: "2026-08-01T12:00:00.000Z",
+          found: true,
+          position: 31,
+          rankingUrl: "https://example.com/history"
+        },
+        {
+          source: "KEY_COLLECTOR",
+          searchEngine: "YANDEX",
+          countryCode: "RU",
+          regionCode: "kc4-import",
+          regionLabel: "Импорт Key Collector",
+          language: "ru",
+          device: "DESKTOP",
+          observedAt: "2026-08-01T12:00:00.000Z",
+          found: false
+        }
+      ]),
+      JSON.stringify([{
+        searchEngine: "YANDEX",
+        results: [
+          {
+            position: 1,
+            rankingUrl: "https://example.com/first",
+            title: "Первый результат"
+          },
+          {
+            position: 43,
+            rankingUrl: "https://example.com/second"
+          }
+        ]
+      }])
     ],
     [
       "Фраза",
@@ -108,7 +195,9 @@ test("preserves native KC4 hierarchy and imports search engine positions", () =>
       "Яндекс · URL выдачи",
       "Google · Позиция",
       "Google · Изменение позиции",
-      "Google · URL выдачи"
+      "Google · URL выдачи",
+      KC4_POSITION_HISTORY_HEADER,
+      KC4_SERP_RESULTS_HEADER
     ],
     {
       columns: [
@@ -133,17 +222,45 @@ test("preserves native KC4 hierarchy and imports search engine positions", () =>
     { sourceFormat: "KC4" }
   );
 
-  assert.deepEqual(result.groupPath, ["Корень", "Раздел", "Подраздел"]);
+  assert.deepEqual(result.groupPath, [
+    "Корень",
+    "Раздел / услуги",
+    "Подраздел"
+  ]);
   assert.deepEqual(result.positions, [
     {
       searchEngine: "YANDEX",
       found: true,
       position: 25,
       previousPosition: 27,
-      rankingUrl: "https://example.com/yandex-result"
+      rankingUrl: "https://example.com/yandex-result",
+      serpResults: [
+        {
+          position: 1,
+          rankingUrl: "https://example.com/first",
+          title: "Первый результат"
+        },
+        {
+          position: 43,
+          rankingUrl: "https://example.com/second"
+        }
+      ]
     },
     { searchEngine: "GOOGLE", found: false }
   ]);
+  assert.deepEqual(result.positionHistory, [{
+    source: "KEY_COLLECTOR",
+    searchEngine: "YANDEX",
+    countryCode: "RU",
+    regionCode: "kc4-import",
+    regionLabel: "Импорт Key Collector",
+    language: "ru",
+    device: "DESKTOP",
+    observedAt: "2026-08-01T12:00:00.000Z",
+    found: true,
+    position: 31,
+    rankingUrl: "https://example.com/history"
+  }]);
   assert.deepEqual(result.customValues, {});
   assert.deepEqual([...issues], []);
 });

@@ -107,6 +107,19 @@ export type SemanticKeywordPageSize =
 export const semanticKeywordMaxPageSize: SemanticKeywordPageSize = 1_000;
 export const semanticKeywordNotesMaxPageSize = 200;
 export const semanticKeywordMultiSearchMaxTerms = 500;
+
+export interface SemanticKeywordTagOption {
+  readonly id: string;
+  readonly name: string;
+  readonly keywordCount: number;
+}
+
+export interface SemanticKeywordTagDeleteResult {
+  readonly tagId: string;
+  readonly name: string;
+  readonly detachedKeywordCount: number;
+}
+
 export const semanticKeywordMultiSearchModes = [
   "EXACT",
   "CONTAINS",
@@ -611,6 +624,20 @@ export interface SemanticKeywordBulkSelection {
   readonly version: number;
 }
 
+/** Lightweight server projection used to freeze large operation scopes. */
+export interface SemanticOperationScopeKeyword
+  extends SemanticKeywordBulkSelection {
+  readonly isTracked: boolean;
+}
+
+export interface SemanticOperationScopePageInput {
+  readonly groupIds?: readonly string[];
+  readonly cursor?: string;
+}
+
+export const semanticOperationScopePageSize = 10_000 as const;
+export const semanticOperationScopeGroupLimit = 20_000 as const;
+
 /** Synchronous write batch; clients split larger selections without losing the full selection. */
 export const semanticKeywordBulkCommandMaxItems = 200;
 
@@ -723,4 +750,40 @@ export interface SemanticKeywordCleaningResult {
   readonly unchangedIds: readonly string[];
   readonly conflictedIds: readonly string[];
   readonly failedIds: readonly string[];
+}
+
+export interface SemanticKeywordMergeSelection {
+  readonly id: string;
+  readonly version: number;
+}
+
+/** The keeper remains visible; every source becomes a historical alias. */
+export interface SemanticKeywordMergeInput {
+  readonly keeper: SemanticKeywordMergeSelection;
+  readonly sources: readonly SemanticKeywordMergeSelection[];
+}
+
+export interface InternalSemanticKeywordMergeInput
+  extends SemanticKeywordMergeInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export interface SemanticKeywordMergeResult {
+  readonly keeperKeywordId: string;
+  readonly keeperVersion: number;
+  readonly mergedKeywordIds: readonly string[];
+  readonly mergedAt: string;
+}
+
+export interface SemanticKeywordMergeSuggestion {
+  readonly source: SemanticKeywordMergeSelection & Readonly<{
+    text: string;
+  }>;
+  readonly candidate: SemanticKeywordMergeSelection & Readonly<{
+    text: string;
+  }>;
+  readonly similarity: number;
+  readonly reason: "BROKEN_ENCODING" | "SIMILAR_TEXT";
 }

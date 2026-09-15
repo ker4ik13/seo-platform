@@ -21,7 +21,8 @@ import {
   RANK_TRACKING_CAPABILITY,
   reconcileProjectConnectorCreate,
   sameProjectConnectorBindingRevision,
-  stableProjectConnectorCreateCommand
+  stableProjectConnectorCreateCommand,
+  workspaceConnectorOptions
 } from "./project-integration-settings.ts";
 
 const activeCredential: ProjectConnectorCredentialOption = {
@@ -237,6 +238,13 @@ test("inherited execution options follow the current workspace route", () => {
       RANK_TRACKING_CAPABILITY
     ).map(({ id }) => id),
     [activeCredential.id]
+  );
+  assert.deepEqual(
+    workspaceConnectorOptions(
+      workspace,
+      RANK_TRACKING_CAPABILITY
+    ).map(({ id }) => id),
+    [arsenkin.id]
   );
 });
 

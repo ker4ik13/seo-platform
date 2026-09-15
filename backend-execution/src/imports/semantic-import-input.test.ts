@@ -4,7 +4,9 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalCancelSemanticImportInput,
   internalConfigureSemanticImportInput,
-  internalConfirmSemanticImportInput
+  internalConfirmSemanticImportInput,
+  internalCreateSemanticImportInput,
+  semanticImportPreviewRowsQuery
 } from "./semantic-import-input.js";
 
 const context = {
@@ -20,6 +22,64 @@ const entitlement = {
   foldersPerProject: 500,
   trackedContextPairs: 50_000
 } as const;
+
+test("parses bounded semantic import preview pagination and sorting", () => {
+  assert.deepEqual(
+    semanticImportPreviewRowsQuery("cursor_1", "12", "DESC"),
+    { cursor: "cursor_1", sortColumn: 12, sortDirection: "DESC" }
+  );
+  assert.deepEqual(
+    semanticImportPreviewRowsQuery(undefined, "0", undefined),
+    { sortColumn: 0, sortDirection: "ASC" }
+  );
+  assert.throws(
+    () => semanticImportPreviewRowsQuery(undefined, "500", "ASC"),
+    BadRequestException
+  );
+  assert.throws(
+    () => semanticImportPreviewRowsQuery(undefined, undefined, "DESC"),
+    BadRequestException
+  );
+});
+
+test("captures a normalized trusted project domain for imported SERP", () => {
+  const result = internalCreateSemanticImportInput({
+    ...context,
+    projectDomain: "Example.COM",
+    uploadId: "01900000-0000-7000-8000-000000000005",
+    idempotencyKey: "semantic-import-1",
+    jobCapacity: {
+      planCode: "TEAM",
+      planVersion: 1,
+      concurrentJobs: 8
+    },
+    semanticCapacity: entitlement
+  });
+
+  assert.equal(result.projectDomain, "example.com");
+  assert.deepEqual(result.semanticCapacity, entitlement);
+  assert.equal(
+    internalCreateSemanticImportInput({
+      ...context,
+      projectDomain: "example.com",
+      uploadId: "01900000-0000-7000-8000-000000000006",
+      idempotencyKey: "semantic-import-legacy",
+      jobCapacity: {
+        planCode: "TEAM",
+        planVersion: 1,
+        concurrentJobs: 8
+      }
+    }).semanticCapacity,
+    undefined
+  );
+  assert.throws(
+    () => internalCreateSemanticImportInput({
+      ...result,
+      projectDomain: "https://example.com/private"
+    }),
+    BadRequestException
+  );
+});
 
 test("parses mapping, confirmation and monotonic cancellation commands", () => {
   assert.deepEqual(

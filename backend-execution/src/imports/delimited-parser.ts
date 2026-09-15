@@ -297,6 +297,13 @@ function suggestedTarget(header: string): {
   readonly confidence: number;
 } {
   const raw = header.normalize("NFKC").toLowerCase().replace(/ё/gu, "е");
+  // Native KC4-only columns deliberately carry this prefix. Their words may
+  // resemble ordinary fields (for example, a metric named `Label` or a group
+  // comment), but they must stay custom instead of stealing a singleton
+  // mapping such as tags or group.path.
+  if (/^key collector\s*·/u.test(raw.trim())) {
+    return { suggestedTarget: "custom", confidence: 0.99 };
+  }
   const yandex = /(яндекс|yandex)/u.test(raw);
   const google = /(google|гугл)/u.test(raw);
   const positionChange =

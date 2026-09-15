@@ -1,5 +1,6 @@
 import {
   operationResultItemStatuses,
+  parseXmlStockOperationUsageSummary,
   rankCommandKeywordLimit,
   type InternalRankOperationScope,
   type InternalRankOperationScopeItem
@@ -17,7 +18,14 @@ export function scopedRankOperationScope(
   limit: number,
   cursor?: string
 ): InternalRankOperationScope {
-  const input = exact(value, ["workspaceId", "projectId", "jobId", "items", "page"]);
+  const input = exact(
+    value,
+    ["workspaceId", "projectId", "jobId", "items", "page"],
+    ["providerUsage"]
+  );
+  const providerUsage = input.providerUsage === undefined
+    ? undefined
+    : safeProviderUsage(input.providerUsage);
   const page = exact(input.page, ["hasNext"], ["nextCursor"]);
   if (
     input.workspaceId !== workspaceId ||
@@ -73,6 +81,7 @@ export function scopedRankOperationScope(
     workspaceId,
     projectId,
     jobId,
+    ...(providerUsage ? { providerUsage } : {}),
     items,
     page: {
       hasNext: page.hasNext,
@@ -81,6 +90,14 @@ export function scopedRankOperationScope(
         : {})
     }
   };
+}
+
+function safeProviderUsage(value: unknown) {
+  try {
+    return parseXmlStockOperationUsageSummary(value);
+  } catch {
+    invalid();
+  }
 }
 
 function exact(

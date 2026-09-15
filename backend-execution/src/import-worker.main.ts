@@ -73,10 +73,29 @@ async function bootstrap(): Promise<void> {
         throw new Error("Invalid semantic import job");
       }
       if (job.name === SEMANTIC_IMPORT_PARSE_JOB) {
-        return parser.parse(job.data.importId);
+        const outcome = await parser.parse(job.data.importId);
+        if (outcome.status === "VALIDATING" && outcome.version !== undefined) {
+          await enqueueSemanticImportValidation(
+            queue,
+            outcome.importId,
+            outcome.version
+          );
+        }
+        return outcome;
       }
       if (job.name === SEMANTIC_IMPORT_VALIDATE_JOB) {
-        return validator.validate(job.data.importId);
+        const outcome = await validator.validate(job.data.importId);
+        if (
+          outcome.status === "READY_TO_PUBLISH" &&
+          outcome.version !== undefined
+        ) {
+          await enqueueSemanticImportPublish(
+            queue,
+            outcome.importId,
+            outcome.version
+          );
+        }
+        return outcome;
       }
       if (job.name === SEMANTIC_IMPORT_PUBLISH_JOB) {
         return publisher.publish(job.data.importId);
@@ -85,7 +104,11 @@ async function bootstrap(): Promise<void> {
     },
     {
       ...bullMqConnectionOptions(workerConnection),
-      concurrency: config.imports.parseConcurrency
+      concurrency: config.imports.parseConcurrency,
+      // Native KC4 parsing is CPU intensive and may keep the event loop busy
+      // longer than BullMQ's 30 second default. Match the database claim lease
+      // so a large project cannot be picked up twice while parsing.
+      lockDuration: config.imports.parseLeaseMinutes * 60_000
     }
   );
   const exportQueue = new Queue<SemanticExportJobData>(
@@ -105,7 +128,8 @@ async function bootstrap(): Promise<void> {
     },
     {
       ...bullMqConnectionOptions(exportWorkerConnection),
-      concurrency: Math.max(1, Math.min(config.imports.parseConcurrency, 2))
+      concurrency: Math.max(1, Math.min(config.imports.parseConcurrency, 2)),
+      lockDuration: config.imports.parseLeaseMinutes * 60_000
     }
   );
 

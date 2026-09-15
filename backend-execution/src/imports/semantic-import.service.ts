@@ -10,6 +10,7 @@ import {
   semanticImportDuplicatePolicies,
   semanticImportDelimiters,
   semanticImportEncodings,
+  semanticImportPreviewPageSize,
   semanticImportTargets,
   parseSemanticPositionHistoryImportOptions,
   type InternalCancelSemanticImportInput,
@@ -20,8 +21,12 @@ import {
   type SemanticImportDelimiter,
   type SemanticImportEncoding,
   type SemanticImportMapping,
+  type SemanticImportPreviewRow,
+  type SemanticImportPreviewRowsPage,
+  type SemanticImportPreviewRowsQuery,
   type SemanticImportResultSummary,
-  type SemanticImportSummary
+  type SemanticImportSummary,
+  type SemanticCapacityEntitlement
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -91,6 +96,7 @@ export class SemanticImportService {
           data: {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
+            projectDomain: input.projectDomain,
             uploadId: upload.id,
             actorId: input.actorId,
             sourceFormat,
@@ -98,7 +104,25 @@ export class SemanticImportService {
             requestedDelimiter: options.delimiter,
             headerMode: options.headerMode,
             totalBytes: upload.sizeBytes,
-            idempotencyKey: input.idempotencyKey
+            idempotencyKey: input.idempotencyKey,
+            ...(input.semanticCapacity
+              ? {
+                  billingPlanCode: input.semanticCapacity.planCode,
+                  billingPlanVersion: input.semanticCapacity.planVersion,
+                  storedKeywordsLimit: BigInt(
+                    input.semanticCapacity.storedKeywords
+                  ),
+                  keywordsPerProjectLimit: BigInt(
+                    input.semanticCapacity.keywordsPerProject
+                  ),
+                  foldersPerProjectLimit: BigInt(
+                    input.semanticCapacity.foldersPerProject
+                  ),
+                  trackedContextPairsLimit: BigInt(
+                    input.semanticCapacity.trackedContextPairs
+                  )
+                }
+              : {})
           }
         });
         await transaction.outboxEvent.create({
@@ -147,6 +171,75 @@ export class SemanticImportService {
     });
     if (!semanticImport) throw new NotFoundException("Import not found");
     return toSemanticImportSummary(semanticImport);
+  }
+
+  public async previewRows(
+    importId: string,
+    workspaceId: string,
+    projectId: string,
+    query: SemanticImportPreviewRowsQuery
+  ): Promise<SemanticImportPreviewRowsPage> {
+    const semanticImport = await this.requiredScoped(importId, {
+      workspaceId,
+      projectId
+    });
+    const headers = safeHeaders(semanticImport.headers);
+    if (!headers) {
+      throw new ConflictException("Semantic import preview is unavailable");
+    }
+    const visibleColumns = safeColumns(semanticImport.suggestedMapping);
+    if (!visibleColumns) {
+      throw new ConflictException("Semantic import preview is unavailable");
+    }
+    const visibleColumnIndexes = new Set(
+      visibleColumns.map(({ index }) => index)
+    );
+    if (
+      query.sortColumn !== undefined &&
+      query.sortColumn >= headers.length
+    ) {
+      throw new UnprocessableEntityException(
+        "Semantic import preview references an unknown column"
+      );
+    }
+
+    const cursor = semanticImportPreviewCursor(query.cursor, query);
+    if (BigInt(cursor.offset) > semanticImport.totalRows) {
+      throw new UnprocessableEntityException(
+        "Semantic import preview cursor is outside the result"
+      );
+    }
+    const rows = await this.previewRowsQuery(
+      importId,
+      cursor.offset,
+      query.sortColumn,
+      query.sortDirection
+    );
+    const hasNext = rows.length > semanticImportPreviewPageSize;
+    const pageRows = rows
+      .slice(0, semanticImportPreviewPageSize)
+      .map((row) => previewRow(row, visibleColumnIndexes));
+    const nextOffset = cursor.offset + pageRows.length;
+    return {
+      rows: pageRows,
+      page: {
+        hasNext,
+        ...(hasNext
+          ? {
+              nextCursor: encodeSemanticImportPreviewCursor({
+                offset: nextOffset,
+                ...(query.sortColumn === undefined
+                  ? {}
+                  : {
+                      sortColumn: query.sortColumn,
+                      sortDirection: query.sortDirection ?? "ASC"
+                    })
+              })
+            }
+          : {}),
+        totalRows: semanticImport.totalRows.toString()
+      }
+    };
   }
 
   public async configure(
@@ -344,6 +437,8 @@ export class SemanticImportService {
   ): void {
     if (
       existing.projectId !== input.projectId ||
+      (existing.projectDomain !== null &&
+        existing.projectDomain !== input.projectDomain) ||
       existing.uploadId !== input.uploadId ||
       existing.requestedEncoding !== options.encoding ||
       existing.requestedDelimiter !== options.delimiter ||
@@ -410,6 +505,173 @@ export class SemanticImportService {
     });
     if (!semanticImport) throw new NotFoundException("Import not found");
     return semanticImport;
+  }
+
+  private previewRowsQuery(
+    importId: string,
+    offset: number,
+    sortColumn?: number,
+    sortDirection?: "ASC" | "DESC"
+  ): Promise<readonly PreviewDatabaseRow[]> {
+    const limit = semanticImportPreviewPageSize + 1;
+    if (sortColumn === undefined) {
+      return this.prisma.$queryRaw<readonly PreviewDatabaseRow[]>(Prisma.sql`
+        SELECT "row_number", "raw_values"
+        FROM "semantic_import_staging_rows"
+        WHERE "import_id" = ${importId}::uuid
+        ORDER BY "row_number" ASC
+        OFFSET ${offset}
+        LIMIT ${limit}
+      `);
+    }
+    const direction = sortDirection === "DESC"
+      ? Prisma.sql`DESC`
+      : Prisma.sql`ASC`;
+    return this.prisma.$queryRaw<readonly PreviewDatabaseRow[]>(Prisma.sql`
+      SELECT "row_number", "raw_values"
+      FROM (
+        SELECT
+          "row_number",
+          "raw_values",
+          BTRIM(COALESCE("raw_values" ->> ${sortColumn}::integer, '')) AS "sort_value"
+        FROM "semantic_import_staging_rows"
+        WHERE "import_id" = ${importId}::uuid
+      ) AS "preview_rows"
+      ORDER BY
+        ("sort_value" = '') ASC,
+        CASE
+          WHEN "sort_value" ~ '^[+-]?(?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)$'
+          THEN REPLACE("sort_value", ',', '.')::numeric
+        END ${direction} NULLS LAST,
+        LOWER("sort_value") ${direction},
+        "row_number" ASC
+      OFFSET ${offset}
+      LIMIT ${limit}
+    `);
+  }
+}
+
+interface PreviewDatabaseRow {
+  readonly row_number: bigint;
+  readonly raw_values: unknown;
+}
+
+interface SemanticImportPreviewCursor {
+  readonly offset: number;
+  readonly sortColumn?: number;
+  readonly sortDirection?: "ASC" | "DESC";
+}
+
+function previewRow(
+  value: PreviewDatabaseRow,
+  visibleColumnIndexes: ReadonlySet<number>
+): SemanticImportPreviewRow {
+  if (
+    !Array.isArray(value.raw_values) ||
+    value.raw_values.some((cell) => typeof cell !== "string")
+  ) {
+    throw new ServiceUnavailableException(
+      "Semantic import preview row is invalid"
+    );
+  }
+  let remainingBytes = 12_000;
+  const values = value.raw_values.map((cell, index) => {
+    if (!visibleColumnIndexes.has(index) || remainingBytes <= 0) return "";
+    const preview = boundedPreviewCell(cell, Math.min(4_096, remainingBytes));
+    remainingBytes -= Buffer.byteLength(preview, "utf8");
+    return preview;
+  });
+  return {
+    rowNumber: value.row_number.toString(),
+    values
+  };
+}
+
+function boundedPreviewCell(value: string, maximumBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
+  if (maximumBytes <= 3) return "";
+  return `${Buffer.from(value, "utf8")
+    .subarray(0, maximumBytes - 3)
+    .toString("utf8")
+    .replace(/\uFFFD$/u, "")}…`;
+}
+
+export function encodeSemanticImportPreviewCursor(
+  value: SemanticImportPreviewCursor
+): string {
+  return Buffer.from(JSON.stringify({
+    v: 1,
+    o: value.offset,
+    ...(value.sortColumn === undefined
+      ? {}
+      : {
+          c: value.sortColumn,
+          d: value.sortDirection ?? "ASC"
+        })
+  }), "utf8").toString("base64url");
+}
+
+export function semanticImportPreviewCursor(
+  value: string | undefined,
+  query: SemanticImportPreviewRowsQuery
+): SemanticImportPreviewCursor {
+  if (value === undefined) {
+    return {
+      offset: 0,
+      ...(query.sortColumn === undefined
+        ? {}
+        : {
+            sortColumn: query.sortColumn,
+            sortDirection: query.sortDirection ?? "ASC"
+          })
+    };
+  }
+  try {
+    if (value.length > 512 || !/^[A-Za-z0-9_-]+$/u.test(value)) {
+      throw new Error("invalid cursor token");
+    }
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("invalid cursor payload");
+    }
+    const input = parsed as Readonly<Record<string, unknown>>;
+    if (
+      Object.keys(input).some((key) => !["v", "o", "c", "d"].includes(key)) ||
+      input.v !== 1 ||
+      !Number.isSafeInteger(input.o) ||
+      Number(input.o) < 0 ||
+      (input.c !== undefined &&
+        (!Number.isSafeInteger(input.c) || Number(input.c) < 0)) ||
+      (input.d !== undefined && input.d !== "ASC" && input.d !== "DESC")
+    ) {
+      throw new Error("invalid cursor fields");
+    }
+    const cursor: SemanticImportPreviewCursor = {
+      offset: Number(input.o),
+      ...(input.c === undefined
+        ? {}
+        : {
+            sortColumn: Number(input.c),
+            sortDirection: input.d as "ASC" | "DESC"
+          })
+    };
+    if (
+      cursor.sortColumn !== query.sortColumn ||
+      cursor.sortDirection !== (
+        query.sortColumn === undefined
+          ? undefined
+          : query.sortDirection ?? "ASC"
+      )
+    ) {
+      throw new Error("cursor sort mismatch");
+    }
+    return cursor;
+  } catch {
+    throw new UnprocessableEntityException(
+      "Semantic import preview cursor is invalid"
+    );
   }
 }
 
@@ -592,6 +854,65 @@ export function safeValidation(
     uniqueKeywordsToProcess: record.uniqueKeywordsToProcess as string,
     issueCounts: record.issueCounts as Readonly<Record<string, string>>
   };
+}
+
+export function semanticImportEntitlement(
+  semanticImport: Pick<
+    SemanticImport,
+    | "billingPlanCode"
+    | "billingPlanVersion"
+    | "storedKeywordsLimit"
+    | "keywordsPerProjectLimit"
+    | "foldersPerProjectLimit"
+    | "trackedContextPairsLimit"
+  >
+): SemanticCapacityEntitlement | undefined {
+  const {
+    billingPlanCode,
+    billingPlanVersion,
+    storedKeywordsLimit,
+    keywordsPerProjectLimit,
+    foldersPerProjectLimit,
+    trackedContextPairsLimit
+  } = semanticImport;
+  if (
+    !billingPlanCode ||
+    billingPlanVersion === null ||
+    storedKeywordsLimit === null ||
+    keywordsPerProjectLimit === null ||
+    foldersPerProjectLimit === null ||
+    trackedContextPairsLimit === null
+  ) {
+    return undefined;
+  }
+  const storedKeywords = safePlanLimit(storedKeywordsLimit);
+  const keywordsPerProject = safePlanLimit(keywordsPerProjectLimit);
+  const foldersPerProject = safePlanLimit(foldersPerProjectLimit);
+  const trackedContextPairs = safePlanLimit(trackedContextPairsLimit);
+  if (
+    !Number.isSafeInteger(billingPlanVersion) ||
+    billingPlanVersion <= 0 ||
+    storedKeywords === undefined ||
+    keywordsPerProject === undefined ||
+    foldersPerProject === undefined ||
+    trackedContextPairs === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    planCode: billingPlanCode,
+    planVersion: billingPlanVersion,
+    storedKeywords,
+    keywordsPerProject,
+    foldersPerProject,
+    trackedContextPairs
+  };
+}
+
+function safePlanLimit(value: bigint): number | undefined {
+  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(value)
+    : undefined;
 }
 
 export function safeResult(

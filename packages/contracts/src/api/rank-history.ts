@@ -46,7 +46,7 @@ interface RankHistoryItemBase extends SemanticRankDimensionMetadata {
   readonly keywordId: string;
   readonly trackingContextId: string;
   readonly configurationVersion: number;
-  readonly provider: "ARSENKIN" | "XMLSTOCK" | "MANUAL_IMPORT";
+  readonly provider: "ARSENKIN" | "XMLSTOCK" | "KEY_COLLECTOR" | "MANUAL_IMPORT";
   readonly connectorVersion: string;
   readonly contextName?: string;
   readonly searchEngine?: "GOOGLE" | "YANDEX";
@@ -63,7 +63,7 @@ interface RankHistoryItemBase extends SemanticRankDimensionMetadata {
 }
 
 export interface RankHistoryProviderFoundItem extends RankHistoryItemBase {
-  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly provider: "ARSENKIN" | "XMLSTOCK" | "KEY_COLLECTOR";
   readonly found: true;
   readonly position: number;
   readonly absolutePosition?: number;
@@ -204,11 +204,11 @@ const NOT_FOUND_ONLY_FORBIDDEN_KEYS = [
 export function redactRankHistoryItem(
   input: RankHistoryItem
 ): RankHistoryItem {
-  const technicalIdPattern = input.provider === "MANUAL_IMPORT"
+  const technicalIdPattern = input.provider === "MANUAL_IMPORT" || input.provider === "KEY_COLLECTOR"
     ? UUID_PATTERN
     : UUID_V7_PATTERN;
   if (
-    !["ARSENKIN", "XMLSTOCK", "MANUAL_IMPORT"].includes(input.provider) ||
+    !["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR", "MANUAL_IMPORT"].includes(input.provider) ||
     typeof input.snapshotId !== "string" ||
     !technicalIdPattern.test(input.snapshotId) ||
     typeof input.keywordId !== "string" ||
@@ -231,7 +231,9 @@ export function redactRankHistoryItem(
   const dataQualityFlags = copyQualityFlags(input.dataQualityFlags);
   if (input.provider === "MANUAL_IMPORT"
     ? dataQualityFlags.length !== 1 || dataQualityFlags[0] !== "IMPORTED_MANUAL_HISTORY"
-    : dataQualityFlags.some(flag => flag === "IMPORTED_KC4" || flag === "IMPORTED_MANUAL_HISTORY")) {
+    : input.provider === "KEY_COLLECTOR"
+      ? dataQualityFlags.length !== 1 || dataQualityFlags[0] !== "IMPORTED_KC4"
+      : dataQualityFlags.some(flag => flag === "IMPORTED_KC4" || flag === "IMPORTED_MANUAL_HISTORY")) {
     return invalidRankHistoryItem();
   }
   assertOptionalBoundedString(input.contextName, 160);
@@ -285,7 +287,7 @@ export function redactRankHistoryItem(
     if (
       input.position !== null ||
       NOT_FOUND_ONLY_FORBIDDEN_KEYS.some((key) => key in input) ||
-      (input.provider !== "MANUAL_IMPORT" && dataQualityFlags.some(
+      (!["MANUAL_IMPORT", "KEY_COLLECTOR"].includes(input.provider) && dataQualityFlags.some(
         (flag) => flag !== "PROVIDER_OBSERVED_AT_UNAVAILABLE"
       ))
     ) {
@@ -313,6 +315,33 @@ export function redactRankHistoryItem(
       provider: "MANUAL_IMPORT",
       found: true,
       position: input.position
+    };
+  }
+
+  if (input.provider === "KEY_COLLECTOR") {
+    if (
+      input.found !== true ||
+      !Number.isSafeInteger(input.position) ||
+      input.position < 1 ||
+      input.position > 100 ||
+      input.resultType !== "ORGANIC" ||
+      !Array.isArray(input.serpFeatures) ||
+      input.serpFeatures.length !== 0 ||
+      ["absolutePosition", "pixelPosition", "title", "snippet"].some((key) => key in input)
+    ) {
+      return invalidRankHistoryItem();
+    }
+    assertUrl(input.rankingUrl);
+    assertUrl(input.normalizedRankingUrl);
+    return {
+      ...base,
+      provider: "KEY_COLLECTOR",
+      found: true,
+      position: input.position,
+      rankingUrl: input.rankingUrl,
+      normalizedRankingUrl: input.normalizedRankingUrl,
+      resultType: "ORGANIC",
+      serpFeatures: []
     };
   }
 

@@ -319,6 +319,15 @@ test("status includes external storage TLS and ClamAV readiness", async () => {
   assert.match(source, /3310/);
 });
 
+test("VPS ClamAV accepts the documented five-gigabyte upload boundary", async () => {
+  const source = await readVpsFile("clamd.conf");
+
+  assert.match(source, /^StreamMaxLength 5G$/mu);
+  assert.match(source, /^MaxScanSize 5G$/mu);
+  assert.match(source, /^MaxFileSize 5G$/mu);
+  assert.match(source, /^ReadTimeout 900$/mu);
+});
+
 test("runtime stop targets only panes of its own tmux session", async () => {
   const source = await readVpsFile("stop-runtime.sh");
   const listPanes = source.match(/tmux list-panes[\s\S]*?-F '#\{pane_pid\}'/u)?.[0];

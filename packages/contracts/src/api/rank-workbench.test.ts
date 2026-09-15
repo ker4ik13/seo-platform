@@ -102,6 +102,30 @@ test("keeps ordinary and AI SERP inside the same dimension", () => {
   assert.equal(report.rows[0]?.aiSnapshots[0]?.results[0]?.url, "https://ai.example/");
 });
 
+test("normalizes imported Key Collector SERP as a canonical stored snapshot", () => {
+  const report = parseSerpWorkbenchReport({
+    dimensions: [{ key: dimensionKey, ...dimension }],
+    rows: [{
+      keywordId,
+      version: 1,
+      query: "сертификат на гирлянду",
+      language: "ru",
+      tags: [],
+      snapshots: [{
+        dimensionKey,
+        snapshotId,
+        observedAt: "2024-04-18T00:00:00.000Z",
+        provider: "KEY_COLLECTOR",
+        results: [{ position: 1, url: "https://example.ru/catalog" }]
+      }],
+      aiSnapshots: []
+    }],
+    page: { hasNext: false, totalApprox: 1 }
+  });
+
+  assert.equal(report.rows[0]?.snapshots[0]?.provider, "KEY_COLLECTOR");
+});
+
 test("validates every position report cell and its date scope", () => {
   const report = parseRankPositionReport({
     dimension: { key: dimensionKey, ...dimension, regionLabel: "Москва" },

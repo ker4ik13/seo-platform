@@ -69,7 +69,8 @@ export function rankRetryContextDraft(result: RankOperationResult): TrackingCont
     searchSource: result.job.searchSource ?? "LIVE",
     includeUntracked: true,
     scopeMode: "KEYWORDS",
-    groupIds: []
+    groupIds: [],
+    descendantGroupIds: []
   };
 }
 function invalid() { return new BrowserApiError(409, "RETRY_SCOPE_CHANGED", "Состав операции изменился. Обновите список и повторите подготовку."); }

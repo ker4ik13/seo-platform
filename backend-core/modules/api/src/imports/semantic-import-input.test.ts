@@ -3,8 +3,24 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   configureSemanticImportInput,
-  createSemanticImportInput
+  createSemanticImportInput,
+  semanticImportPreviewRowsQuery
 } from "./semantic-import-input.js";
+
+test("parses import preview pagination without accepting loose query values", () => {
+  assert.deepEqual(
+    semanticImportPreviewRowsQuery("cursor_1", "3", "DESC"),
+    { cursor: "cursor_1", sortColumn: 3, sortDirection: "DESC" }
+  );
+  assert.deepEqual(
+    semanticImportPreviewRowsQuery(undefined, "0", undefined),
+    { sortColumn: 0, sortDirection: "ASC" }
+  );
+  assert.throws(
+    () => semanticImportPreviewRowsQuery("bad cursor", undefined, undefined),
+    DomainError
+  );
+});
 
 test("parses explicit or default semantic import options", () => {
   const uploadId = "01900000-0000-7000-8000-000000000005";

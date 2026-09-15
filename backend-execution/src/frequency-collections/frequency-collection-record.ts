@@ -12,6 +12,7 @@ import type {
 import { frequencyCollectionKeywordLimit } from "@seo-platform/contracts";
 import { parseFrequencySeasonalityRequest } from "@seo-platform/contracts";
 import type { Job } from "../generated/prisma/client.js";
+import { storedXmlStockOperationUsage } from "../integrations/xmlstock-pricing.js";
 
 export type FrequencyJob = Job;
 
@@ -25,6 +26,9 @@ export function frequencyCollectionSummary(
     job.scopeSnapshot,
     currentStatus,
     currentFailure.failureCode
+  );
+  const providerUsage = storedXmlStockOperationUsage(
+    record(job.scopeSnapshot)?.providerUsage
   );
   if (job.progressTotal === null) invalid();
   const selectedKeywords = boundedCount(job.progressTotal);
@@ -46,6 +50,7 @@ export function frequencyCollectionSummary(
     ...(route.connectorAttempts.length > 0
       ? { connectorAttempts: route.connectorAttempts }
       : {}),
+    ...(providerUsage ? { providerUsage } : {}),
     status: currentStatus,
     ...(job.stage ? { stage: job.stage } : {}),
     selectedKeywords,

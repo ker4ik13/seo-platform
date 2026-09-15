@@ -93,6 +93,8 @@ import type {
   RankJobSummary,
   InternalRankOperationScope,
   RankRuntimeDiagnostics,
+  SemanticImportPreviewRowsPage,
+  SemanticImportPreviewRowsQuery,
   SemanticImportSummary,
   StorageCapacityEntitlement,
   UploadPartUrls,
@@ -1411,16 +1413,20 @@ export class JobsClient {
   public createSemanticImport(
     context: InternalContext,
     input: CreateSemanticImportInput,
+    projectDomain: string,
     idempotencyKey: string,
-    jobCapacity: InternalCreateSemanticImportInput["jobCapacity"]
+    jobCapacity: InternalCreateSemanticImportInput["jobCapacity"],
+    semanticCapacity: SemanticCapacityEntitlement
   ): Promise<SemanticImportSummary> {
     const body: InternalCreateSemanticImportInput = {
       ...input,
       workspaceId: context.tenant.workspaceId,
       projectId: requiredProjectId(context.tenant),
+      projectDomain,
       actorId: context.actorId,
       idempotencyKey,
-      jobCapacity
+      jobCapacity,
+      semanticCapacity
     };
     return this.request("POST", "/internal/v1/imports", context, body);
   }
@@ -1434,6 +1440,25 @@ export class JobsClient {
       `/internal/v1/imports/${encodeURIComponent(importId)}`,
       context
     );
+  }
+
+  public getSemanticImportPreviewRows(
+    context: InternalContext,
+    importId: string,
+    query: SemanticImportPreviewRowsQuery
+  ): Promise<SemanticImportPreviewRowsPage> {
+    const url = new URL(
+      `/internal/v1/imports/${encodeURIComponent(importId)}/preview-rows`,
+      this.config.services.jobs
+    );
+    if (query.cursor !== undefined) {
+      url.searchParams.set("cursor", query.cursor);
+    }
+    if (query.sortColumn !== undefined) {
+      url.searchParams.set("sortColumn", String(query.sortColumn));
+      url.searchParams.set("sortDirection", query.sortDirection ?? "ASC");
+    }
+    return this.request("GET", url.toString(), context);
   }
 
   public configureSemanticImport(
@@ -3177,6 +3202,20 @@ function upstreamError(status: number, payload: unknown): DomainError {
         details: { reason: "ACTIVE_OPERATIONS" }
       });
     }
+    if (code === "CONNECTOR_NOT_READY") {
+      return new DomainError({
+        statusCode: 409,
+        code: "CONNECTOR_NOT_READY",
+        message: "No configured workspace integration can execute this operation"
+      });
+    }
+    if (code === "INVALID_CONNECTOR_ROUTE_CHAIN") {
+      return new DomainError({
+        statusCode: 409,
+        code: "INVALID_CONNECTOR_ROUTE_CHAIN",
+        message: "Workspace integration route is invalid"
+      });
+    }
     if (isRankRunConflictReason(code)) {
       const details = upstreamRankRunConflictDetails(payload, code);
       if (!details) return dependencyUnavailable();
@@ -4021,6 +4060,9 @@ function credentialQuotaSummary(
     input.balance === undefined
       ? undefined
       : credentialProviderBalance(input.balance);
+  const xmlStockPricing = input.xmlStockPricing === undefined
+    ? undefined
+    : credentialXmlStockPricing(input.xmlStockPricing);
   if (
     input.status !== "AVAILABLE" ||
     ![
@@ -4065,6 +4107,62 @@ function credentialQuotaSummary(
     ...(typeof input.tariffDaysRemaining === "number"
       ? { tariffDaysRemaining: input.tariffDaysRemaining }
       : {}),
+    ...(xmlStockPricing ? { xmlStockPricing } : {}),
+    ...(typeof input.observedAt === "string"
+      ? { observedAt: input.observedAt }
+      : {})
+  };
+}
+
+function credentialXmlStockPricing(
+  value: unknown
+): NonNullable<
+  Extract<
+    IntegrationCredentialSummary["quota"],
+    { readonly status: "AVAILABLE" }
+  >["xmlStockPricing"]
+> {
+  const input = exactRecord(value, [
+    "tariffCode",
+    "currency",
+    "priceUnit",
+    "pricesPerThousand",
+    ...(unknownRecord(value)?.observedAt === undefined ? [] : ["observedAt"])
+  ]);
+  const prices = exactRecord(input.pricesPerThousand, [
+    "YANDEX_SEARCH_API",
+    "YANDEX_LIVE",
+    "YANDEX_TURBO",
+    "GOOGLE_LIVE",
+    "WORDSTAT"
+  ]);
+  if (
+    !["BASIC", "OPTIMAL", "MAXIMUM", "PREMIUM", "CUSTOM"].includes(
+      String(input.tariffCode)
+    ) ||
+    input.currency !== "RUB" ||
+    input.priceUnit !== "PER_1000_REQUESTS" ||
+    Object.values(prices).some(
+      (price) =>
+        typeof price !== "string" ||
+        !/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/u.test(price)
+    ) ||
+    (input.observedAt !== undefined &&
+      (typeof input.observedAt !== "string" || !isIsoDate(input.observedAt)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    tariffCode: input.tariffCode as "BASIC" | "OPTIMAL" | "MAXIMUM" | "PREMIUM" | "CUSTOM",
+    currency: "RUB",
+    priceUnit: "PER_1000_REQUESTS",
+    pricesPerThousand: prices as unknown as {
+      readonly YANDEX_SEARCH_API: string;
+      readonly YANDEX_LIVE: string;
+      readonly YANDEX_TURBO: string;
+      readonly GOOGLE_LIVE: string;
+      readonly WORDSTAT: string;
+    },
     ...(typeof input.observedAt === "string"
       ? { observedAt: input.observedAt }
       : {})

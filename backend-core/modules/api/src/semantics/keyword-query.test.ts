@@ -5,9 +5,27 @@ import {
   keywordListQuery,
   keywordBodyListInput,
   keywordMultiSearchInput,
+  keywordOperationScopeInput,
   keywordTagOptionsQuery,
   projectPositionHistoryQuery
 } from "./keyword-query.js";
+
+test("parses a bounded public operation scope page", () => {
+  const groupId = "01900000-0000-7000-8000-000000000001";
+  const cursor = "01900000-0000-7000-8000-000000000002";
+  assert.deepEqual(
+    keywordOperationScopeInput({ groupIds: [groupId], cursor }),
+    { groupIds: [groupId], cursor }
+  );
+  assert.throws(
+    () => keywordOperationScopeInput({ groupIds: [] }),
+    DomainError
+  );
+  assert.throws(
+    () => keywordOperationScopeInput({ cursor: 1 }),
+    DomainError
+  );
+});
 
 test("parses a bounded semantic keyword query", () => {
   const clusterId = "01900000-0000-7000-8000-000000000001";

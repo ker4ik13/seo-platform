@@ -24,6 +24,7 @@ import {
   keywordResearchRowPage,
   keywordResearchSummary
 } from "./keyword-research-record.js";
+import { xmlStockOperationUsage } from "../integrations/xmlstock-pricing.js";
 
 function destinationsByPath(
   destinations: NonNullable<InternalConfirmKeywordResearchRunInput["rowDestinations"]>
@@ -84,6 +85,14 @@ export class KeywordResearchService {
       expectedProvider,
       input.billing?.credentialId
     );
+    const providerUsage = input.source === "XMLSTOCK_WORDSTAT"
+      ? xmlStockOperationUsage(
+          route.xmlStockPricing,
+          "WORDSTAT",
+          1,
+          input.queries.length
+        )
+      : undefined;
     if (route.provider !== expectedProvider) {
       throw new HttpException(
         {
@@ -134,8 +143,9 @@ export class KeywordResearchService {
                 outcome: entry.outcome,
                 ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}),
                 occurredAt: entry.occurredAt
-              }))
-            },
+              })),
+              ...(providerUsage ? { providerUsage } : {})
+            } as unknown as Prisma.InputJsonValue,
             progressTotal: BigInt(input.maxKeywords),
             progressUnit: "keywords",
             credentialMode: route.credentialMode,
@@ -162,10 +172,13 @@ export class KeywordResearchService {
             inputSnapshot,
             maxKeywords: input.maxKeywords
           },
-          include: { rows: true }
+          include: {
+            rows: true,
+            job: { select: { scopeSnapshot: true, attempt: true } }
+          }
         });
       });
-      return keywordResearchSummary(run, run.rows);
+      return keywordResearchSummary(run, run.rows, run.job);
     } catch (error) {
       if (!unique(error)) throw error;
       const winner = await this.prisma.job.findUnique({
@@ -189,11 +202,14 @@ export class KeywordResearchService {
   ): Promise<readonly KeywordResearchRunSummary[]> {
     const runs = await this.prisma.keywordResearchRun.findMany({
       where: { workspaceId, projectId, job: { dismissedAt: null } },
-      include: { rows: { orderBy: { ordinal: "asc" }, take: 500 } },
+      include: {
+        rows: { orderBy: { ordinal: "asc" }, take: 500 },
+        job: { select: { scopeSnapshot: true, attempt: true } }
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 25
     });
-    return runs.map((run) => keywordResearchSummary(run, run.rows));
+    return runs.map((run) => keywordResearchSummary(run, run.rows, run.job));
   }
 
   public async get(
@@ -202,7 +218,7 @@ export class KeywordResearchService {
     runId: string
   ): Promise<KeywordResearchRunSummary> {
     const run = await this.required(workspaceId, projectId, runId);
-    return keywordResearchSummary(run, run.rows);
+    return keywordResearchSummary(run, run.rows, run.job);
   }
 
   public async rows(
@@ -491,7 +507,10 @@ export class KeywordResearchService {
   private async required(workspaceId: string, projectId: string, runId: string) {
     const run = await this.prisma.keywordResearchRun.findFirst({
       where: { id: runId, workspaceId, projectId },
-      include: { rows: { orderBy: { ordinal: "asc" }, take: 500 } }
+      include: {
+        rows: { orderBy: { ordinal: "asc" }, take: 500 },
+        job: { select: { scopeSnapshot: true, attempt: true } }
+      }
     });
     if (!run) throw new NotFoundException("Keyword research run not found");
     return run;
@@ -539,6 +558,8 @@ function researchInputSnapshot(
 function replay(
   job: {
     readonly requestHash: Uint8Array | null;
+    readonly scopeSnapshot: Prisma.JsonValue;
+    readonly attempt: number;
     readonly keywordResearchRun: ({
       readonly rows: readonly import("../generated/prisma/client.js").KeywordResearchRow[];
     } & import("../generated/prisma/client.js").KeywordResearchRun) | null;
@@ -552,7 +573,7 @@ function replay(
   ) {
     throw new ConflictException("Idempotency key was already used");
   }
-  return keywordResearchSummary(job.keywordResearchRun, job.keywordResearchRun.rows);
+  return keywordResearchSummary(job.keywordResearchRun, job.keywordResearchRun.rows, job);
 }
 
 function unique(error: unknown): boolean {

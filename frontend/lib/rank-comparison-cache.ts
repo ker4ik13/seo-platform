@@ -9,3 +9,15 @@ export function mergeRankComparisonItems(
   if (next.size === 0) return current;
   return new Map([...current, ...next]);
 }
+
+export function unresolvedRankComparisonKeywordIds(
+  keywordIds: readonly string[],
+  dimensionKeys: readonly string[],
+  resolvedKeys: ReadonlySet<string>
+): readonly string[] {
+  return keywordIds.filter((keywordId) =>
+    dimensionKeys.some((dimensionKey) =>
+      !resolvedKeys.has(`${keywordId}:${dimensionKey}`)
+    )
+  );
+}

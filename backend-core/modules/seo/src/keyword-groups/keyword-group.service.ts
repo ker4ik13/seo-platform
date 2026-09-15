@@ -31,13 +31,23 @@ export class KeywordGroupService {
     projectId: string
   ): Promise<readonly SemanticKeywordGroup[]> {
     return this.prisma.$transaction(async (transaction) => {
-      await lockGroupTree(transaction, projectId);
-      await ensureSystemGroups(transaction, workspaceId, projectId);
-      const rows = await transaction.keywordGroup.findMany({
+      let rows = await transaction.keywordGroup.findMany({
         where: { workspaceId, projectId, status: "ACTIVE" },
         orderBy: [{ position: "asc" }, { id: "asc" }],
         include: GROUP_INCLUDE
       });
+      const systemKinds = new Set(
+        rows.flatMap(({ systemKind }) => systemKind ? [systemKind] : [])
+      );
+      if (!systemKinds.has("UNGROUPED") || !systemKinds.has("TRASH")) {
+        await lockGroupTree(transaction, projectId);
+        await ensureSystemGroups(transaction, workspaceId, projectId);
+        rows = await transaction.keywordGroup.findMany({
+          where: { workspaceId, projectId, status: "ACTIVE" },
+          orderBy: [{ position: "asc" }, { id: "asc" }],
+          include: GROUP_INCLUDE
+        });
+      }
       return rows.map(groupItem);
     });
   }

@@ -7,7 +7,8 @@ import {
   type SemanticKeywordGroup,
   type SemanticRankDimension,
   type SerpWorkbenchReport,
-  type SerpWorkbenchResult
+  type SerpWorkbenchResult,
+  type SerpWorkbenchSnapshotProvider
 } from "@seo-platform/contracts";
 import {
   useCallback,
@@ -546,6 +547,7 @@ export function SerpWorkbench({
           onStarted={() => { setCollectionOpen(false); setError(undefined); }}
           projectDomain={projectDomain}
           projectId={projectId}
+          workspaceId={workspaceId}
         />
       : <SemanticPositionDialog activeGroupId={groupId || undefined} groups={groups.map((group) => ({ ...group }))} initialSelections={[]} mode="competitors" onClose={() => setCollectionOpen(false)} onStarted={() => { setCollectionOpen(false); setError(undefined); }} projectId={projectId} {...(projectSearchCity ? { projectSearchCity } : {})} workspaceId={workspaceId} />)}
   </main>;
@@ -601,7 +603,7 @@ function SerpSnapshotCell({
   kind: "organic" | "ai";
   observedAt: string;
   projectDomain: string;
-  provider: "ARSENKIN" | "XMLSTOCK";
+  provider: SerpWorkbenchSnapshotProvider;
   results: readonly SerpWorkbenchResult[];
   watchedDomains: readonly string[];
 }>) {
@@ -619,7 +621,11 @@ function SerpSnapshotCell({
             minute: "2-digit"
           }).format(new Date(observedAt))}
         </time>
-        <span>{provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"}</span>
+        <span>{provider === "XMLSTOCK"
+          ? "XMLStock"
+          : provider === "KEY_COLLECTOR"
+            ? "Key Collector · импорт"
+            : "Arsenkin"}</span>
       </header>
       <ol>
         {visible.map((result) => {

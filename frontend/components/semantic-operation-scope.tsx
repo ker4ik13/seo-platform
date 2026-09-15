@@ -9,17 +9,21 @@ import {
   type CSSProperties,
   type UIEvent
 } from "react";
-import type { TrackingContextScopeMode } from "@seo-platform/contracts";
+import type {
+  SemanticOperationScopeKeyword,
+  TrackingContextScopeMode
+} from "@seo-platform/contracts";
 import {
   browserApiCollectionRequest,
   type BrowserApiCollection
 } from "../lib/browser-api";
 import {
   expandedAncestorIds,
-  treeIdsWithDescendants,
+  resolvedFolderSelectionIds,
   visibleFolderRows
 } from "../lib/semantic-operation-tree";
-import { semanticOperationScopeQuery } from "../lib/semantic-operation-scope-query";
+import { semanticOperationScopePageInput } from "../lib/semantic-operation-scope-query";
+import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { Icon } from "./icon";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -44,6 +48,9 @@ export interface SemanticOperationGroup {
 export interface SemanticOperationScopeState {
   readonly mode: TrackingContextScopeMode;
   readonly groupIds: readonly string[];
+  readonly descendantGroupIds?: readonly string[];
+  /** Legacy all-roots expansion used by profiles saved before per-folder controls. */
+  readonly includeDescendants?: boolean;
 }
 
 export type SemanticOperationScopeCountChange = (
@@ -124,6 +131,12 @@ export function SemanticOperationScope({
           : []
       )
   );
+  const [descendantGroupIds, setDescendantGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set(
+      initialScope?.descendantGroupIds ??
+      (initialScope?.includeDescendants ? initialScope.groupIds : [])
+    )
+  );
   const [expandedGroupIds, setExpandedGroupIds] = useState<ReadonlySet<string>>(
     () => expandedAncestorIds(
       groups,
@@ -135,13 +148,26 @@ export function SemanticOperationScope({
     [groups]
   );
   const resolvedGroupIds = useMemo(
-    () => treeIdsWithDescendants(availableGroups, selectedGroupIds),
-    [availableGroups, selectedGroupIds]
+    () => resolvedFolderSelectionIds(
+      availableGroups,
+      selectedGroupIds,
+      descendantGroupIds
+    ),
+    [availableGroups, descendantGroupIds, selectedGroupIds]
+  );
+  const resolvedGroupIdSet = useMemo(
+    () => new Set(resolvedGroupIds),
+    [resolvedGroupIds]
   );
   const visibleGroups = useMemo(
     () => visibleFolderRows(availableGroups, expandedGroupIds),
     [availableGroups, expandedGroupIds]
   );
+  useEffect(() => {
+    if (selectedGroupIds.size === 0 && descendantGroupIds.size > 0) {
+      setDescendantGroupIds(new Set());
+    }
+  }, [descendantGroupIds, selectedGroupIds]);
   const visibleQueryOptions = useMemo(() => {
     const result = new Map<string, KeywordListItem>();
     const normalizedSearch = querySearch.trim().toLocaleLowerCase("ru-RU");
@@ -166,7 +192,9 @@ export function SemanticOperationScope({
   useEffect(() => {
     onScopeChange?.({
       mode,
-      groupIds: mode === "GROUPS" ? [...selectedGroupIds] : []
+      groupIds: mode === "GROUPS" ? [...selectedGroupIds] : [],
+      descendantGroupIds:
+        mode === "GROUPS" ? [...descendantGroupIds] : []
     });
     if (mode === "KEYWORDS") {
       onCountChange?.(querySelections.size, false);
@@ -224,7 +252,7 @@ export function SemanticOperationScope({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [maxItems, mode, onChange, onCountChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
+  }, [descendantGroupIds, maxItems, mode, onChange, onCountChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
 
   useEffect(() => {
     queryPaginationControllerRef.current?.abort();
@@ -337,7 +365,25 @@ export function SemanticOperationScope({
   }, [loadNextQueryPage, mode, queryHasNext, queryLoadError]);
 
   function toggleGroup(groupId: string): void {
+    const removing = selectedGroupIds.has(groupId);
     setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+    if (removing) {
+      setDescendantGroupIds((current) => {
+        const next = new Set(current);
+        next.delete(groupId);
+        return next;
+      });
+    }
+  }
+
+  function toggleDescendants(groupId: string): void {
+    setSelectedGroupIds((current) => new Set([...current, groupId]));
+    setDescendantGroupIds((current) => {
       const next = new Set(current);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
@@ -438,7 +484,7 @@ export function SemanticOperationScope({
             type="radio"
           />
           <span><UiText text="Папки" /></span>
-          <b>{selectedGroupIds.size}</b>
+          <b>{resolvedGroupIds.length}</b>
         </label>
       </div>
       {mode === "ALL" ? (
@@ -519,46 +565,66 @@ export function SemanticOperationScope({
           {queryError && <div className="inline-alert warning" role="alert">{<UiText text={queryError ?? ""} />}</div>}
         </div>
       ) : (
-        <div className="semantic-operation-folder-list" aria-label={uiText("Папки запросов")}>
-          {visibleGroups.map(({ group, depth, hasChildren }) => (
-            <div
-              className="semantic-operation-folder-row"
-              key={group.id}
-              style={{ "--folder-depth": depth } as CSSProperties}
-              title={group.path}
-            >
-              {hasChildren ? (
-                <button
-                  aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
-                  aria-expanded={expandedGroupIds.has(group.id)}
-                  className="semantic-operation-folder-toggle"
-                  onClick={() => toggleExpanded(group.id)}
-                  type="button"
+        <div className="semantic-operation-folder-picker">
+          <div className="semantic-operation-folder-options">
+            <span><UiText text="Выбрано папок:" after=" " />{resolvedGroupIds.length}</span>
+          </div>
+          <div className="semantic-operation-folder-list" aria-label={uiText("Папки запросов")}>
+            {visibleGroups.map(({ group, depth, hasChildren }) => {
+              const selected = selectedGroupIds.has(group.id);
+              const includedByParent = !selected && resolvedGroupIdSet.has(group.id);
+              return (
+                <div
+                  className={`semantic-operation-folder-row${includedByParent ? " included-by-parent" : ""}`}
+                  key={group.id}
+                  style={{ "--folder-depth": depth } as CSSProperties}
+                  title={group.path}
                 >
-                  <Icon name="chevronRight" />
-                </button>
-              ) : (
-                <span className="semantic-operation-folder-toggle-spacer" />
-              )}
-              <label>
-                <input
-                  checked={selectedGroupIds.has(group.id)}
-                  onChange={() => toggleGroup(group.id)}
-                  type="checkbox"
-                />
-                <i
-                  aria-hidden="true"
-                  className="semantic-operation-folder-color"
-                  style={{ background: group.color ?? "#a8a5b8" }}
-                />
-                <span>{group.name}</span>
-                <b>{group.keywordCount}</b>
-              </label>
-            </div>
-          ))}
+                  {hasChildren ? (
+                    <button
+                      aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
+                      aria-expanded={expandedGroupIds.has(group.id)}
+                      className="semantic-operation-folder-toggle"
+                      onClick={() => toggleExpanded(group.id)}
+                      type="button"
+                    >
+                      <Icon name="chevronRight" />
+                    </button>
+                  ) : (
+                    <span className="semantic-operation-folder-toggle-spacer" />
+                  )}
+                  <label>
+                    <input
+                      checked={selected || includedByParent}
+                      disabled={includedByParent}
+                      onChange={() => toggleGroup(group.id)}
+                      type="checkbox"
+                    />
+                    <i
+                      aria-hidden="true"
+                      className="semantic-operation-folder-color"
+                      style={{ background: group.color ?? "#a8a5b8" }}
+                    />
+                    <span>{group.name}</span>
+                    <b>{group.keywordCount}</b>
+                  </label>
+                  {hasChildren ? (
+                    <SemanticFolderDescendantsToggle
+                      disabled={includedByParent}
+                      enabled={descendantGroupIds.has(group.id)}
+                      folderName={group.name}
+                      onChange={() => toggleDescendants(group.id)}
+                    />
+                  ) : (
+                    <span className="semantic-folder-descendants-spacer" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
-      <small><UiText text="Текущее выделение таблицы переносится в список конкретных запросов. Родительская папка включает вложенные. Лимит одной операции:" after=" " />{maxItems}.</small>
+      <small><UiText text="Текущее выделение таблицы переносится в список конкретных запросов. У папок с потомками есть отдельная кнопка выбора их поддерева. Лимит одной операции:" after=" " />{maxItems}.</small>
     </section>
   );
 }
@@ -608,10 +674,13 @@ async function loadGroupSelections(
   const selections = new Map<string, SemanticOperationSelection>();
   let cursor: string | undefined;
   do {
-    const query = semanticOperationScopeQuery(groupIds, cursor);
-    const page = await browserApiCollectionRequest<KeywordListItem>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
-      { signal }
+    const page = await browserApiCollectionRequest<SemanticOperationScopeKeyword>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/operation-scope`,
+      {
+        method: "POST",
+        body: semanticOperationScopePageInput(groupIds, cursor),
+        signal
+      }
     );
     if (!cursor && page.page.totalApprox !== undefined) {
       onCount(page.page.totalApprox);
@@ -625,7 +694,7 @@ async function loadGroupSelections(
       selections.set(keyword.id, {
         id: keyword.id,
         version: keyword.version,
-        label: keyword.textOriginal,
+        label: "",
         isTracked: keyword.isTracked
       });
       if (selections.size > maxItems) {
@@ -649,10 +718,13 @@ async function loadProjectSelections(
   const selections: SemanticOperationSelection[] = [];
   let cursor: string | undefined;
   do {
-    const query = semanticOperationScopeQuery(undefined, cursor);
-    const page = await browserApiCollectionRequest<KeywordListItem>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
-      { signal }
+    const page = await browserApiCollectionRequest<SemanticOperationScopeKeyword>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/operation-scope`,
+      {
+        method: "POST",
+        body: semanticOperationScopePageInput(undefined, cursor),
+        signal
+      }
     );
     if (!cursor && page.page.totalApprox !== undefined) {
       onCount(page.page.totalApprox);
@@ -663,11 +735,10 @@ async function loadProjectSelections(
       }
     }
     for (const keyword of page.data) {
-      if (keyword.trashed) continue;
       selections.push({
         id: keyword.id,
         version: keyword.version,
-        label: keyword.textOriginal,
+        label: "",
         isTracked: keyword.isTracked
       });
       if (selections.length > maxItems) {

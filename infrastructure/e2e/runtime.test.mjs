@@ -159,7 +159,12 @@ test("production runtime through Caddy: tenant security, real writes and respons
         assert.ok(dimensions.document <= width + 1, `${index} overflows at ${width}px`);
         const heading = await page.locator('.page-heading').boundingBox();
         const navigation = await page.locator('.settings-tabs').boundingBox();
-        assert.ok(heading && navigation && navigation.y >= heading.y + heading.height - 1, `${index}: settings navigation overlaps the page heading`);
+        const separated = heading && navigation && (
+          navigation.y >= heading.y + heading.height - 1 ||
+          navigation.x + navigation.width <= heading.x + 1 ||
+          heading.x + heading.width <= navigation.x + 1
+        );
+        assert.ok(separated, `${index}: settings navigation overlaps the page heading`);
         if (path === "/app/settings/billing") {
           assert.equal(await page.locator('.billing-cancel-subscription').count(), 0, "A permanent free tier has no paid renewal to cancel");
           assert.equal(/9999|10000/u.test(await page.locator('.billing-stack').innerText()), false, "Do not expose the free-tier date sentinel");

@@ -8,25 +8,26 @@ import {
 } from "react";
 import {
   expandedAncestorIds,
-  treeIdsWithDescendants,
+  resolvedFolderSelectionIds,
   visibleFolderRows
 } from "../lib/semantic-operation-tree";
 import { Icon } from "./icon";
+import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { UiText, useUiLocale } from "./ui-locale";
 
 
 export function SemanticExportFolderPicker({
+  descendantGroupIds,
   disabled,
   groups,
-  includeDescendants,
-  onIncludeDescendantsChange,
+  onDescendantGroupIdsChange,
   onSelectedGroupIdsChange,
   selectedGroupIds
 }: Readonly<{
   disabled: boolean;
+  descendantGroupIds: ReadonlySet<string>;
   groups: readonly SemanticExportFolderGroup[];
-  includeDescendants: boolean;
-  onIncludeDescendantsChange: (value: boolean) => void;
+  onDescendantGroupIdsChange: (value: ReadonlySet<string>) => void;
   onSelectedGroupIdsChange: (value: ReadonlySet<string>) => void;
   selectedGroupIds: ReadonlySet<string>;
 }>) {
@@ -41,10 +42,12 @@ export function SemanticExportFolderPicker({
     () => expandedAncestorIds(availableGroups, selectedGroupIds)
   );
   const includedGroupIds = useMemo(
-    () => includeDescendants
-      ? new Set(treeIdsWithDescendants(availableGroups, selectedGroupIds))
-      : new Set(selectedGroupIds),
-    [availableGroups, includeDescendants, selectedGroupIds]
+    () => new Set(resolvedFolderSelectionIds(
+      availableGroups,
+      selectedGroupIds,
+      descendantGroupIds
+    )),
+    [availableGroups, descendantGroupIds, selectedGroupIds]
   );
   const includedKeywordRows = useMemo(() => {
     let total = 0;
@@ -80,25 +83,28 @@ export function SemanticExportFolderPicker({
     if (ancestors.size === 0) return;
     setExpandedGroupIds((current) => new Set([...current, ...ancestors]));
   }, [availableGroups, selectedGroupIds]);
-
   function toggleGroup(groupId: string): void {
     const next = new Set(selectedGroupIds);
-    if (next.has(groupId)) next.delete(groupId);
-    else next.add(groupId);
+    if (next.has(groupId)) {
+      next.delete(groupId);
+      const descendantRoots = new Set(descendantGroupIds);
+      descendantRoots.delete(groupId);
+      onDescendantGroupIdsChange(descendantRoots);
+    } else next.add(groupId);
     onSelectedGroupIdsChange(next);
   }
 
+  function toggleDescendants(groupId: string): void {
+    onSelectedGroupIdsChange(new Set([...selectedGroupIds, groupId]));
+    const next = new Set(descendantGroupIds);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    onDescendantGroupIdsChange(next);
+  }
+
   function selectAll(): void {
-    if (!includeDescendants) {
-      onSelectedGroupIdsChange(new Set(availableGroups.map(({ id }) => id)));
-      return;
-    }
-    const availableIds = new Set(availableGroups.map(({ id }) => id));
-    onSelectedGroupIdsChange(new Set(
-      availableGroups
-        .filter(({ parentId }) => !parentId || !availableIds.has(parentId))
-        .map(({ id }) => id)
-    ));
+    onSelectedGroupIdsChange(new Set(availableGroups.map(({ id }) => id)));
+    onDescendantGroupIdsChange(new Set());
   }
 
   return (
@@ -112,7 +118,10 @@ export function SemanticExportFolderPicker({
         <div className="semantic-export-folder-actions">
           <button disabled={disabled || availableGroups.length === 0} onClick={selectAll} type="button">
             <UiText text="Выбрать все" /></button>
-          <button disabled={disabled || selectedGroupIds.size === 0} onClick={() => onSelectedGroupIdsChange(new Set())} type="button">
+          <button disabled={disabled || selectedGroupIds.size === 0} onClick={() => {
+            onSelectedGroupIdsChange(new Set());
+            onDescendantGroupIdsChange(new Set());
+          }} type="button">
             <UiText text="Очистить" /></button>
         </div>
       </header>
@@ -127,15 +136,6 @@ export function SemanticExportFolderPicker({
             type="search"
             value={search}
           />
-        </label>
-        <label className="semantic-control-check semantic-export-folder-descendants">
-          <input
-            checked={includeDescendants}
-            disabled={disabled}
-            onChange={(event) => onIncludeDescendantsChange(event.target.checked)}
-            type="checkbox"
-          />
-          <span><UiText text="Включать все вложенные папки выбранных" /></span>
         </label>
       </div>
       <div className="semantic-operation-folder-list semantic-export-folder-tree" aria-label={uiText("Дерево папок карты сайта")}>
@@ -170,8 +170,8 @@ export function SemanticExportFolderPicker({
               )}
               <label>
                 <input
-                  checked={selected}
-                  disabled={disabled}
+                  checked={selected || includedByParent}
+                  disabled={disabled || includedByParent}
                   onChange={() => toggleGroup(group.id)}
                   type="checkbox"
                 />
@@ -184,6 +184,16 @@ export function SemanticExportFolderPicker({
                 {includedByParent && <em><UiText text="из вложенных" /></em>}
                 <b>{formatInteger(group.keywordCount, uiLocale)}</b>
               </label>
+              {hasChildren ? (
+                <SemanticFolderDescendantsToggle
+                  disabled={disabled || includedByParent}
+                  enabled={descendantGroupIds.has(group.id)}
+                  folderName={group.name}
+                  onChange={() => toggleDescendants(group.id)}
+                />
+              ) : (
+                <span className="semantic-folder-descendants-spacer" />
+              )}
             </div>
           );
         })}

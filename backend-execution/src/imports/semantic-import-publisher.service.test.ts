@@ -127,15 +127,66 @@ test("preserves every Key Collector group membership for a duplicate phrase", ()
   ]);
 });
 
+test("keeps merged KC4 history found state and position coherent", () => {
+  const base = {
+    sourceRowNumber: "1",
+    textOriginal: "одинаковая фраза",
+    textNormalized: "одинаковая фраза",
+    normalizedHash: "f".repeat(64),
+    language: "ru",
+    customValues: {}
+  } as const;
+  const history = {
+    source: "KEY_COLLECTOR" as const,
+    searchEngine: "YANDEX" as const,
+    countryCode: "RU",
+    regionCode: "kc4-import",
+    regionLabel: "Импорт Key Collector",
+    language: "ru",
+    device: "DESKTOP" as const,
+    observedAt: "2026-08-18T00:00:00.000Z"
+  };
+  const merged = mergeCanonicalPublishRows([
+    {
+      ...base,
+      positionHistory: [{ ...history, found: true, position: 36 }]
+    },
+    {
+      ...base,
+      sourceRowNumber: "2",
+      positionHistory: [{ ...history, found: false }]
+    }
+  ]);
+
+  assert.deepEqual(merged.positionHistory, [{
+    ...history,
+    found: true,
+    position: 36
+  }]);
+  assert.ok(canonicalPublishRow(merged));
+});
+
 test("canonicalizes nested KC4 position fields before hashing a publish chunk", () => {
   const canonical = canonicalPublishRow({
     language: "ru",
     groupPath: ["Статьи", "Информационка"],
     positions: [
       {
+        source: "KEY_COLLECTOR",
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP",
+        observedAt: "2026-08-01T00:00:00.000Z",
         found: true,
         position: 7,
         rankingUrl: "https://example.com/page",
+        serpResults: [{
+          title: "Глубокий результат",
+          rankingUrl: "https://example.com/deep",
+          position: 43
+        }],
         searchEngine: "YANDEX"
       },
       {
@@ -154,10 +205,22 @@ test("canonicalizes nested KC4 position fields before hashing a publish chunk", 
   assert.ok(canonical);
   assert.deepEqual(canonical.positions, [
     {
+      source: "KEY_COLLECTOR",
+      countryCode: "RU",
+      regionCode: "213",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP",
+      observedAt: "2026-08-01T00:00:00.000Z",
       searchEngine: "YANDEX",
       found: true,
       position: 7,
-      rankingUrl: "https://example.com/page"
+      rankingUrl: "https://example.com/page",
+      serpResults: [{
+        position: 43,
+        rankingUrl: "https://example.com/deep",
+        title: "Глубокий результат"
+      }]
     },
     { searchEngine: "GOOGLE", found: false }
   ]);
@@ -177,10 +240,22 @@ test("canonicalizes nested KC4 position fields before hashing a publish chunk", 
         frequencies: [{ type: "BASE", value: "120" }],
         positions: [
           {
+            source: "KEY_COLLECTOR",
+            countryCode: "RU",
+            regionCode: "213",
+            regionLabel: "Москва",
+            language: "ru",
+            device: "DESKTOP",
+            observedAt: "2026-08-01T00:00:00.000Z",
             searchEngine: "YANDEX",
             found: true,
             position: 7,
-            rankingUrl: "https://example.com/page"
+            rankingUrl: "https://example.com/page",
+            serpResults: [{
+              position: 43,
+              rankingUrl: "https://example.com/deep",
+              title: "Глубокий результат"
+            }]
           },
           { searchEngine: "GOOGLE", found: false }
         ],
@@ -188,6 +263,62 @@ test("canonicalizes nested KC4 position fields before hashing a publish chunk", 
       }
     ])
   );
+});
+
+test("merges duplicate KC4 rows into one SERP result per position", () => {
+  const base = {
+    sourceRowNumber: "2",
+    textOriginal: "продвижение сайта",
+    textNormalized: "продвижение сайта",
+    normalizedHash: "e".repeat(64),
+    language: "ru",
+    customValues: {}
+  } as const;
+  const merged = mergeCanonicalPublishRows([
+    {
+      ...base,
+      groupPath: ["Первая папка"],
+      positions: [{
+        searchEngine: "YANDEX",
+        found: true,
+        position: 1,
+        rankingUrl: "https://example.com/first",
+        serpResults: [
+          { position: 1, rankingUrl: "https://example.com/first" },
+          { position: 43, rankingUrl: "https://example.com/deep" }
+        ]
+      }]
+    },
+    {
+      ...base,
+      sourceRowNumber: "9",
+      groupPath: ["Вторая папка"],
+      positions: [{
+        searchEngine: "YANDEX",
+        found: true,
+        position: 1,
+        rankingUrl: "https://example.com/first",
+        serpResults: [
+          {
+            position: 1,
+            rankingUrl: "https://example.com/first",
+            title: "Главная"
+          },
+          { position: 43, rankingUrl: "https://example.com/deep" }
+        ]
+      }]
+    }
+  ]);
+
+  assert.deepEqual(merged.positions?.[0]?.serpResults, [
+    {
+      position: 1,
+      rankingUrl: "https://example.com/first",
+      title: "Главная"
+    },
+    { position: 43, rankingUrl: "https://example.com/deep" }
+  ]);
+  assert.ok(canonicalPublishRow(merged));
 });
 
 test("canonicalizes nested manual history fields before hashing a publish chunk", () => {

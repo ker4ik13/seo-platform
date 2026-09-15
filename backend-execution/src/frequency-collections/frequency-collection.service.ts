@@ -27,6 +27,11 @@ import {
   frequencyCollectionSummary,
   type FrequencyJob
 } from "./frequency-collection-record.js";
+import {
+  storedXmlStockOperationUsage,
+  xmlStockOperationUsage,
+  xmlStockUsageWithActual
+} from "../integrations/xmlstock-pricing.js";
 
 const CREATE_SCOPE = "frequency-collection:create";
 const ARSENKIN_WORDSTAT_MAX_ATTEMPTS = 720;
@@ -75,6 +80,14 @@ export class FrequencyCollectionService {
         "Seasonality currently supports only base frequency"
       );
     }
+    const providerUsage = route.provider === "XMLSTOCK"
+      ? xmlStockOperationUsage(
+          route.xmlStockPricing,
+          "WORDSTAT",
+          input.items.length * input.types.length,
+          input.items.length * input.types.length
+        )
+      : undefined;
     const providerKeywordLimit = frequencyCollectionKeywordLimit;
     if (input.items.length > providerKeywordLimit) {
       throw new BadRequestException(
@@ -126,8 +139,9 @@ export class FrequencyCollectionService {
                   outcome: entry.outcome,
                   ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}),
                   occurredAt: entry.occurredAt
-                }))
-              },
+                })),
+                ...(providerUsage ? { providerUsage } : {})
+              } as unknown as Prisma.InputJsonValue,
               progressTotal: BigInt(input.items.length),
               progressUnit: "keywords",
               credentialMode: route.credentialMode,
@@ -203,7 +217,8 @@ export class FrequencyCollectionService {
     cursor?: number,
     onlyFailed = false
   ): Promise<InternalFrequencyOperationScope> {
-    const job = await this.prisma.job.findFirst({
+    const [job, attempts] = await Promise.all([
+      this.prisma.job.findFirst({
       where: {
         id: jobId,
         workspaceId,
@@ -211,6 +226,10 @@ export class FrequencyCollectionService {
         type: "FREQUENCY_COLLECTION"
       },
       select: {
+        provider: true,
+        scopeSnapshot: true,
+        inputSnapshot: true,
+        progressCurrent: true,
         items: {
           where: { ...(cursor === undefined ? {} : { sequence: { gt: cursor } }), ...(onlyFailed ? { status: "FAILED_FINAL" as const } : {}) },
           orderBy: { sequence: "asc" },
@@ -223,15 +242,35 @@ export class FrequencyCollectionService {
           }
         }
       }
-    });
+      }),
+      this.prisma.jobItem.aggregate({
+        where: { jobId, workspaceId, projectId },
+        _sum: { attempt: true }
+      })
+    ]);
     if (!job) throw new NotFoundException("Frequency collection not found");
     const items = job.items.slice(0, limit);
     const hasNext = job.items.length > limit;
     const last = items.at(-1);
+    const storedUsage = storedXmlStockOperationUsage(
+      record(job.scopeSnapshot)?.providerUsage
+    );
+    const storedTypes = record(job.inputSnapshot)?.types;
+    const typeCount = Array.isArray(storedTypes) ? storedTypes.length : 0;
+    const completed = Number(job.progressCurrent);
+    const totalAttempts = attempts._sum.attempt ?? 0;
+    const providerUsage = job.provider === "XMLSTOCK" && typeCount > 0
+      ? xmlStockUsageWithActual(
+          storedUsage,
+          completed * typeCount,
+          totalAttempts * typeCount
+        )
+      : undefined;
     return {
       workspaceId,
       projectId,
       jobId,
+      ...(providerUsage ? { providerUsage } : {}),
       items: items.map(frequencyResultScopeItem),
       page: {
         hasNext,

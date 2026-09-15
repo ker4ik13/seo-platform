@@ -18,6 +18,7 @@ import type { IntegrationCredential } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeIntegrationCredentialCapabilities } from "./integration-credential-capabilities.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
+import { xmlStockPricingFromProviderMeta } from "./xmlstock-pricing.js";
 import type { PlatformCredentialMaterial } from "./integration-credential-crypto.service.js";
 import { integrationCredentialId } from "./integration-credential-id.js";
 import {
@@ -680,6 +681,10 @@ export function safeCredentialQuota(
     );
     const amount = decimalString(account.balance);
     const frozenAmount = decimalString(account.frozenBalance);
+    const xmlStockPricing = xmlStockPricingFromProviderMeta(
+      providerMeta,
+      lastSuccessAt ?? undefined
+    );
     if (remaining === undefined || amount === undefined) {
       return { status: "NOT_AVAILABLE" };
     }
@@ -698,6 +703,7 @@ export function safeCredentialQuota(
       ...(tariffDaysRemaining === undefined
         ? {}
         : { tariffDaysRemaining }),
+      ...(xmlStockPricing ? { xmlStockPricing } : {}),
       ...(observedAt ? { observedAt } : {})
     };
   }

@@ -6,6 +6,174 @@ export const integrationProviders = [
 
 export type IntegrationProvider = (typeof integrationProviders)[number];
 
+export const xmlStockTariffCodes = [
+  "BASIC",
+  "OPTIMAL",
+  "MAXIMUM",
+  "PREMIUM",
+  "CUSTOM"
+] as const;
+
+export type XmlStockTariffCode = (typeof xmlStockTariffCodes)[number];
+
+export const xmlStockOperationProducts = [
+  "YANDEX_SEARCH_API",
+  "YANDEX_LIVE",
+  "YANDEX_TURBO",
+  "GOOGLE_LIVE",
+  "WORDSTAT"
+] as const;
+
+export type XmlStockOperationProduct =
+  (typeof xmlStockOperationProducts)[number];
+
+/** Safe projection of the account-specific rates returned by `info=user`. */
+export interface XmlStockPricingSummary {
+  readonly tariffCode: XmlStockTariffCode;
+  readonly currency: "RUB";
+  readonly priceUnit: "PER_1000_REQUESTS";
+  readonly pricesPerThousand: Readonly<
+    Record<XmlStockOperationProduct, string>
+  >;
+  readonly observedAt?: string;
+}
+
+/**
+ * Immutable provider-cost snapshot attached to an operation. Micro values are
+ * RUB × 1,000,000 and ranges remain explicit for Turbo and retry ambiguity.
+ */
+export interface XmlStockOperationUsageSummary {
+  readonly provider: "XMLSTOCK";
+  readonly product: XmlStockOperationProduct;
+  readonly tariffCode: XmlStockTariffCode;
+  readonly currency: "RUB";
+  readonly pricePerThousand: string;
+  readonly unitPriceMicro: string;
+  readonly estimatedRequestCount: {
+    readonly minimum: string;
+    readonly maximum: string;
+  };
+  readonly estimatedCostMicro: {
+    readonly minimum: string;
+    readonly maximum: string;
+  };
+  readonly actualRequestCount?: {
+    readonly minimum: string;
+    readonly maximum: string;
+  };
+  readonly actualCostMicro?: {
+    readonly minimum: string;
+    readonly maximum: string;
+  };
+  readonly pricedAt: string;
+  readonly priceSource:
+    | "XMLSTOCK_ACCOUNT_API"
+    | "XMLSTOCK_ACCOUNT_API_WITH_PUBLIC_TURBO_SURCHARGE";
+}
+
+export function parseXmlStockOperationUsageSummary(
+  value: unknown
+): XmlStockOperationUsageSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Invalid XMLStock operation usage summary");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  const required = [
+    "provider",
+    "product",
+    "tariffCode",
+    "currency",
+    "pricePerThousand",
+    "unitPriceMicro",
+    "estimatedRequestCount",
+    "estimatedCostMicro",
+    "pricedAt",
+    "priceSource"
+  ];
+  const optional = ["actualRequestCount", "actualCostMicro"];
+  if (
+    required.some((key) => !(key in input)) ||
+    Object.keys(input).some(
+      (key) => !required.includes(key) && !optional.includes(key)
+    ) ||
+    input.provider !== "XMLSTOCK" ||
+    !xmlStockOperationProducts.includes(input.product as XmlStockOperationProduct) ||
+    !xmlStockTariffCodes.includes(input.tariffCode as XmlStockTariffCode) ||
+    input.currency !== "RUB" ||
+    typeof input.pricePerThousand !== "string" ||
+    !/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/u.test(input.pricePerThousand) ||
+    typeof input.unitPriceMicro !== "string" ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(input.unitPriceMicro) ||
+    typeof input.pricedAt !== "string" ||
+    Number.isNaN(Date.parse(input.pricedAt)) ||
+    new Date(input.pricedAt).toISOString() !== input.pricedAt ||
+    input.priceSource !== "XMLSTOCK_ACCOUNT_API" &&
+      input.priceSource !== "XMLSTOCK_ACCOUNT_API_WITH_PUBLIC_TURBO_SURCHARGE" ||
+    (input.actualRequestCount === undefined) !==
+      (input.actualCostMicro === undefined)
+  ) {
+    throw new TypeError("Invalid XMLStock operation usage summary");
+  }
+  const estimatedRequestCount = xmlStockUsageRange(input.estimatedRequestCount);
+  const estimatedCostMicro = xmlStockUsageRange(input.estimatedCostMicro);
+  const actualRequestCount = input.actualRequestCount === undefined
+    ? undefined
+    : xmlStockUsageRange(input.actualRequestCount);
+  const actualCostMicro = input.actualCostMicro === undefined
+    ? undefined
+    : xmlStockUsageRange(input.actualCostMicro);
+  const unit = BigInt(input.unitPriceMicro);
+  if (
+    BigInt(estimatedRequestCount.minimum) * unit !==
+      BigInt(estimatedCostMicro.minimum) ||
+    BigInt(estimatedRequestCount.maximum) * unit !==
+      BigInt(estimatedCostMicro.maximum) ||
+    (actualRequestCount !== undefined && actualCostMicro !== undefined &&
+      (BigInt(actualRequestCount.minimum) * unit !==
+        BigInt(actualCostMicro.minimum) ||
+        BigInt(actualRequestCount.maximum) * unit !==
+          BigInt(actualCostMicro.maximum)))
+  ) {
+    throw new TypeError("Invalid XMLStock operation usage summary");
+  }
+  return {
+    provider: "XMLSTOCK",
+    product: input.product as XmlStockOperationProduct,
+    tariffCode: input.tariffCode as XmlStockTariffCode,
+    currency: "RUB",
+    pricePerThousand: input.pricePerThousand,
+    unitPriceMicro: input.unitPriceMicro,
+    estimatedRequestCount,
+    estimatedCostMicro,
+    ...(actualRequestCount && actualCostMicro
+      ? { actualRequestCount, actualCostMicro }
+      : {}),
+    pricedAt: input.pricedAt,
+    priceSource: input.priceSource as XmlStockOperationUsageSummary["priceSource"]
+  };
+}
+
+function xmlStockUsageRange(value: unknown): {
+  readonly minimum: string;
+  readonly maximum: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Invalid XMLStock usage range");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (
+    Object.keys(input).length !== 2 ||
+    typeof input.minimum !== "string" ||
+    typeof input.maximum !== "string" ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(input.minimum) ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(input.maximum) ||
+    BigInt(input.minimum) > BigInt(input.maximum)
+  ) {
+    throw new TypeError("Invalid XMLStock usage range");
+  }
+  return { minimum: input.minimum, maximum: input.maximum };
+}
+
 export const integrationCapabilities = [
   "SERP_RANK_TRACKING",
   "SERP_COLLECTION",
@@ -94,6 +262,8 @@ export type IntegrationCredentialQuotaSummary =
       readonly usedMonth?: number;
       readonly frozenRemaining?: number;
       readonly tariffDaysRemaining?: number;
+      /** Current account-specific XMLStock rates; absent for other providers. */
+      readonly xmlStockPricing?: XmlStockPricingSummary;
       readonly observedAt?: string;
     };
 

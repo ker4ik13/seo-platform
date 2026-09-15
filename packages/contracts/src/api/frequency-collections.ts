@@ -3,7 +3,8 @@ import type { JobCapacityEntitlement } from "./billing.js";
 import type { SemanticKeywordBulkSelection } from "./keywords.js";
 import type {
   ConnectorOperationAttemptSummary,
-  ConnectorRoutingScope
+  ConnectorRoutingScope,
+  XmlStockOperationUsageSummary
 } from "./integrations.js";
 import type {
   RankEstimateProvider,
@@ -197,6 +198,7 @@ export interface FrequencyCollectionSummary {
   readonly provider: FrequencyCollectionProvider;
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
+  readonly providerUsage?: XmlStockOperationUsageSummary;
   readonly status: FrequencyCollectionStatus;
   readonly stage?: string;
   readonly selectedKeywords: number;
@@ -361,7 +363,7 @@ export interface SemanticKeywordCompetitorSnapshot extends SemanticRankDimension
   readonly contextName: string;
   readonly searchEngine: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
-  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly provider: "ARSENKIN" | "XMLSTOCK" | "KEY_COLLECTOR";
   readonly observedAt: string;
   readonly results: readonly SemanticKeywordCompetitorResult[];
 }

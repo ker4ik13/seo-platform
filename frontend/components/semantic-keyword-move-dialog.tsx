@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import type { SemanticKeywordBulkResult } from "@seo-platform/contracts";
 import { BrowserApiError } from "../lib/browser-api";
 import { updateSemanticKeywordsInBatches } from "../lib/semantic-keyword-bulk";
@@ -32,6 +32,7 @@ export function SemanticKeywordMoveDialog({
   }>[];
 }>) {
   const { t: uiText } = useUiLocale();
+  const formId = useId();
   const availableGroups = useMemo(
     () => groups.filter(({ systemKind }) => !systemKind),
     [groups]
@@ -66,13 +67,23 @@ export function SemanticKeywordMoveDialog({
 
   return (
     <SemanticModal
+      bodyLayout="edge"
+      closeDisabled={saving}
       description={uiText("Выбрано запросов: {0}. Выберите папку в дереве — вложенность и путь сохранятся.", [String(selections.length)])}
+      footer={
+        <div className="semantic-modal-actions">
+          <button className="secondary-button" disabled={saving} onClick={onClose} type="button"><UiText text="Отмена" /></button>
+          <button className="primary-button" disabled={saving} form={formId} type="submit">
+            {saving ? <UiText text="Переносим…" /> : <UiText text="Перенести ({0})" values={[String(selections.length)]} />}
+          </button>
+        </div>
+      }
       onClose={saving ? () => undefined : onClose}
       presenceKey="semantic-modal:move-keywords"
       size="medium"
       title={uiText("Перенести запросы")}
     >
-      <form className="semantic-dialog-form semantic-move-dialog" onSubmit={(event) => void submit(event)}>
+      <form className="semantic-dialog-form semantic-move-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         <div className="semantic-move-current-summary">
           <span className="semantic-move-current-icon"><Icon name="inbox" /></span>
           <span>
@@ -108,12 +119,6 @@ export function SemanticKeywordMoveDialog({
         </details>
 
         {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
-        <div className="semantic-modal-actions">
-          <button className="secondary-button" disabled={saving} onClick={onClose} type="button"><UiText text="Отмена" /></button>
-          <button className="primary-button" disabled={saving} type="submit">
-            {saving ? <UiText text="Переносим…" /> : <UiText text="Перенести ({0})" values={[String(selections.length)]} />}
-          </button>
-        </div>
       </form>
     </SemanticModal>
   );

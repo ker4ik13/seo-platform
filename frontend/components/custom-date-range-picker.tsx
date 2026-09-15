@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import {
+  dateRangePreset,
+  selectDateRangeDay
+} from "../lib/date-range-selection";
 import { Icon } from "./icon";
 import { useUiLocale, UiText } from "./ui-locale";
 
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
 const DEFAULT_CUSTOM_RANGE_DAYS = 30;
-
-type DateBoundary = "FROM" | "TO";
 
 export interface CustomDateRangeValue {
   readonly from: string;
@@ -21,12 +24,13 @@ export function CustomDateRangePicker({
   availableRange,
   className,
   dialogLabel = "Выбрать период графика",
+  disabled = false,
   modal = false,
   onApply,
   onOpenChange,
   onReset,
   open,
-  periodLabel = "Период графика",
+  periodLabel = "",
   rangeLabel = "Доступные срезы:",
   resetLabel = "Вернуть 30 дней",
   triggerLabel = "Свой период",
@@ -37,6 +41,7 @@ export function CustomDateRangePicker({
   availableRange: CustomDateRangeValue;
   className?: string;
   dialogLabel?: string;
+  disabled?: boolean;
   modal?: boolean;
   onApply: (range: CustomDateRangeValue) => void;
   onOpenChange: (open: boolean) => void;
@@ -52,9 +57,13 @@ export function CustomDateRangePicker({
   const { t: uiText } = useUiLocale();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const availableFrom = availableRange.from;
+  const availableTo = availableRange.to;
+  const valueFrom = value?.from;
+  const valueTo = value?.to;
   const [draftFrom, setDraftFrom] = useState(availableRange.from);
-  const [draftTo, setDraftTo] = useState<string>();
-  const [activeBoundary, setActiveBoundary] = useState<DateBoundary>("FROM");
+  const [draftTo, setDraftTo] = useState(availableRange.to);
+  const [selectingEnd, setSelectingEnd] = useState(false);
   const multipleAvailableMonths = monthKey(availableRange.from) !==
     monthKey(availableRange.to);
   const [anchorMonth, setAnchorMonth] = useState(() =>
@@ -63,16 +72,23 @@ export function CustomDateRangePicker({
 
   useEffect(() => {
     if (!open) return;
-    const next = value ?? defaultCustomRange(availableRange);
+    const next = valueFrom && valueTo
+      ? { from: valueFrom, to: valueTo }
+      : defaultCustomRange({ from: availableFrom, to: availableTo });
     setDraftFrom(next.from);
     setDraftTo(next.to);
-    setActiveBoundary("FROM");
-    setAnchorMonth(initialAnchorMonth(availableRange, multipleAvailableMonths));
+    setSelectingEnd(false);
+    setAnchorMonth(initialAnchorMonth(
+      { from: availableFrom, to: availableTo },
+      multipleAvailableMonths
+    ));
   }, [
-    availableRange,
+    availableFrom,
+    availableTo,
     multipleAvailableMonths,
     open,
-    value
+    valueFrom,
+    valueTo
   ]);
 
   useEffect(() => {
@@ -100,6 +116,10 @@ export function CustomDateRangePicker({
     };
   }, [onOpenChange, open]);
 
+  useEffect(() => {
+    if (disabled && open) onOpenChange(false);
+  }, [disabled, onOpenChange, open]);
+
   const months = useMemo(
     () => multipleAvailableMonths
       ? [anchorMonth, addMonths(anchorMonth, 1)]
@@ -114,31 +134,26 @@ export function CustomDateRangePicker({
   const nextDisabled = multipleAvailableMonths
     ? compareMonths(addMonths(anchorMonth, 1), lastAvailableMonth) >= 0
     : true;
-  const completeDraft = draftTo !== undefined;
+  const completeDraft = Boolean(draftFrom && draftTo);
 
   function selectDate(date: string): void {
-    if (activeBoundary === "FROM") {
-      setDraftFrom(date);
-      setDraftTo((current) => current && current >= date ? current : undefined);
-      setActiveBoundary("TO");
-      return;
-    }
-    if (date < draftFrom) {
-      setDraftFrom(date);
-      setDraftTo(draftFrom);
-    } else {
-      setDraftTo(date);
-    }
+    const next = selectDateRangeDay({
+      from: draftFrom,
+      to: draftTo,
+      selectingEnd
+    }, date);
+    setDraftFrom(next.from);
+    setDraftTo(next.to);
+    setSelectingEnd(next.selectingEnd);
   }
 
-  function editBoundary(boundary: DateBoundary): void {
-    setActiveBoundary(boundary);
-    const date = boundary === "FROM" ? draftFrom : draftTo;
-    if (!date) return;
-    const month = monthStart(date);
-    setAnchorMonth(
-      multipleAvailableMonths ? addMonths(month, -1) : month
-    );
+  function selectPreset(days: number): void {
+    const range = dateRangePreset(availableRange, days);
+    setDraftFrom(range.from);
+    setDraftTo(range.to);
+    setSelectingEnd(false);
+    const month = monthStart(range.to);
+    setAnchorMonth(multipleAvailableMonths ? addMonths(month, -1) : month);
   }
 
   return (
@@ -151,6 +166,7 @@ export function CustomDateRangePicker({
           : uiText(dialogLabel)}
         aria-pressed={active}
         className={`dashboard-date-range-trigger${active ? " is-active" : ""}`}
+        disabled={disabled}
         onClick={() => onOpenChange(!open)}
         ref={triggerRef}
         type="button"
@@ -161,6 +177,7 @@ export function CustomDateRangePicker({
       </button>
 
       {open && (
+        <DateRangeLayerPortal modal={modal}>
         <div className={`custom-date-range-layer${modal ? " is-modal" : ""}`}>
           <div
             aria-hidden="true"
@@ -176,13 +193,16 @@ export function CustomDateRangePicker({
           >
             <header className="dashboard-date-range-header">
               <div>
-                <span><UiText text={periodLabel} /></span>
+                {periodLabel && <span><UiText text={periodLabel} /></span>}
                 <strong className="dashboard-date-range-month-label is-desktop">
                   {formatMonthRange(months, uiLocale)}
                 </strong>
                 <strong className="dashboard-date-range-month-label is-mobile">
                   {formatMonth(months.at(-1)!, uiLocale)}
                 </strong>
+                <small className="dashboard-date-range-available">
+                  <UiText text={rangeLabel} after=" " />{formatSelectedDate(availableRange.from, uiLocale)} — {formatSelectedDate(availableRange.to, uiLocale)}
+                </small>
               </div>
               <div className="dashboard-date-range-navigation">
                 <button
@@ -213,33 +233,19 @@ export function CustomDateRangePicker({
             </header>
 
             <div className="dashboard-date-range-values">
-              <button
-                aria-pressed={activeBoundary === "FROM"}
-                className={activeBoundary === "FROM" ? "is-active" : ""}
-                onClick={() => editBoundary("FROM")}
-                type="button"
-              >
-                <small><UiText text="Начало" /></small>
+              <div className="dashboard-date-range-value">
                 <strong>{formatSelectedDate(draftFrom, uiLocale)}</strong>
-              </button>
+              </div>
               <span aria-hidden="true">→</span>
-              <button
-                aria-pressed={activeBoundary === "TO"}
-                className={activeBoundary === "TO" ? "is-active" : ""}
-                onClick={() => editBoundary("TO")}
-                type="button"
-              >
-                <small><UiText text="Конец" /></small>
-                <strong>{draftTo ? formatSelectedDate(draftTo, uiLocale) : <UiText text="Выберите дату" />}</strong>
-              </button>
+              <div className="dashboard-date-range-value">
+                <strong>{formatSelectedDate(draftTo, uiLocale)}</strong>
+              </div>
             </div>
 
             <p aria-live="polite" className="dashboard-date-range-guidance">
-              {activeBoundary === "FROM"
-                ? <UiText text="Выберите первый день периода" />
-                : draftTo
-                  ? <UiText text="Диапазон готов — можно применить" />
-                  : <UiText text="Теперь выберите последний день периода" />}
+              {selectingEnd
+                ? <UiText text="Выберите второй день — будет отмечен весь промежуток" />
+                : <UiText text="Один клик выбирает день, второй — диапазон" />}
             </p>
 
             <div className="dashboard-date-range-calendars">
@@ -255,15 +261,25 @@ export function CustomDateRangePicker({
                   key={monthKey(month)}
                   month={month}
                   onSelect={selectDate}
-                  {...(draftTo ? { to: draftTo } : {})}
+                  to={draftTo}
                 />
               ))}
             </div>
 
+            <div aria-label={uiText("Быстрый выбор периода")} className="dashboard-date-range-presets" role="group">
+              {([
+                ["Сегодня", 1],
+                ["Неделя", 7],
+                ["Месяц", 30],
+                ["3 месяца", 90]
+              ] as const).map(([label, days]) => (
+                <button key={label} onClick={() => selectPreset(days)} type="button">
+                  <UiText text={label} />
+                </button>
+              ))}
+            </div>
+
             <footer className="dashboard-date-range-footer">
-              <span>
-                <UiText text={rangeLabel} after=" " />{formatSelectedDate(availableRange.from, uiLocale)} — {formatSelectedDate(availableRange.to, uiLocale)}
-              </span>
               <div>
                 <button
                   className="dashboard-date-range-reset"
@@ -278,7 +294,6 @@ export function CustomDateRangePicker({
                   className="dashboard-date-range-apply"
                   disabled={!completeDraft}
                   onClick={() => {
-                    if (!draftTo) return;
                     onApply({ from: draftFrom, to: draftTo });
                     onOpenChange(false);
                   }}
@@ -289,9 +304,19 @@ export function CustomDateRangePicker({
             </footer>
           </div>
         </div>
+        </DateRangeLayerPortal>
       )}
     </div>
   );
+}
+
+function DateRangeLayerPortal({
+  children,
+  modal
+}: Readonly<{ children: ReactNode; modal: boolean }>) {
+  return modal && typeof document !== "undefined"
+    ? createPortal(children, document.body)
+    : children;
 }
 
 function CalendarMonth({

@@ -114,7 +114,8 @@ test("normalizes a tracking context draft into the public mutation shape", () =>
       includeUntracked: false,
       scope: {
         mode: "KEYWORDS",
-        groupIds: []
+        groupIds: [],
+        descendantGroupIds: []
       }
     }
   });
@@ -220,6 +221,25 @@ test("detects semantic draft changes after normalization", () => {
     }),
     true
   );
+});
+
+test("preserves legacy descendant scope while new drafts stay direct", () => {
+  const legacy = trackingContextDraft({
+    ...context,
+    launchProfile: {
+      searchSource: "LIVE",
+      includeUntracked: false,
+      scope: {
+        mode: "GROUPS",
+        groupIds: ["01900000-0000-7000-8000-000000000099"]
+      }
+    }
+  });
+
+  assert.deepEqual(legacy.descendantGroupIds, [
+    "01900000-0000-7000-8000-000000000099"
+  ]);
+  assert.deepEqual(emptyTrackingContextDraft().descendantGroupIds, []);
 });
 
 test("matches a reusable context only against the complete normalized draft", () => {

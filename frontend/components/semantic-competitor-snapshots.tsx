@@ -86,7 +86,17 @@ export function SemanticCompetitorSnapshots({
                     </small>
                   )}
               </div>
-              <ProviderLogo provider={snapshot.provider} size="compact" />
+              {snapshot.provider === "KEY_COLLECTOR" ? (
+                <span
+                  aria-label="Key Collector"
+                  className="provider-logo key-collector compact"
+                  role="img"
+                >
+                  <Icon name="import" />
+                </span>
+              ) : (
+                <ProviderLogo provider={snapshot.provider} size="compact" />
+              )}
             </header>
             <ol>
               {visibleResults.map((result) => {
@@ -285,9 +295,12 @@ function competitorSourceLabel(
   const searchSource = "searchSource" in snapshot
     ? snapshot.searchSource
     : undefined;
-  return `${rankSearchSystemLabel(snapshot.searchEngine, searchSource)} · ${
-    snapshot.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"
-  }`;
+  const provider = snapshot.provider === "XMLSTOCK"
+    ? "XMLStock"
+    : snapshot.provider === "KEY_COLLECTOR"
+      ? "Key Collector · импорт"
+      : "Arsenkin Tools";
+  return `${rankSearchSystemLabel(snapshot.searchEngine, searchSource)} · ${provider}`;
 }
 
 type CompetitorSnapshot =

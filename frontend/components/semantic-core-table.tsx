@@ -19,6 +19,7 @@ import {
   SemanticRankUrlCell
 } from "./semantic-rank-comparison-cell";
 import { SemanticRankContext } from "./semantic-rank-context";
+import { CustomDateRangePicker } from "./custom-date-range-picker";
 
 import {
   semanticKeywordDefaultPageSize,
@@ -35,6 +36,8 @@ import {
   type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
   type SemanticKeywordInsights,
+  type SemanticKeywordTagDeleteResult,
+  type SemanticKeywordTagOption,
   type CreateWordstatExpansionRunInput,
   type KeywordResearchRunSummary,
   type AiAnswerCollectionSummary,
@@ -117,6 +120,7 @@ import {
   type SemanticManualDuplicateMode
 } from "../lib/semantic-manual-add-preferences";
 import { semanticKeywordSearchPlaceholder } from "../lib/semantic-group-selection";
+import { resolvedFolderSelectionIds } from "../lib/semantic-operation-tree";
 import { normalizeSemanticGroupName } from "../lib/semantic-group-name-batch";
 import {
   semanticResearchImportSignature,
@@ -292,6 +296,21 @@ interface SemanticCluster {
   readonly version: number;
 }
 
+type SemanticFilterTaxonomyDelete =
+  | Readonly<{
+      kind: "TAG";
+      id: string;
+      name: string;
+      keywordCount: number;
+    }>
+  | Readonly<{
+      kind: "CLUSTER";
+      id: string;
+      name: string;
+      keywordCount: number;
+      version: number;
+    }>;
+
 interface KeywordDraft {
   readonly duplicateMode: SemanticManualDuplicateMode;
   readonly text: string;
@@ -424,7 +443,13 @@ export function SemanticCoreTable({
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
   const [multiGroupIds, setMultiGroupIds] = useState<readonly string[]>([]);
   const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
-  const [tagOptions, setTagOptions] = useState<readonly string[]>([]);
+  const [tagOptions, setTagOptions] = useState<readonly SemanticKeywordTagOption[]>([]);
+  const [tagOptionsRevision, setTagOptionsRevision] = useState(0);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterDatePickerOpen, setFilterDatePickerOpen] = useState(false);
+  const [filterTaxonomyDelete, setFilterTaxonomyDelete] =
+    useState<SemanticFilterTaxonomyDelete>();
+  const [deletingFilterTaxonomy, setDeletingFilterTaxonomy] = useState(false);
   const [customColumns, setCustomColumns] = useState<
     readonly SemanticCustomColumn[]
   >([]);
@@ -469,7 +494,9 @@ export function SemanticCoreTable({
   const [exportFolderMapGroupIds, setExportFolderMapGroupIds] = useState<ReadonlySet<string>>(
     new Set()
   );
-  const [exportFolderMapIncludeDescendants, setExportFolderMapIncludeDescendants] = useState(true);
+  const [exportFolderMapDescendantGroupIds, setExportFolderMapDescendantGroupIds] = useState<ReadonlySet<string>>(
+    new Set()
+  );
   const [exportBom, setExportBom] = useState(true);
   const [, setProjectTableView] = useState<SemanticSavedView>();
   const [activeSavedView, setActiveSavedView] = useState<SemanticSavedView>();
@@ -651,10 +678,6 @@ export function SemanticCoreTable({
   const debouncedSearch = useDebouncedValue(
     draftConfig.filters.search ?? "",
     300
-  );
-  const debouncedTagSearch = useDebouncedValue(
-    draftConfig.filters.tag ?? "",
-    250
   );
   const presenceGroupIds = useMemo<readonly string[]>(
     () =>
@@ -855,24 +878,20 @@ export function SemanticCoreTable({
 
   useEffect(() => {
     const controller = new AbortController();
-    const query = new URLSearchParams();
-    if (debouncedTagSearch.trim()) {
-      query.set("search", debouncedTagSearch.trim());
-    }
-    const serializedQuery = query.toString();
-    const suffix = serializedQuery ? `?${serializedQuery}` : "";
-    void browserApiRequest<readonly string[]>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/tag-options${suffix}`,
+    void browserApiRequest<readonly SemanticKeywordTagOption[]>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/tags`,
       { signal: controller.signal }
     )
       .then((result) => {
-        if (!controller.signal.aborted) setTagOptions(result);
+        if (!controller.signal.aborted) {
+          setTagOptions(result);
+        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setTagOptions([]);
       });
     return () => controller.abort();
-  }, [debouncedTagSearch, projectId]);
+  }, [projectId, tagOptionsRevision]);
 
   useEffect(() => {
     activeSavedViewRef.current = undefined;
@@ -982,6 +1001,8 @@ export function SemanticCoreTable({
     const closeFromEscape = (event: KeyboardEvent) => {
       if (
         event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !document.querySelector("[data-exclusive-dropdown-layer]") &&
         !document.querySelector(".semantic-modal[open]")
       ) {
         setRightSidebar(undefined);
@@ -1499,6 +1520,7 @@ export function SemanticCoreTable({
         ...(search ? { search } : {})
       }
     }, otherFilters.groupId));
+    setFilterOpen(false);
   }
 
   function submitSearch(event: FormEvent<HTMLFormElement>): void {
@@ -1794,6 +1816,89 @@ export function SemanticCoreTable({
         }
       };
     });
+  }
+
+  function updateRankDateRange(from: string, to: string): void {
+    setDraftConfig((current) => ({
+      ...current,
+      filters: {
+        ...current.filters,
+        rankCheckedFrom: `${from}T00:00:00.000Z`,
+        rankCheckedBefore: nextUtcDay(to)
+      }
+    }));
+  }
+
+  function clearRankDateRange(): void {
+    setDraftConfig((current) => {
+      const {
+        rankCheckedFrom: _from,
+        rankCheckedBefore: _before,
+        ...filters
+      } = current.filters;
+      void _from;
+      void _before;
+      return { ...current, filters };
+    });
+  }
+
+  function clearDeletedTaxonomyFilter(
+    field: "clusterId" | "tag",
+    value: string
+  ): void {
+    const clear = (current: SemanticViewConfig): SemanticViewConfig => {
+      if (current.filters[field] !== value) return current;
+      const { [field]: _removed, ...filters } = current.filters;
+      void _removed;
+      return { ...current, filters };
+    };
+    setDraftConfig(clear);
+    setViewConfig(clear);
+  }
+
+  async function deleteFilterTaxonomy(): Promise<void> {
+    const selection = filterTaxonomyDelete;
+    if (!selection || deletingFilterTaxonomy) return;
+    setDeletingFilterTaxonomy(true);
+    setMutationError(undefined);
+    try {
+      if (selection.kind === "TAG") {
+        const result = await browserApiRequest<SemanticKeywordTagDeleteResult>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/keywords/tags/${encodeURIComponent(selection.id)}`,
+          { method: "DELETE" }
+        );
+        setTagOptions((current) =>
+          current.filter(({ id }) => id !== result.tagId)
+        );
+        clearDeletedTaxonomyFilter("tag", selection.name);
+        setTagOptionsRevision((value) => value + 1);
+        setBulkNotice(
+          `Тег «${result.name}» удалён у ${formatInteger(result.detachedKeywordCount, uiLocale)} запросов`
+        );
+      } else {
+        await browserApiRequest<void>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/clusters/${encodeURIComponent(selection.id)}`,
+          { method: "DELETE", ifMatch: selection.version }
+        );
+        setClusters((current) =>
+          current.filter(({ id }) => id !== selection.id)
+        );
+        clearDeletedTaxonomyFilter("clusterId", selection.id);
+        setBulkNotice(
+          `Кластер «${selection.name}» удалён у ${formatInteger(selection.keywordCount, uiLocale)} запросов`
+        );
+      }
+      setFilterTaxonomyDelete(undefined);
+      setRetryVersion((value) => value + 1);
+    } catch (requestError) {
+      setMutationError(
+        requestError instanceof BrowserApiError
+          ? requestError.message
+          : "Не удалось удалить выбранное значение фильтра."
+      );
+    } finally {
+      setDeletingFilterTaxonomy(false);
+    }
   }
 
   function toggleColumn(column: SemanticViewColumn): void {
@@ -2829,7 +2934,7 @@ export function SemanticCoreTable({
         .map(({ id }) => id)
     );
     setExportFolderMapGroupIds(regularGroupIds);
-    setExportFolderMapIncludeDescendants(true);
+    setExportFolderMapDescendantGroupIds(new Set());
     setExportHistoryIncludeUntracked(false);
     setExportBom(
       exportContent === "SEMANTIC" &&
@@ -2882,8 +2987,12 @@ export function SemanticCoreTable({
             ...(exportContent === "FOLDER_MAP"
               ? {
                   folderMap: {
-                    groupIds: [...exportFolderMapGroupIds],
-                    includeDescendants: exportFolderMapIncludeDescendants
+                    groupIds: resolvedFolderSelectionIds(
+                      groups,
+                      exportFolderMapGroupIds,
+                      exportFolderMapDescendantGroupIds
+                    ),
+                    includeDescendants: false
                   }
                 }
               : groupId
@@ -3428,12 +3537,15 @@ export function SemanticCoreTable({
     const parsed = parseSemanticRankColumnKey(column);
     return parsed ? [parsed.dimension.key] : [];
   }))]);
-  const rankKeywordSignature = JSON.stringify(virtualRows.items.map(row => row.id));
+  // Prefetch exact city/device cells for every row already delivered by the
+  // paginated keyword request. Virtual scrolling must only render rows; it
+  // must not become the trigger that starts loading their values.
+  const rankKeywordSignature = JSON.stringify(items.map(row => row.id));
   const rankComparison = useSemanticRankComparison(
     projectId,
     rankKeywordSignature,
     rankDimensionsSignature,
-    `${retryVersion}:${operationsRefreshVersion}:${virtualRows.items.map(row => row.positions?.map(position => position.observedAt).join(",")).join(";")}`,
+    `${retryVersion}:${operationsRefreshVersion}`,
     `${retryVersion}:${operationsRefreshVersion}`
   );
   useEffect(() => {
@@ -3468,6 +3580,21 @@ export function SemanticCoreTable({
     );
   }, [exportHistoryEngines, rankComparison.dimensions]);
   const rankColumns = useMemo(() => rankDimensionColumns(rankComparison.dimensions, uiLocale), [rankComparison.dimensions, uiLocale]);
+  const selectedFilterTag = tagOptions.find(
+    ({ name }) => name === draftConfig.filters.tag
+  );
+  const selectedFilterCluster = clusters.find(
+    ({ id }) => id === draftConfig.filters.clusterId
+  );
+  const filterAvailableDateRange = semanticFilterAvailableDateRange(
+    draftConfig.filters.rankCheckedFrom,
+    draftConfig.filters.rankCheckedBefore
+  );
+  const filterSelectedDateRange = semanticFilterSelectedDateRange(
+    draftConfig.filters.rankCheckedFrom,
+    draftConfig.filters.rankCheckedBefore,
+    filterAvailableDateRange
+  );
   const focusedKeywordId = rightSidebar?.type === "KEYWORD"
     ? rightSidebar.keywordId
     : undefined;
@@ -3993,8 +4120,21 @@ export function SemanticCoreTable({
             )}
           </label>
         </form>
-        <details className="semantic-filter-disclosure" data-exclusive-dropdown>
-          <summary>
+        <details
+          className="semantic-filter-disclosure"
+          data-exclusive-dropdown
+          onToggle={(event) => setFilterOpen(event.currentTarget.open)}
+          open={filterOpen}
+        >
+          <summary
+            data-semantic-sidebar-trigger
+            onClick={(event) => {
+              event.preventDefault();
+              const nextOpen = rightSidebar ? true : !filterOpen;
+              setRightSidebar(undefined);
+              setFilterOpen(nextOpen);
+            }}
+          >
             <UiText text="Фильтры" />{activeFilterCount(viewConfig.filters) > 0 && (
               <span>{activeFilterCount(viewConfig.filters)}</span>
             )}
@@ -4032,67 +4172,113 @@ export function SemanticCoreTable({
             value={draftConfig.filters.groupId ?? ""}
           />
         </label>
-        <label>
+        <div className="semantic-filter-card semantic-filter-managed-field">
           <span><UiText text="Кластер" /></span>
-          <CustomSelect
-            aria-label={uiText("Кластер")}
-            onChange={(event) =>
-              updateOptionalFilter("clusterId", event.target.value)
-            }
-            value={draftConfig.filters.clusterId ?? ""}
-          >
-            <option value=""><UiText text="Все кластеры" /></option>
-            {clusters.map((cluster) => (
-              <option key={cluster.id} value={cluster.id}>
-                {cluster.name}
-              </option>
-            ))}
-          </CustomSelect>
-        </label>
-        <label>
+          <div className="semantic-filter-managed-control">
+            <CustomSelect
+              aria-label={uiText("Кластер")}
+              onChange={(event) =>
+                updateOptionalFilter("clusterId", event.target.value)
+              }
+              searchable
+              searchPlaceholder={uiText("Найти кластер")}
+              value={draftConfig.filters.clusterId ?? ""}
+            >
+              <option value=""><UiText text="Все кластеры" /></option>
+              {clusters.map((cluster) => (
+                <option key={cluster.id} value={cluster.id}>
+                  <span className="semantic-filter-select-option">
+                    <span>{cluster.name}</span>
+                    <small>{formatInteger(cluster.keywordCount, uiLocale)}</small>
+                  </span>
+                </option>
+              ))}
+            </CustomSelect>
+            {selectedFilterCluster && (
+              <button
+                aria-label={uiText("Удалить кластер «{0}»", [selectedFilterCluster.name])}
+                className="semantic-filter-delete-option"
+                onClick={() => setFilterTaxonomyDelete({
+                  kind: "CLUSTER",
+                  id: selectedFilterCluster.id,
+                  name: selectedFilterCluster.name,
+                  keywordCount: selectedFilterCluster.keywordCount,
+                  version: selectedFilterCluster.version
+                })}
+                title={uiText("Удалить кластер")}
+                type="button"
+              >
+                <Icon name="trash" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="semantic-filter-card semantic-filter-managed-field">
           <span><UiText text="Тег" /></span>
-          <input
-            list={`semantic-tag-filter-options-${projectId}`}
-            maxLength={160}
-            onChange={(event) =>
-              updateOptionalFilter("tag", event.target.value)
-            }
-            placeholder={uiText("Выберите или введите тег")}
-            type="text"
-            value={draftConfig.filters.tag ?? ""}
-          />
-          <datalist id={`semantic-tag-filter-options-${projectId}`}>
-            {tagOptions.map((tag) => (
-              <option key={tag} value={tag} />
-            ))}
-          </datalist>
-        </label>
-        <label>
+          <div className="semantic-filter-managed-control">
+            <CustomSelect
+              aria-label={uiText("Тег")}
+              onChange={(event) => updateOptionalFilter("tag", event.target.value)}
+              searchable
+              searchPlaceholder={uiText("Найти тег")}
+              value={draftConfig.filters.tag ?? ""}
+            >
+              <option value=""><UiText text="Все теги" /></option>
+              {tagOptions.map((tag) => (
+                <option key={tag.id} value={tag.name}>
+                  <span className="semantic-filter-select-option">
+                    <span>{tag.name}</span>
+                    <small>{formatInteger(tag.keywordCount, uiLocale)}</small>
+                  </span>
+                </option>
+              ))}
+            </CustomSelect>
+            {selectedFilterTag && (
+              <button
+                aria-label={uiText("Удалить тег «{0}»", [selectedFilterTag.name])}
+                className="semantic-filter-delete-option"
+                onClick={() => setFilterTaxonomyDelete({
+                  kind: "TAG",
+                  id: selectedFilterTag.id,
+                  name: selectedFilterTag.name,
+                  keywordCount: selectedFilterTag.keywordCount
+                })}
+                title={uiText("Удалить тег")}
+                type="button"
+              >
+                <Icon name="trash" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="semantic-filter-card semantic-filter-choice-card is-favorite">
           <span><UiText text="Избранное" /></span>
-          <CustomSelect
-            onChange={(event) =>
-              updateBooleanFilter("isFavorite", event.target.value)
-            }
+          <ChoiceToggle
+            ariaLabel={uiText("Фильтр избранного")}
+            className="semantic-filter-choice"
+            onChange={(value) => updateBooleanFilter("isFavorite", value)}
+            options={[
+              { value: "", label: <UiText text="Все" /> },
+              { value: "true", label: <><Icon name="favorite" /><UiText text="Да" /></> },
+              { value: "false", label: <UiText text="Нет" /> }
+            ]}
             value={booleanFilter(draftConfig.filters.isFavorite)}
-          >
-            <option value=""><UiText text="Все" /></option>
-            <option value="true"><UiText text="Только избранные" /></option>
-            <option value="false"><UiText text="Не избранные" /></option>
-          </CustomSelect>
-        </label>
-        <label>
+          />
+        </div>
+        <div className="semantic-filter-card semantic-filter-choice-card">
           <span><UiText text="Отслеживание" /></span>
-          <CustomSelect
-            onChange={(event) =>
-              updateBooleanFilter("isTracked", event.target.value)
-            }
+          <ChoiceToggle
+            ariaLabel={uiText("Фильтр отслеживания")}
+            className="semantic-filter-choice"
+            onChange={(value) => updateBooleanFilter("isTracked", value)}
+            options={[
+              { value: "", label: <UiText text="Все" /> },
+              { value: "true", label: <><Icon name="eye" /><UiText text="Да" /></> },
+              { value: "false", label: <><Icon name="eyeOff" /><UiText text="Нет" /></> }
+            ]}
             value={booleanFilter(draftConfig.filters.isTracked)}
-          >
-            <option value=""><UiText text="Все" /></option>
-            <option value="true"><UiText text="Отслеживаются" /></option>
-            <option value="false"><UiText text="Не отслеживаются" /></option>
-          </CustomSelect>
-        </label>
+          />
+        </div>
         <label>
           <span><UiText text="Приоритет от" /></span>
           <input
@@ -4135,12 +4321,33 @@ export function SemanticCoreTable({
         <section className="semantic-filter-range-section">
           <header><strong><UiText text="Позиции по городу и устройству" /></strong><small><UiText text="Фильтр использует последний снимок выбранного среза." /></small></header>
           <div>
-            <label className="semantic-filter-wide"><span><UiText text="Срез позиций" /></span><CustomSelect searchable searchPlaceholder={uiText("Найти город или устройство")} value={draftConfig.filters.rankDimensionKey ?? ""} onChange={(event) => updateRankDimension(event.target.value)}><option value=""><UiText text="Не фильтровать по позициям" /></option>{rankComparison.dimensions.map(dimension => <option key={dimension.key} value={dimension.key}>{rankDimensionLabel(dimension, uiLocale)}</option>)}</CustomSelect></label>
+            <label className="semantic-filter-wide"><span><UiText text="Срез позиций" /></span><CustomSelect popoverMinWidth={360} searchable searchPlaceholder={uiText("Найти город или устройство")} value={draftConfig.filters.rankDimensionKey ?? ""} onChange={(event) => updateRankDimension(event.target.value)}><option value=""><UiText text="Не фильтровать по позициям" /></option>{rankComparison.dimensions.map(dimension => <option key={dimension.key} value={dimension.key}><span className="semantic-filter-dimension-option"><SemanticRankContext {...dimension} showEngineName={false} /></span></option>)}</CustomSelect></label>
             <label><span><UiText text="Состояние" /></span><CustomSelect disabled={!draftConfig.filters.rankDimensionKey} value={draftConfig.filters.rankState ?? ""} onChange={(event) => updateRankState(event.target.value)}><option value="CHECKED"><UiText text="Есть любой замер" /></option><option value="FOUND"><UiText text="Позиция найдена" /></option><option value="NOT_FOUND"><UiText text="Позиция не найдена" /></option><option value="NOT_CHECKED"><UiText text="Ещё не проверялся" /></option></CustomSelect></label>
             <label><span><UiText text="Позиция от" /></span><input min={1} max={100} type="number" disabled={!draftConfig.filters.rankDimensionKey || ["NOT_FOUND", "NOT_CHECKED"].includes(draftConfig.filters.rankState ?? "")} value={draftConfig.filters.rankPositionMin ?? ""} onChange={(event) => updateAdvancedFilter("rankPositionMin", event.target.value ? Number(event.target.value) : "")} /></label>
             <label><span><UiText text="Позиция до" /></span><input min={1} max={100} type="number" disabled={!draftConfig.filters.rankDimensionKey || ["NOT_FOUND", "NOT_CHECKED"].includes(draftConfig.filters.rankState ?? "")} value={draftConfig.filters.rankPositionMax ?? ""} onChange={(event) => updateAdvancedFilter("rankPositionMax", event.target.value ? Number(event.target.value) : "")} /></label>
-            <label><span><UiText text="Снято с даты" /></span><input type="date" disabled={!draftConfig.filters.rankDimensionKey || draftConfig.filters.rankState === "NOT_CHECKED"} value={filterDateValue(draftConfig.filters.rankCheckedFrom)} onChange={(event) => updateAdvancedFilter("rankCheckedFrom", event.target.value ? `${event.target.value}T00:00:00.000Z` : "")} /></label>
-            <label><span><UiText text="Снято до даты" /></span><input type="date" disabled={!draftConfig.filters.rankDimensionKey || draftConfig.filters.rankState === "NOT_CHECKED"} value={filterDateBeforeValue(draftConfig.filters.rankCheckedBefore)} onChange={(event) => updateAdvancedFilter("rankCheckedBefore", event.target.value ? nextUtcDay(event.target.value) : "")} /></label>
+            <div className="semantic-filter-date-field">
+              <span><UiText text="Дата съёма" /></span>
+              <CustomDateRangePicker
+                active={Boolean(draftConfig.filters.rankCheckedFrom || draftConfig.filters.rankCheckedBefore)}
+                alwaysShowYear
+                availableRange={filterAvailableDateRange}
+                className="semantic-filter-date-picker"
+                dialogLabel="Выбрать даты съёма"
+                disabled={!draftConfig.filters.rankDimensionKey || draftConfig.filters.rankState === "NOT_CHECKED"}
+                modal
+                onApply={({ from, to }) => updateRankDateRange(from, to)}
+                onOpenChange={setFilterDatePickerOpen}
+                onReset={clearRankDateRange}
+                open={filterDatePickerOpen}
+                periodLabel="Дата съёма"
+                rangeLabel="Доступный период:"
+                resetLabel="Сбросить даты"
+                triggerLabel="Выбрать даты"
+                {...(filterSelectedDateRange
+                  ? { value: filterSelectedDateRange }
+                  : {})}
+              />
+            </div>
           </div>
         </section>
         <label>
@@ -4234,11 +4441,58 @@ export function SemanticCoreTable({
         </div>
       </div>
 
+      {filterTaxonomyDelete && (
+        <SemanticModal
+          closeDisabled={deletingFilterTaxonomy}
+          description={filterTaxonomyDelete.kind === "TAG"
+            ? `Тег будет снят со всех связанных запросов и удалён из проекта.`
+            : `Кластер будет снят со всех связанных запросов и удалён из проекта.`}
+          footer={(
+            <>
+              <button
+                className="secondary-button"
+                disabled={deletingFilterTaxonomy}
+                onClick={() => setFilterTaxonomyDelete(undefined)}
+                type="button"
+              >
+                <UiText text="Отмена" />
+              </button>
+              <button
+                className="danger-button"
+                disabled={deletingFilterTaxonomy}
+                onClick={() => void deleteFilterTaxonomy()}
+                type="button"
+              >
+                {deletingFilterTaxonomy
+                  ? <UiText text="Удаляем…" />
+                  : <UiText text="Удалить" />}
+              </button>
+            </>
+          )}
+          onClose={() => setFilterTaxonomyDelete(undefined)}
+          presenceKey="semantic-filter-taxonomy-delete"
+          size="small"
+          title={`${filterTaxonomyDelete.kind === "TAG" ? "Удалить тег" : "Удалить кластер"} «${filterTaxonomyDelete.name}»?`}
+        >
+          <div className="semantic-filter-delete-confirmation">
+            <span className="semantic-filter-delete-confirmation-icon"><Icon name="warning" /></span>
+            <div>
+              <strong>
+                {formatInteger(filterTaxonomyDelete.keywordCount, uiLocale)} <UiText text="связанных запросов" before=" " />
+              </strong>
+              <small><UiText text="История позиций и остальные данные запросов сохранятся." /></small>
+            </div>
+          </div>
+        </SemanticModal>
+      )}
+
       {exportDialog && (
         <SemanticModal
+          bodyClassName="semantic-export-modal-body"
+          className="semantic-export-modal"
           description={uiText("Таблица, история позиций и карта сайта формируются в фоне.")}
           onClose={() => setExportDialog(undefined)}
-          size={exportContent === "FOLDER_MAP" ? "large" : "medium"}
+          size="large"
           title={uiText("Экспорт семантики")}
         >
           <form
@@ -4320,10 +4574,10 @@ export function SemanticCoreTable({
             </div>
             {exportContent === "FOLDER_MAP" && (
               <SemanticExportFolderPicker
+                descendantGroupIds={exportFolderMapDescendantGroupIds}
                 disabled={exporting || exportJob?.status === "COMPLETED"}
                 groups={groups}
-                includeDescendants={exportFolderMapIncludeDescendants}
-                onIncludeDescendantsChange={setExportFolderMapIncludeDescendants}
+                onDescendantGroupIdsChange={setExportFolderMapDescendantGroupIds}
                 onSelectedGroupIdsChange={setExportFolderMapGroupIds}
                 selectedGroupIds={exportFolderMapGroupIds}
               />
@@ -4430,7 +4684,7 @@ export function SemanticCoreTable({
                           {engineDimensions.map((dimension) => (
                             <option key={dimension.key} value={dimension.key}>
                               <span className="rankings-dimension-option">
-                                <SemanticRankContext {...dimension} />
+                                <SemanticRankContext {...dimension} showEngineName={false} />
                                 <span className="visually-hidden">
                                   {rankDimensionLabel(dimension, uiLocale)}
                                 </span>
@@ -5615,6 +5869,7 @@ export function SemanticCoreTable({
           }}
           projectDomain={projectDomain}
           projectId={projectId}
+          workspaceId={workspaceId}
         />
       )}
       {aiCompetitorDialogOpen && (
@@ -5640,6 +5895,7 @@ export function SemanticCoreTable({
           }}
           projectDomain={projectDomain}
           projectId={projectId}
+          workspaceId={workspaceId}
         />
       )}
       {frequencyDialogOpen && (
@@ -5655,6 +5911,7 @@ export function SemanticCoreTable({
             setRightSidebar({ type: "OPERATIONS" });
           }}
           projectId={projectId}
+          workspaceId={workspaceId}
           initialSelections={items
             .filter(({ id }) => checkedIds.has(id))
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
@@ -5674,6 +5931,7 @@ export function SemanticCoreTable({
             setRightSidebar({ type: "OPERATIONS" });
           }}
           projectId={projectId}
+          workspaceId={workspaceId}
           initialSelections={items
             .filter(({ id }) => checkedIds.has(id))
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
@@ -5694,6 +5952,7 @@ export function SemanticCoreTable({
             setRightSidebar({ type: "OPERATIONS" });
           }}
           projectId={projectId}
+          workspaceId={workspaceId}
         />
       )}
       {negativeKeywordsOpen && (
@@ -5767,6 +6026,7 @@ export function SemanticCoreTable({
             void refreshFrequencyMetrics();
           }}
           projectId={projectId}
+          workspaceId={workspaceId}
           refreshToken={operationsRefreshVersion}
           {...(watchedFrequencyId ? { watchedFrequencyId } : {})}
         />
@@ -6317,8 +6577,11 @@ function SemanticSiteResultsModal({
     setDimensionKey(preferred?.key ?? "");
   }, [availableDimensions, dimensionKey, item.positions]);
 
+  const selectedSnapshotId = dimensionKey
+    ? rowsByDimension.get(dimensionKey)?.snapshotId
+    : undefined;
   useEffect(() => {
-    if (!dimensionKey) {
+    if (!dimensionKey || !selectedSnapshotId) {
       setDimensionInsights(undefined);
       setLoadedDimensionKey("");
       return;
@@ -6328,7 +6591,7 @@ function SemanticSiteResultsModal({
     setLoadedDimensionKey("");
     setLoadingDimension(true);
     void browserApiRequest<SemanticKeywordInsights>(
-      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights?dimensionKey=${encodeURIComponent(dimensionKey)}`,
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights?dimensionKey=${encodeURIComponent(dimensionKey)}&snapshotId=${encodeURIComponent(selectedSnapshotId)}`,
       { signal: controller.signal }
     ).then((insights) => {
       if (!controller.signal.aborted) {
@@ -6344,7 +6607,7 @@ function SemanticSiteResultsModal({
       if (!controller.signal.aborted) setLoadingDimension(false);
     });
     return () => controller.abort();
-  }, [dimensionKey, item.id, projectId]);
+  }, [dimensionKey, item.id, projectId, selectedSnapshotId]);
 
   const selectedDimension = availableDimensions.find(
     ({ key }) => key === dimensionKey
@@ -6388,6 +6651,7 @@ function SemanticSiteResultsModal({
     <SemanticModal
       bodyLayout="edge"
       bodyClassName="semantic-data-modal-body"
+      className="semantic-site-results-dialog"
       description={uiText(mode === "MISMATCH"
         ? "Страницы домена из сохранённой выдачи выбранного среза с подсветкой отличий от целевого URL."
         : "Целевой URL и все страницы проекта из последних сохранённых снимков выдачи.")}
@@ -6414,7 +6678,7 @@ function SemanticSiteResultsModal({
                 return (
                   <option key={dimension.key} value={dimension.key}>
                     <span className="semantic-url-context-option">
-                      <SemanticRankContext {...dimension} />
+                      <SemanticRankContext {...dimension} showEngineName={false} />
                       <small>
                         {row.position ?? "×"} · {formatSemanticDateTime(row.observedAt, uiLocale)}
                       </small>
@@ -6904,6 +7168,39 @@ function nextUtcDay(value: string): string {
   return new Date(timestamp + 86_400_000).toISOString();
 }
 
+function semanticFilterAvailableDateRange(
+  from: string | undefined,
+  before: string | undefined
+): Readonly<{ from: string; to: string }> {
+  const today = new Date();
+  const earliest = new Date(Date.UTC(
+    today.getUTCFullYear() - 3,
+    today.getUTCMonth(),
+    today.getUTCDate()
+  )).toISOString().slice(0, 10);
+  const latest = today.toISOString().slice(0, 10);
+  const selectedFrom = filterDateValue(from);
+  const selectedTo = filterDateBeforeValue(before);
+  return {
+    from: selectedFrom && selectedFrom < earliest ? selectedFrom : earliest,
+    to: selectedTo && selectedTo > latest ? selectedTo : latest
+  };
+}
+
+function semanticFilterSelectedDateRange(
+  from: string | undefined,
+  before: string | undefined,
+  available: Readonly<{ from: string; to: string }>
+): Readonly<{ from: string; to: string }> | undefined {
+  const selectedFrom = filterDateValue(from);
+  const selectedTo = filterDateBeforeValue(before);
+  if (!selectedFrom && !selectedTo) return undefined;
+  return {
+    from: selectedFrom || available.from,
+    to: selectedTo || available.to
+  };
+}
+
 function activeFilterCount(filters: SemanticViewConfig["filters"]): number {
   return Object.entries(filters).filter(([key, value]) =>
     key !== "search" && key !== "groupId" && value !== undefined && value !== ""
@@ -6937,6 +7234,9 @@ function keywordErrorMessage(error: unknown): string {
     }
     if (error.code === "VALIDATION_FAILED") {
       return "Параметры поиска устарели. Сбросьте поиск и повторите.";
+    }
+    if (error.code === "DEPENDENCY_UNAVAILABLE" || error.status === 503) {
+      return "Сервис данных временно недоступен. Повторите загрузку.";
     }
     return error.message;
   }

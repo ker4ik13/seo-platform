@@ -8,6 +8,7 @@ import {
   type ReactNode
 } from "react";
 import { useUiLocale } from "./ui-locale";
+import { Icon } from "./icon";
 
 
 export function SemanticModal({
@@ -98,7 +99,7 @@ export function SemanticModal({
             title={closeDisabled ? uiText("Сначала выполните обязательное действие") : undefined}
             type="button"
           >
-            ×
+            <Icon name="close" />
           </button>
         </div>
       </header>

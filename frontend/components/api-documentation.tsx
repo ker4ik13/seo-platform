@@ -710,7 +710,7 @@ curl "${baseUrl}/projects/<projectId>/keywords/position-history?includeUntracked
   "launchProfile": {
     "searchSource": "LIVE",
     "includeUntracked": false,
-    "scope": { "mode": "ALL", "groupIds": [] }
+    "scope": { "mode": "ALL", "groupIds": [], "includeDescendants": false }
   }
 }`}
           language="json"

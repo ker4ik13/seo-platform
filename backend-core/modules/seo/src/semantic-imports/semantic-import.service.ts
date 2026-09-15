@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException
 } from "@nestjs/common";
 import {
@@ -18,8 +19,11 @@ import {
   type InternalSemanticImportChunkResult,
   type InternalSemanticImportReceipt,
   type SemanticImportDuplicatePolicy,
+  type SemanticImportPositionValue,
   type SemanticImportPublishRow,
-  type SemanticImportResultSummary
+  type SemanticImportRankHistoryValue,
+  type SemanticImportResultSummary,
+  type SemanticImportSerpResultValue
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -34,13 +38,42 @@ import {
 } from "../internal/semantic-capacity.js";
 import { normalizePageUrl } from "../pages/page-url.js";
 import { ensureKeywordSystemGroupIds } from "../keyword-groups/semantic-system-groups.js";
+import { KeywordService } from "../keywords/keyword.service.js";
 
 const SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS = 5_000;
-const SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS = 120_000;
+const SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS = 300_000;
+const SEMANTIC_IMPORT_CUSTOM_VALUE_BATCH_SIZE = 2_000;
+const SEMANTIC_IMPORT_KEYWORD_UPDATE_BATCH_SIZE = 1_000;
+
+interface ImportedCustomValue {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly keywordId: string;
+  readonly columnId: string;
+  readonly textValue: string;
+  readonly updatedBy: string;
+}
+
+interface ImportedKeywordOverwrite {
+  readonly id: string;
+  readonly textOriginal: string;
+  readonly priority: number;
+  readonly isFavorite: boolean;
+  readonly isTracked: boolean;
+  readonly note: string | null;
+  readonly intent: string | null;
+  readonly targetPageId: string | null;
+  readonly customValues: Readonly<Record<string, string>>;
+}
 
 @Injectable()
 export class SemanticImportService {
-  public constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(SemanticImportService.name);
+
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly keywords?: KeywordService
+  ) {}
 
   public async normalizeKeywords(
     input: InternalNormalizeSemanticKeywordsInput
@@ -146,7 +179,7 @@ export class SemanticImportService {
   public async applyChunk(
     input: InternalApplySemanticImportChunkInput
   ): Promise<InternalSemanticImportChunkResult> {
-    if (payloadHash(input.rows, input.groupPaths, input.groupMetadata) !== input.payloadHash) {
+    if (payloadHash(input.rows, input.groupPaths, input.groupMetadata, input.projectDomain) !== input.payloadHash) {
       throw new BadRequestException("Semantic import payload hash mismatch");
     }
     const receipt = await this.requiredReceipt(input);
@@ -218,22 +251,41 @@ export class SemanticImportService {
             language,
             normalizedHash
           }))
+        },
+        include: {
+          mergedInto: {
+            select: { target: true }
+          }
         }
       });
       const existingByKey = new Map(
         existingKeywords.map((keyword) => [
           keywordKey(keyword.language, keyword.normalizedHash),
-          keyword
+          keyword.mergedInto?.target ?? keyword
         ])
       );
+      const mergedAliasKeys = new Set(
+        existingKeywords.flatMap((keyword) =>
+          keyword.mergedInto
+            ? [keywordKey(keyword.language, keyword.normalizedHash)]
+            : []
+        )
+      );
+      const canonicalExistingKeywords = [
+        ...new Map(
+          [...existingByKey.values()].map((keyword) => [keyword.id, keyword])
+        ).values()
+      ];
       const trashedKeywordIds = new Set(
-        existingKeywords.length === 0
+        canonicalExistingKeywords.length === 0
           ? []
           : (
               await transaction.keywordGroupMembership.findMany({
                 where: {
                   projectId: input.projectId,
-                  keywordId: { in: existingKeywords.map(({ id }) => id) },
+                  keywordId: {
+                    in: canonicalExistingKeywords.map(({ id }) => id)
+                  },
                   group: {
                     workspaceId: input.workspaceId,
                     projectId: input.projectId,
@@ -353,12 +405,17 @@ export class SemanticImportService {
             language,
             normalizedHash
           }))
+        },
+        include: {
+          mergedInto: {
+            select: { target: true }
+          }
         }
       });
       const keywordByKey = new Map(
         allKeywords.map((keyword) => [
           keywordKey(keyword.language, keyword.normalizedHash),
-          keyword
+          keyword.mergedInto?.target ?? keyword
         ])
       );
       const createdKeys = new Set(
@@ -371,6 +428,8 @@ export class SemanticImportService {
       );
       const updatedKeywordIds = new Set<string>();
       const skippedKeywordIds = new Set<string>();
+      const overwrites = new Map<string, ImportedKeywordOverwrite>();
+      const overwriteKeys = new Map<string, Set<string>>();
       for (const row of eligibleRows) {
         const key = keywordKey(row.language, row.normalizedHash);
         const keyword = keywordByKey.get(key);
@@ -386,17 +445,57 @@ export class SemanticImportService {
           skippedKeywordIds.add(keyword.id);
           continue;
         }
+        const targetPageId = row.targetUrl
+          ? pages.ids.get(
+              normalizePageUrl(row.targetUrl, "targetUrl").hash
+            )
+          : undefined;
+        if (input.duplicatePolicy === "OVERWRITE_MAPPED") {
+          const current = overwrites.get(keyword.id) ?? {
+            id: keyword.id,
+            textOriginal: keyword.textOriginal,
+            priority: keyword.priority,
+            isFavorite: keyword.isFavorite,
+            isTracked: keyword.isTracked,
+            note: keyword.note,
+            intent: keyword.intent,
+            targetPageId: keyword.targetPageId,
+            customValues: stringValues(keyword.customValues)
+          };
+          overwrites.set(keyword.id, {
+            ...current,
+            textOriginal: mergedAliasKeys.has(key)
+              ? current.textOriginal
+              : row.textOriginal,
+            ...(row.priority === undefined ? {} : { priority: row.priority }),
+            ...(row.isFavorite === undefined
+              ? {}
+              : { isFavorite: row.isFavorite }),
+            ...(row.isTracked === undefined
+              ? {}
+              : { isTracked: row.isTracked }),
+            ...(row.note === undefined ? {} : { note: row.note }),
+            ...(row.intent === undefined ? {} : { intent: row.intent }),
+            ...(targetPageId ? { targetPageId } : {}),
+            customValues: {
+              ...current.customValues,
+              ...row.customValues
+            }
+          });
+          const keys = overwriteKeys.get(keyword.id) ?? new Set<string>();
+          keys.add(key);
+          overwriteKeys.set(keyword.id, keys);
+          updatedKeywordIds.add(keyword.id);
+          continue;
+        }
         const update = keywordUpdate(
           keyword,
           row,
           input.duplicatePolicy,
           input.actorId,
           input.importId,
-          row.targetUrl
-            ? pages.ids.get(
-                normalizePageUrl(row.targetUrl, "targetUrl").hash
-              )
-            : undefined
+          targetPageId,
+          mergedAliasKeys.has(key)
         );
         const updatedKeyword = await transaction.keyword.update({
           where: { id: keyword.id },
@@ -408,6 +507,28 @@ export class SemanticImportService {
         keywordByKey.set(key, updatedKeyword);
         updatedKeywordIds.add(keyword.id);
       }
+      if (overwrites.size > 0) {
+        await applyKeywordOverwrites(
+          transaction,
+          input,
+          [...overwrites.values()]
+        );
+        const refreshed = await transaction.keyword.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: { in: [...overwrites.keys()] }
+          }
+        });
+        if (refreshed.length !== overwrites.size) {
+          throw new Error("Imported keyword batch was not persisted");
+        }
+        for (const keyword of refreshed) {
+          for (const key of overwriteKeys.get(keyword.id) ?? []) {
+            keywordByKey.set(key, keyword);
+          }
+        }
+      }
 
       const processedRows = eligibleRows.filter((row) => {
         const keyword = keywordByKey.get(
@@ -417,13 +538,13 @@ export class SemanticImportService {
       });
       const keywordsWithExistingGroup =
         input.duplicatePolicy === "MERGE_NON_EMPTY" &&
-        existingKeywords.length > 0
+        canonicalExistingKeywords.length > 0
           ? new Set(
               (
                 await transaction.keywordGroupMembership.findMany({
                   where: {
                     keywordId: {
-                      in: existingKeywords.map(({ id }) => id)
+                      in: canonicalExistingKeywords.map(({ id }) => id)
                     }
                   },
                   select: { keywordId: true },
@@ -587,7 +708,7 @@ export class SemanticImportService {
   public async complete(
     input: InternalCompleteSemanticImportInput
   ): Promise<SemanticImportResultSummary> {
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       await lockStoredKeywordCapacity(
         transaction,
         input.workspaceId
@@ -647,6 +768,7 @@ export class SemanticImportService {
           "Semantic import has not received every expected chunk"
         );
       }
+      await archiveLegacyKeyCollectorContexts(transaction, input);
       const latestVersion = await transaction.semanticVersion.findFirst({
         where: {
           workspaceId: input.workspaceId,
@@ -735,6 +857,18 @@ export class SemanticImportService {
       });
       return result;
     });
+    if (this.keywords) {
+      void this.keywords
+        .warmPositionHistory(input.workspaceId, input.projectId)
+        .catch(() => {
+          this.logger.warn({
+            event: "position_history_projection_warm_failed",
+            source: "semantic_import",
+            projectId: input.projectId
+          });
+        });
+    }
+    return result;
   }
 
   public async abort(
@@ -880,6 +1014,7 @@ async function applyTypedCustomValues(
   keywordByKey: ReadonlyMap<string, Keyword>,
   columns: ReadonlyMap<string, string>
 ): Promise<void> {
+  const values = new Map<string, ImportedCustomValue>();
   for (const row of rows) {
     const keyword = keywordByKey.get(
       keywordKey(row.language, row.normalizedHash)
@@ -890,42 +1025,145 @@ async function applyTypedCustomValues(
       if (!columnId) {
         throw new Error("Imported custom column was not persisted");
       }
-      if (input.duplicatePolicy === "MERGE_NON_EMPTY") {
-        await transaction.semanticKeywordCustomValue.createMany({
-          data: [
-            {
-              workspaceId: input.workspaceId,
-              projectId: input.projectId,
-              keywordId: keyword.id,
-              columnId,
-              textValue: value,
-              updatedBy: input.actorId
-            }
-          ],
-          skipDuplicates: true
-        });
-        continue;
-      }
-      await transaction.semanticKeywordCustomValue.upsert({
-        where: {
-          keywordId_columnId: { keywordId: keyword.id, columnId }
-        },
-        create: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          keywordId: keyword.id,
-          columnId,
-          textValue: value,
-          updatedBy: input.actorId
-        },
-        update: {
-          textValue: value,
-          updatedBy: input.actorId,
-          version: { increment: 1 }
-        }
+      values.set(`${keyword.id}:${columnId}`, {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        keywordId: keyword.id,
+        columnId,
+        textValue: value,
+        updatedBy: input.actorId
       });
     }
   }
+  const entries = [...values.values()];
+  for (
+    let offset = 0;
+    offset < entries.length;
+    offset += SEMANTIC_IMPORT_CUSTOM_VALUE_BATCH_SIZE
+  ) {
+    const batch = entries.slice(
+      offset,
+      offset + SEMANTIC_IMPORT_CUSTOM_VALUE_BATCH_SIZE
+    );
+    if (input.duplicatePolicy === "MERGE_NON_EMPTY") {
+      await transaction.semanticKeywordCustomValue.createMany({
+        data: batch,
+        skipDuplicates: true
+      });
+      continue;
+    }
+    await transaction.$executeRaw(
+      semanticImportCustomValueUpsertSql(batch)
+    );
+  }
+}
+
+async function applyKeywordOverwrites(
+  transaction: Prisma.TransactionClient,
+  input: Pick<
+    InternalApplySemanticImportChunkInput,
+    "workspaceId" | "projectId" | "actorId" | "importId"
+  >,
+  values: readonly ImportedKeywordOverwrite[]
+): Promise<void> {
+  for (
+    let offset = 0;
+    offset < values.length;
+    offset += SEMANTIC_IMPORT_KEYWORD_UPDATE_BATCH_SIZE
+  ) {
+    const batch = values.slice(
+      offset,
+      offset + SEMANTIC_IMPORT_KEYWORD_UPDATE_BATCH_SIZE
+    );
+    const updated = await transaction.$executeRaw(
+      semanticImportKeywordOverwriteSql(input, batch)
+    );
+    if (updated !== batch.length) {
+      throw new Error("Imported keyword update batch was not fully persisted");
+    }
+  }
+}
+
+export function semanticImportKeywordOverwriteSql(
+  input: Pick<
+    InternalApplySemanticImportChunkInput,
+    "workspaceId" | "projectId" | "actorId" | "importId"
+  >,
+  batch: readonly ImportedKeywordOverwrite[]
+): Prisma.Sql {
+  if (batch.length === 0) {
+    throw new Error("Semantic import keyword update batch is empty");
+  }
+  return Prisma.sql`
+    WITH "incoming" AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(batch)}::jsonb) AS "value"(
+        "id" uuid,
+        "textOriginal" text,
+        "priority" integer,
+        "isFavorite" boolean,
+        "isTracked" boolean,
+        "note" text,
+        "intent" varchar(32),
+        "targetPageId" uuid,
+        "customValues" jsonb
+      )
+    )
+    UPDATE "keywords" AS "keyword"
+    SET
+      "text_original" = "incoming"."textOriginal",
+      "priority" = "incoming"."priority",
+      "is_favorite" = "incoming"."isFavorite",
+      "is_tracked" = "incoming"."isTracked",
+      "note" = "incoming"."note",
+      "intent" = "incoming"."intent",
+      "target_page_id" = "incoming"."targetPageId",
+      "custom_values" = "incoming"."customValues",
+      "source_mode" = ${"IMPORT"}::"DataSourceMode",
+      "source_id" = ${input.importId}::uuid,
+      "updated_by" = ${input.actorId}::uuid,
+      "status" = ${"ACTIVE"}::"EntityStatus",
+      "version" = "keyword"."version" + 1,
+      "updated_at" = CURRENT_TIMESTAMP
+    FROM "incoming"
+    WHERE
+      "keyword"."id" = "incoming"."id"
+      AND "keyword"."workspace_id" = ${input.workspaceId}::uuid
+      AND "keyword"."project_id" = ${input.projectId}::uuid
+  `;
+}
+
+export function semanticImportCustomValueUpsertSql(
+  batch: readonly ImportedCustomValue[]
+): Prisma.Sql {
+  if (batch.length === 0) {
+    throw new Error("Semantic import custom value batch is empty");
+  }
+  return Prisma.sql`
+    INSERT INTO "semantic_keyword_custom_values" (
+      "workspace_id",
+      "project_id",
+      "keyword_id",
+      "column_id",
+      "text_value",
+      "updated_by",
+      "updated_at"
+    )
+    VALUES ${Prisma.join(batch.map((entry) => Prisma.sql`(
+      ${entry.workspaceId}::uuid,
+      ${entry.projectId}::uuid,
+      ${entry.keywordId}::uuid,
+      ${entry.columnId}::uuid,
+      ${entry.textValue},
+      ${entry.updatedBy}::uuid,
+      CURRENT_TIMESTAMP
+    )`))}
+    ON CONFLICT ("keyword_id", "column_id") DO UPDATE SET
+      "text_value" = EXCLUDED."text_value",
+      "updated_by" = EXCLUDED."updated_by",
+      "version" = "semantic_keyword_custom_values"."version" + 1,
+      "updated_at" = CURRENT_TIMESTAMP
+  `;
 }
 
 function normalizeCustomColumnName(value: string): string {
@@ -1046,60 +1284,115 @@ async function ensureGroups(
   const ordered = [...paths.values()].sort(
     (left, right) => left.segments.length - right.segments.length
   );
+  const existingGroups = ordered.length === 0
+    ? []
+    : await transaction.keywordGroup.findMany({
+        where: {
+          projectId: input.projectId,
+          pathHash: { in: ordered.map(({ hash }) => hash) }
+        },
+        select: {
+          id: true,
+          parentId: true,
+          name: true,
+          path: true,
+          pathHash: true,
+          color: true,
+          status: true,
+          systemKind: true
+        }
+      });
+  const existingByHash = new Map(
+    existingGroups.flatMap((group) =>
+      group.pathHash ? [[group.pathHash, group] as const] : []
+    )
+  );
+  const keyByHash = new Map(
+    ordered.map(({ hash, segments }) => [hash, groupPathKey(segments)])
+  );
   const ids = new Map<string, string>();
   let created = 0;
-  for (const path of ordered) {
-    const existing = await transaction.keywordGroup.findUnique({
-      where: {
-        projectId_pathHash: {
+  const maximumDepth = ordered.at(-1)?.segments.length ?? 0;
+  for (let depth = 1; depth <= maximumDepth; depth += 1) {
+    const level = ordered.filter(({ segments }) => segments.length === depth);
+    const missing: Array<{
+      workspaceId: string;
+      projectId: string;
+      parentId?: string;
+      name: string;
+      path: string;
+      pathHash: string;
+      color?: string;
+    }> = [];
+    for (const path of level) {
+      const key = groupPathKey(path.segments);
+      const parentSegments = path.segments.slice(0, -1);
+      const parentId = parentSegments.length > 0
+        ? ids.get(groupPathKey(parentSegments))
+        : undefined;
+      if (parentSegments.length > 0 && !parentId) {
+        throw new Error("Imported group parent was not persisted");
+      }
+      const sourceColor = sourceColors.get(key);
+      const existing = existingByHash.get(path.hash);
+      if (!existing) {
+        missing.push({
+          workspaceId: input.workspaceId,
           projectId: input.projectId,
-          pathHash: path.hash
-        }
-      },
-      select: { id: true, status: true, systemKind: true }
-    });
-    const sourceColor = sourceColors.get(groupPathKey(path.segments));
-    if (existing) {
+          ...(parentId ? { parentId } : {}),
+          name: path.segments.at(-1)!,
+          path: path.segments.join(" / "),
+          pathHash: path.hash,
+          ...(sourceColor ? { color: sourceColor } : {})
+        });
+        continue;
+      }
       const restored = existing.status !== "ACTIVE" || existing.systemKind !== null;
-      if (restored || sourceColor) {
-        const parentSegments = path.segments.slice(0, -1);
+      const expectedName = path.segments.at(-1)!;
+      const expectedPath = path.segments.join(" / ");
+      if (
+        restored ||
+        existing.parentId !== (parentId ?? null) ||
+        existing.name !== expectedName ||
+        existing.path !== expectedPath ||
+        (sourceColor !== undefined && existing.color !== sourceColor)
+      ) {
         await transaction.keywordGroup.update({
           where: { id: existing.id },
           data: {
             status: "ACTIVE",
             systemKind: null,
-            name: path.segments.at(-1)!,
-            path: path.segments.join(" / "),
-            ...(sourceColor ? { color: sourceColor } : {}),
-            ...(parentSegments.length > 0 &&
-            ids.get(groupPathKey(parentSegments))
-              ? { parentId: ids.get(groupPathKey(parentSegments))! }
-              : { parentId: null })
+            parentId: parentId ?? null,
+            name: expectedName,
+            path: expectedPath,
+            ...(sourceColor ? { color: sourceColor } : {})
           }
         });
         if (restored) created += 1;
       }
-      ids.set(groupPathKey(path.segments), existing.id);
-      continue;
+      ids.set(key, existing.id);
     }
-    const parentSegments = path.segments.slice(0, -1);
-    const group = await transaction.keywordGroup.create({
-      data: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        ...(parentSegments.length > 0 &&
-        ids.get(groupPathKey(parentSegments))
-          ? { parentId: ids.get(groupPathKey(parentSegments))! }
-          : {}),
-        name: path.segments.at(-1)!,
-        path: path.segments.join(" / "),
-        pathHash: path.hash,
-        ...(sourceColor ? { color: sourceColor } : {})
-      },
-      select: { id: true }
+    if (missing.length === 0) continue;
+    const inserted = await transaction.keywordGroup.createMany({
+      data: missing,
+      skipDuplicates: true
     });
-    ids.set(groupPathKey(path.segments), group.id);
-    created += 1;
+    created += inserted.count;
+    const persisted = await transaction.keywordGroup.findMany({
+      where: {
+        projectId: input.projectId,
+        pathHash: { in: missing.map(({ pathHash }) => pathHash) }
+      },
+      select: { id: true, pathHash: true }
+    });
+    if (persisted.length !== missing.length) {
+      throw new Error("Imported group batch was not persisted");
+    }
+    for (const group of persisted) {
+      if (!group.pathHash) continue;
+      const key = keyByHash.get(group.pathHash);
+      if (key) ids.set(key, group.id);
+    }
   }
   return { ids, created };
 }
@@ -1157,7 +1450,8 @@ function keywordUpdate(
   policy: SemanticImportDuplicatePolicy,
   actorId: string,
   importId: string,
-  targetPageId: string | undefined
+  targetPageId: string | undefined,
+  preserveText = false
 ): Prisma.KeywordUpdateInput {
   const currentCustomValues = stringValues(keyword.customValues);
   const imported = row.customValues;
@@ -1171,7 +1465,7 @@ function keywordUpdate(
   return {
     ...(policy === "OVERWRITE_MAPPED"
       ? {
-          textOriginal: row.textOriginal,
+          ...(preserveText ? {} : { textOriginal: row.textOriginal }),
           ...(row.priority === undefined ? {} : { priority: row.priority }),
           ...(row.isFavorite === undefined
             ? {}
@@ -1226,6 +1520,61 @@ function keywordUpdate(
     status: "ACTIVE",
     version: { increment: 1 }
   };
+}
+
+export async function archiveLegacyKeyCollectorContexts(
+  transaction: Prisma.TransactionClient,
+  input: Pick<
+    InternalCompleteSemanticImportInput,
+    "workspaceId" | "projectId" | "actorId"
+  >
+): Promise<void> {
+  const contexts = await transaction.trackingContext.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      status: "ACTIVE",
+      rankManifests: { some: { provider: "KEY_COLLECTOR" } }
+    },
+    select: {
+      id: true,
+      configurations: {
+        orderBy: { configurationVersion: "desc" },
+        take: 1,
+        select: { regionCode: true, regionLabel: true }
+      }
+    }
+  });
+  const legacy = contexts.filter(({ configurations }) => {
+    const configuration = configurations[0];
+    return configuration && (
+      configuration.regionCode === "global" ||
+      configuration.regionCode === "kc4-import"
+    ) && configuration.regionLabel === "Импорт Key Collector";
+  });
+  const hasGeographicContext = contexts.some(({ configurations }) => {
+    const configuration = configurations[0];
+    return configuration &&
+      configuration.regionCode !== "global" &&
+      configuration.regionCode !== "kc4-import";
+  });
+  if (!hasGeographicContext || legacy.length === 0) return;
+  const ids = legacy.map(({ id }) => id);
+  await transaction.trackingContext.updateMany({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      id: { in: ids },
+      status: "ACTIVE"
+    },
+    data: {
+      status: "ARCHIVED",
+      archivedBy: input.actorId,
+      archivedAt: new Date(),
+      updatedBy: input.actorId,
+      version: { increment: 1 }
+    }
+  });
 }
 
 function mergeMissingValues(
@@ -1296,55 +1645,72 @@ async function applyImportedRanks(
   transaction: Prisma.TransactionClient,
   input: Pick<
     InternalApplySemanticImportChunkInput,
-    "workspaceId" | "projectId" | "actorId" | "importId" | "chunkIndex"
+    "workspaceId" | "projectId" | "projectDomain" | "actorId" | "importId" | "chunkIndex"
   >,
   rows: readonly SemanticImportPublishRow[],
   keywordByKey: ReadonlyMap<string, Keyword>
 ): Promise<number> {
-  const engines = [
-    ...new Set(
-      rows.flatMap((row) =>
-        (row.positions ?? []).map(({ searchEngine }) => searchEngine)
-      )
-    )
-  ];
   const importedAt = new Date();
   let snapshotCount = 0;
-  for (const engine of engines) {
+  const legacyCurrent = new Map<
+    "YANDEX" | "GOOGLE",
+    Map<string, ImportedRankCandidate>
+  >();
+  const measurements = new Map<string, ImportedRankMeasurementGroup>();
+
+  // History is registered first. A current KC4 value for the same measurement
+  // then enriches it with the live SERP instead of creating a second slice.
+  for (const row of rows) {
+    const keyword = keywordByKey.get(keywordKey(row.language, row.normalizedHash));
+    if (!keyword) continue;
+    for (const point of row.positionHistory ?? []) {
+      addImportedMeasurement(
+        measurements,
+        point,
+        importedRankCandidate(keyword, point),
+        false
+      );
+    }
+  }
+  for (const row of rows) {
+    const keyword = keywordByKey.get(keywordKey(row.language, row.normalizedHash));
+    if (!keyword) continue;
+    for (const position of row.positions ?? []) {
+      if (hasImportedRankContext(position)) {
+        const observedAt = position.observedAt ?? importedAt.toISOString();
+        addImportedMeasurement(
+          measurements,
+          {
+            source: "KEY_COLLECTOR",
+            searchEngine: position.searchEngine,
+            countryCode: position.countryCode,
+            regionCode: position.regionCode,
+            regionLabel: position.regionLabel,
+            language: position.language,
+            device: position.device,
+            observedAt,
+            found: position.found,
+            ...(position.position === undefined ? {} : { position: position.position }),
+            ...(position.rankingUrl === undefined ? {} : { rankingUrl: position.rankingUrl }),
+            ...(position.serpResults === undefined ? {} : { serpResults: position.serpResults })
+          },
+          importedRankCandidate(keyword, position),
+          true
+        );
+        continue;
+      }
+      const candidates = legacyCurrent.get(position.searchEngine) ?? new Map();
+      candidates.set(keyword.id, importedRankCandidate(keyword, position));
+      legacyCurrent.set(position.searchEngine, candidates);
+    }
+  }
+
+  for (const [engine, byKeyword] of legacyCurrent) {
     const context = await ensureImportedRankContext(
       transaction,
       input,
       engine
     );
-    const byKeyword = new Map<
-      string,
-      {
-        readonly keyword: Keyword;
-        readonly found: boolean;
-        readonly position: number | null;
-        readonly rankingUrl: string | null;
-        readonly normalizedRankingUrl: string | null;
-      }
-    >();
-    for (const row of rows) {
-      const keyword = keywordByKey.get(
-        keywordKey(row.language, row.normalizedHash)
-      );
-      const position = (row.positions ?? []).find(
-        (candidate) => candidate.searchEngine === engine
-      );
-      if (!keyword || !position) continue;
-      const rankingUrl = position.rankingUrl ?? null;
-      byKeyword.set(keyword.id, {
-        keyword,
-        found: position.found,
-        position: position.position ?? null,
-        rankingUrl,
-        normalizedRankingUrl: rankingUrl
-          ? normalizePageUrl(rankingUrl, "rankingUrl").normalized
-          : null
-      });
-    }
     const candidates = [...byKeyword.values()];
     if (candidates.length === 0) continue;
     snapshotCount += await persistImportedRankSnapshot(
@@ -1356,36 +1722,121 @@ async function applyImportedRanks(
       importedAt
     );
   }
-  const historyGroups = new Map<string, {
-    readonly sample: NonNullable<SemanticImportPublishRow["positionHistory"]>[number];
-    readonly candidates: Map<string, ImportedRankCandidate>;
-  }>();
-  for (const row of rows) {
-    const keyword = keywordByKey.get(keywordKey(row.language, row.normalizedHash));
-    if (!keyword) continue;
-    for (const point of row.positionHistory ?? []) {
-      const key = `${point.searchEngine}:${point.countryCode}:${point.regionCode}:${point.language}:${point.device}:${point.observedAt}`;
-      const group = historyGroups.get(key) ?? { sample: point, candidates: new Map() };
-      group.candidates.set(keyword.id, { keyword, found: point.found, position: point.position ?? null, rankingUrl: null, normalizedRankingUrl: null });
-      historyGroups.set(key, group);
-    }
-  }
-  for (const { sample, candidates } of historyGroups.values()) {
+  for (const { sample, candidates, hasCurrent } of measurements.values()) {
     const context = await ensureImportedHistoryContext(transaction, input, sample);
-    snapshotCount += await persistImportedRankSnapshot(transaction, input, sample.searchEngine, context, [...candidates.values()], importedAt, {
-      observedAt: new Date(sample.observedAt), provider: "MANUAL_IMPORT", qualityFlag: "IMPORTED_MANUAL_HISTORY",
-      source: "MANUAL_HISTORY", identity: `${input.importId}:${input.chunkIndex}:${sample.searchEngine}:${sample.countryCode}:${sample.regionCode}:${sample.language}:${sample.device}:${sample.observedAt}`,
-      connectorVersion: "manual-history@1", providerRequestPrefix: "manual-history-import"
-    });
+    const keyCollector = sample.source === "KEY_COLLECTOR";
+    snapshotCount += await persistImportedRankSnapshot(
+      transaction,
+      input,
+      sample.searchEngine,
+      context,
+      [...candidates.values()],
+      importedAt,
+      {
+        observedAt: new Date(sample.observedAt),
+        provider: keyCollector ? "KEY_COLLECTOR" : "MANUAL_IMPORT",
+        qualityFlag: keyCollector ? "IMPORTED_KC4" : "IMPORTED_MANUAL_HISTORY",
+        source: keyCollector && hasCurrent ? "KC4" : keyCollector ? "KC4_HISTORY" : "MANUAL_HISTORY",
+        identity: `${input.importId}:${input.chunkIndex}:measurement:${sample.searchEngine}:${sample.countryCode}:${sample.regionCode}:${sample.language}:${sample.device}:${sample.observedAt}`,
+        connectorVersion: keyCollector ? "key-collector@import" : "manual-history@1",
+        providerRequestPrefix: keyCollector ? "kc4-import" : "manual-history-import"
+      }
+    );
   }
   return snapshotCount;
+}
+
+interface ImportedRankMeasurementGroup {
+  readonly sample: SemanticImportRankHistoryValue;
+  readonly candidates: Map<string, ImportedRankCandidate>;
+  hasCurrent: boolean;
+}
+
+function addImportedMeasurement(
+  groups: Map<string, ImportedRankMeasurementGroup>,
+  sample: SemanticImportRankHistoryValue,
+  candidate: ImportedRankCandidate,
+  current: boolean
+): void {
+  const key = importedMeasurementKey(sample);
+  const group = groups.get(key) ?? {
+    sample,
+    candidates: new Map<string, ImportedRankCandidate>(),
+    hasCurrent: false
+  };
+  const existing = group.candidates.get(candidate.keyword.id);
+  group.candidates.set(candidate.keyword.id, existing
+    ? mergeImportedRankCandidates(existing, candidate)
+    : candidate);
+  group.hasCurrent ||= current;
+  groups.set(key, group);
+}
+
+function importedMeasurementKey(
+  sample: Pick<SemanticImportRankHistoryValue, "searchEngine" | "countryCode" | "regionCode" | "language" | "device" | "observedAt">
+): string {
+  return `${sample.searchEngine}:${sample.countryCode}:${sample.regionCode}:${sample.language}:${sample.device}:${sample.observedAt}`;
+}
+
+function importedRankCandidate(
+  keyword: Keyword,
+  position: Pick<SemanticImportPositionValue, "found" | "position" | "rankingUrl" | "serpResults">
+): ImportedRankCandidate {
+  const rankingUrl = position.rankingUrl ?? null;
+  return {
+    keyword,
+    found: position.found,
+    position: position.position ?? null,
+    rankingUrl,
+    normalizedRankingUrl: rankingUrl
+      ? normalizePageUrl(rankingUrl, "rankingUrl").normalized
+      : null,
+    serpResults: position.serpResults ?? []
+  };
+}
+
+function mergeImportedRankCandidates(
+  existing: ImportedRankCandidate,
+  incoming: ImportedRankCandidate
+): ImportedRankCandidate {
+  const rankingUrl = incoming.rankingUrl ?? existing.rankingUrl;
+  return {
+    ...incoming,
+    found: incoming.found || existing.found,
+    position: incoming.position ?? existing.position,
+    rankingUrl,
+    normalizedRankingUrl: rankingUrl
+      ? normalizePageUrl(rankingUrl, "rankingUrl").normalized
+      : null,
+    serpResults: incoming.serpResults.length > 0
+      ? incoming.serpResults
+      : existing.serpResults
+  };
+}
+
+function hasImportedRankContext(
+  value: SemanticImportPositionValue
+): value is SemanticImportPositionValue & Readonly<{
+  source: "KEY_COLLECTOR";
+  countryCode: string;
+  regionCode: string;
+  regionLabel: string;
+  language: string;
+  device: "DESKTOP" | "MOBILE";
+}> {
+  return value.source === "KEY_COLLECTOR" &&
+    value.countryCode !== undefined &&
+    value.regionCode !== undefined &&
+    value.regionLabel !== undefined &&
+    value.language !== undefined &&
+    value.device !== undefined;
 }
 
 interface ImportedRankSource {
   readonly observedAt: Date;
   readonly provider: "KEY_COLLECTOR" | "MANUAL_IMPORT";
   readonly qualityFlag: "IMPORTED_KC4" | "IMPORTED_MANUAL_HISTORY";
-  readonly source: "KC4" | "MANUAL_HISTORY";
+  readonly source: "KC4" | "KC4_HISTORY" | "MANUAL_HISTORY";
   readonly identity: string;
   readonly connectorVersion: "key-collector@import" | "manual-history@1";
   readonly providerRequestPrefix: "kc4-import" | "manual-history-import";
@@ -1404,13 +1855,14 @@ interface ImportedRankCandidate {
   readonly position: number | null;
   readonly rankingUrl: string | null;
   readonly normalizedRankingUrl: string | null;
+  readonly serpResults: readonly SemanticImportSerpResultValue[];
 }
 
 async function persistImportedRankSnapshot(
   transaction: Prisma.TransactionClient,
   input: Pick<
     InternalApplySemanticImportChunkInput,
-    "workspaceId" | "projectId" | "actorId" | "importId" | "chunkIndex"
+    "workspaceId" | "projectId" | "projectDomain" | "actorId" | "importId" | "chunkIndex"
   >,
   engine: "YANDEX" | "GOOGLE",
   context: ImportedRankContext,
@@ -1503,7 +1955,7 @@ async function persistImportedRankSnapshot(
       requestHash: sha256Bytes(`import-request:${identity}`),
       provider: source.provider,
       operation: "POSITIONS",
-      projectDomain: "manual-import.invalid",
+      projectDomain: input.projectDomain ?? "manual-import.invalid",
       projectStatus: "ACTIVE",
       projectVersion: 1,
       trackingContextId: context.id,
@@ -1576,65 +2028,90 @@ async function persistImportedRankSnapshot(
   }));
   await transaction.rankSnapshot.createMany({ data: snapshots });
 
-  const currentRanks = await transaction.currentRank.findMany({
-    where: {
-      workspaceId: input.workspaceId,
-      projectId: input.projectId,
-      trackingContextId: context.id,
-      keywordId: { in: keywordIds }
-    }
-  });
-  const currentByKeyword = new Map(
-    currentRanks.map((current) => [current.keywordId, current])
+  const serpResults = candidates.flatMap((candidate, sequence) =>
+    candidate.serpResults.map((result) => ({
+      snapshotObservedAt: source.observedAt,
+      snapshotId: snapshots[sequence]!.id,
+      position: result.position,
+      rankingUrl: result.rankingUrl,
+      normalizedRankingUrl: normalizePageUrl(
+        result.rankingUrl,
+        "serpResults.rankingUrl"
+      ).normalized,
+      ...(result.title === undefined ? {} : { title: result.title }),
+      ...(result.snippet === undefined ? {} : { snippet: result.snippet }),
+      createdAt: importedAt
+    }))
   );
-  let currentUpdatedCount = 0;
-  for (const snapshot of snapshots) {
-    const current = currentByKeyword.get(snapshot.keywordId);
-    if (current && current.observedAt >= source.observedAt) continue;
-    const where = {
-      workspaceId_projectId_keywordId_trackingContextId: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        keywordId: snapshot.keywordId,
-        trackingContextId: context.id
-      }
-    } as const;
-    const values = {
-      configurationVersion: context.configurationVersion,
-      observedAt: source.observedAt,
-      snapshotId: snapshot.id,
-      found: snapshot.found,
-      position: snapshot.position,
-      rankingUrl: snapshot.rankingUrl,
-      normalizedRankingUrl: snapshot.normalizedRankingUrl,
-      provider: source.provider,
-      sourceMode: "IMPORT" as const,
-      dataQualityFlags,
-      updatedAt: importedAt
-    };
-    if (current) {
-      await transaction.currentRank.update({
-        where,
-        data: {
-          ...values,
-          previousPosition: current.position,
-          version: { increment: 1 }
-        }
-      });
-    } else {
-      await transaction.currentRank.create({
-        data: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          keywordId: snapshot.keywordId,
-          trackingContextId: context.id,
-          previousPosition: null,
-          ...values
-        }
-      });
+  for (let offset = 0; offset < serpResults.length; offset += 1_000) {
+    const batch = serpResults.slice(offset, offset + 1_000);
+    const created = await transaction.rankSerpResult.createMany({ data: batch });
+    if (created.count !== batch.length) {
+      throw new Error("Imported SERP result batch was not fully persisted");
     }
-    currentUpdatedCount += 1;
   }
+
+  const currentRows = await transaction.$queryRaw<readonly { keywordId: string }[]>(Prisma.sql`
+    INSERT INTO current_ranks (
+      workspace_id,
+      project_id,
+      keyword_id,
+      tracking_context_id,
+      configuration_version,
+      observed_at,
+      snapshot_id,
+      found,
+      position,
+      previous_position,
+      ranking_url,
+      normalized_ranking_url,
+      provider,
+      source_mode,
+      data_quality_flags,
+      version,
+      updated_at
+    )
+    VALUES ${Prisma.join(snapshots.map((snapshot) => Prisma.sql`(
+      ${input.workspaceId}::uuid,
+      ${input.projectId}::uuid,
+      ${snapshot.keywordId}::uuid,
+      ${context.id}::uuid,
+      ${context.configurationVersion},
+      ${source.observedAt},
+      ${snapshot.id}::uuid,
+      ${snapshot.found},
+      ${snapshot.position},
+      NULL,
+      ${snapshot.rankingUrl},
+      ${snapshot.normalizedRankingUrl},
+      ${source.provider},
+      ${"IMPORT"}::"DataSourceMode",
+      ${JSON.stringify([source.qualityFlag])}::jsonb,
+      1,
+      ${importedAt}
+    )`))}
+    ON CONFLICT (workspace_id, project_id, keyword_id, tracking_context_id)
+    DO UPDATE SET
+      configuration_version = EXCLUDED.configuration_version,
+      observed_at = EXCLUDED.observed_at,
+      snapshot_id = EXCLUDED.snapshot_id,
+      found = EXCLUDED.found,
+      position = EXCLUDED.position,
+      previous_position = current_ranks.position,
+      ranking_url = EXCLUDED.ranking_url,
+      normalized_ranking_url = EXCLUDED.normalized_ranking_url,
+      provider = EXCLUDED.provider,
+      source_mode = EXCLUDED.source_mode,
+      data_quality_flags = EXCLUDED.data_quality_flags,
+      version = current_ranks.version + 1,
+      updated_at = EXCLUDED.updated_at
+    -- OVERWRITE_MAPPED reimports are authoritative for the same KC4
+    -- measurement date as well. A UUID tie-break could otherwise retain an
+    -- older snapshot that was created before SERP parsing was available.
+    WHERE EXCLUDED.observed_at >= current_ranks.observed_at
+    RETURNING keyword_id AS "keywordId"
+  `);
+  const currentUpdatedCount = currentRows.length;
   await transaction.rankChunkIngestReceipt.create({
     data: {
       manifestId,
@@ -1754,10 +2231,14 @@ async function ensureImportedHistoryContext(
   point: NonNullable<SemanticImportPublishRow["positionHistory"]>[number]
 ): Promise<ImportedRankContext> {
   const identity = `${input.projectId}:${point.searchEngine}:${point.countryCode}:${point.regionCode}:${point.language}:${point.device}`;
-  const id = deterministicUuid(`manual-history-context:${identity}`);
+  const keyCollector = point.source === "KEY_COLLECTOR";
+  const contextSource = keyCollector ? "KC4_HISTORY" : "MANUAL_HISTORY";
+  const id = deterministicUuid(
+    `${keyCollector ? "kc4-history-context" : "manual-history-context"}:${identity}`
+  );
   const configurationVersion = 1;
   const configurationHash = sha256(JSON.stringify({
-    source: "MANUAL_HISTORY", searchEngine: point.searchEngine, countryCode: point.countryCode,
+    source: contextSource, searchEngine: point.searchEngine, countryCode: point.countryCode,
     regionCode: point.regionCode, regionLabel: point.regionLabel, language: point.language,
     device: point.device, depth: 100, domainMatchMode: "ANY_PROJECT_MIRROR", safeSearch: false
   }));
@@ -1775,7 +2256,7 @@ async function ensureImportedHistoryContext(
   const device = point.device === "DESKTOP" ? "ПК" : "Телефон";
   const context = await transaction.trackingContext.create({ data: {
     id, workspaceId: input.workspaceId, projectId: input.projectId,
-    name: `Ручной импорт · ${engine} · ${point.regionLabel} · ${device}`.slice(0, 160),
+    name: `${keyCollector ? "Импорт Key Collector" : "Ручной импорт"} · ${engine} · ${point.regionLabel} · ${device}`.slice(0, 160),
     createdBy: input.actorId, updatedBy: input.actorId
   }, select: { id: true, version: true } });
   await transaction.trackingContextVersion.create({ data: {
@@ -1790,11 +2271,13 @@ async function ensureImportedHistoryContext(
 function payloadHash(
   rows: readonly SemanticImportPublishRow[],
   groupPaths?: readonly (readonly string[])[],
-  groupMetadata?: InternalApplySemanticImportChunkInput["groupMetadata"]
+  groupMetadata?: InternalApplySemanticImportChunkInput["groupMetadata"],
+  projectDomain?: string
 ): string {
   return sha256(JSON.stringify(
-    groupPaths || groupMetadata
+    projectDomain || groupPaths || groupMetadata
       ? {
+          ...(projectDomain ? { projectDomain } : {}),
           ...(groupPaths ? { groupPaths } : {}),
           ...(groupMetadata ? { groupMetadata } : {}),
           rows

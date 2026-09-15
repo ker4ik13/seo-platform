@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   expandedAncestorIds,
+  resolvedFolderSelectionIds,
   treeIdsWithDescendants,
   visibleFolderRows
 } from "./semantic-operation-tree.ts";
@@ -59,6 +60,29 @@ test("resolves selected folders through descendants without duplicate ids", () =
   assert.deepEqual(
     [...expandedAncestorIds(groups, ["leaf"])].sort(),
     ["child", "root"]
+  );
+});
+
+test("keeps folder selection direct until descendants are explicitly enabled", () => {
+  const folders = [
+    { id: "root" },
+    { id: "child", parentId: "root" },
+    { id: "leaf", parentId: "child" }
+  ];
+  const selected = new Set(["root"]);
+
+  assert.deepEqual(resolvedFolderSelectionIds(folders, selected), ["root"]);
+  assert.deepEqual(
+    resolvedFolderSelectionIds(folders, selected, new Set(["root"])),
+    ["child", "leaf", "root"]
+  );
+  assert.deepEqual(
+    resolvedFolderSelectionIds(
+      folders,
+      new Set(["root", "child"]),
+      new Set(["child"])
+    ),
+    ["child", "leaf", "root"]
   );
 });
 

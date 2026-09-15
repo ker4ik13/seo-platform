@@ -123,11 +123,20 @@ export interface SerpWorkbenchResult {
   readonly snippet?: string;
 }
 
+export const serpWorkbenchSnapshotProviders = [
+  "ARSENKIN",
+  "XMLSTOCK",
+  "KEY_COLLECTOR"
+] as const;
+
+export type SerpWorkbenchSnapshotProvider =
+  (typeof serpWorkbenchSnapshotProviders)[number];
+
 export interface SerpWorkbenchSnapshot {
   readonly dimensionKey: string;
   readonly snapshotId: string;
   readonly observedAt: string;
-  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly provider: SerpWorkbenchSnapshotProvider;
   readonly results: readonly SerpWorkbenchResult[];
 }
 
@@ -478,7 +487,7 @@ export function parseSerpWorkbenchReport(value: unknown): SerpWorkbenchReport {
     const snapshots = row.snapshots.map((value) => {
       const snapshot = exactRecord(value, ["dimensionKey", "snapshotId", "observedAt", "provider", "results"]);
       const dimensionKey = rankDimensionKey(snapshot.dimensionKey);
-      if (!dimensionKeys.has(dimensionKey) || snapshotDimensions.has(dimensionKey) || (snapshot.provider !== "ARSENKIN" && snapshot.provider !== "XMLSTOCK") || !Array.isArray(snapshot.results) || snapshot.results.length > 100) invalid();
+      if (!dimensionKeys.has(dimensionKey) || snapshotDimensions.has(dimensionKey) || !serpWorkbenchSnapshotProviders.includes(snapshot.provider as SerpWorkbenchSnapshotProvider) || !Array.isArray(snapshot.results) || snapshot.results.length > 100) invalid();
       snapshotDimensions.add(dimensionKey);
       let previousPosition = 0;
       const results = snapshot.results.map((value) => {
@@ -498,7 +507,7 @@ export function parseSerpWorkbenchReport(value: unknown): SerpWorkbenchReport {
         dimensionKey,
         snapshotId: uuid(snapshot.snapshotId),
         observedAt: instant(snapshot.observedAt),
-        provider: snapshot.provider as "ARSENKIN" | "XMLSTOCK",
+        provider: snapshot.provider as SerpWorkbenchSnapshotProvider,
         results
       };
     });

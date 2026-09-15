@@ -8,7 +8,8 @@ import {
   internalSemanticKeywordBulkCreateInput,
   internalSemanticKeywordBulkCreatePreviewInput,
   internalSemanticKeywordBulkInput,
-  internalSemanticKeywordCleaningInput
+  internalSemanticKeywordCleaningInput,
+  internalSemanticKeywordMergeInput
 } from "./keyword-input.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
@@ -280,6 +281,29 @@ test("validates exact tenant-scoped keyword cleaning commands", () => {
       rules: { letterCase: "KEEP" }
     })
   );
+});
+test("validates the trusted scope and versions of a keyword merge", () => {
+  const sourceId = "01900000-0000-7000-8000-000000000044";
+  assert.deepEqual(internalSemanticKeywordMergeInput({
+    workspaceId,
+    projectId,
+    actorId,
+    keeper: { id: keywordId, version: 2 },
+    sources: [{ id: sourceId, version: 7 }]
+  }), {
+    workspaceId,
+    projectId,
+    actorId,
+    keeper: { id: keywordId, version: 2 },
+    sources: [{ id: sourceId, version: 7 }]
+  });
+  assert.throws(() => internalSemanticKeywordMergeInput({
+    workspaceId,
+    projectId,
+    actorId,
+    keeper: { id: keywordId, version: 2 },
+    sources: [{ id: keywordId, version: 2 }]
+  }), BadRequestException);
 });
 test("trusted tag changes reject mixed replacement and allow exact bulk deltas", () => {
   const context = { workspaceId, projectId, actorId, version: 1 };

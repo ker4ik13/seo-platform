@@ -61,6 +61,10 @@ import {
   toRankJobSummary,
   type StoredRankJob
 } from "./rank-job-record.js";
+import {
+  storedXmlStockOperationUsage,
+  xmlStockUsageWithActual
+} from "../integrations/xmlstock-pricing.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -68,6 +72,12 @@ const RANK_PREPARATION_MAX_ATTEMPTS = 20;
 const CANCELLATION_TRANSACTION_ATTEMPTS = 3;
 
 class RankJobConcurrencyError extends Error {}
+
+function storedRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : undefined;
+}
 
 @Injectable()
 export class RankRunService {
@@ -266,7 +276,8 @@ export class RankRunService {
     limit: number,
     cursor?: number
   ): Promise<InternalRankOperationScope> {
-    const job = await this.prisma.job.findFirst({
+    const [job, attempts] = await Promise.all([
+      this.prisma.job.findFirst({
       where: {
         id: jobId,
         workspaceId,
@@ -275,6 +286,7 @@ export class RankRunService {
         provider: "XMLSTOCK"
       },
       select: {
+        scopeSnapshot: true,
         items: {
           ...(cursor === undefined
             ? {}
@@ -288,7 +300,12 @@ export class RankRunService {
           }
         }
       }
-    });
+      }),
+      this.prisma.rankConnectorExecution.aggregate({
+        where: { workspaceId, projectId, jobId, provider: "XMLSTOCK" },
+        _sum: { submitAttemptCount: true, pollAttemptCount: true }
+      })
+    ]);
     if (!job) throw rankJobNotFound("XMLStock rank result scope not found");
 
     const items = job.items.slice(0, limit);
@@ -336,10 +353,22 @@ export class RankRunService {
     });
     const hasNext = job.items.length > limit;
     const last = scopeItems.at(-1);
+    const storedUsage = storedXmlStockOperationUsage(
+      storedRecord(job.scopeSnapshot)?.providerUsage
+    );
+    const actualRequests = storedUsage?.product === "YANDEX_SEARCH_API"
+      ? attempts._sum.submitAttemptCount ?? 0
+      : attempts._sum.pollAttemptCount ?? 0;
+    const providerUsage = xmlStockUsageWithActual(
+      storedUsage,
+      actualRequests,
+      actualRequests
+    );
     return {
       workspaceId,
       projectId,
       jobId,
+      ...(providerUsage ? { providerUsage } : {}),
       items: scopeItems,
       page: {
         hasNext,

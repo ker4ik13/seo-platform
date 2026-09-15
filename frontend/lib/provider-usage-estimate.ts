@@ -19,8 +19,15 @@ export function frequencyProviderUsageEstimate(
     return platformTokenEstimate();
   }
   if (source.provider === "XMLSTOCK") {
+    const requestCount = keywordCount * typeCount;
     return {
-      usage: `до ${formatInteger(keywordCount * typeCount, uiLocale)} запросов XMLStock`,
+      usage: xmlStockUsageLabel(
+        source,
+        "WORDSTAT",
+        requestCount,
+        requestCount,
+        uiLocale
+      ),
       available: providerQuotaLabel(source, uiLocale)
     };
   }
@@ -40,22 +47,13 @@ export function rankProviderUsageEstimate(
   depth: 10 | 20 | 30 | 50 | 100,
   searchSource: "SEARCH_API" | "LIVE",
   yandexLiveMode?: "TURBO",
-  purpose: RankCollectionPurpose = "POSITION_TRACKING", uiLocale: string = "ru-RU"
+  _purpose: RankCollectionPurpose = "POSITION_TRACKING", uiLocale: string = "ru-RU"
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
   if (source.mode === "PLATFORM_PAID") {
     return platformTokenEstimate();
   }
   if (source.provider === "XMLSTOCK") {
-    if (purpose === "COMPETITOR_SERP") {
-      const requestCount = keywordCount;
-      const pricePerThousand =
-        searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 28 : 25;
-      return {
-        usage: `до ${formatInteger(requestCount, uiLocale)} запросов XMLStock · Топ-${depth} · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB", uiLocale)}`,
-        available: providerQuotaLabel(source, uiLocale)
-      };
-    }
     if (
       yandexLiveMode === "TURBO" &&
       searchEngine === "YANDEX" &&
@@ -66,8 +64,13 @@ export function rankProviderUsageEstimate(
       const maximumRequestCount =
         keywordCount * Math.ceil(depth / 10);
       return {
-        usage:
-          `${formatInteger(minimumRequestCount, uiLocale)}–${formatInteger(maximumRequestCount, uiLocale)} запросов XMLStock Turbo · повышенный тариф`,
+        usage: xmlStockUsageLabel(
+          source,
+          "YANDEX_TURBO",
+          minimumRequestCount,
+          maximumRequestCount,
+          uiLocale
+        ),
         available: providerQuotaLabel(source, uiLocale)
       };
     }
@@ -76,10 +79,19 @@ export function rankProviderUsageEstimate(
         ? 1
         : Math.ceil(depth / 10);
     const requestCount = keywordCount * requestsPerKeyword;
-    const pricePerThousand =
-      searchEngine === "YANDEX" && searchSource === "SEARCH_API" ? 28 : 25;
+    const product = searchEngine === "GOOGLE"
+      ? "GOOGLE_LIVE" as const
+      : searchSource === "SEARCH_API"
+        ? "YANDEX_SEARCH_API" as const
+        : "YANDEX_LIVE" as const;
     return {
-      usage: `до ${formatInteger(requestCount, uiLocale)} запросов XMLStock · от ${formatMoney(String(requestCount * pricePerThousand / 1_000), "RUB", uiLocale)}`,
+      usage: xmlStockUsageLabel(
+        source,
+        product,
+        requestCount,
+        requestCount,
+        uiLocale
+      ),
       available: providerQuotaLabel(source, uiLocale)
     };
   }
@@ -93,6 +105,40 @@ export function rankProviderUsageEstimate(
     };
   }
   return unavailableEstimate();
+}
+
+function xmlStockUsageLabel(
+  source: ProjectConnectorCredentialOption,
+  product: "YANDEX_SEARCH_API" | "YANDEX_LIVE" | "YANDEX_TURBO" | "GOOGLE_LIVE" | "WORDSTAT",
+  minimumRequests: number,
+  maximumRequests: number,
+  uiLocale: string
+): string {
+  const quota = source.quota;
+  const pricing = quota?.status === "AVAILABLE"
+    ? quota.xmlStockPricing
+    : undefined;
+  const requestLabel = minimumRequests === maximumRequests
+    ? `${formatInteger(minimumRequests, uiLocale)} запросов`
+    : `${formatInteger(minimumRequests, uiLocale)}–${formatInteger(maximumRequests, uiLocale)} запросов`;
+  if (!pricing) return `${requestLabel} XMLStock · цена обновится после проверки API`;
+  const price = pricing.pricesPerThousand[product];
+  const minimumCost = minimumRequests * Number(price) / 1_000;
+  const maximumCost = maximumRequests * Number(price) / 1_000;
+  const cost = minimumRequests === maximumRequests
+    ? formatMoney(String(minimumCost), "RUB", uiLocale)
+    : `${formatMoney(String(minimumCost), "RUB", uiLocale)}–${formatMoney(String(maximumCost), "RUB", uiLocale)}`;
+  return `${xmlStockTariffLabel(pricing.tariffCode)} · ${price} ₽ за 1000 · ${requestLabel} · ${cost}`;
+}
+
+function xmlStockTariffLabel(
+  tariff: "BASIC" | "OPTIMAL" | "MAXIMUM" | "PREMIUM" | "CUSTOM"
+): string {
+  if (tariff === "BASIC") return "Базовый тариф";
+  if (tariff === "OPTIMAL") return "Оптимальный тариф";
+  if (tariff === "MAXIMUM") return "Тариф Максимум";
+  if (tariff === "PREMIUM") return "Премиум тариф";
+  return "Тариф по ставкам аккаунта";
 }
 
 export function providerQuotaLabel(

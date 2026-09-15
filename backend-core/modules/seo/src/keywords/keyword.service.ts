@@ -2,7 +2,8 @@ import { rankDimensionMetadata } from "../rank-results/rank-dimension.js";
 import {
   rankDimensionConfigurationPredicate,
   rankDimensionConfigurationWhereAny,
-  rankDimensionSources
+  rankDimensionSources,
+  resolvedRankDimensionMergeTargets
 } from "../rank-results/rank-dimension-merge.js";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
@@ -18,6 +19,7 @@ import {
   parseSemanticRankDimensionKey,
   semanticRankDimensionKey,
   semanticKeywordBulkCreatePreviewMaxGroups,
+  semanticOperationScopePageSize,
   type ApiCollectionResponse,
   type InternalCreateSemanticKeywordInput,
   type InternalDeleteSemanticKeywordInput,
@@ -25,6 +27,7 @@ import {
   type InternalSemanticKeywordBulkCreatePreviewInput,
   type InternalSemanticKeywordBulkInput,
   type InternalSemanticKeywordCleaningInput,
+  type InternalSemanticKeywordMergeInput,
   type InternalUpdateSemanticKeywordInput,
   type KeywordListQuery,
   type ProjectPositionHistory,
@@ -39,6 +42,12 @@ import {
   type SemanticKeywordCleaningPreview,
   type SemanticKeywordCleaningPreviewChange,
   type SemanticKeywordCleaningResult,
+  type SemanticKeywordMergeResult,
+  type SemanticKeywordMergeSuggestion,
+  type SemanticOperationScopeKeyword,
+  type SemanticOperationScopePageInput,
+  type SemanticKeywordTagDeleteResult,
+  type SemanticKeywordTagOption,
   type SemanticKeywordIntent,
   type SemanticKeywordPositionHistoryProvider,
   type SemanticKeywordListItem,
@@ -158,6 +167,11 @@ type KeywordMutationAggregate = Prisma.KeywordGetPayload<{
   include: typeof KEYWORD_MUTATION_INCLUDE;
 }>;
 
+const KEYWORD_AGGREGATE_HYDRATION_BATCH_SIZE = 250;
+const POSITION_HISTORY_PROJECTION_SCHEMA_VERSION =
+  "project-position-history@1";
+const POSITION_HISTORY_REBUILD_ATTEMPTS = 2;
+
 type RankSearchEngine = SemanticKeywordListPosition["searchEngine"];
 
 interface PreviousFoundPositionAnchor {
@@ -177,6 +191,11 @@ interface PreviousFoundPositionRow {
 
 @Injectable()
 export class KeywordService {
+  private readonly positionHistoryBuilds = new Map<
+    string,
+    Promise<ProjectPositionHistory>
+  >();
+
   public constructor(
     private readonly prisma: PrismaService,
     private readonly semanticVersions: SemanticVersionService
@@ -200,17 +219,27 @@ export class KeywordService {
       ? rankDimensionConfigurationPredicate(sourceDimensions)
       : Prisma.empty;
     const rows = await this.prisma.$queryRaw<readonly { position: number }[]>(Prisma.sql`
-      SELECT DISTINCT ON (current.keyword_id) current.position
+      SELECT DISTINCT ON (COALESCE(merge.target_keyword_id, current.keyword_id))
+        current.position
       FROM current_ranks current
+      LEFT JOIN keyword_merges merge
+        ON merge.workspace_id = current.workspace_id
+       AND merge.project_id = current.project_id
+       AND merge.source_keyword_id = current.keyword_id
       JOIN keywords keyword
         ON keyword.workspace_id = current.workspace_id
        AND keyword.project_id = current.project_id
-       AND keyword.id = current.keyword_id
+       AND keyword.id = COALESCE(merge.target_keyword_id, current.keyword_id)
       JOIN tracking_context_versions configuration
         ON configuration.workspace_id = current.workspace_id
        AND configuration.project_id = current.project_id
        AND configuration.context_id = current.tracking_context_id
        AND configuration.configuration_version = current.configuration_version
+      JOIN tracking_contexts context
+        ON context.workspace_id = current.workspace_id
+       AND context.project_id = current.project_id
+       AND context.id = current.tracking_context_id
+       AND context.status::text = 'ACTIVE'
       WHERE current.workspace_id = ${workspaceId}::uuid
         AND current.project_id = ${projectId}::uuid
         AND keyword.status::text = 'ACTIVE'
@@ -229,7 +258,7 @@ export class KeywordService {
             AND current.observed_at <= deletion.excluded_through
         )
         ${dimensionFilter}
-      ORDER BY current.keyword_id, current.observed_at DESC, current.snapshot_id DESC
+      ORDER BY COALESCE(merge.target_keyword_id, current.keyword_id), current.observed_at DESC, current.snapshot_id DESC
     `);
     const positions = rows.map(({ position }) => position);
     const topCounts = positionTopCounts(positions);
@@ -250,6 +279,165 @@ export class KeywordService {
     workspaceId: string,
     projectId: string,
     query: ProjectPositionHistoryQuery = { includeUntracked: false }
+  ): Promise<ProjectPositionHistory> {
+    if (
+      !this.prisma.projectPositionHistoryRevision ||
+      !this.prisma.projectPositionHistoryProjection
+    ) {
+      return this.computePositionHistory(workspaceId, projectId, query);
+    }
+    const scopeHash = positionHistoryScopeHash(query);
+    const revision = await this.positionHistoryRevision(workspaceId, projectId);
+    const cached = await this.positionHistoryProjection(
+      workspaceId,
+      projectId,
+      scopeHash,
+      revision
+    );
+    if (cached) return cached;
+
+    const buildKey = `${workspaceId}:${projectId}:${scopeHash}`;
+    const currentBuild = this.positionHistoryBuilds.get(buildKey);
+    if (currentBuild) return currentBuild;
+    const build = this.rebuildPositionHistoryProjection(
+      workspaceId,
+      projectId,
+      query,
+      scopeHash
+    );
+    this.positionHistoryBuilds.set(buildKey, build);
+    try {
+      return await build;
+    } finally {
+      if (this.positionHistoryBuilds.get(buildKey) === build) {
+        this.positionHistoryBuilds.delete(buildKey);
+      }
+    }
+  }
+
+  public async warmPositionHistory(
+    workspaceId: string,
+    projectId: string
+  ): Promise<void> {
+    await this.positionHistory(workspaceId, projectId, {
+      includeUntracked: false
+    });
+  }
+
+  private async rebuildPositionHistoryProjection(
+    workspaceId: string,
+    projectId: string,
+    query: ProjectPositionHistoryQuery,
+    scopeHash: string
+  ): Promise<ProjectPositionHistory> {
+    let result: ProjectPositionHistory = { points: [], truncated: false };
+    for (
+      let attempt = 0;
+      attempt < POSITION_HISTORY_REBUILD_ATTEMPTS;
+      attempt += 1
+    ) {
+      const revisionBefore = await this.positionHistoryRevision(
+        workspaceId,
+        projectId
+      );
+      const concurrentProjection = await this.positionHistoryProjection(
+        workspaceId,
+        projectId,
+        scopeHash,
+        revisionBefore
+      );
+      if (concurrentProjection) return concurrentProjection;
+      result = await this.computePositionHistory(workspaceId, projectId, query);
+      const revisionAfter = await this.positionHistoryRevision(
+        workspaceId,
+        projectId
+      );
+      if (revisionAfter !== revisionBefore) continue;
+      const now = new Date();
+      await this.prisma.projectPositionHistoryProjection.upsert({
+        where: {
+          workspaceId_projectId_scopeHash: {
+            workspaceId,
+            projectId,
+            scopeHash
+          }
+        },
+        create: {
+          workspaceId,
+          projectId,
+          scopeHash,
+          schemaVersion: POSITION_HISTORY_PROJECTION_SCHEMA_VERSION,
+          sourceRevision: revisionAfter,
+          payload: result as unknown as Prisma.InputJsonValue,
+          builtAt: now
+        },
+        update: {
+          schemaVersion: POSITION_HISTORY_PROJECTION_SCHEMA_VERSION,
+          sourceRevision: revisionAfter,
+          payload: result as unknown as Prisma.InputJsonValue,
+          builtAt: now
+        }
+      });
+      const confirmedRevision = await this.positionHistoryRevision(
+        workspaceId,
+        projectId
+      );
+      if (confirmedRevision !== revisionAfter) continue;
+      return result;
+    }
+    return result;
+  }
+
+  private async positionHistoryRevision(
+    workspaceId: string,
+    projectId: string
+  ): Promise<bigint> {
+    const row = await this.prisma.projectPositionHistoryRevision.upsert({
+      where: {
+        workspaceId_projectId: { workspaceId, projectId }
+      },
+      create: { workspaceId, projectId, revision: 1n },
+      update: {},
+      select: { revision: true }
+    });
+    return row.revision;
+  }
+
+  private async positionHistoryProjection(
+    workspaceId: string,
+    projectId: string,
+    scopeHash: string,
+    sourceRevision: bigint
+  ): Promise<ProjectPositionHistory | undefined> {
+    const projection =
+      await this.prisma.projectPositionHistoryProjection.findUnique({
+        where: {
+          workspaceId_projectId_scopeHash: {
+            workspaceId,
+            projectId,
+            scopeHash
+          }
+        },
+        select: {
+          schemaVersion: true,
+          sourceRevision: true,
+          payload: true
+        }
+      });
+    if (
+      !projection ||
+      projection.schemaVersion !== POSITION_HISTORY_PROJECTION_SCHEMA_VERSION ||
+      projection.sourceRevision !== sourceRevision
+    ) {
+      return undefined;
+    }
+    return storedPositionHistoryProjection(projection.payload);
+  }
+
+  private async computePositionHistory(
+    workspaceId: string,
+    projectId: string,
+    query: ProjectPositionHistoryQuery
   ): Promise<ProjectPositionHistory> {
     const dimension = query.rankDimensionKey
       ? parseSemanticRankDimensionKey(query.rankDimensionKey)
@@ -273,25 +461,34 @@ export class KeywordService {
             'YYYY-MM-DD'
           ) AS "dayKey",
           snapshot.observed_at AS "observedAt",
-          snapshot.keyword_id,
+          COALESCE(merge.target_keyword_id, snapshot.keyword_id) AS keyword_id,
           snapshot.found,
           snapshot.position,
           ROW_NUMBER() OVER (
             PARTITION BY
               (snapshot.observed_at AT TIME ZONE 'UTC')::date,
-              snapshot.keyword_id
+              COALESCE(merge.target_keyword_id, snapshot.keyword_id)
             ORDER BY snapshot.observed_at DESC, snapshot.id DESC
           ) AS daily_sequence
         FROM rank_snapshots snapshot
+        LEFT JOIN keyword_merges merge
+          ON merge.workspace_id = snapshot.workspace_id
+         AND merge.project_id = snapshot.project_id
+         AND merge.source_keyword_id = snapshot.keyword_id
         INNER JOIN keywords keyword
           ON keyword.workspace_id = snapshot.workspace_id
          AND keyword.project_id = snapshot.project_id
-         AND keyword.id = snapshot.keyword_id
+         AND keyword.id = COALESCE(merge.target_keyword_id, snapshot.keyword_id)
         INNER JOIN tracking_context_versions configuration
           ON configuration.workspace_id = snapshot.workspace_id
          AND configuration.project_id = snapshot.project_id
          AND configuration.context_id = snapshot.tracking_context_id
          AND configuration.configuration_version = snapshot.configuration_version
+        INNER JOIN tracking_contexts context
+          ON context.workspace_id = snapshot.workspace_id
+         AND context.project_id = snapshot.project_id
+         AND context.id = snapshot.tracking_context_id
+         AND context.status::text = 'ACTIVE'
         WHERE snapshot.workspace_id = ${workspaceId}::uuid
           AND snapshot.project_id = ${projectId}::uuid
           AND snapshot.position_tracking_enabled = TRUE
@@ -516,6 +713,7 @@ export class KeywordService {
     let externalSortValueById = new Map<string, string | number>();
     let rows: KeywordAggregate[];
     let totalApprox: number | undefined;
+    let hasNext = false;
     const advancedFilters = hasAdvancedKeywordFilters(query);
     if (isExternalKeywordSort(sort) || advancedFilters) {
       const [externalPage, count] = await Promise.all([
@@ -550,14 +748,15 @@ export class KeywordService {
             ? rawKeywordCount(this.prisma, workspaceId, projectId, query, search, tag, keywordStatus)
             : this.prisma.keyword.count({ where: baseWhere })
       ]);
-      const aggregates: KeywordAggregate[] = externalPage.ids.length === 0
-        ? []
-        : await this.prisma.keyword.findMany({
-            where: { ...baseWhere, id: { in: [...externalPage.ids] } },
-            include: KEYWORD_INCLUDE
-          });
+      hasNext = externalPage.ids.length > query.limit;
+      const pageIds = externalPage.ids.slice(0, query.limit);
+      const aggregates = await hydratedKeywordRows(
+        this.prisma,
+        baseWhere,
+        pageIds
+      );
       const aggregateById = new Map(aggregates.map((row) => [row.id, row]));
-      rows = externalPage.ids.flatMap((id) => {
+      rows = pageIds.flatMap((id) => {
         const row = aggregateById.get(id);
         return row ? [row] : [];
       });
@@ -568,20 +767,26 @@ export class KeywordService {
         ...baseWhere,
         ...(cursor ? cursorWhere(cursor) : {})
       };
-      [rows, totalApprox] = await Promise.all([
+      const [anchors, count] = await Promise.all([
         this.prisma.keyword.findMany({
           where,
           orderBy: keywordOrderBy(sort),
           take: query.limit + 1,
-          include: KEYWORD_INCLUDE
+          select: { id: true }
         }),
         cursor
           ? Promise.resolve(undefined)
           : this.prisma.keyword.count({ where: baseWhere })
       ]);
+      hasNext = anchors.length > query.limit;
+      rows = await hydratedKeywordRows(
+        this.prisma,
+        baseWhere,
+        anchors.slice(0, query.limit).map(({ id }) => id)
+      );
+      totalApprox = count;
     }
-    const hasNext = rows.length > query.limit;
-    const pageRows = rows.slice(0, query.limit);
+    const pageRows = rows;
     const pageIds = [
       ...new Set(
         pageRows.flatMap(({ targetPageId }) =>
@@ -590,6 +795,28 @@ export class KeywordService {
       )
     ];
     const keywordIds = pageRows.map(({ id }) => id);
+    const keywordMerges = keywordIds.length === 0
+      ? []
+      : await this.prisma.keywordMerge?.findMany({
+          where: {
+            workspaceId,
+            projectId,
+            targetKeywordId: { in: keywordIds }
+          },
+          select: { sourceKeywordId: true, targetKeywordId: true }
+        }) ?? [];
+    const mergedTargetBySourceId = new Map(
+      keywordMerges.map(({ sourceKeywordId, targetKeywordId }) => [
+        sourceKeywordId,
+        targetKeywordId
+      ])
+    );
+    const historyKeywordIds = [
+      ...keywordIds,
+      ...mergedTargetBySourceId.keys()
+    ];
+    const visibleKeywordId = (keywordId: string): string =>
+      mergedTargetBySourceId.get(keywordId) ?? keywordId;
     const clusterIds = [
       ...new Set(
         pageRows.flatMap(({ clusterId }) => (clusterId ? [clusterId] : []))
@@ -632,12 +859,12 @@ export class KeywordService {
             where: {
               workspaceId,
               projectId,
-              keywordId: { in: keywordIds },
+              keywordId: { in: historyKeywordIds },
             },
             orderBy: [
-              { keywordId: "asc" },
               { observedAt: "desc" },
-              { id: "desc" }
+              { id: "desc" },
+              { keywordId: "asc" }
             ],
             distinct: ["keywordId", "type"],
             select: {
@@ -656,7 +883,7 @@ export class KeywordService {
             where: {
               workspaceId,
               projectId,
-              keywordId: { in: keywordIds }
+              keywordId: { in: historyKeywordIds }
             },
             orderBy: [
               { observedAt: "desc" },
@@ -681,7 +908,7 @@ export class KeywordService {
             where: {
               workspaceId,
               projectId,
-              keywordId: { in: keywordIds },
+              keywordId: { in: historyKeywordIds },
               positionTrackingEnabled: true
             },
             orderBy: [
@@ -742,6 +969,7 @@ export class KeywordService {
           where: {
             workspaceId,
             projectId,
+            context: { status: "ACTIVE" },
             OR: currentRanks.map((rank) => ({
               contextId: rank.trackingContextId,
               configurationVersion: rank.configurationVersion
@@ -783,7 +1011,9 @@ export class KeywordService {
       SemanticKeywordListFrequencyValue[]
     >();
     for (const snapshot of frequencySnapshots) {
-      const frequencies = frequenciesByKeywordId.get(snapshot.keywordId) ?? [];
+      const targetKeywordId = visibleKeywordId(snapshot.keywordId);
+      const frequencies = frequenciesByKeywordId.get(targetKeywordId) ?? [];
+      if (frequencies.some(({ type }) => type === snapshot.type)) continue;
       frequencies.push({
         type: snapshot.type as SemanticKeywordListFrequencyValue["type"],
         ...(snapshot.value === null
@@ -794,7 +1024,7 @@ export class KeywordService {
         provider: snapshot.provider,
         observedAt: snapshot.observedAt.toISOString()
       });
-      frequenciesByKeywordId.set(snapshot.keywordId, frequencies);
+      frequenciesByKeywordId.set(targetKeywordId, frequencies);
     }
     const previousAiPositions = await previousAiAnswerPositions(
       this.prisma,
@@ -811,8 +1041,16 @@ export class KeywordService {
     );
     const aiAnswersByKeywordId = new Map<string, SemanticAiAnswerSummary[]>();
     for (const snapshot of aiAnswerSnapshots) {
-      const answers = aiAnswersByKeywordId.get(snapshot.keywordId) ?? [];
+      const targetKeywordId = visibleKeywordId(snapshot.keywordId);
+      const answers = aiAnswersByKeywordId.get(targetKeywordId) ?? [];
       const searchEngine = snapshot.searchEngine as SemanticAiAnswerSummary["searchEngine"];
+      const existingIndex = answers.findIndex(
+        (answer) => answer.searchEngine === searchEngine
+      );
+      if (
+        existingIndex >= 0 &&
+        answers[existingIndex]!.observedAt >= snapshot.observedAt.toISOString()
+      ) continue;
       const previousPosition = previousAiPositions.get(
         previousAiAnswerPositionKey(
           snapshot.keywordId,
@@ -823,7 +1061,7 @@ export class KeywordService {
           snapshot.id
         )
       );
-      answers.push({
+      const answer: SemanticAiAnswerSummary = {
         searchEngine,
         answerPresent: snapshot.answerPresent,
         siteFound: snapshot.siteFound,
@@ -832,8 +1070,10 @@ export class KeywordService {
         ...(snapshot.rankingUrl === null ? {} : { rankingUrl: snapshot.rankingUrl }),
         brandFound: snapshot.brandFound,
         observedAt: snapshot.observedAt.toISOString()
-      });
-      aiAnswersByKeywordId.set(snapshot.keywordId, answers);
+      };
+      if (existingIndex >= 0) answers[existingIndex] = answer;
+      else answers.push(answer);
+      aiAnswersByKeywordId.set(targetKeywordId, answers);
     }
     const configurationById = new Map(
       rankConfigurations.map((configuration) => [
@@ -854,7 +1094,7 @@ export class KeywordService {
       );
       if (!configuration) continue;
       const searchEngine = configuration.searchEngine as RankSearchEngine;
-      const key = `${rank.keywordId}:${searchEngine}`;
+      const key = `${visibleKeywordId(rank.keywordId)}:${searchEngine}`;
       if (!latestRankByKeywordEngine.has(key)) {
         latestRankByKeywordEngine.set(key, { rank, searchEngine });
       }
@@ -908,7 +1148,7 @@ export class KeywordService {
     const keywordsWithMultipleRankingUrls = new Set(
       currentSerpSnapshots.flatMap((snapshot) =>
         (siteResultsBySnapshotId.get(snapshot.id)?.length ?? 0) > 1
-          ? [snapshot.keywordId]
+          ? [visibleKeywordId(snapshot.keywordId)]
           : []
       )
     );
@@ -921,7 +1161,8 @@ export class KeywordService {
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
       if (!configuration) continue;
-      const positions = positionsByKeywordId.get(rank.keywordId) ?? new Map();
+      const targetKeywordId = visibleKeywordId(rank.keywordId);
+      const positions = positionsByKeywordId.get(targetKeywordId) ?? new Map();
       const previousPosition = previousPositions.get(
         previousFoundPositionKey(
           rank.keywordId,
@@ -967,7 +1208,7 @@ export class KeywordService {
         ...(siteResults.length === 0 ? {} : { siteResults }),
         observedAt: rank.observedAt.toISOString()
       });
-      positionsByKeywordId.set(rank.keywordId, positions);
+      positionsByKeywordId.set(targetKeywordId, positions);
     }
     const last = pageRows.at(-1);
     return {
@@ -1006,6 +1247,58 @@ export class KeywordService {
     };
   }
 
+  public async operationScope(
+    workspaceId: string,
+    projectId: string,
+    query: SemanticOperationScopePageInput,
+    requestId: string
+  ): Promise<ApiCollectionResponse<SemanticOperationScopeKeyword>> {
+    const baseWhere: Prisma.KeywordWhereInput = {
+      workspaceId,
+      projectId,
+      status: "ACTIVE",
+      ...(query.groupIds
+        ? {
+            memberships: {
+              some: {
+                projectId,
+                groupId: { in: [...query.groupIds] },
+                group: { workspaceId, projectId, status: "ACTIVE" }
+              }
+            }
+          }
+        : {})
+    };
+    const where: Prisma.KeywordWhereInput = {
+      ...baseWhere,
+      ...(query.cursor ? { id: { gt: query.cursor } } : {})
+    };
+    const [rows, totalApprox] = await Promise.all([
+      this.prisma.keyword.findMany({
+        where,
+        orderBy: { id: "asc" },
+        take: semanticOperationScopePageSize + 1,
+        select: { id: true, version: true, isTracked: true }
+      }),
+      query.cursor
+        ? Promise.resolve(undefined)
+        : this.prisma.keyword.count({ where: baseWhere })
+    ]);
+    const data = rows.slice(0, semanticOperationScopePageSize);
+    const hasNext = rows.length > semanticOperationScopePageSize;
+    return {
+      data,
+      page: {
+        hasNext,
+        ...(hasNext && data.length > 0
+          ? { nextCursor: data[data.length - 1]!.id }
+          : {}),
+        ...(totalApprox === undefined ? {} : { totalApprox })
+      },
+      meta: { requestId }
+    };
+  }
+
   public async tagOptions(
     workspaceId: string,
     projectId: string,
@@ -1028,12 +1321,190 @@ export class KeywordService {
     return tags.map(({ name }) => name);
   }
 
+  public async tagManagementOptions(
+    workspaceId: string,
+    projectId: string
+  ): Promise<readonly SemanticKeywordTagOption[]> {
+    const tags = await this.prisma.tag.findMany({
+      where: { workspaceId, projectId, status: "ACTIVE" },
+      orderBy: [{ normalizedName: "asc" }, { id: "asc" }],
+      take: 500,
+      select: { id: true, name: true }
+    });
+    if (tags.length === 0) return [];
+    const counts = await this.prisma.keywordTag.groupBy({
+      by: ["tagId"],
+      where: {
+        projectId,
+        tagId: { in: tags.map(({ id }) => id) }
+      },
+      _count: { _all: true }
+    });
+    const countByTagId = new Map(
+      counts.map(({ tagId, _count }) => [tagId, _count._all])
+    );
+    return tags.map(({ id, name }) => ({
+      id,
+      name,
+      keywordCount: countByTagId.get(id) ?? 0
+    }));
+  }
+
+  public async deleteTag(
+    workspaceId: string,
+    projectId: string,
+    actorId: string,
+    tagId: string
+  ): Promise<SemanticKeywordTagDeleteResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockSemanticKeywordWrites(transaction, projectId);
+      const tag = await transaction.tag.findFirst({
+        where: { id: tagId, workspaceId, projectId, status: "ACTIVE" },
+        select: { id: true, name: true }
+      });
+      if (!tag) throw new BadRequestException("Semantic tag is unavailable");
+      const detachedKeywordCount = await transaction.keywordTag.count({
+        where: { projectId, tagId }
+      });
+      if (detachedKeywordCount > 0) {
+        await transaction.keyword.updateMany({
+          where: {
+            workspaceId,
+            projectId,
+            tags: { some: { projectId, tagId } }
+          },
+          data: { updatedBy: actorId, version: { increment: 1 } }
+        });
+        await transaction.keywordTag.deleteMany({
+          where: { projectId, tagId }
+        });
+      }
+      await transaction.tag.update({
+        where: { id: tag.id },
+        data: { status: "DELETED" }
+      });
+      await this.semanticVersions.createIrreversibleVersion(
+        transaction,
+        {
+          workspaceId,
+          projectId,
+          actorId,
+          reason: "BULK_UPDATE",
+          summary: `Удалён тег «${tag.name}» у ${detachedKeywordCount} запросов`
+        },
+        detachedKeywordCount,
+        { action: "TAG_DELETE", tagId: tag.id }
+      );
+      return {
+        tagId: tag.id,
+        name: tag.name,
+        detachedKeywordCount
+      };
+    });
+  }
+
+  public async mergeSuggestions(
+    workspaceId: string,
+    projectId: string
+  ): Promise<readonly SemanticKeywordMergeSuggestion[]> {
+    const sources = await this.prisma.keyword.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        status: "ACTIVE",
+        textOriginal: { contains: "\uFFFD" },
+        mergedInto: null
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 100,
+      select: {
+        id: true,
+        version: true,
+        textOriginal: true,
+        textNormalized: true,
+        language: true
+      }
+    });
+    const suggestions: SemanticKeywordMergeSuggestion[] = [];
+    for (const source of sources) {
+      const tokens = source.textNormalized
+        .split(/\s+/u)
+        .filter((token) => token.length >= 2 && !token.includes("\uFFFD"))
+        .sort((left, right) => right.length - left.length)
+        .slice(0, 2);
+      const candidates = await this.prisma.keyword.findMany({
+        where: {
+          workspaceId,
+          projectId,
+          status: "ACTIVE",
+          language: source.language,
+          id: { not: source.id },
+          NOT: { textOriginal: { contains: "\uFFFD" } },
+          ...(tokens.length === 0
+            ? {}
+            : {
+                AND: tokens.map((token) => ({
+                  textNormalized: { contains: token }
+                }))
+              })
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: 50,
+        select: { id: true, version: true, textOriginal: true, textNormalized: true }
+      });
+      const repaired = source.textNormalized.replaceAll("\uFFFD", "");
+      const ranked = candidates
+        .map((candidate) => ({
+          candidate,
+          similarity: boundedTextSimilarity(repaired, candidate.textNormalized)
+        }))
+        .sort((left, right) =>
+          right.similarity - left.similarity ||
+          left.candidate.id.localeCompare(right.candidate.id)
+        );
+      const best = ranked[0];
+      if (!best || best.similarity < 0.35) continue;
+      suggestions.push({
+        source: {
+          id: source.id,
+          version: source.version,
+          text: source.textOriginal
+        },
+        candidate: {
+          id: best.candidate.id,
+          version: best.candidate.version,
+          text: best.candidate.textOriginal
+        },
+        similarity: best.similarity,
+        reason: "BROKEN_ENCODING"
+      });
+    }
+    return suggestions.sort((left, right) =>
+      right.similarity - left.similarity ||
+      left.source.id.localeCompare(right.source.id)
+    );
+  }
+
   public async insights(
     workspaceId: string,
     projectId: string,
     keywordId: string,
-    dimensionKey?: string
+    dimensionKey?: string,
+    snapshotId?: string
   ): Promise<SemanticKeywordInsights> {
+    const dimensionMerges = await this.prisma.rankDimensionMerge?.findMany({
+      where: { workspaceId, projectId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 2_000,
+      select: {
+        sourceDimensionKey: true,
+        targetDimensionKey: true,
+        targetRegionLabel: true
+      }
+    }) ?? [];
+    const dimensionMergeTargets = resolvedRankDimensionMergeTargets(
+      dimensionMerges
+    );
     const selectedDimension = dimensionKey
       ? parseSemanticRankDimensionKey(dimensionKey)
       : undefined;
@@ -1087,6 +1558,20 @@ export class KeywordService {
     if (!keyword) {
       throw new HttpException("Keyword not found", HttpStatus.NOT_FOUND);
     }
+    const mergedSources = await this.prisma.keywordMerge?.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        targetKeywordId: keywordId
+      },
+      orderBy: [{ createdAt: "asc" }, { sourceKeywordId: "asc" }],
+      take: 1_000,
+      select: { sourceKeywordId: true }
+    }) ?? [];
+    const keywordIdentityIds = [
+      keywordId,
+      ...mergedSources.map(({ sourceKeywordId }) => sourceKeywordId)
+    ];
     const rankDeletions = await this.prisma.rankDimensionHistoryDeletion.findMany({
       where: { workspaceId, projectId },
       orderBy: { excludedThrough: "desc" },
@@ -1112,13 +1597,13 @@ export class KeywordService {
         where: {
           workspaceId,
           projectId,
-          keywordId
+          keywordId: { in: keywordIdentityIds }
         },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
         take: 100
       }),
       this.prisma.frequencySeasonalityPoint.findMany({
-        where: { workspaceId, projectId, keywordId },
+        where: { workspaceId, projectId, keywordId: { in: keywordIdentityIds } },
         orderBy: [
           { observedAt: "desc" },
           { jobId: "desc" },
@@ -1128,7 +1613,7 @@ export class KeywordService {
         take: 1_000
       }),
       this.prisma.currentRank.findMany({
-        where: { workspaceId, projectId, keywordId },
+        where: { workspaceId, projectId, keywordId: { in: keywordIdentityIds } },
         orderBy: [{ observedAt: "desc" }, { snapshotId: "desc" }],
         take: 200
       }),
@@ -1136,16 +1621,18 @@ export class KeywordService {
         where: {
           workspaceId,
           projectId,
-          keywordId,
-          ...(insightDimensions
-            ? {
-                manifest: {
+          keywordId: { in: keywordIdentityIds },
+          ...(snapshotId ? { id: snapshotId } : {}),
+          manifest: {
+            context: { status: "ACTIVE" },
+            ...(insightDimensions
+              ? {
                   configuration: rankDimensionConfigurationWhereAny(
                     insightDimensions
                   )
                 }
-              }
-            : {}),
+              : {})
+          },
           ...(rankDeletions.length === 0
             ? {}
             : { AND: rankDeletions.map(rankDeletionExclusionWhere) })
@@ -1154,6 +1641,7 @@ export class KeywordService {
         take: 240,
         select: {
           id: true,
+          keywordId: true,
           trackingContextId: true,
           configurationVersion: true,
           provider: true,
@@ -1170,7 +1658,7 @@ export class KeywordService {
         where: {
           workspaceId,
           projectId,
-          keywordId,
+          keywordId: { in: keywordIdentityIds },
           positionTrackingEnabled: true,
           ...(selectedDimension
             ? {
@@ -1211,7 +1699,7 @@ export class KeywordService {
         where: {
           workspaceId,
           projectId,
-          keywordId,
+          keywordId: { in: keywordIdentityIds },
           sources: { some: {} },
           ...(selectedDimension
             ? {
@@ -1254,7 +1742,12 @@ export class KeywordService {
       ? [[], []] as const
       : await Promise.all([
           this.prisma.trackingContext.findMany({
-            where: { workspaceId, projectId, id: { in: contextIds } },
+            where: {
+              workspaceId,
+              projectId,
+              id: { in: contextIds },
+              status: "ACTIVE"
+            },
             select: { id: true, name: true }
           }),
           this.prisma.trackingContextVersion.findMany({
@@ -1286,25 +1779,36 @@ export class KeywordService {
         configuration
       ])
     );
-    const visibleCurrentRanks = currentRanks.filter((rank) => {
+    const latestCurrentRankByDimension = new Map<string, (typeof currentRanks)[number]>();
+    for (const rank of currentRanks) {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
-      return Boolean(
+      if (!(
         configuration &&
         (!sourceDimensionKeys || sourceDimensionKeys.has(
           rankDimensionMetadata(configuration).dimensionKey
         )) &&
         !rankIsExcluded(rank.observedAt, configuration, rankDeletions)
-      );
-    });
+      )) continue;
+      const key = resolvedRankDimensionMetadata(
+        configuration,
+        selectedDimension,
+        sourceDimensionKeys,
+        dimensionMergeTargets
+      ).dimensionKey;
+      if (!latestCurrentRankByDimension.has(key)) {
+        latestCurrentRankByDimension.set(key, rank);
+      }
+    }
+    const visibleCurrentRanks = [...latestCurrentRankByDimension.values()];
     const currentRankAnchors = visibleCurrentRanks.flatMap((rank) => {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
       if (!configuration) return [];
       return [{
-        keywordId,
+        keywordId: rank.keywordId,
         searchEngine: configuration.searchEngine as RankSearchEngine,
         observedAt: rank.observedAt,
         snapshotId: rank.snapshotId
@@ -1317,7 +1821,10 @@ export class KeywordService {
       currentRankAnchors
     );
     const serpCandidateSnapshots = rankSnapshots.filter(
-      ({ provider }) => provider === "ARSENKIN" || provider === "XMLSTOCK"
+      ({ provider }) =>
+        provider === "ARSENKIN" ||
+        provider === "XMLSTOCK" ||
+        provider === "KEY_COLLECTOR"
     );
     const rankSerpResults = serpCandidateSnapshots.length === 0
       ? []
@@ -1326,8 +1833,16 @@ export class KeywordService {
             snapshotId: {
               in: serpCandidateSnapshots.map(({ id }) => id)
             },
-            position: { lte: 10 },
-            snapshot: { workspaceId, projectId, keywordId }
+            // The general inspector shows a compact TOP-10 preview. A
+            // dimension-specific request powers the "several site URLs"
+            // modal and must include the whole captured depth: the second
+            // project URL can legitimately be at position 43 or below.
+            ...(selectedDimension ? {} : { position: { lte: 10 } }),
+            snapshot: {
+              workspaceId,
+              projectId,
+              keywordId: { in: keywordIdentityIds }
+            }
           },
           orderBy: [
             { snapshotObservedAt: "desc" },
@@ -1360,7 +1875,8 @@ export class KeywordService {
           resolvedRankDimensionMetadata(
             configuration,
             selectedDimension,
-            sourceDimensionKeys
+            sourceDimensionKeys,
+            dimensionMergeTargets
           ).dimensionKey
         )
       ) {
@@ -1368,7 +1884,8 @@ export class KeywordService {
           resolvedRankDimensionMetadata(
             configuration,
             selectedDimension,
-            sourceDimensionKeys
+            sourceDimensionKeys,
+            dimensionMergeTargets
           ).dimensionKey,
           snapshot
         );
@@ -1433,7 +1950,7 @@ export class KeywordService {
         const searchEngine = configuration.searchEngine as RankSearchEngine;
         const previousPosition = previousPositions.get(
           previousFoundPositionKey(
-            keywordId,
+            rank.keywordId,
             searchEngine,
             rank.observedAt,
             rank.snapshotId
@@ -1443,7 +1960,8 @@ export class KeywordService {
           ...resolvedRankDimensionMetadata(
             configuration,
             selectedDimension,
-            sourceDimensionKeys
+            sourceDimensionKeys,
+            dimensionMergeTargets
           ),
           trackingContextId: rank.trackingContextId,
           contextName: context.name,
@@ -1469,7 +1987,8 @@ export class KeywordService {
           ...resolvedRankDimensionMetadata(
             configuration,
             selectedDimension,
-            sourceDimensionKeys
+            sourceDimensionKeys,
+            dimensionMergeTargets
           ),
           snapshotId: snapshot.id,
           trackingContextId: snapshot.trackingContextId,
@@ -1497,7 +2016,8 @@ export class KeywordService {
           ...resolvedRankDimensionMetadata(
             configuration,
             selectedDimension,
-            sourceDimensionKeys
+            sourceDimensionKeys,
+            dimensionMergeTargets
           ),
           snapshotId: snapshot.id,
           trackingContextId: snapshot.trackingContextId,
@@ -1518,7 +2038,7 @@ export class KeywordService {
       }),
       aiPositionHistory: aiPositionSnapshots.map((snapshot) => ({
         snapshotId: snapshot.id,
-        keywordId: snapshot.keywordId,
+        keywordId,
         searchEngine: snapshot.searchEngine as SemanticAiAnswerHistoryItem["searchEngine"],
         regionCode: snapshot.regionCode,
         device: snapshot.device as SemanticAiAnswerHistoryItem["device"],
@@ -2452,6 +2972,270 @@ export class KeywordService {
     }
   }
 
+  public async merge(
+    input: InternalSemanticKeywordMergeInput
+  ): Promise<SemanticKeywordMergeResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockSemanticKeywordWrites(transaction, input.projectId);
+      const ids = [input.keeper.id, ...input.sources.map(({ id }) => id)]
+        .sort((left, right) => left.localeCompare(right));
+      for (const keywordId of ids) {
+        await lockKeyword(transaction, input.projectId, keywordId);
+      }
+      const keywords = await transaction.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          id: { in: ids },
+          status: "ACTIVE"
+        },
+        include: KEYWORD_MUTATION_INCLUDE
+      });
+      if (keywords.length !== ids.length) {
+        throw new HttpException(
+          { code: "NOT_FOUND", message: "Один из запросов больше недоступен" },
+          HttpStatus.NOT_FOUND
+        );
+      }
+      const byId = new Map(keywords.map((keyword) => [keyword.id, keyword]));
+      const keeper = byId.get(input.keeper.id)!;
+      assertKeywordVersion(keeper.version, input.keeper.version);
+      const sources = input.sources.map((selection) => {
+        const source = byId.get(selection.id)!;
+        assertKeywordVersion(source.version, selection.version);
+        if (source.language !== keeper.language) {
+          throw new HttpException(
+            { code: "VALIDATION_FAILED", message: "Объединять можно запросы одного языка" },
+            HttpStatus.BAD_REQUEST
+          );
+        }
+        return source;
+      });
+      const existingSourceMerges = await transaction.keywordMerge.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          sourceKeywordId: { in: ids }
+        },
+        select: { sourceKeywordId: true }
+      });
+      if (existingSourceMerges.length > 0) {
+        throw new ConflictException("Keyword merge target changed");
+      }
+
+      const memberships = [
+        ...keeper.memberships,
+        ...sources.flatMap(({ memberships }) => memberships)
+      ];
+      const regularGroupIds = new Set(
+        memberships.flatMap(({ group }) =>
+          group.systemKind === null ? [group.id] : []
+        )
+      );
+      const ungroupedGroupIds = new Set(
+        memberships.flatMap(({ group }) =>
+          group.systemKind === "UNGROUPED" ? [group.id] : []
+        )
+      );
+      const groupIds = regularGroupIds.size > 0
+        ? regularGroupIds
+        : new Set([...ungroupedGroupIds].slice(0, 1));
+      const tagIds = new Set([
+        ...keeper.tags.map(({ tag }) => tag.id),
+        ...sources.flatMap(({ tags }) => tags.map(({ tag }) => tag.id))
+      ]);
+      const sourceIds = sources.map(({ id }) => id);
+      const mergedAt = new Date();
+
+      await transaction.keywordMerge.updateMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          targetKeywordId: { in: sourceIds }
+        },
+        data: { targetKeywordId: keeper.id }
+      });
+      await transaction.keywordMerge.createMany({
+        data: sources.map((source) => ({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          sourceKeywordId: source.id,
+          targetKeywordId: keeper.id,
+          sourceText: source.textOriginal,
+          sourceLanguage: source.language,
+          createdBy: input.actorId,
+          createdAt: mergedAt
+        }))
+      });
+
+      if (groupIds.size > 0) {
+        if (regularGroupIds.size > 0 && ungroupedGroupIds.size > 0) {
+          await transaction.keywordGroupMembership.deleteMany({
+            where: {
+              projectId: input.projectId,
+              keywordId: keeper.id,
+              groupId: { in: [...ungroupedGroupIds] }
+            }
+          });
+        }
+        await transaction.keywordGroupMembership.createMany({
+          data: [...groupIds].map((groupId) => ({
+            projectId: input.projectId,
+            keywordId: keeper.id,
+            groupId
+          })),
+          skipDuplicates: true
+        });
+      }
+      if (tagIds.size > 0) {
+        await transaction.keywordTag.createMany({
+          data: [...tagIds].map((tagId) => ({
+            projectId: input.projectId,
+            keywordId: keeper.id,
+            tagId
+          })),
+          skipDuplicates: true
+        });
+      }
+      const sourceCustomValues = sources.flatMap(
+        ({ typedCustomValues }) => typedCustomValues
+      );
+      if (sourceCustomValues.length > 0) {
+        await transaction.semanticKeywordCustomValue.createMany({
+          data: sourceCustomValues.map((value) => ({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            keywordId: keeper.id,
+            columnId: value.columnId,
+            textValue: value.textValue,
+            integerValue: value.integerValue,
+            decimalValue: value.decimalValue,
+            booleanValue: value.booleanValue,
+            dateValue: value.dateValue,
+            datetimeValue: value.datetimeValue,
+            stringArrayValue: value.stringArrayValue,
+            userId: value.userId,
+            updatedBy: input.actorId
+          })),
+          skipDuplicates: true
+        });
+      }
+      const activeSourceAssignments = await transaction.trackingContextKeywordAssignment.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          keywordId: { in: sourceIds },
+          removedAt: null
+        },
+        select: { contextId: true }
+      });
+      if (activeSourceAssignments.length > 0) {
+        await transaction.trackingContextKeywordAssignment.createMany({
+          data: [...new Set(activeSourceAssignments.map(({ contextId }) => contextId))]
+            .map((contextId) => ({
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              contextId,
+              keywordId: keeper.id,
+              assignedBy: input.actorId,
+              assignedAt: mergedAt
+            })),
+          skipDuplicates: true
+        });
+        await transaction.trackingContextKeywordAssignment.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            keywordId: { in: sourceIds },
+            removedAt: null
+          },
+          data: {
+            removedBy: input.actorId,
+            removedAt: mergedAt
+          }
+        });
+      }
+
+      const updatedKeeper = await transaction.keyword.update({
+        where: { id: keeper.id },
+        data: {
+          priority: Math.max(keeper.priority, ...sources.map(({ priority }) => priority)),
+          isFavorite: keeper.isFavorite || sources.some(({ isFavorite }) => isFavorite),
+          isTracked: keeper.isTracked || sources.some(({ isTracked }) => isTracked),
+          showAiAnswerButton:
+            keeper.showAiAnswerButton ||
+            sources.some(({ showAiAnswerButton }) => showAiAnswerButton),
+          intent: keeper.intent ?? sources.find(({ intent }) => intent)?.intent ?? null,
+          clusterId: keeper.clusterId ?? sources.find(({ clusterId }) => clusterId)?.clusterId ?? null,
+          targetPageId:
+            keeper.targetPageId ??
+            sources.find(({ targetPageId }) => targetPageId)?.targetPageId ??
+            null,
+          note: mergeKeywordNotes(
+            keeper.note,
+            sources.map(({ note }) => note)
+          ),
+          customValues: mergeLegacyKeywordValues(
+            keeper.customValues,
+            sources.map(({ customValues }) => customValues)
+          ),
+          updatedBy: input.actorId,
+          version: { increment: 1 }
+        }
+      });
+      await transaction.keyword.updateMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          id: { in: sourceIds },
+          status: "ACTIVE"
+        },
+        data: {
+          status: "DELETED",
+          deletedAt: mergedAt,
+          updatedBy: input.actorId,
+          version: { increment: 1 }
+        }
+      });
+      await transaction.keywordGroupMembership.deleteMany({
+        where: { projectId: input.projectId, keywordId: { in: sourceIds } }
+      });
+      await transaction.keywordTag.deleteMany({
+        where: { projectId: input.projectId, keywordId: { in: sourceIds } }
+      });
+      await transaction.semanticKeywordCustomValue.deleteMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          keywordId: { in: sourceIds }
+        }
+      });
+      await transaction.outboxEvent.create({
+        data: {
+          eventType: "semantics.keyword.merged.v1",
+          aggregateId: keeper.id,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          payload: {
+            keeperKeywordId: keeper.id,
+            mergedKeywordIds: sourceIds,
+            mergedAt: mergedAt.toISOString()
+          },
+          metadata: {
+            producer: "seo-data",
+            source: "keyword-merge"
+          }
+        }
+      });
+      return {
+        keeperKeywordId: keeper.id,
+        keeperVersion: updatedKeeper.version,
+        mergedKeywordIds: sourceIds,
+        mergedAt: mergedAt.toISOString()
+      };
+    });
+  }
+
   public async delete(
     keywordId: string,
     input: InternalDeleteSemanticKeywordInput
@@ -2844,6 +3628,34 @@ export class KeywordService {
       failedIds
     };
   }
+}
+
+async function hydratedKeywordRows(
+  prisma: PrismaService,
+  where: Prisma.KeywordWhereInput,
+  orderedIds: readonly string[]
+): Promise<KeywordAggregate[]> {
+  if (orderedIds.length === 0) return [];
+  const hydrated: KeywordAggregate[] = [];
+  for (
+    let offset = 0;
+    offset < orderedIds.length;
+    offset += KEYWORD_AGGREGATE_HYDRATION_BATCH_SIZE
+  ) {
+    const ids = orderedIds.slice(
+      offset,
+      offset + KEYWORD_AGGREGATE_HYDRATION_BATCH_SIZE
+    );
+    hydrated.push(...await prisma.keyword.findMany({
+      where: { ...where, id: { in: [...ids] } },
+      include: KEYWORD_INCLUDE
+    }));
+  }
+  const byId = new Map(hydrated.map((row) => [row.id, row]));
+  return orderedIds.flatMap((id) => {
+    const row = byId.get(id);
+    return row ? [row] : [];
+  });
 }
 
 type CleaningCandidate = SemanticKeywordCleaningPreviewChange &
@@ -3297,6 +4109,59 @@ function sameKeywordVersionState(
   right: SemanticKeywordVersionState
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeKeywordNotes(
+  keeperNote: string | null,
+  sourceNotes: readonly (string | null)[]
+): string | null {
+  const notes = [...new Set(
+    [keeperNote, ...sourceNotes]
+      .map((note) => note?.trim())
+      .filter((note): note is string => Boolean(note))
+  )];
+  return notes.length > 0 ? notes.join("\n\n") : null;
+}
+
+function boundedTextSimilarity(left: string, right: string): number {
+  const leftCharacters = Array.from(left.slice(0, 512));
+  const rightCharacters = Array.from(right.slice(0, 512));
+  const maximum = Math.max(leftCharacters.length, rightCharacters.length);
+  if (maximum === 0) return 1;
+  if (Math.abs(leftCharacters.length - rightCharacters.length) > maximum * 0.65) {
+    return 0;
+  }
+  let previous = Array.from(
+    { length: rightCharacters.length + 1 },
+    (_, index) => index
+  );
+  for (let leftIndex = 0; leftIndex < leftCharacters.length; leftIndex += 1) {
+    const current = [leftIndex + 1];
+    for (let rightIndex = 0; rightIndex < rightCharacters.length; rightIndex += 1) {
+      current.push(Math.min(
+        current[rightIndex]! + 1,
+        previous[rightIndex + 1]! + 1,
+        previous[rightIndex]! +
+          (leftCharacters[leftIndex] === rightCharacters[rightIndex] ? 0 : 1)
+      ));
+    }
+    previous = current;
+  }
+  return Math.max(0, 1 - previous[rightCharacters.length]! / maximum);
+}
+
+function mergeLegacyKeywordValues(
+  keeper: Prisma.JsonValue,
+  sources: readonly Prisma.JsonValue[]
+): Prisma.InputJsonObject {
+  const result: Record<string, Prisma.InputJsonValue> = {};
+  for (const value of [...sources, keeper]) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    for (const [key, item] of Object.entries(value)) {
+      if (item !== undefined) result[key] = item as Prisma.InputJsonValue;
+    }
+  }
+  return result as Prisma.InputJsonObject;
 }
 
 function keywordCustomValue(
@@ -3755,6 +4620,7 @@ async function previousFoundPositions(
       ON current_snapshot.workspace_id = ${workspaceId}::uuid
      AND current_snapshot.project_id = ${projectId}::uuid
      AND current_snapshot.keyword_id = anchors.keyword_id
+     AND current_snapshot.observed_at = anchors.observed_at
      AND current_snapshot.id = anchors.snapshot_id
     INNER JOIN tracking_context_versions current_configuration
       ON current_configuration.workspace_id = current_snapshot.workspace_id
@@ -3989,45 +4855,64 @@ async function metricSortedKeywordPage(
             SELECT
               cr.found,
               cr.position,
-              (
+              CASE
+                WHEN cr.found = TRUE AND cr.position IS NOT NULL THEN NULL
+                ELSE (
                   SELECT CASE
-                    WHEN previous.found = TRUE AND previous.position IS NOT NULL
-                      THEN previous.position
+                    WHEN candidate.found = TRUE AND candidate.position IS NOT NULL
+                      THEN candidate.position
                     ELSE NULL
                   END
-                  FROM rank_snapshots previous
-                  INNER JOIN tracking_context_versions previous_tcv
-                    ON previous_tcv.workspace_id = previous.workspace_id
-                   AND previous_tcv.project_id = previous.project_id
-                   AND previous_tcv.context_id = previous.tracking_context_id
-                   AND previous_tcv.configuration_version = previous.configuration_version
-                  WHERE previous.workspace_id = cr.workspace_id
-                    AND previous.project_id = cr.project_id
-                    AND previous.keyword_id = cr.keyword_id
-                    AND previous.position_tracking_enabled = TRUE
-                    AND previous_tcv.search_engine::text = ${rankEngine}
-                    AND previous_tcv.country_code = tcv.country_code
-                    AND COALESCE(previous_tcv.region_code, previous_tcv.country_code) =
-                        COALESCE(tcv.region_code, tcv.country_code)
-                    AND previous_tcv.language = tcv.language
-                    AND previous_tcv.device = tcv.device
-                    ${previousRankDimensionFilter}
-                    AND NOT EXISTS (
-                      SELECT 1 FROM rank_dimension_history_deletions deletion
-                      WHERE deletion.workspace_id = previous.workspace_id
-                        AND deletion.project_id = previous.project_id
-                        AND deletion.search_engine = previous_tcv.search_engine::text
-                        AND deletion.country_code = previous_tcv.country_code
-                        AND deletion.region_code = COALESCE(previous_tcv.region_code, previous_tcv.country_code)
-                        AND deletion.language = previous_tcv.language
-                        AND deletion.device = previous_tcv.device::text
-                        AND previous.observed_at <= deletion.excluded_through
-                    )
-                    AND (previous.observed_at, previous.id) <
-                        (cr.observed_at, cr.snapshot_id)
-                  ORDER BY previous.observed_at DESC, previous.id DESC
-                  LIMIT 1
-              ) AS historical_position
+                  FROM (
+                    SELECT
+                      previous.found,
+                      previous.position,
+                      previous.observed_at,
+                      previous.id
+                    FROM tracking_context_versions previous_tcv
+                    INNER JOIN LATERAL (
+                      SELECT
+                        snapshot.found,
+                        snapshot.position,
+                        snapshot.observed_at,
+                        snapshot.id
+                      FROM rank_snapshots snapshot
+                      WHERE snapshot.workspace_id = cr.workspace_id
+                        AND snapshot.project_id = cr.project_id
+                        AND snapshot.keyword_id = cr.keyword_id
+                        AND snapshot.tracking_context_id = previous_tcv.context_id
+                        AND snapshot.configuration_version = previous_tcv.configuration_version
+                        AND snapshot.position_tracking_enabled = TRUE
+                        AND (snapshot.observed_at, snapshot.id) <
+                            (cr.observed_at, cr.snapshot_id)
+                      ORDER BY snapshot.observed_at DESC, snapshot.id DESC
+                      LIMIT 1
+                    ) previous ON TRUE
+                    WHERE previous_tcv.workspace_id = cr.workspace_id
+                      AND previous_tcv.project_id = cr.project_id
+                      AND previous_tcv.search_engine::text = ${rankEngine}
+                      AND previous_tcv.country_code = tcv.country_code
+                      AND COALESCE(previous_tcv.region_code, previous_tcv.country_code) =
+                          COALESCE(tcv.region_code, tcv.country_code)
+                      AND previous_tcv.language = tcv.language
+                      AND previous_tcv.device = tcv.device
+                      ${previousRankDimensionFilter}
+                      AND NOT EXISTS (
+                        SELECT 1 FROM rank_dimension_history_deletions deletion
+                        WHERE deletion.workspace_id = cr.workspace_id
+                          AND deletion.project_id = cr.project_id
+                          AND deletion.search_engine = previous_tcv.search_engine::text
+                          AND deletion.country_code = previous_tcv.country_code
+                          AND deletion.region_code = COALESCE(previous_tcv.region_code, previous_tcv.country_code)
+                          AND deletion.language = previous_tcv.language
+                          AND deletion.device = previous_tcv.device::text
+                          AND previous.observed_at <= deletion.excluded_through
+                      )
+                    ORDER BY previous.observed_at DESC, previous.id DESC
+                    LIMIT 1
+                  ) candidate
+                )
+              END AS historical_position
             FROM current_ranks cr
             INNER JOIN tracking_context_versions tcv
               ON tcv.workspace_id = cr.workspace_id
@@ -4575,6 +5460,85 @@ function safeHistoryCount(value: bigint): number {
   return Number(value);
 }
 
+function positionHistoryScopeHash(
+  query: ProjectPositionHistoryQuery
+): string {
+  return sha256([
+    POSITION_HISTORY_PROJECTION_SCHEMA_VERSION,
+    query.includeUntracked ? "ALL_ACTIVE" : "TRACKED_ONLY",
+    query.rankDimensionKey ?? "ALL_DIMENSIONS"
+  ].join("\0"));
+}
+
+function storedPositionHistoryProjection(
+  value: unknown
+): ProjectPositionHistory | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (!Array.isArray(input.points) || input.points.length > projectPositionHistoryMaxPoints || typeof input.truncated !== "boolean") {
+    return undefined;
+  }
+  let previousDate = "";
+  const points: ProjectPositionHistoryPoint[] = [];
+  for (const value of input.points) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const point = value as Readonly<Record<string, unknown>>;
+    if (
+      typeof point.date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(point.date) ||
+      Number.isNaN(Date.parse(`${point.date}T00:00:00.000Z`)) ||
+      point.id !== `day:${point.date}` ||
+      typeof point.observedAt !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(point.observedAt) ||
+      new Date(point.observedAt).toISOString() !== point.observedAt ||
+      point.observedAt.slice(0, 10) !== point.date ||
+      (previousDate && point.date <= previousDate)
+    ) {
+      return undefined;
+    }
+    const counts = [
+      point.top1KeywordCount,
+      point.top3KeywordCount,
+      point.top5KeywordCount,
+      point.top10KeywordCount,
+      point.top30KeywordCount,
+      point.top50KeywordCount,
+      point.positionedKeywordCount,
+      point.measuredKeywordCount
+    ];
+    if (
+      counts.some(
+        (count) => !Number.isSafeInteger(count) || Number(count) < 0
+      ) ||
+      counts.some(
+        (count, index) =>
+          index > 0 && Number(counts[index - 1]) > Number(count)
+      )
+    ) {
+      return undefined;
+    }
+    points.push({
+      id: point.id,
+      date: point.date,
+      observedAt: point.observedAt,
+      top1KeywordCount: Number(point.top1KeywordCount),
+      top3KeywordCount: Number(point.top3KeywordCount),
+      top5KeywordCount: Number(point.top5KeywordCount),
+      top10KeywordCount: Number(point.top10KeywordCount),
+      top30KeywordCount: Number(point.top30KeywordCount),
+      top50KeywordCount: Number(point.top50KeywordCount),
+      positionedKeywordCount: Number(point.positionedKeywordCount),
+      measuredKeywordCount: Number(point.measuredKeywordCount)
+    });
+    previousDate = point.date;
+  }
+  return { points, truncated: input.truncated };
+}
+
 function emptyPositionTopCounts(): ProjectPositionTopCounts {
   return {
     top1KeywordCount: 0,
@@ -4606,30 +5570,44 @@ function addPositionTopCount(
 
 function competitorSnapshotProvider(
   value: string
-): "ARSENKIN" | "XMLSTOCK" {
-  if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
+): "ARSENKIN" | "XMLSTOCK" | "KEY_COLLECTOR" {
+  if (
+    value === "ARSENKIN" ||
+    value === "XMLSTOCK" ||
+    value === "KEY_COLLECTOR"
+  ) return value;
   throw new Error("Stored SERP snapshot provider is unsupported");
 }
 
 function resolvedRankDimensionMetadata(
   configuration: Parameters<typeof rankDimensionMetadata>[0],
   selectedDimension: SemanticRankDimension | undefined,
-  sourceDimensionKeys: ReadonlySet<string> | undefined
+  sourceDimensionKeys: ReadonlySet<string> | undefined,
+  mergeTargets: ReadonlyMap<string, SemanticRankDimension>
 ) {
   const stored = rankDimensionMetadata(configuration);
-  if (
-    !selectedDimension ||
-    !sourceDimensionKeys?.has(stored.dimensionKey)
-  ) return stored;
+  if (selectedDimension && sourceDimensionKeys?.has(stored.dimensionKey)) {
+    return rankDimensionMetadataFromDimension(selectedDimension);
+  }
+  const merged = mergeTargets.get(stored.dimensionKey);
+  if (merged) {
+    return rankDimensionMetadataFromDimension(merged);
+  }
+  return stored;
+}
+
+function rankDimensionMetadataFromDimension(
+  dimension: SemanticRankDimension
+) {
   return {
-    searchEngine: selectedDimension.searchEngine,
-    countryCode: selectedDimension.countryCode,
-    regionCode: selectedDimension.regionCode,
-    language: selectedDimension.language,
-    device: selectedDimension.device,
-    ...(selectedDimension.regionLabel
-      ? { regionLabel: selectedDimension.regionLabel }
+    searchEngine: dimension.searchEngine,
+    countryCode: dimension.countryCode,
+    regionCode: dimension.regionCode,
+    language: dimension.language,
+    device: dimension.device,
+    ...(dimension.regionLabel
+      ? { regionLabel: dimension.regionLabel }
       : {}),
-    dimensionKey: selectedDimension.key
+    dimensionKey: dimension.key
   };
 }

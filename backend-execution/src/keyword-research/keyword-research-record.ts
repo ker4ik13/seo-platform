@@ -13,13 +13,32 @@ import type {
   KeywordResearchRun,
   Prisma
 } from "../generated/prisma/client.js";
+import type { Job } from "../generated/prisma/client.js";
+import {
+  storedXmlStockOperationUsage,
+  xmlStockUsageWithActual
+} from "../integrations/xmlstock-pricing.js";
 
 export function keywordResearchSummary(
   run: KeywordResearchRun,
-  rows: readonly KeywordResearchRow[]
+  rows: readonly KeywordResearchRow[],
+  job?: Pick<Job, "scopeSnapshot" | "attempt">
 ): KeywordResearchRunSummary {
   const source = researchSource(run.source);
   const snapshot = inputSnapshot(run.inputSnapshot, source);
+  const storedUsage = storedXmlStockOperationUsage(
+    jsonRecordOptional(job?.scopeSnapshot)?.providerUsage
+  );
+  const successfulRequests = snapshot.source === "XMLSTOCK_WORDSTAT"
+    ? Math.min(snapshot.queries.length, Math.max(0, run.nextPage - 1))
+    : 0;
+  const providerUsage = snapshot.source === "XMLSTOCK_WORDSTAT"
+    ? xmlStockUsageWithActual(
+        storedUsage,
+        successfulRequests,
+        successfulRequests + Math.max(0, job?.attempt ?? 0)
+      )
+    : undefined;
   return {
     id: run.id,
     workspaceId: run.workspaceId,
@@ -27,6 +46,7 @@ export function keywordResearchSummary(
     actorId: run.actorId,
     source,
     provider: provider(run.provider),
+    ...(providerUsage ? { providerUsage } : {}),
     ...(run.domain ? { domain: run.domain } : {}),
     ...(run.database
       ? { database: run.database as KeysSoDatabase }
@@ -248,6 +268,14 @@ function jsonRecord(value: unknown, label: string): Readonly<Record<string, unkn
     throw new TypeError(`Stored keyword research ${label} is invalid`);
   }
   return value as Readonly<Record<string, unknown>>;
+}
+
+function jsonRecordOptional(
+  value: unknown
+): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : undefined;
 }
 
 function storedInteger(value: unknown): number {

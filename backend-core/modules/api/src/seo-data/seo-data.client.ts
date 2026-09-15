@@ -25,9 +25,11 @@ import {
   semanticKeywordCleaningStates,
   semanticKeywordSourceModes,
   semanticKeywordPageSizes,
+  semanticOperationScopePageSize,
   semanticKeywordGroupSystemKinds,
   semanticGroupColorLegendNoteMaxLength,
   semanticGroupPaletteColors,
+  semanticImportMaxGroupManifestEntries,
   semanticKeywordSorts,
   semanticClusterMethods,
   semanticClusterPageSources,
@@ -57,6 +59,7 @@ import {
   type InternalCreateSemanticKeywordInput,
   type InternalSemanticKeywordBulkCreateInput,
   type InternalSemanticKeywordBulkCreatePreviewInput,
+  type InternalSemanticKeywordMergeInput,
   type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordGroupsInput,
@@ -130,6 +133,11 @@ import {
   type SemanticClusterPageBulkResult,
   type SemanticClusterPageSource,
   type SemanticKeywordBulkInput,
+  type SemanticKeywordMergeInput,
+  type SemanticKeywordMergeResult,
+  type SemanticKeywordMergeSuggestion,
+  type SemanticKeywordTagDeleteResult,
+  type SemanticKeywordTagOption,
   type SemanticKeywordBulkCreateInput,
   type SemanticKeywordBulkCreatePreviewInput,
   type SemanticKeywordBulkCreatePreviewResult,
@@ -142,6 +150,8 @@ import {
   type SemanticGroupColorLegendEntry,
   type SemanticGroupColorLegendState,
   type SemanticKeywordListItem,
+  type SemanticOperationScopeKeyword,
+  type SemanticOperationScopePageInput,
   type SemanticKeywordInsights,
   type SemanticFrequencyDevice,
   type SemanticFrequencyType,
@@ -274,6 +284,13 @@ interface KeywordPage {
   readonly data: readonly SemanticKeywordListItem[];
   readonly page: ApiCollectionResponse<SemanticKeywordListItem>["page"];
 }
+
+export interface OperationScopePage {
+  readonly data: readonly SemanticOperationScopeKeyword[];
+  readonly page: ApiCollectionResponse<SemanticOperationScopeKeyword>["page"];
+}
+
+const SEMANTIC_LARGE_READ_TIMEOUT_MS = 30_000;
 
 interface AiAnswerHistoryPage {
   readonly data: readonly SemanticAiAnswerHistoryItem[];
@@ -413,6 +430,23 @@ export class SeoDataClient {
     return semanticKeywordPage(payload, listQuery.includeNotes === true);
   }
 
+  public async listOperationScope(
+    context: InternalContext,
+    input: SemanticOperationScopePageInput
+  ): Promise<OperationScopePage> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/operation-scope`,
+        this.config.services.seoData
+      ),
+      context,
+      input
+    );
+    return semanticOperationScopePage(payload);
+  }
+
   public async listKeywordTagOptions(
     context: InternalContext,
     search?: string
@@ -435,6 +469,83 @@ export class SeoDataClient {
       throw invalidResponse();
     }
     return data as readonly string[];
+  }
+
+  public async listKeywordTags(
+    context: InternalContext
+  ): Promise<readonly SemanticKeywordTagOption[]> {
+    const payload = await this.request(
+      "GET",
+      keywordUrl(context, this.config.services.seoData, "tags"),
+      context
+    );
+    const data = responseData(payload);
+    if (!Array.isArray(data) || data.length > 500) throw invalidResponse();
+    const ids = new Set<string>();
+    return data.map((value) => {
+      const tag = exactRecord(value, ["id", "name", "keywordCount"]);
+      if (
+        typeof tag.id !== "string" ||
+        !UUID_PATTERN.test(tag.id) ||
+        ids.has(tag.id) ||
+        !requiredString(tag.name) ||
+        tag.name.length > 160 ||
+        !nonNegativeInteger(tag.keywordCount)
+      ) {
+        throw invalidResponse();
+      }
+      ids.add(tag.id);
+      return {
+        id: tag.id,
+        name: tag.name,
+        keywordCount: Number(tag.keywordCount)
+      };
+    });
+  }
+
+  public async deleteKeywordTag(
+    context: InternalContext,
+    tagId: string
+  ): Promise<SemanticKeywordTagDeleteResult> {
+    const payload = await this.request(
+      "DELETE",
+      keywordUrl(context, this.config.services.seoData, `tags/${tagId}`),
+      context,
+      {}
+    );
+    const result = exactRecord(responseData(payload), [
+      "tagId",
+      "name",
+      "detachedKeywordCount"
+    ]);
+    if (
+      result.tagId !== tagId ||
+      !requiredString(result.name) ||
+      result.name.length > 160 ||
+      !nonNegativeInteger(result.detachedKeywordCount)
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      tagId,
+      name: result.name,
+      detachedKeywordCount: Number(result.detachedKeywordCount)
+    };
+  }
+
+  public async keywordMergeSuggestions(
+    context: InternalContext
+  ): Promise<readonly SemanticKeywordMergeSuggestion[]> {
+    const payload = await this.request(
+      "GET",
+      keywordUrl(
+        context,
+        this.config.services.seoData,
+        "merge-suggestions"
+      ),
+      context
+    );
+    return semanticKeywordMergeSuggestions(responseData(payload));
   }
 
   public async projectPositionSummary(
@@ -482,15 +593,19 @@ export class SeoDataClient {
   public async keywordInsights(
     context: InternalContext,
     keywordId: string,
-    dimensionKey?: string
+    dimensionKey?: string,
+    snapshotId?: string
   ): Promise<SemanticKeywordInsights> {
     const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/insights`,
+      this.config.services.seoData
+    );
+    if (dimensionKey) url.searchParams.set("dimensionKey", dimensionKey);
+    if (snapshotId) url.searchParams.set("snapshotId", snapshotId);
     const payload = await this.request(
       "GET",
-      new URL(
-        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/insights${dimensionKey ? `?dimensionKey=${encodeURIComponent(dimensionKey)}` : ""}`,
-        this.config.services.seoData
-      ),
+      url,
       context
     );
     return semanticKeywordInsights(responseData(payload), keywordId);
@@ -1027,6 +1142,26 @@ export class SeoDataClient {
       body
     );
     return semanticKeywordItem(responseData(payload));
+  }
+
+  public async mergeKeywords(
+    context: InternalContext,
+    input: SemanticKeywordMergeInput
+  ): Promise<SemanticKeywordMergeResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticKeywordMergeInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(context, this.config.services.seoData, "merge"),
+      context,
+      body
+    );
+    return semanticKeywordMergeResult(responseData(payload), input);
   }
 
   public async deleteKeyword(
@@ -2705,6 +2840,11 @@ export class SeoDataClient {
         ? Math.max(65_000, this.config.internalCommandTimeoutMs)
         : method === "POST" && /\/tracking-contexts\/[^/]+\/materialize\/?$/u.test(url.pathname)
         ? Math.max(65_000, this.config.internalCommandTimeoutMs)
+        : isSeoDataBoundedRead(method, url.pathname)
+        ? Math.max(
+            SEMANTIC_LARGE_READ_TIMEOUT_MS,
+            this.config.dependencyTimeoutMs
+          )
         : method === "GET"
         ? this.config.dependencyTimeoutMs
         : this.config.internalCommandTimeoutMs;
@@ -2740,6 +2880,17 @@ export class SeoDataClient {
   }
 }
 
+function isSeoDataBoundedRead(
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
+  pathname: string
+): boolean {
+  if (method === "GET") return true;
+  return (
+    method === "POST" &&
+    /\/keywords\/(?:list|search|operation-scope)\/?$/u.test(pathname)
+  );
+}
+
 export function semanticKeywordPage(
   payload: unknown,
   includeNotes = false
@@ -2768,6 +2919,65 @@ export function semanticKeywordPage(
       ...(typeof page.nextCursor === "string"
         ? { nextCursor: page.nextCursor }
         : {}),
+      ...(typeof page.totalApprox === "number"
+        ? { totalApprox: page.totalApprox }
+        : {})
+    }
+  };
+}
+
+export function semanticOperationScopePage(
+  payload: unknown
+): OperationScopePage {
+  const response = objectValue(payload);
+  const data = response?.data;
+  const page = objectValue(response?.page);
+  if (
+    !Array.isArray(data) ||
+    data.length > semanticOperationScopePageSize ||
+    !page ||
+    typeof page.hasNext !== "boolean" ||
+    (page.totalApprox !== undefined &&
+      (!Number.isSafeInteger(page.totalApprox) || Number(page.totalApprox) < 0))
+  ) {
+    throw invalidResponse();
+  }
+  const ids = new Set<string>();
+  const items = data.map((candidate) => {
+    const item = exactRecord(candidate, ["id", "version", "isTracked"]);
+    if (
+      typeof item.id !== "string" ||
+      !UUID_PATTERN.test(item.id) ||
+      ids.has(item.id) ||
+      !Number.isSafeInteger(item.version) ||
+      Number(item.version) < 1 ||
+      typeof item.isTracked !== "boolean"
+    ) {
+      throw invalidResponse();
+    }
+    ids.add(item.id);
+    return {
+      id: item.id,
+      version: Number(item.version),
+      isTracked: item.isTracked
+    };
+  });
+  const nextCursor = page.nextCursor;
+  if (
+    page.hasNext
+      ? items.length !== semanticOperationScopePageSize ||
+        typeof nextCursor !== "string" ||
+        !UUID_PATTERN.test(nextCursor) ||
+        nextCursor !== items.at(-1)?.id
+      : nextCursor !== undefined
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    data: items,
+    page: {
+      hasNext: page.hasNext,
+      ...(typeof nextCursor === "string" ? { nextCursor } : {}),
       ...(typeof page.totalApprox === "number"
         ? { totalApprox: page.totalApprox }
         : {})
@@ -3263,7 +3473,9 @@ export function semanticKeywordInsights(
         !["GOOGLE", "YANDEX"].includes(String(item.searchEngine)) ||
         (item.searchSource !== undefined &&
           !["LIVE", "SEARCH_API"].includes(String(item.searchSource))) ||
-        !["ARSENKIN", "XMLSTOCK"].includes(String(item.provider)) ||
+        !["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR"].includes(
+          String(item.provider)
+        ) ||
         !validDate(item.observedAt) ||
         !Array.isArray(item.results) ||
         item.results.length < 1 ||
@@ -3307,7 +3519,7 @@ export function semanticKeywordInsights(
         ...(item.searchSource === "LIVE" || item.searchSource === "SEARCH_API"
           ? { searchSource: item.searchSource }
           : {}),
-        provider: item.provider as "ARSENKIN" | "XMLSTOCK",
+        provider: item.provider as "ARSENKIN" | "XMLSTOCK" | "KEY_COLLECTOR",
         observedAt: item.observedAt,
         results
       };
@@ -3933,7 +4145,7 @@ function keywordUrl(
     projectId
   )}/keywords`;
   return new URL(
-    keywordId ? `${base}/${encodeURIComponent(keywordId)}` : base,
+    keywordId ? `${base}/${encodePathSuffix(keywordId)}` : base,
     baseUrl
   );
 }
@@ -3954,10 +4166,109 @@ export function semanticKeywordGroups(
   return groups;
 }
 
+function semanticKeywordMergeResult(
+  value: unknown,
+  input: SemanticKeywordMergeInput
+): SemanticKeywordMergeResult {
+  const result = objectValue(value);
+  if (
+    !result ||
+    Object.keys(result).some(
+      (key) => ![
+        "keeperKeywordId",
+        "keeperVersion",
+        "mergedKeywordIds",
+        "mergedAt"
+      ].includes(key)
+    ) ||
+    result.keeperKeywordId !== input.keeper.id ||
+    !positiveInteger(result.keeperVersion) ||
+    !Array.isArray(result.mergedKeywordIds) ||
+    result.mergedKeywordIds.length !== input.sources.length ||
+    result.mergedKeywordIds.some(
+      (id) => typeof id !== "string" || !UUID_PATTERN.test(id)
+    ) ||
+    new Set(result.mergedKeywordIds).size !== result.mergedKeywordIds.length ||
+    typeof result.mergedAt !== "string" ||
+    new Date(result.mergedAt).toISOString() !== result.mergedAt
+  ) {
+    throw invalidResponse();
+  }
+  const expected = new Set(input.sources.map(({ id }) => id));
+  if (result.mergedKeywordIds.some((id) => !expected.has(id as string))) {
+    throw invalidResponse();
+  }
+  return {
+    keeperKeywordId: result.keeperKeywordId as string,
+    keeperVersion: Number(result.keeperVersion),
+    mergedKeywordIds: result.mergedKeywordIds as readonly string[],
+    mergedAt: result.mergedAt
+  };
+}
+
+function semanticKeywordMergeSuggestions(
+  value: unknown
+): readonly SemanticKeywordMergeSuggestion[] {
+  if (!Array.isArray(value) || value.length > 100) throw invalidResponse();
+  const seen = new Set<string>();
+  return value.map((entry) => {
+    const item = objectValue(entry);
+    if (!item) throw invalidResponse();
+    const source = objectValue(item.source);
+    const candidate = objectValue(item.candidate);
+    if (
+      !source ||
+      !candidate ||
+      Object.keys(item).some(
+        (key) => !["source", "candidate", "similarity", "reason"].includes(key)
+      ) ||
+      typeof source.id !== "string" ||
+      !UUID_PATTERN.test(source.id) ||
+      !positiveInteger(source.version) ||
+      typeof source.text !== "string" ||
+      source.text.length < 1 ||
+      source.text.length > 2_000 ||
+      typeof candidate.id !== "string" ||
+      !UUID_PATTERN.test(candidate.id) ||
+      !positiveInteger(candidate.version) ||
+      typeof candidate.text !== "string" ||
+      candidate.text.length < 1 ||
+      candidate.text.length > 2_000 ||
+      source.id === candidate.id ||
+      typeof item.similarity !== "number" ||
+      !Number.isFinite(item.similarity) ||
+      item.similarity < 0 ||
+      item.similarity > 1 ||
+      !["BROKEN_ENCODING", "SIMILAR_TEXT"].includes(String(item.reason)) ||
+      seen.has(source.id)
+    ) {
+      throw invalidResponse();
+    }
+    seen.add(source.id);
+    return {
+      source: {
+        id: source.id,
+        version: Number(source.version),
+        text: source.text
+      },
+      candidate: {
+        id: candidate.id,
+        version: Number(candidate.version),
+        text: candidate.text
+      },
+      similarity: item.similarity,
+      reason: item.reason as SemanticKeywordMergeSuggestion["reason"]
+    };
+  });
+}
+
 function semanticKeywordGroupItems(
   value: unknown
 ): readonly SemanticKeywordGroup[] {
-  if (!Array.isArray(value) || value.length > 2_000) {
+  if (
+    !Array.isArray(value) ||
+    value.length > semanticImportMaxGroupManifestEntries
+  ) {
     throw invalidResponse();
   }
   const groups = value.map(semanticKeywordGroup);

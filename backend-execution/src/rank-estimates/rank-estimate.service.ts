@@ -62,6 +62,7 @@ import {
   rankEstimateSnapshot,
   rankEstimateSnapshotJson
 } from "./rank-estimate-snapshot.js";
+import { xmlStockOperationUsage } from "../integrations/xmlstock-pricing.js";
 
 export const RANK_ESTIMATE_POLICY_VERSION =
   batchedArsenkinRankPolicyVersion;
@@ -952,6 +953,7 @@ function publicEstimate(input: {
   readonly expiresAt: Date;
 }): RankEstimate {
   const executionAllowed = input.blockers.length === 0;
+  const providerUsage = rankXmlStockProviderUsage(input);
   return {
     id: input.id,
     workspaceId: input.input.workspaceId,
@@ -1005,6 +1007,7 @@ function publicEstimate(input: {
     },
     providerLimits: { status: "NOT_AVAILABLE" },
     expectedDuration: { status: "NOT_AVAILABLE" },
+    ...(providerUsage ? { providerUsage } : {}),
     platformChargeMicro: "0",
     billingCurrency: input.input.billingCurrency,
     quota: input.input.quota,
@@ -1019,6 +1022,42 @@ function publicEstimate(input: {
     calculatedAt: input.calculatedAt.toISOString(),
     expiresAt: input.expiresAt.toISOString()
   };
+}
+
+function rankXmlStockProviderUsage(
+  input: Parameters<typeof publicEstimate>[0]
+) {
+  if (
+    input.provider !== "XMLSTOCK" ||
+    !input.execution ||
+    !input.resolvedRoute?.xmlStockPricing
+  ) {
+    return undefined;
+  }
+  const mapping = input.execution.providerMappingVersion;
+  const product = input.execution.searchEngine === "GOOGLE"
+    ? "GOOGLE_LIVE" as const
+    : mapping.includes("search-api")
+      ? "YANDEX_SEARCH_API" as const
+      : mapping === "xmlstock-yandex-live@3"
+        ? "YANDEX_TURBO" as const
+        : "YANDEX_LIVE" as const;
+  const keywordCount = Number(input.scope.keywordCount);
+  const minimumPages = product === "YANDEX_SEARCH_API"
+    ? 1
+    : product === "YANDEX_TURBO"
+      ? Math.ceil(input.execution.depth / 50)
+      : Math.ceil(input.execution.depth / 10);
+  const maximumPages = product === "YANDEX_TURBO"
+    ? Math.ceil(input.execution.depth / 10)
+    : minimumPages;
+  return xmlStockOperationUsage(
+    input.resolvedRoute.xmlStockPricing,
+    product,
+    keywordCount * minimumPages,
+    keywordCount * maximumPages,
+    input.calculatedAt
+  );
 }
 
 function checkedReplay(

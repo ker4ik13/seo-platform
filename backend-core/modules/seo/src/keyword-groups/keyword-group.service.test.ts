@@ -18,6 +18,7 @@ const unlimitedEntitlement = {
 
 test("lists only tenant-scoped active groups with keyword counts", async () => {
   let observedWhere: unknown;
+  let lockCalls = 0;
   const regular = {
     id: "01900000-0000-7000-8000-000000000010",
     workspaceId,
@@ -40,7 +41,10 @@ test("lists only tenant-scoped active groups with keyword counts", async () => {
     TRASH: { ...regular, id: "01900000-0000-7000-8000-000000000021", name: "Корзина", path: "__system__/trash", systemKind: "TRASH" as const, position: 1_999, _count: { memberships: 0 } }
   };
   const transaction = {
-    $executeRaw: async () => 1,
+    $executeRaw: async () => {
+      lockCalls += 1;
+      return 1;
+    },
     keywordGroup: {
       findFirst: async ({ where }: { where: { id?: string; systemKind?: "UNGROUPED" | "TRASH" } }) => {
         if (where.systemKind) return { id: systemRows[where.systemKind].id };
@@ -71,6 +75,7 @@ test("lists only tenant-scoped active groups with keyword counts", async () => {
   assert.equal(result[0]?.version, 2);
   assert.equal(result[1]?.systemKind, "UNGROUPED");
   assert.equal(result[2]?.systemKind, "TRASH");
+  assert.equal(lockCalls, 0);
 });
 
 test("creates a regular root group after regular siblings, not after system groups", async () => {

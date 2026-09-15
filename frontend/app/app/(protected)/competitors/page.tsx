@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { KeywordResearchConnectorSetup } from "../../../../components/keyword-research-connector-setup";
 import { KeywordResearchWorkspace } from "../../../../components/keyword-research-workspace";
 import { ProjectOnboarding } from "../../../../components/tenant-onboarding";
-import { WordstatExpansionConnectorSetup } from "../../../../components/wordstat-expansion-connector-setup";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
 import { UiText } from "../../../../components/ui-locale";
 
@@ -35,8 +33,6 @@ export default async function CompetitorsPage() {
                 <UiText text="Анализируйте домены в Keys.so и расширяйте выбранные запросы через Wordstat, не покидая проект." /></p>
             </div>
           </section>
-          <KeywordResearchConnectorSetup projectId={context.project.id} />
-          <WordstatExpansionConnectorSetup projectId={context.project.id} />
           <KeywordResearchWorkspace
             projectDomain={context.project.domain}
             projectId={context.project.id}

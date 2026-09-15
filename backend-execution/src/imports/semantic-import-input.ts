@@ -4,6 +4,7 @@ import {
   semanticImportDelimiters,
   semanticImportEncodings,
   semanticImportHeaderModes,
+  semanticImportPreviewSortDirections,
   semanticImportTargets,
   parseSemanticPositionHistoryImportOptions,
   type InternalCancelSemanticImportInput,
@@ -15,6 +16,8 @@ import {
   type SemanticImportEncoding,
   type SemanticImportHeaderMode,
   type SemanticImportMappingColumn,
+  type SemanticImportPreviewRowsQuery,
+  type SemanticImportPreviewSortDirection,
   type SemanticImportTarget,
   type SemanticCapacityEntitlement
 } from "@seo-platform/contracts";
@@ -23,6 +26,38 @@ import { jobCapacityInput } from "../jobs/job-capacity-input.js";
 
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const PLAN_CODE_PATTERN = /^[A-Z][A-Z0-9_-]{0,63}$/u;
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
+
+export function semanticImportPreviewRowsQuery(
+  cursor: unknown,
+  sortColumn: unknown,
+  sortDirection: unknown
+): SemanticImportPreviewRowsQuery {
+  const parsedCursor = optionalQueryToken(cursor, "cursor");
+  const parsedColumn = optionalQueryInteger(
+    sortColumn,
+    "sortColumn",
+    0,
+    499
+  );
+  if (parsedColumn === undefined && sortDirection !== undefined) {
+    invalid("sortDirection");
+  }
+  return {
+    ...(parsedCursor === undefined ? {} : { cursor: parsedCursor }),
+    ...(parsedColumn === undefined
+      ? {}
+      : {
+          sortColumn: parsedColumn,
+          sortDirection: enumValue<SemanticImportPreviewSortDirection>(
+            sortDirection,
+            semanticImportPreviewSortDirections,
+            "ASC",
+            "sortDirection"
+          )
+        })
+  };
+}
 
 export function internalCreateSemanticImportInput(
   value: unknown
@@ -34,13 +69,23 @@ export function internalCreateSemanticImportInput(
   if (!IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
     invalid("idempotencyKey");
   }
+  const projectDomain = string(input, "projectDomain").toLowerCase();
+  if (!DOMAIN_PATTERN.test(projectDomain)) invalid("projectDomain");
   return {
     workspaceId: uuid(input, "workspaceId"),
     projectId: uuid(input, "projectId"),
+    projectDomain,
     actorId: uuid(input, "actorId"),
     uploadId: uuid(input, "uploadId"),
     idempotencyKey,
     jobCapacity: jobCapacityInput(input.jobCapacity),
+    ...(input.semanticCapacity === undefined
+      ? {}
+      : {
+          semanticCapacity: semanticCapacityEntitlement(
+            input.semanticCapacity
+          )
+        }),
     parse: {
       encoding: enumValue<SemanticImportEncoding>(
         parse.encoding,
@@ -299,6 +344,36 @@ function positiveVersion(value: unknown): number {
     invalid("version");
   }
   return Number(value);
+}
+
+function optionalQueryToken(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 512 ||
+    !/^[A-Za-z0-9_-]+$/u.test(value)
+  ) {
+    invalid(field);
+  }
+  return value;
+}
+
+function optionalQueryInteger(
+  value: unknown,
+  field: string,
+  minimum: number,
+  maximum: number
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/u.test(value)) {
+    invalid(field);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    invalid(field);
+  }
+  return parsed;
 }
 
 function invalid(field: string): never {

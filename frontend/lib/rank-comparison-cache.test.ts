@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SemanticRankComparisonItem } from "@seo-platform/contracts";
-import { mergeRankComparisonItems } from "./rank-comparison-cache.ts";
+import {
+  mergeRankComparisonItems,
+  unresolvedRankComparisonKeywordIds
+} from "./rank-comparison-cache.ts";
 
 
 function item(keywordId: string, position: number): SemanticRankComparisonItem {
@@ -34,4 +37,27 @@ test("keeps resolved rank cells across virtual viewport requests", () => {
   assert.equal(merged.get(key(first))?.position, 5);
   assert.equal(merged.get(key(second))?.position, 12);
   assert.equal(merged.size, 2);
+});
+
+test("requests only keywords whose visible dimension cells are unresolved", () => {
+  const first = item("01900000-0000-7000-8000-000000000001", 7);
+  const secondId = "01900000-0000-7000-8000-000000000002";
+  const key = `${first.keywordId}:${first.dimensionKey}`;
+
+  assert.deepEqual(
+    unresolvedRankComparisonKeywordIds(
+      [first.keywordId, secondId],
+      [first.dimensionKey],
+      new Set([key])
+    ),
+    [secondId]
+  );
+  assert.deepEqual(
+    unresolvedRankComparisonKeywordIds(
+      [first.keywordId, secondId],
+      [first.dimensionKey],
+      new Set([key, `${secondId}:${first.dimensionKey}`])
+    ),
+    []
+  );
 });

@@ -27,7 +27,7 @@ import {
 } from "@seo-platform/contracts";
 import {
   expandedAncestorIds,
-  treeIdsWithDescendants,
+  resolvedFolderSelectionIds,
   visibleFolderRows
 } from "../lib/semantic-operation-tree";
 import { builtInNegativeKeywordPresets } from "../lib/semantic-negative-keyword-presets";
@@ -37,6 +37,7 @@ import {
 } from "../lib/browser-api";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
 import type { SemanticOperationGroup } from "./semantic-operation-scope";
@@ -80,6 +81,9 @@ export function SemanticNegativeKeywordsDialog({
   const [selectedGroupIds, setSelectedGroupIds] = useState<ReadonlySet<string>>(
     () => new Set(activeGroup ? [activeGroup.id] : [])
   );
+  const [descendantGroupIds, setDescendantGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [expandedGroupIds, setExpandedGroupIds] = useState<ReadonlySet<string>>(
     () => expandedAncestorIds(groups, activeGroup ? [activeGroup.id] : [])
   );
@@ -106,13 +110,26 @@ export function SemanticNegativeKeywordsDialog({
     [groups]
   );
   const resolvedGroupIds = useMemo(
-    () => treeIdsWithDescendants(availableGroups, selectedGroupIds),
-    [availableGroups, selectedGroupIds]
+    () => resolvedFolderSelectionIds(
+      availableGroups,
+      selectedGroupIds,
+      descendantGroupIds
+    ),
+    [availableGroups, descendantGroupIds, selectedGroupIds]
+  );
+  const resolvedGroupIdSet = useMemo(
+    () => new Set(resolvedGroupIds),
+    [resolvedGroupIds]
   );
   const visibleGroups = useMemo(
     () => visibleFolderRows(availableGroups, expandedGroupIds),
     [availableGroups, expandedGroupIds]
   );
+  useEffect(() => {
+    if (selectedGroupIds.size === 0 && descendantGroupIds.size > 0) {
+      setDescendantGroupIds(new Set());
+    }
+  }, [descendantGroupIds, selectedGroupIds]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -142,7 +159,26 @@ export function SemanticNegativeKeywordsDialog({
   }
 
   function toggleGroup(groupId: string): void {
+    const removing = selectedGroupIds.has(groupId);
     setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+    if (removing) {
+      setDescendantGroupIds((current) => {
+        const next = new Set(current);
+        next.delete(groupId);
+        return next;
+      });
+    }
+    invalidatePreview();
+  }
+
+  function toggleDescendants(groupId: string): void {
+    setSelectedGroupIds((current) => new Set([...current, groupId]));
+    setDescendantGroupIds((current) => {
       const next = new Set(current);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
@@ -414,6 +450,7 @@ export function SemanticNegativeKeywordsDialog({
       ignorePunctuation;
   const dirty =
     rulesDirty ||
+    descendantGroupIds.size > 0 ||
     scopeKind !== initialScopeKind ||
     !sameStringSet(
       selectedGroupIds,
@@ -449,8 +486,8 @@ export function SemanticNegativeKeywordsDialog({
                   {scopeKind === "SELECTION"
                     ? <UiText text="{0} выбранных" values={[String(formatInteger(selections.length, uiLocale))]} />
                     : scopeKind === "GROUP"
-                      ? selectedGroupIds.size > 0
-                        ? <UiText text="{0} папок" values={[String(formatInteger(selectedGroupIds.size, uiLocale))]} />
+                      ? resolvedGroupIds.length > 0
+                        ? <UiText text="{0} папок" values={[String(formatInteger(resolvedGroupIds.length, uiLocale))]} />
                         : <UiText text="Папки не выбраны" />
                       : <UiText text="Весь проект" />}
                 </dd>
@@ -600,19 +637,20 @@ export function SemanticNegativeKeywordsDialog({
                 <ScopeCard checked={scopeKind === "SELECTION"} count={selections.length} label={uiText("Выбранные запросы")} onSelect={() => { setScopeKind("SELECTION"); invalidatePreview(); }} />
               )}
               {availableGroups.length > 0 && (
-                <ScopeCard checked={scopeKind === "GROUP"} count={selectedGroupIds.size} label={uiText("Конкретные папки")} onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
+                <ScopeCard checked={scopeKind === "GROUP"} count={resolvedGroupIds.length} label={uiText("Конкретные папки")} onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
               )}
             </div>
             {scopeKind === "GROUP" && (
               <div className="semantic-duplicate-folder-scope semantic-negative-folder-scope">
                 <div className="semantic-duplicate-folder-toolbar">
-                  <span><UiText text="Выбрано папок:" after=" " />{formatInteger(selectedGroupIds.size, uiLocale)}</span>
+                  <span><UiText text="Выбрано папок:" after=" " />{formatInteger(resolvedGroupIds.length, uiLocale)}</span>
                   <div>
                     {activeGroup && (
                       <button
                         disabled={applying}
                         onClick={() => {
                           setSelectedGroupIds(new Set([activeGroup.id]));
+                          setDescendantGroupIds(new Set());
                           setExpandedGroupIds(expandedAncestorIds(groups, [activeGroup.id]));
                           invalidatePreview();
                         }}
@@ -635,47 +673,62 @@ export function SemanticNegativeKeywordsDialog({
                   aria-label={uiText("Папки для поиска минус-слов")}
                   className="semantic-operation-folder-list semantic-duplicate-folder-list"
                 >
-                  {visibleGroups.map(({ group, depth, hasChildren }) => (
-                    <div
-                      className="semantic-operation-folder-row"
-                      key={group.id}
-                      style={{ "--folder-depth": depth } as CSSProperties}
-                      title={group.path}
-                    >
-                      {hasChildren ? (
-                        <button
-                          aria-expanded={expandedGroupIds.has(group.id)}
-                          aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
-                          className="semantic-operation-folder-toggle"
-                          disabled={applying}
-                          onClick={() => toggleExpanded(group.id)}
-                          type="button"
-                        >
-                          <Icon name="chevronRight" />
-                        </button>
-                      ) : (
-                        <span className="semantic-operation-folder-toggle-spacer" />
-                      )}
-                      <label>
-                        <input
-                          checked={selectedGroupIds.has(group.id)}
-                          disabled={applying}
-                          onChange={() => toggleGroup(group.id)}
-                          type="checkbox"
-                        />
-                        <i
-                          aria-hidden="true"
-                          className="semantic-operation-folder-color"
-                          style={{ background: group.color ?? "#a8a5b8" }}
-                        />
-                        <span>{group.name}</span>
-                        <b>{formatInteger(group.keywordCount, uiLocale)}</b>
-                      </label>
-                    </div>
-                  ))}
+                  {visibleGroups.map(({ group, depth, hasChildren }) => {
+                    const selected = selectedGroupIds.has(group.id);
+                    const includedByParent =
+                      !selected && resolvedGroupIdSet.has(group.id);
+                    return (
+                      <div
+                        className={`semantic-operation-folder-row${includedByParent ? " included-by-parent" : ""}`}
+                        key={group.id}
+                        style={{ "--folder-depth": depth } as CSSProperties}
+                        title={group.path}
+                      >
+                        {hasChildren ? (
+                          <button
+                            aria-expanded={expandedGroupIds.has(group.id)}
+                            aria-label={expandedGroupIds.has(group.id) ? uiText("Свернуть папку") : uiText("Развернуть папку")}
+                            className="semantic-operation-folder-toggle"
+                            disabled={applying}
+                            onClick={() => toggleExpanded(group.id)}
+                            type="button"
+                          >
+                            <Icon name="chevronRight" />
+                          </button>
+                        ) : (
+                          <span className="semantic-operation-folder-toggle-spacer" />
+                        )}
+                        <label>
+                          <input
+                            checked={selected || includedByParent}
+                            disabled={applying || includedByParent}
+                            onChange={() => toggleGroup(group.id)}
+                            type="checkbox"
+                          />
+                          <i
+                            aria-hidden="true"
+                            className="semantic-operation-folder-color"
+                            style={{ background: group.color ?? "#a8a5b8" }}
+                          />
+                          <span>{group.name}</span>
+                          <b>{formatInteger(group.keywordCount, uiLocale)}</b>
+                        </label>
+                        {hasChildren ? (
+                          <SemanticFolderDescendantsToggle
+                            disabled={applying || includedByParent}
+                            enabled={descendantGroupIds.has(group.id)}
+                            folderName={group.name}
+                            onChange={() => toggleDescendants(group.id)}
+                          />
+                        ) : (
+                          <span className="semantic-folder-descendants-spacer" />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 <small>
-                  <UiText text="Родительская папка включает все вложенные. Запросы из нескольких выбранных папок проверяются один раз." /></small>
+                  <UiText text="Папка включает только свои запросы. Кнопка справа включает поддерево только этой папки; запросы из нескольких папок проверяются один раз." /></small>
               </div>
             )}
             <div className="semantic-negative-checkbox-options">

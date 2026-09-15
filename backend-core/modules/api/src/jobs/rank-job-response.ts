@@ -142,7 +142,9 @@ export function scopedRankJobSummary(
     input.operation !== "POSITIONS" ||
     credentialMode === undefined ||
     saveProjectPosition === null ||
-    (purpose === undefined) !== (saveProjectPosition === undefined) ||
+    (purpose === undefined && saveProjectPosition !== undefined) ||
+    (purpose === "COMPETITOR_SERP" && saveProjectPosition === undefined) ||
+    (purpose === "POSITION_TRACKING" && saveProjectPosition === false) ||
     platformChargeMicro === undefined ||
     (credentialMode === "BYOK_API_KEY" &&
       platformChargeMicro !== "0") ||

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HttpException, HttpStatus } from "@nestjs/common";
 import type { PrismaService } from "../database/prisma.service.js";
 import { ClusterService } from "./cluster.service.js";
 import type { SemanticVersionService } from "../semantic-versions/semantic-version.service.js";
@@ -14,7 +13,8 @@ const secondClusterId = "01900000-0000-7000-8000-000000000006";
 const thirdClusterId = "01900000-0000-7000-8000-000000000007";
 const missingClusterId = "01900000-0000-7000-8000-000000000008";
 const semanticVersions = {
-  createWithClusterChange: async () => undefined
+  createWithClusterChange: async () => undefined,
+  createIrreversibleVersion: async () => undefined
 } as unknown as SemanticVersionService;
 
 const row = {
@@ -191,38 +191,63 @@ test("maps an active tenant page and reports competing keyword pages", async () 
   });
 });
 
-test("refuses to delete a cluster that still owns active keywords", async () => {
-  let updated = false;
+test("deleting a cluster detaches every linked keyword in the same transaction", async () => {
+  let keywordUpdate: unknown;
+  let versionInput: unknown;
+  let versionCount: number | undefined;
   const transaction = {
     $executeRaw: async () => 1,
     $queryRaw: async () => [],
     cluster: {
       findFirst: async () => row,
-      update: async () => {
-        updated = true;
-        return row;
-      }
+      update: async () => ({ ...row, status: "DELETED" as const, version: 3 })
     },
-    keyword: { count: async () => 2 }
+    keyword: {
+      count: async () => 2,
+      updateMany: async (input: unknown) => {
+        keywordUpdate = input;
+        return { count: 2 };
+      }
+    }
   };
   const service = new ClusterService({
     $transaction: async (callback: (tx: typeof transaction) => Promise<void>) =>
       callback(transaction)
-  } as unknown as PrismaService, semanticVersions);
+  } as unknown as PrismaService, {
+    createIrreversibleVersion: async (
+      _transaction: unknown,
+      input: unknown,
+      count: number
+    ) => {
+      versionInput = input;
+      versionCount = count;
+      return undefined;
+    }
+  } as unknown as SemanticVersionService);
 
-  await assert.rejects(
-    () =>
-      service.delete(clusterId, {
-        workspaceId,
-        projectId,
-        actorId,
-        version: 2
-      }),
-    (error: unknown) =>
-      error instanceof HttpException &&
-      error.getStatus() === HttpStatus.CONFLICT
-  );
-  assert.equal(updated, false);
+  await service.delete(clusterId, {
+    workspaceId,
+    projectId,
+    actorId,
+    version: 2
+  });
+
+  assert.deepEqual(keywordUpdate, {
+    where: { workspaceId, projectId, clusterId },
+    data: {
+      clusterId: null,
+      updatedBy: actorId,
+      version: { increment: 1 }
+    }
+  });
+  assert.equal(versionCount, 3);
+  assert.deepEqual(versionInput, {
+    workspaceId,
+    projectId,
+    actorId,
+    reason: "CLUSTER_DELETE",
+    summary: "Удалён кластер «SEO аудит» и снят с 2 запросов"
+  });
 });
 
 test("previews applicable, unchanged, stale and unavailable page mappings", async () => {

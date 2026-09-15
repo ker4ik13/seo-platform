@@ -149,6 +149,10 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
     request: "Query: limit, cursor?, search?, groupId/groupIds?, filters?, sort?, includeNotes=true|false. Полный note возвращается только при includeNotes=true; в этом режиме limit <= 200.",
     response: "200 · data: SemanticKeywordListItem[] с groupPath, optional groupMembershipCount для нескольких папок, targetUrl, tags, frequencies, positions, aiAnswers, hasNote и optional note; page: { hasNext, nextCursor?, totalApprox? }."
   }),
+  endpoint("keywords-operation-scope", "POST", "/projects/{projectId}/keywords/operation-scope", "semantics:read", "Облегчённая выборка запросов для большой операции", "semantics", {
+    request: "JSON: { groupIds?: UUID[], cursor?: UUID }. Без groupIds выбираются все активные запросы проекта; до 20 000 уникальных папок образуют один union.",
+    response: "200 · до 10 000 строк { id, version, isTracked }; первая страница содержит totalApprox, следующая — UUID cursor. Табличные метрики, теги и custom values не загружаются."
+  }),
   endpoint("position-summary", "GET", "/projects/{projectId}/keywords/position-summary", "semantics:read", "Текущая средняя позиция и число запросов в Топ-3/5/10/30/50", "positions", {
     request: "Query: rankDimensionKey? — точный поисковик, город и устройство; includeUntracked? — учитывать неотслеживаемые запросы."
   }),
@@ -159,12 +163,18 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
     response: "200 · data содержит indexed outcomes CREATED, LINKED_EXISTING, RESTORED, SKIPPED_EXISTING, REJECTED_EXISTING или FAILED."
   }),
   endpoint("keyword-update", "PATCH", "/projects/{projectId}/keywords/{keywordId}", "semantics:write", "Изменить ключевое слово", "semantics"),
+  endpoint("keyword-merge", "POST", "/projects/{projectId}/keywords/merge", "semantics:write", "Объединить запросы с сохранением истории у выбранного основного запроса", "semantics", {
+    request: "JSON: { keeper: { id, version }, sources: [{ id, version }] }. Все запросы должны принадлежать одному проекту и иметь один язык.",
+    response: "200 · data: { keeperKeywordId, keeperVersion, mergedKeywordIds, mergedAt }. Immutable history остаётся доступной через keeper."
+  }),
+  endpoint("keyword-merge-suggestions", "GET", "/projects/{projectId}/keywords/merge-suggestions", "semantics:read", "Найти повреждённые названия и ближайшие варианты для ручного объединения", "semantics"),
   endpoint("keyword-delete", "DELETE", "/projects/{projectId}/keywords/{keywordId}", "semantics:write", "Переместить запрос в корзину или окончательно очистить его данные", "semantics", {
     request: "Headers: If-Match. Optional JSON: { permanent?: boolean }; permanent=true допустим только для ключа в корзине.",
     response: "204 No Content."
   }),
   endpoint("bulk-command", "POST", "/projects/{projectId}/bulk-commands", "semantics:write", "Массовое изменение выбранных ключей", "semantics"),
   endpoint("import-get", "GET", "/projects/{projectId}/imports/{importId}", "semantics:read", "Состояние импорта", "semantics"),
+  endpoint("import-preview-rows", "GET", "/projects/{projectId}/imports/{importId}/preview-rows", "semantics:read", "Строки предпросмотра импорта", "semantics"),
   endpoint("imports-create", "POST", "/projects/{projectId}/imports", "semantics:write", "Создать импорт", "semantics"),
   endpoint("exports", "GET", "/projects/{projectId}/exports", "semantics:read", "История экспортов", "semantics"),
   endpoint("exports-create", "POST", "/projects/{projectId}/exports", "semantics:write", "Создать экспорт", "semantics"),
@@ -247,9 +257,11 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
     response: "200 · data: SemanticKeywordListItem[]; page: { hasNext, nextCursor?, totalApprox? }."
   }),
   endpoint("keyword-tag-options", "GET", "/projects/{projectId}/keywords/tag-options", "semantics:read", "Получить доступные теги проекта", "semantics"),
+  endpoint("keyword-tags", "GET", "/projects/{projectId}/keywords/tags", "semantics:read", "Получить теги проекта с количеством связанных запросов", "semantics"),
+  endpoint("keyword-tag-delete", "DELETE", "/projects/{projectId}/keywords/tags/{tagId}", "semantics:write", "Удалить тег и снять его со всех запросов проекта", "semantics"),
   endpoint("keywords-bulk-preview", "POST", "/projects/{projectId}/keywords/bulk-preview", "semantics:write", "Проверить пакет ключей перед созданием", "semantics"),
   endpoint("keyword-insights", "GET", "/projects/{projectId}/keywords/{keywordId}/insights", "semantics:read", "Карточка ключа: текущие папки с цветами, позиции, частотность, SERP, URL и заметка", "semantics", {
-    request: "Path: projectId, keywordId (UUID). Query: dimensionKey? — точный срез поисковика, региона и устройства.",
+    request: "Path: projectId, keywordId (UUID). Query: dimensionKey? — точный срез поисковика, региона и устройства; snapshotId? — точный immutable снимок для списка найденных URL.",
     response: "200 · data: SemanticKeywordInsights с последними частотностями, позициями, SERP-результатами, target URL и note."
   }),
   endpoint("keyword-ai-answers", "GET", "/projects/{projectId}/keywords/{keywordId}/ai-answers", "semantics:read", "Последние ИИ-ответы ключа по выбранному срезу", "semantics"),
@@ -285,7 +297,7 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("clusters-split-preview", "POST", "/projects/{projectId}/clusters/split-preview", "semantics:write", "Предпросмотр разделения кластера", "semantics"),
   endpoint("clusters-split", "POST", "/projects/{projectId}/clusters/split", "semantics:write", "Разделить кластер", "semantics"),
   endpoint("cluster-update", "PATCH", "/projects/{projectId}/clusters/{clusterId}", "semantics:write", "Изменить кластер", "semantics"),
-  endpoint("cluster-delete", "DELETE", "/projects/{projectId}/clusters/{clusterId}", "semantics:write", "Удалить кластер", "semantics"),
+  endpoint("cluster-delete", "DELETE", "/projects/{projectId}/clusters/{clusterId}", "semantics:write", "Удалить кластер и снять его со всех запросов проекта", "semantics"),
   endpoint("custom-columns", "GET", "/projects/{projectId}/semantic-custom-columns", "semantics:read", "Пользовательские колонки семантики", "semantics"),
   endpoint("custom-column-create", "POST", "/projects/{projectId}/semantic-custom-columns", "semantics:write", "Создать пользовательскую колонку", "semantics"),
   endpoint("custom-column-update", "PATCH", "/projects/{projectId}/semantic-custom-columns/{columnId}", "semantics:write", "Изменить пользовательскую колонку", "semantics"),
@@ -324,7 +336,7 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   }),
   endpoint("rank-workbench-serp", "POST", "/projects/{projectId}/rank-workbench/serp", "positions:read", "Сравнить обычную и ИИ-выдачу до пяти срезов", "positions", {
     request: "JSON: { dimensionKeys: string[1..5], groupIds?, search?, limit: 50|100|200, cursor? }.",
-    response: "200 · data: { dimensions, rows, page }; каждая строка содержит snapshots и aiSnapshots с position, URL, title, snippet и faviconUrl."
+    response: "200 · data: { dimensions, rows, page }; каждая строка содержит snapshots и aiSnapshots с position, URL, title, snippet и faviconUrl. Обычный snapshot имеет canonical provider ARSENKIN | XMLSTOCK | KEY_COLLECTOR."
   }),
   endpoint("rank-dimension-history-delete", "POST", "/projects/{projectId}/rank-workbench/delete-dimension-history", "positions:run", "Исключить старую историю выбранного среза", "positions"),
   endpoint("rank-dimensions", "GET", "/projects/{projectId}/keyword-ranks/dimensions", "positions:read", "Каталог поисковиков, городов и устройств", "positions", {
