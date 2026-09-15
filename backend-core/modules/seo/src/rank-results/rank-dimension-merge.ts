@@ -160,7 +160,20 @@ export async function rankDimensionSources(
       targetRegionLabel: true
     }
   });
-  const targets = resolvedRankDimensionMergeTargets(merges);
+  return rankDimensionSourcesFromMerges(merges, target);
+}
+
+export function rankDimensionSourcesFromMerges(
+  merges: readonly Readonly<{
+    sourceDimensionKey: string;
+    sourceRegionLabel: string | null;
+    targetDimensionKey: string;
+    targetRegionLabel: string | null;
+  }>[],
+  target: SemanticRankDimension,
+  targets: ReadonlyMap<string, SemanticRankDimension> =
+    resolvedRankDimensionMergeTargets(merges)
+): readonly SemanticRankDimension[] {
   return [
     target,
     ...merges.flatMap((merge) =>

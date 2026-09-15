@@ -25,10 +25,13 @@ import {
   mergedAiRankDimensionCatalog,
   mergedRankDimensionCatalog,
   rankDimensionConfigurationPredicate,
-  rankDimensionSources,
+  rankDimensionSourcesFromMerges,
   rawRankDimensionCatalog,
+  resolvedRankDimensionMergeTargets,
   storedRankDimensionMerge
 } from "../rank-results/rank-dimension-merge.js";
+
+const COMPARISON_DIMENSION_CONCURRENCY = 4;
 
 interface StoredComparison {
   keywordId: string; snapshotId: string; trackingContextId: string;
@@ -187,45 +190,77 @@ export class KeywordRankComparisonService {
   async compare(scope: Scope, value: SemanticRankComparisonInput): Promise<readonly SemanticRankComparisonItem[]> {
     let input: SemanticRankComparisonInput;
     try { input = parseSemanticRankComparisonInput(value); } catch { throw new BadRequestException("Invalid rank comparison scope"); }
-    const count = await this.prisma.keyword.count({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: [...input.keywordIds] }, status: { in: ["ACTIVE", "DELETED"] } } });
+    const [count, merges] = await Promise.all([
+      this.prisma.keyword.count({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: [...input.keywordIds] }, status: { in: ["ACTIVE", "DELETED"] } } }),
+      this.prisma.rankDimensionMerge.findMany({
+        where: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: 2_000,
+        select: {
+          sourceDimensionKey: true,
+          sourceRegionLabel: true,
+          targetDimensionKey: true,
+          targetRegionLabel: true
+        }
+      })
+    ]);
     if (count !== input.keywordIds.length) throw new NotFoundException("Keyword selection unavailable");
+    const mergeTargets = resolvedRankDimensionMergeTargets(merges);
     const result: SemanticRankComparisonItem[] = [];
-    for (const key of input.dimensionKeys) {
-      const dimension = parseSemanticRankDimensionKey(key)!;
-      const sources = await rankDimensionSources(this.prisma, scope, dimension);
-      const [rows, aiRows] = await Promise.all([
-        this.readDimension(scope, input.keywordIds, dimension, sources),
-        this.readAiDimension(scope, input.keywordIds, dimension, sources)
-      ]);
-      const aiByKeyword = new Map(aiRows.map((row) => [row.keywordId, row]));
-      for (const row of rows) {
-        const searchSource = rankHistorySearchSource(row.execution, dimension.searchEngine);
-        const ai = aiByKeyword.get(row.keywordId);
-        result.push({
-          keywordId: row.keywordId, dimensionKey: key, searchEngine: dimension.searchEngine,
-          snapshotId: row.snapshotId, trackingContextId: row.trackingContextId,
-          configurationVersion: row.configurationVersion, jobId: row.jobId,
-          observedAt: row.observedAt.toISOString(), found: row.found,
-          ...(row.position === null ? {} : { position: row.position }),
-          ...(row.previousPosition === null ? {} : { previousPosition: row.previousPosition }),
-          ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
-          provider: row.provider, depth: row.depth,
-          siteResultCount: safeCount(row.siteResultCount),
-          ...(searchSource ? { searchSource } : {}),
-          ...(ai ? {
-            aiAnswer: {
-              snapshotId: ai.snapshotId,
-              answerPresent: ai.answerPresent,
-              siteFound: ai.siteFound,
-              ...(ai.position === null ? {} : { position: ai.position }),
-              ...(ai.previousPosition === null ? {} : { previousPosition: ai.previousPosition }),
-              ...(ai.rankingUrl === null ? {} : { rankingUrl: ai.rankingUrl }),
-              brandFound: ai.brandFound,
-              observedAt: ai.observedAt.toISOString(),
-              provider: "ARSENKIN" as const
-            }
-          } : {})
+    for (let offset = 0; offset < input.dimensionKeys.length; offset += COMPARISON_DIMENSION_CONCURRENCY) {
+      const dimensions = input.dimensionKeys.slice(
+        offset,
+        offset + COMPARISON_DIMENSION_CONCURRENCY
+      );
+      const compared = await Promise.all(dimensions.map(async (key) => {
+        const dimension = parseSemanticRankDimensionKey(key)!;
+        const sources = rankDimensionSourcesFromMerges(
+          merges,
+          dimension,
+          mergeTargets
+        );
+        const [rows, aiRows] = await Promise.all([
+          this.readDimension(scope, input.keywordIds, dimension, sources),
+          input.includeAi === false
+            ? Promise.resolve([] as StoredAiComparison[])
+            : this.readAiDimension(scope, input.keywordIds, dimension, sources)
+        ]);
+        const aiByKeyword = new Map(aiRows.map((row) => [row.keywordId, row]));
+        return rows.map((row): SemanticRankComparisonItem => {
+          const searchSource = rankHistorySearchSource(row.execution, dimension.searchEngine);
+          const ai = aiByKeyword.get(row.keywordId);
+          return {
+            keywordId: row.keywordId, dimensionKey: key, searchEngine: dimension.searchEngine,
+            snapshotId: row.snapshotId, trackingContextId: row.trackingContextId,
+            configurationVersion: row.configurationVersion, jobId: row.jobId,
+            observedAt: row.observedAt.toISOString(), found: row.found,
+            ...(row.position === null ? {} : { position: row.position }),
+            ...(row.previousPosition === null ? {} : { previousPosition: row.previousPosition }),
+            ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
+            provider: row.provider, depth: row.depth,
+            siteResultCount: safeCount(row.siteResultCount),
+            ...(searchSource ? { searchSource } : {}),
+            ...(ai ? {
+              aiAnswer: {
+                snapshotId: ai.snapshotId,
+                answerPresent: ai.answerPresent,
+                siteFound: ai.siteFound,
+                ...(ai.position === null ? {} : { position: ai.position }),
+                ...(ai.previousPosition === null ? {} : { previousPosition: ai.previousPosition }),
+                ...(ai.rankingUrl === null ? {} : { rankingUrl: ai.rankingUrl }),
+                brandFound: ai.brandFound,
+                observedAt: ai.observedAt.toISOString(),
+                provider: "ARSENKIN" as const
+              }
+            } : {})
+          };
         });
+      }));
+      for (const items of compared) {
+        result.push(...items);
       }
     }
     return result;

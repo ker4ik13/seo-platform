@@ -51,6 +51,8 @@ export const semanticRankComparisonMaxCells = 2_000;
 export interface SemanticRankComparisonInput {
   readonly keywordIds: readonly string[];
   readonly dimensionKeys: readonly string[];
+  /** Omit for the complete legacy projection; tables without AI columns send false. */
+  readonly includeAi?: boolean;
 }
 
 export interface SemanticRankComparisonItem extends SemanticKeywordListPosition {
@@ -112,14 +114,19 @@ export function parseSemanticRankColumnKey(value: unknown): Readonly<{ dimension
 }
 
 export function parseSemanticRankComparisonInput(value: unknown): SemanticRankComparisonInput {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => key !== "keywordIds" && key !== "dimensionKeys")) throw new TypeError("Invalid comparison input");
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => key !== "keywordIds" && key !== "dimensionKeys" && key !== "includeAi")) throw new TypeError("Invalid comparison input");
   const input = value as Record<string, unknown>;
   if (!Array.isArray(input.keywordIds) || input.keywordIds.length < 1 || input.keywordIds.length > semanticRankComparisonMaxKeywords ||
     input.keywordIds.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id)) ||
     new Set(input.keywordIds).size !== input.keywordIds.length ||
     !Array.isArray(input.dimensionKeys) || input.dimensionKeys.length < 1 || input.dimensionKeys.length > semanticRankComparisonMaxDimensions ||
-    input.dimensionKeys.some(key => !parseSemanticRankDimensionKey(key)) || new Set(input.dimensionKeys).size !== input.dimensionKeys.length || input.keywordIds.length * input.dimensionKeys.length > semanticRankComparisonMaxCells) throw new TypeError("Invalid comparison scope");
-  return { keywordIds: [...input.keywordIds] as string[], dimensionKeys: [...input.dimensionKeys] as string[] };
+    input.dimensionKeys.some(key => !parseSemanticRankDimensionKey(key)) || new Set(input.dimensionKeys).size !== input.dimensionKeys.length || input.keywordIds.length * input.dimensionKeys.length > semanticRankComparisonMaxCells ||
+    (input.includeAi !== undefined && typeof input.includeAi !== "boolean")) throw new TypeError("Invalid comparison scope");
+  return {
+    keywordIds: [...input.keywordIds] as string[],
+    dimensionKeys: [...input.dimensionKeys] as string[],
+    ...(input.includeAi === undefined ? {} : { includeAi: input.includeAi })
+  };
 }
 
 /** Rebuild trusted responses through an allowlist before exposing them to Web. */

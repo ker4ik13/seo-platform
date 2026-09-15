@@ -5090,7 +5090,6 @@ svg { display: block; }
   box-shadow: inset 2px 0 0 var(--brand), 0 1px 3px rgba(67, 45, 190, .08);
   color: #5639e8;
 }
-.semantic-group-tree-row.active .semantic-group-name span { font-weight: 700; }
 .semantic-group-tree-row.top-level { background: #fbfbfc; position: sticky; top: 0; z-index: 3; }
 .semantic-group-tree-row.top-level:hover,
 .semantic-group-tree-row.top-level.selected { background: #f4f3fa; }
@@ -5102,9 +5101,6 @@ svg { display: block; }
   border-color: #a99cff;
   box-shadow: inset 4px 0 0 var(--brand), inset 0 0 0 1px rgba(91, 61, 245, .12), 0 2px 6px rgba(67, 45, 190, .14);
   color: #4223d7;
-}
-.semantic-group-tree-row.selected:not(.active):not(.system) .semantic-group-name span {
-  font-weight: 750;
 }
 .semantic-group-tree-row.system { border: 1px solid transparent; margin-top: 3px; }
 .semantic-group-tree-row.system.ungrouped { background: #f6f6f9; }

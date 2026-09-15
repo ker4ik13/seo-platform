@@ -36,6 +36,7 @@ export function SemanticKeywordRegionalRanks({
     projectId,
     JSON.stringify([keywordId]),
     "ALL",
+    false,
     revision,
     projectId
   );

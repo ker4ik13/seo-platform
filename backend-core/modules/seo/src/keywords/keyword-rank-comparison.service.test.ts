@@ -47,3 +47,41 @@ test("rank-dimension Prisma filters never receive trusted actor metadata", async
     version: 2
   }]);
 });
+
+test("comparison loads dimension merges once and skips unused AI reads", async () => {
+  let mergeReads = 0;
+  let rankReads = 0;
+  const keywordId = "01900000-0000-7000-8000-000000000004";
+  const dimensionKeys = [
+    "YANDEX|RU|213|ru|DESKTOP",
+    "YANDEX|RU|10758|ru|DESKTOP"
+  ];
+  const prisma = {
+    keyword: {
+      count: async () => 1
+    },
+    rankDimensionMerge: {
+      findMany: async () => {
+        mergeReads += 1;
+        return [];
+      }
+    },
+    $queryRaw: async () => {
+      rankReads += 1;
+      return [];
+    }
+  } as unknown as PrismaService;
+  const service = new KeywordRankComparisonService(prisma);
+
+  assert.deepEqual(await service.compare(scope, {
+    keywordIds: [keywordId],
+    dimensionKeys,
+    includeAi: false
+  }), []);
+  assert.equal(mergeReads, 1);
+  assert.equal(rankReads, 2, "one SEO query per dimension is sufficient");
+
+  rankReads = 0;
+  await service.compare(scope, { keywordIds: [keywordId], dimensionKeys });
+  assert.equal(rankReads, 4, "legacy callers still receive SEO and AI data");
+});

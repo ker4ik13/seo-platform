@@ -14,6 +14,7 @@ import {
 } from "../lib/rank-comparison-cache";
 
 const emptyComparisonItems: ReadonlyMap<string, SemanticRankComparisonItem> = new Map();
+const emptyResolvedKeys: ReadonlySet<string> = new Set();
 
 type CatalogState = Readonly<{
   projectId: string;
@@ -26,6 +27,7 @@ type ComparisonState = Readonly<{
   projectId: string;
   scopeKey: string;
   items: ReadonlyMap<string, SemanticRankComparisonItem>;
+  resolvedKeys: ReadonlySet<string>;
   loading: boolean;
   error?: string;
 }>;
@@ -34,6 +36,7 @@ export function useSemanticRankComparison(
   projectId: string,
   keywordSignature: string,
   dimensionSignature: string,
+  includeAi: boolean,
   refreshKey: string,
   catalogRefreshKey: string
 ) {
@@ -46,6 +49,7 @@ export function useSemanticRankComparison(
     projectId,
     scopeKey: "",
     items: emptyComparisonItems,
+    resolvedKeys: emptyResolvedKeys,
     loading: false
   });
   const [revision, setRevision] = useState(0);
@@ -75,6 +79,7 @@ export function useSemanticRankComparison(
   ]);
   const comparisonDataContextKey = JSON.stringify([
     comparisonScopeKey,
+    includeAi,
     refreshKey,
     revision
   ]);
@@ -125,6 +130,7 @@ export function useSemanticRankComparison(
         projectId,
         scopeKey: comparisonScopeKey,
         items: emptyComparisonItems,
+        resolvedKeys: emptyResolvedKeys,
         loading: false
       });
       return () => controller.abort();
@@ -147,6 +153,7 @@ export function useSemanticRankComparison(
         projectId,
         scopeKey: comparisonScopeKey,
         items: cachedItems,
+        resolvedKeys,
         loading: false
       });
       return () => controller.abort();
@@ -160,6 +167,9 @@ export function useSemanticRankComparison(
       items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
         ? current.items
         : emptyComparisonItems,
+      resolvedKeys: current.projectId === projectId && current.scopeKey === comparisonScopeKey
+        ? current.resolvedKeys
+        : emptyResolvedKeys,
       loading: true
     }));
     void (async () => {
@@ -176,7 +186,8 @@ export function useSemanticRankComparison(
           for (let start = 0; start < unresolvedKeywordIds.length; start += pageSize) {
             const scope = {
               keywordIds: unresolvedKeywordIds.slice(start, start + pageSize),
-              dimensionKeys: selectedDimensions
+              dimensionKeys: selectedDimensions,
+              ...(includeAi ? {} : { includeAi: false as const })
             };
             const payload = await loadRankComparison(
               `/app/api/projects/${encodeURIComponent(projectId)}/keyword-ranks/comparison`,
@@ -202,6 +213,7 @@ export function useSemanticRankComparison(
                 projectId,
                 scopeKey: comparisonScopeKey,
                 items,
+                resolvedKeys: new Set(resolvedKeys),
                 loading: true
               });
             }
@@ -218,6 +230,7 @@ export function useSemanticRankComparison(
             projectId,
             scopeKey: comparisonScopeKey,
             items,
+            resolvedKeys: new Set(resolvedKeys),
             loading: false
           });
         }
@@ -229,21 +242,25 @@ export function useSemanticRankComparison(
             items: current.projectId === projectId && current.scopeKey === comparisonScopeKey
               ? current.items
               : emptyComparisonItems,
+            resolvedKeys: current.projectId === projectId && current.scopeKey === comparisonScopeKey
+              ? current.resolvedKeys
+              : emptyResolvedKeys,
             loading: false,
             error: "Не удалось загрузить сравнение позиций. Повторите загрузку."
           }));
         }
       });
     return () => controller.abort();
-  }, [comparisonDataContextKey, comparisonRequestKey, comparisonScopeKey, effectiveDimensionSignature, keywordSignature, projectId, refreshKey, revision]);
+  }, [comparisonDataContextKey, comparisonRequestKey, comparisonScopeKey, effectiveDimensionSignature, includeAi, keywordSignature, projectId, refreshKey, revision]);
 
   const currentComparison = comparison.projectId === projectId &&
     comparison.scopeKey === comparisonScopeKey
     ? comparison
-    : { projectId, scopeKey: comparisonScopeKey, items: emptyComparisonItems, loading: true };
+    : { projectId, scopeKey: comparisonScopeKey, items: emptyComparisonItems, resolvedKeys: emptyResolvedKeys, loading: true };
   return {
     dimensions,
     items: currentComparison.items,
+    resolvedKeys: currentComparison.resolvedKeys,
     loading: catalog.loading || currentComparison.loading,
     error: currentComparison.error,
     catalogError: catalog.projectId === projectId ? catalog.error : undefined,
@@ -256,17 +273,35 @@ async function loadRankComparison(
   scope: Readonly<{
     keywordIds: readonly string[];
     dimensionKeys: readonly string[];
+    includeAi?: false;
   }>,
   signal: AbortSignal
 ): Promise<unknown> {
+  let requestScope: Readonly<{
+    keywordIds: readonly string[];
+    dimensionKeys: readonly string[];
+    includeAi?: false;
+  }> = scope;
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await browserApiRequest<unknown>(path, {
         method: "POST",
-        body: scope,
+        body: requestScope,
         signal
       });
     } catch (error) {
+      if (
+        attempt === 0 &&
+        requestScope.includeAi === false &&
+        error instanceof BrowserApiError &&
+        error.status === 400
+      ) {
+        requestScope = {
+          keywordIds: scope.keywordIds,
+          dimensionKeys: scope.dimensionKeys
+        };
+        continue;
+      }
       if (
         signal.aborted ||
         !(error instanceof BrowserApiError) ||

@@ -3537,6 +3537,9 @@ export function SemanticCoreTable({
     const parsed = parseSemanticRankColumnKey(column);
     return parsed ? [parsed.dimension.key] : [];
   }))]);
+  const rankComparisonIncludesAi = tableColumns.some((column) =>
+    parseSemanticRankColumnKey(column)?.metric.startsWith("ai")
+  );
   // Prefetch exact city/device cells for every row already delivered by the
   // paginated keyword request. Virtual scrolling must only render rows; it
   // must not become the trigger that starts loading their values.
@@ -3545,6 +3548,7 @@ export function SemanticCoreTable({
     projectId,
     rankKeywordSignature,
     rankDimensionsSignature,
+    rankComparisonIncludesAi,
     `${retryVersion}:${operationsRefreshVersion}`,
     `${retryVersion}:${operationsRefreshVersion}`
   );
@@ -5494,16 +5498,28 @@ export function SemanticCoreTable({
                       </i>
                     </button>
                   ) : columnHeader(column, customColumns, rankComparison.dimensions, uiLocale),
-                  cell: (item: SemanticKeyword) => parseSemanticRankColumnKey(column) ? <SemanticRankComparisonCell item={rankComparison.items.get(`${item.id}:${parseSemanticRankColumnKey(column)!.dimension.key}`)} metric={parseSemanticRankColumnKey(column)!.metric} loading={rankComparison.loading} {...(rankComparison.error ? { error: rankComparison.error } : {})} /> : keywordColumn(
-                    item,
-                    column,
-                    customColumns,
-                    (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
-                    (mode) => setSiteResultsKeyword({ item, mode }),
-                    () => setNoteKeyword(item),
-                    viewConfig.density,
-                    semanticQueryIndicatorsFor(viewConfig), uiLocale
-                  )
+                  cell: (item: SemanticKeyword) => {
+                    const rankColumn = parseSemanticRankColumnKey(column);
+                    if (rankColumn) {
+                      const identity = `${item.id}:${rankColumn.dimension.key}`;
+                      return <SemanticRankComparisonCell
+                        item={rankComparison.items.get(identity)}
+                        metric={rankColumn.metric}
+                        loading={rankComparison.loading && !rankComparison.resolvedKeys.has(identity)}
+                        {...(rankComparison.error ? { error: rankComparison.error } : {})}
+                      />;
+                    }
+                    return keywordColumn(
+                      item,
+                      column,
+                      customColumns,
+                      (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
+                      (mode) => setSiteResultsKeyword({ item, mode }),
+                      () => setNoteKeyword(item),
+                      viewConfig.density,
+                      semanticQueryIndicatorsFor(viewConfig), uiLocale
+                    );
+                  }
                 };
               })}
               density={viewConfig.density}
@@ -6539,6 +6555,7 @@ function SemanticSiteResultsModal({
     projectId,
     JSON.stringify([item.id]),
     "ALL",
+    false,
     item.updatedAt,
     projectId
   );
