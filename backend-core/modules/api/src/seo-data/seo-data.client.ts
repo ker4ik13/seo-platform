@@ -14,7 +14,8 @@ import {
   type CreateRankDimensionMergeInput,
   type RankDimensionMergeSettings,
   type RankDimensionMergeSummary,
-  type SemanticRankComparisonInput
+  type SemanticRankComparisonInput,
+  type SemanticRankComparisonItem
 } from "@seo-platform/contracts";
 import {
   projectPositionHistoryMaxPoints,
@@ -372,7 +373,11 @@ export class SeoDataClient {
   ): Promise<KeywordPage> {
     const projectId = requiredProjectId(context.tenant);
     const { multiSearch, ...listQuery } = query;
-    const bodyList = !multiSearch && (listQuery.groupIds?.length ?? 0) > 20;
+    const bodyList = !multiSearch && (
+      (listQuery.groupIds?.length ?? 0) > 20 ||
+      listQuery.metricProjection !== undefined ||
+      (listQuery.rankColumnKeys?.length ?? 0) > 0
+    );
     const url = new URL(
       `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords${multiSearch ? "/search" : bodyList ? "/list" : ""}`,
       this.config.services.seoData
@@ -384,11 +389,11 @@ export class SeoDataClient {
         context,
         { query: listQuery, search: multiSearch }
       );
-      return semanticKeywordPage(payload, listQuery.includeNotes === true);
+      return semanticKeywordPage(payload, listQuery.includeNotes === true, listQuery);
     }
     if (bodyList) {
       const payload = await this.request("POST", url, context, { query: listQuery });
-      return semanticKeywordPage(payload, listQuery.includeNotes === true);
+      return semanticKeywordPage(payload, listQuery.includeNotes === true, listQuery);
     }
     url.searchParams.set("limit", String(listQuery.limit));
     if (listQuery.cursor) url.searchParams.set("cursor", listQuery.cursor);
@@ -427,7 +432,7 @@ export class SeoDataClient {
     if (listQuery.sort) url.searchParams.set("sort", listQuery.sort);
 
     const payload = await this.request("GET", url, context);
-    return semanticKeywordPage(payload, listQuery.includeNotes === true);
+    return semanticKeywordPage(payload, listQuery.includeNotes === true, listQuery);
   }
 
   public async listOperationScope(
@@ -2896,7 +2901,8 @@ function isSeoDataBoundedRead(
 
 export function semanticKeywordPage(
   payload: unknown,
-  includeNotes = false
+  includeNotes = false,
+  query?: KeywordListQuery
 ): KeywordPage {
   const response = objectValue(payload);
   const data = response?.data;
@@ -2914,7 +2920,9 @@ export function semanticKeywordPage(
     throw invalidResponse();
   }
 
-  const items = data.map((item) => semanticKeywordItem(item, includeNotes));
+  const items = data.map((item) =>
+    semanticKeywordItem(item, includeNotes, query?.rankColumnKeys)
+  );
   return {
     data: items,
     page: {
@@ -3768,7 +3776,8 @@ function validUtcDateKey(value: unknown): value is string {
 
 export function semanticKeywordItem(
   value: unknown,
-  includeNote = false
+  includeNote = false,
+  rankColumnKeys: KeywordListQuery["rankColumnKeys"] = undefined
 ): SemanticKeywordListItem {
   const item = objectValue(value);
   if (!item) throw invalidResponse();
@@ -3779,6 +3788,11 @@ export function semanticKeywordItem(
   const frequencies = semanticKeywordListFrequencies(item.frequencies);
   const positions = semanticKeywordListPositions(item.positions);
   const aiAnswers = semanticKeywordListAiAnswers(item.aiAnswers);
+  const rankComparison = semanticKeywordRankComparison(
+    item.rankComparison,
+    item.id,
+    rankColumnKeys
+  );
   const sourceMode = item.sourceMode;
   if (
     !requiredString(item.id) ||
@@ -3795,6 +3809,8 @@ export function semanticKeywordItem(
         typeof item.note !== "string" ||
         !item.note ||
         item.hasNote !== true)) ||
+    (item.hasTargetUrlMismatch !== undefined &&
+      typeof item.hasTargetUrlMismatch !== "boolean") ||
     (item.hasMultipleRankingUrls !== undefined && typeof item.hasMultipleRankingUrls !== "boolean") ||
     (item.intent !== undefined &&
       (typeof item.intent !== "string" ||
@@ -3844,6 +3860,7 @@ export function semanticKeywordItem(
     showAiAnswerButton: item.showAiAnswerButton,
     hasNote: item.hasNote === true,
     ...(typeof item.note === "string" ? { note: item.note } : {}),
+    ...(item.hasTargetUrlMismatch === true ? { hasTargetUrlMismatch: true } : {}),
     ...(item.hasMultipleRankingUrls === true ? { hasMultipleRankingUrls: true } : {}),
     ...(typeof item.intent === "string"
       ? {
@@ -3878,6 +3895,7 @@ export function semanticKeywordItem(
     ...(frequencies.length > 0 ? { frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
     ...(aiAnswers.length > 0 ? { aiAnswers } : {}),
+    ...(rankComparison ? { rankComparison } : {}),
     sourceMode:
       sourceMode as SemanticKeywordListItem["sourceMode"],
     ...(item.trashed === true ? { trashed: true } : {}),
@@ -3893,6 +3911,41 @@ export function semanticKeywordItem(
     updatedAt: item.updatedAt as string,
     version: item.version as number
   };
+}
+
+function semanticKeywordRankComparison(
+  value: unknown,
+  keywordIdValue: unknown,
+  columnKeys: KeywordListQuery["rankColumnKeys"]
+): SemanticKeywordListItem["rankComparison"] {
+  if (!columnKeys?.length) return undefined;
+  if (typeof keywordIdValue !== "string" || !UUID_PATTERN.test(keywordIdValue)) {
+    throw invalidResponse();
+  }
+  const comparison = exactRecord(value, ["dimensionKeys", "items"]);
+  const expectedDimensionKeys = [...new Set(
+    columnKeys.map((key) => parseSemanticRankColumnKey(key)!.dimension.key)
+  )];
+  if (
+    !Array.isArray(comparison.dimensionKeys) ||
+    comparison.dimensionKeys.length !== expectedDimensionKeys.length ||
+    comparison.dimensionKeys.some(
+      (key, index) => key !== expectedDimensionKeys[index]
+    )
+  ) {
+    throw invalidResponse();
+  }
+  let items: readonly SemanticRankComparisonItem[];
+  try {
+    items = parseSemanticRankComparisonItems(comparison.items, {
+      keywordIds: [keywordIdValue],
+      dimensionKeys: expectedDimensionKeys,
+      columnKeys
+    });
+  } catch {
+    throw invalidResponse();
+  }
+  return { dimensionKeys: expectedDimensionKeys, items };
 }
 
 function optionalSemanticKeywordListFrequency(

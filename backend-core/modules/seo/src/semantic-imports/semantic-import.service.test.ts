@@ -194,6 +194,63 @@ test("creates an idempotent semantic import receipt", async () => {
   );
 });
 
+test("returns the authoritative resume boundary when a deployment changed chunk size", async () => {
+  const transaction = {
+    $executeRaw: async () => 1,
+    semanticImportReceipt: {
+      findUnique: async () => ({
+        ...context,
+        status: "RECEIVING",
+        mappingHash: "a".repeat(64),
+        duplicatePolicy: "SKIP_EXISTING",
+        createMissingKeywords: true,
+        expectedChunks: 33,
+        expectedUniqueRows: 161_624n,
+        planCode: entitlement.planCode,
+        planVersion: entitlement.planVersion,
+        storedKeywordsLimit: BigInt(entitlement.storedKeywords),
+        keywordsPerProjectLimit: BigInt(entitlement.keywordsPerProject),
+        foldersPerProjectLimit: BigInt(entitlement.foldersPerProject),
+        reservedKeywords: 161_624n,
+        semanticVersionId: null,
+        resultSummary: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        completedAt: null,
+        chunks: [
+          { chunkIndex: 0, inputRows: 5_000 },
+          { chunkIndex: 1, inputRows: 5_000 }
+        ]
+      })
+    }
+  };
+  const service = new SemanticImportService({
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  const result = await service.begin({
+    ...context,
+    mappingHash: "a".repeat(64),
+    duplicatePolicy: "SKIP_EXISTING",
+    createMissingKeywords: true,
+    expectedChunks: 162,
+    expectedUniqueRows: "161624",
+    expectedNewKeywords: "161624",
+    entitlement
+  });
+
+  assert.deepEqual(result, {
+    importId: context.importId,
+    status: "RECEIVING",
+    receivedChunks: 2,
+    expectedChunks: 33,
+    receivedRows: "10000",
+    batchRows: 5_000
+  });
+});
+
 test("rejects a new-keyword reservation for update-only imports", async () => {
   const service = new SemanticImportService({} as PrismaService);
   await assert.rejects(

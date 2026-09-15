@@ -47,6 +47,20 @@ test("parses bounded keyword list query", () => {
     keywordBodyListInput({ query: { includeNotes: true } }).includeNotes,
     true
   );
+  assert.deepEqual(
+    keywordBodyListInput({
+      query: {
+        metricProjection: ["BASE", "POSITIONS"],
+        rankColumnKeys: ["rank:GOOGLE|RU|213|ru|MOBILE:url"]
+      }
+    }),
+    {
+      limit: 100,
+      sort: "CREATED_DESC",
+      metricProjection: ["BASE", "POSITIONS"],
+      rankColumnKeys: ["rank:GOOGLE|RU|213|ru|MOBILE:url"]
+    }
+  );
   assert.throws(
     () => keywordListQuery({ includeNotes: "yes" }),
     BadRequestException

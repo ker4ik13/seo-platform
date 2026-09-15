@@ -36,6 +36,27 @@ test("catalog and comparison parsers enforce exact tenant-independent scope", ()
   assert.deepEqual(scope, { keywordIds: [keywordId], dimensionKeys: [key], includeAi: false });
   const rows = parseSemanticRankComparisonItems([{ keywordId, dimensionKey: key, searchEngine: "YANDEX", found: true, position: 7, previousPosition: 11, rankingUrl: "https://example.com/a", observedAt: "2026-09-08T10:00:00.000Z", snapshotId, trackingContextId: contextId, configurationVersion: 2, jobId, provider: "MANUAL_IMPORT", depth: 100, siteResultCount: 2 }], scope);
   assert.equal(rows[0]?.position, 7);
+  const positionColumn = semanticRankColumnKey(key, "position");
+  assert.deepEqual(
+    parseSemanticRankComparisonInput({
+      keywordIds: [keywordId],
+      dimensionKeys: [key],
+      columnKeys: [positionColumn],
+      includeSiteResultCount: false
+    }),
+    {
+      keywordIds: [keywordId],
+      dimensionKeys: [key],
+      columnKeys: [positionColumn],
+      includeSiteResultCount: false
+    }
+  );
+  assert.equal(
+    parseSemanticRankComparisonItems([
+      { ...rows[0], siteResultCount: undefined }
+    ], scope)[0]?.siteResultCount,
+    undefined
+  );
   assert.throws(() => parseSemanticRankComparisonInput({ keywordIds: Array.from({ length: 84 }, () => keywordId), dimensionKeys: Array.from({ length: 24 }, () => key) }));
   assert.throws(() => parseSemanticRankComparisonInput({ keywordIds: [keywordId], dimensionKeys: [key], includeAi: "false" }));
   assert.throws(() => parseSemanticRankComparisonItems([{ ...rows[0], keywordId: snapshotId }], scope));

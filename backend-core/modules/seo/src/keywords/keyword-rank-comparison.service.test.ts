@@ -51,6 +51,7 @@ test("rank-dimension Prisma filters never receive trusted actor metadata", async
 test("comparison loads dimension merges once and skips unused AI reads", async () => {
   let mergeReads = 0;
   let rankReads = 0;
+  const queries: string[] = [];
   const keywordId = "01900000-0000-7000-8000-000000000004";
   const dimensionKeys = [
     "YANDEX|RU|213|ru|DESKTOP",
@@ -66,8 +67,9 @@ test("comparison loads dimension merges once and skips unused AI reads", async (
         return [];
       }
     },
-    $queryRaw: async () => {
+    $queryRaw: async (query: Readonly<{ sql?: string }>) => {
       rankReads += 1;
+      queries.push(query.sql ?? "");
       return [];
     }
   } as unknown as PrismaService;
@@ -84,4 +86,16 @@ test("comparison loads dimension merges once and skips unused AI reads", async (
   rankReads = 0;
   await service.compare(scope, { keywordIds: [keywordId], dimensionKeys });
   assert.equal(rankReads, 4, "legacy callers still receive SEO and AI data");
+
+  rankReads = 0;
+  queries.length = 0;
+  await service.compareTrusted(scope, {
+    keywordIds: [keywordId],
+    dimensionKeys,
+    columnKeys: dimensionKeys.map((key) => `rank:${key}:checkedAt` as const),
+    includeSiteResultCount: false
+  });
+  assert.equal(rankReads, 2, "an exact checked-at projection skips every AI read");
+  assert.ok(queries.every((query) => !query.includes("rank_serp_results")));
+  assert.ok(queries.every((query) => !query.includes("previous.position")));
 });

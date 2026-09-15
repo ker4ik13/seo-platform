@@ -455,6 +455,10 @@ export interface InternalSemanticImportReceipt {
   readonly status: "RECEIVING" | "COMPLETED" | "ABORTED";
   readonly receivedChunks: number;
   readonly expectedChunks: number;
+  /** Present on current Core versions so publishers can seek past accepted chunks. */
+  readonly receivedRows?: string;
+  /** Size of chunk zero; freezes the batching generation across deployments. */
+  readonly batchRows?: number;
 }
 
 export interface InternalApplySemanticImportChunkInput {

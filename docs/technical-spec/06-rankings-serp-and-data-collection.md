@@ -432,16 +432,16 @@ base64url cursor. Array/unknown parameters и некогерентный диа�
 
 Каталог `keyword-ranks/dimensions` использует устойчивую идентичность
 `searchEngine|country|region|language|device` и отдельно возвращает
-`dimensions` с SEO-снимками и `aiDimensions` со снимками ИИ-позиций. Body-only comparison принимает
-до 1000 keyword ID, до 24 срезов и не более 2000 ячеек за запрос. Таблица
-может передать `includeAi=false`, если в layout нет ни одной AI-колонки; тогда
-SEO service не читает AI snapshots. Merge graph загружается один раз на
-comparison request, а dimension reads выполняются параллельно с пределом
-четыре. Подтверждённое отсутствие значения завершается отдельно для каждой
-ячейки и сразу отображается прочерком. При rolling upgrade старый `400` на
-optional `includeAi` приводит только к одному совместимому read-only повтору
-без этого поля. Таблица запрашивает только строки
-виртуального viewport, а layout drawer создаёт для среза отдельные колонки
+`dimensions` с SEO-снимками и `aiDimensions` со снимками ИИ-позиций. Body-only
+comparison для явно открытых inspector/history принимает до 1000 keyword ID,
+до 24 срезов и не более 2000 ячеек за запрос. Основная таблица comparison route
+не вызывает: тот же body-only keyword list принимает exact visible rank column
+keys, вычисляет их после cursor pagination и вкладывает найденные значения и
+resolved-отсутствия в каждую строку. List также получает metric projection и не
+читает frequency, legacy position, AI или SERP таблицы для скрытых колонок;
+query-индикатор не расширяет серверную проекцию. Merge graph загружается один раз на list/comparison request, а
+dimension reads выполняются параллельно с пределом четыре. Таблица загружает
+все строки выбранной страницы одним request, а layout drawer создаёт для среза отдельные колонки
 позиции, URL и времени. Открытие и закрытие layout
 drawer не входит в revision key каталога или comparison и не очищает данные;
 при явном refresh текущие ячейки остаются до атомарной замены новым ответом.

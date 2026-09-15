@@ -28,6 +28,9 @@ import {
   parseSemanticRankColumnKey,
   parseSemanticRankDimensionKey,
   type SemanticRankDimension,
+  type SemanticRankColumnKey,
+  type SemanticRankComparisonItem,
+  type SemanticKeywordMetricProjection,
   semanticKeywordPageSizes,
   semanticSavedViewQueryIndicators,
   semanticSystemColumnKeys,
@@ -213,6 +216,7 @@ interface SemanticKeyword {
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
   readonly hasNote?: boolean;
+  readonly hasTargetUrlMismatch?: boolean;
   readonly hasMultipleRankingUrls?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
@@ -264,6 +268,10 @@ interface SemanticKeyword {
     brandFound: boolean;
     observedAt: string;
   }>[];
+  readonly rankComparison?: Readonly<{
+    readonly dimensionKeys: readonly string[];
+    readonly items: readonly SemanticRankComparisonItem[];
+  }>;
   readonly customValues?: readonly Readonly<{
     columnId: string;
     value: string | number | boolean | readonly string[];
@@ -499,6 +507,7 @@ export function SemanticCoreTable({
   );
   const [exportBom, setExportBom] = useState(true);
   const [, setProjectTableView] = useState<SemanticSavedView>();
+  const [tableViewReadyProjectId, setTableViewReadyProjectId] = useState("");
   const [activeSavedView, setActiveSavedView] = useState<SemanticSavedView>();
   const [activeSavedViewBaseline, setActiveSavedViewBaseline] = useState("");
   const [folderSortViews, setFolderSortViews] = useState<
@@ -617,17 +626,31 @@ export function SemanticCoreTable({
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [mobileGroupTreeOpen]);
+  const keywordMetricProjection = useMemo(
+    () => semanticKeywordMetricProjectionFor(viewConfig),
+    [viewConfig]
+  );
+  const keywordRankColumnKeys = useMemo(
+    () => viewConfig.columns.flatMap((column) =>
+      parseSemanticRankColumnKey(column)
+        ? [column as SemanticRankColumnKey]
+        : []
+    ),
+    [viewConfig.columns]
+  );
   const keywordQueryConfig = useMemo(
     () => ({
       filters: viewConfig.filters,
       sort: viewConfig.sort,
+      metricProjection: keywordMetricProjection,
+      rankColumnKeys: keywordRankColumnKeys,
       ...(viewConfig.rankSortDimensionKey
         ? { rankSortDimensionKey: viewConfig.rankSortDimensionKey }
         : {}),
       ...(multiSearch ? { multiSearch } : {}),
       ...(multiGroupIds.length > 1 ? { groupIds: multiGroupIds } : {})
     }),
-    [multiGroupIds, multiSearch, viewConfig.filters, viewConfig.rankSortDimensionKey, viewConfig.sort]
+    [keywordMetricProjection, keywordRankColumnKeys, multiGroupIds, multiSearch, viewConfig.filters, viewConfig.rankSortDimensionKey, viewConfig.sort]
   );
   const selectionScopeSignature = semanticSelectionScopeSignature({
     projectId,
@@ -1017,13 +1040,19 @@ export function SemanticCoreTable({
   }, [rightSidebar]);
 
   useEffect(() => {
+    if (tableViewReadyProjectId !== projectId) {
+      setLoading(true);
+      return;
+    }
     const controller = new AbortController();
     setRootTotal(undefined);
     void loadKeywordPage(
       projectId,
       {
         filters: {},
-        sort: defaultSemanticViewConfig.sort
+        sort: defaultSemanticViewConfig.sort,
+        metricProjection: ["BASE"],
+        rankColumnKeys: []
       },
       undefined,
       controller.signal,
@@ -1036,7 +1065,7 @@ export function SemanticCoreTable({
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [projectId, refreshVersion, retryVersion]);
+  }, [projectId, refreshVersion, retryVersion, tableViewReadyProjectId]);
 
   useEffect(() => {
     const previousSignature = selectionScopeSignatureRef.current;
@@ -1056,6 +1085,10 @@ export function SemanticCoreTable({
   }, [selectionScopeSignature]);
 
   useEffect(() => {
+    if (tableViewReadyProjectId !== projectId) {
+      setLoading(true);
+      return;
+    }
     const controller = new AbortController();
     const preservedScrollTop = tableScrollRef.current?.scrollTop ?? 0;
     setLoading(true);
@@ -1101,7 +1134,7 @@ export function SemanticCoreTable({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [keywordQueryConfig, pageSize, projectId, refreshVersion, retryVersion]);
+  }, [keywordQueryConfig, pageSize, projectId, refreshVersion, retryVersion, tableViewReadyProjectId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1350,6 +1383,7 @@ export function SemanticCoreTable({
 
   useEffect(() => {
     const controller = new AbortController();
+    setTableViewReadyProjectId("");
     setProjectTableView(undefined);
     projectTableViewRef.current = undefined;
     activeSavedViewRef.current = undefined;
@@ -1436,8 +1470,11 @@ export function SemanticCoreTable({
           setDraftConfig(nextConfig);
           setViewConfig(nextConfig);
         }
+        setTableViewReadyProjectId(projectId);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted) setTableViewReadyProjectId(projectId);
+      });
     return () => controller.abort();
   }, [currentUserId, projectId]);
 
@@ -2831,7 +2868,8 @@ export function SemanticCoreTable({
 
   async function selectAllMatchingKeywords(
     postAction: "SELECT" | "MOVE" | "HIGHLIGHT" = "SELECT",
-    config = keywordQueryConfig, uiLocale: string = "ru-RU"
+    config: SemanticKeywordLoadConfig = keywordQueryConfig,
+    uiLocale: string = "ru-RU"
   ): Promise<void> {
     const controller = new AbortController();
     selectAllAbortRef.current?.abort();
@@ -3537,21 +3575,39 @@ export function SemanticCoreTable({
     const parsed = parseSemanticRankColumnKey(column);
     return parsed ? [parsed.dimension.key] : [];
   }))]);
-  const rankComparisonIncludesAi = tableColumns.some((column) =>
-    parseSemanticRankColumnKey(column)?.metric.startsWith("ai")
-  );
-  // Prefetch exact city/device cells for every row already delivered by the
-  // paginated keyword request. Virtual scrolling must only render rows; it
-  // must not become the trigger that starts loading their values.
-  const rankKeywordSignature = JSON.stringify(items.map(row => row.id));
-  const rankComparison = useSemanticRankComparison(
+  // The catalog is independent metadata. Exact visible values are embedded
+  // into the keyword page response so the table never starts a second read.
+  const rankCatalog = useSemanticRankComparison(
     projectId,
-    rankKeywordSignature,
+    "[]",
     rankDimensionsSignature,
-    rankComparisonIncludesAi,
+    false,
     `${retryVersion}:${operationsRefreshVersion}`,
     `${retryVersion}:${operationsRefreshVersion}`
   );
+  const embeddedRankComparison = useMemo(() => {
+    const comparisonItems = new Map<string, SemanticRankComparisonItem>();
+    const resolvedKeys = new Set<string>();
+    for (const row of items) {
+      for (const dimensionKey of row.rankComparison?.dimensionKeys ?? []) {
+        resolvedKeys.add(`${row.id}:${dimensionKey}`);
+      }
+      for (const comparison of row.rankComparison?.items ?? []) {
+        comparisonItems.set(
+          `${comparison.keywordId}:${comparison.dimensionKey}`,
+          comparison
+        );
+      }
+    }
+    return { items: comparisonItems, resolvedKeys };
+  }, [items]);
+  const rankComparison = {
+    ...rankCatalog,
+    items: embeddedRankComparison.items,
+    resolvedKeys: embeddedRankComparison.resolvedKeys,
+    loading: loading || rankCatalog.loading,
+    error: undefined
+  };
   useEffect(() => {
     const availableEngines = [...new Set(
       rankComparison.dimensions.map(({ searchEngine }) => searchEngine)
@@ -6182,7 +6238,45 @@ type SemanticKeywordLoadConfig = Pick<
 > & Readonly<{
   groupIds?: readonly string[];
   multiSearch?: SemanticKeywordMultiSearch;
+  metricProjection: readonly SemanticKeywordMetricProjection[];
+  rankColumnKeys: readonly SemanticRankColumnKey[];
 }>;
+
+function semanticKeywordMetricProjectionFor(
+  config: SemanticViewConfig
+): readonly SemanticKeywordMetricProjection[] {
+  const columns = new Set(config.columns);
+  const result: SemanticKeywordMetricProjection[] = ["BASE"];
+  if ((["frequency", "frequencyExact", "frequencyFixed"] as const).some((column) => columns.has(column))) {
+    result.push("FREQUENCIES");
+  }
+  if (
+    ([
+      "yandexPosition", "googlePosition", "yandexRelevantUrl", "googleRelevantUrl",
+      "yandexCheckedAt", "googleCheckedAt", "visibility"
+    ] as const).some((column) => columns.has(column))
+  ) {
+    result.push("POSITIONS");
+  }
+  if (
+    ([
+      "yandexAiPosition", "googleAiPosition", "yandexAiRelevantUrl",
+      "googleAiRelevantUrl", "yandexAiCheckedAt", "googleAiCheckedAt"
+    ] as const).some((column) => columns.has(column))
+  ) {
+    result.push("AI_ANSWERS");
+  }
+  if (columns.has("query")) {
+    const indicators = semanticQueryIndicatorsFor(config);
+    if (indicators.includes("TARGET_URL_MISMATCH")) {
+      result.push("TARGET_URL_INDICATOR");
+    }
+    if (indicators.includes("MULTIPLE_URLS")) {
+      result.push("MULTIPLE_URL_INDICATOR");
+    }
+  }
+  return result;
+}
 
 const semanticAdvancedFilterFields = [
   "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
@@ -6226,10 +6320,17 @@ async function loadKeywordPage(
     query.set("rankSortDimensionKey", config.rankSortDimensionKey);
   }
   if (cursor) query.set("cursor", cursor);
-  if (config.multiSearch || (config.groupIds?.length ?? 0) > 20) {
+  if (
+    config.multiSearch ||
+    config.metricProjection.length > 0 ||
+    config.rankColumnKeys.length > 0 ||
+    (config.groupIds?.length ?? 0) > 20
+  ) {
     const bodyQuery: Record<string, unknown> = {
       limit,
       sort: config.sort,
+      metricProjection: config.metricProjection,
+      rankColumnKeys: config.rankColumnKeys,
       ...(config.rankSortDimensionKey
         ? { rankSortDimensionKey: config.rankSortDimensionKey }
         : {}),
@@ -6578,7 +6679,7 @@ function SemanticSiteResultsModal({
         !sameSemanticRankingUrl(item.targetUrl, row.rankingUrl)
       );
     }
-    return row.siteResultCount > 1;
+    return (row.siteResultCount ?? 0) > 1;
   }), [comparison.dimensions, item.targetUrl, mode, rowsByDimension]);
   const [dimensionKey, setDimensionKey] = useState("");
   const [dimensionInsights, setDimensionInsights] =
@@ -6765,6 +6866,7 @@ function SemanticSiteResultsModal({
 
 function keywordHasTargetUrlMismatch(item: SemanticKeyword): boolean {
   return Boolean(
+    item.hasTargetUrlMismatch ||
     item.targetUrl &&
     item.positions?.some(
       ({ found, rankingUrl }) =>

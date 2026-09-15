@@ -136,6 +136,10 @@ export interface SemanticKeywordMultiSearch {
 export interface KeywordListQuery {
   readonly limit: number;
   readonly cursor?: string;
+  /** Expensive list enrichments explicitly requested by the current table layout. */
+  readonly metricProjection?: readonly SemanticKeywordMetricProjection[];
+  /** Exact dynamic city/device columns rendered by the current table layout. */
+  readonly rankColumnKeys?: readonly import("./rank-dimensions.js").SemanticRankColumnKey[];
   /** Include the full keyword note for API/export consumers; false by default. */
   readonly includeNotes?: boolean;
   readonly search?: string;
@@ -202,6 +206,8 @@ export interface SemanticKeywordListItem {
   readonly hasNote?: boolean;
   /** Returned only when the caller explicitly requests includeNotes=true. */
   readonly note?: string;
+  /** A current found URL differs from the configured target URL. */
+  readonly hasTargetUrlMismatch?: boolean;
   /** At least one current city/device snapshot contains several project URLs. */
   readonly hasMultipleRankingUrls?: boolean;
   readonly customValues?: readonly import("./semantic-custom-columns.js").SemanticKeywordCustomValue[];
@@ -209,6 +215,11 @@ export interface SemanticKeywordListItem {
   readonly frequencies?: readonly SemanticKeywordListFrequencyValue[];
   readonly positions?: readonly SemanticKeywordListPosition[];
   readonly aiAnswers?: readonly import("./ai-answer-collections.js").SemanticAiAnswerSummary[];
+  /** Exact rank cells resolved inside the same page read. */
+  readonly rankComparison?: Readonly<{
+    readonly dimensionKeys: readonly string[];
+    readonly items: readonly import("./rank-dimensions.js").SemanticRankComparisonItem[];
+  }>;
   readonly sourceMode: SemanticKeywordSourceMode;
   readonly trashed?: boolean;
   readonly createdAt: string;
@@ -220,6 +231,19 @@ export interface SemanticKeywordListItem {
     "REJECTED_EXISTING" | "FAILED"
   >;
 }
+
+export const semanticKeywordMetricProjections = [
+  "BASE",
+  "FREQUENCIES",
+  "POSITIONS",
+  "AI_ANSWERS",
+  "TARGET_URL_INDICATOR",
+  "MULTIPLE_URL_INDICATOR",
+  "RANKING_SITE_RESULTS"
+] as const;
+
+export type SemanticKeywordMetricProjection =
+  (typeof semanticKeywordMetricProjections)[number];
 
 export interface SemanticKeywordListFrequency {
   readonly value?: string;

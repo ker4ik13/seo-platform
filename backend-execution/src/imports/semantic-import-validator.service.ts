@@ -943,8 +943,8 @@ function kc4SerpResultValues(
         return [];
       }
       positions.add(position);
-      const title = boundedKc4SerpCopy(row.title, 8_000, issues);
-      const snippet = boundedKc4SerpCopy(row.snippet, 32_000, issues);
+      const title = boundedKc4SerpCopy(row.title, 2_048, issues);
+      const snippet = boundedKc4SerpCopy(row.snippet, 8_192, issues);
       return [{
         position,
         rankingUrl,
@@ -1230,14 +1230,10 @@ function validRankingUrl(
   issues: Set<string>
 ): string | undefined {
   if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol)) throw new Error();
-    return value;
-  } catch {
-    issues.add("INVALID_RANKING_URL");
-    return undefined;
-  }
+  const result = firstWebUrl(value);
+  if (result) return result;
+  issues.add("INVALID_RANKING_URL");
+  return undefined;
 }
 
 function validUrl(
@@ -1245,14 +1241,29 @@ function validUrl(
   issues: Set<string>
 ): string | undefined {
   if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    if (!["http:", "https:"].includes(url.protocol)) throw new Error();
-    return value;
-  } catch {
-    issues.add("INVALID_TARGET_URL");
-    return undefined;
+  const result = firstWebUrl(value);
+  if (result) return result;
+  issues.add("INVALID_TARGET_URL");
+  return undefined;
+}
+
+function firstWebUrl(value: string): string | undefined {
+  const candidates = [value.trim(), ...value.split(/[\s;]+/u)]
+    .map((candidate) => candidate.trim())
+    .filter((candidate, index, values) =>
+      candidate.length > 0 &&
+      candidate.length <= 8_192 &&
+      values.indexOf(candidate) === index
+    );
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (["http:", "https:"].includes(url.protocol)) return candidate;
+    } catch {
+      // Legacy KC4 cells can contain several values or a text prefix.
+    }
   }
+  return undefined;
 }
 
 function frequency(

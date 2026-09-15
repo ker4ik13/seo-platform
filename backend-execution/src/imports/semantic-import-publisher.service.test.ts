@@ -7,14 +7,16 @@ import {
   semanticImportPublishBatchSize,
   semanticImportPublishErrorIsRetryable,
   semanticImportPublishFailureCode,
-  semanticImportPublishRetryExhausted
+  semanticImportPublishResumeState,
+  semanticImportPublishRetryExhausted,
+  semanticImportResumeBatchSize
 } from "./semantic-import-publisher.service.js";
 import { SeoDataClientError } from "../seo-data/seo-data.client.js";
 
 test("keeps a bounded retry window for production publish handovers", () => {
-  assert.equal(semanticImportPublishRetryExhausted(9), false);
-  assert.equal(semanticImportPublishRetryExhausted(10), true);
-  assert.equal(semanticImportPublishRetryExhausted(11), true);
+  assert.equal(semanticImportPublishRetryExhausted(39), false);
+  assert.equal(semanticImportPublishRetryExhausted(40), true);
+  assert.equal(semanticImportPublishRetryExhausted(41), true);
 });
 
 test("retries a temporary import command mismatch during a rolling deployment", () => {
@@ -33,6 +35,29 @@ test("publishes rich KC4 rows in short transactions", () => {
   assert.equal(semanticImportPublishBatchSize(5_000, "KC4", 1), 1_000);
   assert.equal(semanticImportPublishBatchSize(5_000, "CSV", 1), 5_000);
   assert.equal(semanticImportPublishBatchSize(5_000, "KC4", 25), 400);
+});
+
+test("resumes a large publication after the last accepted idempotent chunk", () => {
+  assert.equal(
+    semanticImportResumeBatchSize(1_000, 5_000, 161_624n, 33),
+    5_000
+  );
+  assert.equal(
+    semanticImportResumeBatchSize(1_000, 5_000, 161_624n, 162, 1_000),
+    1_000
+  );
+  assert.deepEqual(
+    semanticImportPublishResumeState(31, 5_000, 161_624n, "154321"),
+    { chunkIndex: 31, publishedRows: 154_321n }
+  );
+  assert.deepEqual(
+    semanticImportPublishResumeState(31, 5_000, 161_624n),
+    { chunkIndex: 31, publishedRows: 155_000n }
+  );
+  assert.deepEqual(
+    semanticImportPublishResumeState(33, 5_000, 161_624n),
+    { chunkIndex: 33, publishedRows: 161_624n }
+  );
 });
 
 test("canonicalizes PostgreSQL JSON field order before hashing a publish chunk", () => {
@@ -100,6 +125,35 @@ test("rejects non-string custom values and malformed optional fields", () => {
     canonicalPublishRow({ ...required, targetUrl: 42 }),
     undefined
   );
+});
+
+test("normalizes optional URLs and SERP copy to the receiving command limits", () => {
+  const canonical = canonicalPublishRow({
+    sourceRowNumber: "1",
+    textOriginal: "SEO",
+    textNormalized: "seo",
+    normalizedHash: "a".repeat(64),
+    language: "ru",
+    targetUrl: "несколько адресов через пробел https://example.com",
+    positions: [{
+      searchEngine: "YANDEX",
+      found: true,
+      position: 1,
+      rankingUrl: "https://example.com/result",
+      serpResults: [{
+        position: 1,
+        rankingUrl: "https://example.com/result",
+        title: "t".repeat(3_000),
+        snippet: "s".repeat(9_000)
+      }]
+    }],
+    customValues: {}
+  });
+
+  assert.ok(canonical);
+  assert.equal(canonical.targetUrl, "https://example.com");
+  assert.equal(canonical.positions?.[0]?.serpResults?.[0]?.title?.length, 2_048);
+  assert.equal(canonical.positions?.[0]?.serpResults?.[0]?.snippet?.length, 8_192);
 });
 
 test("preserves every Key Collector group membership for a duplicate phrase", () => {

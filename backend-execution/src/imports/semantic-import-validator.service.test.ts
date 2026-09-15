@@ -133,6 +133,29 @@ test("keeps a valid keyword while reporting invalid optional values", () => {
   );
 });
 
+test("uses the first valid URL from a legacy multi-value cell", () => {
+  const issues = new Set<string>();
+  const result = canonicalImportRow(
+    3n,
+    ["SEO", "", "основной https://example.com/seo;https://example.com/other"],
+    ["Фраза", "Группа", "URL"],
+    {
+      ...mapping,
+      columns: [mapping.columns[0]!, mapping.columns[2]!]
+    },
+    {
+      textOriginal: "SEO",
+      textNormalized: "seo",
+      normalizedHash: "a".repeat(64),
+      language: "ru"
+    },
+    issues
+  );
+
+  assert.equal(result.targetUrl, "https://example.com/seo");
+  assert.deepEqual([...issues], []);
+});
+
 test("preserves native KC4 hierarchy and imports search engine positions", () => {
   const issues = new Set<string>();
   const result = canonicalImportRow(

@@ -43,12 +43,20 @@ interface SemanticImportPublishPlan {
   readonly uniqueRows: bigint;
   readonly newKeywords: bigint;
   readonly batchSize: number;
+  readonly legacyBatchSize: number;
   readonly expectedChunks: number;
   readonly entitlement: SemanticCapacityEntitlement;
 }
 
-const SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS = 10;
+const SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS = 40;
 const KC4_PUBLISH_MAX_ROWS = 1_000;
+
+class SemanticImportPublishInvariantError extends Error {
+  public constructor(public readonly code: string) {
+    super(code);
+    this.name = "SemanticImportPublishInvariantError";
+  }
+}
 
 @Injectable()
 export class SemanticImportPublisherService {
@@ -164,8 +172,13 @@ export class SemanticImportPublisherService {
         }
       }
       if (
+        error instanceof SeoDataClientError &&
+        error.code === "INVALID_COMMAND" &&
         semanticImportPublishRetryExhausted(
-          semanticImport.publishingAttempts
+          await this.currentPublishingAttempts(
+            semanticImport.id,
+            semanticImport.publishingAttempts
+          )
         )
       ) {
         try {
@@ -185,7 +198,11 @@ export class SemanticImportPublisherService {
         }
       }
       await this.releaseForRetry(semanticImport.id, claimedAt);
-      throw error;
+      return {
+        importId: semanticImport.id,
+        status: "SKIPPED",
+        code: "IMPORT_PUBLISH_RETRY_PENDING"
+      };
     }
   }
 
@@ -197,12 +214,55 @@ export class SemanticImportPublisherService {
     if ("code" in plan) {
       return this.fail(semanticImport, claimedAt, plan.code);
     }
-    const { mapping, uniqueRows, batchSize, expectedChunks } = plan;
-    await this.beginReceipt(semanticImport, plan);
-
-    let afterHash: string | undefined;
-    let chunkIndex = 0;
-    let publishedRows = 0n;
+    const { mapping, uniqueRows } = plan;
+    const receipt = await this.beginReceipt(semanticImport, plan);
+    const batchSize = semanticImportResumeBatchSize(
+      plan.batchSize,
+      plan.legacyBatchSize,
+      uniqueRows,
+      receipt.expectedChunks,
+      receipt.batchRows
+    );
+    const expectedChunks = receipt.expectedChunks;
+    if (
+      receipt.status === "ABORTED" ||
+      receipt.receivedChunks > expectedChunks ||
+      batchSize === undefined
+    ) {
+      throw new SemanticImportPublishInvariantError(
+        "SEO_DATA_RECEIPT_UNAVAILABLE"
+      );
+    }
+    const resume = semanticImportPublishResumeState(
+      receipt.receivedChunks,
+      batchSize,
+      uniqueRows,
+      receipt.receivedRows
+    );
+    let chunkIndex = resume.chunkIndex;
+    let publishedRows = resume.publishedRows;
+    if (
+      publishedRows > uniqueRows ||
+      (chunkIndex === 0 && publishedRows !== 0n) ||
+      (chunkIndex > 0 && publishedRows === 0n)
+    ) {
+      throw new SemanticImportPublishInvariantError(
+        "SEO_DATA_RECEIPT_UNAVAILABLE"
+      );
+    }
+    let afterHash = publishedRows === 0n
+      ? undefined
+      : await validatedHashAtOffset(
+          this.prisma,
+          semanticImport.id,
+          publishedRows - 1n,
+          mapping.createMissingKeywords
+        );
+    if (publishedRows > 0n && !afterHash) {
+      throw new SemanticImportPublishInvariantError(
+        "IMPORT_RESUME_CURSOR_UNAVAILABLE"
+      );
+    }
     while (true) {
       if (await this.cancelRequested(semanticImport.id, claimedAt)) {
         return this.finishCancelled(
@@ -223,7 +283,9 @@ export class SemanticImportPublisherService {
           (canonical_row === undefined ? [] : [canonical_row]);
         const parsed = sourceRows.map(canonicalPublishRow);
         if (parsed.length === 0 || parsed.some((row) => !row)) {
-          throw new Error("Validated semantic row is invalid");
+          throw new SemanticImportPublishInvariantError(
+            "IMPORT_VALIDATED_ROW_INVALID"
+          );
         }
         return mergeCanonicalPublishRows(
           parsed as readonly SemanticImportPublishRow[]
@@ -273,7 +335,9 @@ export class SemanticImportPublisherService {
       );
     }
     if (chunkIndex !== expectedChunks || publishedRows !== uniqueRows) {
-      throw new Error("Semantic import publish row count mismatch");
+      throw new SemanticImportPublishInvariantError(
+        "IMPORT_PUBLISH_ROW_COUNT_MISMATCH"
+      );
     }
     const result = await this.seoData.completeImport({
       workspaceId: semanticImport.workspaceId,
@@ -348,6 +412,10 @@ export class SemanticImportPublisherService {
       semanticImport.sourceFormat,
       historyDateCount
     );
+    const legacyBatchSize = semanticImportLegacyPublishBatchSize(
+      this.config.imports.publishBatchRows,
+      historyDateCount
+    );
     const expectedChunksBig =
       (uniqueRows + BigInt(batchSize) - 1n) / BigInt(batchSize);
     if (expectedChunksBig > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -370,6 +438,7 @@ export class SemanticImportPublisherService {
         ? uniqueRows - existingKeywords
         : 0n,
       batchSize,
+      legacyBatchSize,
       expectedChunks: Number(expectedChunksBig),
       entitlement
     };
@@ -637,7 +706,8 @@ export class SemanticImportPublisherService {
       },
       data: {
         publishingHeartbeatAt: new Date(),
-        stage: `publishing_chunks:${publishedRows}:${totalRows}:${publishedChunks}:${totalChunks}`
+        stage: `publishing_chunks:${publishedRows}:${totalRows}:${publishedChunks}:${totalChunks}`,
+        publishingAttempts: 0
       }
     });
     if (updated.count === 0) {
@@ -662,6 +732,17 @@ export class SemanticImportPublisherService {
     return current.status === "CANCEL_REQUESTED";
   }
 
+  private async currentPublishingAttempts(
+    importId: string,
+    fallback: number
+  ): Promise<number> {
+    const current = await this.prisma.semanticImport.findUnique({
+      where: { id: importId },
+      select: { publishingAttempts: true }
+    });
+    return current?.publishingAttempts ?? fallback;
+  }
+
   private staleBefore(): Date {
     return new Date(
       Date.now() -
@@ -677,12 +758,14 @@ export function semanticImportPublishRetryExhausted(
 }
 
 export function semanticImportPublishErrorIsRetryable(error: unknown): boolean {
+  if (error instanceof SemanticImportPublishInvariantError) return false;
   return !(error instanceof SeoDataClientError) ||
     error.retryable ||
     error.code === "INVALID_COMMAND";
 }
 
 export function semanticImportPublishFailureCode(error: unknown): string {
+  if (error instanceof SemanticImportPublishInvariantError) return error.code;
   if (!(error instanceof SeoDataClientError)) {
     return "IMPORT_PUBLISH_RETRY_EXHAUSTED";
   }
@@ -704,6 +787,75 @@ export function semanticImportPublishBatchSize(
     Math.max(1, Math.floor(10_000 / Math.max(historyDateCount, 1))),
     sourceFormat === "KC4" ? KC4_PUBLISH_MAX_ROWS : semanticImportPublishMaxRows
   );
+}
+
+function semanticImportLegacyPublishBatchSize(
+  configuredRows: number,
+  historyDateCount: number
+): number {
+  return Math.min(
+    Math.max(configuredRows, 1),
+    semanticImportPublishMaxRows,
+    Math.max(1, Math.floor(10_000 / Math.max(historyDateCount, 1)))
+  );
+}
+
+export function semanticImportResumeBatchSize(
+  currentBatchSize: number,
+  legacyBatchSize: number,
+  uniqueRows: bigint,
+  expectedChunks: number,
+  storedBatchRows?: number
+): number | undefined {
+  const candidates = [storedBatchRows, currentBatchSize, legacyBatchSize]
+    .filter((value): value is number =>
+      Number.isSafeInteger(value) && Number(value) > 0
+    );
+  return [...new Set(candidates)].find((candidate) =>
+    Number(
+      (uniqueRows + BigInt(candidate) - 1n) / BigInt(candidate)
+    ) === expectedChunks
+  );
+}
+
+export function semanticImportPublishResumeState(
+  receivedChunks: number,
+  batchSize: number,
+  uniqueRows: bigint,
+  receivedRows?: string
+): Readonly<{ chunkIndex: number; publishedRows: bigint }> {
+  const storedRows = receivedRows === undefined ? undefined : BigInt(receivedRows);
+  const calculatedRows = BigInt(receivedChunks) * BigInt(batchSize);
+  return {
+    chunkIndex: receivedChunks,
+    publishedRows: storedRows !== undefined
+      ? storedRows
+      : calculatedRows < uniqueRows
+      ? calculatedRows
+      : uniqueRows
+  };
+}
+
+async function validatedHashAtOffset(
+  prisma: PrismaService,
+  importId: string,
+  offset: bigint,
+  createMissingKeywords: boolean
+): Promise<string | undefined> {
+  if (offset < 0n || offset > BigInt(Number.MAX_SAFE_INTEGER)) return undefined;
+  const rows = await prisma.$queryRaw<readonly { normalized_hash: string }[]>`
+    SELECT "normalized_hash"
+    FROM "semantic_import_validated_rows"
+    WHERE
+      "import_id" = ${importId}::uuid
+      AND "is_valid"
+      AND (${createMissingKeywords} OR "project_duplicate")
+    GROUP BY "normalized_hash"
+    ORDER BY "normalized_hash"
+    OFFSET ${Number(offset)}
+    LIMIT 1
+  `;
+  return rows[0]?.normalized_hash;
 }
 
 async function validatedBatch(
@@ -757,12 +909,14 @@ export function mergeCanonicalPublishRows(
     rows.flatMap((row) =>
       row.groupPaths ?? (row.groupPath ? [row.groupPath] : [])
     )
+  ).slice(0, 100);
+  const tags = [...new Set(rows.flatMap((row) => row.tags ?? []))].slice(0, 100);
+  const customValues = Object.fromEntries(
+    Object.entries(Object.assign(
+      {},
+      ...rows.map(({ customValues }) => customValues)
+    ) as Readonly<Record<string, string>>).slice(0, 500)
   );
-  const tags = [...new Set(rows.flatMap((row) => row.tags ?? []))];
-  const customValues = Object.assign(
-    {},
-    ...rows.map(({ customValues }) => customValues)
-  ) as Readonly<Record<string, string>>;
   const positionsByEngine = new Map<
     "YANDEX" | "GOOGLE",
     NonNullable<SemanticImportPublishRow["positions"]>[number]
@@ -793,7 +947,7 @@ export function mergeCanonicalPublishRows(
   }
   const positionHistory = [...historyByKey.values()].sort(
     (left, right) => left.observedAt.localeCompare(right.observedAt)
-  );
+  ).slice(-1_100);
   const notes = [...new Set(rows.flatMap((row) => row.note?.trim() ? [row.note.trim()] : []))];
   const note = notes.join("\n\n").slice(0, 1_000_000) || undefined;
   const frequencies = [...new Map(
@@ -904,17 +1058,42 @@ function canonicalImportSerpResult(
   return {
     position: result.position,
     rankingUrl: result.rankingUrl,
-    ...(result.title === undefined ? {} : { title: result.title }),
-    ...(result.snippet === undefined ? {} : { snippet: result.snippet })
+    ...(result.title === undefined ? {} : { title: result.title.slice(0, 2_048) }),
+    ...(result.snippet === undefined ? {} : { snippet: result.snippet.slice(0, 8_192) })
   };
 }
 
 function canonicalImportSerpResults(
   value: unknown
 ): readonly SemanticImportSerpResultValue[] {
-  return (value as readonly SemanticImportSerpResultValue[]).map(
-    canonicalImportSerpResult
+  return (value as readonly SemanticImportSerpResultValue[]).flatMap(
+    (result) => {
+      const rankingUrl = safeImportWebUrl(result.rankingUrl);
+      return rankingUrl
+        ? [canonicalImportSerpResult({ ...result, rankingUrl })]
+        : [];
+    }
   );
+}
+
+function safeImportWebUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length < 1) return undefined;
+  const candidates = [value.trim(), ...value.split(/[\s;]+/u)]
+    .map((candidate) => candidate.trim())
+    .filter((candidate, index, values) =>
+      candidate.length > 0 &&
+      candidate.length <= 8_192 &&
+      values.indexOf(candidate) === index
+    );
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (["http:", "https:"].includes(url.protocol)) return candidate;
+    } catch {
+      // Continue to a URL embedded in a legacy multi-value KC4 cell.
+    }
+  }
+  return undefined;
 }
 
 function uniquePaths(
@@ -1056,9 +1235,9 @@ export function canonicalPublishRow(
           ...(position.previousPosition === undefined
             ? {}
             : { previousPosition: position.previousPosition as number }),
-          ...(position.rankingUrl === undefined
+          ...(safeImportWebUrl(position.rankingUrl) === undefined
             ? {}
-            : { rankingUrl: position.rankingUrl as string }),
+            : { rankingUrl: safeImportWebUrl(position.rankingUrl)! }),
           ...(position.serpResults === undefined
             ? {}
             : {
@@ -1082,7 +1261,9 @@ export function canonicalPublishRow(
         observedAt: item.observedAt as string,
         found: item.found as boolean,
         ...(item.position === undefined ? {} : { position: item.position as number }),
-        ...(item.rankingUrl === undefined ? {} : { rankingUrl: item.rankingUrl as string }),
+        ...(safeImportWebUrl(item.rankingUrl) === undefined
+          ? {}
+          : { rankingUrl: safeImportWebUrl(item.rankingUrl)! }),
         ...(item.serpResults === undefined
           ? {}
           : {
@@ -1113,7 +1294,7 @@ export function canonicalPublishRow(
     ...(row.groupPath
       ? { groupPath: row.groupPath as readonly string[] }
       : {}),
-    ...(row.targetUrl ? { targetUrl: row.targetUrl as string } : {}),
+    ...(safeImportWebUrl(row.targetUrl) ? { targetUrl: safeImportWebUrl(row.targetUrl)! } : {}),
     ...(frequencies ? { frequencies } : {}),
     ...(positions ? { positions } : {}),
     ...(positionHistory ? { positionHistory } : {}),

@@ -12,10 +12,12 @@ import {
   ConflictException,
   HttpException,
   HttpStatus,
-  Injectable
+  Injectable,
+  Optional
 } from "@nestjs/common";
 import {
   projectPositionHistoryMaxPoints,
+  parseSemanticRankColumnKey,
   parseSemanticRankDimensionKey,
   semanticRankDimensionKey,
   semanticKeywordBulkCreatePreviewMaxGroups,
@@ -55,6 +57,7 @@ import {
   type SemanticKeywordListPosition,
   type SemanticKeywordInsights,
   type SemanticRankDimension,
+  type SemanticRankComparisonItem,
   type SemanticKeywordSort,
   type SemanticFrequencyDevice,
   type FrequencyCollectionProvider,
@@ -78,6 +81,7 @@ import {
 } from "../semantic-versions/semantic-version.service.js";
 import { normalizeKeywordText } from "./keyword-normalization.js";
 import { cleanKeywordText } from "./keyword-cleaning.js";
+import { KeywordRankComparisonService } from "./keyword-rank-comparison.service.js";
 import { normalizePageUrl } from "../pages/page-url.js";
 import { ensureKeywordSystemGroupIds } from "../keyword-groups/semantic-system-groups.js";
 import {
@@ -198,7 +202,9 @@ export class KeywordService {
 
   public constructor(
     private readonly prisma: PrismaService,
-    private readonly semanticVersions: SemanticVersionService
+    private readonly semanticVersions: SemanticVersionService,
+    @Optional()
+    private readonly rankComparisons?: KeywordRankComparisonService
   ) {}
 
   public async positionSummary(
@@ -795,7 +801,32 @@ export class KeywordService {
       )
     ];
     const keywordIds = pageRows.map(({ id }) => id);
-    const keywordMerges = keywordIds.length === 0
+    const metricProjection = query.metricProjection
+      ? new Set(query.metricProjection)
+      : undefined;
+    const includeFrequencies =
+      metricProjection === undefined || metricProjection.has("FREQUENCIES");
+    const includePositions =
+      metricProjection === undefined ||
+      metricProjection.has("POSITIONS") ||
+      metricProjection.has("RANKING_SITE_RESULTS");
+    const includeRankingSiteResults =
+      metricProjection === undefined || metricProjection.has("RANKING_SITE_RESULTS");
+    const includeAiAnswers =
+      metricProjection === undefined || metricProjection.has("AI_ANSWERS");
+    const includeTargetUrlIndicator =
+      metricProjection === undefined || metricProjection.has("TARGET_URL_INDICATOR");
+    const includeMultipleUrlIndicator =
+      metricProjection === undefined || metricProjection.has("MULTIPLE_URL_INDICATOR");
+    const includeCurrentRanks =
+      includePositions || includeTargetUrlIndicator || includeMultipleUrlIndicator;
+    const dynamicRankColumnKeys = query.rankColumnKeys ?? [];
+    const dynamicRankDimensionKeys = [...new Set(
+      dynamicRankColumnKeys.map((key) => parseSemanticRankColumnKey(key)!.dimension.key)
+    )];
+    const needsLegacyMetricMerges =
+      includeFrequencies || includeCurrentRanks || includeAiAnswers;
+    const keywordMerges = keywordIds.length === 0 || !needsLegacyMetricMerges
       ? []
       : await this.prisma.keywordMerge?.findMany({
           where: {
@@ -829,7 +860,8 @@ export class KeywordService {
       currentRanks,
       aiAnswerSnapshots,
       selectedGroupMemberships,
-      rankDeletions
+      rankDeletions,
+      rankComparisonItems
     ] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([])
@@ -853,7 +885,7 @@ export class KeywordService {
             },
             select: { id: true, name: true }
           }),
-      keywordIds.length === 0
+      keywordIds.length === 0 || !includeFrequencies
         ? Promise.resolve([])
         : this.prisma.frequencySnapshot.findMany({
             where: {
@@ -877,7 +909,7 @@ export class KeywordService {
               observedAt: true
             }
           }),
-      keywordIds.length === 0
+      keywordIds.length === 0 || !includeCurrentRanks
         ? Promise.resolve([])
         : this.prisma.currentRank.findMany({
             where: {
@@ -902,7 +934,7 @@ export class KeywordService {
               snapshotId: true
             }
           }),
-      keywordIds.length === 0
+      keywordIds.length === 0 || !includeAiAnswers
         ? Promise.resolve([])
         : this.prisma.aiAnswerSnapshot.findMany({
             where: {
@@ -947,7 +979,7 @@ export class KeywordService {
               group: { select: { id: true, path: true, name: true } }
             }
           }),
-      keywordIds.length === 0
+      keywordIds.length === 0 || !includeCurrentRanks
         ? Promise.resolve([])
         : this.prisma.rankDimensionHistoryDeletion.findMany({
             where: { workspaceId, projectId },
@@ -961,7 +993,19 @@ export class KeywordService {
               device: true,
               excludedThrough: true
             }
-          })
+          }),
+      keywordIds.length === 0 || dynamicRankDimensionKeys.length === 0
+        ? Promise.resolve([] as readonly SemanticRankComparisonItem[])
+        : (this.rankComparisons ?? new KeywordRankComparisonService(this.prisma))
+            .compareTrusted(
+              { workspaceId, projectId },
+              {
+                keywordIds,
+                dimensionKeys: dynamicRankDimensionKeys,
+                columnKeys: dynamicRankColumnKeys,
+                includeSiteResultCount: false
+              }
+            )
     ]);
     const rankConfigurations = currentRanks.length === 0
       ? []
@@ -1099,19 +1143,22 @@ export class KeywordService {
         latestRankByKeywordEngine.set(key, { rank, searchEngine });
       }
     }
-    const previousPositions = await previousFoundPositions(
-      this.prisma,
-      workspaceId,
-      projectId,
-      [...latestRankByKeywordEngine.values()].map(({ rank, searchEngine }) => ({
-        keywordId: rank.keywordId,
-        searchEngine,
-        observedAt: rank.observedAt,
-        snapshotId: rank.snapshotId
-      }))
-    );
+    const previousPositions = includePositions
+      ? await previousFoundPositions(
+          this.prisma,
+          workspaceId,
+          projectId,
+          [...latestRankByKeywordEngine.values()].map(({ rank, searchEngine }) => ({
+            keywordId: rank.keywordId,
+            searchEngine,
+            observedAt: rank.observedAt,
+            snapshotId: rank.snapshotId
+          }))
+        )
+      : new Map<string, number>();
     const currentRankSnapshotIds = visibleCurrentRanks.map(({ snapshotId }) => snapshotId);
-    const currentSerpSnapshots = currentRankSnapshotIds.length === 0
+    const currentSerpSnapshots =
+      !includeRankingSiteResults || currentRankSnapshotIds.length === 0
       ? []
       : await this.prisma.rankSnapshot.findMany({
           where: {
@@ -1136,6 +1183,15 @@ export class KeywordService {
             }
           }
         });
+    const multipleResultSnapshotIds =
+      includeMultipleUrlIndicator && !includeRankingSiteResults
+        ? await snapshotIdsWithMultipleProjectUrls(
+            this.prisma,
+            workspaceId,
+            projectId,
+            currentRankSnapshotIds
+          )
+        : new Set<string>();
     const siteResultsBySnapshotId = new Map(
       currentSerpSnapshots.map((snapshot) => [
         snapshot.id,
@@ -1146,17 +1202,47 @@ export class KeywordService {
       ])
     );
     const keywordsWithMultipleRankingUrls = new Set(
-      currentSerpSnapshots.flatMap((snapshot) =>
+      visibleCurrentRanks.flatMap((rank) =>
+        multipleResultSnapshotIds.has(rank.snapshotId)
+          ? [visibleKeywordId(rank.keywordId)]
+          : []
+      ).concat(currentSerpSnapshots.flatMap((snapshot) =>
         (siteResultsBySnapshotId.get(snapshot.id)?.length ?? 0) > 1
           ? [visibleKeywordId(snapshot.keywordId)]
           : []
-      )
+      ))
     );
+    const keywordsWithTargetUrlMismatch = new Set<string>();
+    if (includeTargetUrlIndicator) {
+      const rowById = new Map(pageRows.map((row) => [row.id, row]));
+      for (const { rank } of latestRankByKeywordEngine.values()) {
+        if (!rank.found || !rank.rankingUrl) continue;
+        const keywordId = visibleKeywordId(rank.keywordId);
+        const row = rowById.get(keywordId);
+        const targetUrl = row?.targetPageId
+          ? pageUrlById.get(row.targetPageId)
+          : undefined;
+        if (targetUrl && !sameKeywordRankingUrl(targetUrl, rank.rankingUrl)) {
+          keywordsWithTargetUrlMismatch.add(keywordId);
+        }
+      }
+    }
+    const rankComparisonByKeywordId = new Map<
+      string,
+      SemanticRankComparisonItem[]
+    >();
+    for (const comparison of rankComparisonItems) {
+      const comparisons = rankComparisonByKeywordId.get(comparison.keywordId) ?? [];
+      comparisons.push(comparison);
+      rankComparisonByKeywordId.set(comparison.keywordId, comparisons);
+    }
     const positionsByKeywordId = new Map<
       string,
       Map<SemanticKeywordListPosition["searchEngine"], SemanticKeywordListPosition>
     >();
-    for (const { rank, searchEngine } of latestRankByKeywordEngine.values()) {
+    for (const { rank, searchEngine } of includePositions
+      ? latestRankByKeywordEngine.values()
+      : []) {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
@@ -1212,8 +1298,8 @@ export class KeywordService {
     }
     const last = pageRows.at(-1);
     return {
-      data: pageRows.map((row) =>
-        keywordItem(
+      data: pageRows.map((row) => ({
+        ...keywordItem(
           row,
           row.targetPageId
             ? pageUrlById.get(row.targetPageId)
@@ -1224,9 +1310,19 @@ export class KeywordService {
           selectedGroupByKeywordId.get(row.id),
           aiAnswersByKeywordId.get(row.id),
           keywordsWithMultipleRankingUrls.has(row.id),
-          query.includeNotes === true
-        )
-      ),
+          query.includeNotes === true,
+          undefined,
+          dynamicRankDimensionKeys.length === 0
+            ? undefined
+            : {
+                dimensionKeys: dynamicRankDimensionKeys,
+                items: rankComparisonByKeywordId.get(row.id) ?? []
+              }
+        ),
+        ...(keywordsWithTargetUrlMismatch.has(row.id)
+          ? { hasTargetUrlMismatch: true }
+          : {})
+      })),
       page: {
         hasNext,
         ...(totalApprox === undefined ? {} : { totalApprox }),
@@ -4027,7 +4123,8 @@ function keywordItem(
   includeNote = false,
   groupMembershipCount = row._count?.memberships ?? row.memberships.filter(
     ({ group }) => group.systemKind === null
-  ).length
+  ).length,
+  rankComparison?: SemanticKeywordListItem["rankComparison"]
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
   const group = displayGroup ?? row.memberships[0]?.group;
@@ -4074,6 +4171,7 @@ function keywordItem(
     ...(frequencies.length > 0 ? { frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
     ...(aiAnswers.length > 0 ? { aiAnswers } : {}),
+    ...(rankComparison ? { rankComparison } : {}),
     sourceMode: row.sourceMode,
     ...(row.status === "DELETED" ? { trashed: true } : {}),
     createdAt: row.createdAt.toISOString(),
@@ -5401,6 +5499,59 @@ function rankIsExcluded(
     deletion.device === configuration.device &&
     observedAt <= deletion.excludedThrough
   );
+}
+
+async function snapshotIdsWithMultipleProjectUrls(
+  prisma: PrismaService,
+  workspaceId: string,
+  projectId: string,
+  snapshotIds: readonly string[]
+): Promise<ReadonlySet<string>> {
+  if (snapshotIds.length === 0) return new Set();
+  const rows = await prisma.$queryRaw<readonly { snapshotId: string }[]>(Prisma.sql`
+    SELECT result.snapshot_id AS "snapshotId"
+    FROM rank_serp_results result
+    JOIN rank_snapshots snapshot
+      ON snapshot.observed_at = result.snapshot_observed_at
+        AND snapshot.id = result.snapshot_id
+        AND snapshot.workspace_id = ${workspaceId}::uuid
+        AND snapshot.project_id = ${projectId}::uuid
+    JOIN rank_execution_manifests manifest
+      ON manifest.workspace_id = snapshot.workspace_id
+        AND manifest.project_id = snapshot.project_id
+        AND manifest.id = snapshot.manifest_id
+        AND manifest.job_id = snapshot.job_id
+    CROSS JOIN LATERAL (
+      SELECT regexp_replace(
+        lower(split_part(split_part(regexp_replace(manifest.project_domain, '^https?://', '', 'i'), '/', 1), ':', 1)),
+        '^www\\.', ''
+      ) AS host
+    ) project_host
+    CROSS JOIN LATERAL (
+      SELECT regexp_replace(
+        lower(split_part(split_part(regexp_replace(result.ranking_url, '^https?://', '', 'i'), '/', 1), ':', 1)),
+        '^www\\.', ''
+      ) AS host
+    ) result_host
+    WHERE result.snapshot_id IN (${Prisma.join(
+      snapshotIds.map((id) => Prisma.sql`${id}::uuid`)
+    )})
+      AND (
+        result_host.host = project_host.host OR
+        result_host.host LIKE '%.' || project_host.host
+      )
+    GROUP BY result.snapshot_id
+    HAVING count(DISTINCT result.normalized_ranking_url) > 1
+  `);
+  return new Set(rows.map(({ snapshotId }) => snapshotId));
+}
+
+function sameKeywordRankingUrl(left: string, right: string): boolean {
+  try {
+    return normalizePageUrl(left).normalized === normalizePageUrl(right).normalized;
+  } catch {
+    return left === right;
+  }
 }
 
 function storedDeletionSearchEngine(value: string): "YANDEX" | "GOOGLE" {

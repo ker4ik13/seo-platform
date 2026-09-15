@@ -53,6 +53,10 @@ export interface SemanticRankComparisonInput {
   readonly dimensionKeys: readonly string[];
   /** Omit for the complete legacy projection; tables without AI columns send false. */
   readonly includeAi?: boolean;
+  /** Exact visible table columns; omitted legacy calls request the full projection. */
+  readonly columnKeys?: readonly SemanticRankColumnKey[];
+  /** On-demand multiple-URL views request the otherwise skipped SERP count. */
+  readonly includeSiteResultCount?: boolean;
 }
 
 export interface SemanticRankComparisonItem extends SemanticKeywordListPosition {
@@ -66,7 +70,7 @@ export interface SemanticRankComparisonItem extends SemanticKeywordListPosition 
   readonly searchSource?: "LIVE" | "SEARCH_API";
   readonly depth: number;
   /** Number of distinct project pages in this exact latest snapshot. */
-  readonly siteResultCount: number;
+  readonly siteResultCount?: number;
   readonly title?: string;
   readonly snippet?: string;
   readonly aiAnswer?: Readonly<{
@@ -114,18 +118,40 @@ export function parseSemanticRankColumnKey(value: unknown): Readonly<{ dimension
 }
 
 export function parseSemanticRankComparisonInput(value: unknown): SemanticRankComparisonInput {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => key !== "keywordIds" && key !== "dimensionKeys" && key !== "includeAi")) throw new TypeError("Invalid comparison input");
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !["keywordIds", "dimensionKeys", "includeAi", "columnKeys", "includeSiteResultCount"].includes(key))) throw new TypeError("Invalid comparison input");
   const input = value as Record<string, unknown>;
-  if (!Array.isArray(input.keywordIds) || input.keywordIds.length < 1 || input.keywordIds.length > semanticRankComparisonMaxKeywords ||
-    input.keywordIds.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id)) ||
-    new Set(input.keywordIds).size !== input.keywordIds.length ||
-    !Array.isArray(input.dimensionKeys) || input.dimensionKeys.length < 1 || input.dimensionKeys.length > semanticRankComparisonMaxDimensions ||
-    input.dimensionKeys.some(key => !parseSemanticRankDimensionKey(key)) || new Set(input.dimensionKeys).size !== input.dimensionKeys.length || input.keywordIds.length * input.dimensionKeys.length > semanticRankComparisonMaxCells ||
-    (input.includeAi !== undefined && typeof input.includeAi !== "boolean")) throw new TypeError("Invalid comparison scope");
+  const keywordIds = Array.isArray(input.keywordIds)
+    ? input.keywordIds
+    : [];
+  const dimensionKeys = Array.isArray(input.dimensionKeys)
+    ? input.dimensionKeys
+    : [];
+  const columnKeys = input.columnKeys === undefined
+    ? undefined
+    : Array.isArray(input.columnKeys)
+      ? input.columnKeys.map((key) => {
+          if (typeof key !== "string" || !parseSemanticRankColumnKey(key)) {
+            throw new TypeError("Invalid comparison column");
+          }
+          return key as SemanticRankColumnKey;
+        })
+      : undefined;
+  if (keywordIds.length < 1 || keywordIds.length > semanticRankComparisonMaxKeywords ||
+    keywordIds.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id)) ||
+    new Set(keywordIds).size !== keywordIds.length ||
+    dimensionKeys.length < 1 || dimensionKeys.length > semanticRankComparisonMaxDimensions ||
+    dimensionKeys.some(key => !parseSemanticRankDimensionKey(key)) || new Set(dimensionKeys).size !== dimensionKeys.length || keywordIds.length * dimensionKeys.length > semanticRankComparisonMaxCells ||
+    (input.includeAi !== undefined && typeof input.includeAi !== "boolean") ||
+    (input.includeSiteResultCount !== undefined && typeof input.includeSiteResultCount !== "boolean") ||
+    (input.columnKeys !== undefined && (!columnKeys || columnKeys.length < 1 || columnKeys.length > 128 || new Set(columnKeys).size !== columnKeys.length || columnKeys.some((key) => !dimensionKeys.includes(parseSemanticRankColumnKey(key)!.dimension.key))))) throw new TypeError("Invalid comparison scope");
   return {
-    keywordIds: [...input.keywordIds] as string[],
-    dimensionKeys: [...input.dimensionKeys] as string[],
-    ...(input.includeAi === undefined ? {} : { includeAi: input.includeAi })
+    keywordIds: [...keywordIds] as string[],
+    dimensionKeys: [...dimensionKeys] as string[],
+    ...(input.includeAi === undefined ? {} : { includeAi: input.includeAi }),
+    ...(columnKeys === undefined ? {} : { columnKeys }),
+    ...(input.includeSiteResultCount === undefined
+      ? {}
+      : { includeSiteResultCount: input.includeSiteResultCount })
   };
 }
 
@@ -188,7 +214,9 @@ export function parseSemanticRankComparisonItems(value: unknown, scope: Semantic
       snapshotId: identifier(item.snapshotId), trackingContextId: identifier(item.trackingContextId),
       configurationVersion: integer(item.configurationVersion, 1, 2_147_483_647), jobId: identifier(item.jobId),
       provider, depth: integer(item.depth, 1, 100),
-      siteResultCount: integer(item.siteResultCount, 0, 100),
+      ...(item.siteResultCount === undefined
+        ? {}
+        : { siteResultCount: integer(item.siteResultCount, 0, 100) }),
       ...(source === undefined ? {} : { searchSource: source }),
       ...(title === undefined ? {} : { title }), ...(snippet === undefined ? {} : { snippet }),
       ...(aiAnswer === undefined ? {} : { aiAnswer })

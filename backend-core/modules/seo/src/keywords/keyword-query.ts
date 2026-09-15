@@ -3,12 +3,14 @@ import {
   semanticKeywordDefaultPageSize,
   semanticKeywordIntents,
   semanticKeywordMaxPageSize,
+  semanticKeywordMetricProjections,
   semanticKeywordNotesMaxPageSize,
   semanticKeywordMultiSearchMaxTerms,
   semanticKeywordMultiSearchModes,
   semanticOperationScopeGroupLimit,
   semanticKeywordSorts,
   isSemanticRankDimensionSort,
+  parseSemanticRankColumnKey,
   parseSemanticRankDimensionKey,
   type KeywordListQuery,
   type ProjectPositionHistoryQuery,
@@ -57,7 +59,7 @@ export function keywordOperationScopeInput(
   };
 }
 const BODY_QUERY_FIELDS = [
-  "limit", "cursor", "includeNotes", "search", "tag", "intent", "groupId", "groupIds",
+  "limit", "cursor", "includeNotes", "metricProjection", "rankColumnKeys", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
   , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
   "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
@@ -143,6 +145,12 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const limit = optionalSingleString(query.limit, "limit");
   const cursor = optionalSingleString(query.cursor, "cursor");
   const includeNotes = optionalBoolean(query.includeNotes, "includeNotes");
+  const metricProjection = optionalEnumList(
+    query.metricProjection,
+    "metricProjection",
+    semanticKeywordMetricProjections
+  );
+  const rankColumnKeys = optionalRankColumnKeys(query.rankColumnKeys);
   const search = optionalSingleString(query.search, "search")?.normalize(
     "NFKC"
   );
@@ -242,6 +250,8 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     limit: parsedLimit,
     ...(cursor ? { cursor } : {}),
     ...(includeNotes === undefined ? {} : { includeNotes }),
+    ...(metricProjection === undefined ? {} : { metricProjection }),
+    ...(rankColumnKeys.length === 0 ? {} : { rankColumnKeys }),
     ...(search ? { search } : {}),
     ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),
@@ -285,7 +295,7 @@ function bodyQuery(value: unknown): Readonly<Record<string, string>> {
   const result: Record<string, string> = {};
   for (const [key, candidate] of Object.entries(query)) {
     if (candidate === undefined) continue;
-    if (key === "groupIds") {
+    if (key === "groupIds" || key === "metricProjection" || key === "rankColumnKeys") {
       if (!Array.isArray(candidate) || !candidate.every((item) => typeof item === "string")) invalid("query.groupIds");
       result[key] = candidate.join(",");
       continue;
@@ -294,6 +304,35 @@ function bodyQuery(value: unknown): Readonly<Record<string, string>> {
     result[key] = String(candidate);
   }
   return result;
+}
+
+function optionalEnumList<T extends string>(
+  value: unknown,
+  field: string,
+  values: readonly T[]
+): readonly T[] | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  const entries = parsed.split(",").filter(Boolean);
+  if (
+    entries.some((entry) => !values.includes(entry as T)) ||
+    new Set(entries).size !== entries.length
+  ) invalid(field);
+  return entries.map((entry) => entry as T);
+}
+
+function optionalRankColumnKeys(
+  value: unknown
+): readonly import("@seo-platform/contracts").SemanticRankColumnKey[] {
+  const parsed = optionalSingleString(value, "rankColumnKeys");
+  if (parsed === undefined) return [];
+  const entries = parsed.split(",").filter(Boolean);
+  if (
+    entries.length > 128 ||
+    new Set(entries).size !== entries.length ||
+    entries.some((entry) => !parseSemanticRankColumnKey(entry))
+  ) invalid("rankColumnKeys");
+  return entries as readonly import("@seo-platform/contracts").SemanticRankColumnKey[];
 }
 
 function optionalEnum<T extends string>(

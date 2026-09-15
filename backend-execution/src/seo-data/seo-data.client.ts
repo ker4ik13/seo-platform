@@ -803,7 +803,14 @@ function importReceipt(
       String(payload.status)
     ) ||
     !nonNegativeInteger(payload.receivedChunks) ||
-    !nonNegativeInteger(payload.expectedChunks)
+    !nonNegativeInteger(payload.expectedChunks) ||
+    (payload.receivedRows !== undefined &&
+      (typeof payload.receivedRows !== "string" ||
+        !/^\d+$/u.test(payload.receivedRows))) ||
+    (payload.batchRows !== undefined &&
+      (!nonNegativeInteger(payload.batchRows) ||
+        Number(payload.batchRows) < 1 ||
+        Number(payload.batchRows) > 5_000))
   ) {
     return undefined;
   }

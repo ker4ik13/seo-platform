@@ -308,6 +308,12 @@ test("accepts a strictly shaped semantic keyword page", () => {
   assert.equal(result.data[0]?.hasNote, false);
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
 
+  const withRankIndicator = semanticKeywordPage({
+    data: [{ ...validItem, hasTargetUrlMismatch: true }],
+    page: { hasNext: false, totalApprox: 1 }
+  });
+  assert.equal(withRankIndicator.data[0]?.hasTargetUrlMismatch, true);
+
   const withNote = semanticKeywordPage({
     data: [{
       ...validItem,
@@ -325,6 +331,45 @@ test("accepts a strictly shaped semantic keyword page", () => {
     data: [{ ...validItem, groupMembershipCount: 2_001 }],
     page: { hasNext: false }
   }));
+});
+
+test("accepts exact rank cells embedded into the requested keyword page", () => {
+  const dimensionKey = "YANDEX|RU|213|ru|DESKTOP";
+  const columnKey = `rank:${dimensionKey}:position` as const;
+  const comparison = {
+    keywordId: validItem.id,
+    dimensionKey,
+    searchEngine: "YANDEX",
+    found: true,
+    position: 7,
+    previousPosition: 9,
+    rankingUrl: "https://example.com/result",
+    observedAt: "2026-09-15T10:00:00.000Z",
+    snapshotId: "01900000-0000-7000-8000-000000000020",
+    trackingContextId: "01900000-0000-7000-8000-000000000021",
+    configurationVersion: 1,
+    jobId: "01900000-0000-7000-8000-000000000022",
+    provider: "KEY_COLLECTOR",
+    depth: 100
+  };
+  const result = semanticKeywordPage({
+    data: [{
+      ...validItem,
+      rankComparison: { dimensionKeys: [dimensionKey], items: [comparison] }
+    }],
+    page: { hasNext: false, totalApprox: 1 }
+  }, false, {
+    limit: 100,
+    metricProjection: ["BASE"],
+    rankColumnKeys: [columnKey]
+  });
+
+  assert.equal(result.data[0]?.rankComparison?.items[0]?.position, 7);
+  assert.deepEqual(result.data[0]?.rankComparison?.dimensionKeys, [dimensionKey]);
+  assert.throws(() => semanticKeywordPage({
+    data: [validItem],
+    page: { hasNext: false, totalApprox: 1 }
+  }, false, { limit: 100, metricProjection: ["BASE"], rankColumnKeys: [columnKey] }));
 });
 
 test("validates the project color legend and its unread projection", () => {

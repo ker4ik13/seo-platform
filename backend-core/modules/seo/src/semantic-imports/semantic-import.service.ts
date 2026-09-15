@@ -134,11 +134,16 @@ export class SemanticImportService {
       const existing =
         await transaction.semanticImportReceipt.findUnique({
           where: { importId: input.importId },
-          include: { _count: { select: { chunks: true } } }
+          include: {
+            chunks: {
+              orderBy: { chunkIndex: "asc" },
+              select: { chunkIndex: true, inputRows: true }
+            }
+          }
         });
       if (existing) {
         assertReceiptCommand(existing, input);
-        return receiptSummary(existing, existing._count.chunks);
+        return receiptSummary(existing, existing.chunks);
       }
       await assertStoredKeywordCapacity(
         transaction,
@@ -172,7 +177,7 @@ export class SemanticImportService {
           reservedKeywords: expectedNewKeywords
         }
       });
-      return receiptSummary(created, 0);
+      return receiptSummary(created, []);
     });
   }
 
@@ -2332,7 +2337,6 @@ function assertReceiptCommand(
     receipt.mappingHash !== input.mappingHash ||
     receipt.duplicatePolicy !== input.duplicatePolicy ||
     receipt.createMissingKeywords !== input.createMissingKeywords ||
-    receipt.expectedChunks !== input.expectedChunks ||
     receipt.expectedUniqueRows !== BigInt(input.expectedUniqueRows) ||
     receipt.planCode !== input.entitlement.planCode ||
     receipt.planVersion !== input.entitlement.planVersion ||
@@ -2420,13 +2424,22 @@ function assertChunkHash(
 
 function receiptSummary(
   receipt: SemanticImportReceipt,
-  receivedChunks: number
+  chunks: readonly Readonly<{ chunkIndex: number; inputRows: number }>[]
 ): InternalSemanticImportReceipt {
+  const contiguous: Readonly<{ chunkIndex: number; inputRows: number }>[] = [];
+  for (const chunk of chunks) {
+    if (chunk.chunkIndex !== contiguous.length) break;
+    contiguous.push(chunk);
+  }
   return {
     importId: receipt.importId,
     status: receipt.status,
-    receivedChunks,
-    expectedChunks: receipt.expectedChunks
+    receivedChunks: contiguous.length,
+    expectedChunks: receipt.expectedChunks,
+    receivedRows: String(
+      contiguous.reduce((sum, { inputRows }) => sum + BigInt(inputRows), 0n)
+    ),
+    ...(contiguous[0] ? { batchRows: contiguous[0].inputRows } : {})
   };
 }
 

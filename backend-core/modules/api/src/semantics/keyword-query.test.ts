@@ -42,6 +42,20 @@ test("parses a bounded semantic keyword query", () => {
     keywordBodyListInput({ query: { includeNotes: true } }).includeNotes,
     true
   );
+  assert.deepEqual(
+    keywordBodyListInput({
+      query: {
+        metricProjection: ["BASE", "FREQUENCIES"],
+        rankColumnKeys: ["rank:YANDEX|RU|213|ru|DESKTOP:position"]
+      }
+    }),
+    {
+      limit: 100,
+      sort: "CREATED_DESC",
+      metricProjection: ["BASE", "FREQUENCIES"],
+      rankColumnKeys: ["rank:YANDEX|RU|213|ru|DESKTOP:position"]
+    }
+  );
   assert.throws(
     () => keywordListQuery({ includeNotes: "yes" }),
     DomainError

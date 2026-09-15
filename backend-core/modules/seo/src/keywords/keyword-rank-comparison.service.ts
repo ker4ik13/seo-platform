@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import {
   parseCreateRankDimensionMergeInput,
+  parseSemanticRankColumnKey,
   parseSemanticRankComparisonInput,
   parseSemanticRankDimensionKey,
   type CreateRankDimensionMergeInput,
@@ -38,8 +39,8 @@ interface StoredComparison {
   configurationVersion: number; jobId: string; observedAt: Date;
   found: boolean; position: number | null; previousPosition: number | null;
   rankingUrl: string | null;
-  provider: string; depth: number; execution: Prisma.JsonValue;
-  siteResultCount: bigint;
+  provider: string; depth: number; execution: Prisma.JsonValue | null;
+  siteResultCount: bigint | null;
 }
 interface StoredAiComparison {
   keywordId: string;
@@ -190,8 +191,25 @@ export class KeywordRankComparisonService {
   async compare(scope: Scope, value: SemanticRankComparisonInput): Promise<readonly SemanticRankComparisonItem[]> {
     let input: SemanticRankComparisonInput;
     try { input = parseSemanticRankComparisonInput(value); } catch { throw new BadRequestException("Invalid rank comparison scope"); }
+    return this.compareParsed(scope, input, true);
+  }
+
+  async compareTrusted(
+    scope: Scope,
+    value: SemanticRankComparisonInput
+  ): Promise<readonly SemanticRankComparisonItem[]> {
+    return this.compareParsed(scope, value, false);
+  }
+
+  private async compareParsed(
+    scope: Scope,
+    input: SemanticRankComparisonInput,
+    validateKeywordSelection: boolean
+  ): Promise<readonly SemanticRankComparisonItem[]> {
     const [count, merges] = await Promise.all([
-      this.prisma.keyword.count({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: [...input.keywordIds] }, status: { in: ["ACTIVE", "DELETED"] } } }),
+      validateKeywordSelection
+        ? this.prisma.keyword.count({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: [...input.keywordIds] }, status: { in: ["ACTIVE", "DELETED"] } } })
+        : Promise.resolve(input.keywordIds.length),
       this.prisma.rankDimensionMerge.findMany({
         where: {
           workspaceId: scope.workspaceId,
@@ -217,16 +235,23 @@ export class KeywordRankComparisonService {
       );
       const compared = await Promise.all(dimensions.map(async (key) => {
         const dimension = parseSemanticRankDimensionKey(key)!;
+        const projection = comparisonProjection(input, key);
         const sources = rankDimensionSourcesFromMerges(
           merges,
           dimension,
           mergeTargets
         );
         const [rows, aiRows] = await Promise.all([
-          this.readDimension(scope, input.keywordIds, dimension, sources),
-          input.includeAi === false
+          this.readDimension(scope, input.keywordIds, dimension, sources, projection),
+          !projection.includeAi
             ? Promise.resolve([] as StoredAiComparison[])
-            : this.readAiDimension(scope, input.keywordIds, dimension, sources)
+            : this.readAiDimension(
+                scope,
+                input.keywordIds,
+                dimension,
+                sources,
+                projection.includeAiPreviousPosition
+              )
         ]);
         const aiByKeyword = new Map(aiRows.map((row) => [row.keywordId, row]));
         return rows.map((row): SemanticRankComparisonItem => {
@@ -241,7 +266,9 @@ export class KeywordRankComparisonService {
             ...(row.previousPosition === null ? {} : { previousPosition: row.previousPosition }),
             ...(row.rankingUrl === null ? {} : { rankingUrl: row.rankingUrl }),
             provider: row.provider, depth: row.depth,
-            siteResultCount: safeCount(row.siteResultCount),
+            ...(row.siteResultCount === null
+              ? {}
+              : { siteResultCount: safeCount(row.siteResultCount) }),
             ...(searchSource ? { searchSource } : {}),
             ...(ai ? {
               aiAnswer: {
@@ -270,7 +297,8 @@ export class KeywordRankComparisonService {
     scope: Scope,
     keywordIds: readonly string[],
     dimension: SemanticRankDimension,
-    sources: readonly SemanticRankDimension[]
+    sources: readonly SemanticRankDimension[],
+    projection: ComparisonProjection
   ): Promise<StoredComparison[]> {
     // Each inner scan uses the existing (tenant, keyword, context, observed_at)
     // index. Immutable configuration filters keep old city/device results
@@ -296,12 +324,20 @@ export class KeywordRankComparisonService {
       )
       SELECT keyword.id AS "keywordId", latest.id AS "snapshotId", latest.tracking_context_id AS "trackingContextId",
         latest.configuration_version AS "configurationVersion", latest.job_id AS "jobId", latest.observed_at AS "observedAt",
-        latest.found, latest.position, previous.position AS "previousPosition", latest.ranking_url AS "rankingUrl",
-        latest.provider, latest.depth, manifest.execution,
-        greatest(
-          CASE WHEN latest.found THEN 1 ELSE 0 END,
-          coalesce(site_results.result_count, 0)
-        )::bigint AS "siteResultCount"
+        latest.found, latest.position,
+        ${projection.includePreviousPosition
+          ? Prisma.sql`previous.position`
+          : Prisma.sql`NULL::integer`} AS "previousPosition",
+        latest.ranking_url AS "rankingUrl", latest.provider, latest.depth,
+        ${projection.includeExecution
+          ? Prisma.sql`manifest.execution`
+          : Prisma.sql`NULL::jsonb`} AS execution,
+        ${projection.includeSiteResultCount
+          ? Prisma.sql`greatest(
+              CASE WHEN latest.found THEN 1 ELSE 0 END,
+              coalesce(site_results.result_count, 0)
+            )::bigint`
+          : Prisma.sql`NULL::bigint`} AS "siteResultCount"
       FROM selected_keywords keyword
       CROSS JOIN LATERAL (
         SELECT candidate.*, configuration.depth
@@ -319,31 +355,37 @@ export class KeywordRankComparisonService {
         ) candidate
         ORDER BY candidate.observed_at DESC, candidate.id DESC LIMIT 1
       ) latest
-      JOIN rank_execution_manifests manifest
-        ON manifest.workspace_id = ${scope.workspaceId}::uuid AND manifest.project_id = ${scope.projectId}::uuid
-          AND manifest.id = latest.manifest_id AND manifest.job_id = latest.job_id
-      CROSS JOIN LATERAL (
-        SELECT regexp_replace(
-          lower(split_part(split_part(regexp_replace(manifest.project_domain, '^https?://', '', 'i'), '/', 1), ':', 1)),
-          '^www\\.', ''
-        ) AS host
-      ) project_host
-      LEFT JOIN LATERAL (
-        SELECT count(DISTINCT result.normalized_ranking_url)::bigint AS result_count
-        FROM rank_serp_results result
+      ${projection.includeExecution || projection.includeSiteResultCount
+        ? Prisma.sql`JOIN rank_execution_manifests manifest
+          ON manifest.workspace_id = ${scope.workspaceId}::uuid
+            AND manifest.project_id = ${scope.projectId}::uuid
+            AND manifest.id = latest.manifest_id
+            AND manifest.job_id = latest.job_id`
+        : Prisma.empty}
+      ${projection.includeSiteResultCount ? Prisma.sql`
         CROSS JOIN LATERAL (
           SELECT regexp_replace(
-            lower(split_part(split_part(regexp_replace(result.ranking_url, '^https?://', '', 'i'), '/', 1), ':', 1)),
+            lower(split_part(split_part(regexp_replace(manifest.project_domain, '^https?://', '', 'i'), '/', 1), ':', 1)),
             '^www\\.', ''
           ) AS host
-        ) result_host
-        WHERE result.snapshot_id = latest.id
-          AND (
-            result_host.host = project_host.host OR
-            result_host.host LIKE '%.' || project_host.host
-          )
-      ) site_results ON true
-      LEFT JOIN LATERAL (
+        ) project_host
+        LEFT JOIN LATERAL (
+          SELECT count(DISTINCT result.normalized_ranking_url)::bigint AS result_count
+          FROM rank_serp_results result
+          CROSS JOIN LATERAL (
+            SELECT regexp_replace(
+              lower(split_part(split_part(regexp_replace(result.ranking_url, '^https?://', '', 'i'), '/', 1), ':', 1)),
+              '^www\\.', ''
+            ) AS host
+          ) result_host
+          WHERE result.snapshot_id = latest.id
+            AND (
+              result_host.host = project_host.host OR
+              result_host.host LIKE '%.' || project_host.host
+            )
+        ) site_results ON true
+      ` : Prisma.empty}
+      ${projection.includePreviousPosition ? Prisma.sql`LEFT JOIN LATERAL (
         SELECT candidate.position FROM configurations configuration
         CROSS JOIN LATERAL (
           SELECT
@@ -366,7 +408,7 @@ export class KeywordRankComparisonService {
           ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
         ) candidate
         ORDER BY candidate.observed_at DESC, candidate.id DESC LIMIT 1
-      ) previous ON true
+      ) previous ON true` : Prisma.empty}
       ORDER BY keyword.id
     `);
   }
@@ -375,7 +417,8 @@ export class KeywordRankComparisonService {
     scope: Scope,
     keywordIds: readonly string[],
     dimension: SemanticRankDimension,
-    sources: readonly SemanticRankDimension[]
+    sources: readonly SemanticRankDimension[],
+    includePreviousPosition: boolean
   ): Promise<StoredAiComparison[]> {
     const regionCodes = [...new Set(sources.map(({ regionCode }) => regionCode))];
     return this.prisma.$queryRaw<StoredAiComparison[]>(Prisma.sql`
@@ -398,7 +441,9 @@ export class KeywordRankComparisonService {
         snapshot.answer_present AS "answerPresent",
         snapshot.site_found AS "siteFound",
         snapshot.position,
-        previous.position AS "previousPosition",
+        ${includePreviousPosition
+          ? Prisma.sql`previous.position`
+          : Prisma.sql`NULL::integer`} AS "previousPosition",
         snapshot.ranking_url AS "rankingUrl",
         snapshot.brand_found AS "brandFound",
         snapshot.observed_at AS "observedAt"
@@ -419,7 +464,7 @@ export class KeywordRankComparisonService {
         ORDER BY candidate.observed_at DESC, candidate.id DESC
         LIMIT 1
       ) snapshot
-      LEFT JOIN LATERAL (
+      ${includePreviousPosition ? Prisma.sql`LEFT JOIN LATERAL (
         SELECT
           CASE
             WHEN candidate.site_found = TRUE AND candidate.position IS NOT NULL
@@ -441,10 +486,38 @@ export class KeywordRankComparisonService {
             (snapshot.observed_at, snapshot.id)
         ORDER BY candidate.observed_at DESC, candidate.id DESC
         LIMIT 1
-      ) previous ON true
+      ) previous ON true` : Prisma.empty}
       ORDER BY keyword.id
     `);
   }
+}
+
+interface ComparisonProjection {
+  readonly includeAi: boolean;
+  readonly includeAiPreviousPosition: boolean;
+  readonly includeExecution: boolean;
+  readonly includePreviousPosition: boolean;
+  readonly includeSiteResultCount: boolean;
+}
+
+function comparisonProjection(
+  input: SemanticRankComparisonInput,
+  dimensionKey: string
+): ComparisonProjection {
+  const metrics = input.columnKeys?.flatMap((key) => {
+    const column = parseSemanticRankColumnKey(key)!;
+    return column.dimension.key === dimensionKey ? [column.metric] : [];
+  });
+  const legacy = metrics === undefined;
+  return {
+    includeAi: legacy
+      ? input.includeAi !== false
+      : metrics.some((metric) => metric.startsWith("ai")),
+    includeAiPreviousPosition: legacy || metrics.includes("aiPosition"),
+    includeExecution: legacy,
+    includePreviousPosition: legacy || metrics.includes("position"),
+    includeSiteResultCount: input.includeSiteResultCount ?? legacy
+  };
 }
 
 function safeCount(value: bigint): number {
