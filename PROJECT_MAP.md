@@ -485,7 +485,9 @@ preview вручную. Legacy-операция без полного snapshot �
 ручном подтверждении.
 Jobs и Core SEO используют общий `semanticImportPublishMaxRows=5000`.
 Core создаёт manifest-папки пакетами по уровням дерева и сохраняет миллионы
-KC4 custom values bounded SQL-upsert пакетами вместо отдельных запросов.
+KC4 custom values bounded `jsonb_to_recordset` upsert-пакетами до 10 000
+значений вместо тысяч bind parameters и отдельных запросов; неизменное значение
+не переписывается и не увеличивает version.
 Повторный `OVERWRITE_MAPPED` обновляет existing keywords tenant-scoped
 `jsonb_to_recordset` пакетами; 300-секундная Core transaction вместе с
 30-секундным ожиданием соединения укладывается в 360-секундный Jobs caller
@@ -499,6 +501,15 @@ Publisher при новом claim использует число приняты
 операцию в очередь одним новым job, не запускает одновременно BullMQ retries и
 не закрывает частично опубликованный KC4 как failed. Перед отправкой URL и
 размеры SERP/history/membership повторно приводятся к точному Core contract.
+Statement-триггеры ревизии кэша позиций сначала схлопывают transition table до
+одной строки на workspace/project и только затем вычисляют `clock_timestamp()`.
+Поэтому массовая вставка KC4 snapshots увеличивает ревизию один раз и не падает
+с PostgreSQL cardinality violation на первом чанке.
+Повторный publish claim сохраняет последний encoded progress, сразу
+восстанавливает его из Core receipt и не сбрасывает UI с 100% на 0%.
+После последнего chunk операция переходит в отдельную фазу
+`finalizing_import`; Core finalization получает 30 секунд на connection и до
+300 секунд на транзакцию, а Jobs ждёт ответ до 360 секунд.
 Platform API принимает дерево папок до общего KC4 manifest-предела 20 000.
 Обычный list не берёт group-tree advisory lock при уже существующих системных
 папках, поэтому 5 000+ папок читаются во время фонового publish без 502/503.

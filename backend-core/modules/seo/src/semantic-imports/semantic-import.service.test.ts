@@ -80,7 +80,9 @@ test("bulk custom-value upsert supplies the required update timestamp", () => {
   }]);
   assert.match(query.sql, /"updated_at"/u);
   assert.match(query.sql, /CURRENT_TIMESTAMP/u);
-  assert.equal(query.values.length, 6);
+  assert.match(query.sql, /jsonb_to_recordset/u);
+  assert.match(query.sql, /IS DISTINCT FROM EXCLUDED\."text_value"/u);
+  assert.equal(query.values.length, 1);
 });
 
 test("bulk keyword overwrite is tenant-scoped and increments versions", () => {

@@ -42,7 +42,7 @@ import { KeywordService } from "../keywords/keyword.service.js";
 
 const SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS = 30_000;
 const SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS = 300_000;
-const SEMANTIC_IMPORT_CUSTOM_VALUE_BATCH_SIZE = 2_000;
+const SEMANTIC_IMPORT_CUSTOM_VALUE_BATCH_SIZE = 10_000;
 const SEMANTIC_IMPORT_KEYWORD_UPDATE_BATCH_SIZE = 1_000;
 
 interface ImportedCustomValue {
@@ -861,6 +861,9 @@ export class SemanticImportService {
         }
       });
       return result;
+    }, {
+      maxWait: SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS,
+      timeout: SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS
     });
     if (this.keywords) {
       void this.keywords
@@ -1145,6 +1148,17 @@ export function semanticImportCustomValueUpsertSql(
     throw new Error("Semantic import custom value batch is empty");
   }
   return Prisma.sql`
+    WITH "incoming" AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(batch)}::jsonb) AS "value"(
+        "workspaceId" uuid,
+        "projectId" uuid,
+        "keywordId" uuid,
+        "columnId" uuid,
+        "textValue" text,
+        "updatedBy" uuid
+      )
+    )
     INSERT INTO "semantic_keyword_custom_values" (
       "workspace_id",
       "project_id",
@@ -1154,20 +1168,22 @@ export function semanticImportCustomValueUpsertSql(
       "updated_by",
       "updated_at"
     )
-    VALUES ${Prisma.join(batch.map((entry) => Prisma.sql`(
-      ${entry.workspaceId}::uuid,
-      ${entry.projectId}::uuid,
-      ${entry.keywordId}::uuid,
-      ${entry.columnId}::uuid,
-      ${entry.textValue},
-      ${entry.updatedBy}::uuid,
+    SELECT
+      "workspaceId",
+      "projectId",
+      "keywordId",
+      "columnId",
+      "textValue",
+      "updatedBy",
       CURRENT_TIMESTAMP
-    )`))}
+    FROM "incoming"
     ON CONFLICT ("keyword_id", "column_id") DO UPDATE SET
       "text_value" = EXCLUDED."text_value",
       "updated_by" = EXCLUDED."updated_by",
       "version" = "semantic_keyword_custom_values"."version" + 1,
       "updated_at" = CURRENT_TIMESTAMP
+    WHERE "semantic_keyword_custom_values"."text_value"
+      IS DISTINCT FROM EXCLUDED."text_value"
   `;
 }
 

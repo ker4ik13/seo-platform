@@ -147,6 +147,7 @@ type UploadStage =
   | "validating"
   | "validation-ready"
   | "publishing"
+  | "finalizing"
   | "import-pending"
   | "preview"
   | "import-failed"
@@ -290,6 +291,7 @@ export function SemanticUpload({
     "parsing",
     "validating",
     "publishing",
+    "finalizing",
     "import-pending"
   ].includes(stage);
   const closeProtectionRequired = importInProgress || (
@@ -310,6 +312,7 @@ export function SemanticUpload({
     "parsing",
     "validating",
     "publishing",
+    "finalizing",
     "import-pending",
     "uploaded"
   ].includes(stage);
@@ -500,7 +503,10 @@ export function SemanticUpload({
         controller.signal,
         (summary) => {
           setActiveImportSourceFormat(summary.sourceFormat);
-          const nextStage = semanticImportActiveStage(summary.status);
+          const nextStage = semanticImportActiveStage(
+            summary.status,
+            summary.stage
+          );
           if (nextStage) setStage(nextStage);
           const next = semanticImportProgress(summary, uiLocale);
           setProgress(next.percent);
@@ -1993,13 +1999,15 @@ async function waitForSemanticImport(
 }
 
 function semanticImportActiveStage(
-  status: string
-): "parsing" | "validating" | "publishing" | undefined {
+  status: string,
+  detailStage?: string
+): "parsing" | "validating" | "publishing" | "finalizing" | undefined {
   if (["QUEUED", "PARSING"].includes(status)) return "parsing";
   if (status === "VALIDATING") return "validating";
   if (
     ["READY_TO_PUBLISH", "PUBLISHING", "CANCEL_REQUESTED"].includes(status)
   ) {
+    if (detailStage?.startsWith("finalizing_import:")) return "finalizing";
     return "publishing";
   }
   return undefined;
@@ -2031,6 +2039,12 @@ function semanticImportProgress(
   }
   if (parts[0] === "publishing_chunks") {
     return { percent: 0, detail: "Готовим публикацию…" };
+  }
+  if (parts[0] === "finalizing_import") {
+    return {
+      percent: 100,
+      detail: "Все чанки опубликованы. Завершаем версию семантического ядра…"
+    };
   }
   const progressBytes = Number(summary.progressBytes);
   const totalBytes = Number(summary.totalBytes);
@@ -2084,6 +2098,7 @@ function uploadStatus(stage: UploadStage, progress: number): string {
   if (stage === "validating") return "Проверяем строки, дубли и значения…";
   if (stage === "validation-ready") return "Проверка импорта готова";
   if (stage === "publishing") return "Публикуем семантическое ядро чанками…";
+  if (stage === "finalizing") return "Завершаем публикацию семантического ядра…";
   if (stage === "import-pending") return "Импорт обрабатывается в фоне";
   if (stage === "preview") return "Предпросмотр импорта готов";
   if (stage === "import-failed") return "Файл не удалось разобрать";

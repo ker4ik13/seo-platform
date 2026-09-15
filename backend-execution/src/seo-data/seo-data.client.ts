@@ -125,7 +125,8 @@ export class SeoDataClient {
   ): Promise<SemanticImportResultSummary> {
     const payload = await this.request(
       `/internal/v1/semantic-imports/${encodeURIComponent(input.importId)}/complete`,
-      input
+      input,
+      SEMANTIC_IMPORT_COMPLETION_COMMAND_TIMEOUT_MS
     );
     const result = importResult(payload);
     if (!result) throw new SeoDataClientError("UNAVAILABLE", true);
@@ -728,6 +729,7 @@ export class SeoDataClient {
 const RANK_SCOPE_RESPONSE_MAX_BYTES = 64 * 1_024;
 const SEMANTIC_NORMALIZE_RESPONSE_MAX_BYTES = 32 * 1_024 * 1_024;
 export const SEMANTIC_IMPORT_CHUNK_COMMAND_TIMEOUT_MS = 360_000;
+export const SEMANTIC_IMPORT_COMPLETION_COMMAND_TIMEOUT_MS = 360_000;
 const FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 const FREQUENCY_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
 const AI_ANSWER_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;

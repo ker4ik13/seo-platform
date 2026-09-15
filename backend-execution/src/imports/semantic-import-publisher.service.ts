@@ -135,7 +135,6 @@ export class SemanticImportPublisherService {
       },
       data: {
         status: "PUBLISHING",
-        stage: "publishing_chunks",
         publishingStartedAt: claimedAt,
         publishingHeartbeatAt: claimedAt,
         publishingCompletedAt: null,
@@ -250,6 +249,15 @@ export class SemanticImportPublisherService {
         "SEO_DATA_RECEIPT_UNAVAILABLE"
       );
     }
+    await this.heartbeat(
+      semanticImport.id,
+      claimedAt,
+      publishedRows,
+      uniqueRows,
+      chunkIndex,
+      expectedChunks,
+      false
+    );
     let afterHash = publishedRows === 0n
       ? undefined
       : await validatedHashAtOffset(
@@ -339,6 +347,16 @@ export class SemanticImportPublisherService {
         "IMPORT_PUBLISH_ROW_COUNT_MISMATCH"
       );
     }
+    await this.heartbeat(
+      semanticImport.id,
+      claimedAt,
+      publishedRows,
+      uniqueRows,
+      chunkIndex,
+      expectedChunks,
+      false,
+      "finalizing_import"
+    );
     const result = await this.seoData.completeImport({
       workspaceId: semanticImport.workspaceId,
       projectId: semanticImport.projectId,
@@ -661,7 +679,6 @@ export class SemanticImportPublisherService {
       },
       data: {
         status: "READY_TO_PUBLISH",
-        stage: "publish_retry_pending",
         publishingStartedAt: null,
         publishingHeartbeatAt: null,
         failure: { code: "IMPORT_DEPENDENCY_UNAVAILABLE" },
@@ -696,7 +713,9 @@ export class SemanticImportPublisherService {
     publishedRows: bigint,
     totalRows: bigint,
     publishedChunks: number,
-    totalChunks: number
+    totalChunks: number,
+    resetAttempts = true,
+    stage = "publishing_chunks"
   ): Promise<void> {
     const updated = await this.prisma.semanticImport.updateMany({
       where: {
@@ -706,8 +725,8 @@ export class SemanticImportPublisherService {
       },
       data: {
         publishingHeartbeatAt: new Date(),
-        stage: `publishing_chunks:${publishedRows}:${totalRows}:${publishedChunks}:${totalChunks}`,
-        publishingAttempts: 0
+        stage: `${stage}:${publishedRows}:${totalRows}:${publishedChunks}:${totalChunks}`,
+        ...(resetAttempts ? { publishingAttempts: 0 } : {})
       }
     });
     if (updated.count === 0) {

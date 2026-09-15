@@ -6,9 +6,14 @@ import {
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import {
+  SEMANTIC_IMPORT_COMPLETION_COMMAND_TIMEOUT_MS,
   SeoDataClient,
   SeoDataClientError
 } from "./seo-data.client.js";
+
+test("allows KC4 finalization the same bounded window as a rich chunk", () => {
+  assert.equal(SEMANTIC_IMPORT_COMPLETION_COMMAND_TIMEOUT_MS, 360_000);
+});
 
 const context = {
   workspaceId: "01900000-0000-7000-8000-000000000001",
