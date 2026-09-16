@@ -362,7 +362,7 @@ export function SemanticPositionDialog({
       browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
         rankRunsApiPath(projectId),
         { signal: controller.signal }
-      )
+      ).catch(() => ({ jobs: [] as readonly RankJobSummary[] }))
     ])
       .then(([trackingResult, workspaceResult, rankRuns]) => {
         if (controller.signal.aborted) return;

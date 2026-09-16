@@ -342,11 +342,8 @@ export function scopedRankJobSummary(
             finishedAt !== undefined &&
             result !== undefined &&
             failure?.code === "SUBMIT_OUTCOME_UNKNOWN" &&
-            result.persistedCount === "0" &&
-            result.foundCount === "0" &&
-            result.notFoundCount === "0" &&
-            result.failedCount === "0" &&
-            result.submitOutcomeUnknownCount === result.pairCount
+            BigInt(result.persistedCount) < BigInt(result.pairCount) &&
+            BigInt(result.submitOutcomeUnknownCount) > 0n
         );
         return redactRankJobSummary({
           ...base,
@@ -601,7 +598,7 @@ function rankJobResult(
     persistedCount > pairCount ||
     failedCount > pairCount ||
     unknownCount > pairCount ||
-    persistedCount + failedCount + unknownCount > pairCount
+    persistedCount + failedCount + unknownCount !== pairCount
   ) {
     throw invalidResponse();
   }

@@ -122,6 +122,38 @@ test("maps every current public manual rank lifecycle family", () => {
   }
 });
 
+test("accepts action-required rank Jobs after earlier chunks were persisted", () => {
+  const mapped = scopedRankJobSummary(
+    {
+      ...preparing,
+      status: "ACTION_REQUIRED",
+      stage: "SUBMIT_OUTCOME_UNKNOWN",
+      progress: { ...preparing.progress, current: "1", total: "3" },
+      result: {
+        pairCount: "3",
+        persistedCount: "1",
+        foundCount: "1",
+        notFoundCount: "0",
+        failedCount: "1",
+        submitOutcomeUnknownCount: "1"
+      },
+      failure: { code: "SUBMIT_OUTCOME_UNKNOWN" },
+      queuedAt: "2026-07-29T12:00:01.000Z",
+      startedAt: "2026-07-29T12:00:02.000Z",
+      finishedAt: "2026-07-29T12:00:03.000Z"
+    },
+    workspaceId,
+    projectId,
+    jobId
+  );
+
+  assert.equal(mapped.status, "ACTION_REQUIRED");
+  assert.equal(mapped.progress.current, "1");
+  assert.equal(mapped.result.persistedCount, "1");
+  assert.equal(mapped.result.failedCount, "1");
+  assert.equal(mapped.result.submitOutcomeUnknownCount, "1");
+});
+
 test("accepts and preserves safe rank execution presentation", () => {
   const mapped = scopedRankJobSummary(
     {
@@ -318,6 +350,10 @@ test("rejects contradictory lifecycle, counts and timestamps", () => {
     {
       ...actionRequired(),
       result: result({ submitOutcomeUnknownCount: "1" })
+    },
+    {
+      ...actionRequired(),
+      result: result({ submitOutcomeUnknownCount: "0" })
     },
     {
       ...preparing,
