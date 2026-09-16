@@ -2350,6 +2350,10 @@ result deep links. Web сохраняет это же название при о
 ### Platform admin: ручная подписка
 
 Admin BFF пропускает только явно перечисленные workspace и billing paths.
+Browser client при 401 один раз выполняет `/admin/api/auth/refresh` через тот
+же cross-tab lock, что основное приложение, повторяет исходный запрос и
+обновляет CSRF header mutation-команды; форма входа появляется только после
+реального отказа refresh session.
 Core проверяет platform role независимо от tenant membership; чтение доступно
 операционным/support/finance ролям, изменение подписки — только `FINANCE` или
 `SUPER_ADMIN`. Запись `billing_subscriptions`, redacted `audit_events` и

@@ -67,6 +67,12 @@ const defaultScopes: readonly ApiTokenScope[] = [
   "frequency:run"
 ];
 
+const clientDashboardScopes: readonly ApiTokenScope[] = [
+  "projects:read",
+  "semantics:read",
+  "positions:read"
+];
+
 interface Draft {
   readonly name: string;
   readonly scopes: readonly ApiTokenScope[];
@@ -206,6 +212,13 @@ export function ApiTokenSettings({
     setDraft({
       ...draft,
       scopes: apiTokenScopes.filter((scope) => scope.endsWith(":read"))
+    });
+  }
+
+  function setClientDashboardScopes(): void {
+    setDraft({
+      ...draft,
+      scopes: clientDashboardScopes
     });
   }
 
@@ -475,6 +488,12 @@ export function ApiTokenSettings({
                 <p><UiText text="Выдавайте только те операции, которые нужны интеграции." /></p>
               </div>
               <div className={styles.quickActions}>
+                <button
+                  className="text-button"
+                  onClick={setClientDashboardScopes}
+                  type="button"
+                >
+                  <UiText text="Клиентская витрина" /></button>
                 <button
                   className="text-button"
                   onClick={setReadOnlyScopes}

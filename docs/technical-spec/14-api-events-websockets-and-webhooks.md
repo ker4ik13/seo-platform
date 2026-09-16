@@ -1083,6 +1083,16 @@ scope. `operation-estimates` выбирает required scope из allowlisted
 preferences, realtime tickets, account/team/billing и управление API tokens
 остаются session-only.
 
+Для внешнего клиентского кабинета достаточно project-restricted token со
+scopes `projects:read`, `semantics:read`, `positions:read`. После discovery он
+читает дерево папок, keyword pages с `targetUrl`, частотностями и текущими
+позициями, каталог rank dimensions и read-only
+`POST rank-workbench/positions`. Последний возвращает готовую cursor-paginated
+матрицу `query/groupPath/targetUrl/frequencies/cells`, где каждая дата содержит
+позицию, предыдущую позицию, ranking URL и время наблюдения. Эти read-only POST
+queries принимают Bearer без cookie и CSRF и не дают ключу права запускать
+съём либо менять проект.
+
 Identifier-free discovery выполняется через token-only
 `GET /api/v1/access`. Запрос не содержит workspace/project ID и возвращает
 metadata текущего ключа, одну workspace (personal token всегда tenant-bound)

@@ -429,7 +429,10 @@ export function SemanticCoreTable({
   const [page, setPage] = useState<BrowserCursorPage>({
     hasNext: false
   });
-  const [rootTotal, setRootTotal] = useState<number>();
+  const [rootTotal, setRootTotal] = useState<Readonly<{
+    projectId: string;
+    value: number;
+  }>>();
   const [draftConfig, setDraftConfig] = useState<SemanticViewConfig>(
     defaultSemanticViewConfig
   );
@@ -1045,7 +1048,6 @@ export function SemanticCoreTable({
       return;
     }
     const controller = new AbortController();
-    setRootTotal(undefined);
     void loadKeywordPage(
       projectId,
       {
@@ -1060,7 +1062,15 @@ export function SemanticCoreTable({
     )
       .then((result) => {
         if (!controller.signal.aborted) {
-          setRootTotal(result.page.totalApprox ?? result.data.length);
+          const nextTotal = result.page.totalApprox ??
+            (!result.page.hasNext ? result.data.length : undefined);
+          if (nextTotal !== undefined) {
+            setRootTotal((current) =>
+              current?.projectId === projectId && current.value === nextTotal
+                ? current
+                : { projectId, value: nextTotal }
+            );
+          }
         }
       })
       .catch(() => undefined);
@@ -3461,7 +3471,9 @@ export function SemanticCoreTable({
     setRightSidebar({ type: "OPERATIONS" });
   }
 
-  const total = rootTotal;
+  const total = rootTotal?.projectId === projectId
+    ? rootTotal.value
+    : undefined;
   const filteredTotal = page.totalApprox;
   const projectOptions = projects.some(({ id }) => id === projectId)
     ? projects
@@ -3514,7 +3526,7 @@ export function SemanticCoreTable({
   const activeGroupIsEmpty = activeGroup?.keywordCount === 0;
   const activeScopeIsEmpty = activeGroup
     ? activeGroupIsEmpty
-    : rootTotal === 0;
+    : total === 0;
   const canAddToActiveScope =
     activeScopeIsEmpty && activeGroup?.systemKind !== "TRASH";
   const emptyTableContent = items.length === 0 ? (
@@ -3663,7 +3675,7 @@ export function SemanticCoreTable({
     .filter(({ systemKind }) => !systemKind)
     .find(({ id }) => id === viewConfig.filters.groupId);
   const mutationIds = actionIds ?? checkedIds;
-  const projectHasKeywords = (rootTotal ?? items.length) > 0;
+  const projectHasKeywords = (total ?? items.length) > 0;
   const commandMenuItems: readonly ContextMenuItem[] = commandMenu
     ? commandMenu.kind === "WORDSTAT"
       ? [
@@ -4011,9 +4023,9 @@ export function SemanticCoreTable({
           <span><UiText text="Сбор конкурентов" /></span>
           <Icon className="semantic-command-chevron" name="chevronDown" />
         </button>
-        <button className={activityButtonClass("SEMANTIC_CLUSTERING")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:clustering" disabled={(rootTotal ?? items.length) === 0} onClick={() => setClusteringDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? uiText("В проекте пока нет запросов") : uiText("Разбить выбранные запросы или папки на группы по выдаче")} type="button"><Icon name="cluster" /><UiText text="Кластеризовать" /></button>
-        <button className={activityButtonClass("SEMANTIC_NEGATIVE_KEYWORDS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:negative-keywords" disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title={uiText("Найти запросы по минус-словам и переместить их в корзину")} type="button"><Icon name="warning" /><UiText text="Минус-слова" /></button>
-        <button className={activityButtonClass("SEMANTIC_DUPLICATES")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:duplicates" disabled={(rootTotal ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title={uiText("Найти фразы с одинаковым набором слов и удалить лишние варианты")} type="button"><Icon name="checkDouble" /><UiText text="Дубли" /></button>
+        <button className={activityButtonClass("SEMANTIC_CLUSTERING")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:clustering" disabled={(total ?? items.length) === 0} onClick={() => setClusteringDialogOpen(true)} title={(total ?? items.length) === 0 ? uiText("В проекте пока нет запросов") : uiText("Разбить выбранные запросы или папки на группы по выдаче")} type="button"><Icon name="cluster" /><UiText text="Кластеризовать" /></button>
+        <button className={activityButtonClass("SEMANTIC_NEGATIVE_KEYWORDS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:negative-keywords" disabled={(total ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title={uiText("Найти запросы по минус-словам и переместить их в корзину")} type="button"><Icon name="warning" /><UiText text="Минус-слова" /></button>
+        <button className={activityButtonClass("SEMANTIC_DUPLICATES")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:duplicates" disabled={(total ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title={uiText("Найти фразы с одинаковым набором слов и удалить лишние варианты")} type="button"><Icon name="checkDouble" /><UiText text="Дубли" /></button>
         <button className={activityButtonClass("SEMANTIC_DELETE", "danger")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:delete" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" /><UiText text="Удалить" /></button>
         {checkedIds.size > 0 && (
           <div className="semantic-selection-chip" role="status">

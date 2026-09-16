@@ -11,18 +11,32 @@ const ROLE_COLUMNS = [
   ["VIEWER", "Наблюдатель"]
 ] as const;
 
-const CAPABILITIES = [
-  ["Управление рабочей областью", "Да", "Частично", "—", "—", "—", "—", "—", "—"],
-  ["Участники и роли", "Да", "Да", "Просмотр", "—", "—", "—", "—", "—"],
-  ["Биллинг", "Да", "По разрешению", "Расходы", "—", "—", "—", "—", "—"],
-  ["Создание проектов", "Да", "Да", "Да", "По разрешению", "—", "—", "—", "—"],
-  ["Семантика", "Да", "Да", "Да", "Да", "Просмотр / экспорт", "Ограниченно", "—", "Просмотр"],
-  ["Платные операции", "Да", "Да", "Да", "По лимиту", "—", "—", "—", "—"],
-  ["Позиции и аналитика", "Да", "Да", "Да", "Да", "Да", "Просмотр", "Отчёты", "Просмотр"],
-  ["Страницы и контент", "Да", "Да", "Да", "Да", "Просмотр", "Да", "Комментарии", "Просмотр"],
-  ["Интеграции", "Да", "Да", "Использование", "Использование", "—", "—", "—", "—"],
-  ["Автоматизации", "Да", "Да", "Да", "По разрешению", "—", "—", "—", "—"]
-] as const;
+type RoleAccess =
+  | "NONE"
+  | "VIEW"
+  | "EDIT"
+  | "EDIT_LIMITED"
+  | "VIEW_EXPORT"
+  | "CREATE"
+  | "RUN"
+  | "RUN_LIMITED"
+  | "USE"
+  | "COMMENTS"
+  | "REPORTS"
+  | "COSTS";
+
+const CAPABILITIES: readonly [string, ...RoleAccess[]][] = [
+  ["Рабочая область", "EDIT", "EDIT_LIMITED", "VIEW", "VIEW", "VIEW", "VIEW", "VIEW", "VIEW"],
+  ["Участники и роли", "EDIT", "EDIT", "VIEW", "NONE", "NONE", "NONE", "NONE", "NONE"],
+  ["Биллинг", "EDIT", "EDIT_LIMITED", "COSTS", "NONE", "NONE", "NONE", "NONE", "NONE"],
+  ["Проекты", "EDIT", "EDIT", "EDIT", "EDIT_LIMITED", "VIEW", "VIEW", "VIEW", "VIEW"],
+  ["Семантика", "EDIT", "EDIT", "EDIT", "EDIT", "VIEW_EXPORT", "EDIT_LIMITED", "NONE", "VIEW"],
+  ["Платные операции", "RUN", "RUN", "RUN", "RUN_LIMITED", "NONE", "NONE", "NONE", "NONE"],
+  ["Позиции и аналитика", "EDIT", "EDIT", "EDIT", "EDIT", "VIEW_EXPORT", "VIEW", "REPORTS", "VIEW"],
+  ["Страницы и контент", "EDIT", "EDIT", "EDIT", "EDIT", "VIEW", "EDIT", "COMMENTS", "VIEW"],
+  ["Интеграции", "EDIT", "EDIT", "USE", "USE", "NONE", "NONE", "NONE", "NONE"],
+  ["Автоматизации", "EDIT", "EDIT", "EDIT", "VIEW", "NONE", "NONE", "NONE", "NONE"]
+];
 
 export function WorkspaceRoleCatalog({
   currentRoleCode
@@ -70,7 +84,7 @@ export function WorkspaceRoleCatalog({
                       className={ROLE_COLUMNS[index]?.[0] === currentRoleCode ? "current" : undefined}
                       key={`${capability}:${ROLE_COLUMNS[index]?.[0]}`}
                     >
-                      <UiText text={value} />
+                      <RoleAccessPresentation value={value} />
                     </td>
                   ))}
                 </tr>
@@ -109,6 +123,45 @@ export function WorkspaceRoleCatalog({
       </section>
     </div>
   );
+}
+
+function RoleAccessPresentation({ value }: Readonly<{ value: RoleAccess }>) {
+  if (value === "NONE") {
+    return <span className="workspace-role-access none">—</span>;
+  }
+  const [primary, secondary] = roleAccessLabels(value);
+  return (
+    <span className={`workspace-role-access ${roleAccessTone(value)}`}>
+      <span><UiText text={primary} /></span>
+      {secondary && <strong><UiText text={secondary} /></strong>}
+    </span>
+  );
+}
+
+function roleAccessLabels(value: Exclude<RoleAccess, "NONE">): readonly [string, string?] {
+  switch (value) {
+    case "VIEW": return ["Просмотр"];
+    case "EDIT": return ["Просмотр", "Редактирование"];
+    case "EDIT_LIMITED": return ["Просмотр", "Ограниченное редактирование"];
+    case "VIEW_EXPORT": return ["Просмотр", "Экспорт"];
+    case "CREATE": return ["Просмотр", "Создание"];
+    case "RUN": return ["Просмотр", "Запуск"];
+    case "RUN_LIMITED": return ["Просмотр", "Запуск по лимиту"];
+    case "USE": return ["Просмотр", "Использование"];
+    case "COMMENTS": return ["Просмотр", "Комментарии"];
+    case "REPORTS": return ["Просмотр отчётов"];
+    case "COSTS": return ["Просмотр расходов"];
+  }
+}
+
+function roleAccessTone(value: Exclude<RoleAccess, "NONE">): "view" | "edit" | "action" {
+  if (["VIEW", "VIEW_EXPORT", "REPORTS", "COSTS"].includes(value)) {
+    return "view";
+  }
+  if (["RUN", "RUN_LIMITED", "USE", "COMMENTS", "CREATE"].includes(value)) {
+    return "action";
+  }
+  return "edit";
 }
 
 function roleLabel(roleCode: string | undefined): string {

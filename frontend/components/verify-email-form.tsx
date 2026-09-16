@@ -28,6 +28,8 @@ interface AcceptedOperation {
   readonly verificationTokenForDevelopment?: string;
 }
 
+const VERIFICATION_RESEND_COOLDOWN_MS = 60_000;
+
 export function VerifyEmailForm({
   initialEmail,
   initialReturnTo
@@ -42,6 +44,8 @@ export function VerifyEmailForm({
   const [resending, setResending] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const [resendAvailableAt, setResendAvailableAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const automaticVerificationStarted = useRef(false);
   const verificationInFlight = useRef(false);
 
@@ -62,6 +66,7 @@ export function VerifyEmailForm({
         if (!result.emailVerificationRequired) {
           sessionStorage.removeItem("development-verification-token");
           sessionStorage.removeItem("pending-verification-email");
+          sessionStorage.removeItem("pending-verification-sent-at");
           const pendingInvite = sessionStorage.getItem(
             "pending-workspace-invite-token"
           );
@@ -108,12 +113,28 @@ export function VerifyEmailForm({
     const developmentToken = sessionStorage.getItem(
       "development-verification-token"
     );
+    const sentAt = Number(
+      sessionStorage.getItem("pending-verification-sent-at") ?? "0"
+    );
+    if (Number.isFinite(sentAt) && sentAt > 0) {
+      setResendAvailableAt(sentAt + VERIFICATION_RESEND_COOLDOWN_MS);
+    }
     setToken(developmentToken || "");
     if (fragment.token && !automaticVerificationStarted.current) {
       automaticVerificationStarted.current = true;
       void confirmToken(fragment.token);
     }
   }, [confirmToken]);
+
+  useEffect(() => {
+    if (resendAvailableAt <= Date.now()) return;
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= resendAvailableAt) window.clearInterval(timer);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [resendAvailableAt]);
 
   async function verify(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -140,9 +161,20 @@ export function VerifyEmailForm({
           result.verificationTokenForDevelopment
         );
       }
-      setMessage("Новая ссылка отправлена. Проверьте почту.");
-    } catch {
-      setError("Не удалось отправить ссылку. Попробуйте позже.");
+      const sentAt = Date.now();
+      sessionStorage.setItem("pending-verification-sent-at", String(sentAt));
+      setNow(sentAt);
+      setResendAvailableAt(sentAt + VERIFICATION_RESEND_COOLDOWN_MS);
+      setMessage(
+        "Запрос принят. Доставка может занять несколько минут. Проверьте папку «Спам» и используйте самую новую ссылку."
+      );
+    } catch (requestError) {
+      setError(
+        requestError instanceof BrowserApiError &&
+          requestError.code === "RATE_LIMITED"
+          ? "Слишком много запросов. Подождите несколько минут и повторите."
+          : "Не удалось отправить ссылку. Попробуйте позже."
+      );
     } finally {
       setResending(false);
     }
@@ -187,12 +219,18 @@ export function VerifyEmailForm({
       </button>
       <button
         className="secondary-button auth-submit"
-        disabled={!email || resending}
+        disabled={!email || resending || resendAvailableAt > now}
         onClick={resend}
         type="button"
       >
-        {resending ? <UiText text="Отправляем…" /> : <UiText text="Отправить ссылку повторно" />}
+        {resending
+          ? <UiText text="Отправляем…" />
+          : resendAvailableAt > now
+            ? <UiText text="Повторить через {0} с" values={[String(Math.ceil((resendAvailableAt - now) / 1_000))]} />
+            : <UiText text="Отправить ссылку повторно" />}
       </button>
+      <small className="auth-delivery-note">
+        <UiText text="Письмо отправляется через очередь и может задержаться у почтового провайдера. Не запрашивайте несколько ссылок подряд." /></small>
       <p className="auth-switch">
         <a href="/app/login"><UiText text="Вернуться ко входу" /></a>
       </p>

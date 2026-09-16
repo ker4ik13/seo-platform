@@ -99,6 +99,10 @@ export function AuthForm({
       if (result.emailVerificationRequired) {
         sessionStorage.setItem("pending-verification-email", email);
         sessionStorage.setItem(
+          "pending-verification-sent-at",
+          String(Date.now())
+        );
+        sessionStorage.setItem(
           "pending-verification-return-to",
           safeAppReturnTo(returnTo)
         );

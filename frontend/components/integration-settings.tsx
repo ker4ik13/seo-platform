@@ -20,6 +20,7 @@ import {
 } from "../lib/integration-presentation";
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
 import { ProviderLogo } from "./provider-logo";
+import { SemanticModal } from "./semantic-modal";
 import { WorkspaceIntegrationRouting } from "./workspace-integration-routing";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -526,38 +527,16 @@ export function IntegrationSettings({
       </section>
 
       {canManage && showCreate ? (
-        <div
-          className="integration-dialog-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !saving) {
-              setShowCreate(false);
-            }
-          }}
+        <SemanticModal
+          bodyClassName="integration-credential-modal-body"
+          className="integration-credential-modal"
+          closeDisabled={saving}
+          description="Браузер передаёт ключ в same-origin API по защищённому HTTPS-соединению. Секрет шифруется внутри сервиса интеграций и больше не показывается."
+          onClose={() => setShowCreate(false)}
+          size="large"
+          title="Новое подключение"
         >
-        <section
-          aria-busy={saving}
-          className="panel integration-connect-card"
-          id="new-integration"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="new-integration-title"
-        >
-          <header className="security-card-header">
-            <div>
-              <h2 id="new-integration-title"><UiText text="Новое подключение" /></h2>
-              <p>
-                <UiText text="Браузер передаёт ключ в same-origin API по защищённому HTTPS-соединению. Внутри платформы секрет обрабатывается сервисом интеграций и сохраняется через AES-256-GCM." /></p>
-            </div>
-            <button
-              aria-label={uiText("Закрыть окно")}
-              className="integration-dialog-close"
-              disabled={saving}
-              onClick={() => setShowCreate(false)}
-              type="button"
-            >
-              ×
-            </button>
-          </header>
+        <div aria-busy={saving} className="integration-connect-card" id="new-integration">
           {createError && (
             <IntegrationErrorAlert error={createError} />
           )}
@@ -577,12 +556,20 @@ export function IntegrationSettings({
                     withoutFieldError(current, "accountIdentifier")
                   );
                 }}
+                popoverClassName="integration-provider-select-popover"
+                popoverMinWidth={360}
                 required
                 value={draft.provider}
               >
                 {catalog.map((item) => (
                   <option key={item.provider} value={item.provider}>
-                    {item.displayName}
+                    <span className="integration-provider-select-option">
+                      <ProviderLogo provider={item.provider} size="compact" />
+                      <span>
+                        <strong>{item.displayName}</strong>
+                        <small>{item.description}</small>
+                      </span>
+                    </span>
                   </option>
                 ))}
               </CustomSelect>
@@ -698,6 +685,12 @@ export function IntegrationSettings({
             </label>
           </div>
           <div className="integration-form-actions">
+            <span>
+              {selectedProvider?.credentialValidationMode ===
+              "ACCOUNT_METADATA"
+                ? <UiText text="После сохранения запустите безопасную проверку подключения в списке ниже." />
+                : <UiText text="Для XMLStock автоматическая внешняя проверка пока недоступна; подключение останется «ожидает проверки»." />}
+            </span>
             <button
               className="primary-button"
               disabled={saving}
@@ -706,15 +699,9 @@ export function IntegrationSettings({
             >
               {saving ? <UiText text="Шифруем…" /> : <UiText text="Сохранить ключ" />}
             </button>
-            <span>
-              {selectedProvider?.credentialValidationMode ===
-              "ACCOUNT_METADATA"
-                ? <UiText text="После сохранения запустите безопасную проверку подключения в списке ниже." />
-                : <UiText text="Для XMLStock автоматическая внешняя проверка пока недоступна; подключение останется «ожидает проверки»." />}
-            </span>
           </div>
-        </section>
         </div>
+        </SemanticModal>
       ) : (
         !canManage && <div className="inline-alert warning">
           {readOnly

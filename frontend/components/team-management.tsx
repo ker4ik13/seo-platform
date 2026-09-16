@@ -1,6 +1,8 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
+import { ProjectFavicon } from "./project-favicon";
 
 import {
   assignableWorkspaceRoleCodes,
@@ -884,6 +886,7 @@ export function TeamManagement({
         }}
         online={online}
         operation={operation}
+        projects={safeProjects}
         state={invites}
       />
 
@@ -937,7 +940,7 @@ function MembersPanel({
 }>) {
   const { t: uiText } = useUiLocale();
   return (
-    <section className="panel security-card">
+    <section className="panel security-card team-members-panel">
       <header className="security-card-header">
         <div>
           <h2><UiText text="Участники" /></h2>
@@ -960,7 +963,7 @@ function MembersPanel({
         state={state}
       >
         {(items) => (
-          <ul className="session-list">
+          <ul className="session-list team-member-grid">
             {items.map((member) => (
               <MemberRow
                 canMutate={canMutate}
@@ -995,6 +998,7 @@ function InvitesPanel({
   canMutate,
   online,
   operation,
+  projects,
   state,
   onLoadMore,
   onReload,
@@ -1003,6 +1007,7 @@ function InvitesPanel({
   canMutate: boolean;
   online: boolean;
   operation: string | undefined;
+  projects: readonly AppProject[];
   state: TeamCollectionState<WorkspaceInviteSummary>;
   onLoadMore: () => void;
   onReload: () => void;
@@ -1010,7 +1015,7 @@ function InvitesPanel({
 }>) {
   const { t: uiText } = useUiLocale();
   return (
-    <section className="panel security-card">
+    <section className="panel security-card team-invites-panel">
       <header className="security-card-header">
         <div>
           <h2><UiText text="Ожидающие приглашения" /></h2>
@@ -1033,7 +1038,7 @@ function InvitesPanel({
         state={state}
       >
         {(items) => (
-          <ul className="session-list">
+          <ul className="session-list team-invite-grid">
             {items.map((invite) => (
               <InviteRow
                 canMutate={canMutate}
@@ -1041,6 +1046,7 @@ function InvitesPanel({
                 key={invite.id}
                 onRevoke={() => onRevoke(invite)}
                 operation={operation}
+                projects={projects}
               />
             ))}
           </ul>
@@ -1238,6 +1244,10 @@ function ProjectAccessEditor({
       ),
     [assignments]
   );
+  const projectById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project] as const)),
+    [projects]
+  );
   const explicitCount = allProjects
     ? assignments.length
     : assignments.filter(({ level }) => level !== "NONE").length;
@@ -1309,17 +1319,23 @@ function ProjectAccessEditor({
             return (
               <li className="team-project-access-row" key={project.id}>
                 <div className="team-project-access-copy">
-                  <div className="session-row-title">
-                    <strong>{project.name}</strong>
-                    {!project.listed && (
-                      <span className="security-status"><UiText text="Вне подборки" /></span>
-                    )}
-                    {project.status === "ARCHIVED" && (
-                      <span className="security-status"><UiText text="Архив" /></span>
-                    )}
-                  </div>
-                  <div className="session-network-metadata">
-                    {project.domain && <span>{project.domain}</span>}
+                  <TeamProjectMark
+                    name={project.name}
+                    project={projectById.get(project.id)}
+                  />
+                  <div className="team-project-access-details">
+                    <div className="session-row-title">
+                      <strong>{project.name}</strong>
+                      {!project.listed && (
+                        <span className="security-status"><UiText text="Вне подборки" /></span>
+                      )}
+                      {project.status === "ARCHIVED" && (
+                        <span className="security-status"><UiText text="Архив" /></span>
+                      )}
+                    </div>
+                    <div className="session-network-metadata">
+                      {project.domain && <span>{project.domain}</span>}
+                    </div>
                   </div>
                 </div>
                 <label className="form-field">
@@ -1359,6 +1375,97 @@ function ProjectAccessEditor({
         </small>
       )}
     </fieldset>
+  );
+}
+
+function MemberProjectAccessCards({
+  allProjects,
+  canRevoke,
+  projectAccesses,
+  projects,
+  onRevoke
+}: Readonly<{
+  allProjects: boolean;
+  canRevoke: boolean;
+  projectAccesses: readonly ProjectAccessAssignment[];
+  projects: readonly AppProject[];
+  onRevoke: (projectId: string) => void;
+}>) {
+  const { t: uiText } = useUiLocale();
+  const accessByProject = new Map(
+    projectAccesses.map(({ projectId, level }) => [projectId, level] as const)
+  );
+  const visible = projects.flatMap((project) => {
+    const explicit = accessByProject.get(project.id);
+    if (allProjects) {
+      return explicit === "NONE"
+        ? []
+        : [{ project, level: explicit ?? "INHERIT" as const }];
+    }
+    return explicit && explicit !== "NONE"
+      ? [{ project, level: explicit }]
+      : [];
+  });
+  const lastExplicitProject = !allProjects && visible.length <= 1;
+
+  return (
+    <section className="team-member-projects" aria-label={uiText("Доступ к проектам")}>
+      <header>
+        <strong><UiText text="Проекты" /></strong>
+        <span>{visible.length}</span>
+      </header>
+      {visible.length === 0 ? (
+        <p><UiText text="Нет доступных проектов" /></p>
+      ) : (
+        <div className="team-member-project-grid">
+          {visible.map(({ project, level }) => (
+            <article className="team-member-project-card" key={project.id}>
+              <TeamProjectMark name={project.name} project={project} />
+              <span>
+                <strong title={project.name}>{project.name}</strong>
+                <small>{level === "INHERIT"
+                  ? <UiText text="По системной роли" />
+                  : <UiText text={projectAccessLabel(level) ?? ""} />}</small>
+              </span>
+              {canRevoke && (
+                <button
+                  aria-label={uiText("Отозвать доступ к проекту {0}", [String(project.name)])}
+                  disabled={lastExplicitProject}
+                  onClick={() => onRevoke(project.id)}
+                  title={lastExplicitProject
+                    ? uiText("У участника должен остаться хотя бы один проект")
+                    : uiText("Отозвать доступ")}
+                  type="button"
+                >
+                  <Icon name="close" />
+                </button>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TeamProjectMark({
+  name,
+  project
+}: Readonly<{
+  name: string;
+  project: Pick<AppProject, "id" | "version" | "logoSource"> | undefined;
+}>) {
+  return (
+    <span aria-hidden="true" className="team-project-mark">
+      <span>{projectInitial(name)}</span>
+      {project?.logoSource && (
+        <ProjectFavicon
+          className="team-project-logo"
+          project={project}
+          size={30}
+        />
+      )}
+    </span>
   );
 }
 
@@ -1415,7 +1522,7 @@ function MemberRow({
   ]);
 
   return (
-    <li className={current ? "session-row current" : "session-row"}>
+    <li className={`session-row team-member-card${current ? " current" : ""}${accessExpanded ? " access-expanded" : ""}`}>
       <span aria-hidden="true" className="session-device-mark">
         {memberInitials(member.displayName)}
       </span>
@@ -1439,6 +1546,28 @@ function MemberRow({
             </span>
           )}
         </div>
+        <MemberProjectAccessCards
+          allProjects={allProjects}
+          canRevoke={canMutate && !owner && !operation}
+          onRevoke={(projectId) => {
+            const nextProjectAccesses = setTeamProjectAccess(
+              accessDraft,
+              projectId,
+              allProjects ? "NONE" : undefined
+            );
+            const nextDraft = {
+              allProjects,
+              projectAccesses: nextProjectAccesses
+            };
+            if (validateTeamProjectAccess(nextDraft)) return;
+            onUpdate(teamMemberUpdateInput(
+              roleCode as AssignableWorkspaceRoleCode,
+              nextDraft
+            ));
+          }}
+          projectAccesses={projectAccesses}
+          projects={projects}
+        />
         <label className="form-field">
           <span><UiText text="Системная роль" /></span>
           <CustomSelect
@@ -1526,17 +1655,19 @@ function InviteRow({
   canMutate,
   invite,
   operation,
+  projects,
   onRevoke
 }: Readonly<{
   canMutate: boolean;
   invite: WorkspaceInviteSummary;
   operation: string | undefined;
+  projects: readonly AppProject[];
   onRevoke: () => void;
 }>) {
   const uiLocale = useUiLocale().locale;
   const busy = operation === `invite:revoke:${invite.id}`;
   return (
-    <li className="session-row">
+    <li className="session-row team-invite-card-compact">
       <span aria-hidden="true" className="session-device-mark unknown">
         @
       </span>
@@ -1559,6 +1690,13 @@ function InviteRow({
             </time>
           </span>
         </div>
+        <MemberProjectAccessCards
+          allProjects={invite.allProjects}
+          canRevoke={false}
+          onRevoke={() => undefined}
+          projectAccesses={invite.projectAccesses}
+          projects={projects}
+        />
         <div className="security-actions">
           <button
             className="danger-button"
@@ -1932,6 +2070,10 @@ function memberInitials(displayName: string): string {
     .map((part) => part.at(0)?.toUpperCase() ?? "")
     .join("");
   return initials || "?";
+}
+
+function projectInitial(name: string): string {
+  return name.trim().at(0)?.toLocaleUpperCase("ru-RU") ?? "•";
 }
 
 function formatTeamDate(value: string, uiLocale: string = "ru-RU"): string {

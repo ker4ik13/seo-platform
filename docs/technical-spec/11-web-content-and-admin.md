@@ -113,6 +113,13 @@ Admin responses `no-store/noindex`; BFF не принимает произвол
 URL и не пересылает internal service tokens. Error output и audit metadata не
 содержат auth/payment/provider secrets или лишние PII.
 
+Обычное истечение короткой access session не возвращает администратора на
+форму входа: `/admin/api/**` выполняет ту же координированную refresh-ротацию,
+что `/app`, повторяет исходный запрос один раз и для mutation подставляет новый
+CSRF token. Повторная аутентификация требуется только когда refresh session
+действительно истекла, отозвана либо high-risk операция явно требует recent
+authentication/MFA.
+
 ## 7. Контентная модель
 
 Типизированный public content содержит:

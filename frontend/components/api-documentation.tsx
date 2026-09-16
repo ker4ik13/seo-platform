@@ -296,7 +296,7 @@ function QuickStart({ baseUrl }: Readonly<{ baseUrl: string }>) {
     "token": {
       "id": "<tokenId>",
       "name": "SEO-агент",
-      "scopes": ["semantics:read", "positions:run"],
+      "scopes": ["projects:read", "semantics:read", "positions:read"],
       "allProjects": false
     },
     "workspace": {
@@ -672,6 +672,49 @@ function Positions({ baseUrl }: Readonly<{ baseUrl: string }>) {
         title={uiText("Позиции и конкуренты")}
       />
       <RouteSummary section="positions" />
+      <Section title={uiText("Read-only API для внешнего клиентского кабинета")}>
+        <p>
+          <UiText text="Для витрины наподобие таблицы позиций создайте отдельный API-ключ только со scopes" after=" " />
+          <code>projects:read</code>, <code>semantics:read</code> <UiText text="и" before=" " after=" " />
+          <code>positions:read</code><UiText text=". Ограничьте ключ нужными проектами. Такой ключ может читать семантику, папки, целевые URL, частотности, города, устройства и историю позиций, но не может запускать сборы или изменять данные." />
+        </p>
+        <CodeBlock
+          code={`# 1. Найти доступный проект
+curl "${baseUrl}/access" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"
+
+# 2. Получить дерево папок и семантику с целевыми URL
+curl "${baseUrl}/projects/<projectId>/keyword-groups" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"
+curl "${baseUrl}/projects/<projectId>/keywords?limit=200" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"
+
+# 3. Получить точные срезы поисковик · город · устройство
+curl "${baseUrl}/projects/<projectId>/keyword-ranks/dimensions" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN"`}
+          language="bash"
+          title={uiText("Базовые данные витрины")}
+        />
+        <CodeBlock
+          code={`curl -X POST "${baseUrl}/projects/<projectId>/rank-workbench/positions" \\
+  -H "Authorization: Bearer $SEO_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "mode": "SEO",
+    "dimensionKey": "<key из keyword-ranks/dimensions>",
+    "observedFrom": "2026-06-01T00:00:00.000Z",
+    "observedBefore": "2026-09-17T00:00:00.000Z",
+    "dateLimit": 14,
+    "limit": 100,
+    "sort": "POSITION_ASC"
+  }'`}
+          language="bash"
+          title={uiText("Матрица для таблицы клиента")}
+        />
+        <Callout title={uiText("Что уже возвращается")}>
+          <code>rows[]</code> <UiText text="содержит keywordId, запрос, язык, путь папки, targetUrl, три частотности и cells по датам. В каждой ячейке доступны found, position, previousPosition, rankingUrl и observedAt. Для следующей страницы передавайте непрозрачный page.nextCursor без разбора его содержимого." />
+        </Callout>
+      </Section>
       <Flow steps={["Контекст", "Оценка", "Запуск", "Результат"]} />
       <Section title={uiText("Сводка позиций проекта")}>
         <p>

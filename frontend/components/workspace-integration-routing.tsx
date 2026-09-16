@@ -17,6 +17,7 @@ import {
 } from "../lib/browser-api";
 import {
   integrationCapabilityLabel,
+  integrationCredentialModeLabel,
   integrationProviderLabel
 } from "../lib/integration-presentation";
 import { CustomSelect } from "./custom-select";
@@ -396,6 +397,8 @@ function CapabilityRoutingRow({
                     : current.fallbackReasons
               };
             })}
+            popoverClassName="integration-credential-select-popover"
+            popoverMinWidth={440}
             searchable
             value=""
           >
@@ -414,8 +417,19 @@ function CapabilityRoutingRow({
                 key={credential.id}
                 value={credential.id}
               >
-                {<UiText text={integrationProviderLabel(credential.provider) ?? ""} />} · {credential.label}
-                {credential.status === "ACTIVE" ? "" : <UiText text="· недоступно" before=" " />}
+                <span className="integration-credential-select-option">
+                  <ProviderLogo provider={credential.provider} size="compact" />
+                  <span className="integration-credential-select-copy">
+                    <strong>{<UiText text={integrationProviderLabel(credential.provider) ?? ""} />}</strong>
+                    <small>{<UiText text={integrationCredentialModeLabel(credential.mode) ?? ""} />}</small>
+                  </span>
+                  <span className="integration-credential-select-badges">
+                    <span className="integration-credential-label-chip">{credential.label}</span>
+                    {credential.status === "ACTIVE"
+                      ? null
+                      : <span className="integration-credential-unavailable-chip"><UiText text="Недоступно" /></span>}
+                  </span>
+                </span>
               </option>
             ))}
           </CustomSelect>
