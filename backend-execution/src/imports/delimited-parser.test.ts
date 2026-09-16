@@ -138,6 +138,17 @@ test("recognizes a generic search result URL independently from a target URL", (
   );
 });
 
+test("recognizes a one-snapshot external positions export", () => {
+  assert.deepEqual(
+    suggestColumnMapping([
+      "Запрос",
+      "Яндекс:XML Desktop Москва [213]",
+      "Релевантная страница"
+    ]).map(({ suggestedTarget }) => suggestedTarget),
+    ["keyword.text", "ranking.position", "ranking.url"]
+  );
+});
+
 test("keeps native Key Collector service columns as custom values", () => {
   const headers = [
     "Key Collector · Комментарий группы",

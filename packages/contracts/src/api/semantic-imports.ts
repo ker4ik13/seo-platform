@@ -196,6 +196,8 @@ export interface SemanticImportMapping {
 export interface SemanticPositionHistoryImportOptions {
   /** WIDE reads one date per column; LONG reads date and position mappings per row. */
   readonly layout?: "WIDE" | "LONG";
+  /** Default observation time for one-snapshot files without a date column. */
+  readonly observedAt?: string;
   /** One uploaded file represents exactly one search engine. */
   readonly searchEngine: "YANDEX" | "GOOGLE";
   readonly countryCode: string;
@@ -208,9 +210,11 @@ export interface SemanticPositionHistoryImportOptions {
 export function parseSemanticPositionHistoryImportOptions(value: unknown): SemanticPositionHistoryImportOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid position history options");
   const input = value as Record<string, unknown>;
-  const allowed = ["layout", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
+  const allowed = ["layout", "observedAt", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
   if (Object.keys(input).some(key => !allowed.includes(key)) ||
     (input.layout !== undefined && input.layout !== "WIDE" && input.layout !== "LONG") ||
+    (input.observedAt !== undefined &&
+      (typeof input.observedAt !== "string" || input.observedAt.length > 64)) ||
     (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") ||
     typeof input.countryCode !== "string" || !/^[A-Za-z]{2}$/u.test(input.countryCode) ||
     typeof input.regionCode !== "string" || !input.regionCode.trim() || input.regionCode.length > 100 ||
@@ -219,8 +223,15 @@ export function parseSemanticPositionHistoryImportOptions(value: unknown): Seman
     (input.device !== "DESKTOP" && input.device !== "MOBILE")) throw new TypeError("Invalid position history context");
   let language: string;
   try { language = Intl.getCanonicalLocales(input.language.trim())[0]!; } catch { throw new TypeError("Invalid position history language"); }
+  let observedAt: string | undefined;
+  if (typeof input.observedAt === "string") {
+    const date = new Date(input.observedAt);
+    if (Number.isNaN(date.getTime())) throw new TypeError("Invalid position history date");
+    observedAt = date.toISOString();
+  }
   const result: SemanticPositionHistoryImportOptions = {
     ...(input.layout ? { layout: input.layout as "WIDE" | "LONG" } : {}),
+    ...(observedAt ? { observedAt } : {}),
     searchEngine: input.searchEngine as "YANDEX" | "GOOGLE",
     countryCode: input.countryCode.toUpperCase(),
     regionCode: input.regionCode.normalize("NFKC").trim(),
@@ -232,6 +243,25 @@ export function parseSemanticPositionHistoryImportOptions(value: unknown): Seman
     throw new TypeError("Invalid position history context");
   }
   return result;
+}
+
+/** Detects compact external-service headers such as `Яндекс:XML Desktop Москва [213]`. */
+export function isSemanticPositionSnapshotHeader(
+  value: string
+): boolean {
+  const source = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  if (!source || source.length > 512) return false;
+  const engineMatch = /^(яндекс|yandex|google|гугл)(?=$|[\s:·|/_-])/iu.exec(source);
+  if (!engineMatch) return false;
+  const remainder = source.slice(engineMatch[0].length).trim();
+  const regionCodeStart = remainder.lastIndexOf("[");
+  const bracketedRegionCode = regionCodeStart >= 0 &&
+    remainder.endsWith("]") &&
+    remainder.length - regionCodeStart - 2 >= 1 &&
+    remainder.length - regionCodeStart - 2 <= 100;
+  return source.includes(":") ||
+    /(desktop|десктоп|пк|mobile|мобильное|мобильный|мобайл|телефон)/iu.test(remainder) ||
+    bracketedRegionCode;
 }
 
 /** Canonicalizes ISO and common Russian/European spreadsheet date headers. */

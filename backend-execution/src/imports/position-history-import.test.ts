@@ -134,6 +134,55 @@ test("imports long position rows with their own date, engine, region and ranking
   assert.deepEqual([...issues], []);
 });
 
+test("imports a one-snapshot external row with a manually selected date and context", () => {
+  const issues = new Set<string>();
+  const points = importedPositionHistory(
+    ["Запрос", "Яндекс:XML Desktop Москва [213]", "Релевантная страница"],
+    ["кабель кгтп расшифровка", "18", "https://example.com/catalog/kabel-kgtp/"],
+    {
+      ...defaults,
+      layout: "LONG",
+      observedAt: "2026-09-16T12:00:00.000Z",
+      regionCode: "1011973",
+      regionLabel: "Санкт-Петербург",
+      device: "MOBILE"
+    },
+    issues,
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "ranking.position" },
+        { sourceIndex: 2, target: "ranking.url" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: false,
+      positionHistory: {
+        ...defaults,
+        layout: "LONG",
+        observedAt: "2026-09-16T12:00:00.000Z",
+        regionCode: "1011973",
+        regionLabel: "Санкт-Петербург",
+        device: "MOBILE"
+      }
+    }
+  );
+  assert.deepEqual(points, [{
+    searchEngine: "GOOGLE",
+    countryCode: "RU",
+    regionCode: "1011973",
+    regionLabel: "Санкт-Петербург",
+    language: "ru",
+    device: "MOBILE",
+    observedAt: "2026-09-16T12:00:00.000Z",
+    found: true,
+    position: 18,
+    rankingUrl: "https://example.com/catalog/kabel-kgtp/"
+  }]);
+  assert.deepEqual([...issues], []);
+});
+
 test("reports an invalid ranking URL without dropping a valid long position", () => {
   const issues = new Set<string>();
   const points = importedPositionHistory(

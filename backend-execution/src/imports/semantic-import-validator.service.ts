@@ -165,7 +165,8 @@ export class SemanticImportValidatorService {
     }
     if (
       mapping.positionHistory?.layout === "LONG" &&
-      (!mapping.columns.some(({ target }) => target === "metric.observed_at") ||
+      ((!mapping.positionHistory.observedAt &&
+        !mapping.columns.some(({ target }) => target === "metric.observed_at")) ||
         !mapping.columns.some(({ target }) =>
           ["ranking.position", "ranking.yandex.position", "ranking.google.position"].includes(target)
         ))

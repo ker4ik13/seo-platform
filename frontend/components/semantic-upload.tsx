@@ -9,6 +9,7 @@ import { LanguageSelect } from "./locale-selects";
 import {
   semanticImportTargets,
   semanticPositionHistoryHeaderDate,
+  isSemanticPositionSnapshotHeader,
   type SemanticImportPreviewRow,
   type SemanticImportPreviewRowsPage,
   type SemanticPositionHistoryImportOptions,
@@ -527,6 +528,8 @@ export function SemanticUpload({
         semanticImport.preview
       ) {
         const detectedHistory = isPositionHistoryPreview(semanticImport.preview);
+        const detectedSnapshot = isPositionSnapshotPreview(semanticImport.preview);
+        const positionImport = source === "POSITIONS" || detectedSnapshot;
         const sourcePreset = sourceMapping(semanticImport.preview, source, detectedHistory);
         const columns = semanticImport.mapping?.columns ??
           sourcePreset;
@@ -536,7 +539,7 @@ export function SemanticUpload({
             ? "OVERWRITE_MAPPED"
             : "MERGE_NON_EMPTY");
         const resolvedCreateMissingKeywords =
-          semanticImport.mapping?.createMissingKeywords ?? source !== "POSITIONS";
+          semanticImport.mapping?.createMissingKeywords ?? !positionImport;
         const resolvedLanguage =
           semanticImport.mapping?.defaultLanguage ??
           "ru";
@@ -550,7 +553,7 @@ export function SemanticUpload({
         setDefaultLanguage(resolvedLanguage);
         setGroupSeparator(resolvedGroupSeparator);
         setPositionHistory(semanticImport.mapping?.positionHistory ??
-          (source === "POSITIONS"
+          (positionImport
             ? {
                 ...defaultPositionHistoryOptions(file?.name),
                 layout: detectedHistory ? "WIDE" : "LONG"
@@ -818,6 +821,14 @@ export function SemanticUpload({
       importVersion === undefined ||
       mappingColumns.length === 0
     ) {
+      return;
+    }
+    if (
+      positionHistory?.layout === "LONG" &&
+      !positionHistory.observedAt &&
+      !mappingColumns.some(({ target }) => target === "metric.observed_at")
+    ) {
+      setError("Укажите дату снимка для файла без отдельной колонки даты.");
       return;
     }
     setStage("validating");
@@ -1235,14 +1246,15 @@ export function SemanticUpload({
           )}
           {positionHistory && (
             <section className="import-position-history-settings">
-              <header><Icon name="history" /><div><strong><UiText text="Параметры истории позиций" /></strong><small>{positionHistory.layout === "LONG" ? <UiText text="Построчный формат: дата и позиция берутся из каждой строки" /> : <UiText text="Найдено колонок с датами: {0}" values={[String(positionHistoryDateCount(importPreview))]} />}</small></div></header>
+              <header><Icon name="history" /><div><strong><UiText text="Параметры истории позиций" /></strong><small>{positionHistory.layout === "LONG" ? mappingColumns.some(({ target }) => target === "metric.observed_at") ? <UiText text="Построчный формат: дата и позиция берутся из каждой строки" /> : <UiText text="Один снимок: выберите дату и контекст ниже" /> : <UiText text="Найдено колонок с датами: {0}" values={[String(positionHistoryDateCount(importPreview))]} />}</small></div></header>
               <div>
                 <label><span><UiText text="Поисковая система файла" /></span><CustomSelect value={positionHistory.searchEngine} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, searchEngine: event.target.value as "YANDEX" | "GOOGLE" } : current)}><option value="YANDEX"><UiText text="Яндекс" /></option><option value="GOOGLE">Google</option></CustomSelect></label>
                 <label><span><UiText text="Город / регион по умолчанию" /></span><SearchableRegionSelect kind={positionHistory.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"} value={positionHistory.regionCode} valueLabel={positionHistory.regionLabel} onChange={({ code, label }) => setPositionHistory(current => current ? { ...current, regionCode: code, regionLabel: label } : current)} /></label>
                 <label><span><UiText text="Устройство по умолчанию" /></span><CustomSelect value={positionHistory.device} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, device: event.target.value as "DESKTOP" | "MOBILE" } : current)}><option value="DESKTOP"><UiText text="ПК" /></option><option value="MOBILE"><UiText text="Телефон" /></option></CustomSelect></label>
                 <label><span><UiText text="Язык выдачи" /></span><LanguageSelect value={positionHistory.language} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, language: event.target.value } : current)} /></label>
+                {positionHistory.layout === "LONG" && !mappingColumns.some(({ target }) => target === "metric.observed_at") && <label><span><UiText text="Дата снимка" /></span><input aria-label={uiText("Дата снимка")} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, observedAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "" } : current)} required type="date" value={positionHistory.observedAt?.slice(0, 10) ?? ""} /></label>}
               </div>
-              <p><UiText text="Если файл экспортирован из Сеньориты, город, код региона, устройство, страна и язык берутся из каждой строки. Эти значения имеют приоритет над настройками выше." /></p>
+              <p><UiText text="Если дата или контекст указаны отдельными колонками файла, значения строки имеют приоритет. Для файла одного снимка выберите дату, поисковик, город и устройство здесь." /></p>
             </section>
           )}
           {!positionHistory && <div
@@ -1376,7 +1388,9 @@ export function SemanticUpload({
           )}
           <small className="upload-note import-preview-note">
             <UiText text={positionHistory
-              ? "Колонки с датами распознаны автоматически; сопоставлять их вручную не нужно."
+              ? positionHistory.layout === "WIDE"
+                ? "Колонки с датами распознаны автоматически; сопоставлять их вручную не нужно."
+                : "Колонка позиции и URL из выдачи распознаны автоматически; проверьте дату и контекст снимка."
               : stage === "preview"
                 ? "Для каждой исходной колонки выберите поле назначения, «Своя колонка» или «Не импортировать». Таблица прокручивается по горизонтали и вертикали; её шапка остаётся на месте."
                 : source === "KEY_COLLECTOR"
@@ -1522,7 +1536,10 @@ export function SemanticUpload({
               mappingColumns.some(
                 ({ target, customName }) =>
                   target === "custom" && !customName?.trim()
-              )
+              ) ||
+              (positionHistory?.layout === "LONG" &&
+                !positionHistory.observedAt &&
+                !mappingColumns.some(({ target }) => target === "metric.observed_at"))
             }
             onClick={() => void validateImport(uiLocale)}
             type="button"
@@ -2304,7 +2321,9 @@ function sourceMapping(
     return positionHistoryMapping(preview);
   }
   if (source === "TOPVISOR") return presetMapping(preview, "TOPVISOR");
-  if (source === "POSITIONS") return presetMapping(preview, "POSITIONS");
+  if (source === "POSITIONS" || isPositionSnapshotPreview(preview)) {
+    return presetMapping(preview, "POSITIONS");
+  }
   return suggestedMapping(preview);
 }
 
@@ -2340,6 +2359,7 @@ function importPresetTarget(
   if (/^(?:группа|путь группы|папка|group|group path)$/iu.test(value)) return "group.path";
   if (/^(?:теги|метки|tags)$/iu.test(value)) return "keyword.tags";
   if (preset === "POSITIONS" && positionRankingUrlHeader(value)) return "ranking.url";
+  if (preset === "POSITIONS" && isSemanticPositionSnapshotHeader(value)) return "ranking.position";
   if (/^(?:целевой url|целевая страница|посадочная страница|target url|landing page)$/iu.test(value)) return "page.target_url";
   if (/^(?:язык|language|locale)$/iu.test(value)) return "keyword.language";
   if (/^(?:заметка|комментарий|note|comment)$/iu.test(value)) return "keyword.note";
@@ -2361,7 +2381,7 @@ function sourceHelp(source: SemanticImportSource): string {
     KEY_COLLECTOR: "Загрузите нативный .kc4. Поля сопоставятся автоматически, после проверки Сеньорита сразу перенесёт дерево, цвета, заметки, колонки, частотности, позиции, URL и сохранённую выдачу.",
     TOPVISOR: "Поддерживаются CSV, TSV и XLSX. Названия стандартных колонок Топвизора будут сопоставлены автоматически, остальные останутся доступными как свои поля.",
     UNIVERSAL: "Загрузите таблицу с заголовками. Перед публикацией можно назначить каждой колонке поле Сеньориты и проверить конфликты.",
-    POSITIONS: "Поддерживаются широкая история с датами в колонках и построчный формат с колонками Запрос, Дата, Поисковик, Позиция и URL из выдачи."
+    POSITIONS: "Поддерживаются широкая история, построчный формат и файл одного снимка. Для снимка без даты выберите дату и контекст вручную."
   };
   return messages[source];
 }
@@ -2369,7 +2389,8 @@ function sourceHelp(source: SemanticImportSource): string {
 function sourceExampleLinks(source: SemanticImportSource): readonly Readonly<{ href: string; label: string }>[] {
   if (source === "POSITIONS") return [
     { href: "/examples/imports/positions-wide.csv", label: "Широкий CSV" },
-    { href: "/examples/imports/positions-long.csv", label: "Построчный CSV" }
+    { href: "/examples/imports/positions-long.csv", label: "Построчный CSV" },
+    { href: "/examples/imports/positions-snapshot-2026-09-16.csv", label: "Один снимок" }
   ];
   if (source === "TOPVISOR") return [
     { href: "/examples/imports/topvisor.csv", label: "Пример CSV" }
@@ -2386,6 +2407,15 @@ function isPositionHistoryPreview(preview: SemanticImportPreview): boolean {
   return positionHistoryDateCount(preview) > 0 && preview.columns.some(column =>
     /^(?:запрос(?:ы)?|ключ(?:евая фраза)?|фраза|query|keyword)$/iu.test(column.sourceName.normalize("NFKC").trim())
   );
+}
+
+function isPositionSnapshotPreview(preview: SemanticImportPreview): boolean {
+  return preview.columns.some(({ sourceName }) => isSemanticPositionSnapshotHeader(sourceName)) &&
+    preview.columns.some(({ sourceName }) =>
+      /^(?:запрос(?:ы)?|ключ(?:евая фраза)?|фраза|query|keyword)$/iu.test(
+        sourceName.normalize("NFKC").trim()
+      )
+    );
 }
 
 function positionHistoryDateCount(preview: SemanticImportPreview): number {
@@ -2418,7 +2448,9 @@ function positionRankingUrlHeader(value: string): boolean {
 
 function defaultPositionHistoryOptions(filename?: string): SemanticPositionHistoryImportOptions {
   const google = /google|гугл/iu.test(filename ?? "");
+  const observedAt = positionHistoryDateFromFilename(filename);
   return {
+    ...(observedAt ? { observedAt } : {}),
     searchEngine: google ? "GOOGLE" : "YANDEX",
     countryCode: "RU",
     regionCode: google ? "1011969" : "213",
@@ -2426,6 +2458,19 @@ function defaultPositionHistoryOptions(filename?: string): SemanticPositionHisto
     language: "ru",
     device: "DESKTOP"
   };
+}
+
+function positionHistoryDateFromFilename(filename?: string): string | undefined {
+  const match = /((?:19|20)\d{2})[-_.](\d{2})[-_.](\d{2})/u.exec(
+    filename?.normalize("NFKC") ?? ""
+  );
+  if (!match) return undefined;
+  const date = `${match[1]}-${match[2]}-${match[3]}`;
+  const observedAt = `${date}T12:00:00.000Z`;
+  const parsed = new Date(observedAt);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === observedAt
+    ? observedAt
+    : undefined;
 }
 
 function importIssueLabel(value: string): string {

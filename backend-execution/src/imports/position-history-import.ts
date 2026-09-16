@@ -140,16 +140,17 @@ function importedLongPositionHistory(
   const explicitEngine = optionalEngine(engineRaw);
   const yandexPosition = mapped("ranking.yandex.position");
   const googlePosition = mapped("ranking.google.position");
+  const genericPosition = mapped("ranking.position");
   const searchEngine = yandexPosition
     ? "YANDEX"
     : googlePosition
       ? "GOOGLE"
       : explicitEngine ?? defaults.searchEngine;
-  const rawPosition = yandexPosition || googlePosition || mapped("ranking.position") || indexed(HEADER_ALIASES.position);
+  const rawPosition = yandexPosition || googlePosition || genericPosition || indexed(HEADER_ALIASES.position);
   const rawRankingUrl = mapped(rankingUrlTarget(searchEngine)) ||
     mapped("ranking.url") ||
     indexed(HEADER_ALIASES.rankingUrl);
-  const rawObservedAt = mapped("metric.observed_at") || indexed(HEADER_ALIASES.observedAt);
+  const rawObservedAt = mapped("metric.observed_at") || indexed(HEADER_ALIASES.observedAt) || defaults.observedAt || "";
   if ((engineRaw && !explicitEngine) || !rawPosition || !rawObservedAt) {
     issues.add("POSITION_HISTORY_CONTEXT_INVALID");
     return [];

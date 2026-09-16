@@ -1,7 +1,8 @@
-import type {
-  SemanticImportDelimiter,
-  SemanticImportEncoding,
-  SemanticImportHeaderMode
+import {
+  isSemanticPositionSnapshotHeader,
+  type SemanticImportDelimiter,
+  type SemanticImportEncoding,
+  type SemanticImportHeaderMode
 } from "@seo-platform/contracts";
 
 const SAMPLE_BYTES = 64 * 1_024;
@@ -285,11 +286,23 @@ export function suggestColumnMapping(
   readonly suggestedTarget: string;
   readonly confidence: number;
 }[] {
-  return headers.map((sourceName, index) => ({
-    index,
-    sourceName,
-    ...suggestedTarget(sourceName)
-  }));
+  const singleSnapshot = headers.some((header) =>
+    isSemanticPositionSnapshotHeader(header)
+  );
+  return headers.map((sourceName, index) => {
+    const suggested = suggestedTarget(sourceName);
+    const rankingUrl = singleSnapshot &&
+      /(?:релевантн).*(?:url|урл|ссылк|страниц)/iu.test(
+        sourceName.normalize("NFKC")
+      );
+    return {
+      index,
+      sourceName,
+      ...(rankingUrl
+        ? { suggestedTarget: "ranking.url", confidence: 0.99 }
+        : suggested)
+    };
+  });
 }
 
 function suggestedTarget(header: string): {
@@ -314,6 +327,7 @@ function suggestedTarget(header: string): {
     );
   const relevantUrl =
     /(релевантн|целев).*(url|урл|ссылк|страниц)/u.test(raw);
+  const snapshotHeader = isSemanticPositionSnapshotHeader(header);
 
   // Key Collector puts the engine suffix after the field name in XLSX
   // exports (for example, `Рел. позиция [Yandex]`). Engine detection must
@@ -335,6 +349,9 @@ function suggestedTarget(header: string): {
   }
   if (positionUrl) {
     return { suggestedTarget: "ranking.url", confidence: 0.98 };
+  }
+  if (snapshotHeader) {
+    return { suggestedTarget: "ranking.position", confidence: 0.99 };
   }
   if (yandex && /(позици|position|rank)/u.test(raw)) {
     return { suggestedTarget: "ranking.yandex.position", confidence: 0.99 };

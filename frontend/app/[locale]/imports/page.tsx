@@ -146,6 +146,13 @@ export default async function ImportDocumentationPage({ params }: Props) {
                   ? "Ranking URL is stored on the imported observation and does not replace the keyword target URL. An empty cell means no observation. A dash or zero means the site was checked but not found. Verify the search engine, city, language and device before publishing."
                   : "URL из выдачи сохраняется в импортированном снимке и не заменяет целевой URL запроса. Пустая ячейка означает отсутствие замера. Дефис или ноль означает, что проверка была, но сайт не найден. Перед публикацией проверьте поисковик, город, язык и устройство."}
               </p>
+              <p>{en ? "Single snapshot without a date column:" : "Один снимок без колонки даты:"}</p>
+              <pre><code>{en ? "Keyword,Yandex:XML Desktop Moscow [213],Relevant page\nbuy a bike,9,https://example.com/bikes" : "Запрос,Яндекс:XML Desktop Москва [213],Релевантная страница\nкупить велосипед,9,https://example.ru/velosipedy"}</code></pre>
+              <p>
+                {en
+                  ? "For this format, select the snapshot date, search engine, city and device in the import wizard. A date found in the filename prefills the editable date field."
+                  : "Для такого формата выберите дату снимка, поисковик, город и устройство в мастере импорта. Дата из имени файла предзаполняет редактируемое поле."}
+              </p>
             </section>
 
             <section id="examples">
@@ -162,6 +169,10 @@ export default async function ImportDocumentationPage({ params }: Props) {
                 <a download href="/examples/imports/positions-long.csv">
                   <strong>{en ? "Row ranking history" : "Построчная история позиций"}</strong>
                   <span>positions-long.csv</span>
+                </a>
+                <a download href="/examples/imports/positions-snapshot-2026-09-16.csv">
+                  <strong>{en ? "Single ranking snapshot" : "Один снимок позиций"}</strong>
+                  <span>positions-snapshot-2026-09-16.csv</span>
                 </a>
               </div>
             </section>

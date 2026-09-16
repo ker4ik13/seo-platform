@@ -166,3 +166,32 @@ test("rejects duplicate singleton targets and missing custom names", () => {
     BadRequestException
   );
 });
+
+test("accepts a trusted one-snapshot positions mapping", () => {
+  const result = internalConfigureSemanticImportInput({
+    ...context,
+    version: 8,
+    columns: [
+      { sourceIndex: 0, target: "keyword.text" },
+      { sourceIndex: 1, target: "ranking.position" },
+      { sourceIndex: 2, target: "ranking.url" }
+    ],
+    defaultLanguage: "ru",
+    groupSeparator: "/",
+    duplicatePolicy: "MERGE_NON_EMPTY",
+    createMissingKeywords: false,
+    positionHistory: {
+      layout: "LONG",
+      observedAt: "2026-09-16T12:00:00.000Z",
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP"
+    }
+  });
+  assert.equal(result.columns[1]?.target, "ranking.position");
+  assert.equal(result.columns[2]?.target, "ranking.url");
+  assert.equal(result.positionHistory?.observedAt, "2026-09-16T12:00:00.000Z");
+});

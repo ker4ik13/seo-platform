@@ -112,6 +112,36 @@ test("requires one keyword column and preserves custom mappings", () => {
   );
 });
 
+test("accepts a manually configured one-snapshot positions import", () => {
+  const result = configureSemanticImportInput(
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "ranking.position" },
+        { sourceIndex: 2, target: "ranking.url" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: false,
+      positionHistory: {
+        layout: "LONG",
+        observedAt: "2026-09-16T12:00:00.000Z",
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "213",
+        regionLabel: "Москва",
+        language: "ru",
+        device: "DESKTOP"
+      }
+    },
+    7
+  );
+  assert.equal(result.columns[1]?.target, "ranking.position");
+  assert.equal(result.columns[2]?.target, "ranking.url");
+  assert.equal(result.positionHistory?.observedAt, "2026-09-16T12:00:00.000Z");
+});
+
 test("rejects invalid semantic import identifiers and parse options", () => {
   assert.throws(
     () => createSemanticImportInput({ uploadId: "not-an-id" }),
