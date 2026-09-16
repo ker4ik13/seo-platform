@@ -588,43 +588,45 @@ export function RankingsWorkspace({
                   return (
                     <tr key={row.keywordId}>
                       <th scope="row">
-                        <strong>{row.query}</strong>
-                        {row.frequencies.length > 0 && (
-                          <div className="rankings-frequency-badges">
-                            {row.frequencies.map((frequency) => (
-                              <DuplicateFrequency
-                                key={frequency.type}
-                                label={rankingFrequencyShortLabel(frequency.type)}
-                                title={t(`Яндекс · ${rankingFrequencyLabel(frequency.type).toLocaleLowerCase("ru")} частотность`)}
-                                value={frequency.value}
-                              />
-                            ))}
+                        <strong title={row.query}>{row.query}</strong>
+                        <div className="rankings-query-meta">
+                          {row.frequencies.length > 0 && (
+                            <div className="rankings-frequency-badges">
+                              {row.frequencies.map((frequency) => (
+                                <DuplicateFrequency
+                                  key={frequency.type}
+                                  label={rankingFrequencyShortLabel(frequency.type)}
+                                  title={t(`Яндекс · ${rankingFrequencyLabel(frequency.type).toLocaleLowerCase("ru")} частотность`)}
+                                  value={frequency.value}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <div className="rankings-query-actions">
+                            <a
+                              aria-label={t("Открыть запрос в поиске")}
+                              href={searchUrl(report.dimension, row.query)}
+                              rel="noopener noreferrer"
+                              target="_blank"
+                              title={t("Открыть запрос в поиске")}
+                            ><Icon name="search" /></a>
+                            <button
+                              aria-label={t(effectiveMode === "AI" ? "Открыть историю ИИ-позиций" : "Открыть историю позиций")}
+                              onClick={() => effectiveMode === "AI"
+                                ? setAiHistory(selection)
+                                : setHistory(selection)}
+                              title={t(effectiveMode === "AI" ? "Открыть историю ИИ-позиций" : "Открыть историю позиций")}
+                              type="button"
+                            ><Icon name="history" /></button>
+                            <button
+                              aria-label={t(effectiveMode === "AI" ? "Открыть историю ИИ-выдачи" : "Открыть историю выдачи")}
+                              onClick={() => effectiveMode === "AI"
+                                ? setAiHistory(selection)
+                                : setSerpHistory(selection)}
+                              title={t(effectiveMode === "AI" ? "Открыть историю ИИ-выдачи" : "Открыть историю выдачи")}
+                              type="button"
+                            ><Icon name="competitors" /></button>
                           </div>
-                        )}
-                        <div className="rankings-query-actions">
-                          <a
-                            aria-label={t("Открыть запрос в поиске")}
-                            href={searchUrl(report.dimension, row.query)}
-                            rel="noopener noreferrer"
-                            target="_blank"
-                            title={t("Открыть запрос в поиске")}
-                          ><Icon name="search" /></a>
-                          <button
-                            aria-label={t(effectiveMode === "AI" ? "Открыть историю ИИ-позиций" : "Открыть историю позиций")}
-                            onClick={() => effectiveMode === "AI"
-                              ? setAiHistory(selection)
-                              : setHistory(selection)}
-                            title={t(effectiveMode === "AI" ? "Открыть историю ИИ-позиций" : "Открыть историю позиций")}
-                            type="button"
-                          ><Icon name="history" /></button>
-                          <button
-                            aria-label={t(effectiveMode === "AI" ? "Открыть историю ИИ-выдачи" : "Открыть историю выдачи")}
-                            onClick={() => effectiveMode === "AI"
-                              ? setAiHistory(selection)
-                              : setSerpHistory(selection)}
-                            title={t(effectiveMode === "AI" ? "Открыть историю ИИ-выдачи" : "Открыть историю выдачи")}
-                            type="button"
-                          ><Icon name="competitors" /></button>
                         </div>
                       </th>
                       {visibleDates.map((date) => (

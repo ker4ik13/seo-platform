@@ -419,9 +419,10 @@ export class SemanticImportPublisherService {
     }
     const headers = Array.isArray(semanticImport.headers) && semanticImport.headers.every(value => typeof value === "string")
       ? semanticImport.headers as string[] : [];
-    const historyDateCount = mapping.positionHistory
-      ? positionHistoryDateColumns(headers).length
-      : 1;
+    const historyDateCount = semanticImportPublishHistoryDateCount(
+      mapping,
+      headers
+    );
     if (mapping.positionHistory && historyDateCount === 0) {
       return { code: "IMPORT_MAPPING_INVALID" };
     }
@@ -806,6 +807,16 @@ export function semanticImportPublishBatchSize(
     Math.max(1, Math.floor(10_000 / Math.max(historyDateCount, 1))),
     sourceFormat === "KC4" ? KC4_PUBLISH_MAX_ROWS : semanticImportPublishMaxRows
   );
+}
+
+export function semanticImportPublishHistoryDateCount(
+  mapping: SemanticImportMapping,
+  headers: readonly string[]
+): number {
+  if (!mapping.positionHistory) return 1;
+  return mapping.positionHistory.layout === "LONG"
+    ? 1
+    : positionHistoryDateColumns(headers).length;
 }
 
 function semanticImportLegacyPublishBatchSize(

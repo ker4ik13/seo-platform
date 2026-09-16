@@ -6049,17 +6049,17 @@ svg { display: block; }
 .rankings-table-panel > header p, .rankings-table-panel > header > span { color: var(--muted); font-size: 10px; margin: 0; }
 .rankings-table-scroll { overflow-x: auto; overscroll-behavior: contain; }
 .rankings-matrix { border-collapse: separate; border-spacing: 0; min-width: 100%; table-layout: fixed; width: max-content; }
-.rankings-matrix :where(th, td) { border-bottom: 1px solid #ececf2; border-right: 1px solid #eeeeF4; height: 58px; }
+.rankings-matrix :where(th, td) { border-bottom: 1px solid #ececf2; border-right: 1px solid #eeeeF4; height: 44px; }
 .rankings-matrix thead th { background: #f8f8fb; color: var(--muted); font-size: 10px; font-weight: 750; height: 42px; min-width: 76px; padding: 0 8px; position: sticky; top: 0; z-index: 3; }
 .rankings-matrix thead th:first-child { left: 0; min-width: 270px; text-align: left; z-index: 5; }
 .rankings-matrix thead th:last-child { min-width: 76px; right: 0; z-index: 5; }
-.rankings-matrix tbody > tr > th { background: #fff; left: 0; max-width: 270px; min-width: 270px; padding: 8px 12px; position: sticky; text-align: left; z-index: 2; }
+.rankings-matrix tbody > tr > th { background: #fff; left: 0; max-width: 270px; min-width: 270px; padding: 4px 9px; position: sticky; text-align: left; z-index: 2; }
 .rankings-matrix tbody > tr:hover > th { background: #fbfaff; }
-.rankings-matrix tbody th strong { display: -webkit-box; font-size: 11px; line-height: 1.3; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.rankings-matrix tbody th > strong { display: block; font-size: 10px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rankings-matrix tbody th small { color: var(--muted); display: block; font-size: 8px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rankings-cell { min-width: 76px; padding: 0; text-align: center; }
-.rankings-cell > button { align-content: center; background: transparent; display: grid; height: 57px; justify-content: center; min-width: 75px; padding: 4px; position: relative; width: 100%; }
-.rankings-cell strong { font-size: 15px; }
+.rankings-cell > button { align-content: center; background: transparent; display: grid; height: 43px; justify-content: center; min-width: 75px; padding: 3px; position: relative; width: 100%; }
+.rankings-cell strong { font-size: 13px; line-height: 1; }
 .rankings-cell small { color: var(--muted); font-size: 8px; font-weight: 750; margin-top: 2px; }
 .rankings-cell.up { background: #e9f9f0; }
 .rankings-cell.up small { color: #168652; }
@@ -15068,8 +15068,8 @@ svg { display: block; }
 .rankings-matrix tbody > tr > th { max-width: var(--rankings-query-width, 300px); min-width: var(--rankings-query-width, 300px); width: var(--rankings-query-width, 300px); }
 .rankings-matrix thead th:first-child { position: sticky; }
 .rankings-matrix thead th:last-child { right: auto; }
-.rankings-matrix tbody > tr > th { min-height: 48px; padding: 6px 9px; }
-.rankings-matrix :where(th, td) { height: 52px; }
+.rankings-matrix tbody > tr > th { min-height: 40px; padding: 4px 8px; }
+.rankings-matrix :where(th, td) { height: 44px; }
 .rankings-cell { max-width: 104px; min-width: 104px; width: 104px; }
 .rankings-query-heading { display: block; }
 .rankings-query-resizer { bottom: 0; cursor: col-resize; position: absolute; right: -5px; top: 0; touch-action: none; width: 10px; z-index: 10; }
@@ -15093,20 +15093,24 @@ svg { display: block; }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m3 8 3 3 7-7'/%3E%3C/svg%3E");
   border-color: var(--brand);
 }
-.rankings-frequency-badges { display: flex; flex-wrap: nowrap; gap: 3px; margin-top: 4px; overflow: hidden; }
-.rankings-frequency-badges .semantic-duplicate-frequency { min-height: 20px; padding: 1px 4px; }
-.rankings-query-actions { align-items: center; display: flex; gap: 3px; margin-top: 4px; }
+.rankings-query-meta { align-items: center; display: flex; gap: 5px; margin-top: 2px; min-width: 0; overflow: hidden; }
+.rankings-frequency-badges { display: flex; flex: 0 1 auto; flex-wrap: nowrap; gap: 2px; margin: 0; min-width: 0; overflow: hidden; }
+.rankings-frequency-badges .semantic-duplicate-frequency { gap: 2px; grid-template-columns: 11px auto auto; min-height: 18px; padding: 0 3px; }
+.rankings-frequency-badges .semantic-duplicate-frequency .search-engine-logo.compact { height: 11px; width: 11px; }
+.rankings-frequency-badges .semantic-duplicate-frequency b { font-size: 7px; }
+.rankings-frequency-badges .semantic-duplicate-frequency strong { font-size: 8px; }
+.rankings-query-actions { align-items: center; display: flex; flex: 0 0 auto; gap: 2px; margin: 0; }
 .rankings-query-actions :where(a, button),
-.rankings-cell-actions :where(a, button) { align-items: center; background: transparent; border-radius: 5px; color: var(--muted); display: inline-flex; height: 20px; justify-content: center; padding: 0; width: 20px; }
+.rankings-cell-actions :where(a, button) { align-items: center; background: transparent; border-radius: 5px; color: var(--muted); display: inline-flex; height: 18px; justify-content: center; padding: 0; width: 18px; }
 .rankings-query-actions :where(a, button):hover,
 .rankings-cell-actions :where(a, button):hover { background: #eae6ff; color: var(--brand); }
 .rankings-query-actions svg,
-.rankings-cell-actions svg { height: 11px; width: 11px; }
-.rankings-cell-content { align-items: center; display: grid; grid-template-rows: minmax(0, 1fr); height: 51px; justify-items: center; padding: 2px; position: relative; }
-.rankings-cell-content:has(.rankings-ai-value) { grid-template-rows: 27px 17px; }
-.rankings-cell-content:has(.rankings-ai-value) .rankings-cell-value { height: 24px; }
-.rankings-cell-value { align-content: center; background: transparent; color: inherit; display: grid; height: 27px; justify-content: center; min-width: 0; padding: 0; text-decoration: none; width: 100%; }
-.rankings-cell-value > small { font-size: 10px; font-weight: 850; line-height: 1.05; }
+.rankings-cell-actions svg { height: 10px; width: 10px; }
+.rankings-cell-content { align-items: center; display: grid; grid-template-rows: minmax(0, 1fr); height: 43px; justify-items: center; padding: 1px; position: relative; }
+.rankings-cell-content:has(.rankings-ai-value) { grid-template-rows: 22px 14px; }
+.rankings-cell-content:has(.rankings-ai-value) .rankings-cell-value { height: 21px; }
+.rankings-cell-value { align-content: center; background: transparent; color: inherit; display: grid; height: 24px; justify-content: center; min-width: 0; padding: 0; text-decoration: none; width: 100%; }
+.rankings-cell-value > small { font-size: 8px; font-weight: 850; line-height: 1; }
 .rankings-cell-value[href]:hover strong { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
 .rankings-cell-actions { align-items: center; display: flex; flex-direction: column; gap: 2px; justify-content: center; min-height: 0; position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
 .rankings-cell-actions:empty { display: none; }
@@ -15116,12 +15120,12 @@ svg { display: block; }
   border: 1px solid #efd789;
   border-radius: 6px;
   color: #8d5700;
-  height: 22px;
+  height: 19px;
   padding: 0;
-  width: 24px;
+  width: 20px;
 }
 .rankings-cell-actions .rankings-cell-mismatch:hover { background: #ffe895; color: #704500; }
-.rankings-cell-actions .rankings-cell-mismatch svg { height: 13px; width: 13px; }
+.rankings-cell-actions .rankings-cell-mismatch svg { height: 11px; width: 11px; }
 .rankings-infinite-sentinel { min-width: 100%; width: max-content; }
 @media (max-width: 700px) {
   .rankings-table-heading-actions { align-items: flex-end; flex-direction: column; }

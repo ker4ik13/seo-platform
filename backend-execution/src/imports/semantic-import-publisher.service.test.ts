@@ -7,6 +7,7 @@ import {
   semanticImportPublishBatchSize,
   semanticImportPublishErrorIsRetryable,
   semanticImportPublishFailureCode,
+  semanticImportPublishHistoryDateCount,
   semanticImportPublishResumeState,
   semanticImportPublishRetryExhausted,
   semanticImportResumeBatchSize
@@ -35,6 +36,37 @@ test("publishes rich KC4 rows in short transactions", () => {
   assert.equal(semanticImportPublishBatchSize(5_000, "KC4", 1), 1_000);
   assert.equal(semanticImportPublishBatchSize(5_000, "CSV", 1), 5_000);
   assert.equal(semanticImportPublishBatchSize(5_000, "KC4", 25), 400);
+});
+
+test("publishes a long or one-snapshot position import without date columns", () => {
+  const mapping = {
+    columns: [
+      { sourceIndex: 0, target: "keyword.text" as const },
+      { sourceIndex: 1, target: "ranking.position" as const },
+      { sourceIndex: 2, target: "ranking.url" as const }
+    ],
+    defaultLanguage: "ru",
+    groupSeparator: "/",
+    duplicatePolicy: "MERGE_NON_EMPTY" as const,
+    createMissingKeywords: false,
+    positionHistory: {
+      layout: "LONG" as const,
+      observedAt: "2026-09-16T12:00:00.000Z",
+      searchEngine: "YANDEX" as const,
+      countryCode: "RU",
+      regionCode: "213",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP" as const
+    }
+  };
+  assert.equal(
+    semanticImportPublishHistoryDateCount(
+      mapping,
+      ["Запрос", "Яндекс:XML Desktop Москва [213]", "Релевантная страница"]
+    ),
+    1
+  );
 });
 
 test("resumes a large publication after the last accepted idempotent chunk", () => {
