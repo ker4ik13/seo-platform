@@ -129,6 +129,15 @@ test("recognizes Key Collector XLSX headers with bracketed provider suffixes", (
   );
 });
 
+test("recognizes a generic search result URL independently from a target URL", () => {
+  assert.deepEqual(
+    suggestColumnMapping(["URL из выдачи", "Целевой URL"]).map(
+      ({ suggestedTarget }) => suggestedTarget
+    ),
+    ["ranking.url", "page.target_url"]
+  );
+});
+
 test("keeps native Key Collector service columns as custom values", () => {
   const headers = [
     "Key Collector · Комментарий группы",

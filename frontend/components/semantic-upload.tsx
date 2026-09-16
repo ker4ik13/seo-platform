@@ -2226,6 +2226,7 @@ function mappingTargetLabel(value: SemanticImportTarget): string {
     "frequency.exact": 'Яндекс · ""',
     "frequency.fixed": 'Яндекс · "!"',
     "ranking.position": "Позиция (по колонке поисковика)",
+    "ranking.url": "URL из выдачи",
     "ranking.yandex.position": "Яндекс · Позиция",
     "ranking.yandex.change": "Яндекс · Изменение позиции",
     "ranking.yandex.url": "Яндекс · Релевантный URL",
@@ -2258,7 +2259,7 @@ function mappingTargetIcon(value: SemanticImportTarget) {
         ? "pages"
         : value === "keyword.tags"
           ? "tag"
-          : value === "ranking.position"
+          : value === "ranking.position" || value === "ranking.url"
             ? "rankCheck"
             : value === "metric.observed_at"
               ? "history"
@@ -2338,6 +2339,7 @@ function importPresetTarget(
   if (/^(?:запрос|запросы|ключ|ключевая фраза|фраза|keyword|query)$/iu.test(value)) return "keyword.text";
   if (/^(?:группа|путь группы|папка|group|group path)$/iu.test(value)) return "group.path";
   if (/^(?:теги|метки|tags)$/iu.test(value)) return "keyword.tags";
+  if (preset === "POSITIONS" && positionRankingUrlHeader(value)) return "ranking.url";
   if (/^(?:целевой url|целевая страница|посадочная страница|target url|landing page)$/iu.test(value)) return "page.target_url";
   if (/^(?:язык|language|locale)$/iu.test(value)) return "keyword.language";
   if (/^(?:заметка|комментарий|note|comment)$/iu.test(value)) return "keyword.note";
@@ -2359,7 +2361,7 @@ function sourceHelp(source: SemanticImportSource): string {
     KEY_COLLECTOR: "Загрузите нативный .kc4. Поля сопоставятся автоматически, после проверки Сеньорита сразу перенесёт дерево, цвета, заметки, колонки, частотности, позиции, URL и сохранённую выдачу.",
     TOPVISOR: "Поддерживаются CSV, TSV и XLSX. Названия стандартных колонок Топвизора будут сопоставлены автоматически, остальные останутся доступными как свои поля.",
     UNIVERSAL: "Загрузите таблицу с заголовками. Перед публикацией можно назначить каждой колонке поле Сеньориты и проверить конфликты.",
-    POSITIONS: "Поддерживаются широкая история с датами в колонках и построчный формат с колонками Запрос, Дата, Поисковик и Позиция."
+    POSITIONS: "Поддерживаются широкая история с датами в колонках и построчный формат с колонками Запрос, Дата, Поисковик, Позиция и URL из выдачи."
   };
   return messages[source];
 }
@@ -2398,10 +2400,20 @@ function positionHistoryMapping(preview: SemanticImportPreview): readonly Semant
   const keywordLanguage = preview.columns.find(column =>
     /^(?:язык запроса|keyword language)$/iu.test(column.sourceName.normalize("NFKC").trim())
   );
+  const rankingUrl = preview.columns.find(column =>
+    positionRankingUrlHeader(column.sourceName)
+  );
   return [
     { sourceIndex: keyword.index, target: "keyword.text" },
-    ...(keywordLanguage ? [{ sourceIndex: keywordLanguage.index, target: "keyword.language" as const }] : [])
+    ...(keywordLanguage ? [{ sourceIndex: keywordLanguage.index, target: "keyword.language" as const }] : []),
+    ...(rankingUrl ? [{ sourceIndex: rankingUrl.index, target: "ranking.url" as const }] : [])
   ];
+}
+
+function positionRankingUrlHeader(value: string): boolean {
+  return /^(?:url|урл|url из выдачи|урл из выдачи|ссылка из выдачи|найденный url|найденная страница|релевантный url|релевантная страница|url позиции|ranking url|ranking page|serp url|result url|relevant url)$/iu.test(
+    value.normalize("NFKC").trim()
+  );
 }
 
 function defaultPositionHistoryOptions(filename?: string): SemanticPositionHistoryImportOptions {

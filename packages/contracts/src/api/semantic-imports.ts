@@ -73,6 +73,7 @@ export const semanticImportTargets = [
   "frequency.exact",
   "frequency.fixed",
   "ranking.position",
+  "ranking.url",
   "ranking.yandex.position",
   "ranking.yandex.change",
   "ranking.yandex.url",

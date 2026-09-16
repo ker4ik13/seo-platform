@@ -313,7 +313,7 @@ function suggestedTarget(header: string): {
       raw
     );
   const relevantUrl =
-    /(релевантн).*(url|урл|ссылк|страниц)/u.test(raw);
+    /(релевантн|целев).*(url|урл|ссылк|страниц)/u.test(raw);
 
   // Key Collector puts the engine suffix after the field name in XLSX
   // exports (for example, `Рел. позиция [Yandex]`). Engine detection must
@@ -332,6 +332,9 @@ function suggestedTarget(header: string): {
   }
   if (google && positionUrl) {
     return { suggestedTarget: "ranking.google.url", confidence: 0.99 };
+  }
+  if (positionUrl) {
+    return { suggestedTarget: "ranking.url", confidence: 0.98 };
   }
   if (yandex && /(позици|position|rank)/u.test(raw)) {
     return { suggestedTarget: "ranking.yandex.position", confidence: 0.99 };

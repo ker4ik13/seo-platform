@@ -138,13 +138,13 @@ export default async function ImportDocumentationPage({ params }: Props) {
             <section id="rankings">
               <h2>{en ? "Ranking history" : "История позиций"}</h2>
               <p>{en ? "Wide format:" : "Широкий формат:"}</p>
-              <pre><code>{en ? "Keyword,01.09.2026,08.09.2026\nbuy a bike,12,9" : "Запрос,01.09.2026,08.09.2026\nкупить велосипед,12,9"}</code></pre>
+              <pre><code>{en ? "Keyword,Ranking URL,01.09.2026,08.09.2026\nbuy a bike,https://example.com/bikes,12,9" : "Запрос,URL из выдачи,01.09.2026,08.09.2026\nкупить велосипед,https://example.ru/velosipedy,12,9"}</code></pre>
               <p>{en ? "Row format:" : "Построчный формат:"}</p>
-              <pre><code>{en ? "Keyword,Date,Search engine,Position\nbuy a bike,08.09.2026,Yandex,9" : "Запрос,Дата,Поисковик,Позиция\nкупить велосипед,08.09.2026,Яндекс,9"}</code></pre>
+              <pre><code>{en ? "Keyword,Date,Search engine,Position,Ranking URL\nbuy a bike,08.09.2026,Yandex,9,https://example.com/bikes" : "Запрос,Дата,Поисковик,Позиция,URL из выдачи\nкупить велосипед,08.09.2026,Яндекс,9,https://example.ru/velosipedy"}</code></pre>
               <p>
                 {en
-                  ? "An empty cell means no observation. A dash or zero means the site was checked but not found. Verify the search engine, city, language and device before publishing."
-                  : "Пустая ячейка означает отсутствие замера. Дефис или ноль означает, что проверка была, но сайт не найден. Перед публикацией проверьте поисковик, город, язык и устройство."}
+                  ? "Ranking URL is stored on the imported observation and does not replace the keyword target URL. An empty cell means no observation. A dash or zero means the site was checked but not found. Verify the search engine, city, language and device before publishing."
+                  : "URL из выдачи сохраняется в импортированном снимке и не заменяет целевой URL запроса. Пустая ячейка означает отсутствие замера. Дефис или ноль означает, что проверка была, но сайт не найден. Перед публикацией проверьте поисковик, город, язык и устройство."}
               </p>
             </section>
 

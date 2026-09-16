@@ -17,6 +17,53 @@ test("wide position history distinguishes missing measurements, not-found dashes
   assert.deepEqual([...issues], []);
 });
 
+test("attaches one imported ranking URL to found points in a wide history row", () => {
+  const headers = ["Запрос", "URL из выдачи", "2026-09-08", "2026-09-14"];
+  const issues = new Set<string>();
+  const points = importedPositionHistory(
+    headers,
+    ["купить слона", "https://example.com/slony", "7", "—"],
+    defaults,
+    issues,
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "ranking.url" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: false,
+      positionHistory: defaults
+    }
+  );
+  assert.deepEqual(points, [
+    {
+      searchEngine: "GOOGLE",
+      countryCode: "RU",
+      regionCode: "1011969",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP",
+      observedAt: "2026-09-08T12:00:00.000Z",
+      found: true,
+      position: 7,
+      rankingUrl: "https://example.com/slony"
+    },
+    {
+      searchEngine: "GOOGLE",
+      countryCode: "RU",
+      regionCode: "1011969",
+      regionLabel: "Москва",
+      language: "ru",
+      device: "DESKTOP",
+      observedAt: "2026-09-14T12:00:00.000Z",
+      found: false
+    }
+  ]);
+  assert.deepEqual([...issues], []);
+});
+
 test("Sonorita export metadata overrides defaults and validates one engine", () => {
   const headers = ["Фраза", "Поисковик", "Город", "Код региона", "Устройство", "Страна", "Язык", "2026-09-08"];
   const issues = new Set<string>();
@@ -47,9 +94,9 @@ test("rejects explicit unknown engine and device metadata instead of replacing i
   }
 });
 
-test("imports long position rows with their own date, engine and region", () => {
-  const headers = ["Запрос", "Дата", "Поисковик", "Город", "Код региона", "Устройство", "Позиция"];
-  const values = ["купить слона", "14.09.2026", "Google", "Москва", "1011969", "Телефон", "7"];
+test("imports long position rows with their own date, engine, region and ranking URL", () => {
+  const headers = ["Запрос", "Дата", "Поисковик", "Город", "Код региона", "Устройство", "Позиция", "URL из выдачи"];
+  const values = ["купить слона", "14.09.2026", "Google", "Москва", "1011969", "Телефон", "7", "https://example.com/slony"];
   const issues = new Set<string>();
   const points = importedPositionHistory(
     headers,
@@ -62,7 +109,8 @@ test("imports long position rows with their own date, engine and region", () => 
         { sourceIndex: 1, target: "metric.observed_at" },
         { sourceIndex: 2, target: "context.search_engine" },
         { sourceIndex: 3, target: "context.region" },
-        { sourceIndex: 6, target: "ranking.position" }
+        { sourceIndex: 6, target: "ranking.position" },
+        { sourceIndex: 7, target: "ranking.url" }
       ],
       defaultLanguage: "ru",
       groupSeparator: "/",
@@ -80,7 +128,34 @@ test("imports long position rows with their own date, engine and region", () => 
     device: "MOBILE",
     observedAt: "2026-09-14T12:00:00.000Z",
     found: true,
-    position: 7
+    position: 7,
+    rankingUrl: "https://example.com/slony"
   }]);
   assert.deepEqual([...issues], []);
+});
+
+test("reports an invalid ranking URL without dropping a valid long position", () => {
+  const issues = new Set<string>();
+  const points = importedPositionHistory(
+    ["Запрос", "Дата", "Позиция", "URL из выдачи"],
+    ["купить слона", "14.09.2026", "7", "javascript:alert(1)"],
+    { ...defaults, layout: "LONG" },
+    issues,
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "metric.observed_at" },
+        { sourceIndex: 2, target: "ranking.position" },
+        { sourceIndex: 3, target: "ranking.url" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: false,
+      positionHistory: { ...defaults, layout: "LONG" }
+    }
+  );
+  assert.equal(points[0]?.position, 7);
+  assert.equal(points[0]?.rankingUrl, undefined);
+  assert.deepEqual([...issues], ["INVALID_RANKING_URL"]);
 });

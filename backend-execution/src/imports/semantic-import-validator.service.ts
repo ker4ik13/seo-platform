@@ -27,7 +27,7 @@ import {
   safeMapping,
   semanticImportEntitlement
 } from "./semantic-import.service.js";
-import { importedPositionHistory, isPositionHistorySummary, positionHistoryDateColumns, positionHistoryMetadataHeader } from "./position-history-import.js";
+import { importedPositionHistory, importedRankingUrl, isPositionHistorySummary, positionHistoryDateColumns, positionHistoryMetadataHeader } from "./position-history-import.js";
 import {
   KC4_NATIVE_INTERNAL_HEADERS,
   KC4_POSITION_CONTEXTS_HEADER,
@@ -1050,10 +1050,14 @@ function legacyMappedPosition(
   }
   const position = importedPosition(rawPosition, issues);
   if (position === undefined) return [];
+  const rankingUrl = position > 0
+    ? importedRankingUrl(value("ranking.url"), issues)
+    : undefined;
   return [{
     searchEngine,
     found: position > 0,
-    ...(position > 0 ? { position } : {})
+    ...(position > 0 ? { position } : {}),
+    ...(rankingUrl ? { rankingUrl } : {})
   }];
 }
 
@@ -1229,11 +1233,7 @@ function validRankingUrl(
   value: string | undefined,
   issues: Set<string>
 ): string | undefined {
-  if (!value) return undefined;
-  const result = firstWebUrl(value);
-  if (result) return result;
-  issues.add("INVALID_RANKING_URL");
-  return undefined;
+  return importedRankingUrl(value, issues);
 }
 
 function validUrl(

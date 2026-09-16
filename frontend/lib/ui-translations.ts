@@ -4139,6 +4139,7 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Яндекс · \"\"": "Yandex · \"\"",
   "Яндекс · \"!\"": "Yandex · \"!\"",
   "Позиция (по колонке поисковика)": "Position (by search engine column)",
+  "URL из выдачи": "Ranking URL",
   "Яндекс · Позиция": "Yandex · Position",
   "Яндекс · Изменение позиции": "Yandex · Position change",
   "Яндекс · Релевантный URL": "Yandex · Ranking URL",
