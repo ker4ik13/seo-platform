@@ -1032,6 +1032,13 @@ Core `provider_balance_notifications` хранит pending/low/generation и п�
 Используется существующий внутренний пакет `@seo-platform/operational-alerts`
 с acknowledged endpoint, без нового внешнего SDK или дополнительного deployable.
 
+Web credential validation возобновляет polling сохранённой active job только
+в течение десяти минут от `requestedAt`. Старая Keys.so/Arsenkin job больше не
+показывает бесконечный spinner и не блокирует управление подключением. Revoke
+размонтирует и abort-ит текущий polling, освобождает client operation lock и
+выполняет существующий versioned `DELETE`; Jobs по-прежнему владеет окончательным
+revoke и защитой старой проверки по credential material version.
+
 `integrations/system-connector-bootstrap.service.ts` готовит системные соединения
 для нового проекта: зашифрованные operator credentials, обычную асинхронную
 валидацию и только отсутствующие default routes. Core-команда

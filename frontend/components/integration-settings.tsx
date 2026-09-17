@@ -380,7 +380,8 @@ export function IntegrationSettings({
   }
 
   function beginRevoke(credential: Credential): void {
-    if (isCredentialOperationActive(credential.id)) return;
+    const activeOperation = credentialOperationsRef.current[credential.id];
+    if (activeOperation && activeOperation !== "validation") return;
     setRevokeTarget(credential);
     setRevokeError(undefined);
     setSuccess(undefined);
@@ -744,7 +745,12 @@ export function IntegrationSettings({
                         </span>
                       </div>
                     </div>
-                    <IntegrationCredentialValidation
+                    {revokeTarget?.id === credential.id ? (
+                      <div className="integration-validation-note" role="status">
+                        <strong><UiText text="Проверка остановлена" /></strong>
+                        <span><UiText text="Теперь подключение можно отключить." /></span>
+                      </div>
+                    ) : <IntegrationCredentialValidation
                       activeValidation={credential.activeValidation}
                       canTest={canTest}
                       credentialId={credential.id}
@@ -788,7 +794,7 @@ export function IntegrationSettings({
                         )?.credentialValidationMode
                       }
                       workspaceId={workspaceId}
-                    />
+                    />}
                   </header>
                   <div className="integration-credential-meta">
                     <span>{<UiText text={integrationCredentialModeLabel(credential.mode) ?? ""} />}</span>
@@ -822,7 +828,8 @@ export function IntegrationSettings({
                       <button
                         className="secondary-button danger-button integration-card-action"
                         disabled={Boolean(
-                          credentialOperations[credential.id] ||
+                          (credentialOperations[credential.id] &&
+                            credentialOperations[credential.id] !== "validation") ||
                             editing?.id === credential.id
                         )}
                         onClick={() => beginRevoke(credential)}

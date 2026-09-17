@@ -5167,5 +5167,8 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Найденный запрос": "Found keyword",
   "Объединить запросы": "Merge keywords",
   "Закрыть во время импорта?": "Close while importing?",
+  "Проверка остановлена": "Validation stopped",
+  "Теперь подключение можно отключить.": "The integration can now be disconnected.",
+  "Проверка давно не обновлялась и больше не блокирует управление подключением. Её можно повторить позже или отключить ключ сейчас.": "The validation has not updated for a while and no longer blocks integration controls. Retry it later or disconnect the key now.",
   "Остаться": "Stay"
 };

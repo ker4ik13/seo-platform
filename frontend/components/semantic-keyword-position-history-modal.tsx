@@ -194,6 +194,7 @@ export function SemanticKeywordPositionHistoryModal({
   return (
     <SemanticModal
       bodyLayout="edge"
+      className="semantic-position-history-modal"
       description={uiText(dimensionKey ? "Сохранённые позиции выбранного города и устройства. История загружается блоками по 200 записей." : "Все сохранённые съёмы этого запроса во всех контекстах. История загружается блоками по 200 записей и не обрезается последними датами.")}
       onClose={onClose}
       size="large"

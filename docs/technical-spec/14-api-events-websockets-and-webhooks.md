@@ -807,7 +807,10 @@ terminal результат читается из обычного credential st
 Точный повтор с тем же `Idempotency-Key` возвращает тот же Job. Пока для
 текущего `credentialMaterialVersion` есть active Job, новый command key
 получает `409 RESOURCE_STATE_CONFLICT`; после terminal state разрешён новый
-validation.
+validation. Browser автоматически продолжает polling только для active job не
+старше десяти минут; более старая projection не блокирует edit/revoke и не
+показывает бесконечный loading. При revoke клиент отменяет только свой GET
+polling, а `DELETE` и последующая server-side stale-защита завершают lifecycle.
 
 Validation response содержит только `id`, workspace/credential IDs,
 `credentialMaterialVersion`, provider, connector version, timestamps,

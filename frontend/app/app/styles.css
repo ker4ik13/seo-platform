@@ -6063,7 +6063,8 @@ svg { display: block; }
 .rankings-cell small { color: var(--muted); font-size: 8px; font-weight: 750; margin-top: 2px; }
 .rankings-cell.up { background: #e9f9f0; }
 .rankings-cell.up small { color: #168652; }
-.rankings-cell.down, .rankings-cell.lost { background: #fff0f2; }
+.rankings-cell.down { background: #fff8f8; }
+.rankings-cell.lost { background: #ffeff2; }
 .rankings-cell.down small, .rankings-cell.lost small { color: #d94657; }
 .rankings-cell.new { background: #f3f0ff; }
 .rankings-cell.new small { color: var(--brand); }
@@ -11366,6 +11367,8 @@ svg { display: block; }
   display: grid;
   gap: 12px;
 }
+
+.semantic-modal.semantic-position-history-modal { overflow: hidden; }
 
 .semantic-position-history-full > header {
   align-items: center;

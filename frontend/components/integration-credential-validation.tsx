@@ -18,6 +18,7 @@ import {
   isTerminalCredentialValidationStatus,
   isTransientCredentialValidationPollError,
   persistedCredentialValidationPresentation,
+  shouldAutoResumeCredentialValidation,
   supportsAutomaticCredentialValidation
 } from "../lib/integration-credential-validation";
 import { UiText } from "./ui-locale";
@@ -27,6 +28,8 @@ import { Icon } from "./icon";
 const VALIDATION_POLL_INTERVAL_MS = 2_000;
 const VALIDATION_POLL_TIMEOUT_MS = 5 * 60 * 1_000;
 const VALIDATION_TRANSIENT_GET_RETRY_LIMIT = 4;
+const STALE_ACTIVE_VALIDATION_MESSAGE =
+  "Проверка давно не обновлялась и больше не блокирует управление подключением. Её можно повторить позже или отключить ключ сейчас.";
 
 type ValidationPhase =
   | "idle"
@@ -240,14 +243,23 @@ export function useIntegrationCredentialValidation({
     validation: IntegrationCredentialValidationSummary
   ) => Promise<void> | void;
 }>) {
+  const autoResumeActiveValidation = Boolean(
+    activeValidation && shouldAutoResumeCredentialValidation(activeValidation)
+  );
   const [phase, setPhase] = useState<ValidationPhase>(
-    activeValidation ? "polling" : "idle"
+    activeValidation
+      ? autoResumeActiveValidation ? "polling" : "error"
+      : "idle"
   );
   const [summary, setSummary] =
     useState<IntegrationCredentialValidationSummary | undefined>(
       activeValidation
     );
-  const [error, setError] = useState<ValidationRequestError>();
+  const [error, setError] = useState<ValidationRequestError | undefined>(
+    activeValidation && !autoResumeActiveValidation
+      ? { message: STALE_ACTIVE_VALIDATION_MESSAGE }
+      : undefined
+  );
   const [refreshWarning, setRefreshWarning] = useState<string>();
   const activeRequest = useRef<AbortController | undefined>(undefined);
   const idempotencyKey = useRef<string | undefined>(undefined);
@@ -262,14 +274,21 @@ export function useIntegrationCredentialValidation({
 
   useEffect(() => {
     const initialValidation = activeValidationRef.current;
+    const shouldResume = Boolean(
+      initialValidation &&
+        shouldAutoResumeCredentialValidation(initialValidation)
+    );
     idempotencyKey.current = undefined;
     setSummary(initialValidation);
-    setError(undefined);
+    setError(
+      initialValidation && !shouldResume
+        ? { message: STALE_ACTIVE_VALIDATION_MESSAGE }
+        : undefined
+    );
     setRefreshWarning(undefined);
-    setPhase(initialValidation ? "polling" : "idle");
+    setPhase(initialValidation ? shouldResume ? "polling" : "error" : "idle");
     const resumeTimer =
-      initialValidation &&
-      !isTerminalCredentialValidationStatus(initialValidation.status)
+      initialValidation && shouldResume
         ? window.setTimeout(
             () => void runRef.current(initialValidation),
             0
@@ -287,9 +306,13 @@ export function useIntegrationCredentialValidation({
   }, [credentialId, credentialVersion, workspaceId]);
 
   async function start(): Promise<void> {
+    const resumable = Boolean(
+      summary && shouldAutoResumeCredentialValidation(summary)
+    );
     return run(
       summary &&
-        !isTerminalCredentialValidationStatus(summary.status)
+        !isTerminalCredentialValidationStatus(summary.status) &&
+        resumable
         ? summary
         : undefined
     );
@@ -343,6 +366,15 @@ export function useIntegrationCredentialValidation({
             return;
           }
         }
+      }
+      if (
+        !isTerminalCredentialValidationStatus(current.status) &&
+        !shouldAutoResumeCredentialValidation(current)
+      ) {
+        setSummary(current);
+        setError({ message: STALE_ACTIVE_VALIDATION_MESSAGE });
+        setPhase("error");
+        return;
       }
       setSummary(current);
       const pollingDeadline = Date.now() + VALIDATION_POLL_TIMEOUT_MS;

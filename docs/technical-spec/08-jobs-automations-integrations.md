@@ -749,6 +749,12 @@ Web гидратирует эту job после reload/navigation и продо
 обязан перечитать authoritative list и присоединиться к найденной active job;
 если она уже terminal, используются обновлённые credential status и безопасный
 `lastErrorCode`. `sessionStorage` не является источником истины validation.
+Автоматическое возобновление browser polling ограничено десятью минутами от
+`requestedAt`: более старая незавершённая job показывается как зависшая без
+spinner и не удерживает локальный operation lock. Открытие revoke во время
+свежего polling прерывает browser GET loop, освобождает lock и разрешает
+`DELETE`; server revoke остаётся источником истины и делает исполняющуюся
+старую проверку `STALE` через material/lifecycle guard.
 
 `PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
 XMLStock/Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider

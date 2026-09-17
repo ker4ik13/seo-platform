@@ -25,6 +25,7 @@ interface CredentialValidationPollDelayOptions {
 
 const TRANSIENT_RETRY_BASE_DELAY_MS = 750;
 const TRANSIENT_RETRY_MAX_DELAY_MS = 8_000;
+export const CREDENTIAL_VALIDATION_AUTO_RESUME_MAX_AGE_MS = 10 * 60 * 1_000;
 
 const TERMINAL_STATUSES: ReadonlySet<IntegrationCredentialValidationStatus> =
   new Set([
@@ -44,6 +45,21 @@ export function supportsAutomaticCredentialValidation(
   mode: IntegrationCredentialValidationMode | undefined
 ): boolean {
   return mode === "ACCOUNT_METADATA";
+}
+
+export function shouldAutoResumeCredentialValidation(
+  validation: Pick<
+    IntegrationCredentialValidationSummary,
+    "requestedAt" | "status"
+  >,
+  nowMs = Date.now(),
+  maxAgeMs = CREDENTIAL_VALIDATION_AUTO_RESUME_MAX_AGE_MS
+): boolean {
+  if (isTerminalCredentialValidationStatus(validation.status)) return false;
+  const requestedAtMs = Date.parse(validation.requestedAt);
+  if (!Number.isFinite(requestedAtMs)) return false;
+  const ageMs = nowMs - requestedAtMs;
+  return ageMs >= 0 && ageMs <= Math.max(0, maxAgeMs);
 }
 
 export function credentialValidationPresentation(

@@ -12,6 +12,7 @@ import {
   isTerminalCredentialValidationStatus,
   isTransientCredentialValidationPollError,
   persistedCredentialValidationPresentation,
+  shouldAutoResumeCredentialValidation,
   supportsAutomaticCredentialValidation
 } from "./integration-credential-validation.ts";
 
@@ -48,6 +49,38 @@ test("polls every nonterminal credential validation status", () => {
   for (const status of terminal) {
     assert.equal(isTerminalCredentialValidationStatus(status), true);
   }
+});
+
+test("does not resume a stale validation forever after reopening settings", () => {
+  const nowMs = Date.parse("2026-09-17T10:20:00.000Z");
+  assert.equal(
+    shouldAutoResumeCredentialValidation(
+      { status: "RUNNING", requestedAt: "2026-09-17T10:15:00.000Z" },
+      nowMs
+    ),
+    true
+  );
+  assert.equal(
+    shouldAutoResumeCredentialValidation(
+      { status: "RETRY_SCHEDULED", requestedAt: "2026-09-17T09:00:00.000Z" },
+      nowMs
+    ),
+    false
+  );
+  assert.equal(
+    shouldAutoResumeCredentialValidation(
+      { status: "SUCCEEDED", requestedAt: "2026-09-17T10:19:00.000Z" },
+      nowMs
+    ),
+    false
+  );
+  assert.equal(
+    shouldAutoResumeCredentialValidation(
+      { status: "QUEUED", requestedAt: "invalid" },
+      nowMs
+    ),
+    false
+  );
 });
 
 test("uses honest terminal messages for success, stale and provider failures", () => {
