@@ -3,6 +3,15 @@ export const projectSemanticMutationEvent =
 
 type BrowserMutationMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** These POST endpoints only read data; they must not invalidate that data. */
+export function isSemanticReadRequest(path: string, method: BrowserMutationMethod): boolean {
+  if (method !== "POST") return false;
+  const pathname = path.split(/[?#]/u, 1)[0] ?? "";
+  const match = PROJECT_API_PATTERN.exec(pathname);
+  return Boolean(match && UUID_PATTERN.test(match[1] ?? "") &&
+    /^keywords\/(?:list|search|operation-scope|bulk-preview)$/u.test(match[2] ?? ""));
+}
+
 export function announceProjectSemanticMutation(projectId: string): void {
   if (typeof window === "undefined" || !UUID_PATTERN.test(projectId)) return;
   window.dispatchEvent(
@@ -22,7 +31,7 @@ export function semanticMutationProjectId(
   path: string,
   method: BrowserMutationMethod
 ): string | undefined {
-  if (method === "GET") return undefined;
+  if (method === "GET" || isSemanticReadRequest(path, method)) return undefined;
   const pathname = path.split(/[?#]/u, 1)[0] ?? "";
   const match = PROJECT_API_PATTERN.exec(pathname);
   if (!match) return undefined;
@@ -38,9 +47,6 @@ export function semanticMutationProjectId(
     return projectId;
   }
   if (/^keywords(?:\/|$)/u.test(resource)) {
-    if (method === "POST" && /\/(?:search|bulk-preview)$/u.test(resource)) {
-      return undefined;
-    }
     return projectId;
   }
   if (/^bulk-commands(?:\/clean)?$/u.test(resource)) return projectId;

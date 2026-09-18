@@ -411,3 +411,34 @@ function restoreGlobalNavigator(
     Reflect.deleteProperty(globalThis, "navigator");
   }
 }
+
+test("paginated semantic POST reads never announce changes or reset workspace usage", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const events: Event[] = [];
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dispatchEvent: (event: Event) => { events.push(event); return true; } } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { cookie: "seo_csrf=test-csrf" } });
+  globalThis.fetch = async () => Response.json({ data: [], page: { hasNext: true, nextCursor: "next-page" } });
+  const project = "0198f258-8cc7-7abc-8def-1234567890ab";
+  try {
+    const { browserApiCollectionRequest } = await import("./browser-api.ts");
+    for (const prefix of ["/app/api", "/app/api/v1"]) {
+      for (const resource of ["list", "search", "operation-scope", "bulk-preview"]) {
+        for (let page = 0; page < 8; page++) {
+          await browserApiCollectionRequest(`${prefix}/projects/${project}/keywords/${resource}`, {
+            method: "POST", body: { query: { limit: 100, cursor: `page-${page}` } }
+          });
+        }
+      }
+    }
+    assert.equal(events.length, 0, "Reading the next page must not broadcast a mutation or refresh usage");
+    await browserApiRequest(`/app/api/projects/${project}/keywords/bulk`, { method: "POST", body: {} });
+    assert.deepEqual(events.map(event => event.type), ["seo:project-semantic-mutation", "workspace-usage:refresh"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    restoreGlobalDocument(originalDocument);
+  }
+});

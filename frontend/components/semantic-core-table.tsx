@@ -5713,6 +5713,7 @@ export function SemanticCoreTable({
               presenceByRowId={remoteKeywordPresence}
               rowNumberOffset={virtualRows.start}
               rows={virtualRows.items}
+              virtualRowHeight={semanticRowHeight(viewConfig.density)}
               selectedIds={checkedIds}
               showRowNumbers
               toggleAllDisabled={selectingAll}
@@ -6318,8 +6319,11 @@ function semanticVirtualRows(
   const rowHeight = semanticRowHeight(density);
   const overscan = 14;
   const bodyScrollTop = Math.max(0, viewport.scrollTop - 35);
-  const start = Math.max(0, Math.floor(bodyScrollTop / rowHeight) - overscan);
   const visible = Math.ceil(viewport.height / rowHeight) + overscan * 2;
+  const start = Math.min(
+    Math.max(0, items.length - visible),
+    Math.max(0, Math.floor(bodyScrollTop / rowHeight) - overscan)
+  );
   const end = Math.min(items.length, start + visible);
   return {
     items: items.slice(start, end),

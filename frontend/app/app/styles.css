@@ -5423,6 +5423,8 @@ svg { display: block; }
 .semantic-column-available { display: grid; gap: 6px; grid-template-columns: 1fr 1fr; }
 .semantic-column-picker-menu > .text-button { justify-self: start; }
 .semantic-core > .semantic-table-wrap {
+  /* The virtual window owns offsets; browser anchoring must not move it. */
+  overflow-anchor: none;
   border: 0;
   border-radius: 0;
   box-sizing: border-box;
@@ -5663,6 +5665,33 @@ svg { display: block; }
 .semantic-load-sentinel { height: 1px; width: 100%; }
 .semantic-virtual-spacer td { border: 0 !important; padding: 0 !important; }
 .semantic-virtual-spacer:hover td { background: transparent !important; }
+
+/* Match the virtualizer's exact row extent, including padding and border.
+   Table-cell height alone is only a minimum and grows with tags/URL content. */
+.semantic-table.has-virtual-rows > tbody > tr[data-presence-row-id] > td {
+  box-sizing: border-box;
+  height: var(--semantic-row-height);
+  padding-block: 2px;
+  border-bottom: 1px solid var(--line);
+}
+.semantic-virtual-cell {
+  max-height: calc(var(--semantic-row-height) - 5px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.semantic-virtual-cell .semantic-query-actions :is(.semantic-keyword-note-indicator, .semantic-keyword-rank-indicator) {
+  height: 16px;
+  width: 16px;
+  min-height: 16px;
+  min-width: 16px;
+}
+.semantic-virtual-cell .semantic-query-tags { line-height: 1; }
+.semantic-virtual-cell .semantic-query-tags > span { line-height: 1; }
+.semantic-table.has-virtual-rows .semantic-row-more {
+  height: min(28px, calc(var(--semantic-row-height) - 5px));
+  padding: 0;
+  vertical-align: middle;
+}
 .semantic-keyword-inspector {
   align-self: stretch;
   background: #fff;
@@ -11696,7 +11725,8 @@ svg { display: block; }
 }
 
 .semantic-table .semantic-ranking-url-link,
-.semantic-table td.semantic-column-targetUrl > span {
+.semantic-table td.semantic-column-targetUrl > span,
+.semantic-table td.semantic-column-targetUrl > .semantic-virtual-cell > span {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   display: -webkit-box;
@@ -11707,6 +11737,11 @@ svg { display: block; }
   text-overflow: ellipsis;
   white-space: normal;
   word-break: break-word;
+}
+
+.semantic-table.has-virtual-rows.density-compact .semantic-ranking-url-link,
+.semantic-table.has-virtual-rows.density-compact td.semantic-column-targetUrl > .semantic-virtual-cell > span {
+  -webkit-line-clamp: 1;
 }
 
 .project-notes-layout {

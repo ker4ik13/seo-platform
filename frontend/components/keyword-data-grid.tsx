@@ -3,6 +3,7 @@ import { semanticColumnPresenceKey } from "../lib/semantic-column-presence";
 
 import type {
   AriaAttributes,
+  CSSProperties,
   DragEvent,
   KeyboardEvent,
   MouseEvent,
@@ -66,6 +67,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   selectedIds,
   showRowNumbers = false,
   tableClassName = "semantic-table",
+  virtualRowHeight,
   toggleAllDisabled = false
 }: Readonly<{
   actions?: (row: Row) => ReactNode;
@@ -92,6 +94,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   selectedIds: ReadonlySet<string>;
   showRowNumbers?: boolean;
   tableClassName?: string;
+  virtualRowHeight?: number;
   toggleAllDisabled?: boolean;
 }>) {
   const { t: uiText } = useUiLocale();
@@ -179,12 +182,13 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   return (
     <table
       aria-label={ariaLabel}
-      className={`${tableClassName} density-${density.toLowerCase()}${hasSizedColumns ? " has-sized-columns" : ""}${onToggleHighlighted ? " has-highlight-selector" : ""}${showRowNumbers ? " has-row-numbers" : ""}`}
+      className={`${tableClassName} density-${density.toLowerCase()}${hasSizedColumns ? " has-sized-columns" : ""}${onToggleHighlighted ? " has-highlight-selector" : ""}${showRowNumbers ? " has-row-numbers" : ""}${virtualRowHeight ? " has-virtual-rows" : ""}`}
       data-presence-key="semantic-keyword-table"
       style={
-        tableWidth
-          ? { minWidth: tableWidth, width: tableWidth }
-          : undefined
+        {
+          ...(tableWidth ? { minWidth: tableWidth, width: tableWidth } : {}),
+          ...(virtualRowHeight ? { "--semantic-row-height": `${virtualRowHeight}px` } : {})
+        } as CSSProperties
       }
     >
       {hasSizedColumns && (
@@ -361,7 +365,9 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                   data-presence-row-id={row.id}
                   key={column.key}
                 >
-                  {column.cell(row)}
+                  {virtualRowHeight
+                    ? <div className="semantic-virtual-cell">{column.cell(row)}</div>
+                    : column.cell(row)}
                 </td>
               ))}
               {actions && (

@@ -43,6 +43,8 @@ test("detects committed semantic mutations that require reconciliation", () => {
 test("does not announce reads, previews or unrelated project commands", () => {
   for (const [method, resource] of [
     ["GET", "keywords"],
+    ["POST", "keywords/list"],
+    ["POST", "keywords/operation-scope"],
     ["POST", "keywords/search"],
     ["POST", "keywords/bulk-preview"],
     ["POST", "bulk-commands/clean-preview"],

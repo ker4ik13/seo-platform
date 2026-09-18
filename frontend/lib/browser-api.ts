@@ -2,7 +2,7 @@ import {
   rankRunConflictDetails,
   type RankRunConflictDetails
 } from "@seo-platform/contracts";
-import { announceSemanticMutationForRequest } from "./semantic-realtime.ts";
+import { announceSemanticMutationForRequest, isSemanticReadRequest } from "./semantic-realtime.ts";
 import type { OperationEstimate } from "@seo-platform/contracts";
 import { confirmPaidOperation, hasOperationConfirmation, quotedOperationRoute } from "./operation-confirmation.ts";
 import type { OperationAttempt } from "./operation-attempt.ts";
@@ -213,7 +213,7 @@ async function browserApiPayload(
     );
   }
   announceSemanticMutationForRequest(path, method);
-  if (method !== "GET" && typeof window !== "undefined") {
+  if (method !== "GET" && !isSemanticReadRequest(path, method) && typeof window !== "undefined") {
     window.dispatchEvent(new Event("workspace-usage:refresh"));
   }
   return { response, payload };
