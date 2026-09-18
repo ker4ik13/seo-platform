@@ -399,8 +399,14 @@ for provider_name in XMLSTOCK ARSENKIN; do
   api_key_count=$#
   for raw_api_key_value in "$@"; do
     api_key_value="$(printf '%s' "$raw_api_key_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    if ! LC_ALL=C printf '%s' "$api_key_value" |
-      grep -Eq '^[!-~]{8,2048}$'; then
+    api_key_length=${#api_key_value}
+    # POSIX only guarantees interval expressions up to RE_DUP_MAX (255).
+    # Alpine's grep therefore rejects {8,2048} as a malformed expression
+    # before it can inspect an otherwise valid provider key. Bound the value
+    # in the shell and let grep validate only the visible ASCII alphabet.
+    if [ "$api_key_length" -lt 8 ] ||
+      [ "$api_key_length" -gt 2048 ] ||
+      ! LC_ALL=C printf '%s' "$api_key_value" | grep -Eq '^[!-~]+$'; then
       echo "service-token-preflight: $api_key_name items must contain 8..2048 visible ASCII characters without whitespace" >&2
       exit 1
     fi
@@ -421,7 +427,7 @@ for provider_name in XMLSTOCK ARSENKIN; do
     done
     set +f
     validated_provider_secret_values="$validated_provider_secret_values $api_key_value"
-    unset api_key_value raw_api_key_value
+    unset api_key_length api_key_value raw_api_key_value
   done
 
   if [ "$provider_name" = XMLSTOCK ]; then
@@ -477,14 +483,16 @@ for provider_name in XMLSTOCK ARSENKIN; do
     fi
     for raw_account_value in "$@"; do
       account_value="$(printf '%s' "$raw_account_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-      if ! LC_ALL=C printf '%s' "$account_value" |
-        grep -Eq '^[ -~]{1,255}$' ||
+      account_value_length=${#account_value}
+      if [ "$account_value_length" -lt 1 ] ||
+        [ "$account_value_length" -gt 255 ] ||
+        ! LC_ALL=C printf '%s' "$account_value" | grep -Eq '^[ -~]+$' ||
         [ -z "$(printf '%s' "$account_value" | tr -d '[:space:]')" ]; then
         echo "service-token-preflight: $account_name items must be bounded printable identifiers" >&2
         exit 1
       fi
     done
-    unset account_name account_value account_values legacy_account_name legacy_account_value pool_account_name pool_account_value raw_account_value
+    unset account_name account_value account_value_length account_values legacy_account_name legacy_account_value pool_account_name pool_account_value raw_account_value
   fi
 
   validated_platform_providers=$((validated_platform_providers + 1))

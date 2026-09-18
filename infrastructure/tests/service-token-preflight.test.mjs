@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -106,6 +107,37 @@ test("preflight accepts complete enabled platform providers", async () => {
     `${result.stdout}${result.stderr}`,
     environment
   );
+});
+
+test("preflight keeps provider bounds portable below POSIX RE_DUP_MAX", async () => {
+  const source = await readFile(scriptPath, "utf8");
+  const grepExpressions = source
+    .split("\n")
+    .filter((line) => line.includes("grep -E"))
+    .join("\n");
+  const intervalBounds = [
+    ...grepExpressions.matchAll(/\{\d+,(\d+)\}/gu)
+  ].map((match) => Number(match[1]));
+  assert.equal(
+    intervalBounds.every((upperBound) => upperBound <= 255),
+    true,
+    "grep interval expressions must not exceed POSIX RE_DUP_MAX"
+  );
+
+  const environment = validEnvironment();
+  Object.assign(environment, {
+    PLATFORM_XMLSTOCK_ENABLED: "true",
+    PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "17",
+    PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
+    PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000",
+    PLATFORM_XMLSTOCK_API_KEYS: "x".repeat(2048),
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "a".repeat(255)
+  });
+
+  const result = await runPreflight(environment);
+
+  assert.equal(result.stderr, "");
+  assertDoesNotExposeCredentials(result.stdout, environment);
 });
 
 test("preflight fails closed for incomplete or malformed platform configuration", async () => {
