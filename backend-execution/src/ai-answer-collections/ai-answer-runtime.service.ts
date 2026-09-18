@@ -196,7 +196,7 @@ export class AiAnswerRuntimeService {
       throw error;
     } finally {
       await this.refreshScheduler
-        ?.scheduleAfterProviderOperation(activeClaim.credentialId)
+        ?.scheduleAfterProviderOperation(activeClaim.credentialId, "ARSENKIN")
         .catch(() => undefined);
     }
   }

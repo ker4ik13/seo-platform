@@ -1186,8 +1186,9 @@ Page-worthy:
 
 Production Compose и одноузловой VPS runtime имеют private receiver на порту
 `4004`. Он принимает только exact JSON envelope версии 1 с allowlisted
-`service/source/code/severity/fingerprint`, отдельным
-`OPERATIONAL_ALERT_TOKEN`, лимитом тела 2 KiB и timing-safe проверкой
+`service/source/code/severity/fingerprint` и необязательным bounded-набором
+заранее очищенных диагностических полей, отдельным
+`OPERATIONAL_ALERT_TOKEN`, лимитом тела 4 KiB и timing-safe проверкой
 авторизации. Произвольный текст исключения, request body, tenant/provider
 payload, URL и credential передать через этот контракт нельзя.
 
@@ -1198,10 +1199,16 @@ payload, URL и credential передать через этот контракт
   в виде локального SHA-256 fingerprint;
 - uncaught exception monitor backend supervisors;
 - ошибки Next request handler и Realtime upgrade proxy.
+- ошибки создания, сверки и возврата платежей YooKassa/Crypto Pay: сообщение
+  содержит цитатой только provider, нормализованный код, HTTP status,
+  безопасный параметр и opaque payment/order/request IDs. Одинаковая ошибка
+  одной операции подавляется в пределах окна дедупликации.
 
 Ожидаемые domain `4xx`, validation failures и пользовательские provider
-statuses не являются внутренними инцидентами и не алертятся. Неизвестный `5xx`
-должен попасть в structured error log и далее в supervisor alert.
+statuses не являются внутренними инцидентами и не алертятся. Исключение —
+отказ платёжного provider API после создания локальной финансовой операции:
+он требует безопасной диагностической эскалации. Неизвестный `5xx` должен
+попасть в structured error log и далее в supervisor alert.
 
 Telegram bot token получает только alert-receiver process; Frontend и
 Execution получают лишь внутренний URL и dedicated token. Receiver делает

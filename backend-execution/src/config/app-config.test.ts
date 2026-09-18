@@ -46,7 +46,7 @@ test("exposes only explicitly enabled and complete platform provider credentials
     DATABASE_URL: "postgresql://test",
     PLATFORM_XMLSTOCK_ENABLED: "true",
     PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-secret-1, xmlstock-secret-2",
-    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-42",
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-41,account-42",
     PLATFORM_ARSENKIN_ENABLED: "false",
     PLATFORM_ARSENKIN_API_KEY: "ignored staged value with whitespace"
   });
@@ -55,7 +55,7 @@ test("exposes only explicitly enabled and complete platform provider credentials
     XMLSTOCK: [
       {
         apiKey: "xmlstock-secret-1",
-        accountIdentifier: "account-42"
+        accountIdentifier: "account-41"
       },
       {
         apiKey: "xmlstock-secret-2",
@@ -122,9 +122,19 @@ test("rejects ambiguous or malformed platform credential pools", () => {
       DATABASE_URL: "postgresql://test",
       PLATFORM_XMLSTOCK_ENABLED: "true",
       PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-key-1,xmlstock-key-2",
-      PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-1,account-2,account-3"
+      PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-1"
     }),
-    /one shared identifier or one identifier per API key/u
+    /exactly one identifier per API key in the same order/u
+  );
+  assert.throws(
+    () => loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      PLATFORM_XMLSTOCK_ENABLED: "true",
+      PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-key-1,xmlstock-key-2",
+      PLATFORM_XMLSTOCK_ACCOUNT_IDS: "account-1,account-1"
+    }),
+    /must not contain duplicate identifiers/u
   );
 });
 

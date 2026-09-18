@@ -318,12 +318,17 @@ PLATFORM_ARSENKIN_API_KEYS=
 PLATFORM_ARSENKIN_API_KEY=
 ```
 
+В `PLATFORM_XMLSTOCK_API_KEYS` и `PLATFORM_XMLSTOCK_ACCOUNT_IDS` должно быть
+одинаковое число элементов. Пара с индексом `i` всегда образует один физический
+аккаунт XMLStock; один account ID нельзя повторять для нескольких API-ключей.
+
 Цена задаётся в minor units за одну keyword-context проверку, положительным
 целым не больше `61489146912`. При включённом provider flag обязательны цена и
 все его credentials; preflight отклоняет частичную конфигурацию. Для пула
 используются plural-переменные со значениями через запятую. XMLStock принимает
-один общий account ID или список той же длины, что и API keys. Singular и
-plural одновременно задавать нельзя. Эти flags
+только список уникальных account ID той же длины, что и API keys; элементы
+связываются строго по индексу. Singular и plural одновременно задавать нельзя.
+Эти flags
 нельзя включать в production до письменного разрешения provider, заполненных
 суточного/месячного hard budgets,
 balance alert и fault-injection canary порядка reserve → provider response →

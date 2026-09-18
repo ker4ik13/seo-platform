@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
-import { CryptoPayClient, normalizeCryptoPayInvoice, verifyCryptoPaySignature } from "./crypto-pay.client.js";
+import { CryptoPayClient, CryptoPayProviderError, normalizeCryptoPayInvoice, verifyCryptoPaySignature } from "./crypto-pay.client.js";
 import { loadAppConfig } from "../config/app-config.js";
 
 const token = "123456789:synthetic-crypto-token-for-unit-tests-only";
@@ -36,4 +36,66 @@ test("configuration is opt-in and restricts provider endpoints", () => {
   assert.equal(new CryptoPayClient(config).isEnabled(), false);
   assert.throws(() => loadAppConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://test", CRYPTO_PAY_ENABLED: "true" }));
   assert.throws(() => loadAppConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://test", CRYPTO_PAY_API_BASE_URL: "http://169.254.169.254/api" }));
+});
+test("creates a fiat invoice and preserves the provider rejection code", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<Record<string, unknown>> = [];
+  let reject = false;
+  globalThis.fetch = async (_input, init) => {
+    requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return reject
+      ? new Response(JSON.stringify({ ok: false, error: "PARAM_AMOUNT_INVALID" }), { status: 400 })
+      : new Response(JSON.stringify({ ok: true, result: invoice() }), { status: 200 });
+  };
+  try {
+    const client = new CryptoPayClient(loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      WEB_PUBLIC_URL: "https://app.example.test",
+      CRYPTO_PAY_ENABLED: "true",
+      CRYPTO_PAY_API_TOKEN: token,
+      CRYPTO_PAY_API_BASE_URL: "https://testnet-pay.crypt.bot/api"
+    }));
+    const payment = await client.createPayment({
+      idempotencyKey: "not-used-by-provider",
+      amountMinor: 10_000,
+      description: "Balance top-up",
+      returnUrl: "https://app.example.test/app/settings/billing?checkout=return",
+      orderId,
+      workspaceId,
+      savePaymentMethod: false
+    });
+    assert.equal(payment.confirmationUrl?.startsWith("https://t.me/"), true);
+    assert.deepEqual(requests[0], {
+      currency_type: "fiat",
+      fiat: "RUB",
+      amount: "100.00",
+      description: "Balance top-up",
+      expires_in: 3600,
+      allow_anonymous: false,
+      allow_comments: false,
+      paid_btn_name: "callback",
+      paid_btn_url: "https://app.example.test/app/settings/billing?checkout=return",
+      payload: JSON.stringify({ order_id: orderId, workspace_id: workspaceId })
+    });
+
+    reject = true;
+    await assert.rejects(
+      () => client.createPayment({
+        idempotencyKey: "not-used-by-provider",
+        amountMinor: 10_000,
+        description: "Balance top-up",
+        returnUrl: "https://app.example.test/app/settings/billing?checkout=return",
+        orderId,
+        workspaceId,
+        savePaymentMethod: false
+      }),
+      (error) => error instanceof CryptoPayProviderError &&
+        error.code === "CRYPTO_PAY_PARAM_AMOUNT_INVALID" &&
+        error.providerReason === "PARAM_AMOUNT_INVALID" &&
+        error.httpStatus === 400
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

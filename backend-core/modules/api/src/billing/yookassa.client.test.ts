@@ -172,6 +172,46 @@ test("retries transient network failures with the same idempotency key", async (
   ]);
 });
 
+test("preserves a safe YooKassa error parameter for operational diagnostics", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    type: "error",
+    id: "provider-request-id",
+    code: "invalid_request",
+    description: "must never be exposed verbatim",
+    parameter: "confirmation.return_url"
+  }), { status: 400 });
+  try {
+    const client = new YookassaClient(loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      YOOKASSA_ENABLED: "true",
+      YOOKASSA_SHOP_ID: "123456",
+      YOOKASSA_SECRET_KEY: "s".repeat(32),
+      YOOKASSA_RETURN_URL: "https://app.example.test/billing/return",
+      YOOKASSA_API_BASE_URL: "http://provider.test/v3"
+    }));
+    await assert.rejects(
+      () => client.createPayment({
+        idempotencyKey: "providererror123",
+        amountMinor: 10_000,
+        description: "Balance top-up",
+        returnUrl: "https://app.example.test/billing/return",
+        orderId: "order-1",
+        workspaceId: "workspace-1",
+        savePaymentMethod: false
+      }),
+      (error) => error instanceof YookassaProviderError &&
+        error.code === "YOOKASSA_INVALID_REQUEST" &&
+        error.httpStatus === 400 &&
+        error.parameter === "confirmation.return_url" &&
+        !error.message.includes("must never")
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("charges a consented saved method without creating a hosted redirect", async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: unknown;

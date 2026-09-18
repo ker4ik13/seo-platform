@@ -23,7 +23,7 @@ export class CryptoPayWebhookController {
       fingerprint: verified.fingerprint,
       // Semantic identity is stable across redelivery request_date/update metadata.
       payloadHash: new Uint8Array(Buffer.from(verified.fingerprint, "hex"))
-    }, request.ip, true);
+    }, request.ip, true, request.id);
     return { received: true };
   }
 }

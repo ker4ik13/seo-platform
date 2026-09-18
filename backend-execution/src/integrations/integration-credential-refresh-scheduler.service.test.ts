@@ -5,7 +5,7 @@ import { IntegrationCredentialRefreshSchedulerService } from "./integration-cred
 import type { IntegrationCredentialExecutionBrokerService } from "./integration-credential-execution-broker.service.js";
 import type { IntegrationCredentialConnectorRegistry } from "./integration-credential-connector.registry.js";
 
-test("schedules stale credentials hourly with every supported connector version", async () => {
+test("schedules hourly refreshes without automatically probing XMLStock", async () => {
   const calls: unknown[] = [];
   const broker = {
     scheduleValidationRefreshes: async (input: unknown) => {
@@ -34,13 +34,12 @@ test("schedules stale credentials hourly with every supported connector version"
   assert.equal(call.limit, 100);
   assert.ok(call.staleBefore.getTime() >= before - 1_000);
   assert.deepEqual(call.connectorVersions, {
-    XMLSTOCK: "xmlstock@test",
     ARSENKIN: "arsenkin@test",
     KEYS_SO: "keys_so@test"
   });
 });
 
-test("schedules an exact credential refresh after provider operation", async () => {
+test("schedules an exact non-XMLStock refresh after provider operation", async () => {
   let received: unknown;
   const broker = {
     scheduleValidationRefreshes: async (input: unknown) => {
@@ -56,16 +55,38 @@ test("schedules an exact credential refresh after provider operation", async () 
   await new IntegrationCredentialRefreshSchedulerService(
     broker,
     connectors
-  ).scheduleAfterProviderOperation(credentialId);
+  ).scheduleAfterProviderOperation(credentialId, "ARSENKIN");
 
   assert.deepEqual(received, {
     credentialIds: [credentialId],
     connectorVersions: {
-      XMLSTOCK: "xmlstock@test",
       ARSENKIN: "arsenkin@test",
       KEYS_SO: "keys_so@test"
     },
     reason: "PROVIDER_OPERATION",
     limit: 1
   });
+});
+
+test("never refreshes XMLStock automatically after a provider operation", async () => {
+  let calls = 0;
+  const broker = {
+    scheduleValidationRefreshes: async () => {
+      calls += 1;
+      return [];
+    }
+  } as unknown as IntegrationCredentialExecutionBrokerService;
+  const connectors = {
+    version: (provider: IntegrationProvider) => `${provider.toLowerCase()}@test`
+  } as unknown as IntegrationCredentialConnectorRegistry;
+
+  await new IntegrationCredentialRefreshSchedulerService(
+    broker,
+    connectors
+  ).scheduleAfterProviderOperation(
+    "019fc000-0000-7000-8000-000000000002",
+    "XMLSTOCK"
+  );
+
+  assert.equal(calls, 0);
 });

@@ -25,7 +25,7 @@ const baseEnvironment = {
     "billing-settlement-secret",
   PLATFORM_XMLSTOCK_ENABLED: "true",
   PLATFORM_XMLSTOCK_API_KEYS: "must-stay-in-http-1,must-stay-in-http-2",
-  PLATFORM_XMLSTOCK_ACCOUNT_IDS: "platform-account",
+  PLATFORM_XMLSTOCK_ACCOUNT_IDS: "platform-account-1,platform-account-2",
   PLATFORM_ARSENKIN_ENABLED: "false",
   PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http",
   RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: "750"

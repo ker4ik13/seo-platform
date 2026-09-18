@@ -477,10 +477,11 @@ for provider_name in XMLSTOCK ARSENKIN; do
       set +f
     fi
     IFS=$old_ifs
-    if [ "$#" -ne 1 ] && [ "$#" -ne "$api_key_count" ]; then
-      echo "service-token-preflight: $account_name must contain one shared identifier or one identifier per API key" >&2
+    if [ "$#" -ne "$api_key_count" ]; then
+      echo "service-token-preflight: $account_name must contain exactly one identifier per API key in the same order" >&2
       exit 1
     fi
+    validated_account_values=
     for raw_account_value in "$@"; do
       account_value="$(printf '%s' "$raw_account_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
       account_value_length=${#account_value}
@@ -491,8 +492,19 @@ for provider_name in XMLSTOCK ARSENKIN; do
         echo "service-token-preflight: $account_name items must be bounded printable identifiers" >&2
         exit 1
       fi
+      if [ -n "$validated_account_values" ] &&
+        printf '%s\n' "$validated_account_values" | grep -Fqx "x$account_value"; then
+        echo "service-token-preflight: $account_name must not contain duplicate identifiers" >&2
+        exit 1
+      fi
+      if [ -n "$validated_account_values" ]; then
+        validated_account_values="$validated_account_values
+x$account_value"
+      else
+        validated_account_values="x$account_value"
+      fi
     done
-    unset account_name account_value account_value_length account_values legacy_account_name legacy_account_value pool_account_name pool_account_value raw_account_value
+    unset account_name account_value account_value_length account_values legacy_account_name legacy_account_value pool_account_name pool_account_value raw_account_value validated_account_values
   fi
 
   validated_platform_providers=$((validated_platform_providers + 1))

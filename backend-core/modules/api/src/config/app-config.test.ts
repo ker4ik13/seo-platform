@@ -203,6 +203,26 @@ test("keeps production YooKassa traffic on the official API with IP validation",
   );
 });
 
+test("enables reconciliation for Crypto Pay without requiring YooKassa", () => {
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    CRYPTO_PAY_ENABLED: "true",
+    CRYPTO_PAY_API_TOKEN: "123456789:synthetic-crypto-token"
+  });
+  assert.equal(config.billing.cryptoPay?.enabled, true);
+  assert.equal(config.billing.reconciliation.enabled, true);
+
+  assert.throws(
+    () => loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      BILLING_RECONCILIATION_ENABLED: "true"
+    }),
+    /requires an enabled payment provider/u
+  );
+});
+
 test("uses only explicit loopback or container bind addresses", () => {
   assert.equal(
     loadAppConfig(

@@ -337,9 +337,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     true,
     "YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP"
   );
+  const cryptoPay = cryptoPayConfig(env);
   const billingReconciliationEnabled = booleanValue(
     env.BILLING_RECONCILIATION_ENABLED,
-    yookassaEnabled,
+    yookassaEnabled || cryptoPay.enabled,
     "BILLING_RECONCILIATION_ENABLED"
   );
   const platformXmlstockEnabled = booleanValue(
@@ -635,9 +636,13 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       );
     }
   }
-  if (billingReconciliationEnabled && !yookassaEnabled) {
+  if (
+    billingReconciliationEnabled &&
+    !yookassaEnabled &&
+    !cryptoPay.enabled
+  ) {
     throw new Error(
-      "BILLING_RECONCILIATION_ENABLED requires YOOKASSA_ENABLED"
+      "BILLING_RECONCILIATION_ENABLED requires an enabled payment provider"
     );
   }
   if (
@@ -670,11 +675,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   );
   if (
     nodeEnv === "production" &&
-    yookassaEnabled &&
+    (yookassaEnabled || cryptoPay.enabled) &&
     !billingReconciliationEnabled
   ) {
     throw new Error(
-      "BILLING_RECONCILIATION_ENABLED is required with YooKassa in production"
+      "BILLING_RECONCILIATION_ENABLED is required with online payments in production"
     );
   }
   if (
@@ -840,7 +845,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     billing: {
       npd: npdProcessingConfig(env),
-      cryptoPay: cryptoPayConfig(env),
+      cryptoPay,
       yookassa: {
         enabled: yookassaEnabled,
         apiBaseUrl: yookassaApiBaseUrl,

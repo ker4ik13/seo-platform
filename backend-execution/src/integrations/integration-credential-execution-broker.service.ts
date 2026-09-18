@@ -172,7 +172,9 @@ export class IntegrationCredentialExecutionBrokerService {
   public async scheduleValidationRefreshes(input: {
     readonly credentialIds?: readonly string[];
     readonly staleBefore?: Date;
-    readonly connectorVersions: Readonly<Record<IntegrationProvider, string>>;
+    readonly connectorVersions: Readonly<
+      Partial<Record<IntegrationProvider, string>>
+    >;
     readonly reason: "HOURLY" | "PROVIDER_OPERATION";
     readonly limit?: number;
   }): Promise<readonly string[]> {

@@ -91,7 +91,7 @@ test("preflight accepts complete enabled platform providers", async () => {
     PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
     PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000",
     PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-provider-secret-1,xmlstock-provider-secret-2",
-    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "xmlstock-account",
+    PLATFORM_XMLSTOCK_ACCOUNT_IDS: "xmlstock-account-1,xmlstock-account-2",
     PLATFORM_ARSENKIN_ENABLED: "true",
     PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR: "29",
     PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR: "2000",
@@ -173,6 +173,28 @@ test("preflight fails closed for incomplete or malformed platform configuration"
         PLATFORM_XMLSTOCK_API_KEY: "xmlstock-provider-secret"
       },
       expected: /PLATFORM_XMLSTOCK_ACCOUNT_IDS is required/u
+    },
+    {
+      patch: {
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "17",
+        PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
+        PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000",
+        PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-provider-secret-1,xmlstock-provider-secret-2",
+        PLATFORM_XMLSTOCK_ACCOUNT_IDS: "xmlstock-account"
+      },
+      expected: /exactly one identifier per API key in the same order/u
+    },
+    {
+      patch: {
+        PLATFORM_XMLSTOCK_ENABLED: "true",
+        PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR: "17",
+        PLATFORM_XMLSTOCK_DAILY_SPEND_LIMIT_MINOR: "1000",
+        PLATFORM_XMLSTOCK_MONTHLY_SPEND_LIMIT_MINOR: "10000",
+        PLATFORM_XMLSTOCK_API_KEYS: "xmlstock-provider-secret-1,xmlstock-provider-secret-2",
+        PLATFORM_XMLSTOCK_ACCOUNT_IDS: "xmlstock-account,xmlstock-account"
+      },
+      expected: /must not contain duplicate identifiers/u
     },
     {
       patch: {

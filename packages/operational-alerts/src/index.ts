@@ -8,12 +8,15 @@ const TOKEN = /^[!-~]{32,255}$/u;
 const BOT_TOKEN = /^\d{6,15}:[A-Za-z0-9_-]{30,80}$/u;
 const CHAT_ID = /^-?\d{1,20}$/u;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u;
-const BODY_LIMIT_BYTES = 2_048;
+const BODY_LIMIT_BYTES = 4_096;
 const DELIVERY_TIMEOUT_MS = 5_000;
 const CLIENT_TIMEOUT_MS = 1_500;
 const DEDUPE_WINDOW_MS = 5 * 60_000;
 const RATE_WINDOW_MS = 5 * 60_000;
 const RATE_LIMIT = 20;
+const CONTEXT_KEY = /^[a-z][A-Za-z0-9]{0,31}$/u;
+const MAX_CONTEXT_ENTRIES = 10;
+const MAX_CONTEXT_VALUE_LENGTH = 128;
 
 export type OperationalAlertSeverity = "ERROR" | "CRITICAL";
 
@@ -22,6 +25,8 @@ export interface OperationalAlertInput {
   readonly code: string;
   readonly severity: OperationalAlertSeverity;
   readonly fingerprint?: string;
+  /** Bounded, pre-redacted diagnostic fields. Never pass secrets or PII. */
+  readonly context?: Readonly<Record<string, string>>;
 }
 
 export interface OperationalAlertReporter {
@@ -320,6 +325,7 @@ class TelegramEnvelopeReporter implements AlertEnvelopeReporter {
         this.serviceVersion,
         new Date(observedAt)
       ),
+      parse_mode: "HTML",
       disable_web_page_preview: true
     };
     if (this.threadId !== undefined) {
@@ -387,9 +393,15 @@ function parseEnvelope(body: string): AlertEnvelope {
     throw new HttpInputError(400);
   }
   if (!plainRecord(parsed)) throw new HttpInputError(400);
-  const expected = parsed.fingerprint === undefined
-    ? ["code", "service", "severity", "source", "version"]
-    : ["code", "fingerprint", "service", "severity", "source", "version"];
+  const expected = [
+    "code",
+    ...(parsed.context === undefined ? [] : ["context"]),
+    ...(parsed.fingerprint === undefined ? [] : ["fingerprint"]),
+    "service",
+    "severity",
+    "source",
+    "version"
+  ].sort();
   if (Object.keys(parsed).sort().join("\u0000") !== expected.join("\u0000")) {
     throw new HttpInputError(400);
   }
@@ -402,13 +414,20 @@ function parseEnvelope(body: string): AlertEnvelope {
   if (parsed.fingerprint !== undefined && (typeof parsed.fingerprint !== "string" || !FINGERPRINT.test(parsed.fingerprint))) {
     throw new HttpInputError(400);
   }
+  let context: Readonly<Record<string, string>> | undefined;
+  try {
+    context = operationalAlertContext(parsed.context);
+  } catch {
+    throw new HttpInputError(400);
+  }
   return {
     version: 1,
     service: parsed.service,
     source: parsed.source,
     code: parsed.code,
     severity: parsed.severity,
-    ...(parsed.fingerprint ? { fingerprint: parsed.fingerprint } : {})
+    ...(parsed.fingerprint ? { fingerprint: parsed.fingerprint } : {}),
+    ...(context ? { context } : {})
   };
 }
 
@@ -417,13 +436,15 @@ function alertEnvelope(service: string, alert: OperationalAlertInput): AlertEnve
   if (!CODE.test(alert.code)) throw new TypeError("Invalid operational alert code");
   if (alert.severity !== "ERROR" && alert.severity !== "CRITICAL") throw new TypeError("Invalid operational alert severity");
   if (alert.fingerprint !== undefined && !FINGERPRINT.test(alert.fingerprint)) throw new TypeError("Invalid operational alert fingerprint");
+  const context = operationalAlertContext(alert.context);
   return {
     version: 1,
     service,
     source: alert.source,
     code: alert.code,
     severity: alert.severity,
-    ...(alert.fingerprint ? { fingerprint: alert.fingerprint } : {})
+    ...(alert.fingerprint ? { fingerprint: alert.fingerprint } : {}),
+    ...(context ? { context } : {})
   };
 }
 
@@ -443,9 +464,54 @@ function telegramMessage(
     `Код: ${envelope.code}`,
     `Критичность: ${envelope.severity}`,
     ...(envelope.fingerprint ? [`Отпечаток: ${envelope.fingerprint}`] : []),
+    ...(envelope.context
+      ? [
+          "Диагностика (секреты и персональные данные исключены):",
+          `<blockquote>${Object.entries(envelope.context)
+            .map(([key, value]) =>
+              escapeTelegramHtml(`${key}: ${value}`)
+            )
+            .join("\n")}</blockquote>`
+        ]
+      : []),
     `Версия: ${serviceVersion}`,
     `Время: ${observedAt.toISOString()}`
   ].join("\n");
+}
+
+function escapeTelegramHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function operationalAlertContext(
+  value: unknown
+): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined;
+  if (!plainRecord(value)) throw new TypeError("Invalid operational alert context");
+  const entries = Object.entries(value);
+  if (entries.length < 1 || entries.length > MAX_CONTEXT_ENTRIES) {
+    throw new TypeError("Invalid operational alert context");
+  }
+  const result: Record<string, string> = {};
+  for (const [key, item] of entries) {
+    if (
+      !CONTEXT_KEY.test(key) ||
+      typeof item !== "string" ||
+      item.length < 1 ||
+      item.length > MAX_CONTEXT_VALUE_LENGTH ||
+      [...item].some((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code < 0x20 || code > 0x7e;
+      })
+    ) {
+      throw new TypeError("Invalid operational alert context");
+    }
+    result[key] = item;
+  }
+  return result;
 }
 
 function pruneObservations(values: Map<string, number>, now: number): void {

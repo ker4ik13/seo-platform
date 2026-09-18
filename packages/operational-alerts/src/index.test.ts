@@ -152,7 +152,12 @@ test("authenticated receiver sends only bounded metadata to Telegram", async (co
     source: "next-request",
     code: "REQUEST_HANDLER_FAILURE",
     severity: "ERROR",
-    fingerprint: "fedcba9876543210"
+    fingerprint: "fedcba9876543210",
+    context: {
+      provider: "YOOKASSA",
+      providerCode: "YOOKASSA_INVALID_REQUEST",
+      requestId: "req-w4"
+    }
   });
   await reporter.flush();
   await delivery;
@@ -160,11 +165,16 @@ test("authenticated receiver sends only bounded metadata to Telegram", async (co
   assert.equal(telegramCalls.length, 1);
   const body = JSON.parse(String(telegramCalls[0]?.init?.body)) as {
     readonly text: string;
+    readonly parse_mode?: string;
   };
+  assert.equal(body.parse_mode, "HTML");
   assert.match(body.text, /Сервис: frontend/u);
   assert.match(body.text, /Источник: next-request/u);
   assert.match(body.text, /Код: REQUEST_HANDLER_FAILURE/u);
   assert.match(body.text, /Отпечаток: fedcba9876543210/u);
+  assert.match(body.text, /<blockquote>provider: YOOKASSA/u);
+  assert.match(body.text, /providerCode: YOOKASSA_INVALID_REQUEST/u);
+  assert.match(body.text, /requestId: req-w4<\/blockquote>/u);
   assert.doesNotMatch(body.text, /authorization|cookie|payload|stack/iu);
 
   const rejected = await fetch(`http://127.0.0.1:${port}/internal/alerts`, {
@@ -183,6 +193,23 @@ test("authenticated receiver sends only bounded metadata to Telegram", async (co
     })
   });
   assert.equal(rejected.status, 400);
+
+  const unsafeContext = await fetch(`http://127.0.0.1:${port}/internal/alerts`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${operationalToken}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      version: 1,
+      service: "backend-core",
+      source: "billing-payment",
+      code: "PAYMENT_PROVIDER_FAILURE",
+      severity: "ERROR",
+      context: { providerCode: "safe\nraw-provider-body" }
+    })
+  });
+  assert.equal(unsafeContext.status, 400);
 });
 
 async function freePort(): Promise<number> {

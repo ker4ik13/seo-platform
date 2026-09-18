@@ -9,7 +9,12 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export class CryptoPayProviderError extends Error {
-  public constructor(public readonly code: string, public readonly retryable: boolean) {
+  public constructor(
+    public readonly code: string,
+    public readonly retryable: boolean,
+    public readonly httpStatus?: number,
+    public readonly providerReason?: string
+  ) {
     super("Crypto Pay request failed"); this.name = "CryptoPayProviderError";
   }
 }
@@ -82,7 +87,17 @@ export class CryptoPayClient {
     let envelope: Record<string, unknown>;
     try { envelope = object(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch { throw failure("INVALID_PROVIDER_RESPONSE"); }
     if (!response.ok || envelope.ok !== true) {
-      throw new CryptoPayProviderError(response.status === 429 ? "PROVIDER_RATE_LIMIT" : "PROVIDER_REJECTED", response.status >= 500 || response.status === 429);
+      const providerReason = cryptoPayProviderReason(envelope.error);
+      throw new CryptoPayProviderError(
+        response.status === 429
+          ? "PROVIDER_RATE_LIMIT"
+          : providerReason
+            ? `CRYPTO_PAY_${providerReason}`
+            : `CRYPTO_PAY_HTTP_${response.status}`,
+        response.status >= 500 || response.status === 429,
+        response.status,
+        providerReason
+      );
     }
     return envelope.result;
   }
@@ -132,3 +147,14 @@ function invoiceIdValue(value: unknown): string { if (!Number.isSafeInteger(valu
 function dateValue(value: unknown): string { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw failure("INVALID_INVOICE_DATE"); return new Date(value).toISOString(); }
 function failure(code: string): CryptoPayProviderError { return new CryptoPayProviderError(code, false); }
 function money(value: number): string { if (!Number.isSafeInteger(value) || value < 1 || value > 100_000_000) throw failure("INVALID_PAYMENT_AMOUNT"); return `${Math.floor(value / 100)}.${String(value % 100).padStart(2, "0")}`; }
+function cryptoPayProviderReason(value: unknown): string | undefined {
+  const candidate = typeof value === "string"
+    ? value
+    : value && typeof value === "object" && !Array.isArray(value) &&
+        "name" in value && typeof value.name === "string"
+      ? value.name
+      : undefined;
+  return candidate && /^[A-Z][A-Z0-9_]{0,79}$/u.test(candidate)
+    ? candidate
+    : undefined;
+}

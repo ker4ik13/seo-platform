@@ -21,7 +21,9 @@ export class BillingWebhookController {
   ): Promise<{ readonly received: true }> {
     await this.billing.processWebhook(
       yookassaWebhookInput(body),
-      request.ip
+      request.ip,
+      false,
+      request.id
     );
     return { received: true };
   }

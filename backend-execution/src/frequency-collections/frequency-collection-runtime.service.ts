@@ -469,7 +469,10 @@ export class FrequencyCollectionRuntimeService {
       throw error;
     } finally {
       await this.refreshScheduler
-        ?.scheduleAfterProviderOperation(activeClaim.credentialId)
+        ?.scheduleAfterProviderOperation(
+          activeClaim.credentialId,
+          activeClaim.provider
+        )
         .catch(() => undefined);
     }
   }

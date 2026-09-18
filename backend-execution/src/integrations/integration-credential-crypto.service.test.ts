@@ -193,6 +193,41 @@ test("encrypts a bounded platform pool with stable opaque entry scopes", () => {
   );
 });
 
+test("keeps every XMLStock API key paired with one unique account", () => {
+  const manager = managementCrypto(
+    `3:${Buffer.alloc(32, 7).toString("base64url")}`,
+    3
+  );
+  const paired = manager.platformCredentialPoolSecret("XMLSTOCK", [
+    { apiKey: "xmlstock-secret-one", accountIdentifier: "account-one" },
+    { apiKey: "xmlstock-secret-two", accountIdentifier: "account-two" }
+  ]);
+
+  assert.deepEqual(
+    paired.platformPool?.map(({ apiKey, accountIdentifier }) => ({
+      apiKey,
+      accountIdentifier
+    })),
+    [
+      { apiKey: "xmlstock-secret-one", accountIdentifier: "account-one" },
+      { apiKey: "xmlstock-secret-two", accountIdentifier: "account-two" }
+    ]
+  );
+  assert.throws(
+    () => manager.platformCredentialPoolSecret("XMLSTOCK", [
+      { apiKey: "xmlstock-secret-one", accountIdentifier: "same-account" },
+      { apiKey: "xmlstock-secret-two", accountIdentifier: "same-account" }
+    ]),
+    /credential encryption is unavailable/iu
+  );
+  assert.throws(
+    () => manager.platformCredentialPoolSecret("XMLSTOCK", [
+      { apiKey: "xmlstock-secret-one" }
+    ]),
+    /credential encryption is unavailable/iu
+  );
+});
+
 test("keeps the legacy BYOK request fingerprint byte-compatible", () => {
   const manager = managementCrypto(
     `3:${Buffer.alloc(32, 7).toString("base64url")}`,

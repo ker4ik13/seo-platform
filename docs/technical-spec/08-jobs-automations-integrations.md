@@ -756,10 +756,13 @@ spinner и не удерживает локальный operation lock. Откр
 `DELETE`; server revoke остаётся источником истины и делает исполняющуюся
 старую проверку `STALE` через material/lifecycle guard.
 Если последняя безопасная quota-проекция XMLStock уже показывает нулевой
-денежный баланс, Web не присоединяется автоматически к фоновой validation job
-и не держит бесконечный spinner. Карточка показывает terminal low-balance
-состояние; после пополнения пользователь может явно запустить проверку, а
-server-side revalidation продолжает жить независимо от открытого экрана.
+денежный баланс, Web не присоединяется автоматически к validation job и не
+держит бесконечный spinner. XMLStock полностью исключён из hourly refresh и
+refresh после provider operation: его account/balance endpoint вызывается
+только после явного нажатия пользователем кнопки проверки. Arsenkin и Keys.so
+сохраняют автоматическое обновление. После пополнения XMLStock пользователь
+явно обновляет безопасную quota-проекцию; сохранённые операции и результаты от
+этого не меняются.
 
 `PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
 XMLStock/Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider
@@ -1241,7 +1244,8 @@ service JWT/mTLS identity и не доказательство полной prod
   management-role Jobs HTTP process. Рекомендуемые переменные
   `PLATFORM_XMLSTOCK_API_KEYS`, `PLATFORM_XMLSTOCK_ACCOUNT_IDS` и
   `PLATFORM_ARSENKIN_API_KEYS` принимают до 64 значений через запятую;
-  XMLStock допускает один общий account ID либо список той же длины. Legacy
+  XMLStock требует список уникальных account ID той же длины: элементы с
+  одинаковым индексом образуют одну пару API key/account ID. Legacy
   singular-переменные поддерживаются для одного ключа, смешивание форматов и
   дубликаты отклоняются fail-closed;
 - при включении весь пул шифруется vault-моделью в отдельную workspace

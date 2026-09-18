@@ -660,7 +660,7 @@ function providerAccountIdentifiers(
       `${pluralKey} must contain at most ${PLATFORM_PROVIDER_POOL_MAX_SIZE} identifiers`
     );
   }
-  return values.map((value, index) => {
+  const identifiers = values.map((value, index) => {
     const identifier = providerAccountIdentifier(value, pluralKey);
     if (!identifier) {
       throw new Error(
@@ -669,23 +669,24 @@ function providerAccountIdentifiers(
     }
     return identifier;
   });
+  if (new Set(identifiers).size !== identifiers.length) {
+    throw new Error(`${pluralKey} must not contain duplicate identifiers`);
+  }
+  return identifiers;
 }
 
 function xmlStockPlatformCredentials(
   apiKeys: readonly string[],
   accountIdentifiers: readonly string[]
 ): PlatformProviderCredentialsConfig["XMLSTOCK"] {
-  if (
-    accountIdentifiers.length !== 1 &&
-    accountIdentifiers.length !== apiKeys.length
-  ) {
+  if (accountIdentifiers.length !== apiKeys.length) {
     throw new Error(
-      "PLATFORM_XMLSTOCK_ACCOUNT_IDS must contain one shared identifier or one identifier per API key"
+      "PLATFORM_XMLSTOCK_ACCOUNT_IDS must contain exactly one identifier per API key in the same order"
     );
   }
   return apiKeys.map((apiKey, index) => ({
     apiKey,
-    accountIdentifier: accountIdentifiers[index] ?? accountIdentifiers[0]!
+    accountIdentifier: accountIdentifiers[index]!
   }));
 }
 

@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import { sendConfirmedOperationalAlert } from "@seo-platform/operational-alerts";
 import { CryptoPayClient, CryptoPayProviderError } from "./crypto-pay.client.js";
 import {
   type BillingPaymentProvider,
@@ -529,7 +531,7 @@ export class BillingService {
         replay.status === "CREATING" ||
         replay.status === "FAILED_RETRYABLE"
       ) {
-        await this.resumeRefund(replay.id);
+        await this.resumeRefund(replay.id, context.requestId);
       }
       return refundSummary(
         (await this.prisma.billingRefund.findUnique({
@@ -631,7 +633,7 @@ export class BillingService {
         });
         if (concurrent) {
           assertRequestHash(concurrent.requestHash, requestHash);
-          await this.resumeRefund(concurrent.id);
+          await this.resumeRefund(concurrent.id, context.requestId);
           return refundSummary(
             (await this.prisma.billingRefund.findUnique({
               where: { id: concurrent.id }
@@ -641,7 +643,7 @@ export class BillingService {
       }
       throw error;
     }
-    await this.resumeRefund(refund.id);
+    await this.resumeRefund(refund.id, context.requestId);
     return refundSummary(
       (await this.prisma.billingRefund.findUnique({
         where: { id: refund.id }
@@ -652,7 +654,8 @@ export class BillingService {
   public async processWebhook(
     input: YookassaWebhookInput,
     sourceIp: string,
-    deferred = false
+    deferred = false,
+    requestId?: string
   ): Promise<void> {
     const provider = input.provider ?? "YOOKASSA";
     if (
@@ -758,6 +761,15 @@ export class BillingService {
           failureCode: publicFailureCode(error)
         }
       });
+      if (inbox.failureCode !== publicFailureCode(error)) {
+        await this.reportPaymentProviderFailure(error, {
+          provider,
+          phase: "webhook",
+          externalId: input.objectId,
+          inboxId: inbox.id,
+          ...(requestId ? { requestId } : {})
+        });
+      }
       throw error;
     }
   }
@@ -932,7 +944,7 @@ export class BillingService {
         (payment.status === "CREATING" ||
           payment.status === "FAILED_RETRYABLE")
       ) {
-        await this.resumePayment(payment.id);
+        await this.resumePayment(payment.id, input.context.requestId);
       }
       return orderSummary(
         await this.orderRecord(input.workspaceId, replay.id)
@@ -1031,7 +1043,10 @@ export class BillingService {
           assertRequestHash(concurrent.requestHash, requestHash);
           const concurrentPayment = concurrent.payments[0];
           if (concurrentPayment) {
-            await this.resumePayment(concurrentPayment.id);
+            await this.resumePayment(
+              concurrentPayment.id,
+              input.context.requestId
+            );
           }
           return orderSummary(
             await this.orderRecord(input.workspaceId, concurrent.id)
@@ -1040,7 +1055,7 @@ export class BillingService {
       }
       throw error;
     }
-    await this.resumePayment(paymentId);
+    await this.resumePayment(paymentId, input.context.requestId);
     return orderSummary(await this.orderRecord(input.workspaceId, orderId));
   }
 
@@ -1199,7 +1214,10 @@ export class BillingService {
     await this.resumePayment(paymentId);
   }
 
-  private async resumePayment(paymentId: string): Promise<void> {
+  private async resumePayment(
+    paymentId: string,
+    requestId?: string
+  ): Promise<void> {
     const payment = await this.prisma.billingPayment.findUnique({
       where: { id: paymentId }, include: { order: true, paymentMethod: true }
     });
@@ -1239,8 +1257,8 @@ export class BillingService {
       }
       await this.applyPayment(providerPayment, payment.id, payment.provider);
     } catch (error) {
-      await this.paymentProviderFailure(payment.id, payment.orderId, error);
-      throw mapProviderError(error);
+      await this.paymentProviderFailure(payment, error, requestId);
+      throw mapProviderError(error, payment.provider as BillingPaymentProvider);
     }
   }
 
@@ -1607,14 +1625,16 @@ export class BillingService {
   }
 
   private async paymentProviderFailure(
-    paymentId: string,
-    orderId: string,
-    error: unknown
+    payment: Prisma.BillingPaymentGetPayload<{
+      include: { order: true; paymentMethod: true };
+    }>,
+    error: unknown,
+    requestId?: string
   ): Promise<void> {
     if (!(error instanceof YookassaProviderError) && !(error instanceof CryptoPayProviderError)) return;
     await this.prisma.$transaction([
       this.prisma.billingPayment.update({
-        where: { id: paymentId },
+        where: { id: payment.id },
         data: {
           status: error.retryable ? "FAILED_RETRYABLE" : "FAILED_FINAL",
           failureCode: error.code,
@@ -1625,7 +1645,7 @@ export class BillingService {
         ? []
         : [
             this.prisma.billingOrder.update({
-              where: { id: orderId },
+              where: { id: payment.orderId },
               data: {
                 status: "FAILED",
                 completedAt: new Date(),
@@ -1634,9 +1654,21 @@ export class BillingService {
             })
           ])
     ]);
+    if (payment.failureCode !== error.code) {
+      await this.reportPaymentProviderFailure(error, {
+        provider: payment.provider as BillingPaymentProvider,
+        phase: "payment",
+        paymentId: payment.id,
+        orderId: payment.orderId,
+        ...(requestId ? { requestId } : {})
+      });
+    }
   }
 
-  private async resumeRefund(refundId: string): Promise<void> {
+  private async resumeRefund(
+    refundId: string,
+    requestId?: string
+  ): Promise<void> {
     const refund = await this.prisma.billingRefund.findUnique({
       where: { id: refundId },
       include: { payment: true }
@@ -1670,8 +1702,77 @@ export class BillingService {
             failureCode: error.code
           }
         });
+        if (refund.failureCode !== error.code) {
+          await this.reportPaymentProviderFailure(error, {
+            provider: "YOOKASSA",
+            phase: "refund",
+            refundId: refund.id,
+            paymentId: refund.paymentId,
+            ...(requestId ? { requestId } : {})
+          });
+        }
       }
-      throw mapProviderError(error);
+      throw mapProviderError(error, "YOOKASSA");
+    }
+  }
+
+  private async reportPaymentProviderFailure(
+    error: unknown,
+    scope: Readonly<Record<string, string>> & {
+      readonly provider: BillingPaymentProvider;
+      readonly phase: "payment" | "refund" | "webhook";
+    }
+  ): Promise<void> {
+    if (
+      !(error instanceof YookassaProviderError) &&
+      !(error instanceof CryptoPayProviderError)
+    ) {
+      return;
+    }
+    const parameter = error instanceof YookassaProviderError
+      ? error.parameter
+      : error.providerReason;
+    const context = {
+      provider: scope.provider,
+      phase: scope.phase,
+      providerCode: error.code,
+      retryable: String(error.retryable),
+      ...(error.httpStatus === undefined
+        ? {}
+        : { httpStatus: String(error.httpStatus) }),
+      ...(parameter ? { parameter } : {}),
+      ...Object.fromEntries(
+        Object.entries(scope).filter(
+          ([key, value]) =>
+            key !== "provider" &&
+            key !== "phase" &&
+            isOperationalAlertContextValue(value)
+        )
+      )
+    };
+    const fingerprint = createHash("sha256")
+      .update(scope.provider)
+      .update("\0")
+      .update(scope.phase)
+      .update("\0")
+      .update(error.code)
+      .update("\0")
+      .update(scope.paymentId ?? scope.refundId ?? scope.externalId ?? "unknown")
+      .digest("hex");
+    try {
+      await sendConfirmedOperationalAlert(
+        process.env,
+        "backend-core",
+        {
+          source: "billing-payment",
+          code: "PAYMENT_PROVIDER_FAILURE",
+          severity: "ERROR",
+          fingerprint,
+          context
+        }
+      );
+    } catch {
+      // Alert transport must never change the durable payment outcome.
     }
   }
 
@@ -2339,20 +2440,55 @@ function requiredReturnUrl(config: AppConfig, provider: BillingPaymentProvider =
   return returnUrl;
 }
 
-function mapProviderError(error: unknown): Error {
+function mapProviderError(
+  error: unknown,
+  provider?: BillingPaymentProvider
+): Error {
   if (error instanceof DomainError) return error;
   if (error instanceof YookassaProviderError || error instanceof CryptoPayProviderError) {
     return new DomainError({
       statusCode: error.retryable ? 503 : 502,
       code: "PROVIDER_UNAVAILABLE",
-      message: error.retryable
-        ? "Payment provider is temporarily unavailable"
-        : "Payment provider rejected the operation",
+      message: paymentProviderErrorMessage(error, provider),
       retryable: error.retryable,
-      details: { provider: error instanceof CryptoPayProviderError ? "CRYPTO_PAY" : "YOOKASSA", providerCode: error.code }
+      details: {
+        provider: provider ??
+          (error instanceof CryptoPayProviderError ? "CRYPTO_PAY" : "YOOKASSA"),
+        providerCode: error.code
+      }
     });
   }
   return error instanceof Error ? error : new Error("Billing operation failed");
+}
+
+function paymentProviderErrorMessage(
+  error: YookassaProviderError | CryptoPayProviderError,
+  provider?: BillingPaymentProvider
+): string {
+  if (error.retryable) {
+    return "Платёжный сервис временно недоступен. Повторите попытку позже";
+  }
+  if (
+    provider !== "CRYPTO_PAY" &&
+    error instanceof YookassaProviderError &&
+    (error.httpStatus === 401 ||
+      /(?:INVALID_CREDENTIALS|UNAUTHORIZED)/u.test(error.code))
+  ) {
+    return "ЮKassa отклонила Shop ID или секретный ключ. Подробности отправлены в Telegram";
+  }
+  if (provider !== "CRYPTO_PAY" && error instanceof YookassaProviderError) {
+    return "ЮKassa отклонила параметры платежа. Подробности отправлены в Telegram";
+  }
+  return "Crypto Pay отклонил создание счёта. Подробности отправлены в Telegram";
+}
+
+function isOperationalAlertContextValue(value: string): boolean {
+  return value.length >= 1 &&
+    value.length <= 128 &&
+    [...value].every((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code >= 0x20 && code <= 0x7e;
+    });
 }
 
 function providerUnavailable(reason: string): DomainError {

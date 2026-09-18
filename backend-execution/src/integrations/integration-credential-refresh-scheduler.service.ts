@@ -3,8 +3,7 @@ import type { IntegrationProvider } from "@seo-platform/contracts";
 import { IntegrationCredentialConnectorRegistry } from "./integration-credential-connector.registry.js";
 import { IntegrationCredentialExecutionBrokerService } from "./integration-credential-execution-broker.service.js";
 
-const PROVIDERS: readonly IntegrationProvider[] = [
-  "XMLSTOCK",
+const AUTO_REFRESH_PROVIDERS: readonly IntegrationProvider[] = [
   "ARSENKIN",
   "KEYS_SO"
 ];
@@ -27,8 +26,10 @@ export class IntegrationCredentialRefreshSchedulerService {
   }
 
   public async scheduleAfterProviderOperation(
-    credentialId: string
+    credentialId: string,
+    provider: IntegrationProvider
   ): Promise<void> {
+    if (provider === "XMLSTOCK") return;
     await this.broker.scheduleValidationRefreshes({
       credentialIds: [credentialId],
       connectorVersions: this.connectorVersions(),
@@ -37,9 +38,14 @@ export class IntegrationCredentialRefreshSchedulerService {
     });
   }
 
-  private connectorVersions(): Readonly<Record<IntegrationProvider, string>> {
+  private connectorVersions(): Readonly<
+    Partial<Record<IntegrationProvider, string>>
+  > {
     return Object.fromEntries(
-      PROVIDERS.map((provider) => [provider, this.connectors.version(provider)])
-    ) as Readonly<Record<IntegrationProvider, string>>;
+      AUTO_REFRESH_PROVIDERS.map((provider) => [
+        provider,
+        this.connectors.version(provider)
+      ])
+    ) as Readonly<Partial<Record<IntegrationProvider, string>>>;
   }
 }

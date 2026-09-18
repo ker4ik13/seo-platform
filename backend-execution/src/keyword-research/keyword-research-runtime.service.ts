@@ -101,7 +101,7 @@ export class KeywordResearchRuntimeService {
       throw error;
     } finally {
       await this.refreshScheduler
-        ?.scheduleAfterProviderOperation(claim.credentialId)
+        ?.scheduleAfterProviderOperation(claim.credentialId, claim.provider)
         .catch(() => undefined);
     }
   }

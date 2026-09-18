@@ -73,7 +73,8 @@ export class YookassaProviderError extends Error {
   public constructor(
     public readonly code: string,
     public readonly retryable: boolean,
-    public readonly httpStatus?: number
+    public readonly httpStatus?: number,
+    public readonly parameter?: string
   ) {
     super("YooKassa request failed");
     this.name = "YookassaProviderError";
@@ -208,14 +209,15 @@ export class YookassaClient {
     const text = await boundedText(response);
     const payload = parseJson(text);
     if (!response.ok) {
-      const code = providerErrorCode(payload, response.status);
+      const providerError = providerErrorDetails(payload, response.status);
       throw new YookassaProviderError(
-        code,
+        providerError.code,
         response.status === 408 ||
           response.status === 409 ||
           response.status === 429 ||
           response.status >= 500,
-        response.status
+        response.status,
+        providerError.parameter
       );
     }
     if (payload === undefined) {
@@ -345,17 +347,34 @@ function parseJson(value: string): unknown {
   }
 }
 
-function providerErrorCode(value: unknown, status: number): string {
+function providerErrorDetails(
+  value: unknown,
+  status: number
+): { readonly code: string; readonly parameter?: string } {
+  const parameter =
+    typeof value === "object" &&
+    value !== null &&
+    "parameter" in value &&
+    typeof value.parameter === "string" &&
+    /^[A-Za-z0-9_.[\]-]{1,120}$/u.test(value.parameter)
+      ? value.parameter
+      : undefined;
   if (
     typeof value === "object" &&
     value !== null &&
     "code" in value &&
     typeof value.code === "string" &&
-    /^[a-z0-9_.-]{1,100}$/u.test(value.code)
+    /^[a-z0-9_.-]{1,80}$/u.test(value.code)
   ) {
-    return `YOOKASSA_${value.code.toUpperCase().replaceAll("-", "_")}`;
+    return {
+      code: `YOOKASSA_${value.code.toUpperCase().replaceAll("-", "_")}`,
+      ...(parameter ? { parameter } : {})
+    };
   }
-  return `YOOKASSA_HTTP_${status}`;
+  return {
+    code: `YOOKASSA_HTTP_${status}`,
+    ...(parameter ? { parameter } : {})
+  };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

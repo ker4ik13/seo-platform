@@ -275,6 +275,17 @@ export class IntegrationCredentialCryptoService {
     if (material.length < 1 || material.length > 64) {
       throw encryptionUnavailable();
     }
+    if (provider === "XMLSTOCK") {
+      const accountIdentifiers = material.map(
+        (entry) => entry.accountIdentifier
+      );
+      if (
+        accountIdentifiers.some((identifier) => !identifier) ||
+        new Set(accountIdentifiers).size !== accountIdentifiers.length
+      ) {
+        throw encryptionUnavailable();
+      }
+    }
     const { key } = this.platformPoolFingerprintKey();
     const entries = material.map((entry) => ({
       id: platformPoolEntryId(key, provider, entry),
