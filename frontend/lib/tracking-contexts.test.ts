@@ -17,11 +17,39 @@ import {
   trackingContextDraftDirty,
   trackingContextMatchesDraft,
   trackingContextPayloadSignature,
+  trackingContextScopeResolutionKey,
   trackingContextsApiPath,
   trackingContextsReturnTo,
+  shouldLoadTrackingContextAssignments,
   validateTrackingContextDraft,
   withTrackingContext
 } from "./tracking-contexts.ts";
+
+test("resolves a newly selected profile scope independently from a one-off launch", () => {
+  assert.equal(
+    trackingContextScopeResolutionKey("", false),
+    "one-off-context"
+  );
+  assert.equal(
+    trackingContextScopeResolutionKey("", true),
+    "new-context"
+  );
+  assert.equal(
+    trackingContextScopeResolutionKey("context-1", true),
+    "new-context"
+  );
+  assert.equal(
+    trackingContextScopeResolutionKey("context-1", false),
+    "saved-context:context-1"
+  );
+});
+
+test("loads saved assignments only after a new profile scope was synchronized", () => {
+  assert.equal(shouldLoadTrackingContextAssignments("", false), false);
+  assert.equal(shouldLoadTrackingContextAssignments("", true), false);
+  assert.equal(shouldLoadTrackingContextAssignments("context-1", true), false);
+  assert.equal(shouldLoadTrackingContextAssignments("context-1", false), true);
+});
 
 const context: TrackingContextSummary = {
   id: "context-1",

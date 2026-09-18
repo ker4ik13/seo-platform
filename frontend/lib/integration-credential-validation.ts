@@ -1,4 +1,5 @@
 import type {
+  IntegrationCredentialSummary,
   IntegrationCredentialStatus,
   IntegrationCredentialValidationMode,
   IntegrationCredentialValidationStatus,
@@ -45,6 +46,23 @@ export function supportsAutomaticCredentialValidation(
   mode: IntegrationCredentialValidationMode | undefined
 ): boolean {
   return mode === "ACCOUNT_METADATA";
+}
+
+export function hasEmptyXmlStockBalance(
+  credential: Pick<
+    IntegrationCredentialSummary,
+    "mode" | "provider" | "quota"
+  >
+): boolean {
+  if (
+    credential.provider !== "XMLSTOCK" ||
+    credential.mode !== "BYOK_API_KEY" ||
+    credential.quota.status !== "AVAILABLE" ||
+    !credential.quota.balance
+  ) {
+    return false;
+  }
+  return /^0+(?:\.0+)?$/u.test(credential.quota.balance.amount);
 }
 
 export function shouldAutoResumeCredentialValidation(
@@ -116,6 +134,14 @@ export function persistedCredentialValidationPresentation(
 ): CredentialValidationPresentation | undefined {
   if (credentialStatus === "ACTIVE") {
     return credentialValidationPresentation("SUCCEEDED");
+  }
+  if (credentialStatus === "LOW_BALANCE") {
+    return {
+      message:
+        "На балансе XMLStock нет средств. Пополните баланс и запустите проверку вручную.",
+      terminal: true,
+      tone: "warning"
+    };
   }
   if (!errorCode) return undefined;
   return credentialValidationPresentation(

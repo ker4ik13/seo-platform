@@ -755,6 +755,11 @@ spinner и не удерживает локальный operation lock. Откр
 свежего polling прерывает browser GET loop, освобождает lock и разрешает
 `DELETE`; server revoke остаётся источником истины и делает исполняющуюся
 старую проверку `STALE` через material/lifecycle guard.
+Если последняя безопасная quota-проекция XMLStock уже показывает нулевой
+денежный баланс, Web не присоединяется автоматически к фоновой validation job
+и не держит бесконечный spinner. Карточка показывает terminal low-balance
+состояние; после пополнения пользователь может явно запустить проверку, а
+server-side revalidation продолжает жить независимо от открытого экрана.
 
 `PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
 XMLStock/Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider

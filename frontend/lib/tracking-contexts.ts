@@ -339,6 +339,29 @@ export function trackingContextsReturnTo(projectId: string): string {
   return `/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`;
 }
 
+/**
+ * Keeps the three launch-profile states separate even though both a one-off
+ * launch and an unsaved profile use an empty public context id. A state change
+ * must remount the scope picker so ALL/GROUPS are resolved from the server
+ * again instead of retaining the previous picker's empty selection.
+ */
+export function trackingContextScopeResolutionKey(
+  selectedContextId: string,
+  createSavedContext: boolean
+): string {
+  if (createSavedContext) return "new-context";
+  return selectedContextId
+    ? `saved-context:${selectedContextId}`
+    : "one-off-context";
+}
+
+export function shouldLoadTrackingContextAssignments(
+  selectedContextId: string,
+  createSavedContext: boolean
+): boolean {
+  return Boolean(selectedContextId) && !createSavedContext;
+}
+
 function trackingContextMutationInput(
   draft: TrackingContextDraft
 ): CreateTrackingContextInput {

@@ -58,6 +58,8 @@ import {
   trackingContextDraftDirty,
   trackingContextMatchesDraft,
   trackingContextPayloadSignature,
+  trackingContextScopeResolutionKey,
+  shouldLoadTrackingContextAssignments,
   validateTrackingContextDraft,
   withTrackingContext,
   type TrackingContextDraft
@@ -506,9 +508,16 @@ export function SemanticPositionDialog({
   }, [activeGroupId, competitorMode, initialSelections.length, initialRun, projectId, projectSearchCity, uiLocale, workspaceId]);
 
   useEffect(() => {
-    if (!selectedContextId) {
+    if (
+      !shouldLoadTrackingContextAssignments(
+        selectedContextId,
+        createSavedContext
+      )
+    ) {
       setAssignedKeywordIds(undefined);
-      setAssignedKeywordSelections(initialSelectionsRef.current);
+      if (!selectedContextId) {
+        setAssignedKeywordSelections(initialSelectionsRef.current);
+      }
       setContextAssignmentError(undefined);
       return;
     }
@@ -542,7 +551,7 @@ export function SemanticPositionDialog({
         );
       });
     return () => controller.abort();
-  }, [projectId, selectedContextId]);
+  }, [createSavedContext, projectId, selectedContextId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -721,6 +730,7 @@ export function SemanticPositionDialog({
         setSettings((current) =>
           current ? withTrackingContext(current, selectedContext!) : current
         );
+        if (createSavedContext) setCreateSavedContext(false);
       }
       const launchContext = {
         ...selectedContext,
@@ -1111,7 +1121,10 @@ export function SemanticPositionDialog({
                       ? assignedKeywordSelections ?? []
                       : initialSelections
                   }
-                  key={`${selectedContextId || "new-context"}:ready`}
+                  key={`${trackingContextScopeResolutionKey(
+                    selectedContextId,
+                    createSavedContext
+                  )}:ready`}
                   maxItems={rankCommandKeywordLimit}
                   onChange={resolveScope}
                   onCountChange={resolveScopeCount}

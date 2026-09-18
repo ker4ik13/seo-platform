@@ -9,12 +9,36 @@ import {
   credentialValidationPollDelayMs,
   credentialValidationPresentation,
   credentialValidationTransientRetryDelayMs,
+  hasEmptyXmlStockBalance,
   isTerminalCredentialValidationStatus,
   isTransientCredentialValidationPollError,
   persistedCredentialValidationPresentation,
   shouldAutoResumeCredentialValidation,
   supportsAutomaticCredentialValidation
 } from "./integration-credential-validation.ts";
+
+test("keeps a zero-balance XMLStock credential out of automatic browser polling", () => {
+  assert.equal(hasEmptyXmlStockBalance({
+    provider: "XMLSTOCK",
+    mode: "BYOK_API_KEY",
+    quota: {
+      status: "AVAILABLE",
+      unit: "XMLSTOCK_REQUESTS",
+      remaining: 0,
+      balance: { amount: "0.00000000", currency: "RUB" }
+    }
+  }), true);
+  assert.equal(hasEmptyXmlStockBalance({
+    provider: "XMLSTOCK",
+    mode: "BYOK_API_KEY",
+    quota: {
+      status: "AVAILABLE",
+      unit: "XMLSTOCK_REQUESTS",
+      remaining: 0,
+      balance: { amount: "0.01", currency: "RUB" }
+    }
+  }), false);
+});
 
 test("offers automatic validation only for account metadata mode", () => {
   assert.equal(
@@ -140,6 +164,15 @@ test("presents the persisted credential outcome after reload", () => {
       "PENDING_VERIFICATION"
     ),
     undefined
+  );
+  assert.deepEqual(
+    persistedCredentialValidationPresentation("LOW_BALANCE"),
+    {
+      message:
+        "На балансе XMLStock нет средств. Пополните баланс и запустите проверку вручную.",
+      terminal: true,
+      tone: "warning"
+    }
   );
 });
 

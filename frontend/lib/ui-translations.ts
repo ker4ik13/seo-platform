@@ -793,6 +793,7 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "6 цифр или резервный код": "6 digits or a recovery code",
   "Введите код из приложения-аутентификатора или один из сохранённых резервных кодов.": "Enter a code from your authenticator app or one of your saved recovery codes.",
   "Проверяем…": "Verifying…",
+  "На балансе XMLStock нет средств. Пополните баланс и запустите проверку вручную.": "The XMLStock balance is empty. Add funds, then run the check manually.",
   "Продолжить": "Continue",
   "Вернуться ко входу": "Back to sign in",
   "Загружаем настройки безопасности…": "Loading security settings…",

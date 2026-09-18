@@ -18,6 +18,7 @@ import {
   integrationCredentialModeLabel,
   integrationProviderLabel
 } from "../lib/integration-presentation";
+import { hasEmptyXmlStockBalance } from "../lib/integration-credential-validation";
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
 import { ProviderLogo } from "./provider-logo";
 import { SemanticModal } from "./semantic-modal";
@@ -116,6 +117,11 @@ export function IntegrationSettings({
   const revokeOperation = revokeTarget
     ? credentialOperations[revokeTarget.id]
     : undefined;
+  const emptyBalanceCredentialIds = new Set(
+    credentials
+      .filter(hasEmptyXmlStockBalance)
+      .map(({ id }) => id)
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -510,13 +516,16 @@ export function IntegrationSettings({
           icon="success"
           label={uiText("активны")}
           tone="success"
-          value={credentials.filter(({ status }) => status === "ACTIVE").length}
+          value={credentials.filter(({ id, status }) =>
+            status === "ACTIVE" && !emptyBalanceCredentialIds.has(id)
+          ).length}
         />
         <IntegrationOverviewStat
           icon="warning"
           label={uiText("требуют внимания")}
           tone="warning"
-          value={credentials.filter(({ status }) =>
+          value={credentials.filter(({ id, status }) =>
+            emptyBalanceCredentialIds.has(id) ||
             ["DEGRADED", "RATE_LIMITED", "LOW_BALANCE", "EXPIRED", "INVALID"].includes(status)
           ).length}
         />
@@ -751,12 +760,16 @@ export function IntegrationSettings({
                         <span><UiText text="Теперь подключение можно отключить." /></span>
                       </div>
                     ) : <IntegrationCredentialValidation
-                      activeValidation={credential.activeValidation}
+                      activeValidation={emptyBalanceCredentialIds.has(credential.id)
+                        ? undefined
+                        : credential.activeValidation}
                       canTest={canTest}
                       credentialId={credential.id}
                       credentialLastErrorCode={credential.lastErrorCode}
                       credentialLabel={credential.label}
-                      credentialStatus={credential.status}
+                      credentialStatus={emptyBalanceCredentialIds.has(credential.id)
+                        ? "LOW_BALANCE"
+                        : credential.status}
                       credentialVersion={credential.version}
                       key={`${credential.id}:${credential.version}`}
                       onAcquireOperation={() =>

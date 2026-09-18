@@ -177,7 +177,7 @@ export function CustomDateRangePicker({
       </button>
 
       {open && (
-        <DateRangeLayerPortal modal={modal}>
+        <DateRangeLayerPortal anchor={triggerRef.current} modal={modal}>
         <div className={`custom-date-range-layer${modal ? " is-modal" : ""}`}>
           <div
             aria-hidden="true"
@@ -311,11 +311,21 @@ export function CustomDateRangePicker({
 }
 
 function DateRangeLayerPortal({
+  anchor,
   children,
   modal
-}: Readonly<{ children: ReactNode; modal: boolean }>) {
-  return modal && typeof document !== "undefined"
-    ? createPortal(children, document.body)
+}: Readonly<{
+  anchor: HTMLElement | null;
+  children: ReactNode;
+  modal: boolean;
+}>) {
+  if (!modal || typeof document === "undefined") return children;
+  const target =
+    anchor?.closest<HTMLElement>("[data-dropdown-portal-root]") ??
+    anchor?.closest<HTMLDialogElement>("dialog[open]") ??
+    document.body;
+  return target
+    ? createPortal(children, target)
     : children;
 }
 

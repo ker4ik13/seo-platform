@@ -593,6 +593,9 @@ export function SemanticCoreTable({
   }>>();
   const commandMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreRequestRef = useRef<AbortController | undefined>(undefined);
+  const loadMoreInFlightRef = useRef(false);
+  const loadedKeywordCountRef = useRef(0);
   const selectAllAbortRef = useRef<AbortController | undefined>(undefined);
   const multiSearchActionRef = useRef<
     Exclude<SemanticMultiSearchAction, "SHOW"> | undefined
@@ -621,6 +624,7 @@ export function SemanticCoreTable({
     height: 520,
     scrollTop: 0
   });
+  loadedKeywordCountRef.current = items.length;
   useEffect(() => {
     if (!mobileGroupTreeOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1100,6 +1104,10 @@ export function SemanticCoreTable({
       return;
     }
     const controller = new AbortController();
+    loadMoreRequestRef.current?.abort();
+    loadMoreRequestRef.current = undefined;
+    loadMoreInFlightRef.current = false;
+    setLoadingMore(false);
     const preservedScrollTop = tableScrollRef.current?.scrollTop ?? 0;
     setLoading(true);
     setError(undefined);
@@ -1143,13 +1151,23 @@ export function SemanticCoreTable({
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      loadMoreRequestRef.current?.abort();
+      loadMoreRequestRef.current = undefined;
+      loadMoreInFlightRef.current = false;
+    };
   }, [keywordQueryConfig, pageSize, projectId, refreshVersion, retryVersion, tableViewReadyProjectId]);
+
+  useEffect(() => {
+    liveOperationSignatureRef.current = "";
+    liveResearchImportSignatureRef.current = "[]";
+    liveOperationActiveRef.current = false;
+  }, [projectId]);
 
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
-    liveOperationSignatureRef.current = "";
     const reconcile = async (): Promise<boolean> => {
       const [
         frequencyResult,
@@ -1300,7 +1318,10 @@ export function SemanticCoreTable({
           keywordQueryConfig,
           undefined,
           controller.signal,
-          Math.min(1_000, Math.max(pageSize, items.length))
+          Math.min(
+            1_000,
+            Math.max(pageSize, loadedKeywordCountRef.current)
+          )
         );
         if (!controller.signal.aborted) {
           setItems((current) => mergeKeywordMetrics(current, result.data));
@@ -1338,7 +1359,7 @@ export function SemanticCoreTable({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("online", refreshWhenVisible);
     };
-  }, [items.length, keywordQueryConfig, operationsRefreshVersion, pageSize, projectId]);
+  }, [keywordQueryConfig, operationsRefreshVersion, pageSize, projectId]);
 
   useEffect(() => {
     requestProjectOperationActivityRefresh();
@@ -1444,7 +1465,7 @@ export function SemanticCoreTable({
               sortViews
             );
         if (appliedView || projectView) {
-          const nextPageSize = nextConfig.pageSize ?? layoutPreferencesRef.current.pageSize;
+          const nextPageSize = layoutPreferencesRef.current.pageSize;
           const nextGroupSidebarWidth = nextConfig.groupSidebarWidth ??
             layoutPreferencesRef.current.groupSidebarWidth;
           layoutPreferencesRef.current = {
@@ -2357,37 +2378,59 @@ export function SemanticCoreTable({
     }
   }
 
-  async function loadMore(): Promise<void> {
-    if (!page.hasNext || !page.nextCursor || loadingMore) return;
+  const loadMore = useCallback(async (): Promise<void> => {
+    const nextCursor = page.nextCursor;
+    if (
+      !page.hasNext ||
+      !nextCursor ||
+      loadMoreInFlightRef.current
+    ) return;
+    const retainedTotal = page.totalApprox;
+    const controller = new AbortController();
+    loadMoreInFlightRef.current = true;
+    loadMoreRequestRef.current = controller;
     setLoadingMore(true);
     setError(undefined);
     try {
       const result = await loadKeywordPage(
         projectId,
         keywordQueryConfig,
-        page.nextCursor,
-        undefined,
+        nextCursor,
+        controller.signal,
         pageSize
       );
+      if (controller.signal.aborted) return;
       setItems((current) => mergeKeywords(current, result.data));
       setPage({
         ...result.page,
         ...(result.page.totalApprox === undefined &&
-        page.totalApprox !== undefined
-          ? { totalApprox: page.totalApprox }
+        retainedTotal !== undefined
+          ? { totalApprox: retainedTotal }
           : {})
       });
     } catch (requestError) {
-      setError(keywordErrorMessage(requestError));
+      if (!controller.signal.aborted) {
+        setError(keywordErrorMessage(requestError));
+      }
     } finally {
-      setLoadingMore(false);
+      if (loadMoreRequestRef.current === controller) {
+        loadMoreRequestRef.current = undefined;
+        loadMoreInFlightRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }
+  }, [keywordQueryConfig, page.hasNext, page.nextCursor, page.totalApprox, pageSize, projectId]);
 
   useEffect(() => {
     const sentinel = loadMoreSentinelRef.current;
     const scrollRoot = tableScrollRef.current;
-    if (!sentinel || !scrollRoot || !page.hasNext || !page.nextCursor) return;
+    if (
+      !sentinel ||
+      !scrollRoot ||
+      loadingMore ||
+      !page.hasNext ||
+      !page.nextCursor
+    ) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry?.isIntersecting) void loadMore();
@@ -2396,7 +2439,7 @@ export function SemanticCoreTable({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  });
+  }, [loadMore, loadingMore, page.hasNext, page.nextCursor]);
 
   useEffect(() => {
     const scrollRoot = tableScrollRef.current;
