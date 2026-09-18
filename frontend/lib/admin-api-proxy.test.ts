@@ -52,6 +52,18 @@ test("admin proxy exposes only explicit authentication and admin routes", () => 
     "/admin-api/v1/operations"
   );
   assert.equal(
+    adminUpstreamPath(["provider-accounts", "refresh"]),
+    "/admin-api/v1/provider-accounts/refresh"
+  );
+  assert.equal(
+    adminUpstreamPath([
+      "provider-accounts",
+      "01900000-0000-7000-8000-000000000001",
+      "enabled"
+    ]),
+    "/admin-api/v1/provider-accounts/01900000-0000-7000-8000-000000000001/enabled"
+  );
+  assert.equal(
     adminUpstreamPath([
       "billing",
       "npd-receipts",

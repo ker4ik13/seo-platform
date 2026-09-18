@@ -97,7 +97,7 @@ export class WorkspaceConnectorRoutingService {
   public constructor(private readonly prisma: PrismaService) {}
 
   public async settings(workspaceId: string): Promise<WorkspaceConnectorRoutingSettings> {
-    const [bindings, credentials] = await this.prisma.$transaction([
+    const [bindings, credentials, enabledPlatformAccounts] = await this.prisma.$transaction([
       this.prisma.workspaceConnectorBinding.findMany({
         where: { workspaceId },
         include: WORKSPACE_BINDING_INCLUDE,
@@ -108,12 +108,25 @@ export class WorkspaceConnectorRoutingService {
         select: CREDENTIAL_SELECT,
         orderBy: [{ label: "asc" }, { id: "asc" }],
         take: MAX_CREDENTIAL_OPTIONS + 1
+      }),
+      this.prisma.platformProviderAccount.findMany({
+        where: { enabled: true },
+        select: { provider: true }
       })
     ]);
+    const enabledPlatformProviders = new Set(
+      enabledPlatformAccounts.map(({ provider: value }) => value)
+    );
     return {
-      bindings: bindings.map(workspaceBindingSummary),
+      bindings: bindings.map(binding =>
+        workspaceBindingSummary(binding, enabledPlatformProviders)
+      ),
       credentialOptions: credentials
         .slice(0, MAX_CREDENTIAL_OPTIONS)
+        .filter(credential =>
+          credential.mode !== "PLATFORM_PAID" ||
+          enabledPlatformProviders.has(credential.provider)
+        )
         .map(credentialOption),
       credentialOptionsTruncated: credentials.length > MAX_CREDENTIAL_OPTIONS,
       access: { canUpdateBindings: false, canManageFallback: false }
@@ -131,11 +144,17 @@ export class WorkspaceConnectorRoutingService {
         input.workspaceId,
         input.routes.map(({ credentialId }) => credentialId)
       );
+      const enabledPlatformProviders = await enabledPlatformProviderSet(transaction);
       for (const route of input.routes) {
         const credential = credentials.get(route.credentialId);
         if (!credential || (
           input.enabled &&
-          routeAvailability(input.capability, credential) !== "READY"
+          routeAvailability(
+            input.capability,
+            credential,
+            undefined,
+            enabledPlatformProviders
+          ) !== "READY"
         )) {
           throw connectorNotReady();
         }
@@ -191,7 +210,7 @@ export class WorkspaceConnectorRoutingService {
         include: WORKSPACE_BINDING_INCLUDE
       });
       if (!saved) throw new Error("Workspace connector binding projection is missing");
-      return workspaceBindingSummary(saved);
+      return workspaceBindingSummary(saved, enabledPlatformProviders);
     });
   }
 
@@ -211,6 +230,7 @@ export class WorkspaceConnectorRoutingService {
       capability,
       actorId
     );
+    const enabledPlatformProviders = await enabledPlatformProviderSet(this.prisma);
     const allCandidates = projectCandidates(project);
     const requestedIndex = requestedCredentialId !== undefined
       ? allCandidates.findIndex(
@@ -233,7 +253,8 @@ export class WorkspaceConnectorRoutingService {
       const availability = routeAvailability(
         capability,
         candidate.route.credential,
-        requirement
+        requirement,
+        enabledPlatformProviders
       );
       if (availability === "READY") {
         attempts.push(attempt(index + 1, candidate, "SELECTED"));
@@ -438,7 +459,10 @@ function projectCandidates(project: ProjectBindingRecord): readonly Candidate[] 
     }));
 }
 
-function workspaceBindingSummary(binding: WorkspaceBindingRecord): WorkspaceConnectorBinding {
+function workspaceBindingSummary(
+  binding: WorkspaceBindingRecord,
+  enabledPlatformProviders?: ReadonlySet<string>
+): WorkspaceConnectorBinding {
   const bindingCapability = capability(binding.capability);
   return {
     id: binding.id,
@@ -453,7 +477,12 @@ function workspaceBindingSummary(binding: WorkspaceBindingRecord): WorkspaceConn
       credentialId: route.credentialId,
       provider: provider(route.credential.provider),
       credentialMode: route.credential.mode,
-      availability: routeAvailability(bindingCapability, route.credential),
+      availability: routeAvailability(
+        bindingCapability,
+        route.credential,
+        undefined,
+        enabledPlatformProviders
+      ),
       createdAt: route.createdAt.toISOString(),
       updatedAt: route.updatedAt.toISOString()
     })),
@@ -491,12 +520,16 @@ function credentialOption(credential: CredentialRecord): ProjectConnectorCredent
 function routeAvailability(
   capabilityValue: IntegrationCapability,
   credential: CredentialRecord,
-  requirement?: ConnectorRouteRequirement
+  requirement?: ConnectorRouteRequirement,
+  enabledPlatformProviders?: ReadonlySet<string>
 ): ProjectConnectorBindingAvailability {
   if (credential.deletedAt) return "CREDENTIAL_UNAVAILABLE";
   if (credential.status === "PENDING_VERIFICATION") return "CREDENTIAL_PENDING";
   if (
     credential.status !== "ACTIVE" ||
+    (credential.mode === "PLATFORM_PAID" &&
+      enabledPlatformProviders !== undefined &&
+      !enabledPlatformProviders.has(credential.provider)) ||
     !credentialModeSupportsCapability(credential.mode, capabilityValue, credential.provider)
   ) {
     return "CREDENTIAL_UNAVAILABLE";
@@ -510,6 +543,16 @@ function routeAvailability(
   return xmlStockBalanceInsufficient(credential, requirement)
     ? "CREDENTIAL_UNAVAILABLE"
     : "READY";
+}
+
+async function enabledPlatformProviderSet(
+  prisma: Pick<PrismaService, "platformProviderAccount"> | Prisma.TransactionClient
+): Promise<ReadonlySet<string>> {
+  const rows = await prisma.platformProviderAccount.findMany({
+    where: { enabled: true },
+    select: { provider: true }
+  });
+  return new Set(rows.map(({ provider: value }) => value));
 }
 
 async function lockedCredentials(

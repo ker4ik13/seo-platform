@@ -1,9 +1,10 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { RankBillingSettlementClient } from "../platform-api/rank-billing-settlement.client.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
+import { PlatformCredentialPoolSelectionService } from "../integrations/platform-credential-pool-selection.service.js";
 import {
   XmlStockHttpQuotaLimiter,
   type XmlStockHttpQuotaPermit,
@@ -69,7 +70,8 @@ export class RankConnectorRuntimeService {
     private readonly xmlStockConnector: XmlStockRankConnector,
     private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
     private readonly settlements: RankBillingSettlementClient,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
   ) {}
 
   /**
@@ -106,16 +108,24 @@ export class RankConnectorRuntimeService {
   ): Promise<RankConnectorRuntimeOutcome> {
     const requestIntent = await this.broker.readSubmitRequest(claim);
     const settlement = await this.broker.readBillingSettlement(claim);
-    const secret = selectIntegrationCredentialSecret(
-      this.crypto.decrypt(
+    const decryptedSecret = this.crypto.decrypt(
         claim.workspaceId,
         claim.provider,
         claim.credentialId,
         claim.encryptedCredential
-      ),
-      claim.executionId,
-      claim.credentialId
     );
+    const secret = this.platformPool
+      ? await this.platformPool.select(
+          claim.provider,
+          decryptedSecret,
+          claim.executionId,
+          claim.credentialId
+        )
+      : selectIntegrationCredentialSecret(
+          decryptedSecret,
+          claim.executionId,
+          claim.credentialId
+        );
     const providerCredentialScopeId = secret.rateLimitScopeId!;
     const built = claim.provider === "XMLSTOCK"
       ? (() => {
@@ -246,16 +256,25 @@ export class RankConnectorRuntimeService {
         ? this.settlementTimeoutMs() * 2
         : 0
     );
-    const secret = selectIntegrationCredentialSecret(
-      this.crypto.decrypt(
+    const decryptedSecret = this.crypto.decrypt(
         claim.workspaceId,
         claim.provider,
         claim.credentialId,
         claim.encryptedCredential
-      ),
-      claim.executionId,
-      claim.credentialId
     );
+    const secret = this.platformPool
+      ? await this.platformPool.select(
+          claim.provider,
+          decryptedSecret,
+          claim.executionId,
+          claim.credentialId,
+          true
+        )
+      : selectIntegrationCredentialSecret(
+          decryptedSecret,
+          claim.executionId,
+          claim.credentialId
+        );
     const providerCredentialScopeId = secret.rateLimitScopeId!;
     let outcome:
       | Awaited<ReturnType<XmlStockRankConnector["fetchResult"]>>

@@ -3,6 +3,7 @@ export interface PlatformProviderAccountSnapshot {
   readonly provider: "XMLSTOCK" | "ARSENKIN";
   readonly slot: number;
   readonly enabled: boolean;
+  readonly checking: boolean;
   readonly remaining: string | null;
   readonly unit: "RUB" | "ARSENKIN_LIMITS";
   readonly checkedAt: string | null;

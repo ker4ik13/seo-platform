@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 import { PaidOperationRuntimeService } from "./paid-operations/paid-operation-runtime.service.js";
-import { PlatformAccountProbeService } from "./integrations/platform-account-probe.service.js";
 import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { IntegrationCredentialConnectorRegistry } from "./integrations/integration-credential-connector.registry.js";
@@ -9,6 +8,7 @@ import { IntegrationCredentialExecutionBrokerService } from "./integrations/inte
 import { IntegrationCredentialKeyCoverageService } from "./integrations/integration-credential-key-coverage.service.js";
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "./integrations/integration-credential-refresh-scheduler.service.js";
+import { PlatformCredentialPoolSelectionService } from "./integrations/platform-credential-pool-selection.service.js";
 import { ArsenkinHttpRateLimiter } from "./integrations/arsenkin-http-rate-limiter.js";
 import { XmlStockHttpQuotaLimiter } from "./integrations/xmlstock-http-quota-limiter.js";
 import { ArsenkinRankConnector } from "./rank-runs/arsenkin-rank.connector.js";
@@ -48,7 +48,6 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     PlatformApiModule
   ],
   providers: [
-    PlatformAccountProbeService,
     PaidOperationRuntimeService,
     ArsenkinHttpRateLimiter,
     XmlStockHttpQuotaLimiter,
@@ -58,6 +57,7 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     IntegrationCredentialKeyCoverageService,
     IntegrationCredentialValidationWorkerService,
     IntegrationCredentialRefreshSchedulerService,
+    PlatformCredentialPoolSelectionService,
     RankConnectorRuntimeBrokerService,
     RankConnectorRuntimeService,
     KeywordResearchRuntimeBrokerService,

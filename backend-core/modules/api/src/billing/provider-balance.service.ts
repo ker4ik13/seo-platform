@@ -19,6 +19,12 @@ export class ProviderBalanceService implements OnApplicationBootstrap, OnModuleD
   public async accounts(actorId: string, requestId: string): Promise<readonly AdminProviderAccount[]> {
     return (await this.jobs.platformProviderAccounts(actorId, requestId)).map(providerAccountPresentation);
   }
+  public async refresh(actorId: string, requestId: string): Promise<number> {
+    return this.jobs.refreshPlatformProviderAccounts(actorId, requestId);
+  }
+  public async setEnabled(accountId: string, enabled: boolean, actorId: string, requestId: string): Promise<AdminProviderAccount> {
+    return providerAccountPresentation(await this.jobs.setPlatformProviderAccountEnabled(accountId, enabled, actorId, requestId));
+  }
   private schedule(ms: number) { if (this.stopping) return; this.timer = setTimeout(() => void this.tick(), ms); this.timer.unref(); }
   private async tick() {
     if (this.stopping || this.running) return; this.running = true;
@@ -63,6 +69,6 @@ export function providerAccountPresentation(row: PlatformProviderAccountSnapshot
     const minor = row.provider === "XMLSTOCK" ? micros / 10_000n : micros * providerCostBook.unitCostMicro.ARSENKIN_LIMIT / 10_000_000_000n;
     if (minor <= BigInt(Number.MAX_SAFE_INTEGER)) estimatedBalanceMinor = Number(minor);
   }
-  const stale = !row.checkedAt || Date.now() - Date.parse(row.checkedAt) > 15 * 60_000;
+  const stale = Boolean(row.checkedAt) && Date.now() - Date.parse(row.checkedAt!) > 30 * 60_000;
   return { ...row, estimatedBalanceMinor, stale, lowBalance: estimatedBalanceMinor !== null && estimatedBalanceMinor < PROVIDER_LOW_BALANCE_MINOR };
 }

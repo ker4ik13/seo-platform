@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { OperationEstimate } from "@seo-platform/contracts";
 import { registerOperationConfirmation, type OperationConfirmationRequest } from "../lib/operation-confirmation";
+import { operationConfirmationExpiryDelay } from "../lib/operation-confirmation-expiry";
 import { SemanticModal } from "./semantic-modal";
 import { ProviderLogo } from "./provider-logo";
 import { useUiLocale, UiText } from "./ui-locale";
@@ -15,7 +16,7 @@ export function OperationConfirmationHost({ workspaceId, locale = "ru" }: { work
   const current = useRef<Pending | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
-  const [now, setNow] = useState(Date.now());
+  const [expired, setExpired] = useState(false);
   const en = locale === "en";
   useEffect(() => {
     setPending(undefined);
@@ -23,15 +24,29 @@ export function OperationConfirmationHost({ workspaceId, locale = "ru" }: { work
       if (!workspaceId || request.quote.workspaceId !== workspaceId || current.current || request.signal?.aborted) { resolve(null); return; }
       const cancel = () => { if (current.current?.resolve === entry.resolve) { current.current = undefined; setPending(undefined); } entry.resolve(null); };
       const entry: Pending = { ...request, resolve: quote => { request.signal?.removeEventListener("abort", cancel); resolve(quote); } };
-      current.current = entry; setPending(entry); setRefreshing(false); setError(undefined); setNow(Date.now());
+      current.current = entry; setPending(entry); setRefreshing(false); setError(undefined); setExpired(Date.parse(request.quote.expiresAt) <= Date.now());
       request.signal?.addEventListener("abort", cancel, { once: true });
     }));
     return () => { unregister(); current.current?.resolve(null); current.current = undefined; };
   }, [workspaceId]);
-  useEffect(() => { if (!pending) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [pending]);
+  useEffect(() => {
+    if (!pending) return;
+    const remainingMs = operationConfirmationExpiryDelay(
+      pending.quote.expiresAt
+    );
+    if (remainingMs <= 0) {
+      setExpired(true);
+      return;
+    }
+    setExpired(false);
+    const timer = window.setTimeout(
+      () => setExpired(true),
+      remainingMs
+    );
+    return () => window.clearTimeout(timer);
+  }, [pending]);
   if (!pending || pending.quote.workspaceId !== workspaceId) return null;
   const quote = pending.quote;
-  const expired = Date.parse(quote.expiresAt) <= now;
   const money = (minor: number) => new Intl.NumberFormat(en ? "en-US" : "ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 2 }).format(minor / 100);
   function finish(value: OperationEstimate | null) { const entry = current.current; current.current = undefined; setPending(undefined); entry?.resolve(value); }
   async function refresh() {
@@ -41,7 +56,7 @@ export function OperationConfirmationHost({ workspaceId, locale = "ru" }: { work
       const fresh = await entry.refresh();
       if (current.current !== entry) return;
       if (fresh.workspaceId !== entry.quote.workspaceId || fresh.projectId !== entry.quote.projectId || fresh.kind !== entry.quote.kind || fresh.credentialMode !== "PLATFORM_PAID") throw new Error();
-      const updated = { ...entry, quote: fresh }; current.current = updated; setPending(updated); setNow(Date.now());
+      const updated = { ...entry, quote: fresh }; current.current = updated; setPending(updated);
     } catch { if (current.current === entry) setError(en ? "Could not update the estimate. Please try again." : "Не удалось обновить расчёт. Попробуйте ещё раз."); }
     finally { if (current.current?.resolve === entry.resolve) setRefreshing(false); }
   }

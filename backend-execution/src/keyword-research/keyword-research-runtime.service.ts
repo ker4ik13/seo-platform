@@ -6,6 +6,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
+import { PlatformCredentialPoolSelectionService } from "../integrations/platform-credential-pool-selection.service.js";
 import { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
 import { XmlStockWordstatConnector } from "../frequency-collections/xmlstock-wordstat.connector.js";
 import {
@@ -33,7 +34,8 @@ export class KeywordResearchRuntimeService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
-    @Optional() private readonly billing?: PaidOperationRuntimeService
+    @Optional() private readonly billing?: PaidOperationRuntimeService,
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
   ) {}
 
   public async processOne(leaseOwner: string): Promise<string> {
@@ -56,12 +58,25 @@ export class KeywordResearchRuntimeService {
       ) {
         throw new KeywordResearchLeaseLostError();
       }
-      const secret = selectIntegrationCredentialSecret(this.crypto.decrypt(
+      const decryptedSecret = this.crypto.decrypt(
         claim.workspaceId,
         claim.provider,
         claim.credentialId,
         claim.encryptedCredential
-      ), claim.jobId, claim.credentialId);
+      );
+      const secret = this.platformPool
+        ? await this.platformPool.select(
+            claim.provider,
+            decryptedSecret,
+            claim.jobId,
+            claim.credentialId,
+            Boolean(claim.providerTaskId)
+          )
+        : selectIntegrationCredentialSecret(
+            decryptedSecret,
+            claim.jobId,
+            claim.credentialId
+          );
       if (claim.source === "KEYS_SO") {
         return await this.processKeysSo(claim, secret);
       }

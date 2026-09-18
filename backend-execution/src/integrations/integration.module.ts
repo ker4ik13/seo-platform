@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { SystemConnectorBootstrapService } from "./system-connector-bootstrap.service.js";
 import { PlatformAccountRegistryService } from "./platform-account-registry.service.js";
+import { PlatformAccountProbeService } from "./platform-account-probe.service.js";
 import { PlatformProviderAccountController } from "./platform-provider-account.controller.js";
 import { IntegrationCredentialApiGuard } from "./integration-credential-api.guard.js";
 import { IntegrationCredentialConnectorRegistry } from "./integration-credential-connector.registry.js";
@@ -27,6 +28,7 @@ import { WorkspaceConnectorRoutingService } from "./workspace-connector-routing.
   ],
   providers: [
     PlatformAccountRegistryService,
+    PlatformAccountProbeService,
     SystemConnectorBootstrapService,
     IntegrationCredentialApiGuard,
     IntegrationCredentialConnectorRegistry,

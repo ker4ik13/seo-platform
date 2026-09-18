@@ -146,7 +146,14 @@ export function adminUpstreamPath(
     return `/api/v1/${joined}`;
   }
   if (!ADMIN_ROOTS.has(segments[0] ?? "")) return undefined;
-  if (segments[0] === "provider-accounts" && segments.length !== 1) return undefined;
+  if (
+    segments[0] === "provider-accounts" &&
+    !(
+      segments.length === 1 ||
+      (segments.length === 2 && segments[1] === "refresh") ||
+      (segments.length === 3 && segments[2] === "enabled")
+    )
+  ) return undefined;
   if (segments[0] === "overview" && segments.length !== 1) return undefined;
   if (segments[0] === "refund-requests" && !(segments.length === 1 || segments.length === 3 && ["decision", "confirm-manual", "reconcile-provider"].includes(segments[2] ?? ""))) return undefined;
   if (segments[0] === "me" && segments.length !== 1) return undefined;

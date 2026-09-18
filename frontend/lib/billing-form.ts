@@ -60,7 +60,8 @@ export function billingRublesToMinor(
   ) {
     throw new TypeError("Invalid billing minimum");
   }
-  const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(value);
+  const normalized = value.trim().replaceAll(/\s/gu, "").replace(",", ".");
+  const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(normalized);
   if (!match?.[1]) return undefined;
   const minor =
     BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0"));

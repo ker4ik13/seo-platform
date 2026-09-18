@@ -21,7 +21,7 @@ test("PostgreSQL low-balance alerts survive delivery failures, deduplicate and r
     const email = `balance-${randomUUID()}@example.invalid`;
     const user = await prisma.user.create({ data: { emailNormalized: email, emailDisplay: email, emailVerifiedAt: new Date(), displayName: "Balance monitor", status: "ACTIVE" } });
     await prisma.platformStaffRoleAssignment.create({ data: { userId: user.id, roleCode: "SUPER_ADMIN", reason: "Isolated monitoring test" } });
-    const service = new ProviderBalanceService(prisma, { platformProviderAccounts: async () => [{ id: accountId, provider: "XMLSTOCK", slot: 1, enabled: true, remaining, unit: "RUB", checkedAt: new Date().toISOString(), errorCode: null }] } as never);
+    const service = new ProviderBalanceService(prisma, { platformProviderAccounts: async () => [{ id: accountId, provider: "XMLSTOCK", slot: 1, enabled: true, checking: false, remaining, unit: "RUB", checkedAt: new Date().toISOString(), errorCode: null }] } as never);
     await Promise.all([service.poll(), service.poll()]);
     assert.equal(calls, 1);
     const stored = () => prisma.providerBalanceNotification.findUniqueOrThrow({ where: { accountId } });

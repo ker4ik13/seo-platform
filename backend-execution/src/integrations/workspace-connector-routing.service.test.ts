@@ -237,6 +237,33 @@ test("does not execute a legacy project override without a workspace route", asy
   );
 });
 
+test("does not route new work through a disabled platform provider account", async () => {
+  const platformCredential = {
+    ...(credential("XMLSTOCK", "ACTIVE", "000000000010") as Readonly<Record<string, unknown>>),
+    mode: "PLATFORM_PAID"
+  };
+  const binding = inheritedProjectBinding({
+    routes: [
+      projectRoute(
+        0,
+        "XMLSTOCK",
+        "ACTIVE",
+        "WORKSPACE_DEFAULT",
+        platformCredential
+      )
+    ]
+  });
+  await assert.rejects(
+    service(binding, workspaceBinding(), []).resolve(
+      workspaceId,
+      projectId,
+      "SERP_RANK_TRACKING",
+      actorId
+    ),
+    (error: unknown) => error instanceof ConflictException
+  );
+});
+
 test("allows disabling a workspace route whose credential became degraded", async () => {
   const credentialValue = credential("XMLSTOCK", "DEGRADED", "000000000010");
   const createdBinding = {
@@ -254,6 +281,7 @@ test("allows disabling a workspace route whose credential became degraded", asyn
   };
   const transaction = {
     integrationCredential: { findMany: async () => [credentialValue] },
+    platformProviderAccount: { findMany: async () => [{ provider: "XMLSTOCK" }, { provider: "ARSENKIN" }] },
     workspaceConnectorBinding: {
       findUnique: async () => null,
       create: async () => createdBinding,
@@ -299,8 +327,13 @@ test("allows disabling a workspace route whose credential became degraded", asyn
   assert.equal(result.routes[0]?.availability, "CREDENTIAL_UNAVAILABLE");
 });
 
-function service(project: unknown, workspace: unknown = null): WorkspaceConnectorRoutingService {
+function service(
+  project: unknown,
+  workspace: unknown = null,
+  enabledProviders: readonly ("XMLSTOCK" | "ARSENKIN")[] = ["XMLSTOCK", "ARSENKIN"]
+): WorkspaceConnectorRoutingService {
   const transaction = {
+    platformProviderAccount: { findMany: async () => enabledProviders.map(provider => ({ provider })) },
     projectConnectorBinding: {
       findUnique: async () => project
     },
@@ -314,7 +347,8 @@ function service(project: unknown, workspace: unknown = null): WorkspaceConnecto
     ) => callback(transaction),
     projectConnectorBinding: {
       findUnique: async () => project
-    }
+    },
+    platformProviderAccount: { findMany: async () => enabledProviders.map(provider => ({ provider })) }
   } as unknown as PrismaService;
   return new WorkspaceConnectorRoutingService(prisma);
 }

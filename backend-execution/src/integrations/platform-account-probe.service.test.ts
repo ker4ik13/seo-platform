@@ -2,88 +2,91 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PlatformAccountProbeService } from "./platform-account-probe.service.js";
 
-test("probes the XMLStock API key paired with the claimed account ID", async () => {
+test("probes the XMLStock API key paired with the configured account", async () => {
   const firstId = "01900000-0000-7000-8000-000000000001";
   const secondId = "01900000-0000-7000-8000-000000000002";
-  const token = "01900000-0000-7000-8000-000000000003";
-  const workspaceId = "01900000-0000-7000-8000-000000000004";
-  const credentialId = "01900000-0000-7000-8000-000000000005";
-  const claim = {
-    id: secondId,
-    provider: "XMLSTOCK",
-    token,
-    workspaceId,
-    credentialId,
-    ciphertext: Buffer.from("ciphertext").toString("base64"),
-    nonce: Buffer.from("nonce").toString("base64"),
-    authTag: Buffer.from("auth-tag").toString("base64"),
-    encryptedDataKey: Buffer.from("data-key").toString("base64"),
-    dataKeyNonce: Buffer.from("data-key-nonce").toString("base64"),
-    dataKeyAuthTag: Buffer.from("data-key-tag").toString("base64"),
-    keyVersion: 1
-  } as const;
-  const calls: Array<readonly unknown[]> = [];
-  let claimed = false;
+  const requests: URL[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    requests.push(url);
+    const body = !url.searchParams.has("info") && !url.searchParams.has("pagetype")
+      ? { limits: 100, "outgo-month": 2, "outgo-day": 1, balance: "1250.50" }
+      : {};
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  const writes: unknown[] = [];
+  let candidateReturned = false;
   const prisma = {
-    $queryRaw: async (
-      strings: TemplateStringsArray,
-      ...values: readonly unknown[]
-    ) => {
-      calls.push(values);
-      if (strings.join("").includes("claim_platform_provider_account_probe")) {
-        if (claimed) return [{ claim: null }];
-        claimed = true;
-        return [{ claim }];
-      }
-      return [{ finished: true }];
-    }
-  };
-  const crypto = {
-    decrypt: () => ({
-      apiKey: "xmlstock-key-one",
-      accountIdentifier: "account-one",
-      rateLimitScopeId: firstId,
-      platformPool: [
-        {
-          id: firstId,
-          apiKey: "xmlstock-key-one",
-          accountIdentifier: "account-one"
-        },
-        {
+    platformProviderAccount: {
+      findFirst: async () => {
+        if (candidateReturned) return null;
+        candidateReturned = true;
+        return {
           id: secondId,
-          apiKey: "xmlstock-key-two",
-          accountIdentifier: "account-two"
-        }
-      ]
-    })
-  };
-  const connectors = {
-    validate: async (
-      provider: string,
-      secret: Readonly<Record<string, unknown>>,
-      timeoutMs: number
-    ) => {
-      assert.equal(provider, "XMLSTOCK");
-      assert.equal(timeoutMs, 8_000);
-      assert.deepEqual(secret, {
-        apiKey: "xmlstock-key-two",
-        accountIdentifier: "account-two",
-        rateLimitScopeId: secondId
-      });
-      return { ok: true, providerMeta: { account: { balance: "1250.50" } } };
+          provider: "XMLSTOCK",
+          enabled: true,
+          nextProbeAt: new Date(0),
+          leaseExpiresAt: null
+        };
+      },
+      updateMany: async (input: unknown) => {
+        writes.push(input);
+        return { count: 1 };
+      }
     }
+  };
+  const accounts = {
+    configuredAccounts: () => [
+      {
+        id: firstId,
+        provider: "XMLSTOCK",
+        slot: 1,
+        secret: {
+          apiKey: "xmlstock-key-one",
+          accountIdentifier: "account-one",
+          rateLimitScopeId: firstId
+        }
+      },
+      {
+        id: secondId,
+        provider: "XMLSTOCK",
+        slot: 2,
+        secret: {
+          apiKey: "xmlstock-key-two",
+          accountIdentifier: "account-two",
+          rateLimitScopeId: secondId
+        }
+      }
+    ]
   };
   const service = new PlatformAccountProbeService(
     prisma as never,
-    crypto as never,
-    connectors as never,
+    accounts as never,
     { integrationCredentialValidation: { timeoutMs: 8_000 } } as never
   );
 
-  assert.equal(await service.probeOne(), true);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1]?.[0], secondId);
-  assert.equal(calls[1]?.[2], token);
-  assert.equal(calls[1]?.[3], "1250.50");
-  assert.equal(calls[1]?.[4], null);
+  try {
+    assert.equal(await service.probeOne(), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requests.length, 4);
+  for (const url of requests) {
+    assert.equal(url.searchParams.get("user"), "account-two");
+    assert.equal(url.searchParams.get("key"), "xmlstock-key-two");
+  }
+  assert.equal(writes.length, 2);
+  assert.deepEqual(
+    (writes[1] as { data: Record<string, unknown> }).data.remaining,
+    "1250.50"
+  );
+  assert.equal(
+    (writes[1] as { data: Record<string, unknown> }).data.errorCode,
+    null
+  );
 });

@@ -11,6 +11,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
+import { PlatformCredentialPoolSelectionService } from "../integrations/platform-credential-pool-selection.service.js";
 import { SeoDataClient, SeoDataClientError } from "../seo-data/seo-data.client.js";
 import {
   ArsenkinAiAnswerConnector,
@@ -37,7 +38,8 @@ export class AiAnswerRuntimeService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
-    @Optional() private readonly billing?: PaidOperationRuntimeService
+    @Optional() private readonly billing?: PaidOperationRuntimeService,
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
   ) {}
 
   public async processBatch(
@@ -76,12 +78,25 @@ export class AiAnswerRuntimeService {
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
       }
-      const secret = selectIntegrationCredentialSecret(this.crypto.decrypt(
+      const decryptedSecret = this.crypto.decrypt(
         activeClaim.workspaceId,
         "ARSENKIN",
         activeClaim.credentialId,
         activeClaim.encryptedCredential
-      ), activeClaim.jobId, activeClaim.credentialId);
+      );
+      const secret = this.platformPool
+        ? await this.platformPool.select(
+            "ARSENKIN",
+            decryptedSecret,
+            activeClaim.jobId,
+            activeClaim.credentialId,
+            currentRequestId !== undefined
+          )
+        : selectIntegrationCredentialSecret(
+            decryptedSecret,
+            activeClaim.jobId,
+            activeClaim.credentialId
+          );
       const sourceMode = await this.billing?.mode(activeClaim) === "PLATFORM_PAID" ? "PLATFORM" as const : "BYOK" as const;
       let keywords: readonly InternalAiAnswerKeyword[] | undefined;
       const resolve = async (): Promise<readonly string[]> => {

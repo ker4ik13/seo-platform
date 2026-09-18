@@ -337,10 +337,26 @@ h1, h2, p { margin: 0; }
 @scope (.admin-root) {
   .admin-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px; }
   .admin-provider-card { display: grid; gap: 18px; align-content: start; }
-  .admin-provider-card header { gap: 12px; flex-wrap: wrap; }
+  .admin-provider-card header { gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .admin-provider-card header > div { display: grid; gap: 7px; }
   .admin-provider-card.is-low { border-color: var(--amber); }
+  .admin-provider-card.is-disabled { opacity: .72; }
   .admin-provider-card p, .admin-provider-card small { color: var(--muted); line-height: 1.5; }
   .admin-provider-amount { font-size: 32px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .admin-provider-status { width: fit-content; padding: 4px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .admin-provider-status.success { color: #16a36a; background: rgb(22 163 106 / 12%); }
+  .admin-provider-status.warning { color: var(--amber); background: rgb(245 158 11 / 12%); }
+  .admin-provider-status.danger { color: var(--red); background: rgb(239 68 68 / 12%); }
+  .admin-provider-status.muted { color: var(--muted); background: rgb(148 163 184 / 12%); }
+  .admin-provider-switch { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .admin-provider-switch input { position: absolute; opacity: 0; pointer-events: none; }
+  .admin-provider-switch span { position: relative; width: 38px; height: 22px; border-radius: 999px; background: var(--line); transition: background .16s ease; }
+  .admin-provider-switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 24%); transition: transform .16s ease; }
+  .admin-provider-switch input:checked + span { background: var(--brand); }
+  .admin-provider-switch input:checked + span::after { transform: translateX(16px); }
+  .admin-provider-switch input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .admin-provider-switch input:disabled + span { opacity: .55; }
+  .admin-provider-switch b { font-size: 12px; color: var(--muted); }
 }
 @scope (.admin-root) {
   .admin-overview-heading { display: flex; align-items: start; justify-content: space-between; gap: 24px; }

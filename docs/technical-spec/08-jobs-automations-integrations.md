@@ -1266,6 +1266,12 @@ service JWT/mTLS identity и не доказательство полной prod
   workspace и всеми connector replicas, но не блокирует остальные ключи.
   Redis fail-closed ограничивает внешний HTTP и не является источником Job,
   billing или provider-task state;
+- физические platform accounts проверяются management-role напрямую из
+  environment по сохранённой индексной паре. Успешная фоновая проверка
+  повторяется не чаще одного раза в 15 минут; ручная команда только помечает
+  текущие включённые аккаунты для ближайшей проверки. Admin может отключить
+  конкретный аккаунт: новые операции исключают его из rendezvous selection,
+  но уже принятый provider task завершает polling на первоначальном ключе;
 - одновременно допускается не более одной активной platform credential одного
   provider на workspace. Её нельзя редактировать как пользовательский ключ;
   смена platform secret выполняется через revoke/re-enable после controlled

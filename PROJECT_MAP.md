@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 15 сентября 2026 года.
+Актуально на 18 сентября 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -1022,10 +1022,19 @@ Core запрашивает global aggregates у Jobs/SEO через их соб
 
 Jobs HTTP регистрирует `platform_provider_accounts` из configured system pools;
 это одна строка на физический HMAC-derived account ID, а не дубликат на workspace.
-`PlatformAccountProbeService` в существующей connector role получает только
-lease-bound encrypted envelope через две SQL функции, проверяет конкретный
-аккаунт без платных SEO calls и сохраняет остаток/ошибку. Секреты в projection
-не попадают. Owner-only `/admin` читает normalized snapshots через Core.
+`PlatformAccountProbeService` работает в management HTTP process, где уже
+разрешены исходные platform credentials: он берёт строго индексную пару из
+environment, получает короткий DB lease, проверяет конкретный аккаунт без
+платных SEO calls и сохраняет остаток либо конечный код ошибки. Проверка
+запускается один раз после старта, затем не чаще чем раз в 15 минут при успехе
+и явно по кнопке администратора; секундного provider polling нет. Секреты в
+БД, browser и projection не попадают. Owner-only `/admin` читает normalized
+snapshots через Core и позволяет включать или отключать каждый текущий
+физический аккаунт. Старые IDs после ротации в список не возвращаются.
+Connector role читает только UUID включённых аккаунтов через bounded
+`SECURITY DEFINER` projection; прямого доступа к таблице у неё нет. Новые
+операции обходят выключенный физический аккаунт, а уже принятый provider task
+может завершить polling на исходном ключе.
 Core `provider_balance_notifications` хранит pending/low/generation и повторяет
 отправку до подтверждения Telegram. Повтор неизменного low state не создаёт
 новое оповещение. Arsenkin показывается как лимиты и денежная оценка; порог 500 ₽.
@@ -1038,6 +1047,11 @@ Web credential validation возобновляет polling сохранённо�
 размонтирует и abort-ит текущий polling, освобождает client operation lock и
 выполняет существующий versioned `DELETE`; Jobs по-прежнему владеет окончательным
 revoke и защитой старой проверки по credential material version.
+Общий modal подтверждения platform-paid операции не имеет секундного таймера:
+баланс и цена фиксируются одним immutable estimate, а UI ставит единственный
+timeout на `expiresAt`. Частотность, сезонность, кластеризация и keyword
+research используют этот одинаковый механизм; позиции сохраняют такой же
+одноразовый estimate в своём multi-target flow.
 
 `integrations/system-connector-bootstrap.service.ts` готовит системные соединения
 для нового проекта: зашифрованные operator credentials, обычную асинхронную

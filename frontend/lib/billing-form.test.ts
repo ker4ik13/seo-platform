@@ -50,12 +50,14 @@ test("receipt email is normalized before checkout", () => {
 test("money parser is decimal-exact and mirrors the server maximum", () => {
   assert.equal(billingRublesToMinor("100"), 10_000);
   assert.equal(billingRublesToMinor("100.5"), 10_050);
+  assert.equal(billingRublesToMinor(" 1 000,50 "), 100_050);
   assert.equal(billingRublesToMinor("0.01"), 1);
   assert.equal(billingRublesToMinor("1000000"), 100_000_000);
   for (const invalid of [
     "00.01",
     "1.001",
     "1e3",
+    "1,2,3",
     "-1",
     "1000000.01",
     "1000001"

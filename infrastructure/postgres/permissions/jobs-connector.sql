@@ -638,8 +638,7 @@ SELECT format('GRANT EXECUTE ON FUNCTION public.prepare_provider_usage_ticket(uu
 SELECT format('GRANT EXECUTE ON FUNCTION public.start_provider_usage_ticket(uuid,uuid) TO %I', :'connector_user') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION public.finish_provider_usage_ticket(uuid,uuid,text,jsonb) TO %I', :'connector_user') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION public.read_provider_operation_mode(uuid,uuid,uuid,text,integer) TO %I', :'connector_user') \gexec
-SELECT format('GRANT EXECUTE ON FUNCTION public.claim_platform_provider_account_probe(text) TO %I', :'connector_user') \gexec
-SELECT format('GRANT EXECUTE ON FUNCTION public.finish_platform_provider_account_probe(uuid,text,uuid,text,text) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.list_enabled_platform_provider_account_ids(text,uuid[]) TO %I', :'connector_user') \gexec
 
 -- reject an existing role if any direct ACL dependency remains outside the
 -- exact jobs_db allowlist. pg_shdepend exposes ACL dependencies in every
@@ -670,8 +669,7 @@ BEGIN
   WHERE nspname = 'public';
 
   allowed_routine_ids := ARRAY[
-    'public.claim_platform_provider_account_probe(text)'::regprocedure::oid,
-    'public.finish_platform_provider_account_probe(uuid,text,uuid,text,text)'::regprocedure::oid,
+    'public.list_enabled_platform_provider_account_ids(text,uuid[])'::regprocedure::oid,
     'public.prepare_provider_usage_ticket(uuid,uuid,uuid,text,integer,text,uuid[])'::regprocedure::oid,
     'public.start_provider_usage_ticket(uuid,uuid)'::regprocedure::oid,
     'public.finish_provider_usage_ticket(uuid,uuid,text,jsonb)'::regprocedure::oid,

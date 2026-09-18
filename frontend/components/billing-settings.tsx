@@ -75,6 +75,7 @@ export function BillingSettings({
   const usage = useWorkspaceUsage();
   const [snapshot, setSnapshot] = useState<BillingSnapshot>();
   const [error, setError] = useState<string>();
+  const [checkoutError, setCheckoutError] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [period, setPeriod] = useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [selectedPlan, setSelectedPlan] = useState<string>();
@@ -207,15 +208,19 @@ export function BillingSettings({
   async function mutate(
     key: string,
     operation: () => Promise<void>,
-    reload = true
+    reload = true,
+    errorPlacement: "page" | "checkout" = "page"
   ) {
     setBusy(key);
-    setError(undefined);
+    if (errorPlacement === "checkout") setCheckoutError(undefined);
+    else setError(undefined);
     try {
       await operation();
       if (reload) await load();
     } catch (cause) {
-      setError(errorMessage(cause));
+      const message = errorMessage(cause);
+      if (errorPlacement === "checkout") setCheckoutError(message);
+      else setError(message);
     } finally {
       setBusy(undefined);
     }
@@ -262,9 +267,13 @@ export function BillingSettings({
   }
 
   async function checkout() {
-    if (!selected || !termsAccepted) return;
+    if (!selected) return;
+    if (!termsAccepted) {
+      setCheckoutError("Примите условия оплаты.");
+      return;
+    }
     if (!selectedPrice) {
-      setError("Для выбранного тарифа этот период оплаты недоступен.");
+      setCheckoutError("Для выбранного тарифа этот период оплаты недоступен.");
       return;
     }
     await mutate(
@@ -285,14 +294,15 @@ export function BillingSettings({
         );
         if (!goToConfirmation(order)) await load();
       },
-      false
+      false,
+      "checkout"
     );
   }
 
   async function topUp() {
     const amountMinor = billingRublesToMinor(topUpRubles, 10_000);
     if (!termsAccepted || amountMinor === undefined) {
-      setError("Укажите сумму от 100 ₽ и примите условия оплаты.");
+      setCheckoutError("Укажите сумму от 100 ₽ и примите условия оплаты.");
       return;
     }
     await mutate(
@@ -308,7 +318,8 @@ export function BillingSettings({
         );
         if (!goToConfirmation(order)) await load();
       },
-      false
+      false,
+      "checkout"
     );
   }
 
@@ -714,7 +725,7 @@ export function BillingSettings({
           </div>
           <div className="billing-provider-options" aria-label={uiText("Способ оплаты")}>
             {snapshot.providers.map(provider => <label key={provider.provider} className={paymentProvider === provider.provider ? "selected" : undefined}>
-              <input type="radio" name="payment-provider" value={provider.provider} checked={paymentProvider === provider.provider} disabled={!provider.available || Boolean(busy)} onChange={() => setPaymentProvider(provider.provider)} />
+              <input type="radio" name="payment-provider" value={provider.provider} checked={paymentProvider === provider.provider} disabled={!provider.available || Boolean(busy)} onChange={() => { setPaymentProvider(provider.provider); setCheckoutError(undefined); }} />
               <span><strong>{provider.provider === "YOOKASSA" ? <UiText text="Карта или СБП" /> : "Crypto Pay"}</strong><small>{!provider.available ? <UiText text="Скоро" /> : provider.mode === "TEST" ? <UiText text="Тестовый режим" /> : provider.recurring ? <UiText text="Доступно автопродление" /> : <UiText text="Разовая оплата без автосписания" />}</small></span>
             </label>)}
           </div>
@@ -761,10 +772,8 @@ export function BillingSettings({
               <label>
                 <UiText text="Сумма пополнения, ₽" /><input
                   inputMode="decimal"
-                  min="100"
-                  onChange={(event) => setTopUpRubles(event.target.value)}
-                  step="1"
-                  type="number"
+                  onChange={(event) => { setTopUpRubles(event.target.value); setCheckoutError(undefined); }}
+                  type="text"
                   value={topUpRubles}
                 />
               </label>
@@ -783,19 +792,21 @@ export function BillingSettings({
           <label className="billing-checkbox">
             <input
               checked={termsAccepted}
-              onChange={(event) => setTermsAccepted(event.target.checked)}
+              onChange={(event) => { setTermsAccepted(event.target.checked); setCheckoutError(undefined); }}
               type="checkbox"
             />
             <UiText text="Принимаю условия сервиса и подтверждаю параметры заказа" /></label>
+          {checkoutError && <div className="inline-error" role="alert"><UiText text={checkoutError} /></div>}
           <div className="billing-checkout-actions">
             {selected ? (
               <>
                 <button
                   className="primary-button"
                   disabled={
-                    Boolean(busy) || !termsAccepted || !selectedPrice || !snapshot.providers.some(provider => provider.provider === paymentProvider && provider.available)
+                    Boolean(busy) || !selectedPrice || !snapshot.providers.some(provider => provider.provider === paymentProvider && provider.available)
                   }
                   onClick={() => void checkout()}
+                  type="button"
                 >
                   {!selectedPrice
                     ? <UiText text="Период недоступен" />
@@ -808,14 +819,16 @@ export function BillingSettings({
                 <button
                   className="secondary-button"
                   onClick={() => setSelectedPlan(undefined)}
+                  type="button"
                 >
                   <UiText text="Пополнить баланс вместо подписки" /></button>
               </>
             ) : (
               <button
                 className="primary-button"
-                disabled={Boolean(busy) || !termsAccepted || !snapshot.providers.some(provider => provider.provider === paymentProvider && provider.available)}
+                disabled={Boolean(busy) || !snapshot.providers.some(provider => provider.provider === paymentProvider && provider.available)}
                 onClick={() => void topUp()}
+                type="button"
               >
                 {busy === "top-up" ? <UiText text="Создаём платёж…" /> : <UiText text="Пополнить баланс" />}
               </button>

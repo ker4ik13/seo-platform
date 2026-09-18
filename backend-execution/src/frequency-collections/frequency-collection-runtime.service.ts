@@ -17,6 +17,7 @@ import {
   type IntegrationCredentialSecret
 } from "../integrations/integration-credential-crypto.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
+import { PlatformCredentialPoolSelectionService } from "../integrations/platform-credential-pool-selection.service.js";
 import { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
 import { SeoDataClient, SeoDataClientError } from "../seo-data/seo-data.client.js";
 import {
@@ -53,7 +54,8 @@ export class FrequencyCollectionRuntimeService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
-    @Optional() private readonly billing?: PaidOperationRuntimeService
+    @Optional() private readonly billing?: PaidOperationRuntimeService,
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
   ) {}
 
   public async processBatch(
@@ -122,12 +124,25 @@ export class FrequencyCollectionRuntimeService {
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
       }
-      const secret = selectIntegrationCredentialSecret(this.crypto.decrypt(
+      const decryptedSecret = this.crypto.decrypt(
         activeClaim.workspaceId,
         activeClaim.provider,
         activeClaim.credentialId,
         activeClaim.encryptedCredential
-      ), activeClaim.jobId, activeClaim.credentialId);
+      );
+      const secret = this.platformPool
+        ? await this.platformPool.select(
+            activeClaim.provider,
+            decryptedSecret,
+            activeClaim.jobId,
+            activeClaim.credentialId,
+            existingTaskId !== undefined
+          )
+        : selectIntegrationCredentialSecret(
+            decryptedSecret,
+            activeClaim.jobId,
+            activeClaim.credentialId
+          );
       const sourceMode = await this.billing?.mode(activeClaim) === "PLATFORM_PAID" ? "PLATFORM" as const : "BYOK" as const;
       let keywords: readonly InternalFrequencyKeyword[] | undefined;
       const resolveKeywords = async (): Promise<readonly string[]> => {

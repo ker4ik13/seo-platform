@@ -1960,12 +1960,19 @@ export class JobsClient {
   public async platformProviderAccounts(actorId: string, requestId: string): Promise<readonly PlatformProviderAccountSnapshot[]> {
     const value = await this.requestAdmin<unknown>("/internal/v1/platform-admin/provider-accounts", actorId, requestId);
     if (!Array.isArray(value) || value.length > 128) throw invalidJobsResponse();
-    return value.map(row => {
-      const input = exactRecord(row, ["id", "provider", "slot", "enabled", "remaining", "unit", "checkedAt", "errorCode"]);
-      uuidValue(input.id);
-      if ((input.provider !== "XMLSTOCK" && input.provider !== "ARSENKIN") || !Number.isSafeInteger(input.slot) || Number(input.slot) < 1 || Number(input.slot) > 64 || typeof input.enabled !== "boolean" || input.unit !== (input.provider === "XMLSTOCK" ? "RUB" : "ARSENKIN_LIMITS") || input.remaining !== null && (typeof input.remaining !== "string" || !/^(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?$/u.test(input.remaining)) || input.checkedAt !== null && !Number.isFinite(Date.parse(String(input.checkedAt))) || input.errorCode !== null && (typeof input.errorCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(input.errorCode))) throw invalidJobsResponse();
-      return input as unknown as PlatformProviderAccountSnapshot;
-    });
+    return value.map(platformProviderAccountSnapshot);
+  }
+
+  public async refreshPlatformProviderAccounts(actorId: string, requestId: string): Promise<number> {
+    const value = await this.requestAdmin<unknown>("/internal/v1/platform-admin/provider-accounts/refresh", actorId, requestId, "POST", {});
+    const input = exactRecord(value, ["requested"]);
+    if (!Number.isSafeInteger(input.requested) || Number(input.requested) < 0 || Number(input.requested) > 128) throw invalidJobsResponse();
+    return Number(input.requested);
+  }
+
+  public async setPlatformProviderAccountEnabled(accountId: string, enabled: boolean, actorId: string, requestId: string): Promise<PlatformProviderAccountSnapshot> {
+    uuidValue(accountId);
+    return platformProviderAccountSnapshot(await this.requestAdmin<unknown>(`/internal/v1/platform-admin/provider-accounts/${encodeURIComponent(accountId)}/enabled`, actorId, requestId, "POST", { enabled }));
   }
 
   public async executionOverview(actorId: string, requestId: string): Promise<InternalExecutionOverview> {
@@ -2193,7 +2200,9 @@ export class JobsClient {
   private async requestAdmin<Data>(
     path: string,
     actorId: string,
-    requestId: string
+    requestId: string,
+    method: "GET" | "POST" = "GET",
+    body?: unknown
   ): Promise<Data> {
     const token = this.config.jobsApiToken;
     if (!token) throw dependencyUnavailable();
@@ -2203,11 +2212,13 @@ export class JobsClient {
       "X-Request-Id": requestId,
       "X-Actor-Id": actorId
     });
+    if (body !== undefined) headers.set("Content-Type", "application/json");
     let response: Response;
     try {
       response = await fetch(new URL(path, this.config.services.jobs), {
-        method: "GET",
+        method,
         headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         redirect: "error",
         signal: AbortSignal.timeout(this.config.dependencyTimeoutMs)
       });
@@ -2665,6 +2676,44 @@ function clusteringRunPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/clustering-runs`;
+}
+
+function platformProviderAccountSnapshot(
+  value: unknown
+): PlatformProviderAccountSnapshot {
+  const input = exactRecord(value, [
+    "id",
+    "provider",
+    "slot",
+    "enabled",
+    "checking",
+    "remaining",
+    "unit",
+    "checkedAt",
+    "errorCode"
+  ]);
+  uuidValue(input.id);
+  if (
+    (input.provider !== "XMLSTOCK" && input.provider !== "ARSENKIN") ||
+    !Number.isSafeInteger(input.slot) ||
+    Number(input.slot) < 1 ||
+    Number(input.slot) > 64 ||
+    typeof input.enabled !== "boolean" ||
+    typeof input.checking !== "boolean" ||
+    input.unit !==
+      (input.provider === "XMLSTOCK" ? "RUB" : "ARSENKIN_LIMITS") ||
+    input.remaining !== null &&
+      (typeof input.remaining !== "string" ||
+        !/^(0|[1-9][0-9]{0,17})(\.[0-9]{1,6})?$/u.test(input.remaining)) ||
+    input.checkedAt !== null &&
+      !Number.isFinite(Date.parse(String(input.checkedAt))) ||
+    input.errorCode !== null &&
+      (typeof input.errorCode !== "string" ||
+        !/^[A-Z][A-Z0-9_]{0,63}$/u.test(input.errorCode))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return input as unknown as PlatformProviderAccountSnapshot;
 }
 
 function technicalCrawlResponse(

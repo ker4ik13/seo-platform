@@ -68,8 +68,7 @@ const expectedFunctions = [
   "public.start_provider_usage_ticket(uuid,uuid)",
   "public.finish_provider_usage_ticket(uuid,uuid,text,jsonb)",
   "public.read_provider_operation_mode(uuid,uuid,uuid,text,integer)",
-  "public.claim_platform_provider_account_probe(text)",
-  "public.finish_platform_provider_account_probe(uuid,text,uuid,text,text)"
+  "public.list_enabled_platform_provider_account_ids(text,uuid[])"
 ];
 
 function compactSql(sql) {
