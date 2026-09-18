@@ -471,7 +471,7 @@ function telegramMessage(
             .map(([key, value]) =>
               escapeTelegramHtml(`${key}: ${value}`)
             )
-            .join("\n")}</blockquote>`
+            .join("\n")}</blockquote>\n`
         ]
       : []),
     `Версия: ${serviceVersion}`,

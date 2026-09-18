@@ -22,7 +22,7 @@ import {
   resolvedFolderSelectionIds,
   visibleFolderRows
 } from "../lib/semantic-operation-tree";
-import { semanticOperationScopePageInput } from "../lib/semantic-operation-scope-query";
+import { semanticOperationScopePageInput, semanticOperationScopeResolutionKey } from "../lib/semantic-operation-scope-query";
 import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { Icon } from "./icon";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -147,7 +147,7 @@ export function SemanticOperationScope({
     () => groups.filter(({ systemKind }) => systemKind !== "TRASH"),
     [groups]
   );
-  const resolvedGroupIds = useMemo(
+  const computedResolvedGroupIds = useMemo(
     () => resolvedFolderSelectionIds(
       availableGroups,
       selectedGroupIds,
@@ -155,6 +155,18 @@ export function SemanticOperationScope({
     ),
     [availableGroups, descendantGroupIds, selectedGroupIds]
   );
+  const resolvedGroupContentKey = JSON.stringify(computedResolvedGroupIds);
+  const stableResolvedGroupIdsRef = useRef({
+    key: resolvedGroupContentKey,
+    ids: computedResolvedGroupIds
+  });
+  if (stableResolvedGroupIdsRef.current.key !== resolvedGroupContentKey) {
+    stableResolvedGroupIdsRef.current = {
+      key: resolvedGroupContentKey,
+      ids: computedResolvedGroupIds
+    };
+  }
+  const resolvedGroupIds = stableResolvedGroupIdsRef.current.ids;
   const resolvedGroupIdSet = useMemo(
     () => new Set(resolvedGroupIds),
     [resolvedGroupIds]
@@ -163,6 +175,13 @@ export function SemanticOperationScope({
     () => visibleFolderRows(availableGroups, expandedGroupIds),
     [availableGroups, expandedGroupIds]
   );
+  const resolutionKey = semanticOperationScopeResolutionKey({
+    mode,
+    selectedGroupIds: [...selectedGroupIds],
+    descendantGroupIds: [...descendantGroupIds],
+    resolvedGroupIds,
+    querySelections: [...querySelections.values()]
+  });
   useEffect(() => {
     if (selectedGroupIds.size === 0 && descendantGroupIds.size > 0) {
       setDescendantGroupIds(new Set());
@@ -252,7 +271,7 @@ export function SemanticOperationScope({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [descendantGroupIds, maxItems, mode, onChange, onCountChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
+  }, [descendantGroupIds, maxItems, mode, onChange, onCountChange, onScopeChange, projectId, querySelections, resolutionKey, resolvedGroupIds, selectedGroupIds]);
 
   useEffect(() => {
     queryPaginationControllerRef.current?.abort();

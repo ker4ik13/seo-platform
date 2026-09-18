@@ -66,7 +66,7 @@ export class BillingService {
 
   public providers(): readonly BillingProviderAvailability[] {
     return [
-      { provider: "YOOKASSA", available: this.yookassa.isEnabled(), recurring: true, automaticRefunds: true, mode: this.config.billing.yookassa.secretKey?.startsWith("test_") ? "TEST" : "LIVE" },
+      { provider: "YOOKASSA", available: this.yookassa.isEnabled(), recurring: this.config.billing.yookassa.recurringEnabled, automaticRefunds: true, mode: this.config.billing.yookassa.secretKey?.startsWith("test_") ? "TEST" : "LIVE" },
       { provider: "CRYPTO_PAY", available: this.cryptoPay?.isEnabled() === true, recurring: false, automaticRefunds: false, mode: this.config.billing.cryptoPay?.apiBaseUrl.includes("testnet-") ? "TEST" : "LIVE" }
     ];
   }
@@ -311,6 +311,7 @@ export class BillingService {
     context: RequestContext
   ): Promise<BillingOrderSummary> {
     this.assertProviderEnabled(input.provider);
+    this.assertRecurringAvailable(input);
     if (input.provider === "CRYPTO_PAY" && input.savePaymentMethod) throw new DomainError({ statusCode: 400, code: "VALIDATION_FAILED", message: "Crypto Pay does not support automatic renewal" });
     const planVersion = await this.checkoutPlanVersion(workspaceId, input);
     const price = planVersion.prices.find(
@@ -345,6 +346,7 @@ export class BillingService {
     context: RequestContext
   ): Promise<BillingOrderSummary> {
     this.assertProviderEnabled(input.provider);
+    this.assertRecurringAvailable(input);
     if (input.provider === "CRYPTO_PAY" && input.savePaymentMethod) throw new DomainError({ statusCode: 400, code: "VALIDATION_FAILED", message: "Crypto Pay does not support automatic renewal" });
     return this.createOrderAndPayment({
       workspaceId,
@@ -1252,7 +1254,10 @@ export class BillingService {
             ? { paymentMethodId: payment.paymentMethod.externalId }
             : { returnUrl: requiredReturnUrl(this.config, payment.provider) }),
           orderId: payment.orderId, workspaceId: payment.workspaceId,
-          savePaymentMethod: payment.provider === "YOOKASSA" && payment.order.savePaymentMethod
+          savePaymentMethod:
+            payment.provider === "YOOKASSA" &&
+            this.config.billing.yookassa.recurringEnabled &&
+            payment.order.savePaymentMethod
         });
       }
       await this.applyPayment(providerPayment, payment.id, payment.provider);
@@ -1660,6 +1665,7 @@ export class BillingService {
         phase: "payment",
         paymentId: payment.id,
         orderId: payment.orderId,
+        savePaymentMethod: String(payment.order.savePaymentMethod),
         ...(requestId ? { requestId } : {})
       });
     }
@@ -2142,6 +2148,22 @@ export class BillingService {
       });
     }
   }
+
+  private assertRecurringAvailable(
+    input: CreateBillingCheckoutInput | CreateBillingTopUpInput
+  ): void {
+    if (
+      input.provider === "YOOKASSA" &&
+      input.savePaymentMethod &&
+      !this.config.billing.yookassa.recurringEnabled
+    ) {
+      throw new DomainError({
+        statusCode: 409,
+        code: "FEATURE_NOT_AVAILABLE",
+        message: "Автоплатежи не разрешены для текущего магазина ЮKassa"
+      });
+    }
+  }
 }
 
 function planSummary(
@@ -2475,6 +2497,13 @@ function paymentProviderErrorMessage(
       /(?:INVALID_CREDENTIALS|UNAUTHORIZED)/u.test(error.code))
   ) {
     return "ЮKassa отклонила Shop ID или секретный ключ. Подробности отправлены в Telegram";
+  }
+  if (
+    provider !== "CRYPTO_PAY" &&
+    error instanceof YookassaProviderError &&
+    (error.httpStatus === 403 || error.code === "YOOKASSA_FORBIDDEN")
+  ) {
+    return "ЮKassa запретила операцию для этого магазина. Проверьте права магазина и разрешение на автоплатежи";
   }
   if (provider !== "CRYPTO_PAY" && error instanceof YookassaProviderError) {
     return "ЮKassa отклонила параметры платежа. Подробности отправлены в Telegram";

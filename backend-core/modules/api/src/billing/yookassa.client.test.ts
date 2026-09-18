@@ -104,7 +104,7 @@ test("sends Basic auth and Idempotence-Key only to the configured API", async ()
       returnUrl: "https://app.example.test/billing/return",
       orderId: "order-1",
       workspaceId: "workspace-1",
-      savePaymentMethod: true
+      savePaymentMethod: false
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -121,6 +121,13 @@ test("sends Basic auth and Idempotence-Key only to the configured API", async ()
   );
   assert.equal(headers.get("idempotence-key"), "12345678abcdefgh");
   assert.doesNotMatch(String(request.init.body), /secret|123456:/u);
+  assert.equal(
+    Object.hasOwn(
+      JSON.parse(String(request.init.body)) as Record<string, unknown>,
+      "save_payment_method"
+    ),
+    false
+  );
 });
 
 test("retries transient network failures with the same idempotency key", async () => {

@@ -41,7 +41,8 @@ test("loads explicit service configuration", () => {
       enabled: false,
       apiBaseUrl: "https://api.yookassa.ru/v3",
       requestTimeoutMs: 10_000,
-      validateWebhookSourceIp: true
+      validateWebhookSourceIp: true,
+      recurringEnabled: false
     },
     reconciliation: {
       enabled: false,
@@ -163,6 +164,15 @@ test("requires complete YooKassa credentials and derives a safe return URL", () 
     "https://app.example.test/app/settings/billing?checkout=return"
   );
   assert.equal(config.billing.reconciliation.enabled, true);
+  assert.equal(config.billing.yookassa.recurringEnabled, false);
+  assert.throws(
+    () => loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      YOOKASSA_RECURRING_ENABLED: "true"
+    }),
+    /requires YOOKASSA_ENABLED/u
+  );
 });
 
 test("keeps production YooKassa traffic on the official API with IP validation", () => {

@@ -65,6 +65,7 @@ export interface AppConfig {
       readonly returnUrl?: string;
       readonly requestTimeoutMs: number;
       readonly validateWebhookSourceIp: boolean;
+      readonly recurringEnabled: boolean;
     };
     readonly reconciliation: {
       readonly enabled: boolean;
@@ -336,6 +337,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP,
     true,
     "YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP"
+  );
+  const yookassaRecurringEnabled = booleanValue(
+    env.YOOKASSA_RECURRING_ENABLED,
+    false,
+    "YOOKASSA_RECURRING_ENABLED"
   );
   const cryptoPay = cryptoPayConfig(env);
   const billingReconciliationEnabled = booleanValue(
@@ -645,6 +651,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "BILLING_RECONCILIATION_ENABLED requires an enabled payment provider"
     );
   }
+  if (yookassaRecurringEnabled && !yookassaEnabled) {
+    throw new Error(
+      "YOOKASSA_RECURRING_ENABLED requires YOOKASSA_ENABLED"
+    );
+  }
   if (
     platformXmlstockEnabled &&
     platformXmlstockRankKeywordPriceMinor === undefined
@@ -859,7 +870,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
           1_000,
           30_000
         ),
-        validateWebhookSourceIp: yookassaValidateWebhookSourceIp
+        validateWebhookSourceIp: yookassaValidateWebhookSourceIp,
+        recurringEnabled: yookassaRecurringEnabled
       },
       reconciliation: {
         enabled: billingReconciliationEnabled,

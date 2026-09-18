@@ -112,8 +112,7 @@ export function normalizeCryptoPayInvoice(value: unknown, test: boolean): Yookas
   const input = object(value);
   const id = invoiceIdValue(input.invoice_id);
   if (input.currency_type !== "fiat" || input.fiat !== "RUB") throw failure("INVOICE_CURRENCY_MISMATCH");
-  const amount = String(input.amount);
-  if (!/^(0|[1-9][0-9]{0,6})(?:\.[0-9]{1,2})?$/u.test(amount) || Number(amount) <= 0) throw failure("INVALID_INVOICE_AMOUNT");
+  const amount = cryptoPayAmount(input.amount);
   const status = input.status === "paid" ? "succeeded" : input.status === "active" ? "pending" : input.status === "expired" ? "canceled" : undefined;
   if (!status) throw failure("INVALID_INVOICE_STATUS");
   const createdAt = dateValue(input.created_at);
@@ -147,6 +146,13 @@ function invoiceIdValue(value: unknown): string { if (!Number.isSafeInteger(valu
 function dateValue(value: unknown): string { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw failure("INVALID_INVOICE_DATE"); return new Date(value).toISOString(); }
 function failure(code: string): CryptoPayProviderError { return new CryptoPayProviderError(code, false); }
 function money(value: number): string { if (!Number.isSafeInteger(value) || value < 1 || value > 100_000_000) throw failure("INVALID_PAYMENT_AMOUNT"); return `${Math.floor(value / 100)}.${String(value % 100).padStart(2, "0")}`; }
+function cryptoPayAmount(value: unknown): string {
+  const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(String(value));
+  if (!match?.[1]) throw failure("INVALID_INVOICE_AMOUNT");
+  const minor = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  if (!Number.isSafeInteger(minor) || minor <= 0) throw failure("INVALID_INVOICE_AMOUNT");
+  return `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, "0")}`;
+}
 function cryptoPayProviderReason(value: unknown): string | undefined {
   const candidate = typeof value === "string"
     ? value

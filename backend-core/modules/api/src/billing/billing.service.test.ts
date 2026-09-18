@@ -16,3 +16,33 @@ test("legacy pending top-up refunds remain unavailable across the whole workspac
   assert.deepEqual(queries[0], { where: { workspaceId: "workspace", refundRequestId: null, status: { in: ["CREATING", "PENDING", "FAILED_RETRYABLE"] }, payment: { order: { kind: "TOP_UP" } } }, _sum: { amountMinor: true } });
   assert.equal(await spendablePrepaidMinor(transaction as never, "workspace", 8000n), 0n);
 });
+
+test("does not request recurring YooKassa rights unless the shop enabled them", async () => {
+  const service = new BillingService(
+    {} as never,
+    {} as never,
+    {} as never,
+    { isEnabled: () => true } as never,
+    {} as never,
+    { billing: { yookassa: { recurringEnabled: false } } } as never
+  );
+  await assert.rejects(
+    () => service.createTopUp(
+      "workspace",
+      "actor",
+      "request-key",
+      {
+        provider: "YOOKASSA",
+        amountMinor: 10_000,
+        buyerType: "INDIVIDUAL",
+        deliveryEmail: "owner@example.test",
+        savePaymentMethod: true,
+        termsAccepted: true,
+        termsVersion: "2026-09-18"
+      },
+      {} as never
+    ),
+    (error) => error instanceof DomainError &&
+      error.code === "FEATURE_NOT_AVAILABLE"
+  );
+});

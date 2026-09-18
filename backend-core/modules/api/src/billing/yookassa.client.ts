@@ -111,7 +111,9 @@ export class YookassaClient {
                 type: "redirect",
                 return_url: input.returnUrl
               },
-              save_payment_method: input.savePaymentMethod
+              ...(input.savePaymentMethod
+                ? { save_payment_method: true }
+                : {})
             }),
         description: input.description,
         metadata: {

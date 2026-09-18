@@ -199,6 +199,9 @@ export function BillingSettings({
   const selectedPrice = selected?.prices.find(
     (price) => price.period === period
   );
+  const selectedProvider = snapshot?.providers.find(
+    ({ provider }) => provider === paymentProvider
+  );
   const hasAnnualPlans = Boolean(
     snapshot?.plans.some((plan) =>
       plan.prices.some((price) => price.period === "ANNUAL")
@@ -259,7 +262,10 @@ export function BillingSettings({
       buyerType,
       ...business.value,
       deliveryEmail: email.value,
-      savePaymentMethod: paymentProvider === "YOOKASSA" && savePaymentMethod,
+      savePaymentMethod:
+        paymentProvider === "YOOKASSA" &&
+        selectedProvider?.recurring === true &&
+        savePaymentMethod,
       provider: paymentProvider,
       termsAccepted,
       termsVersion: TERMS_VERSION
@@ -779,7 +785,7 @@ export function BillingSettings({
               </label>
             )}
           </div>
-          {paymentProvider === "YOOKASSA" && <label className="billing-checkbox">
+          {paymentProvider === "YOOKASSA" && selectedProvider?.recurring && <label className="billing-checkbox">
             <input
               checked={savePaymentMethod}
               onChange={(event) =>

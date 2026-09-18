@@ -1,5 +1,6 @@
 "use client";
 import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
+import { semanticCursorPageIssue } from "../lib/semantic-cursor-page";
 
 import { CustomSelect } from "./custom-select";
 import { ChoiceToggle } from "./choice-toggle";
@@ -595,6 +596,9 @@ export function SemanticCoreTable({
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const loadMoreRequestRef = useRef<AbortController | undefined>(undefined);
   const loadMoreInFlightRef = useRef(false);
+  const loadMoreSeenCursorsRef = useRef<Set<string>>(new Set());
+  const loadMoreFailedCursorRef = useRef<string | undefined>(undefined);
+  const loadedKeywordsRef = useRef<readonly SemanticKeyword[]>([]);
   const loadedKeywordCountRef = useRef(0);
   const selectAllAbortRef = useRef<AbortController | undefined>(undefined);
   const multiSearchActionRef = useRef<
@@ -624,6 +628,7 @@ export function SemanticCoreTable({
     height: 520,
     scrollTop: 0
   });
+  loadedKeywordsRef.current = items;
   loadedKeywordCountRef.current = items.length;
   useEffect(() => {
     if (!mobileGroupTreeOpen) return;
@@ -1107,6 +1112,8 @@ export function SemanticCoreTable({
     loadMoreRequestRef.current?.abort();
     loadMoreRequestRef.current = undefined;
     loadMoreInFlightRef.current = false;
+    loadMoreSeenCursorsRef.current = new Set();
+    loadMoreFailedCursorRef.current = undefined;
     setLoadingMore(false);
     const preservedScrollTop = tableScrollRef.current?.scrollTop ?? 0;
     setLoading(true);
@@ -2383,7 +2390,9 @@ export function SemanticCoreTable({
     if (
       !page.hasNext ||
       !nextCursor ||
-      loadMoreInFlightRef.current
+      loadMoreInFlightRef.current ||
+      loadMoreFailedCursorRef.current === nextCursor ||
+      loadMoreSeenCursorsRef.current.has(nextCursor)
     ) return;
     const retainedTotal = page.totalApprox;
     const controller = new AbortController();
@@ -2400,6 +2409,25 @@ export function SemanticCoreTable({
         pageSize
       );
       if (controller.signal.aborted) return;
+      const paginationIssue = semanticCursorPageIssue({
+        requestedCursor: nextCursor,
+        ...(result.page.nextCursor
+          ? { nextCursor: result.page.nextCursor }
+          : {}),
+        hasNext: result.page.hasNext,
+        loadedIds: new Set(loadedKeywordsRef.current.map(({ id }) => id)),
+        returnedIds: result.data.map(({ id }) => id),
+        seenCursors: loadMoreSeenCursorsRef.current
+      });
+      if (paginationIssue) {
+        loadMoreFailedCursorRef.current = nextCursor;
+        setError(
+          "Сервер вернул повторяющуюся страницу. Автозагрузка остановлена, чтобы таблица не обновлялась бесконечно."
+        );
+        return;
+      }
+      loadMoreSeenCursorsRef.current.add(nextCursor);
+      loadMoreFailedCursorRef.current = undefined;
       setItems((current) => mergeKeywords(current, result.data));
       setPage({
         ...result.page,
@@ -2410,6 +2438,7 @@ export function SemanticCoreTable({
       });
     } catch (requestError) {
       if (!controller.signal.aborted) {
+        loadMoreFailedCursorRef.current = nextCursor;
         setError(keywordErrorMessage(requestError));
       }
     } finally {
@@ -2429,7 +2458,9 @@ export function SemanticCoreTable({
       !scrollRoot ||
       loadingMore ||
       !page.hasNext ||
-      !page.nextCursor
+      !page.nextCursor ||
+      loadMoreFailedCursorRef.current === page.nextCursor ||
+      loadMoreSeenCursorsRef.current.has(page.nextCursor)
     ) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -5515,7 +5546,18 @@ export function SemanticCoreTable({
           <span>{<UiText text={error ?? ""} />}</span>
           <button
             className="text-button"
-            onClick={() => setRetryVersion((value) => value + 1)}
+            onClick={() => {
+              if (
+                page.nextCursor &&
+                loadMoreFailedCursorRef.current === page.nextCursor
+              ) {
+                loadMoreFailedCursorRef.current = undefined;
+                setError(undefined);
+                void loadMore();
+                return;
+              }
+              setRetryVersion((value) => value + 1);
+            }}
             type="button"
           >
             <UiText text="Повторить" /></button>

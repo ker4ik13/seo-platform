@@ -7,7 +7,7 @@ import { loadAppConfig } from "../config/app-config.js";
 const token = "123456789:synthetic-crypto-token-for-unit-tests-only";
 const orderId = "01900000-0000-7000-8000-000000000001";
 const workspaceId = "01900000-0000-7000-8000-000000000002";
-const invoice = () => ({ invoice_id: 1001, currency_type: "fiat", fiat: "RUB", amount: "100.00", status: "active", created_at: "2026-09-06T10:00:00Z", payload: JSON.stringify({ order_id: orderId, workspace_id: workspaceId }), bot_invoice_url: "https://t.me/CryptoBot?start=invoice-synthetic" });
+const invoice = () => ({ invoice_id: 1001, currency_type: "fiat", fiat: "RUB", amount: "100", status: "active", created_at: "2026-09-06T10:00:00Z", payload: JSON.stringify({ order_id: orderId, workspace_id: workspaceId }), bot_invoice_url: "https://t.me/CryptoBot?start=invoice-synthetic" });
 const signature = (raw: Buffer) => createHmac("sha256", createHash("sha256").update(token).digest()).update(raw).digest("hex");
 
 test("verifies the exact raw webhook body and rejects tampering, malformed signatures and stale events", () => {
@@ -24,6 +24,7 @@ test("normalizes RUB invoices with exact tenant metadata and rejects unsafe redi
   const normalized = normalizeCryptoPayInvoice(invoice(), true);
   assert.equal(normalized.metadata.order_id, orderId);
   assert.equal(normalized.status, "pending");
+  assert.equal(normalized.amount.value, "100.00");
   assert.equal(normalized.test, true);
   for (const mutation of [{ fiat: "USD" }, { amount: "1e6" }, { amount: "-1" }, { amount: "100.001" }, { invoice_id: 1.2 }, { bot_invoice_url: "https://attacker.example/pay" }, { payload: JSON.stringify({ order_id: orderId, workspace_id: "foreign" }) }]) {
     assert.throws(() => normalizeCryptoPayInvoice({ ...invoice(), ...mutation }, false));
