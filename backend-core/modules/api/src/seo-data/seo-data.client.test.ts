@@ -537,6 +537,14 @@ test("validates safe interactive rank history metadata", () => {
   assert.equal(withAiHistory.aiPositionHistory?.[0]?.previousPosition, 5);
   assert.equal(withAiHistory.aiCompetitorSnapshots?.[0]?.results[0]?.position, 1);
   assert.equal(withAiHistory.aiCompetitorSnapshots?.length, 2);
+  for (const answerPresent of [true, false]) {
+    const emptySources = semanticKeywordInsights({ ...withAiHistory, aiPositionHistory: [], aiCompetitorSnapshots: [{
+      ...withAiHistory.aiCompetitorSnapshots![0]!, searchEngine: "GOOGLE", regionCode: "1012040", answerPresent, results: []
+    }] }, keywordId);
+    assert.equal(emptySources.aiCompetitorSnapshots?.[0]?.answerPresent, answerPresent);
+    assert.deepEqual(emptySources.aiCompetitorSnapshots?.[0]?.results, []);
+  }
+
   const { searchSource: _searchSource, ...importedPoint } =
     insights.positionHistory[0]!;
   const imported = semanticKeywordInsights({

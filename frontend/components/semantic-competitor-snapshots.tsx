@@ -98,6 +98,14 @@ export function SemanticCompetitorSnapshots({
                 <ProviderLogo provider={snapshot.provider} size="compact" />
               )}
             </header>
+            {snapshot.results.length === 0 && (
+              <div className="semantic-inspector-empty">
+                <strong><UiText text="Съём сохранён" /></strong>
+                <span><UiText text={"answerPresent" in snapshot && snapshot.answerPresent === false
+                  ? "Поисковик не вернул ИИ-ответ для этого запроса."
+                  : "В сохранённом ответе нет ссылок на источники."} /></span>
+              </div>
+            )}
             <ol>
               {visibleResults.map((result) => {
                 const isProjectSite = semanticUrlBelongsToProject(

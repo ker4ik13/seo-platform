@@ -9,7 +9,7 @@ export function aiAnswerHistoryQuery(value: unknown): AiAnswerHistoryQuery {
     invalid("query");
   }
   const input = value as Readonly<Record<string, unknown>>;
-  if (Object.keys(input).some((key) => !["limit", "cursor"].includes(key))) {
+  if (Object.keys(input).some((key) => !["limit", "cursor", "includeCompetitors"].includes(key))) {
     invalid("query");
   }
   const parsed =
@@ -35,7 +35,11 @@ export function aiAnswerHistoryQuery(value: unknown): AiAnswerHistoryQuery {
   ) {
     invalid("cursor");
   }
+  if (input.includeCompetitors !== undefined && ![true, false, "true", "false"].includes(input.includeCompetitors as never)) {
+    invalid("includeCompetitors");
+  }
   return {
+    ...(input.includeCompetitors === undefined ? {} : { includeCompetitors: input.includeCompetitors === true || input.includeCompetitors === "true" }),
     limit: parsed,
     ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {})
   };

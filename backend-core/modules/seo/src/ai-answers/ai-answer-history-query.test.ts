@@ -20,3 +20,9 @@ test("rejects unknown, unbounded and malformed AI history query values", () => {
     assert.throws(() => aiAnswerHistoryQuery(value), BadRequestException);
   }
 });
+
+test("accepts only an explicit competitor history flag", () => {
+  assert.deepEqual(aiAnswerHistoryQuery({ limit: "200", includeCompetitors: "true" }), { limit: 200, includeCompetitors: true });
+  assert.deepEqual(aiAnswerHistoryQuery({ limit: "200", includeCompetitors: "false" }), { limit: 200, includeCompetitors: false });
+  assert.throws(() => aiAnswerHistoryQuery({ limit: "200", includeCompetitors: "yes" }), BadRequestException);
+});

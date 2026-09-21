@@ -1437,7 +1437,7 @@ test("projects immutable AI history and latest source competitors into insights"
         }) => {
           aiQueries.push(where);
           aiTakes.push(take);
-          return "sources" in where
+          return !("positionTrackingEnabled" in where)
             ? [{
                 id: snapshotId,
                 searchEngine: "YANDEX",
@@ -3347,3 +3347,28 @@ function createItem(text: string) {
   } = createInput("REJECT_EXISTING");
   return { ...item, text };
 }
+
+test("shows a saved competitor-only Google SPB collection even when sources are empty", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000021";
+  const snapshotId = "01900000-0000-7000-8000-000000000022";
+  const service = new KeywordService({
+    keyword: { findFirst: async () => ({ id: keywordId, note: null }) },
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
+    frequencySeasonalityPoint: { findMany: async () => [] },
+    frequencySnapshot: { findMany: async () => [] },
+    currentRank: { findMany: async () => [] },
+    rankSnapshot: { findMany: async () => [] },
+    aiAnswerSnapshot: { findMany: async ({ where }: { where: Readonly<Record<string, unknown>> }) => {
+      assert.equal(where.workspaceId, workspaceId);
+      assert.equal(where.projectId, projectId);
+      if (where.positionTrackingEnabled) return [];
+      assert.equal(where.sources, undefined, "A completed collection must not disappear when sources are empty");
+      return [{ id: snapshotId, searchEngine: "GOOGLE", regionCode: "1012040", device: "DESKTOP", answerPresent: true, sources: [], observedAt: new Date("2026-09-21T10:00:00Z") }];
+    } }
+  } as unknown as PrismaService, semanticVersions());
+  const result = await service.insights(workspaceId, projectId, keywordId);
+  assert.deepEqual(result.aiPositionHistory, []);
+  assert.equal(result.aiCompetitorSnapshots?.[0]?.answerPresent, true);
+  assert.equal(result.aiCompetitorSnapshots?.[0]?.regionCode, "1012040");
+  assert.deepEqual(result.aiCompetitorSnapshots?.[0]?.results, []);
+});

@@ -444,9 +444,11 @@ export function SemanticKeywordInspector({
   const effectiveInspectorMode: SemanticKeywordInspectorMode =
     hasAnyAiSnapshot ? inspectorMode : "SEARCH";
   const latestPositionAt = latestObservedAt(insights?.positions ?? []);
-  const latestSerpAt = latestObservedAt(competitorSnapshots);
+  const latestSerpSnapshot = [...competitorSnapshots, ...aiCompetitorSnapshots]
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))[0];
+  const latestSerpAt = latestSerpSnapshot?.observedAt;
   const latestFrequencyAt = latestObservedAt(latestFrequencies);
-  const latestSerpResultCount = competitorSnapshots[0]?.results.length ?? 0;
+  const latestSerpResultCount = latestSerpSnapshot?.results.length ?? 0;
   const frequencyByType = useMemo(
     () => latestFrequencyByType(latestFrequencies),
     [latestFrequencies]
@@ -835,7 +837,10 @@ export function SemanticKeywordInspector({
             </span>
             <Icon name="chevronRight" />
           </button>
-          <button onClick={() => selectInspectorTab("SERP")} type="button">
+          <button onClick={() => {
+            if (latestSerpSnapshot) selectSharedInspectorMode("trackingContextId" in latestSerpSnapshot ? "SEARCH" : "AI");
+            selectInspectorTab("SERP");
+          }} type="button">
             <span className="semantic-inspector-state-icon serp">
               <Icon name="search" />
             </span>
@@ -1033,9 +1038,14 @@ export function SemanticKeywordInspector({
                   />
                 )
               )}
+              {selectedAiCompetitorSnapshots.length > 0 && (
+                <button className="secondary-button semantic-serp-history-button" type="button" onClick={() => onOpenAiAnswer(aiSerpDimensionKey || undefined)}>
+                  <Icon name="ai" /><UiText text="Открыть ИИ-ответ" />
+                </button>
+              )}
               <button
                 className="secondary-button semantic-serp-history-button"
-                disabled={(insights?.aiPositionHistory?.length ?? 0) === 0}
+                disabled={aiCompetitorSnapshots.length === 0}
                 onClick={() => setAiHistoryOpen(true)}
                 type="button"
               >
@@ -1273,6 +1283,7 @@ export function SemanticKeywordInspector({
       )}
       {aiHistoryOpen && (
         <SemanticKeywordAiPositionHistoryModal
+          includeCompetitors={activeTab === "SERP"}
           currentUserId={currentUserId}
           {...((activeTab === "SERP" ? aiSerpDimensionKey : aiPositionDimensionKey)
             ? {

@@ -800,6 +800,7 @@ export class SeoDataClient {
       this.config.services.seoData
     );
     url.searchParams.set("limit", String(query.limit));
+    if (query.includeCompetitors !== undefined) url.searchParams.set("includeCompetitors", String(query.includeCompetitors));
     if (query.cursor) url.searchParams.set("cursor", query.cursor);
     const payload = await this.request("GET", url, context);
     return semanticAiAnswerHistoryCollection(
@@ -3560,7 +3561,8 @@ function semanticAiAnswerCompetitorSnapshots(
       "device",
       "provider",
       "observedAt",
-      "results"
+      "results",
+      "answerPresent"
     ]);
     if (
       typeof item.snapshotId !== "string" ||
@@ -3572,7 +3574,8 @@ function semanticAiAnswerCompetitorSnapshots(
       item.provider !== "ARSENKIN" ||
       !validDate(item.observedAt) ||
       !Array.isArray(item.results) ||
-      item.results.length < 1 ||
+      (item.answerPresent !== undefined && typeof item.answerPresent !== "boolean") ||
+      (item.answerPresent === false && item.results.length > 0) ||
       item.results.length > 100
     ) {
       throw invalidResponse();
@@ -3607,6 +3610,7 @@ function semanticAiAnswerCompetitorSnapshots(
     snapshotIds.add(item.snapshotId);
     dimensions.add(dimension);
     return {
+      ...(typeof item.answerPresent === "boolean" ? { answerPresent: item.answerPresent } : {}),
       snapshotId: item.snapshotId,
       searchEngine: item.searchEngine as SemanticAiAnswerCompetitorSnapshot["searchEngine"],
       regionCode: item.regionCode,

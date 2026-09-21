@@ -1796,7 +1796,6 @@ export class KeywordService {
           workspaceId,
           projectId,
           keywordId: { in: keywordIdentityIds },
-          sources: { some: {} },
           ...(selectedDimension
             ? {
                 searchEngine: selectedDimension.searchEngine,
@@ -1816,6 +1815,7 @@ export class KeywordService {
         take: 240,
         select: {
           id: true,
+          answerPresent: true,
           searchEngine: true,
           regionCode: true,
           device: true,
@@ -2153,6 +2153,7 @@ export class KeywordService {
         observedAt: snapshot.observedAt.toISOString()
       })),
       aiCompetitorSnapshots: aiSourceSnapshots.map((snapshot) => ({
+        ...(typeof snapshot.answerPresent === "boolean" ? { answerPresent: snapshot.answerPresent } : {}),
         snapshotId: snapshot.id,
         searchEngine: snapshot.searchEngine as SemanticAiAnswerHistoryItem["searchEngine"],
         regionCode: snapshot.regionCode,

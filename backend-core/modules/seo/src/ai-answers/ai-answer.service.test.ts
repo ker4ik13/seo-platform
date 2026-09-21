@@ -168,3 +168,30 @@ function missingRow() {
     observedAt: new Date("2026-08-18T12:00:00.000Z")
   };
 }
+
+test("competitor history includes untracked Google SPB snapshots and binds its cursor to the read mode", async () => {
+  const queries: Readonly<Record<string, unknown>>[] = [];
+  const row = { ...foundRow(), searchEngine: "GOOGLE", regionCode: "1012040", positionTrackingEnabled: false };
+  const service = new AiAnswerService({
+    keyword: { findFirst: async () => ({ id: keywordId }) },
+    aiAnswerSnapshot: { findMany: async ({ where }: { where: Readonly<Record<string, unknown>> }) => {
+      queries.push(where);
+      return where.positionTrackingEnabled === true ? [] : [row, { ...row, id: secondSnapshotId }];
+    } },
+    $queryRaw: async () => []
+  } as unknown as PrismaService, config());
+  assert.equal((await service.history(query())).items.length, 0);
+  const result = await service.history({ ...query(), includeCompetitors: true });
+  assert.equal(result.items[0]?.regionCode, "1012040");
+  assert.ok(result.page.nextCursor);
+  assert.equal(queries[1]?.workspaceId, workspaceId);
+  assert.equal(queries[1]?.projectId, projectId);
+  assert.equal(queries[1]?.positionTrackingEnabled, undefined);
+  await assert.rejects(() => service.history({ ...query(), cursor: result.page.nextCursor! }), BadRequestException);
+  assert.equal(queries.length, 2);
+  await service.history({ ...query(), includeCompetitors: true, cursor: result.page.nextCursor! });
+  assert.equal(queries.length, 3);
+  const latest = await service.latest(workspaceId, projectId, keywordId);
+  assert.equal(latest[0]?.searchEngine, "GOOGLE");
+  assert.equal(queries[3]?.positionTrackingEnabled, undefined);
+});

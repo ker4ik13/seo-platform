@@ -24,6 +24,7 @@ import { useUiLocale, UiText } from "./ui-locale";
 
 export function SemanticKeywordAiPositionHistoryModal({
   currentUserId,
+  includeCompetitors = false,
   dimensionKey,
   keywordId,
   keywordText,
@@ -33,6 +34,7 @@ export function SemanticKeywordAiPositionHistoryModal({
   projectId
 }: Readonly<{
   currentUserId: string;
+  includeCompetitors?: boolean;
   dimensionKey?: string;
   keywordId: string;
   keywordText: string;
@@ -64,7 +66,7 @@ export function SemanticKeywordAiPositionHistoryModal({
     setHasNext(false);
     setError(undefined);
     setLoading(true);
-    void requestHistoryPage(projectId, keywordId, undefined, controller.signal)
+    void requestHistoryPage(projectId, keywordId, includeCompetitors, undefined, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return;
         setItems(page.data);
@@ -78,7 +80,7 @@ export function SemanticKeywordAiPositionHistoryModal({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [keywordId, projectId]);
+  }, [includeCompetitors, keywordId, projectId]);
 
   const loadMore = useCallback(async (): Promise<void> => {
     if (!hasNext || !nextCursor || loadingMoreRef.current) return;
@@ -86,7 +88,7 @@ export function SemanticKeywordAiPositionHistoryModal({
     setLoadingMore(true);
     setError(undefined);
     try {
-      const page = await requestHistoryPage(projectId, keywordId, nextCursor);
+      const page = await requestHistoryPage(projectId, keywordId, includeCompetitors, nextCursor);
       setItems((current) => mergeHistoryItems(current, page.data));
       setHasNext(page.page.hasNext);
       setNextCursor(page.page.nextCursor);
@@ -96,7 +98,7 @@ export function SemanticKeywordAiPositionHistoryModal({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasNext, keywordId, nextCursor, projectId]);
+  }, [hasNext, includeCompetitors, keywordId, nextCursor, projectId]);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -269,10 +271,12 @@ function aiHistoryStatus(item: SemanticAiAnswerHistoryItem): Readonly<{
 function requestHistoryPage(
   projectId: string,
   keywordId: string,
+  includeCompetitors: boolean,
   cursor?: string,
   signal?: AbortSignal
 ) {
   const query = new URLSearchParams({ limit: "200" });
+  if (includeCompetitors) query.set("includeCompetitors", "true");
   if (cursor) query.set("cursor", cursor);
   return browserApiCollectionRequest<SemanticAiAnswerHistoryItem>(
     `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers/history?${query.toString()}`,

@@ -6,10 +6,14 @@ import {
 
 export function aiAnswerHistoryQuery(value: unknown): AiAnswerHistoryQuery {
   const input = record(value);
-  if (Object.keys(input).some((key) => !["limit", "cursor"].includes(key))) {
+  if (Object.keys(input).some((key) => !["limit", "cursor", "includeCompetitors"].includes(key))) {
     invalid("query");
   }
+  if (input.includeCompetitors !== undefined && ![true, false, "true", "false"].includes(input.includeCompetitors as never)) {
+    invalid("includeCompetitors");
+  }
   return {
+    ...(input.includeCompetitors === undefined ? {} : { includeCompetitors: input.includeCompetitors === true || input.includeCompetitors === "true" }),
     limit: pageLimit(input.limit),
     ...(input.cursor === undefined ? {} : { cursor: opaqueCursor(input.cursor) })
   };

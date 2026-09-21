@@ -33,6 +33,7 @@ const UUID_V7_PATTERN =
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
 
 interface AiAnswerHistoryCursor {
+  readonly includeCompetitors?: boolean;
   readonly schemaVersion: "ai-answer-history-cursor@1";
   readonly workspaceId: string;
   readonly projectId: string;
@@ -193,7 +194,7 @@ export class AiAnswerService {
         workspaceId,
         projectId,
         keywordId: { in: keywordIds },
-        positionTrackingEnabled: true,
+        // Detailed answers include competitor collections even without position tracking.
         ...(dimension ? {
           searchEngine: dimension.searchEngine,
           regionCode: dimension.regionCode,
@@ -289,7 +290,7 @@ export class AiAnswerService {
         projectId: input.projectId,
         keywordId: { in: keywordIds },
         sourceMode: { in: ["BYOK", "PLATFORM"] },
-        positionTrackingEnabled: true,
+        ...(input.includeCompetitors ? {} : { positionTrackingEnabled: true }),
         ...(cursor
           ? {
               OR: [
@@ -375,6 +376,7 @@ export class AiAnswerService {
           ? {
               nextCursor: this.encodeCursor({
                 schemaVersion: "ai-answer-history-cursor@1",
+                ...(input.includeCompetitors ? { includeCompetitors: true } : {}),
                 workspaceId: input.workspaceId,
                 projectId: input.projectId,
                 keywordId: input.keywordId,
@@ -415,8 +417,10 @@ export class AiAnswerService {
       "keywordId",
       "observedAt",
       "snapshotId"
-    ]);
+    ], ["includeCompetitors"]);
+    if (payload.includeCompetitors !== undefined && typeof payload.includeCompetitors !== "boolean") invalidCursor();
     const cursor: AiAnswerHistoryCursor = {
+      ...(typeof payload.includeCompetitors === "boolean" ? { includeCompetitors: payload.includeCompetitors } : {}),
       schemaVersion: payload.schemaVersion === "ai-answer-history-cursor@1"
         ? payload.schemaVersion
         : invalidCursor(),
@@ -431,7 +435,8 @@ export class AiAnswerService {
       !HASH_PATTERN.test(envelope.mac) ||
       cursor.workspaceId !== input.workspaceId ||
       cursor.projectId !== input.projectId ||
-      cursor.keywordId !== input.keywordId
+      cursor.keywordId !== input.keywordId ||
+      Boolean(cursor.includeCompetitors) !== Boolean(input.includeCompetitors)
     ) {
       invalidCursor();
     }
@@ -553,16 +558,16 @@ function cursorMac(key: string, payload: AiAnswerHistoryCursor): string {
 
 function strictRecord(
   value: unknown,
-  keys: readonly string[]
+  keys: readonly string[],
+  optionalKeys: readonly string[] = []
 ): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     invalidCursor();
   }
   const record = value as Readonly<Record<string, unknown>>;
   if (
-    Object.keys(record).length !== keys.length ||
     keys.some((key) => !Object.hasOwn(record, key)) ||
-    Object.keys(record).some((key) => !keys.includes(key))
+    Object.keys(record).some((key) => !keys.includes(key) && !optionalKeys.includes(key))
   ) {
     invalidCursor();
   }

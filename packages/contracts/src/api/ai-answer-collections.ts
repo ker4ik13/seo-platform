@@ -179,6 +179,8 @@ export interface SemanticAiAnswerHistoryItem extends SemanticAiAnswerSummary {
 }
 
 export interface AiAnswerHistoryQuery {
+  /** Include saved competitor runs without promoting them to tracked positions. */
+  readonly includeCompetitors?: boolean;
   readonly limit: number;
   readonly cursor?: string;
 }
@@ -226,6 +228,7 @@ export interface SemanticAiAnswerDetail extends SemanticAiAnswerSummary {
 }
 
 export interface SemanticAiAnswerCompetitorSnapshot {
+  readonly answerPresent?: boolean;
   readonly snapshotId: string;
   readonly searchEngine: AiAnswerSearchEngine;
   readonly regionCode: string;
