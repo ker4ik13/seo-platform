@@ -13,6 +13,7 @@ import type {
   InternalDismissProjectOperationInput,
   InternalWorkspaceExecutionUsage,
   InternalAdminOperationSearchResult,
+  InternalAdminOperationSummary,
   ApiResponse,
   ProjectOperationActivitySummary,
   ProjectOperationDismissal
@@ -129,6 +130,25 @@ export class PlatformAdminOperationController {
     return {
       data: await this.activity.adminList(
         platformAdminOperationQuery({ status, type, cursor, limit })
+      ),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get(":operationId")
+  public async detail(
+    @Param("operationId") operationId: string,
+    @Headers() headers: HeadersRecord,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalAdminOperationSummary>> {
+    const actor = headers["x-actor-id"];
+    if (typeof actor !== "string") {
+      throw new BadRequestException("Missing trusted internal actor");
+    }
+    internalUuid(actor, "actorId");
+    return {
+      data: await this.activity.adminDetail(
+        internalUuid(operationId, "operationId")
       ),
       meta: { requestId: request.id }
     };

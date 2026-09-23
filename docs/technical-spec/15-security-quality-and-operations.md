@@ -97,8 +97,10 @@ embedded content отклоняется.
 - 2FA: TOTP и recovery codes; WebAuthn/passkeys предусматриваются следующим этапом.
 - Recovery codes хранятся только в hash form и показываются один раз.
 - Workspace может требовать 2FA для всех участников.
-- Интерактивная recent reauthentication требуется для MFA, platform-admin,
-  billing, удаления workspace и других явно перечисленных high-risk boundary.
+- Интерактивная recent reauthentication требуется для MFA, изменяющих и
+  high-risk platform-admin команд, billing, удаления workspace и других явно
+  перечисленных high-risk boundary. Read-only admin использует MFA-backed
+  rotating cookie session без короткого recent-auth таймера.
   Provider credentials и soft delete проекта используют автоматически
   обновляемую active session, CSRF, permissions, audit и typed/CAS guards без
   повторного экрана логина.
@@ -510,7 +512,8 @@ VPS делятся на роли:
 - fail2ban или эквивалент для management plane;
 - Dokploy admin защищён MFA/VPN/IP allowlist по возможности;
 - staging и production разделены credentials, networks и data;
-- `/admin` не индексируется и защищён rate limiting/MFA/recent auth.
+- `/admin` не индексируется и защищён rate limiting/MFA; mutation и high-risk
+  действия дополнительно требуют recent auth.
 
 ## 11. SSRF-защита
 
@@ -1195,8 +1198,9 @@ payload, URL и credential передать через этот контракт
 В Telegram уходят:
 
 - unexpected child start/exit/stop;
-- stderr-строки, классифицированные как error/fatal/uncaught/unhandled, только
-  в виде локального SHA-256 fingerprint;
+- stderr-строки, классифицированные как error/fatal/uncaught/unhandled: вместе
+  с локальным SHA-256 fingerprint передаётся короткая цитата после обязательной
+  очистки secrets, URL query, email/телефонов и иных персональных данных;
 - uncaught exception monitor backend supervisors;
 - ошибки Next request handler и Realtime upgrade proxy.
 - ошибки создания, сверки и возврата платежей YooKassa/Crypto Pay: сообщение
@@ -1208,7 +1212,10 @@ payload, URL и credential передать через этот контракт
 statuses не являются внутренними инцидентами и не алертятся. Исключение —
 отказ платёжного provider API после создания локальной финансовой операции:
 он требует безопасной диагностической эскалации. Неизвестный `5xx` должен
-попасть в structured error log и далее в supervisor alert.
+попасть в structured error log и далее в supervisor alert. Для Prisma ошибок
+structured log добавляет только безопасные `Pxxxx`/SQLSTATE codes и
+identifier-only constraint target. Текст driver exception и SQL parameters не
+пересекают alert boundary.
 
 Telegram bot token получает только alert-receiver process; Frontend и
 Execution получают лишь внутренний URL и dedicated token. Receiver делает

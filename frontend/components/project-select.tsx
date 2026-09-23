@@ -92,6 +92,8 @@ export function ProjectSelect({
       onChange={(event) => onChange(event.currentTarget.value)}
       {...(canReorder ? { onOptionOrderChange: persistOrder } : {})}
       optionOrderLabel="Порядок проектов"
+      popoverClassName="project-select-popover"
+      popoverMinWidth={300}
       {...(popoverFooter ? { popoverFooter } : {})}
       searchable={searchable ?? projects.length > 8}
       showSelectedCheck={false}

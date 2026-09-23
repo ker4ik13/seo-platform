@@ -120,6 +120,33 @@ test("round-trips a continuation command bound to its missing pair count", () =>
   );
 });
 
+test("round-trips the XMLStock Turbo depth mode before provider submission", () => {
+  const turbo = {
+    ...command,
+    provider: "XMLSTOCK",
+    providerPolicyVersion: "manual-xmlstock-serp@2.0.0",
+    execution: {
+      ...command.execution,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      language: "ru",
+      depth: 50,
+      xmlStockDepthMode: "STRICT_DEPTH",
+      providerMappingVersion: "xmlstock-yandex-live@3"
+    }
+  } as const satisfies InternalSealRankManifestInput;
+
+  assert.deepEqual(
+    storedRankManifestCommand(
+      rankManifestCommandJson(turbo),
+      rankManifestCommandHash(turbo),
+      binding
+    ),
+    turbo
+  );
+});
+
 test("rejects a self-consistent command bound to another Job graph", () => {
   const digest = rankManifestCommandHash(command);
 

@@ -170,6 +170,9 @@
 .rankFailureTable th:nth-child(5) { width: 150px; }
 .rankFailureReason strong,
 .rankFailureReason small { display: block; }
+.providerAttemptCell span,
+.providerAttemptCell small { display: block; }
+.providerAttemptCell small { color: #858b99; margin-top: 2px; }
 .rankFailureReason strong { color: #5d343a; font-size: 11px; font-weight: 700; }
 .rankFailureReason small { color: #a55b66; font-size: 8px; margin-top: 2px; }
 .table { border-collapse: separate; border-spacing: 0; min-width: 900px; table-layout: fixed; width: 100%; }

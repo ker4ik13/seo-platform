@@ -180,6 +180,23 @@ test("accepts and preserves safe rank execution presentation", () => {
   assert.equal(mapped.depth, 100);
 });
 
+test("preserves the XMLStock Turbo presentation mode", () => {
+  const mapped = scopedRankJobSummary(
+    {
+      ...preparing,
+      provider: "XMLSTOCK",
+      searchEngine: "YANDEX",
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
+    },
+    workspaceId,
+    projectId,
+    jobId
+  );
+
+  assert.equal(mapped.yandexLiveMode, "TURBO");
+});
+
 test("preserves competitor collection policy in every lifecycle", () => {
   const mapped = scopedRankJobSummary(
     {
@@ -433,7 +450,7 @@ test("accepts only bounded secret-free XMLStock runtime diagnostics", () => {
     jobId,
     generatedAt: "2026-07-29T12:00:10.000Z",
     policy: {
-      product: "YANDEX_SEARCH_API",
+      product: "YANDEX_TURBO",
       concurrency: 48,
       requestsPerSecond: 50
     },
@@ -455,7 +472,7 @@ test("accepts only bounded secret-free XMLStock runtime diagnostics", () => {
         submitAttempts: 1,
         pollAttempts: 0,
         completedPages: 0,
-        totalPages: 1,
+        totalPages: 2,
         active: true,
         updatedAt: "2026-07-29T12:00:09.000Z"
       },
@@ -468,7 +485,7 @@ test("accepts only bounded secret-free XMLStock runtime diagnostics", () => {
         submitAttempts: 1,
         pollAttempts: 2,
         completedPages: 0,
-        totalPages: 1,
+        totalPages: 2,
         active: false,
         nextActionAt: "2026-07-29T12:00:30.000Z",
         errorCode: "PROVIDER_PENDING",

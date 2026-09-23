@@ -192,6 +192,37 @@ test("accepts a rank result page beyond the former 1,000-row boundary", () => {
   assert.deepEqual(result.counts, { foundCount: 37, notFoundCount: 163 });
 });
 
+test("keeps a completed rank result readable after its keyword becomes unavailable", () => {
+  const result = scopedInternalRankOperationResult(
+    {
+      workspaceId,
+      projectId,
+      jobId,
+      trackingContextId: "01900000-0000-7000-8000-000000000006",
+      contextName: "Яндекс · Москва",
+      execution: { ...execution(), searchEngine: "YANDEX" },
+      counts: { foundCount: 0, notFoundCount: 1 },
+      rows: [{
+        sequence: 0,
+        keywordId,
+        keyword: "",
+        keywordAvailable: false,
+        state: "NOT_FOUND",
+        observedAt: "2026-08-03T11:25:14.228Z",
+        dataQualityFlags: ["PROVIDER_OBSERVED_AT_UNAVAILABLE"]
+      }],
+      page: { hasNext: false }
+    },
+    workspaceId,
+    projectId,
+    jobId,
+    200
+  );
+
+  assert.equal(result.rows[0]?.keyword, "");
+  assert.equal(result.rows[0]?.keywordAvailable, false);
+});
+
 test("accepts a competitor rank result only within the bounded Top-100 maximum", () => {
   const result = scopedInternalRankOperationResult(
     {

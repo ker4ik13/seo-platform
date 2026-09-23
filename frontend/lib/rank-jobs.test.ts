@@ -111,8 +111,27 @@ test("builds project-safe paths and estimate-only public commands", () => {
 test("labels exact SERP sources without guessing legacy jobs", () => {
   assert.equal(rankSearchSystemLabel("YANDEX", "SEARCH_API"), "Яндекс XML");
   assert.equal(rankSearchSystemLabel("YANDEX", "LIVE"), "Яндекс Live");
+  assert.equal(
+    rankSearchSystemLabel("YANDEX", "LIVE", "TURBO"),
+    "Яндекс Turbo"
+  );
   assert.equal(rankSearchSystemLabel("GOOGLE", "LIVE"), "Google Live");
   assert.equal(rankSearchSystemLabel("YANDEX"), "Яндекс");
+});
+
+test("parses the safe XMLStock Turbo presentation field", () => {
+  const parsed = parseRankJobSummary(
+    {
+      ...base,
+      provider: "XMLSTOCK",
+      yandexLiveMode: "TURBO",
+      status: "PREPARING",
+      stage: "PREPARING_SCOPE"
+    },
+    expected
+  );
+
+  assert.equal(parsed.yandexLiveMode, "TURBO");
 });
 
 test("keeps one Idempotency-Key for explicit ambiguous retry only", () => {

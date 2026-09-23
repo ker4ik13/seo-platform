@@ -32,6 +32,7 @@ import {
 import { resolvedFolderSelectionIds } from "../lib/semantic-operation-tree";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { InfoTooltip } from "./info-tooltip";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticRankTargets } from "./semantic-rank-targets";
 import { SemanticRankContext } from "./semantic-rank-context";
@@ -544,6 +545,67 @@ export function TrackingContextSettingsPanel({
               ))}
             </div>
           </fieldset>
+          {draft.searchSource === "LIVE" && (
+            <fieldset className="field-span-2 semantic-segmented-field semantic-xmlstock-depth-mode">
+              <legend>
+                <UiText text="Обход выдачи XMLStock" />
+                <InfoTooltip>
+                  <UiText text="Настройка сохраняется в контексте и применяется при следующем запуске через XMLStock." />
+                </InfoTooltip>
+              </legend>
+              <div
+                aria-label={uiText("Обход выдачи XMLStock")}
+                className="semantic-segmented-control"
+                role="radiogroup"
+              >
+                <label className={draft.xmlStockDepthMode === "STOP_AFTER_FOUND" ? "selected" : undefined}>
+                  <input
+                    checked={draft.xmlStockDepthMode === "STOP_AFTER_FOUND"}
+                    name="tracking-context-xmlstock-depth-mode"
+                    onChange={() => setDraft({
+                      ...draft,
+                      xmlStockDepthMode: "STOP_AFTER_FOUND"
+                    })}
+                    type="radio"
+                  />
+                  <span><UiText text="До первой позиции" /></span>
+                </label>
+                <label className={draft.xmlStockDepthMode === "STRICT_DEPTH" ? "selected" : undefined}>
+                  <input
+                    checked={draft.xmlStockDepthMode === "STRICT_DEPTH"}
+                    name="tracking-context-xmlstock-depth-mode"
+                    onChange={() => setDraft({
+                      ...draft,
+                      xmlStockDepthMode: "STRICT_DEPTH"
+                    })}
+                    type="radio"
+                  />
+                  <span><UiText text="Строго выбранный Топ" /></span>
+                </label>
+              </div>
+            </fieldset>
+          )}
+          {draft.searchEngine === "YANDEX" && draft.searchSource === "LIVE" && (
+            <label className="field-span-2 semantic-toggle-line tracking-context-turbo-toggle">
+              <input
+                checked={draft.yandexLiveMode === "TURBO"}
+                onChange={(event) => setDraft({
+                  ...draft,
+                  yandexLiveMode: event.target.checked ? "TURBO" : "STANDARD"
+                })}
+                type="checkbox"
+              />
+              <span>
+                <strong>
+                  <UiText text="Turbo режим XMLStock" />
+                  <InfoTooltip>
+                    <UiText text="Настройка сохраняется в контексте: Топ-50 выполняется одним Turbo-запросом, Топ-100 — двумя." />
+                  </InfoTooltip>
+                </strong>
+                <small><UiText text="Использовать Turbo для будущих запусков этого контекста через XMLStock." /></small>
+              </span>
+            </label>
+          )}
         </div>
 
         <ContextScopeEditor draft={draft} groups={groups} onChange={setDraft} />

@@ -160,6 +160,8 @@ function trackingLaunchProfile(
   if (value === undefined) return undefined;
   const input = exactRecord(value, [
     "searchSource",
+    "yandexLiveMode",
+    "xmlStockDepthMode",
     "includeUntracked",
     "scope"
   ]);
@@ -177,6 +179,19 @@ function trackingLaunchProfile(
     scope.mode,
     SCOPE_MODES
   ) as TrackingContextLaunchProfile["scope"]["mode"];
+  if (
+    input.yandexLiveMode !== undefined &&
+    input.yandexLiveMode !== "TURBO"
+  ) {
+    throw invalidResponse();
+  }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+    input.xmlStockDepthMode !== "STOP_AFTER_FOUND"
+  ) {
+    throw invalidResponse();
+  }
   if (!Array.isArray(scope.groupIds)) throw invalidResponse();
   const groupIds = scope.groupIds.map(uuidValue);
   if (
@@ -212,6 +227,16 @@ function trackingLaunchProfile(
   }
   return {
     searchSource,
+    ...(input.yandexLiveMode === "TURBO"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {}),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode: input.xmlStockDepthMode as
+            | "STRICT_DEPTH"
+            | "STOP_AFTER_FOUND"
+        }),
     includeUntracked: input.includeUntracked ?? false,
     scope: {
       mode,

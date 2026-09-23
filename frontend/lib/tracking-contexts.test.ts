@@ -139,12 +139,40 @@ test("normalizes a tracking context draft into the public mutation shape", () =>
     },
     launchProfile: {
       searchSource: "LIVE",
+      xmlStockDepthMode: "STRICT_DEPTH",
       includeUntracked: false,
       scope: {
         mode: "KEYWORDS",
         groupIds: [],
         descendantGroupIds: []
       }
+    }
+  });
+});
+
+test("restores and saves XMLStock launch modes with the context", () => {
+  const configured: TrackingContextSummary = {
+    ...context,
+    launchProfile: {
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO",
+      xmlStockDepthMode: "STOP_AFTER_FOUND",
+      includeUntracked: false,
+      scope: { mode: "ALL", groupIds: [] }
+    }
+  };
+  const draft = trackingContextDraft(configured);
+  assert.equal(draft.yandexLiveMode, "TURBO");
+  assert.equal(draft.xmlStockDepthMode, "STOP_AFTER_FOUND");
+  assert.deepEqual(trackingContextCreateInput(draft).launchProfile, {
+    searchSource: "LIVE",
+    yandexLiveMode: "TURBO",
+    xmlStockDepthMode: "STOP_AFTER_FOUND",
+    includeUntracked: false,
+    scope: {
+      mode: "ALL",
+      groupIds: [],
+      descendantGroupIds: []
     }
   });
 });

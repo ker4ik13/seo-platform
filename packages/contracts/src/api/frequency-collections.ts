@@ -161,6 +161,9 @@ export interface CreateFrequencyCollectionInput {
   readonly types: readonly SemanticFrequencyType[];
   readonly regionCode: string;
   readonly device: SemanticFrequencyDevice;
+  /** Exact workspace route selected in the operation dialog. */
+  readonly provider?: FrequencyCollectionProvider;
+  readonly credentialId?: string;
   /** Missing legacy values mean an ordinary frequency collection. */
   readonly mode?: FrequencyCollectionMode;
   readonly seasonality?: FrequencySeasonalityRequest;

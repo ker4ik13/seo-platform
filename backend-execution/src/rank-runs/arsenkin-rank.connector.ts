@@ -744,9 +744,7 @@ function normalizeArsenkinCheckTopResult(
   const providerResult = record(value);
   const result = record(providerResult.result);
   const collect = array(result.collect);
-  if (collect.length !== 1) invalidResponse();
-  const rows = array(collect[0]);
-  if (rows.length !== intent.keywords.length) invalidResponse();
+  const rows = arsenkinCheckTopRows(collect, intent.keywords.length);
   const snippets = optionalRecord(result.snippets) ?? {};
   const saveProjectPosition = rankExecutionTracksProjectPosition(
     intent.execution
@@ -820,6 +818,32 @@ function normalizeArsenkinCheckTopResult(
       ]
     } satisfies InternalNormalizedRankResult;
   });
+}
+
+function arsenkinCheckTopRows(
+  collect: readonly unknown[],
+  keywordCount: number
+): readonly unknown[] {
+  if (collect.length === 1) {
+    const searchEngineRows = array(collect[0]);
+    if (
+      searchEngineRows.length === keywordCount &&
+      searchEngineRows.every(Array.isArray)
+    ) {
+      return searchEngineRows;
+    }
+  }
+  if (collect.length === keywordCount) {
+    const queryRows = collect.map((queryRow) => {
+      const searchEngines = array(queryRow);
+      if (searchEngines.length !== 1 || !Array.isArray(searchEngines[0])) {
+        invalidResponse();
+      }
+      return searchEngines[0];
+    });
+    if (queryRows.every(Array.isArray)) return queryRows;
+  }
+  invalidResponse();
 }
 
 function arsenkinCheckTopSnippet(value: unknown):

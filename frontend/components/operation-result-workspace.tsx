@@ -1728,8 +1728,8 @@ function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>
               <strong>{row.keyword}</strong>
             </td>
             <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
-            <td>
-              {row.providerSubmitted ? <UiText text="Отправлен" /> : <UiText text="Ожидает отправки" />}
+            <td className={styles.providerAttemptCell}>
+              <span>{row.providerSubmitted ? <UiText text="Отправлен" /> : <UiText text="Ожидает отправки" />}</span>
               <small><UiText text="Попытка" after=" " />{row.attempt}</small>
             </td>
             <td>{row.snapshot ? (row.snapshot.answerPresent ? "Есть" : "Нет") : "—"}</td>
@@ -1974,7 +1974,7 @@ export function RankRuntimeDiagnosticsModal({
             <span className={active ? styles.runtimeLiveDot : styles.runtimeDoneDot} />
             <div>
               <strong>{active ? <UiText text="В реальном времени" /> : <UiText text="Операция завершена" />}</strong>
-              <small>{snapshot ? rankRuntimeProductLabel(snapshot.policy.product) : <UiText text="Подключаем монитор…" />}</small>
+              <small>{snapshot ? uiText(rankRuntimeProductLabel(snapshot.policy.product)) : <UiText text="Подключаем монитор…" />}</small>
             </div>
           </div>
           <RuntimeMetric label={uiText("Активных потоков")} value={snapshot?.totals.active ?? 0} />
@@ -1985,7 +1985,9 @@ export function RankRuntimeDiagnosticsModal({
             <small><UiText text="Лимит подключения" /></small>
             <strong>
               {snapshot
-                ? <UiText text="{0} потоков · {1} запросов/с" values={[String(snapshot.policy.concurrency), String(snapshot.policy.requestsPerSecond)]} />
+                ? snapshot.policy.product === "YANDEX_TURBO"
+                  ? <UiText text="Turbo · без обычного лимита потоков" />
+                  : <UiText text="{0} потоков · {1} запросов/с" values={[String(snapshot.policy.concurrency), String(snapshot.policy.requestsPerSecond)]} />
                 : "—"}
             </strong>
           </div>
@@ -2102,6 +2104,7 @@ function rankRuntimeEntrySignature(entry: RankRuntimeDiagnosticEntry): string {
 function rankRuntimeProductLabel(value: RankRuntimeDiagnostics["policy"]["product"]): string {
   return ({
     YANDEX_LIVE: "Яндекс Live",
+    YANDEX_TURBO: "Яндекс Turbo",
     GOOGLE_LIVE: "Google Live",
     YANDEX_SEARCH_API: "Яндекс XML Proxy"
   } as const)[value];
@@ -2166,7 +2169,7 @@ function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
             <tbody>{resultRows.map((row) => (
               <tr key={`${row.sequence}:${row.keywordId}`}>
                 <td>{row.sequence + 1}</td>
-                <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
+                <td className={styles.primaryCell}><strong>{rankKeywordLabel(row)}</strong></td>
                 <td><RankState state={row.state} /></td>
                 <td className={styles.numberCell}>{rankPosition(row, uiLocale)}</td>
                 <td className={styles.urlCell}><ExternalUrl value={row.rankingUrl} /></td>
@@ -2215,7 +2218,12 @@ function CompetitorRankTable({
       {serpRows.length > 0 && (
         <div className={styles.tableScroll}>
           <table className={`${styles.table} ${styles.competitorTable}`}>
-            <caption><UiText text="Органическая выдача конкурентов Топ-10 этого запуска" /></caption>
+            <caption>
+              <UiText
+                text="Органическая выдача конкурентов Топ-{0} этого запуска"
+                values={[String(result.execution.depth)]}
+              />
+            </caption>
             <thead>
               <tr>
                 <th>#</th><th><UiText text="Запрос" /></th><th><UiText text="Результат" /></th><th><UiText text="Место" /></th>
@@ -2226,7 +2234,7 @@ function CompetitorRankTable({
             <tbody>{serpRows.map(({ operation, result: serpResult }) => (
               <tr key={`${operation.sequence}:${operation.keywordId}:${serpResult?.position ?? "empty"}`}>
                 <td>{operation.sequence + 1}</td>
-                <td className={styles.primaryCell}><strong>{operation.keyword}</strong></td>
+                <td className={styles.primaryCell}><strong>{rankKeywordLabel(operation)}</strong></td>
                 <td>
                   <span className={`${styles.itemStatus} ${operation.state === "PENDING" ? "" : styles.found}`}>
                     {operation.state === "PENDING" ? <UiText text="В работе" /> : <UiText text="Собрано" />}
@@ -2292,7 +2300,7 @@ function RankFailures({
           <tbody>{rows.map((row) => (
             <tr key={`failed:${row.sequence}:${row.keywordId}`}>
               <td>{row.sequence + 1}</td>
-              <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
+              <td className={styles.primaryCell}><strong>{rankKeywordLabel(row)}</strong></td>
               <td>
                 <span className={`${styles.itemStatus} ${styles.failed}`}>
                   {competitorCollection ? <UiText text="Не собран" /> : <UiText text="Не снят" />}
@@ -2309,6 +2317,12 @@ function RankFailures({
       </div>
     </section>
   );
+}
+
+function rankKeywordLabel(row: RankOperationResultRow) {
+  return row.keywordAvailable === false
+    ? <UiText text="Запрос недоступен" />
+    : row.keyword;
 }
 
 function CrawlTable({ result }: Readonly<{ result: CrawlOperationResultPage }>) {
@@ -2629,7 +2643,8 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
     );
     const searchSystem = rankSearchSystemLabel(
       value.execution.searchEngine,
-      searchSource
+      searchSource,
+      value.providerUsage?.product === "YANDEX_TURBO" ? "TURBO" : undefined
     );
     return {
       title: rankCollectionTitle(value.execution),

@@ -126,6 +126,35 @@ test("uses Check Top for new position mappings and derives the project position 
   assert.equal(normalized[1]?.found, false);
 });
 
+test("normalizes the transposed Check Top collect shape returned by Arsenkin", () => {
+  const value = checkTopResultBody() as {
+    result: { result: { collect: unknown } };
+  };
+  value.result.result.collect = [
+    [[
+      "https://competitor.example/one",
+      "https://www.example.com/catalog"
+    ]],
+    [["https://competitor.example/audit"]]
+  ];
+  const checkTopPosition = intent({
+    execution: {
+      ...intent().execution,
+      providerMappingVersion: "arsenkin-check-top-google-live@1"
+    }
+  });
+
+  const normalized = normalizeArsenkinRankResult(
+    value,
+    "3944",
+    checkTopPosition
+  );
+  assert.equal(normalized.length, 2);
+  assert.equal(normalized[0]?.found, true);
+  assert.equal(normalized[0]?.position, 2);
+  assert.equal(normalized[1]?.found, false);
+});
+
 test("builds and normalizes documented Check Top competitor output", () => {
   const collectOnly = competitorIntent(false);
   assert.deepEqual(buildArsenkinRankWireRequest(collectOnly), {

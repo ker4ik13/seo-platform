@@ -4,12 +4,22 @@ import test from "node:test";
 
 const workerUrl = new URL("../connector-worker.main.ts", import.meta.url);
 
-test("connector dispatcher fills the dedicated rank worker pool", async () => {
+test("connector dispatcher probes cheaply and fills the rank pool after activity", async () => {
   const source = await readFile(workerUrl, "utf8");
 
-  assert.match(source, /const rankBurst = config\.connectorRuntime\.rankConcurrency \* 2;/u);
+  assert.match(
+    source,
+    /const rankDispatchStride =\s*config\.connectorRuntime\.rankConcurrency \* 2;/u
+  );
+  assert.match(source, /const rankBurst = adaptiveRankDispatchBurst\(/u);
+  assert.match(source, /activeRankDispatchUntil/u);
+  assert.match(source, /rankRuntimeOutcomeHasWork\(outcome\)/u);
   assert.match(source, /slot < rankBurst; slot \+= 1/u);
-  assert.match(source, /dispatchBucket \* rankBurst \+ slot/u);
+  assert.match(source, /shardedDispatchSequence\(/u);
+  assert.match(source, /config\.connectorRuntime\.shardIndex/u);
+  assert.match(source, /config\.connectorRuntime\.shardCount/u);
+  assert.match(source, /if \(!paidRuntimeEnabled\) return;/u);
+  assert.match(source, /paidRuntimeEnabled \? new Worker<RankConnectorRuntimeJobData>/u);
   assert.match(source, /RANK_CONNECTOR_RUNTIME_QUEUE/u);
   assert.match(source, /FREQUENCY_COLLECTION_RUNTIME_QUEUE/u);
 });

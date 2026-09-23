@@ -151,6 +151,46 @@ test("enriches execution-owned operations without changing the safe summary", as
   });
 });
 
+test("loads one operation by id for an admin deep link", async () => {
+  const prisma = {
+    workspace: {
+      findMany: async () => [{ id: workspaceId, name: "Kireev Studio" }]
+    },
+    project: {
+      findMany: async () => [{ id: projectId, name: "Нейролюб", domain: "neuroluv.ru" }]
+    },
+    user: {
+      findMany: async () => [{ id: authorId, displayName: "Автор", emailDisplay: "author@example.com" }]
+    }
+  } as unknown as PrismaService;
+  const jobs = {
+    getAdminOperation: async () => ({
+      id: operationId,
+      workspaceId,
+      projectId,
+      actorId: authorId,
+      type: "MANUAL_RANK_CHECK",
+      status: "RUNNING",
+      progress: { current: "80", total: "100", unit: "KEYWORDS" },
+      result: { found: 40, notFound: 40 },
+      attempt: 1,
+      maxAttempts: 8,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    })
+  } as unknown as JobsClient;
+  const service = new PlatformAdminReadService(
+    prisma,
+    {} as SeoDataClient,
+    jobs
+  );
+
+  const result = await service.operation(operationId, ownerId, "req-detail");
+  assert.equal(result.id, operationId);
+  assert.equal(result.project?.domain, "neuroluv.ru");
+  assert.equal(result.actor?.email, "author@example.com");
+});
+
 function projectPrisma(): PrismaService {
   return {
     project: {

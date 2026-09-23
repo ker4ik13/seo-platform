@@ -99,6 +99,8 @@ export function launchProfileInput(
 ): TrackingContextLaunchProfile {
   const input = strictRecord(value, [
     "searchSource",
+    "yandexLiveMode",
+    "xmlStockDepthMode",
     "includeUntracked",
     "scope"
   ]);
@@ -107,6 +109,19 @@ export function launchProfileInput(
     !SEARCH_SOURCES.has(input.searchSource)
   ) {
     invalid("launchProfile.searchSource");
+  }
+  if (
+    input.yandexLiveMode !== undefined &&
+    input.yandexLiveMode !== "TURBO"
+  ) {
+    invalid("launchProfile.yandexLiveMode");
+  }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+    input.xmlStockDepthMode !== "STOP_AFTER_FOUND"
+  ) {
+    invalid("launchProfile.xmlStockDepthMode");
   }
   const scope = strictRecord(input.scope, [
     "mode",
@@ -188,6 +203,16 @@ export function launchProfileInput(
   return {
     searchSource:
       input.searchSource as TrackingContextLaunchProfile["searchSource"],
+    ...(input.yandexLiveMode === "TURBO"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {}),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode: input.xmlStockDepthMode as
+            | "STRICT_DEPTH"
+            | "STOP_AFTER_FOUND"
+        }),
     includeUntracked:
       input.includeUntracked === undefined
         ? false

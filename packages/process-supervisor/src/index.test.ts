@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   processEnvironment,
+  supervisedErrorExcerpt,
   supervisedErrorLineFingerprint
 } from "./index.js";
 
@@ -35,4 +36,16 @@ test("error-line observation emits only an irreversible fingerprint", () => {
     supervisedErrorLineFingerprint("request completed successfully"),
     undefined
   );
+});
+
+test("Telegram diagnostic excerpt stays useful without secrets or personal data", () => {
+  const excerpt = supervisedErrorExcerpt(
+    "ERROR request failed DATABASE_PASSWORD=private-value user@example.test postgresql://user:password@db/private"
+  );
+  assert.match(excerpt, /^ERROR request failed/u);
+  assert.match(excerpt, /\[redacted-secret\]/u);
+  assert.match(excerpt, /\[redacted-email\]/u);
+  assert.match(excerpt, /\[redacted-url\]/u);
+  assert.doesNotMatch(excerpt, /private-value|user@example|password@/u);
+  assert.ok(excerpt.length <= 128);
 });

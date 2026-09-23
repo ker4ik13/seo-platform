@@ -41,7 +41,7 @@ export class ClusteringRunService {
       "CLUSTERING",
       input.actorId,
       "ARSENKIN",
-      input.billing?.credentialId
+      input.billing?.credentialId ?? input.credentialId
     );
     if (route.provider !== "ARSENKIN") throw new Error("Clustering requires an Arsenkin route");
     try {
@@ -193,6 +193,7 @@ function requestHash(input: InternalCreateClusteringRunInput): string {
   return createHash("sha256").update(JSON.stringify({
     projectId: input.projectId,
     items: input.items,
+    credentialId: input.credentialId ?? null,
     searchEngine: input.searchEngine,
     regionCode: input.regionCode,
     method: input.method,

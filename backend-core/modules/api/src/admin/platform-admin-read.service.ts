@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import type {
   AdminOperationSearchResult,
+  AdminOperationSummary,
   AdminProjectSearchResult,
   AdminProjectSummary,
-  AdminWorkspaceOwnerSummary
+  AdminWorkspaceOwnerSummary,
+  InternalAdminOperationSummary
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -157,12 +159,42 @@ export class PlatformAdminReadService {
     requestId: string
   ): Promise<AdminOperationSearchResult> {
     const result = await this.jobs.listAdminOperations(actorId, requestId, query);
-    const workspaceIds = [...new Set(result.data.map((item) => item.workspaceId))];
+    return {
+      ...result,
+      data: await this.enrichOperations(result.data)
+    };
+  }
+
+  public async operation(
+    operationId: string,
+    actorId: string,
+    requestId: string
+  ): Promise<AdminOperationSummary> {
+    const operation = await this.jobs.getAdminOperation(
+      actorId,
+      requestId,
+      operationId
+    );
+    const [enriched] = await this.enrichOperations([operation]);
+    if (!enriched) {
+      throw new DomainError({
+        statusCode: 502,
+        code: "DEPENDENCY_UNAVAILABLE",
+        message: "Operation detail is unavailable"
+      });
+    }
+    return enriched;
+  }
+
+  private async enrichOperations(
+    operations: readonly InternalAdminOperationSummary[]
+  ): Promise<AdminOperationSummary[]> {
+    const workspaceIds = [...new Set(operations.map((item) => item.workspaceId))];
     const projectIds = [
-      ...new Set(result.data.flatMap((item) => item.projectId ? [item.projectId] : []))
+      ...new Set(operations.flatMap((item) => item.projectId ? [item.projectId] : []))
     ];
     const actorIds = [
-      ...new Set(result.data.flatMap((item) => item.actorId ? [item.actorId] : []))
+      ...new Set(operations.flatMap((item) => item.actorId ? [item.actorId] : []))
     ];
     const [workspaces, projects, actors] = await Promise.all([
       this.prisma.workspace.findMany({
@@ -181,9 +213,7 @@ export class PlatformAdminReadService {
     const workspaceById = new Map(workspaces.map((item) => [item.id, item]));
     const projectById = new Map(projects.map((item) => [item.id, item]));
     const actorById = new Map(actors.map((item) => [item.id, item]));
-    return {
-      ...result,
-      data: result.data.map((item) => {
+    return operations.map((item) => {
         const actor = item.actorId ? actorById.get(item.actorId) : undefined;
         return {
           ...item,
@@ -197,8 +227,7 @@ export class PlatformAdminReadService {
               }
             : null
         };
-      })
-    };
+      });
   }
 
   private async matchingUserIds(query: string): Promise<string[]> {

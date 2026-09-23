@@ -7,6 +7,7 @@ import type {
   SemanticCompetitorExportKeyword,
   SemanticCompetitorExportSource,
   SemanticExportColumnKey,
+  SemanticExportFilters,
   SemanticKeywordGroup,
   SemanticKeywordListItem,
   SemanticPositionHistoryExportRow,
@@ -570,7 +571,10 @@ export class SemanticExportWorkerService {
       observedCursors.add(nextCursor); cursor = nextCursor;
     } while (cursor);
     if (selected?.size) {
-      if (input.filters?.isTracked === true) selected.clear();
+      if (
+        input.filters?.isTracked === true &&
+        input.positionHistory?.includeAllKeywords !== true
+      ) selected.clear();
       else throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
     }
   }
@@ -580,9 +584,12 @@ export class SemanticExportWorkerService {
     context: ReturnType<typeof exportContext>,
     pageSize = PAGE_SIZE
   ): Promise<KeywordListQuery> {
+    const filters = input.positionHistory?.includeAllKeywords
+      ? positionHistoryAllKeywordFilters(input.filters)
+      : input.filters;
     const base: KeywordListQuery = {
       limit: pageSize,
-      ...input.filters,
+      ...filters,
       sort: input.sort ?? "CREATED_DESC",
       ...(input.rankSortDimensionKey
         ? { rankSortDimensionKey: input.rankSortDimensionKey }
@@ -591,15 +598,15 @@ export class SemanticExportWorkerService {
     if (input.scope !== "GROUP_SUBTREE") return base;
 
     const groups = await this.seoData.listExportKeywordGroups(context);
-    const rootId = input.filters?.groupId;
+    const rootId = filters?.groupId;
     if (!rootId || !groups.some(({ id }) => id === rootId)) {
       throw new ExportFailure("EXPORT_GROUP_NOT_FOUND", false);
     }
     const descendants = descendantGroupIds(groups, rootId);
-    const { groupId: _groupId, ...filters } = input.filters;
+    const { groupId: _groupId, ...descendantFilters } = filters;
     return {
       limit: pageSize,
-      ...filters,
+      ...descendantFilters,
       ...(descendants.length === 1
         ? { groupId: rootId }
         : { groupIds: descendants }),
@@ -720,6 +727,23 @@ export class SemanticExportWorkerService {
       outcome: retryable ? "RETRY_SCHEDULED" : "FAILED_FINAL"
     };
   }
+}
+
+function positionHistoryAllKeywordFilters(
+  filters: SemanticExportFilters | undefined
+): SemanticExportFilters | undefined {
+  if (!filters) return undefined;
+  const {
+    isTracked: _isTracked,
+    rankDimensionKey: _rankDimensionKey,
+    rankState: _rankState,
+    rankPositionMin: _rankPositionMin,
+    rankPositionMax: _rankPositionMax,
+    rankCheckedFrom: _rankCheckedFrom,
+    rankCheckedBefore: _rankCheckedBefore,
+    ...keywordFilters
+  } = filters;
+  return keywordFilters;
 }
 
 async function* counted<Row>(

@@ -193,13 +193,25 @@ export function adminUpstreamPath(
     return undefined;
   }
   if (
-    (segments[0] === "projects" || segments[0] === "operations") &&
+    segments[0] === "projects" &&
     segments.length !== 1
+  ) {
+    return undefined;
+  }
+  if (
+    segments[0] === "operations" &&
+    !(
+      segments.length === 1 ||
+      (segments.length === 2 && UUID_PATTERN.test(segments[1] ?? ""))
+    )
   ) {
     return undefined;
   }
   return `/admin-api/v1/${joined}`;
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export function responseCookies(headers: Headers): readonly string[] {
   const extended = headers as Headers & {

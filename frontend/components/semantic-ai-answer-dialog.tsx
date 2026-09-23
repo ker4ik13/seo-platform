@@ -167,6 +167,7 @@ export function SemanticAiAnswerDialog({
       for (const target of targets) {
         const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
+            credentialId: selectedSource.id,
             searchEngine,
             regionCode: target.regionCode,
             device: target.device,

@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 18 сентября 2026 года.
+Актуально на 23 сентября 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -346,8 +346,8 @@ XLSX-экспорт истории позиций по умолчанию иск
 относительно непосредственно предыдущего съёма, измеренный `not-found` после
 ещё одного отсутствия и запросы без позиционных снимков. Направление сортировки
 меняет порядок чисел только внутри первых двух уровней и не перемешивает уровни.
-Динамические городские колонки позиции и даты передают точный
-`rankSortDimensionKey`; Core SEO сортирует только по последнему snapshot этого
+Динамические городские колонки обычной и ИИ-позиции, а также обеих дат съёма,
+передают точный `rankSortDimensionKey`; Core SEO сортирует только по последнему snapshot этого
 сочетания поисковика, страны, региона, языка и устройства. Ключ измерения входит
 в cursor/filter hash и snapshot экспорта, поэтому infinite scroll, сохранённый
 вид и экспорт воспроизводят один порядок. Web хранит набор уже использованных
@@ -381,8 +381,9 @@ anchoring для этого viewport выключен. Регрессионна�
 динамической колонки. API временно принимает legacy v1/v2/v3; Web добавляет
 обычные и ИИ URL для v1, только ИИ URL для v2 и без изменения явно сохранённой
 видимости переводит конфигурацию в v4.
-Любой участник проекта создаёт и автоматически сохраняет собственное private
-представление; optimistic `If-Match` не позволяет тихо перезаписать изменения
+При первом открытии проекта любой участник получает видимое private-
+представление `Личное`, которое сразу входит в список/счётчик и автоматически
+сохраняется; optimistic `If-Match` не позволяет тихо перезаписать изменения
 из другой вкладки. Общие project-shared представления видны всем участникам,
 но создавать, обновлять и удалять их могут только `OWNER`/`ADMIN`; применение
 общего вида не включает private autosave и потому не изменяет его для коллег.
@@ -390,7 +391,7 @@ anchoring для этого viewport выключен. Регрессионна�
 Скрытый private layout дополнительно хранит `appliedViewId` конкретного
 пользователя. Видимый view применяется отдельной кнопкой-галочкой и остаётся
 выбранным после нового входа; при отсутствии явного выбора используется
-project-shared «Общее для проекта» (либо первый общий view). Расхождение
+`Личное`, затем project-shared «Общее для проекта». Расхождение
 текущего layout с применённой конфигурацией помечается как «Изменения не
 сохранены». Portaled dropdown внутри drawer входит в его outside-click boundary
 и не закрывает панель при выборе scope.
@@ -578,9 +579,15 @@ run и больше не enqueue-ится reconciliation; повторный з�
 задать будущий `runAt`. Пауза, optimistic `If-Match`, no-overlap и
 failure-threshold остаются общей Automation-моделью, новая таблица не добавлена.
 Для явно выбранной связки XMLStock + Яндекс Live мастер дополнительно предлагает
-платный Turbo только на текущий запуск. Режим не записывается в provider-neutral
-профиль: estimate фиксирует отдельный immutable mapping
-`xmlstock-yandex-live@3`, а отсутствие опции сохраняет стандартный Live.
+платный Turbo. Его launch-default и `xmlStockDepthMode` сохраняются в JSON
+launch profile контекста и восстанавливаются в мастере и редакторе; старый
+профиль без полей читается как standard + `STRICT_DEPTH`. Estimate всё равно
+фиксирует отдельный immutable mapping `xmlstock-yandex-live@3`, а отсутствие
+Turbo сохраняет стандартный Live.
+Turbo всегда использует 50 результатов на страницу: TOP-50 делает один GET,
+TOP-100 — два. Для обычного позиционного запуска `xmlStockDepthMode` выбирает
+строгий обход всего Top либо остановку после первой страницы с найденным
+доменом; immutable estimate, manifest и Job presentation сохраняют выбор.
 Редактор профилей переиспользует bounded multi-city/device selector ручного
 мастера: одно сохранение создаёт отдельный обычный tracking context для каждой
 пары «город + устройство», сохраняя прежний one-context estimate/run contract.
@@ -686,8 +693,10 @@ identity и короткий leave grace при плановом обновле�
 Новое соединение стартует как `AWAY` и становится активным только после первого
 подтверждённого browser activity, поэтому ротация lease не «воскрешает» аватар
 неактивного пользователя.
-Детальная визуализация локально отключается кнопкой «Показывать курсоры»;
-аватарки при этом остаются. Cursor overlay рисуется только на совпадающих
+Детальная визуализация локально по умолчанию отключена и включается кнопкой
+«Показывать курсоры»; аватарки при этом остаются. Пока опция выключена, Web не
+подписывается на pointer-move и отправляет `cursor=null`, поэтому координаты
+пользователя не передаются. Cursor overlay рисуется только на совпадающих
 route и semantic view. Для устойчивого положения на разных размерах экрана
 курсор использует безопасный screen/sidebar/modal/row/cell
 `data-presence-key` и относительную позицию внутри элемента, а вне anchor —
@@ -959,6 +968,9 @@ SEO добавляет текущую активную keywordVersion, удал�
 новый scope. FOUND/NOT_FOUND и удалённые ключи не оплачиваются повторно.
 Неопределённая отправка блокирует такой автоматический выбор. Старый BYOK
 `retry-missing` endpoint сохраняется для прежних API clients.
+Для вручную отменённых rank/frequency операций те же мастера показывают
+«Продолжить»: новая операция получает только незавершённые/CANCELLED строки,
+а уже сохранённые результаты не оплачиваются и не выполняются повторно.
 
 До финансового резерва Core проверяет configured лимит системной кластеризации
 `PLATFORM_ARSENKIN_CLUSTERING_KEYWORD_LIMIT` (по умолчанию 30k для Standard,
@@ -1475,15 +1487,34 @@ XMLStock HTTP ограничивается распределёнными Redis 
 `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют друг друга,
 один ключ делит лимит между своими проектами. Permit удерживает только внешний
 HTTP, не `POLL_WAIT`; базовые окна соответствуют provider boundary:
-Yandex Live — `20 concurrent / 10 RPS`, Google Live — `48 / 30`, Yandex
-Search API — `48 / 50`, Wordstat — `10 / 10`. Throttling адаптивно уменьшает окно. Состояние limiter
+Yandex Live — `20 concurrent / 15 RPS`, Google Live — `48 / 30`, Yandex
+Search API — `50 / 50`, Wordstat — `10 / 20`. RPS дополнительно сглаживается
+100-миллисекундными distributed окнами, чтобы replicas не создавали один
+provider burst. Throttling адаптивно уменьшает окно. Состояние limiter
 хранится только в connector ACL namespace
 `seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
 предпочитает менее занятую пару credential/project, оставаясь source of truth
 для Job, lease и progress.
-Каждый connector process выполняет до четырёх frequency claims одновременно;
-три штатных процесса заполняют Wordstat bucket до его реальных `10 RPS`, а
-Redis не позволяет превысить границу провайдера. Capacity wait показывается
+Arsenkin submit claim перед provider-wide advisory lock выполняет дешёвую
+индексную проверку наличия due execution. При пустой очереди connector slots
+завершаются сразу и не образуют постоянную очередь PostgreSQL locks;
+authoritative graph/lease проверка внутри lock остаётся прежней.
+Platform grant advisory lock возвращает Prisma-совместимый boolean projection,
+а не PostgreSQL `void`; реальный driver поэтому не отклоняет grant до создания
+quota reservation/receipt.
+Общий submit claim для XMLStock и Arsenkin также проверяет dedicated
+`connector version + status + authorization expiry` index до соединения всего
+Job graph. Исторические `READY_TO_SUBMIT` с истёкшим grant больше не сканируются
+на каждом пустом runtime tick.
+Каждый connector process выполняет до 16 rank claims и четырёх frequency
+claims одновременно. Три штатных процесса получают разные deterministic
+dispatch shard sequence: их BullMQ ticks больше не дедуплицируются между
+процессами, общий rank I/O pool достигает 48 slot, а Wordstat bucket — `20
+RPS`. В простое каждый shard отправляет один probe в секунду; первый реальный
+claim немедленно раскрывает полный pool на пять секунд, поэтому provider
+throughput сохраняется без постоянных пустых SQL claims. Redis не позволяет
+превысить отдельную границу каждого продукта.
+Capacity wait показывается
 как нормальная фаза с количеством HTTP-запросов и минимальным оставшимся
 временем, без ложного error code.
 Credential validation версии `xmlstock@1.3.0` дополнительно читает бесплатные
@@ -1526,6 +1557,19 @@ XMLStock также не занимает этот lifecycle limit: dispatcher �
 concurrency, lease fencing и PostgreSQL claim остаются bounded safety границей; обычный Live явно
 передаёт пустой `tbm`, чтобы настройка кабинета не включала Turbo неявно.
 
+Проверка XMLStock выполняется только read-only account API (`/api/`,
+`info=user`, `info=status`) и никогда не делает SERP/Wordstat запрос. Она
+планируется автоматически раз в час и после provider operation; версия
+connector proof не меняется, поэтому безопасное обновление проверки не требует
+повторного ввода ключа.
+
+Штатно работает один rank coordinator. Перед выдачей quota reservation Core
+берёт transaction-scoped advisory lock по точному `workspace/item/attempt` и
+после ожидания повторно читает receipt в `READ COMMITTED`; параллельный worker
+не создаёт конфликт `rank_quota_reservations_item_attempt_key` и retry storm.
+Три connector process продолжают потреблять очереди, но SQL maintenance и
+автоматические credential refresh планирует только первый процесс.
+
 ## 5. Владение данными
 
 | Данные | Модуль-владелец | Текущее хранилище |
@@ -1567,7 +1611,9 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
 6. Rank role публикует normalized chunks и terminal result. Для XMLStock тот
    же hash-bound chunk содержит упорядоченную выдачу до выбранной глубины
    Top-100. Новые Arsenkin position estimate используют `check-top`, находят
-   позицию проекта в этой же выдаче и сохраняют URL/title/snippet; legacy
+   позицию проекта в этой же выдаче и сохраняют URL/title/snippet. Нормализатор
+   принимает обе строгие формы `searchEngine→query→URL[]` и наблюдаемую live
+   `query→searchEngine→URL[]`, не используя позиционное угадывание; legacy
    `positions` ответы продолжают сохранять доступную `top20` проекцию.
    Raw provider response не сохраняется: Core SEO пакетно создаёт дочерние
    immutable строки rank snapshot, а frontend читает только tenant-scoped
@@ -1646,6 +1692,9 @@ lease-expiry/reclaim цикла. RPS buckets, число worker-потоков, 
 distributed RPS limiter всё равно сериализует внешний GET. Provider pending
 и retryable failure остаются в отложенной очереди с `next_action_at` и не
 удерживают connector worker.
+Live-страница с количеством документов, отличным от десяти, больше не считается
+концом выдачи: connector продолжает обход до глубины или до первой найденной
+позиции, сохраняет bounded checkpoint и обрезает итог строго по выбранному Top.
 Poll/recovery остаётся lease-fenced и bounded. Для одного XMLStock keyword
 execution разрешено не больше 50 фактических provider HTTP poll/get попыток:
 capacity deferral откатывает счётчик, READY на 50-й попытке сохраняется, любой
@@ -1696,6 +1745,12 @@ Tenant-scoped `GET .../jobs/:jobId/runtime-diagnostics` отдаёт тольк�
 безопасный live-снимок XMLStock execution: текст доступного пользователю
 ключа, логический цветной поток, sequence, состояние, счётчики HTTP
 submit/poll, page progress и allowlisted error code.
+Для Turbo diagnostics сохраняет отдельный product `YANDEX_TURBO`, показывает
+реальные страницы по 50 результатов и не приписывает режиму обычный Live
+thread/RPS limit. Публичная проекция rank Job также несёт безопасный
+`yandexLiveMode=TURBO`: карточки операций, task center и результат различают
+«Яндекс Turbo» и обычный «Яндекс Live», включая старые Jobs, где режим
+восстанавливается из immutable `providerUsage`.
 Credential, provider request ID, raw payload и физическое имя worker наружу не
 выдаются; UI накапливает короткий журнал только пока открыта подмодалка логов.
 General `jobs_runtime` по-прежнему не читает private
@@ -1722,6 +1777,9 @@ transport outage продолжает validation Job через bounded backoff 
 `RATE_LIMITED` либо в `DEGRADED` именно после `PROVIDER_UNAVAILABLE`.
 Неверный ключ и постоянный provider plan/request rejection по-прежнему
 применяют `INVALID`/`DEGRADED` и закрывают route.
+Автопроверка после provider operation подчиняется часовому freshness TTL:
+отдельные batch/items одного запуска не создают непрерывные validation Jobs.
+Ручная проверка остаётся немедленной и выполняется один раз на явное действие.
 Validation completion в PostgreSQL имеет микросекундную точность, а
 JavaScript execution evidence — миллисекундную; migration
 `20260805201500_rank_validation_timestamp_precision` сравнивает proof на
@@ -1731,6 +1789,11 @@ validation Job, но не отклоняет корректный XMLStock/Arsen
 Маршрутизация операций настраивается только в `/app/settings/integrations` на
 уровне workspace. Цепочка credentials упорядочивается кнопками вверх/вниз;
 первый provider основной, остальные — fallback по выбранным причинам.
+Новый credential атомарно добавляется последним во все совместимые цепочки,
+не меняя основной источник. Migration
+`20260922224500_append_existing_credentials_to_workspace_routes` выполняет тот
+же безопасный backfill для старых подключений силами владельца Jobs DB;
+connector-worker не читает credential/routing tables напрямую.
 Изменения маршрута сохраняются сразу после выбора, перестановки, переключения
 или удаления. Если прежний credential уже недоступен, выбор нового заменяет
 его одной командой, поэтому невалидная старая строка не блокирует сохранение.
@@ -1740,6 +1803,9 @@ validation Job, но не отклоняет корректный XMLStock/Arsen
 основной BYOK credential не покрывает её, фиксируется `LOW_BALANCE` и до
 создания Job выбирается следующий разрешённый workspace fallback. Web тем же
 расчётом заранее показывает фактически подходящий credential и его тариф.
+Wordstat runtime повторно связывает exact materialized `routeId + credentialId`
+из Job snapshot и допускает позиции fallback `1..7`; прежнее требование
+`position=0` удалено как несовместимое с уже подтверждённым LOW_BALANCE route.
 Частотности и расширение семантики обозначены в Web как `Wordstat` и
 `Парсинг Wordstat`, поскольку это независимые route capabilities.
 Project connector routes остаются внутренней materialized reference-проекцией:
@@ -2421,14 +2487,20 @@ Core проверяет platform role независимо от tenant membershi
 
 ### Platform admin: проекты и операции
 
-Admin BFF отдельно allowlist-ит только collection routes `projects` и
-`operations`; вложенные произвольные команды через эти roots запрещены.
+Admin BFF отдельно allowlist-ит collection route `projects`, collection
+`operations` и exact UUID detail `operations/:operationId`; остальные
+вложенные команды через эти roots запрещены.
 Каталог проектов ограничен 50 строками и ищет по project/workspace identity и
 автору. SEO Data endpoint принимает не более 50 уникальных UUID и считает
 только active/non-deleted keywords и active folders без `system_kind`.
 Execution endpoint отдаёт не более 100 Jobs на страницу по immutable cursor,
 а totals разделяет на active, completed и attention. Эти экраны являются
 read-only и не обходят существующие service/database ownership boundaries.
+Admin URL хранит `screen`; журнал дополнительно хранит `status`, `type` и
+`operation`. Поэтому reload/deep link восстанавливает тот же фильтр и drawer,
+даже если операция находится не на первой странице. Read-only GET/HEAD
+использует долгоживущую rotating cookie session; recent-auth остаётся
+обязательным для mutation/high-risk команд.
 
 Первый `SUPER_ADMIN` назначается production bootstrap-entrypoint
 `/app/dist/platform-admin-bootstrap.js`: корневой runtime делегирует команду
@@ -2515,6 +2587,10 @@ SEO boundary; колонка остаётся PostgreSQL `TEXT`, а общий t
 - Telegram alert rollout/canary:
   `infrastructure/runbooks/operational-alerts.md`.
 - Local production-like runtime: `infrastructure/vps/README.md`.
+  Для визуальной проверки копии production-данных
+  `SEO_PLATFORM_PAID_CONNECTOR_RUNTIME=false` оставляет connector validation и
+  бесплатный credential refresh включёнными, но не создаёт consumers/dispatch
+  платных rank/frequency/research/AI/clustering очередей.
 - Мутирующий public API security smoke:
   `infrastructure/vps/smoke-public-api.sh`; он запускается только с явным
   `SEO_PLATFORM_API_SMOKE_CONFIRM=CREATE_TEST_DATA`, создаёт изолированные

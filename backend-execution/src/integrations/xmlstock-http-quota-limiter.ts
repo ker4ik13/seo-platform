@@ -23,10 +23,10 @@ export interface XmlStockHttpQuotaPolicy {
 export const XMLSTOCK_HTTP_QUOTA_POLICIES: Readonly<
   Record<XmlStockHttpProduct, XmlStockHttpQuotaPolicy>
 > = {
-  YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 10 },
+  YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 15 },
   GOOGLE_LIVE: { concurrency: 48, requestsPerSecond: 30 },
-  YANDEX_SEARCH_API: { concurrency: 48, requestsPerSecond: 50 },
-  WORDSTAT: { concurrency: 10, requestsPerSecond: 10 }
+  YANDEX_SEARCH_API: { concurrency: 50, requestsPerSecond: 50 },
+  WORDSTAT: { concurrency: 10, requestsPerSecond: 20 }
 };
 
 export const XMLSTOCK_HTTP_QUOTA_NAMESPACE =
@@ -43,6 +43,7 @@ export type XmlStockHttpQuotaPermit =
   | {
       readonly allowed: false;
       readonly retryAfterSeconds: number;
+      readonly retryAfterMilliseconds: number;
     };
 
 export interface XmlStockHttpQuotaGate {
@@ -76,6 +77,7 @@ local base_rps = tonumber(ARGV[2])
 local request_cost = tonumber(ARGV[3])
 local lease_ms = tonumber(ARGV[4])
 local member = ARGV[5]
+local smoothing_window_ms = 100
 local penalty = tonumber(redis.call('GET', KEYS[4]) or '0')
 local divisor = 2 ^ penalty
 local concurrency = math.max(1, math.floor(base_concurrency / divisor))
@@ -88,6 +90,7 @@ end
 
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now_ms - 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[6], '-inf', now_ms - smoothing_window_ms)
 
 local inflight = redis.call('ZCARD', KEYS[1])
 if inflight >= concurrency then
@@ -103,12 +106,22 @@ if recent + request_cost > rps then
   return {0, retry_ms, concurrency, rps}
 end
 
+local smoothing_limit = math.max(request_cost, math.ceil(rps / 10))
+local smoothed_recent = redis.call('ZCARD', KEYS[6])
+if smoothed_recent + request_cost > smoothing_limit then
+  local oldest = redis.call('ZRANGE', KEYS[6], 0, 0, 'WITHSCORES')
+  local retry_ms = math.max(1, math.ceil(tonumber(oldest[2]) + smoothing_window_ms - now_ms))
+  return {0, retry_ms, concurrency, rps}
+end
+
 redis.call('ZADD', KEYS[1], now_ms + lease_ms, member)
 for index = 1, request_cost do
   redis.call('ZADD', KEYS[2], now_ms, member .. ':' .. tostring(index))
+  redis.call('ZADD', KEYS[6], now_ms, member .. ':' .. tostring(index))
 end
 redis.call('PEXPIRE', KEYS[1], lease_ms + 5000)
 redis.call('PEXPIRE', KEYS[2], 6000)
+redis.call('PEXPIRE', KEYS[6], 1000)
 return {1, 0, concurrency, rps}
 `;
 
@@ -181,13 +194,28 @@ export class XmlStockHttpQuotaLimiter
     readonly leaseMs: number;
   }): Promise<XmlStockHttpQuotaPermit> {
     try {
-      return await acquireXmlStockHttpQuotaPermit(
-        this.connection,
-        { ...input, member: randomUUID() }
-      );
+      const startedAt = Date.now();
+      while (true) {
+        const permit = await acquireXmlStockHttpQuotaPermit(
+          this.connection,
+          { ...input, member: randomUUID() }
+        );
+        if (permit.allowed) return permit;
+        if (
+          permit.retryAfterMilliseconds > 100 ||
+          Date.now() - startedAt + permit.retryAfterMilliseconds > 1_000
+        ) {
+          return permit;
+        }
+        await wait(permit.retryAfterMilliseconds);
+      }
     } catch {
       this.logger.error("XMLStock quota limiter acquisition failed closed");
-      return { allowed: false, retryAfterSeconds: 5 };
+      return {
+        allowed: false,
+        retryAfterSeconds: 5,
+        retryAfterMilliseconds: 5_000
+      };
     }
   }
 
@@ -259,12 +287,13 @@ export async function acquireXmlStockHttpQuotaPermit(
   const response = await commandWithTimeout(
     redis.eval(
       ACQUIRE_SCRIPT,
-      5,
+      6,
       `${scope}:inflight`,
       `${scope}:rps`,
       `${scope}:cooldown`,
       `${scope}:penalty`,
       `${scope}:success`,
+      `${scope}:smoothing`,
       String(policy.concurrency),
       String(policy.requestsPerSecond),
       String(requestCost),
@@ -290,7 +319,8 @@ export async function acquireXmlStockHttpQuotaPermit(
   }
   return {
     allowed: false,
-    retryAfterSeconds: Math.max(1, Math.ceil(Number(response[1]) / 1_000))
+    retryAfterSeconds: Math.max(1, Math.ceil(Number(response[1]) / 1_000)),
+    retryAfterMilliseconds: Math.max(1, Number(response[1]))
   };
 }
 
@@ -403,6 +433,10 @@ async function commandWithTimeout<T>(command: Promise<T>): Promise<T> {
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function nonNegativeSafeInteger(value: unknown): boolean {

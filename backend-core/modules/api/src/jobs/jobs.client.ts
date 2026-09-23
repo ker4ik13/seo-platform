@@ -476,6 +476,19 @@ export class JobsClient {
     return adminOperationSearchResult(value, query.limit);
   }
 
+  public async getAdminOperation(
+    actorId: string,
+    requestId: string,
+    operationId: string
+  ): Promise<InternalAdminOperationSummary> {
+    const value = await this.requestAdmin<unknown>(
+      `/internal/v1/platform-admin/operations/${encodeURIComponent(operationId)}`,
+      actorId,
+      requestId
+    );
+    return adminOperationSummary(value);
+  }
+
   public async createFrequencyCollection(
     context: InternalContext,
     input: CreateFrequencyCollectionInput,
@@ -510,8 +523,19 @@ export class JobsClient {
     );
   }
 
-  public async operationRoute(context: InternalContext, kind: PaidOperationKind, source?: string): Promise<InternalOperationRoute> {
-    const value = await this.requestIntegration<unknown>("POST", "/internal/v1/paid-operations/route", context, { kind, ...(source ? { source } : {}) });
+  public async operationRoute(
+    context: InternalContext,
+    kind: PaidOperationKind,
+    source?: string,
+    provider?: string,
+    credentialId?: string
+  ): Promise<InternalOperationRoute> {
+    const value = await this.requestIntegration<unknown>("POST", "/internal/v1/paid-operations/route", context, {
+      kind,
+      ...(source ? { source } : {}),
+      ...(provider ? { provider } : {}),
+      ...(credentialId ? { credentialId } : {})
+    });
     const input = exactRecord(value, ["workspaceId", "projectId", "actorId", "provider", "credentialMode", "credentialId", "bindingId", "bindingVersion", "routeId"]);
     if (input.workspaceId !== context.tenant.workspaceId || input.projectId !== context.tenant.projectId || input.actorId !== context.actorId || !["XMLSTOCK", "ARSENKIN", "KEYS_SO"].includes(String(input.provider)) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(String(input.credentialMode)) || !Number.isSafeInteger(input.bindingVersion) || Number(input.bindingVersion) < 1) throw invalidJobsResponse();
     for (const key of ["credentialId", "bindingId", "routeId"] as const) uuidValue(input[key]);

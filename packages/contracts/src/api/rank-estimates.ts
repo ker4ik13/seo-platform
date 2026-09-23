@@ -228,6 +228,8 @@ export interface CreateRankEstimateInput {
   readonly searchSource?: RankSearchSource;
   /** Paid XMLStock Yandex Live mode selected for this immutable launch. */
   readonly yandexLiveMode?: RankYandexLiveMode;
+  /** XMLStock Live paging: exact depth or stop after the first project match. */
+  readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
 }
 
 /**

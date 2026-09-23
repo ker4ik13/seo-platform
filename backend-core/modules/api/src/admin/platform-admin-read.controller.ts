@@ -1,6 +1,7 @@
-import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Param, Query, Req, UseGuards } from "@nestjs/common";
 import type {
   AdminOperationSearchResult,
+  AdminOperationSummary,
   AdminProjectSearchResult,
   ApiResponse
 } from "@seo-platform/contracts";
@@ -9,6 +10,7 @@ import { CurrentPrincipal } from "../identity/current-principal.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { SessionAuthGuard } from "../identity/session-auth.guard.js";
 import {
+  adminOperationId,
   adminOperationQuery,
   adminProjectQuery
 } from "./platform-admin-read-input.js";
@@ -62,6 +64,22 @@ export class PlatformAdminOperationController {
       request,
       await this.admin.operations(
         adminOperationQuery({ status, type, cursor, limit }),
+        principal.userId,
+        request.id
+      )
+    );
+  }
+
+  @Get(":operationId")
+  public async detail(
+    @Param("operationId") operationId: string,
+    @Req() request: PlatformAdminRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<AdminOperationSummary>> {
+    return apiResponse(
+      request,
+      await this.admin.operation(
+        adminOperationId(operationId),
         principal.userId,
         request.id
       )

@@ -21,7 +21,7 @@ export async function prepareRankRetry(projectId: string, jobId: string, signal:
   for (let page = 0; page <= Math.ceil(rankCommandKeywordLimit / 500); page++) {
     const result = await browserApiRequest<RankOperationResult>(`/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}/result?limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal });
     if (result.jobId !== jobId || result.job.id !== jobId || result.job.projectId !== projectId || !Array.isArray(result.rows) || result.rows.length > 500) throw invalid();
-    if (result.job.status !== "PARTIALLY_COMPLETED" || Number(result.job.result.submitOutcomeUnknownCount) !== 0) throw new BrowserApiError(409, "PAID_OPERATION_REQUIRES_REVIEW", "Сначала дождитесь проверки предыдущего расхода. Повторная отправка пока недоступна.");
+    if (!["PARTIALLY_COMPLETED", "CANCELLED"].includes(result.job.status) || Number(result.job.result?.submitOutcomeUnknownCount ?? "0") !== 0) throw new BrowserApiError(409, "PAID_OPERATION_REQUIRES_REVIEW", "Сначала дождитесь проверки предыдущего расхода. Повторная отправка пока недоступна.");
     if (initial && (JSON.stringify(initial.execution) !== JSON.stringify(result.execution) || JSON.stringify(initial.job.result) !== JSON.stringify(result.job.result))) throw invalid();
     initial ??= result;
     for (const row of result.rows) {
@@ -67,6 +67,11 @@ export function rankRetryContextDraft(result: RankOperationResult): TrackingCont
     domainMatchValue: rule.mode === "SPECIFIC_URL" || rule.mode === "URL_PREFIX" ? rule.value : "",
     safeSearch: execution.safeSearch,
     searchSource: result.job.searchSource ?? "LIVE",
+    yandexLiveMode:
+      execution.providerMappingVersion === "xmlstock-yandex-live@3"
+        ? "TURBO"
+        : "STANDARD",
+    xmlStockDepthMode: execution.xmlStockDepthMode ?? "STRICT_DEPTH",
     includeUntracked: true,
     scopeMode: "KEYWORDS",
     groupIds: [],

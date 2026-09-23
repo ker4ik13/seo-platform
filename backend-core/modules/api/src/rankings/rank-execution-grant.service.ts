@@ -99,6 +99,7 @@ export class RankExecutionGrantService {
       try {
         return await this.prisma.$transaction(
           async (transaction) => {
+            await lockGrantAttempt(transaction, input);
             const transactionReplay = await findIdempotent(
               transaction,
               input.workspaceId,
@@ -186,7 +187,11 @@ export class RankExecutionGrantService {
             });
             return { decision, created: true };
           },
-          { isolationLevel: "Serializable" }
+          // The exact-attempt advisory lock serializes duplicate workers. Under
+          // READ COMMITTED, a waiter sees the winner's receipt after the lock
+          // is released instead of attempting the same quota INSERT from an
+          // old serializable snapshot.
+          { isolationLevel: "ReadCommitted" }
         );
       } catch (error) {
         if (isUniqueConstraintError(error)) {
@@ -246,6 +251,22 @@ export class RankExecutionGrantService {
       "Rank execution grant race could not be resolved"
     );
   }
+}
+
+async function lockGrantAttempt(
+  transaction: GrantTransaction,
+  input: Pick<
+    InternalIssueRankExecutionGrantInputV1,
+    "workspaceId" | "jobItemId" | "executionAttempt"
+  >
+): Promise<void> {
+  const identity =
+    `seo-platform:rank-grant:${input.workspaceId}:` +
+    `${input.jobItemId}:${input.executionAttempt}`;
+  await transaction.$queryRaw`
+    SELECT true AS locked
+    FROM pg_advisory_xact_lock(hashtextextended(${identity}::text, 0))
+  `;
 }
 
 async function authorizeGrant(

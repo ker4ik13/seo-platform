@@ -273,6 +273,43 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
   });
 });
 
+test("loads one safe platform operation summary for a deep link", async () => {
+  const createdAt = new Date("2026-08-11T18:00:00.000Z");
+  const service = new OperationActivityService({
+    job: {
+      findUnique: async () => ({
+        id: jobId,
+        workspaceId,
+        projectId: firstProjectId,
+        actorId,
+        type: "MANUAL_RANK_CHECK",
+        status: "RUNNING",
+        stage: "WAITING_EXECUTION_GRANT",
+        provider: "XMLSTOCK",
+        progressCurrent: 18n,
+        progressTotal: 50n,
+        progressUnit: "KEYWORDS",
+        actualCostMicro: null,
+        currency: "RUB",
+        attempt: 1,
+        maxAttempts: 8,
+        errorSummary: null,
+        resultSummary: { foundCount: 18, raw: "must-not-leak" },
+        createdAt,
+        queuedAt: createdAt,
+        startedAt: createdAt,
+        finishedAt: null,
+        updatedAt: createdAt
+      })
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.adminDetail(jobId);
+  assert.equal(result.id, jobId);
+  assert.deepEqual(result.result, { found: 18 });
+  assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
+});
+
 test("classifies exhausted credential validation as attention", async () => {
   let findManyQuery: unknown;
   const service = new OperationActivityService({

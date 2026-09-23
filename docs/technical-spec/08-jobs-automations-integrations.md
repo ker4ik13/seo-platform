@@ -79,6 +79,23 @@ outcome и нормализованный reason code; credential/route ID и se
 определяет основной и резервные providers. Если credential подключён, но не
 включён в route нужной capability, мастер операции не предлагает его как
 исполняемый и ведёт пользователя в `/app/settings/integrations`.
+Новый credential атомарно добавляется последним во все совместимые workspace
+routes, не меняя выбранный основной источник. При появлении второго источника
+цепочка включает `NEXT_AVAILABLE` со штатными безопасными причинами fallback.
+Одноразовая migration владельца Jobs backfill-ит такие routes для подключений,
+созданных до введения этого правила; connector-worker по-прежнему не получает
+прямого чтения credential и routing tables.
+Выбор Wordstat credential в operation dialog передаётся как exact
+`provider + credentialId` через public/internal contracts, paid quote и Jobs
+resolver. Показанная в UI стоимость поэтому относится к тому же route, который
+записывается в Job и исполняется worker-ом.
+Arsenkin-карточки в модалках ИИ-ответов и кластеризации аналогично передают
+exact `credentialId`; при нескольких аккаунтах UI, quote и worker используют
+один route вместо скрытого возврата к первому аккаунту цепочки.
+`ACTION_REQUIRED/CONNECTOR_NOT_READY` возникает до provider I/O и поэтому
+получает действие «Продолжить»: оно version-aware переоткрывает тот же Job и
+его PENDING items после исправления route, не создавая повторного платного
+submit. Неоднозначные provider outcomes по-прежнему не возобновляются.
 Денежный баланс не является условием сохранения workspace route. При создании
 XMLStock Wordstat operation resolver получает точное максимальное число
 обращений, сравнивает стоимость всего запуска по последнему проверенному тарифу
@@ -294,14 +311,28 @@ replicas. Permit удерживается только вокруг фактич
 время `POLL_WAIT` или внутренних операций. Throttling включает bounded
 adaptive cooldown, успешные ответы постепенно восстанавливают окно, а
 недоступный limiter блокирует внешний вызов fail-closed. Начальные окна на
-один credential: Yandex Live — `20 concurrent / 10 RPS`, Google Live —
-`48 / 30`, Yandex Search API — `48 / 50`, Wordstat — `10 / 10`; provider
+один credential: Yandex Live — `20 concurrent / 15 RPS`, Google Live —
+`48 / 30`, Yandex Search API — `50 / 50`, Wordstat — `10 / 20`; provider
 ответы `55`, `110`, `429` и `503` уменьшают только соответствующее окно.
+Distributed 100-ms smoothing не даёт нескольким replicas выбрать весь
+секундный budget одним burst; короткий permit wait остаётся внутри текущего
+lease, а длинное ожидание возвращается обычному fenced scheduler.
 
 Rank и connector process roles разрешено горизонтально размножать внутри
 одного `backend-execution` container supervisor. PostgreSQL остаётся source of
 truth, lease/token/version fencing предотвращает двойное выполнение, а
 Arsenkin provider-task capacity считается глобально между rank и frequency.
+Штатный default — один rank coordinator. Connector consumers остаются в трёх
+процессах. Periodic SQL maintenance, credential refresh discovery и
+maintenance queue dispatch выполняет только первый process instance. Runtime
+tick dispatch выполняют все экземпляры через непересекающиеся deterministic
+shard sequence, поэтому BullMQ deduplication не схлопывает три configured пула
+в один. Это убирает одинаковые фоновые сканы и сохраняет полные 48
+provider-I/O slot.
+При `CONNECTOR_PAID_RUNTIME_ENABLED=false` процесс продолжает credential
+validation/refresh, но не создаёт BullMQ consumers и ticks для rank,
+frequency, keyword research, AI answers и clustering. Режим предназначен для
+безопасной визуальной проверки production-копии; production default — `true`.
 XMLStock HTTP capacity считается независимо для каждого credential/product;
 PostgreSQL claim order предпочитает credential/project pair с меньшим числом
 активных leases и использует oldest-first как tie-breaker. Frequency claim
@@ -701,10 +732,11 @@ Validation flow:
    Worker только затем расшифровывает секрет.
 5. Arsenkin вызывает фиксированный
    `https://arsenkin.ru/api/tools/info`, Keys.so —
-   `https://api.keys.so/limits/all`, XMLStock — read-only
-   `https://xmlstock.com/wordstat/json/` с `pagetype=regionsTree` и
-   обязательными `USER ID + KEY`; пользователь не может изменить origin, URL,
-   method или headers.
+   `https://api.keys.so/limits/all`, XMLStock — только read-only account API
+   `https://xmlstock.com/api/` в базовом режиме, с `info=user` и
+   `info=status`, используя обязательные `USER ID + KEY`. Проверка не вызывает
+   SERP/Wordstat endpoints и не списывает платные запросы; пользователь не
+   может изменить origin, URL, method или headers.
 6. Provider request имеет timeout, `redirect: error` и ограничивает фактически
    прочитанный body одним MiB. Успешный `2xx` обязан быть валидным JSON;
    безопасный HTTP status и `Retry-After` неуспешного ответа классифицируются
@@ -757,12 +789,13 @@ spinner и не удерживает локальный operation lock. Откр
 старую проверку `STALE` через material/lifecycle guard.
 Если последняя безопасная quota-проекция XMLStock уже показывает нулевой
 денежный баланс, Web не присоединяется автоматически к validation job и не
-держит бесконечный spinner. XMLStock полностью исключён из hourly refresh и
-refresh после provider operation: его account/balance endpoint вызывается
-только после явного нажатия пользователем кнопки проверки. Arsenkin и Keys.so
-сохраняют автоматическое обновление. После пополнения XMLStock пользователь
-явно обновляет безопасную quota-проекцию; сохранённые операции и результаты от
-этого не меняются.
+держит бесконечный spinner. Backend при этом обновляет XMLStock, Arsenkin и
+Keys.so через durable deduplicated job не чаще одного раза в час, в том числе
+после provider operation: отдельные batch/items большого запуска не создают
+непрерывную цепочку проверок. Ручная кнопка не использует этот TTL и запускает
+одну явно запрошенную бесплатную проверку сразу. Поэтому баланс после пополнения обновляется без повторного
+ввода ключа, а открытая modal не создаёт секундный polling/account-request
+цикл. Сохранённые операции и результаты от revalidation не меняются.
 
 `PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
 XMLStock/Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider
@@ -777,7 +810,7 @@ provider catalog. Новая документированная возможно
 кластеризации. Миграционный guard добавляет документированные `WORDSTAT` и
 `CLUSTERING` существующим активным проверенным credentials без повторного
 ввода секрета.
-XMLStock после успешного внешнего `regionsTree` ответа получает только catalog
+XMLStock после успешных read-only account ответов получает только catalog
 allowlist `SERP_RANK_TRACKING`, `SERP_COLLECTION` и `WORDSTAT`. Ошибки
 авторизации, очереди/лимита и временной недоступности нормализуются без
 сохранения provider body. Подключение показывается в public operational

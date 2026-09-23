@@ -99,6 +99,29 @@ test("projects only safe search system and depth presentation fields", () => {
   );
 });
 
+test("projects Turbo from the immutable XMLStock usage snapshot", () => {
+  const summary = toRankJobSummary(
+    rankJob({
+      provider: "XMLSTOCK",
+      scopeSnapshot: {
+        searchEngine: "YANDEX",
+        searchSource: "LIVE",
+        countryCode: "RU",
+        regionCode: "2",
+        language: "ru",
+        device: "DESKTOP",
+        depth: 100,
+        providerUsage: turboUsage(),
+        workspaceId,
+        projectId,
+        trackingContextId
+      }
+    })
+  );
+
+  assert.equal(summary.yandexLiveMode, "TURBO");
+});
+
 test("projects legacy presentation fields from the immutable manifest", () => {
   const summary = toRankJobSummary(
     rankJob({
@@ -338,6 +361,23 @@ test("persists only bounded audit and scope snapshots in the generic Job", () =>
     searchSource: "LIVE",
     depth: 30
   });
+  assert.equal(
+    (rankJobScopeJson(
+      input,
+      trackingContextId,
+      {
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "2",
+        language: "ru",
+        device: "DESKTOP",
+        depth: 100,
+        providerMappingVersion: "xmlstock-yandex-live@3"
+      },
+      { providerUsage: turboUsage() }
+    ) as Readonly<Record<string, unknown>>).yandexLiveMode,
+    "TURBO"
+  );
   assert.deepEqual(
     rankJobAuthorizationSnapshot(rankJobInputJson(input)),
     {
@@ -479,5 +519,20 @@ function rankRun(): NonNullable<StoredRankJob["rankRun"]> {
     cancelRequestedBy: null,
     createdAt: new Date("2026-07-29T12:00:00.000Z"),
     updatedAt: new Date("2026-07-29T12:00:00.000Z")
+  };
+}
+
+function turboUsage() {
+  return {
+    provider: "XMLSTOCK" as const,
+    product: "YANDEX_TURBO" as const,
+    tariffCode: "OPTIMAL" as const,
+    currency: "RUB" as const,
+    pricePerThousand: "30",
+    unitPriceMicro: "30000",
+    estimatedRequestCount: { minimum: "2", maximum: "2" },
+    estimatedCostMicro: { minimum: "60000", maximum: "60000" },
+    pricedAt: "2026-09-23T00:00:00.000Z",
+    priceSource: "XMLSTOCK_ACCOUNT_API_WITH_PUBLIC_TURBO_SURCHARGE" as const
   };
 }

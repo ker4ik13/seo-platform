@@ -8,6 +8,10 @@
 Это runtime для одного узла. Он не заменяет production backup, мониторинг,
 HA/репликацию и внешний secret manager.
 
+PostgreSQL запускается с `POSTGRES_MAX_CONNECTIONS=250` по умолчанию. Лимит
+покрывает суммарный бюджет изолированных service pools и не позволяет
+connector shards вытеснять API/SEO соединения под нагрузкой.
+
 ## Топология
 
 | Компонент | Адрес | Доступ |
@@ -47,6 +51,18 @@ SEO_PLATFORM_SMOKE_CONFIRM=CREATE_TEST_DATA \
   infrastructure/vps/smoke-runtime.sh
 infrastructure/vps/stop-runtime.sh
 ```
+
+Для визуальной проверки на копии production-данных connector workers можно
+явно не запускать, чтобы незавершённые платные Jobs не ушли провайдерам:
+
+```bash
+SEO_PLATFORM_PAID_CONNECTOR_RUNTIME=false \
+  infrastructure/vps/start-runtime.sh
+```
+
+Credential validation продолжает работать, а rank/frequency/research/AI/
+clustering provider workers не потребляют старые платные очереди. Реальные
+provider smoke-тесты запускаются отдельно с явным bounded budget.
 
 Browser Web Push включается отдельной операторской командой только на
 остановленном runtime. Команда создаёт VAPID, AES-256-GCM и HMAC ключи,

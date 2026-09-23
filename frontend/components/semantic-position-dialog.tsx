@@ -99,6 +99,7 @@ import {
 import type { ProjectSearchCity } from "@seo-platform/contracts";
 import { SemanticModal } from "./semantic-modal";
 import { Icon } from "./icon";
+import { InfoTooltip } from "./info-tooltip";
 import { ProviderLogo } from "./provider-logo";
 import { SearchEngineLogo } from "./search-engine-logo";
 import {
@@ -172,7 +173,9 @@ export function SemanticPositionDialog({
   const [contextDraft, setContextDraft] = useState(() =>
     initialRun ? rankRetryContextDraft(initialRun) : defaultContextDraft(undefined, competitorMode, uiLocale)
   );
-  const [yandexLiveTurbo, setYandexLiveTurbo] = useState(initialRun?.execution.providerMappingVersion === "xmlstock-yandex-live@3");
+  const yandexLiveTurbo = contextDraft.yandexLiveMode === "TURBO";
+  const xmlStockDepthMode =
+    contextDraft.xmlStockDepthMode ?? "STRICT_DEPTH";
   const [saveProjectPosition, setSaveProjectPosition] = useState(initialRun?.execution.saveProjectPosition === true);
   const [additionalTargets, setAdditionalTargets] = useState<readonly RankTarget[]>([]);
   const [, setBatchRevision] = useState(0);
@@ -231,11 +234,12 @@ export function SemanticPositionDialog({
     projectId, workspaceId, base: contextDraft, targets, keywordIds: selections.map(({ id }) => id),
     selectedKeywordCount: selections.filter(({ isTracked }) => contextDraft.includeUntracked || isTracked !== false).length,
     source: selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo,
+    xmlStockDepthMode,
     saveContexts: !competitorMode && (createSavedContext || Boolean(selectedContextId)),
     forceCreateContexts: createSavedContext,
     ...(createSavedContext ? { contextName: contextDraft.name.trim() } : {}),
     locale: uiLocale
-  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, selectedContextId, createSavedContext, uiLocale]);
+  } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, xmlStockDepthMode, selectedContextId, createSavedContext, uiLocale]);
   const batchSignature = useMemo(() => batchInput ? rankTargetBatchSignature(batchInput) : undefined, [batchInput]);
   const currentBatch = recoveringBatch || multiBatch.current?.signature === batchSignature ? multiBatch.current : undefined;
   const batchReady = currentBatch ? rankTargetBatchReady(currentBatch) : false;
@@ -257,7 +261,9 @@ export function SemanticPositionDialog({
     contextDraft.depth,
     contextDraft.searchSource,
     yandexLiveTurbo ? "TURBO" : undefined,
-    competitorMode ? "COMPETITOR_SERP" : "POSITION_TRACKING", uiLocale
+    competitorMode ? "COMPETITOR_SERP" : "POSITION_TRACKING",
+    uiLocale,
+    xmlStockDepthMode
   );
   const platformChargeConfirmation =
     estimate?.status === "READY" &&
@@ -266,6 +272,21 @@ export function SemanticPositionDialog({
     !rankEstimateExpired(estimate.expiresAt, Date.now())
       ? formatPlatformCharge(estimate.platformChargeMicro, uiLocale)
       : undefined;
+  const providerTariff = [
+    selectedSource?.label ?? integrationProviderLabel(provider),
+    providerUsage.tariff
+  ].filter(Boolean).join(" · ");
+  const operationCost =
+    (targets.length > 1 &&
+    selectedSource?.mode === "PLATFORM_PAID" &&
+    batchReady
+      ? batchCharge
+      : undefined) ??
+    platformChargeConfirmation ??
+    [providerUsage.requestRange, providerUsage.costRange]
+      .filter(Boolean)
+      .join(" · ") ??
+    providerUsage.usage;
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
     resolving: boolean,
@@ -310,7 +331,6 @@ export function SemanticPositionDialog({
     const contextId = creating ? "" : selection;
     setAdditionalTargets([]);
     multiBatch.current = undefined;
-    setYandexLiveTurbo(false);
     setSelectedContextId(contextId);
     setCreateSavedContext(creating);
     oneOffContext.current = undefined;
@@ -750,7 +770,12 @@ export function SemanticPositionDialog({
         contextDraft.searchSource,
         yandexLiveMode,
         competitorMode ? "COMPETITOR_SERP" : undefined,
-        competitorMode ? saveProjectPosition : undefined
+        competitorMode ? saveProjectPosition : undefined,
+        provider === "XMLSTOCK" &&
+          contextDraft.searchSource === "LIVE" &&
+          !competitorMode
+          ? xmlStockDepthMode
+          : undefined
       );
       let reusableRun = pendingRun.current;
       if (
@@ -777,7 +802,12 @@ export function SemanticPositionDialog({
           contextDraft.searchSource,
           yandexLiveMode,
           competitorMode ? "COMPETITOR_SERP" : undefined,
-          competitorMode ? saveProjectPosition : undefined
+          competitorMode ? saveProjectPosition : undefined,
+          provider === "XMLSTOCK" &&
+            contextDraft.searchSource === "LIVE" &&
+            !competitorMode
+            ? xmlStockDepthMode
+            : undefined
         );
         const estimatePayload = await browserApiRequest<unknown>(
           rankEstimatesApiPath(projectId),
@@ -790,7 +820,12 @@ export function SemanticPositionDialog({
               contextDraft.searchSource,
               yandexLiveMode,
               competitorMode ? "COMPETITOR_SERP" : undefined,
-              competitorMode ? saveProjectPosition : undefined
+              competitorMode ? saveProjectPosition : undefined,
+              provider === "XMLSTOCK" &&
+                contextDraft.searchSource === "LIVE" &&
+                !competitorMode
+                ? xmlStockDepthMode
+                : undefined
             ),
             idempotencyKey: estimateCommand.current.key
           }
@@ -956,18 +991,18 @@ export function SemanticPositionDialog({
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="semantic" /><div><dt><UiText text="Запросов" /></dt><dd>{scopeCount === undefined && resolvingScope ? <UiText text="Считаем…" /> : displayedKeywordCount}</dd></div></div>
             <div>
               <SearchEngineLogo engine={contextDraft.searchEngine} size="compact" />
               <div><dt><UiText text="Поисковик" /></dt><dd>{contextDraft.searchEngine === "YANDEX" ? <UiText text="Яндекс" /> : "Google"}</dd></div>
             </div>
+            <div><Icon name="semantic" /><div><dt><UiText text="Ключей" /></dt><dd>{scopeCount === undefined && resolvingScope ? <UiText text="Считаем…" /> : displayedKeywordCount}</dd></div></div>
             <div>
               <ProviderLogo provider={provider} size="compact" />
-              <div><dt><UiText text="Провайдер" /></dt><dd>{selectedSource?.label ?? integrationProviderLabel(provider)}</dd></div>
+              <div><dt><UiText text="Провайдер и тариф" /></dt><dd>{providerTariff}</dd></div>
             </div>
-            <div><Icon name="frequency" /><div><dt><UiText text="Расход" /></dt><dd><UiText text={(targets.length > 1 && selectedSource?.mode === "PLATFORM_PAID" && batchReady ? batchCharge : undefined) ?? platformChargeConfirmation ?? providerUsage.usage} /></dd></div></div>
+            <div><Icon name="checkDouble" /><div><dt><UiText text="Баланс" /></dt><dd><UiText text={providerUsage.available} /></dd></div></div>
+            <div><Icon name="frequency" /><div><dt><UiText text="Стоимость съёма" /></dt><dd><UiText text={operationCost || providerUsage.usage} /></dd></div></div>
             {targets.length > 1 && <div><Icon name="positions" /><div><dt><UiText text="Съёмов" /></dt><dd>{targets.length}</dd></div></div>}
-            <div><Icon name="checkDouble" /><div><dt><UiText text="Доступно" /></dt><dd><UiText text={providerUsage.available} /></dd></div></div>
           </dl>
           <div className="semantic-modal-actions">
             <button className="secondary-button" disabled={running} onClick={onClose} type="button"><UiText text="Отмена" /></button>
@@ -1031,11 +1066,16 @@ export function SemanticPositionDialog({
             <PositionRunParameters
               draft={contextDraft}
               competitorMode={competitorMode}
-              onChange={draft => {
-                if (draft.searchEngine !== contextDraft.searchEngine) setAdditionalTargets([]);
-                setContextDraft(createSavedContext
-                  ? { ...draft, name: contextDraft.name }
-                  : draft);
+              onChange={nextDraft => {
+                if (nextDraft.searchEngine !== contextDraft.searchEngine) {
+                  setAdditionalTargets([]);
+                }
+                setContextDraft((current) => ({
+                  ...nextDraft,
+                  yandexLiveMode: current.yandexLiveMode,
+                  xmlStockDepthMode: current.xmlStockDepthMode,
+                  ...(createSavedContext ? { name: current.name } : {})
+                }));
               }}
               targets={targets}
               onTargetsChange={targets => {
@@ -1053,11 +1093,11 @@ export function SemanticPositionDialog({
               hasConnectedSource={connectedRankSources.length > 0}
               lastUsedCredentialId={lastUsedCredentialId}
               yandexLiveTurbo={yandexLiveTurbo}
+              xmlStockDepthMode={xmlStockDepthMode}
               sources={sources}
               onCredentialChange={(nextCredentialId) => {
                 const next = sources.find(({ id }) => id === nextCredentialId);
                 setCredentialId(nextCredentialId);
-                setYandexLiveTurbo(false);
                 setContextDraft((current) => ({
                   ...current,
                   ...(current.searchEngine === "GOOGLE"
@@ -1074,7 +1114,6 @@ export function SemanticPositionDialog({
                 runCommand.current = undefined;
               }}
               onSearchSourceChange={(source) => {
-                setYandexLiveTurbo(false);
                 setContextDraft((current) => ({
                   ...current,
                   searchSource: source
@@ -1086,7 +1125,20 @@ export function SemanticPositionDialog({
               }}
               searchSource={contextDraft.searchSource}
               onYandexLiveTurboChange={(enabled) => {
-                setYandexLiveTurbo(enabled);
+                setContextDraft((current) => ({
+                  ...current,
+                  yandexLiveMode: enabled ? "TURBO" : "STANDARD"
+                }));
+                setEstimate(undefined);
+                pendingRun.current = undefined;
+                estimateCommand.current = undefined;
+                runCommand.current = undefined;
+              }}
+              onXmlStockDepthModeChange={(mode) => {
+                setContextDraft((current) => ({
+                  ...current,
+                  xmlStockDepthMode: mode
+                }));
                 setEstimate(undefined);
                 pendingRun.current = undefined;
                 estimateCommand.current = undefined;
@@ -1283,11 +1335,13 @@ function PositionRunParameters({
   hasConnectedSource,
   lastUsedCredentialId,
   yandexLiveTurbo,
+  xmlStockDepthMode,
   sources,
   onCredentialChange,
   searchSource,
   onSearchSourceChange,
   onYandexLiveTurboChange,
+  onXmlStockDepthModeChange,
   preferredRegions,
   preferredRegionSources,
   saveProjectPosition,
@@ -1303,11 +1357,15 @@ function PositionRunParameters({
   hasConnectedSource: boolean;
   lastUsedCredentialId: string | undefined;
   yandexLiveTurbo: boolean;
+  xmlStockDepthMode: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   sources: readonly ProjectConnectorCredentialOption[];
   onCredentialChange: (credentialId: string) => void;
   searchSource: "SEARCH_API" | "LIVE";
   onSearchSourceChange: (source: "SEARCH_API" | "LIVE") => void;
   onYandexLiveTurboChange: (enabled: boolean) => void;
+  onXmlStockDepthModeChange: (
+    mode: "STRICT_DEPTH" | "STOP_AFTER_FOUND"
+  ) => void;
   preferredRegions: SemanticSearchRegions;
   preferredRegionSources: SemanticRegionSources;
   saveProjectPosition: boolean;
@@ -1401,8 +1459,7 @@ function PositionRunParameters({
               </option>
             </CustomSelect>
           </label>
-          {!competitorMode &&
-            draft.searchEngine === "YANDEX" &&
+          {draft.searchEngine === "YANDEX" &&
             searchSource === "LIVE" &&
             provider === "XMLSTOCK" && (
               <label className="semantic-toggle-line semantic-position-turbo-toggle">
@@ -1414,12 +1471,58 @@ function PositionRunParameters({
                   type="checkbox"
                 />
                 <span>
-                  <strong><UiText text="Turbo режим XMLStock" /></strong>
+                  <strong>
+                    <UiText text="Turbo режим XMLStock" />
+                    <InfoTooltip>
+                      <UiText text="Топ-50 выполняется одним Turbo-запросом, Топ-100 — двумя. Каждая страница сохраняет всю полученную выдачу и конкурентов." />
+                    </InfoTooltip>
+                  </strong>
                   <small>
                     <UiText text="Передаёт tbm=turbo, не применяет обычный лимит потоков XMLStock и получает до 50 результатов за страницу. Для максимальной скорости выберите TOP-50 в кабинете XMLStock. Тарифицируется дороже стандартного Live." /></small>
                 </span>
               </label>
             )}
+          {!competitorMode &&
+            provider === "XMLSTOCK" &&
+            draft.searchSource === "LIVE" && (
+            <fieldset className="semantic-segmented-field semantic-xmlstock-depth-mode">
+              <legend>
+                <UiText text="Обход выдачи XMLStock" />
+                <InfoTooltip>
+                  <UiText text="Ранний режим уменьшает расход, когда сайт найден близко к началу выдачи. Строгий режим всегда сохраняет конкурентов до выбранной глубины." />
+                </InfoTooltip>
+              </legend>
+              <div
+                aria-label={uiText("Обход выдачи XMLStock")}
+                className="semantic-segmented-control"
+                role="radiogroup"
+              >
+                <label className={xmlStockDepthMode === "STOP_AFTER_FOUND" ? "selected" : undefined}>
+                  <input
+                    checked={xmlStockDepthMode === "STOP_AFTER_FOUND"}
+                    name="xmlstock-depth-mode"
+                    onChange={() => onXmlStockDepthModeChange("STOP_AFTER_FOUND")}
+                    type="radio"
+                  />
+                  <span><UiText text="До первой позиции" /></span>
+                </label>
+                <label className={xmlStockDepthMode === "STRICT_DEPTH" ? "selected" : undefined}>
+                  <input
+                    checked={xmlStockDepthMode === "STRICT_DEPTH"}
+                    name="xmlstock-depth-mode"
+                    onChange={() => onXmlStockDepthModeChange("STRICT_DEPTH")}
+                    type="radio"
+                  />
+                  <span><UiText text="Строго выбранный Топ" /></span>
+                </label>
+              </div>
+              <small>
+                <UiText text={xmlStockDepthMode === "STOP_AFTER_FOUND"
+                  ? "XMLStock прекращает обход после страницы, где впервые найден сайт. Стоимость зависит от найденной позиции."
+                  : "XMLStock всегда получает все страницы до выбранной глубины. Стоимость известна заранее."} />
+              </small>
+            </fieldset>
+          )}
           <div className="semantic-provider-field">
             <div className="semantic-provider-field-heading">
               <h4><UiText text="Источник данных" /></h4>

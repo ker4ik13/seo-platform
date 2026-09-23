@@ -24,6 +24,7 @@ import {
   FolderPlus,
   Folders,
   Globe2,
+  GripVertical,
   History,
   Inbox,
   Info,
@@ -122,7 +123,8 @@ export type IconName =
   | "mobile"
   | "play"
   | "pause"
-  | "refresh";
+  | "refresh"
+  | "gripVertical";
 
 const icons: Readonly<Record<IconName, LucideIcon>> = {
   dashboard: LayoutDashboard,
@@ -184,7 +186,8 @@ const icons: Readonly<Record<IconName, LucideIcon>> = {
   mobile: Smartphone,
   play: Play,
   pause: Pause,
-  refresh: RefreshCw
+  refresh: RefreshCw,
+  gripVertical: GripVertical
 };
 
 export function Icon({

@@ -63,6 +63,28 @@ test("accepts a Yandex Top-50 execution without weakening the sealed shape", () 
   assert.equal(input.execution.depth, 50);
 });
 
+test("accepts the saved XMLStock depth mode inside the execution object", () => {
+  const input = internalSealRankManifestInput({
+    ...command(),
+    provider: "XMLSTOCK",
+    providerPolicyVersion: "manual-xmlstock-serp@2.0.0",
+    execution: {
+      ...command().execution,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      language: "ru",
+      depth: 100,
+      xmlStockDepthMode: "STRICT_DEPTH",
+      providerMappingVersion: "xmlstock-yandex-live@3"
+    }
+  });
+
+  assert.equal(input.execution.xmlStockDepthMode, "STRICT_DEPTH");
+  assert.equal(input.execution.providerMappingVersion, "xmlstock-yandex-live@3");
+  assert.equal(input.providerPolicyVersion, "manual-xmlstock-serp@2.0.0");
+});
+
 test("accepts the explicit competitor position projection policy", () => {
   const input = internalSealRankManifestInput({
     ...command(),

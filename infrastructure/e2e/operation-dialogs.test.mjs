@@ -27,6 +27,21 @@ test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty
   await command("POST", `projects/${project.id}/keywords/bulk`, { items: ["сохранить настройки", "новый проект"].map(text => ({ text, language: "ru", priority: 0, isFavorite: false, isTracked: true, tagNames: [] })), duplicatePolicy: "SKIP_EXISTING" });
   const context = await browser.newContext({ storageState: await api.storageState() });
   await context.addCookies([{ name: "seo_workspace", value: workspace.id, url: base, secure: true, sameSite: "Lax" }, { name: "seo_project", value: project.id, url: base, secure: true, sameSite: "Lax" }]);
+  const credentialId = randomUUID(), bindingId = randomUUID(), now = new Date().toISOString();
+  await context.route(`**/app/api/workspaces/${workspace.id}/integrations/routing`, route => route.fulfill({ json: { data: {
+    bindings: [{
+      id: bindingId, workspaceId: workspace.id, capability: "SERP_RANK_TRACKING", enabled: true,
+      routes: [{ id: randomUUID(), bindingId, workspaceId: workspace.id, position: 0, credentialId, provider: "XMLSTOCK", credentialMode: "BYOK_API_KEY", availability: "READY", createdAt: now, updatedAt: now }],
+      fallbackPolicy: { mode: "NONE" }, version: 1, createdBy: fixture?.userId ?? randomUUID(), updatedBy: fixture?.userId ?? randomUUID(), createdAt: now, updatedAt: now
+    }],
+    credentialOptions: [{
+      id: credentialId, workspaceId: workspace.id, provider: "XMLSTOCK", label: "Visual XMLStock", mode: "BYOK_API_KEY", status: "ACTIVE",
+      capabilities: ["SERP_RANK_TRACKING"],
+      quota: { status: "AVAILABLE", unit: "XMLSTOCK_REQUESTS", remaining: 10_000, balance: { amount: "250", currency: "RUB" }, xmlStockPricing: { tariffCode: "OPTIMAL", currency: "RUB", priceUnit: "PER_1000_REQUESTS", pricesPerThousand: { YANDEX_SEARCH_API: "27", YANDEX_LIVE: "20", YANDEX_TURBO: "30", GOOGLE_LIVE: "20", WORDSTAT: "23" }, observedAt: now } }
+    }],
+    credentialOptionsTruncated: false,
+    access: { canUpdateBindings: true, canManageFallback: true }
+  } } }));
   page = await context.newPage(); const report = [], errors = [], launches = [];
   page.on("pageerror", error => errors.push({ name: error.name, message: error.message.slice(0, 200) }));
   page.on("request", req => { if (req.method() === "POST" && /\/(frequency-collections|ai-answer-collections|clustering-runs|rank-runs|keyword-research-runs)$/u.test(new URL(req.url()).pathname)) launches.push(new URL(req.url()).pathname); });
@@ -44,8 +59,23 @@ test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty
         await modal.waitFor(); await page.waitForLoadState("networkidle");
         await page.waitForFunction(() => {
           const dialog = document.querySelector("dialog[open].semantic-modal");
-          return dialog && !dialog.querySelector(".semantic-dialog-loading") && !/Loading keywords|Загружаем запросы|Считаем…/u.test(dialog.querySelector(".semantic-modal-footer")?.textContent ?? "");
+          return dialog && !dialog.querySelector(".semantic-dialog-loading") && !/Loading keywords|Загружаем запросы|Считаем(?:…|\.\.\.)/u.test(dialog.querySelector(".semantic-modal-footer")?.textContent ?? "");
         }, undefined, { timeout: 20_000 });
+        if (locale === "ru" && width === 1440 && entry.id === "positions") {
+          const stopAfterFound = modal
+            .locator(".semantic-xmlstock-depth-mode label")
+            .filter({ hasText: "До первой позиции" });
+          const top100 = modal
+            .locator(".semantic-depth-field label")
+            .filter({ hasText: "Топ-100" });
+          await stopAfterFound.click();
+          await top100.click();
+          assert.equal(
+            await stopAfterFound.locator("input").isChecked(),
+            true,
+            "a rapid depth click must not restore STRICT_DEPTH"
+          );
+        }
         const bounds = await modal.boundingBox();
         assert.ok(bounds && bounds.x >= -1 && bounds.x + bounds.width <= width + 1 && bounds.y >= -1 && bounds.y + bounds.height <= 951, `${entry.id}: modal escapes viewport ${width}`);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${entry.id}: document overflow`);

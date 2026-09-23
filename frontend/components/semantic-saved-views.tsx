@@ -13,7 +13,10 @@ import type {
   SemanticSavedView,
   SemanticViewConfig
 } from "./semantic-view-types";
-import { isInternalSemanticViewName } from "./semantic-view-types";
+import {
+  isInternalSemanticViewName,
+  isSemanticPersonalViewName
+} from "./semantic-view-types";
 import { UiText, useUiLocale } from "./ui-locale";
 
 
@@ -185,7 +188,11 @@ export function SemanticSavedViews({
                 >
                   <strong>{view.name}</strong>
                   <small>
-                    {view.scope === "PRIVATE" ? <UiText text="Личное" /> : <UiText text="Общее" />}
+                    {isSemanticPersonalViewName(view.name)
+                      ? <UiText text="По умолчанию" />
+                      : view.scope === "PRIVATE"
+                        ? <UiText text="Личное" />
+                        : <UiText text="Общее" />}
                   </small>
                   {activeView?.id === view.id && isActiveViewDirty && (
                     <small className="semantic-view-dirty"><UiText text="Изменения не сохранены" /></small>

@@ -214,7 +214,7 @@ test("VPS auth-email keeps SMTP in one optional isolated worker", async () => {
   assert.match(stopSource, /attempt <= 20/u);
 });
 
-test("VPS rank and connector runtimes run multiple bounded processes", async () => {
+test("VPS uses one rank coordinator and multiple bounded connector processes", async () => {
   const [source, startSource] = await Promise.all([
     readVpsFile("run-component.sh"),
     readVpsFile("start-runtime.sh")
@@ -229,13 +229,19 @@ test("VPS rank and connector runtimes run multiple bounded processes", async () 
   );
   assert.match(rankBlock, /RANK_PREPARATION_CONCURRENCY=5/u);
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_DISPATCH_SECONDS=5/u);
-  assert.match(connectorBlock, /DATABASE_POOL_MAX=12/u);
+  assert.match(connectorBlock, /DATABASE_POOL_MAX=23/u);
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_CONCURRENCY=1/u);
   assert.match(connectorBlock, /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000/u);
-  assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=4/u);
+  assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=16/u);
+  assert.match(
+    connectorBlock,
+    /CONNECTOR_PAID_RUNTIME_ENABLED="\$\{SEO_PLATFORM_PAID_CONNECTOR_RUNTIME:-true\}"/u
+  );
+  assert.match(connectorBlock, /CONNECTOR_RUNTIME_SHARD_INDEX="\$connector_runtime_shard_index"/u);
+  assert.match(connectorBlock, /CONNECTOR_RUNTIME_SHARD_COUNT=3/u);
   assert.match(connectorBlock, /FREQUENCY_COLLECTION_CONCURRENCY=4/u);
   assert.match(connectorBlock, /KEYWORD_RESEARCH_CONCURRENCY=1/u);
-  assert.match(startSource, /rank-worker-2/u);
+  assert.doesNotMatch(startSource, /start_window rank-worker-2/u);
   assert.match(startSource, /connector-worker-2/u);
   assert.match(startSource, /connector-worker-3/u);
 });
@@ -345,6 +351,10 @@ test("runtime bounds logs, suppresses database payloads and checks disk plus pub
   assert.match(component, /log_error_verbosity=terse/u);
   assert.match(component, /log_parameter_max_length_on_error=0/u);
   assert.match(component, /log_min_error_statement=panic/u);
+  assert.match(
+    component,
+    /max_connections="\$\{POSTGRES_MAX_CONNECTIONS:-250\}"/u
+  );
   assert.match(status, /service=runtime-disk/u);
   assert.match(status, /"\$SEO_PLATFORM_PUBLIC_URL\/ru"/u);
   assert.match(status, /exit "\$runtime_status"/u);

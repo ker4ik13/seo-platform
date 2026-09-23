@@ -45,7 +45,10 @@ export function internalCreateRankEstimateInput(
         : []),
       ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
       ...(Object.hasOwn(raw, "searchSource") ? ["searchSource"] : []),
-      ...(Object.hasOwn(raw, "yandexLiveMode") ? ["yandexLiveMode"] : [])
+      ...(Object.hasOwn(raw, "yandexLiveMode") ? ["yandexLiveMode"] : []),
+      ...(Object.hasOwn(raw, "xmlStockDepthMode")
+        ? ["xmlStockDepthMode"]
+        : [])
     ],
     "rankEstimate"
   );
@@ -112,11 +115,20 @@ export function internalCreateRankEstimateInput(
   const yandexLiveMode = input.yandexLiveMode === undefined
     ? undefined
     : rankYandexLiveMode(input.yandexLiveMode);
+  const xmlStockDepthMode = input.xmlStockDepthMode === undefined
+    ? undefined
+    : rankXmlStockDepthMode(input.xmlStockDepthMode);
   if (
     yandexLiveMode === "TURBO" &&
     (provider !== "XMLSTOCK" || searchSource !== "LIVE")
   ) {
     invalid("yandexLiveMode");
+  }
+  if (
+    xmlStockDepthMode !== undefined &&
+    (provider !== "XMLSTOCK" || purpose === "COMPETITOR_SERP")
+  ) {
+    invalid("xmlStockDepthMode");
   }
   return {
     workspaceId,
@@ -136,6 +148,7 @@ export function internalCreateRankEstimateInput(
       : { credentialId: uuid(input.credentialId, "credentialId") }),
     ...(searchSource === undefined ? {} : { searchSource }),
     ...(yandexLiveMode === undefined ? {} : { yandexLiveMode }),
+    ...(xmlStockDepthMode === undefined ? {} : { xmlStockDepthMode }),
     project: {
       id: snapshotProjectId,
       workspaceId: projectWorkspaceId,
@@ -161,6 +174,15 @@ function rankPurpose(
 ): "POSITION_TRACKING" | "COMPETITOR_SERP" {
   if (value !== "POSITION_TRACKING" && value !== "COMPETITOR_SERP") {
     invalid("purpose");
+  }
+  return value;
+}
+
+function rankXmlStockDepthMode(
+  value: unknown
+): "STRICT_DEPTH" | "STOP_AFTER_FOUND" {
+  if (value !== "STRICT_DEPTH" && value !== "STOP_AFTER_FOUND") {
+    invalid("xmlStockDepthMode");
   }
   return value;
 }

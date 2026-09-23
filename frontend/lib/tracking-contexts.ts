@@ -33,6 +33,8 @@ export interface TrackingContextDraft {
   readonly domainMatchValue: string;
   readonly safeSearch: boolean;
   readonly searchSource: TrackingSearchSource;
+  readonly yandexLiveMode: "STANDARD" | "TURBO";
+  readonly xmlStockDepthMode: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   readonly includeUntracked: boolean;
   readonly scopeMode: TrackingContextScopeMode;
   readonly groupIds: readonly string[];
@@ -76,6 +78,8 @@ export function emptyTrackingContextDraft(): TrackingContextDraft {
     domainMatchValue: "",
     safeSearch: false,
     searchSource: "LIVE",
+    yandexLiveMode: "STANDARD",
+    xmlStockDepthMode: "STRICT_DEPTH",
     includeUntracked: false,
     scopeMode: "KEYWORDS",
     groupIds: [],
@@ -119,6 +123,9 @@ export function trackingContextDraft(
         : "",
     safeSearch: context.configuration.safeSearch,
     searchSource: context.launchProfile?.searchSource ?? "LIVE",
+    yandexLiveMode: context.launchProfile?.yandexLiveMode ?? "STANDARD",
+    xmlStockDepthMode:
+      context.launchProfile?.xmlStockDepthMode ?? "STRICT_DEPTH",
     includeUntracked: context.launchProfile?.includeUntracked ?? false,
     scopeMode: context.launchProfile?.scope.mode ?? "ALL",
     groupIds: context.launchProfile?.scope.groupIds ?? [],
@@ -389,6 +396,10 @@ function trackingContextMutationInput(
     },
     launchProfile: {
       searchSource: draft.searchSource,
+      ...(draft.yandexLiveMode === "TURBO"
+        ? { yandexLiveMode: "TURBO" as const }
+        : {}),
+      xmlStockDepthMode: draft.xmlStockDepthMode,
       includeUntracked: draft.includeUntracked,
       scope: {
         mode: draft.scopeMode,

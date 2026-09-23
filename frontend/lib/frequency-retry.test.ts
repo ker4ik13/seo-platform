@@ -40,3 +40,43 @@ test("a changed operation or repeated cursor invalidates the retry draft", async
     await assert.rejects(() => prepareFrequencyRetry("project", "job", new AbortController().signal), error => error instanceof BrowserApiError && error.code === "RETRY_SCOPE_CHANGED");
   } finally { globalThis.fetch = original; }
 });
+
+test("a manually cancelled frequency run continues its cancelled keyword rows", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) =>
+    String(url).includes("keyword-groups")
+      ? Response.json({ data: [] })
+      : Response.json({
+          data: {
+            collection: { ...collection, status: "CANCELLED" },
+            rows: [
+              {
+                keywordId: "pending",
+                keyword: "не успел собраться",
+                keywordVersion: 4,
+                keywordAvailable: true,
+                status: "CANCELLED"
+              },
+              {
+                keywordId: "finished",
+                keyword: "уже собран",
+                keywordVersion: 2,
+                status: "COMPLETED"
+              }
+            ],
+            page: { hasNext: false }
+          }
+        });
+  try {
+    const draft = await prepareFrequencyRetry(
+      "project",
+      "job",
+      new AbortController().signal
+    );
+    assert.deepEqual(draft.selections, [
+      { id: "pending", version: 4, label: "не успел собраться" }
+    ]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

@@ -13,7 +13,6 @@ import {
 import { xmlStockPricingMetadata } from "./xmlstock-pricing.js";
 
 const XMLSTOCK_ACCOUNT_URL = "https://xmlstock.com/api/";
-const XMLSTOCK_WORDSTAT_URL = "https://xmlstock.com/wordstat/json/";
 
 export class XmlStockCredentialValidationConnector
   implements IntegrationCredentialValidationConnector
@@ -32,13 +31,8 @@ export class XmlStockCredentialValidationConnector
     const accountUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
     const userInfoUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
     const statusInfoUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
-    const regionUrl = authenticatedUrl(XMLSTOCK_WORDSTAT_URL, secret);
     userInfoUrl.searchParams.set("info", "user");
     statusInfoUrl.searchParams.set("info", "status");
-    // XMLStock selects the response shape through `pagetype`. The legacy
-    // `regionsTree=1` query is ignored by the current API and can therefore
-    // make a valid credential look like an invalid provider response.
-    regionUrl.searchParams.set("pagetype", "regionsTree");
     try {
       const account = await providerJsonRequest(
         accountUrl,
@@ -75,35 +69,10 @@ export class XmlStockCredentialValidationConnector
         }
       }
 
-      // Wordstat availability is useful capability metadata, but it must not
-      // hide a valid account balance when the auxiliary region catalogue is
-      // temporarily unavailable.
-      try {
-        const regions = await providerJsonRequest(
-          regionUrl,
-          { method: "GET", headers: { Accept: "application/json" } },
-          timeoutMs,
-          this.fetcher
-        );
-        const regionResult = xmlStockValidationResult(
-          regions.status,
-          regions.value
-        );
-        return regionResult.ok
-          ? {
-              ok: true,
-              providerMeta: {
-                ...providerMeta,
-                ...regionResult.providerMeta
-              }
-            }
-          : { ok: true, providerMeta };
-      } catch (error) {
-        if (error instanceof ProviderTransportError) {
-          return { ok: true, providerMeta };
-        }
-        throw error;
-      }
+      // Account, info=user and info=status are read-only account endpoints.
+      // Validation must never issue a search/Wordstat request that can consume
+      // provider balance merely to keep a credential fresh.
+      return { ok: true, providerMeta };
     } catch (error) {
       if (error instanceof ProviderTransportError) return unavailable();
       throw error;

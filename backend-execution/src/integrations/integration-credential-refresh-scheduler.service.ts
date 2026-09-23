@@ -4,6 +4,7 @@ import { IntegrationCredentialConnectorRegistry } from "./integration-credential
 import { IntegrationCredentialExecutionBrokerService } from "./integration-credential-execution-broker.service.js";
 
 const AUTO_REFRESH_PROVIDERS: readonly IntegrationProvider[] = [
+  "XMLSTOCK",
   "ARSENKIN",
   "KEYS_SO"
 ];
@@ -29,10 +30,12 @@ export class IntegrationCredentialRefreshSchedulerService {
     credentialId: string,
     provider: IntegrationProvider
   ): Promise<void> {
-    if (provider === "XMLSTOCK") return;
     await this.broker.scheduleValidationRefreshes({
       credentialIds: [credentialId],
-      connectorVersions: this.connectorVersions(),
+      staleBefore: new Date(Date.now() - REFRESH_INTERVAL_MS),
+      connectorVersions: {
+        [provider]: this.connectors.version(provider)
+      },
       reason: "PROVIDER_OPERATION",
       limit: 1
     });

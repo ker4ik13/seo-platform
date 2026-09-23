@@ -390,8 +390,10 @@ export class RankRunService {
       throw rankJobNotFound("XMLStock rank diagnostics not found");
     }
     const summary = toRankJobSummary(stored);
-    const product = rankRuntimeProduct(summary);
-    const policy = XMLSTOCK_HTTP_QUOTA_POLICIES[product];
+    const product = rankRuntimeProduct(summary, stored.scopeSnapshot);
+    const policy = XMLSTOCK_HTTP_QUOTA_POLICIES[
+      product === "YANDEX_TURBO" ? "YANDEX_LIVE" : product
+    ];
     const [clock, totalsByStatus, rows] = await Promise.all([
       databaseClock(this.prisma, "Unable to read rank diagnostics clock"),
       this.prisma.$queryRaw<readonly RankRuntimeStatusCountRow[]>(
@@ -1012,8 +1014,13 @@ function rankResultScopeItem(
 }
 
 function rankRuntimeProduct(
-  summary: RankJobSummary
+  summary: RankJobSummary,
+  scopeSnapshot: unknown
 ): RankRuntimeDiagnosticProduct {
+  const usage = storedXmlStockOperationUsage(
+    storedRecord(scopeSnapshot)?.providerUsage
+  );
+  if (usage?.product === "YANDEX_TURBO") return "YANDEX_TURBO";
   if (summary.searchEngine === "GOOGLE") return "GOOGLE_LIVE";
   return summary.searchSource === "SEARCH_API"
     ? "YANDEX_SEARCH_API"
@@ -1152,7 +1159,7 @@ function rankRuntimePageProgress(
     };
   }
   let completedPages = 0;
-  let resultsPerPage = 10;
+  let resultsPerPage = product === "YANDEX_TURBO" ? 50 : 10;
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     const progress = value as Readonly<Record<string, unknown>>;
     if (
@@ -1161,7 +1168,10 @@ function rankRuntimePageProgress(
     ) {
       completedPages = Number(progress.nextPage);
     }
-    if ([10, 20, 30, 40, 50].includes(Number(progress.resultsPerPage))) {
+    if (
+      product !== "YANDEX_TURBO" &&
+      [10, 20, 30, 40, 50].includes(Number(progress.resultsPerPage))
+    ) {
       resultsPerPage = Number(progress.resultsPerPage);
     }
   }

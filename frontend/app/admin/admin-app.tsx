@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type ReactNode
 } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   AdminNpdReceiptDetail,
   AdminNpdReceiptListPage,
@@ -33,15 +34,54 @@ import { UiText, useUiLocale } from "../../components/ui-locale";
 
 type Screen = "overview" | "workspaces" | "projects" | "operations" | "receipts" | "staff" | "refunds" | "providers" | "usage";
 
+const adminScreens: readonly Screen[] = [
+  "overview",
+  "workspaces",
+  "projects",
+  "operations",
+  "receipts",
+  "staff",
+  "refunds",
+  "providers",
+  "usage"
+];
+
+function adminScreen(value: string | null): Screen {
+  return adminScreens.includes(value as Screen) ? value as Screen : "overview";
+}
+
 export function AdminApp() {
   const { t: uiText } = useUiLocale();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [profile, setProfile] = useState<PlatformAdminProfile>();
   const [authState, setAuthState] = useState<
     "loading" | "login" | "mfa" | "forbidden" | "ready"
   >("loading");
   const [challengeToken, setChallengeToken] = useState("");
-  const [screen, setScreen] = useState<Screen>("overview");
+  const [screen, setScreen] = useState<Screen>(() =>
+    adminScreen(searchParams.get("screen"))
+  );
   const [error, setError] = useState<string>();
+
+  const navigateScreen = useCallback((nextScreen: Screen) => {
+    setScreen(nextScreen);
+    const next = new URLSearchParams(window.location.search);
+    if (nextScreen === "overview") next.delete("screen");
+    else next.set("screen", nextScreen);
+    if (nextScreen !== "operations") {
+      next.delete("status");
+      next.delete("type");
+      next.delete("operation");
+    }
+    router.push(`/admin${next.size > 0 ? `?${next.toString()}` : ""}`, {
+      scroll: false
+    });
+  }, [router]);
+
+  useEffect(() => {
+    setScreen(adminScreen(searchParams.get("screen")));
+  }, [searchParams]);
 
   const loadProfile = useCallback(async () => {
     setError(undefined);
@@ -53,7 +93,7 @@ export function AdminApp() {
           ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS"].includes(role)
         )
       ) {
-        setScreen("staff");
+        navigateScreen("staff");
       }
       setAuthState("ready");
       return;
@@ -69,7 +109,7 @@ export function AdminApp() {
     }
     setAuthState("login");
     setError(response.message);
-  }, []);
+  }, [navigateScreen]);
 
   useEffect(() => {
     void loadProfile();
@@ -141,11 +181,11 @@ export function AdminApp() {
           <div><strong><UiText text="SEOньорита" /></strong><small>Operations</small></div>
         </a>
         <nav aria-label={uiText("Разделы администрирования")}>
-          {canViewWorkspaces && <button className={screen === "overview" ? "active" : undefined} onClick={() => setScreen("overview")} type="button"><i>00</i> <UiText text="Обзор" before=" " /></button>}
+          {canViewWorkspaces && <button className={screen === "overview" ? "active" : undefined} onClick={() => navigateScreen("overview")} type="button"><i>00</i> <UiText text="Обзор" before=" " /></button>}
           {canViewWorkspaces && (
             <button
               className={screen === "workspaces" ? "active" : undefined}
-              onClick={() => setScreen("workspaces")}
+              onClick={() => navigateScreen("workspaces")}
               type="button"
             >
               <i>01</i> <UiText text="Рабочие области" before=" " /></button>
@@ -153,7 +193,7 @@ export function AdminApp() {
           {canViewPlatformDirectory && (
             <button
               className={screen === "projects" ? "active" : undefined}
-              onClick={() => setScreen("projects")}
+              onClick={() => navigateScreen("projects")}
               type="button"
             >
               <i>02</i> <UiText text="Проекты" before=" " /></button>
@@ -161,7 +201,7 @@ export function AdminApp() {
           {canViewPlatformDirectory && (
             <button
               className={screen === "operations" ? "active" : undefined}
-              onClick={() => setScreen("operations")}
+              onClick={() => navigateScreen("operations")}
               type="button"
             >
               <i>03</i> <UiText text="Операции" before=" " /></button>
@@ -169,23 +209,23 @@ export function AdminApp() {
           {canViewReceipts && (
             <button
               className={screen === "receipts" ? "active" : undefined}
-              onClick={() => setScreen("receipts")}
+              onClick={() => navigateScreen("receipts")}
               type="button"
             >
               <i>04</i> <UiText text="Чеки НПД" before=" " /></button>
           )}
-          {canViewRefunds && <button className={screen === "refunds" ? "active" : undefined} onClick={() => setScreen("refunds")} type="button"><i>05</i> <UiText text="Возвраты" before=" " /></button>}
+          {canViewRefunds && <button className={screen === "refunds" ? "active" : undefined} onClick={() => navigateScreen("refunds")} type="button"><i>05</i> <UiText text="Возвраты" before=" " /></button>}
           {canManageStaff && (
             <button
               className={screen === "staff" ? "active" : undefined}
-              onClick={() => setScreen("staff")}
+              onClick={() => navigateScreen("staff")}
               type="button"
             >
               <i>05</i> Platform roles
             </button>
           )}
-          {canManageBilling && <button className={screen === "usage" ? "active" : undefined} onClick={() => setScreen("usage")} type="button"><i>07</i> <UiText text="Расходы на проверке" /></button>}
-          {canViewProviders && <button className={screen === "providers" ? "active" : undefined} onClick={() => setScreen("providers")} type="button"><i>06</i> <UiText text="Провайдеры" before=" " /></button>}
+          {canManageBilling && <button className={screen === "usage" ? "active" : undefined} onClick={() => navigateScreen("usage")} type="button"><i>07</i> <UiText text="Расходы на проверке" /></button>}
+          {canViewProviders && <button className={screen === "providers" ? "active" : undefined} onClick={() => navigateScreen("providers")} type="button"><i>06</i> <UiText text="Провайдеры" before=" " /></button>}
         </nav>
         <div className="operator">
           <span>{initials(profile.displayName)}</span>
@@ -204,7 +244,7 @@ export function AdminApp() {
               <select
                 aria-label={uiText("Раздел администрирования")}
                 className="mobile-navigation"
-                onChange={(event) => setScreen(event.target.value as Screen)}
+                onChange={(event) => navigateScreen(event.target.value as Screen)}
                 value={screen}
               >
                 {canViewWorkspaces && <option value="overview"><UiText text="Обзор" /></option>}
@@ -220,7 +260,7 @@ export function AdminApp() {
             )}
           </div>
           <div className="topbar-actions">
-            <span className="system-state"><i /> MFA · recent auth</span>
+            <span className="system-state"><i /> MFA · cookie session</span>
             <button className="ghost" onClick={() => void logout()} type="button">
               <UiText text="Выйти" /></button>
           </div>
@@ -231,7 +271,7 @@ export function AdminApp() {
             title={uiText("Нет доступных разделов")}
           />
         ) : screen === "overview" && canViewWorkspaces ? (
-          <Overview onNavigate={setScreen} />
+          <Overview onNavigate={navigateScreen} />
         ) : screen === "usage" && canManageBilling ? (
           <UsageReview />
         ) : screen === "workspaces" && canViewWorkspaces ? (

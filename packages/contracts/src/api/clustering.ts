@@ -43,6 +43,7 @@ export type ClusteringRunStatus = (typeof clusteringRunStatuses)[number];
 
 export interface CreateClusteringRunInput {
   readonly items: readonly SemanticKeywordBulkSelection[];
+  readonly credentialId?: string;
   readonly searchEngine: ClusteringSearchEngine;
   readonly regionCode: string;
   readonly method: ClusteringMethod;

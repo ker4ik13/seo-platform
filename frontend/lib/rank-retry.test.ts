@@ -46,3 +46,50 @@ test("uncertain, empty, cross-project and changing rank scopes cannot turn into 
     await assert.rejects(() => prepareRankRetry("project", "job", new AbortController().signal), error => error instanceof BrowserApiError && error.code === "RETRY_SCOPE_CHANGED");
   } finally { globalThis.fetch = original; }
 });
+
+test("a manually cancelled rank run continues only its still-pending keywords", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) =>
+    String(url).includes("keyword-groups")
+      ? Response.json({ data: [] })
+      : Response.json({
+          data: {
+            jobId: "job",
+            job: {
+              ...job,
+              status: "CANCELLED",
+              result: undefined
+            },
+            execution,
+            contextName: "Москва · ПК",
+            counts: { foundCount: 1, notFoundCount: 0 },
+            rows: [
+              {
+                keywordId: "pending",
+                keyword: "не успел сняться",
+                keywordVersion: 3,
+                state: "PENDING"
+              },
+              {
+                keywordId: "finished",
+                keyword: "уже снят",
+                keywordVersion: 2,
+                state: "FOUND"
+              }
+            ],
+            page: { hasNext: false }
+          }
+        });
+  try {
+    const draft = await prepareRankRetry(
+      "project",
+      "job",
+      new AbortController().signal
+    );
+    assert.deepEqual(draft.selections, [
+      { id: "pending", version: 3, label: "не успел сняться" }
+    ]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

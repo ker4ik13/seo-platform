@@ -169,8 +169,8 @@ function competitorOptionsBody(value: unknown): SemanticCompetitorExportOptions 
 function positionHistoryOptionsBody(value: unknown): SemanticPositionHistoryExportOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new BadRequestException("Invalid history options");
   const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !["observedFrom", "observedBefore", "searchEngines", "dimensionKeys", "storedBefore"].includes(key)) || !Array.isArray(input.searchEngines) || input.searchEngines.some(engine => typeof engine !== "string") || (input.dimensionKeys !== undefined && (!Array.isArray(input.dimensionKeys) || input.dimensionKeys.some(key => typeof key !== "string")))) throw new BadRequestException("Invalid history options");
-  return positionHistoryOptions({ observedFrom: input.observedFrom, observedBefore: input.observedBefore, searchEngines: input.searchEngines.join(","), ...(Array.isArray(input.dimensionKeys) ? { dimensionKeys: input.dimensionKeys.join(",") } : {}), ...(input.storedBefore === undefined ? {} : { storedBefore: input.storedBefore }) });
+  if (Object.keys(input).some(key => !["observedFrom", "observedBefore", "searchEngines", "dimensionKeys", "storedBefore", "includeAllKeywords"].includes(key)) || !Array.isArray(input.searchEngines) || input.searchEngines.some(engine => typeof engine !== "string") || (input.dimensionKeys !== undefined && (!Array.isArray(input.dimensionKeys) || input.dimensionKeys.some(key => typeof key !== "string"))) || (input.includeAllKeywords !== undefined && typeof input.includeAllKeywords !== "boolean")) throw new BadRequestException("Invalid history options");
+  return positionHistoryOptions({ observedFrom: input.observedFrom, observedBefore: input.observedBefore, searchEngines: input.searchEngines.join(","), ...(Array.isArray(input.dimensionKeys) ? { dimensionKeys: input.dimensionKeys.join(",") } : {}), ...(input.storedBefore === undefined ? {} : { storedBefore: input.storedBefore }), ...(input.includeAllKeywords === true ? { includeAllKeywords: "true" } : {}) });
 }
 
 function positionHistoryOptions(
@@ -199,12 +199,20 @@ function positionHistoryOptions(
   ) {
     throw new BadRequestException("Invalid position-history search engines");
   }
+  if (
+    query.includeAllKeywords !== undefined &&
+    query.includeAllKeywords !== "true" &&
+    query.includeAllKeywords !== "false"
+  ) {
+    throw new BadRequestException("Invalid include-all-keywords option");
+  }
   return {
     observedFrom,
     observedBefore,
     searchEngines: searchEngines as SemanticPositionHistoryExportOptions["searchEngines"],
     ...(query.dimensionKeys === undefined ? {} : { dimensionKeys: historyDimensionKeys(query.dimensionKeys) }),
-    ...(query.storedBefore === undefined ? {} : { storedBefore: canonicalInstant(query.storedBefore, "storedBefore") })
+    ...(query.storedBefore === undefined ? {} : { storedBefore: canonicalInstant(query.storedBefore, "storedBefore") }),
+    ...(query.includeAllKeywords === "true" ? { includeAllKeywords: true } : {})
   };
 }
 

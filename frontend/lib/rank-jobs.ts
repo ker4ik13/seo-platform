@@ -463,12 +463,15 @@ export function parseRankJobSummary(
 
 export function rankSearchSystemLabel(
   searchEngine: "GOOGLE" | "YANDEX",
-  searchSource?: RankSearchSource
+  searchSource?: RankSearchSource,
+  yandexLiveMode?: "TURBO"
 ): string {
   if (searchEngine === "GOOGLE") {
     return searchSource === "LIVE" ? "Google Live" : "Google";
   }
-  if (searchSource === "LIVE") return "Яндекс Live";
+  if (searchSource === "LIVE") {
+    return yandexLiveMode === "TURBO" ? "Яндекс Turbo" : "Яндекс Live";
+  }
   if (searchSource === "SEARCH_API") return "Яндекс XML";
   return "Яндекс";
 }
@@ -480,6 +483,7 @@ function parseRankExecutionPresentation(
   readonly saveProjectPosition?: boolean;
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
+  readonly yandexLiveMode?: "TURBO";
   readonly depth?: 10 | 20 | 30 | 50 | 100;
 } | null {
   const purpose =
@@ -507,6 +511,12 @@ function parseRankExecutionPresentation(
       : input.searchSource === "SEARCH_API" || input.searchSource === "LIVE"
         ? input.searchSource
         : null;
+  const yandexLiveMode =
+    input.yandexLiveMode === undefined
+      ? undefined
+      : input.yandexLiveMode === "TURBO"
+        ? input.yandexLiveMode
+        : null;
   const depth =
     input.depth === undefined
       ? undefined
@@ -518,9 +528,12 @@ function parseRankExecutionPresentation(
     saveProjectPosition === null ||
     searchEngine === null ||
     searchSource === null ||
+    yandexLiveMode === null ||
     depth === null ||
     (searchSource !== undefined && searchEngine === undefined) ||
-    (searchEngine === "GOOGLE" && searchSource === "SEARCH_API")
+    (searchEngine === "GOOGLE" && searchSource === "SEARCH_API") ||
+    (yandexLiveMode !== undefined &&
+      (searchEngine !== "YANDEX" || searchSource !== "LIVE"))
   ) {
     return null;
   }
@@ -529,6 +542,7 @@ function parseRankExecutionPresentation(
     ...(saveProjectPosition === undefined ? {} : { saveProjectPosition }),
     ...(searchEngine ? { searchEngine } : {}),
     ...(searchSource ? { searchSource } : {}),
+    ...(yandexLiveMode ? { yandexLiveMode } : {}),
     ...(depth ? { depth } : {})
   };
 }

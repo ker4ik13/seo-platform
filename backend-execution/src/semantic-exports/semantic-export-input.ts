@@ -167,7 +167,13 @@ function positionHistoryOptions(
 ): NonNullable<InternalCreateSemanticExportInput["positionHistory"]> {
   const input = exactRecord(
     value,
-    new Set(["observedFrom", "observedBefore", "searchEngines", "dimensionKeys"]),
+    new Set([
+      "observedFrom",
+      "observedBefore",
+      "searchEngines",
+      "dimensionKeys",
+      "includeAllKeywords"
+    ]),
     "positionHistory"
   );
   const observedFrom = canonicalInstant(input.observedFrom, "positionHistory.observedFrom");
@@ -209,11 +215,18 @@ function positionHistoryOptions(
     }
     dimensionKeys = dimensions.map(({ key }) => key);
   }
+  if (
+    input.includeAllKeywords !== undefined &&
+    typeof input.includeAllKeywords !== "boolean"
+  ) {
+    invalid("positionHistory.includeAllKeywords");
+  }
   return {
     observedFrom,
     observedBefore,
     searchEngines,
-    ...(dimensionKeys ? { dimensionKeys } : {})
+    ...(dimensionKeys ? { dimensionKeys } : {}),
+    ...(input.includeAllKeywords === true ? { includeAllKeywords: true } : {})
   };
 }
 

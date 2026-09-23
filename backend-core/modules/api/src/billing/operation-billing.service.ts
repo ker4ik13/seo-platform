@@ -25,7 +25,20 @@ export class OperationBillingService {
 
   public async estimate(context: InternalContext, command: OperationEstimateCommand): Promise<OperationEstimate> {
     await this.entitlement.semanticCapacity(context.tenant.workspaceId);
-    const route = await this.jobs.operationRoute(context, command.kind, command.kind === "KEYWORD_RESEARCH" ? command.command.source : undefined);
+    const route = await this.jobs.operationRoute(
+      context,
+      command.kind,
+      command.kind === "KEYWORD_RESEARCH" ? command.command.source : undefined,
+      command.kind === "FREQUENCY_COLLECTION"
+        ? command.command.provider
+        : undefined,
+      command.kind === "FREQUENCY_COLLECTION"
+        ? command.command.credentialId
+        : command.kind === "AI_ANSWER_COLLECTION" ||
+            command.kind === "CLUSTERING_RUN"
+          ? command.command.credentialId
+        : undefined
+    );
     const quantity = command.kind === "KEYWORD_RESEARCH" ? command.command.source === "KEYS_SO" ? 1 : command.command.queries.length : command.command.items.length;
     const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
     if (route.credentialMode === "BYOK_API_KEY") return { workspaceId: context.tenant.workspaceId, projectId: context.tenant.projectId!, id: null, kind: command.kind, provider: route.provider, credentialMode: route.credentialMode, currency: "RUB", maximumChargeMinor: 0, quantity, affordable: true, expiresAt: expiresAt.toISOString(), priceBookVersion: null };

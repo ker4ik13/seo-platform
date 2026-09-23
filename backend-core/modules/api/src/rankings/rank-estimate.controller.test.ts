@@ -109,7 +109,12 @@ test("builds a trusted project/access snapshot without browser authority", async
   );
 
   const response = await controller.create(
-    { trackingContextId: contextId.toUpperCase() },
+    {
+      trackingContextId: contextId.toUpperCase(),
+      provider: "XMLSTOCK",
+      searchSource: "LIVE",
+      xmlStockDepthMode: "STOP_AFTER_FOUND"
+    },
     request({
       headers: { "idempotency-key": "rank-estimate-001" },
       workspaceStatus: "READ_ONLY",
@@ -133,6 +138,9 @@ test("builds a trusted project/access snapshot without browser authority", async
   });
   assert.deepEqual(captured?.[1], {
     trackingContextId: contextId,
+    provider: "XMLSTOCK",
+    searchSource: "LIVE",
+    xmlStockDepthMode: "STOP_AFTER_FOUND",
     workspaceId,
     projectId,
     actorId,

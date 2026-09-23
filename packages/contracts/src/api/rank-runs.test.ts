@@ -411,6 +411,30 @@ test("public rank summary rejects contradictory lifecycle projections", () => {
   }
 });
 
+test("public rank summary keeps Turbo only for XMLStock Yandex Live", () => {
+  const summary = redactRankJobSummary({
+    id: ids.jobId,
+    workspaceId: ids.workspaceId,
+    projectId: ids.projectId,
+    trackingContextId: ids.trackingContextId,
+    type: "MANUAL_RANK_CHECK",
+    provider: "XMLSTOCK",
+    searchEngine: "YANDEX",
+    searchSource: "LIVE",
+    yandexLiveMode: "TURBO",
+    operation: "POSITIONS",
+    credentialMode: "BYOK_API_KEY",
+    status: "PREPARING",
+    stage: "PREPARING_SCOPE",
+    progress: { current: "0", total: "1", unit: "KEYWORD" },
+    platformChargeMicro: "0",
+    billingCurrency: "RUB",
+    createdAt: "2026-09-23T00:00:00.000Z"
+  });
+
+  assert.equal(summary.yandexLiveMode, "TURBO");
+});
+
 test("internal create carries trusted project and access snapshots without execution secrets", () => {
   const input = {
     estimateId: ids.estimateId,

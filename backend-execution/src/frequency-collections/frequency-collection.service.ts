@@ -66,8 +66,8 @@ export class FrequencyCollectionService {
       input.projectId,
       "WORDSTAT",
       input.actorId,
-      input.billing?.provider,
-      input.billing?.credentialId,
+      input.billing?.provider ?? input.provider,
+      input.billing?.credentialId ?? input.credentialId,
       {
         xmlStock: {
           product: "WORDSTAT",
@@ -237,7 +237,12 @@ export class FrequencyCollectionService {
         inputSnapshot: true,
         progressCurrent: true,
         items: {
-          where: { ...(cursor === undefined ? {} : { sequence: { gt: cursor } }), ...(onlyFailed ? { status: "FAILED_FINAL" as const } : {}) },
+          where: {
+            ...(cursor === undefined ? {} : { sequence: { gt: cursor } }),
+            ...(onlyFailed
+              ? { status: { in: ["FAILED_FINAL", "CANCELLED"] as const } }
+              : {})
+          },
           orderBy: { sequence: "asc" },
           take: limit + 1,
           select: {
@@ -346,19 +351,26 @@ export class FrequencyCollectionService {
       if (!current) throw new NotFoundException("Frequency collection not found");
       if (current.version !== input.version) versionConflict();
       if (current.credentialMode === "PLATFORM_PAID") throw new ConflictException({ error: { code: "PAID_RETRY_REQUIRES_ESTIMATE", message: "Create a new collection for failed keywords and confirm its price" } });
-      if (current.status === "ACTION_REQUIRED") {
+      const connectorNotReady =
+        current.status === "ACTION_REQUIRED" &&
+        record(current.errorSummary)?.code === "CONNECTOR_NOT_READY";
+      if (current.status === "ACTION_REQUIRED" && !connectorNotReady) {
         throw new ConflictException(
           "Frequency collection requires manual provider reconciliation"
         );
       }
       if (
+        !connectorNotReady &&
         current.status !== "FAILED_FINAL" &&
         current.status !== "PARTIALLY_COMPLETED"
       ) {
         throw new ConflictException("Frequency collection has no retryable failed items");
       }
       const failed = await transaction.jobItem.updateMany({
-        where: { jobId, status: "FAILED_FINAL" },
+        where: {
+          jobId,
+          status: connectorNotReady ? "PENDING" : "FAILED_FINAL"
+        },
         data: {
           status: "PENDING",
           attempt: 0,
@@ -491,6 +503,8 @@ function requestHash(input: InternalCreateFrequencyCollectionInput): string {
         types: input.types,
         regionCode: input.regionCode,
         device: input.device,
+        provider: input.provider ?? null,
+        credentialId: input.credentialId ?? null,
         mode: input.mode ?? "FREQUENCY",
         seasonality: input.seasonality ?? null
       }),

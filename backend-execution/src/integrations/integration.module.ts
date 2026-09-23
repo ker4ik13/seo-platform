@@ -17,6 +17,7 @@ import { ProjectTransferResetController } from "./project-transfer-reset.control
 import { ProjectTransferResetService } from "./project-transfer-reset.service.js";
 import { WorkspaceConnectorRoutingController } from "./workspace-connector-routing.controller.js";
 import { WorkspaceConnectorRoutingService } from "./workspace-connector-routing.service.js";
+import { WorkspaceCredentialRouteProvisioningService } from "./workspace-credential-route-provisioning.service.js";
 
 @Module({
   controllers: [
@@ -39,6 +40,7 @@ import { WorkspaceConnectorRoutingService } from "./workspace-connector-routing.
     IntegrationCredentialValidationService,
     ProjectConnectorBindingService,
     ProjectTransferResetService,
+    WorkspaceCredentialRouteProvisioningService,
     WorkspaceConnectorRoutingService
   ],
   exports: [IntegrationCredentialApiGuard, WorkspaceConnectorRoutingService]

@@ -32,6 +32,7 @@ export function internalCreateClusteringRunInput(
     "correlationId",
     "jobCapacity",
     "items",
+    "credentialId",
     "searchEngine",
     "regionCode",
     "method",
@@ -84,6 +85,9 @@ export function internalCreateClusteringRunInput(
       concurrentJobs: integer(capacity.concurrentJobs, "jobCapacity.concurrentJobs", 1)
     },
     items,
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     searchEngine: member(input.searchEngine, clusteringSearchEngines, "searchEngine"),
     regionCode: pattern(input.regionCode, "regionCode", REGION_PATTERN),
     method: member(input.method, clusteringMethods, "method"),

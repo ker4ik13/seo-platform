@@ -71,6 +71,34 @@ test("preserves the non-reusable execution marker", () => {
   assert.equal(input.isReusable, false);
 });
 
+test("keeps saved XMLStock launch modes on the trusted boundary", () => {
+  const input = internalCreateTrackingContextInput({
+    workspaceId,
+    projectId,
+    actorId,
+    idempotencyKey: "xmlstock-context-1",
+    name: "Москва · Десктоп",
+    configuration: {
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      language: "ru",
+      device: "DESKTOP",
+      depth: 100,
+      domainMatchRule: { mode: "EXACT_HOST" },
+      safeSearch: false
+    },
+    launchProfile: {
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO",
+      xmlStockDepthMode: "STRICT_DEPTH",
+      includeUntracked: false,
+      scope: { mode: "ALL", groupIds: [] }
+    }
+  });
+  assert.equal(input.launchProfile?.yandexLiveMode, "TURBO");
+  assert.equal(input.launchProfile?.xmlStockDepthMode, "STRICT_DEPTH");
+});
+
 test("materialization accepts only trusted scope and capacity", () => {
   const entitlement = {
     planCode: "PRO",

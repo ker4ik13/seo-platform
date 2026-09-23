@@ -105,7 +105,7 @@ export interface SemanticSavedViewConfig {
   readonly schemaVersion: SemanticSavedViewSchemaVersion;
   readonly filters: SemanticSavedViewFilters;
   readonly sort: SemanticKeywordSort;
-  /** Exact dimension used by RANK_POSITION_* and RANK_CHECKED_AT_* sorts. */
+  /** Exact dimension used by regular and AI RANK_* sorts. */
   readonly rankSortDimensionKey?: string;
   /** Visible columns in their table order. */
   readonly columns: readonly SemanticSavedViewColumnKey[];

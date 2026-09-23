@@ -397,3 +397,6 @@ h1, h2, p { margin: 0; }
 .admin-usage-form label { display:grid; gap:7px; font-size:13px; line-height:1.5; }
 .admin-usage-form textarea,.admin-usage-form input:not([type=radio]):not([type=checkbox]) { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--border,#d9deea); border-radius:8px; background:var(--surface,#fff); color:inherit; }
 @media(max-width:760px) { .admin-usage-ticket { grid-template-columns:1fr; gap:16px; }.admin-usage-totals { width:100%; }.admin-usage-form .primary { width:100%; } }
+@scope (.admin-root) {
+  .admin-detail-loading { position: fixed; z-index: 45; right: 24px; bottom: 24px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: 0 12px 30px rgb(0 0 0 / 24%); color: var(--muted); font-size: 12px; }
+}

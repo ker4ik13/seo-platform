@@ -112,6 +112,9 @@ export interface AppConfig {
   };
   readonly connectorRuntime: {
     readonly dispatchIntervalMs: number;
+    readonly paidExecutionEnabled: boolean;
+    readonly shardIndex: number;
+    readonly shardCount: number;
     readonly rankConcurrency: number;
     readonly frequencyConcurrency: number;
     readonly keywordResearchConcurrency: number;
@@ -426,6 +429,24 @@ function boundedInteger(
     throw new Error(
       `${key} must be between ${minimum} and ${maximum}`
     );
+  }
+  return parsed;
+}
+
+function boundedNonNegativeInteger(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  minimum: number,
+  maximum: number
+): number {
+  const parsed = Number(value ?? fallback);
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < minimum ||
+    parsed > maximum
+  ) {
+    throw new Error(`${key} must be between ${minimum} and ${maximum}`);
   }
   return parsed;
 }
@@ -1441,6 +1462,20 @@ export function loadAppConfig(
     1,
     64
   );
+  const connectorRuntimeShardCount = boundedInteger(
+    env.CONNECTOR_RUNTIME_SHARD_COUNT,
+    1,
+    "CONNECTOR_RUNTIME_SHARD_COUNT",
+    1,
+    16
+  );
+  const connectorRuntimeShardIndex = boundedNonNegativeInteger(
+    env.CONNECTOR_RUNTIME_SHARD_INDEX,
+    0,
+    "CONNECTOR_RUNTIME_SHARD_INDEX",
+    0,
+    connectorRuntimeShardCount - 1
+  );
   const frequencyCollectionConcurrency = boundedInteger(
     env.FREQUENCY_COLLECTION_CONCURRENCY,
     4,
@@ -1737,6 +1772,12 @@ export function loadAppConfig(
         250,
         60_000
       ),
+      paidExecutionEnabled: bool(
+        env.CONNECTOR_PAID_RUNTIME_ENABLED,
+        true
+      ),
+      shardIndex: connectorRuntimeShardIndex,
+      shardCount: connectorRuntimeShardCount,
       rankConcurrency: rankConnectorConcurrency,
       frequencyConcurrency: frequencyCollectionConcurrency,
       keywordResearchConcurrency

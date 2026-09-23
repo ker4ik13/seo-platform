@@ -20,13 +20,37 @@ export class PaidOperationController {
   @Post("route") @UseGuards(IntegrationCredentialApiGuard)
   public async route(@Body() body: unknown, @Req() request: FastifyRequest) {
     const context = scope(request);
-    const input = record(body, ["kind", "source"]);
+    const input = record(body, ["kind", "source", "provider", "credentialId"]);
     if (!paidOperationKinds.includes(input.kind as PaidOperationKind)) throw invalid();
     const kind = input.kind as PaidOperationKind;
     const capability: IntegrationCapability = kind === "FREQUENCY_COLLECTION" ? "WORDSTAT" : kind === "AI_ANSWER_COLLECTION" ? "SERP_COLLECTION" : kind === "CLUSTERING_RUN" ? "CLUSTERING" : input.source === "KEYS_SO" ? "COMPETITOR_RESEARCH" : "KEYWORD_RESEARCH";
     if (kind === "KEYWORD_RESEARCH" && !["KEYS_SO", "ARSENKIN_WORDSTAT", "XMLSTOCK_WORDSTAT"].includes(String(input.source))) throw invalid();
-    const provider: IntegrationProvider | undefined = kind === "FREQUENCY_COLLECTION" ? undefined : kind === "KEYWORD_RESEARCH" ? input.source === "KEYS_SO" ? "KEYS_SO" : input.source === "XMLSTOCK_WORDSTAT" ? "XMLSTOCK" : "ARSENKIN" : "ARSENKIN";
-    const route = await this.routing.resolve(context.workspaceId, context.projectId, capability, context.actorId, provider);
+    if (
+      kind !== "FREQUENCY_COLLECTION" && input.provider !== undefined
+    ) throw invalid();
+    if (
+      kind === "KEYWORD_RESEARCH" && input.credentialId !== undefined
+    ) throw invalid();
+    if (
+      kind === "FREQUENCY_COLLECTION" &&
+      (input.provider === undefined) !== (input.credentialId === undefined)
+    ) throw invalid();
+    const provider: IntegrationProvider | undefined = kind === "FREQUENCY_COLLECTION"
+      ? providerValue(input.provider)
+      : kind === "KEYWORD_RESEARCH"
+        ? input.source === "KEYS_SO" ? "KEYS_SO" : input.source === "XMLSTOCK_WORDSTAT" ? "XMLSTOCK" : "ARSENKIN"
+        : "ARSENKIN";
+    const credentialId = input.credentialId !== undefined
+      ? internalUuid(String(input.credentialId), "credentialId")
+      : undefined;
+    const route = await this.routing.resolve(
+      context.workspaceId,
+      context.projectId,
+      capability,
+      context.actorId,
+      provider,
+      credentialId
+    );
     if (!["ARSENKIN", "XMLSTOCK", "KEYS_SO"].includes(route.provider) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(route.credentialMode)) throw invalid();
     const data: InternalOperationRoute = { ...context, provider: route.provider as InternalOperationRoute["provider"], credentialMode: route.credentialMode as InternalOperationRoute["credentialMode"], credentialId: route.credentialId, bindingId: route.bindingId, bindingVersion: route.bindingVersion, routeId: route.routeId };
     return { data, meta: { requestId: request.id } };
@@ -124,6 +148,7 @@ export class PaidOperationController {
   }
 }
 function scope(request: FastifyRequest) { const context = internalCommandContext(request.headers); return { workspaceId: internalUuid(context.workspaceId, "workspaceId"), projectId: internalUuid(context.projectId, "projectId"), actorId: internalUuid(context.actorId, "actorId") }; }
+function providerValue(value: unknown): IntegrationProvider | undefined { if (value === undefined) return undefined; if (value === "XMLSTOCK" || value === "ARSENKIN") return value; throw invalid(); }
 function usageScope(body: unknown) { const input = record(body, ["quoteId", "jobId", "commandHash"]); if (typeof input.commandHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.commandHash)) throw invalid(); return { quoteId: internalUuid(String(input.quoteId), "quoteId"), jobId: internalUuid(String(input.jobId), "jobId"), commandHash: input.commandHash }; }
 function assertJob(job: { workspaceId: string; projectId: string | null; actorId: string | null; billingQuoteId: string | null; billingCommandHash: Uint8Array | null }, context: ReturnType<typeof scope>, input: ReturnType<typeof usageScope>) { if (job.workspaceId !== context.workspaceId || job.projectId !== context.projectId || job.actorId !== context.actorId || job.billingQuoteId !== input.quoteId || !job.billingCommandHash || Buffer.from(job.billingCommandHash).toString("hex") !== input.commandHash) throw new ConflictException("Paid operation scope does not match"); }
 function record(value: unknown, fields: readonly string[]): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw invalid(); return value as Record<string, unknown>; }

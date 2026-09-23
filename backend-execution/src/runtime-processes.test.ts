@@ -38,7 +38,6 @@ test("execution roles receive only their scoped database and secrets", () => {
     "system-worker",
     "import-worker",
     "rank-worker",
-    "rank-worker-2",
     "crawl-worker",
     "connector-worker",
     "connector-worker-2",
@@ -64,6 +63,9 @@ test("execution roles receive only their scoped database and secrets", () => {
   );
   assert.equal(rank?.INTEGRATION_CREDENTIAL_KEYS, undefined);
   const connector = definitions.find(({ name }) => name === "connector-worker")?.environment;
+  const secondaryConnector = definitions.find(
+    ({ name }) => name === "connector-worker-2"
+  )?.environment;
   assert.equal(connector?.DATABASE_URL, "postgresql://connector");
   assert.equal(connector?.INTEGRATION_CREDENTIAL_KEYS, "secret-keyring");
   assert.equal(
@@ -71,6 +73,12 @@ test("execution roles receive only their scoped database and secrets", () => {
     "billing-settlement-secret"
   );
   assert.equal(connector?.CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS, undefined);
+  assert.equal(connector?.CONNECTOR_MAINTENANCE_ENABLED, "true");
+  assert.equal(secondaryConnector?.CONNECTOR_MAINTENANCE_ENABLED, "false");
+  assert.equal(connector?.CONNECTOR_RUNTIME_SHARD_INDEX, "0");
+  assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_INDEX, "1");
+  assert.equal(connector?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
+  assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
   assert.equal(
     connector?.RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS,
     undefined

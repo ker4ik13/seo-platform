@@ -47,7 +47,11 @@ export const semanticRankDimensionSorts = [
   "RANK_POSITION_ASC",
   "RANK_POSITION_DESC",
   "RANK_CHECKED_AT_ASC",
-  "RANK_CHECKED_AT_DESC"
+  "RANK_CHECKED_AT_DESC",
+  "RANK_AI_POSITION_ASC",
+  "RANK_AI_POSITION_DESC",
+  "RANK_AI_CHECKED_AT_ASC",
+  "RANK_AI_CHECKED_AT_DESC"
 ] as const;
 
 export type SemanticRankDimensionSort =

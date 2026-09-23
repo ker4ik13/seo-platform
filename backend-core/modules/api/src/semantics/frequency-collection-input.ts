@@ -1,5 +1,6 @@
 import {
   frequencyCollectionKeywordLimit,
+  frequencyCollectionProviders,
   frequencyCollectionModes,
   parseFrequencySeasonalityRequest,
   semanticFrequencyDevices,
@@ -30,6 +31,8 @@ export function createFrequencyCollectionInput(
     "types",
     "regionCode",
     "device",
+    "provider",
+    "credentialId",
     "mode",
     "seasonality"
   ]);
@@ -39,6 +42,12 @@ export function createFrequencyCollectionInput(
     input.items.length > frequencyCollectionKeywordLimit
   ) {
     invalid("items");
+  }
+  if (
+    (input.provider === undefined) !==
+    (input.credentialId === undefined)
+  ) {
+    invalid("credentialId");
   }
   const items = input.items.map((value, index) => {
     const item = record(value, ["id", "version"]);
@@ -93,11 +102,37 @@ export function createFrequencyCollectionInput(
     types,
     regionCode: input.regionCode,
     device: input.device as SemanticFrequencyDevice,
+    ...(input.provider === undefined
+      ? {}
+      : {
+          provider: member(
+            input.provider,
+            frequencyCollectionProviders,
+            "provider"
+          )
+        }),
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     ...(input.mode === undefined
       ? {}
       : { mode: mode as "FREQUENCY" | "SEASONALITY" }),
     ...(seasonality ? { seasonality } : {})
   };
+}
+
+function member<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values,
+  field: string
+): Values[number] {
+  if (typeof value !== "string" || !values.includes(value)) invalid(field);
+  return value as Values[number];
+}
+
+function uuid(value: unknown, field: string): string {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) invalid(field);
+  return value.toLowerCase();
 }
 
 export function frequencyIdempotencyKey(value: unknown): string {

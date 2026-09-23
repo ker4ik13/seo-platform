@@ -99,7 +99,13 @@ test("background worker builds the position history report in two bounded passes
       scope: "SELECTED",
       locale: "ru",
       columns: ["query"],
-      filters: { isTracked: true },
+      filters: {
+        isTracked: true,
+        rankDimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+        rankState: "FOUND",
+        rankPositionMin: 1,
+        rankPositionMax: 10
+      },
       keywordIds: [
         "01900000-0000-7000-8000-000000000011",
         "01900000-0000-7000-8000-000000000012",
@@ -108,7 +114,8 @@ test("background worker builds the position history report in two bounded passes
       positionHistory: {
         observedFrom: "2026-08-01T00:00:00.000Z",
         observedBefore: "2026-08-20T00:00:00.000Z",
-        searchEngines: ["YANDEX"]
+        searchEngines: ["YANDEX"],
+        includeAllKeywords: true
       }
     }
   } as Job;
@@ -135,6 +142,13 @@ test("background worker builds the position history report in two bounded passes
       snapshots: [
         { searchEngine: "YANDEX", observedDate: "2026-08-18", found: false }
       ]
+    },
+    {
+      keywordId: "01900000-0000-7000-8000-000000000013",
+      text: "ещё не снимался",
+      keywordLanguage: "ru",
+      createdAt: "2026-07-03T00:00:00.000Z",
+      snapshots: []
     }
   ];
   const seoData = {
@@ -155,10 +169,20 @@ test("background worker builds the position history report in two bounded passes
     },
     listExportPositionHistory: async (
       _context: unknown,
-      query: Readonly<{ isTracked?: boolean }>
+      query: Readonly<{
+        isTracked?: boolean;
+        rankDimensionKey?: string;
+        rankState?: string;
+        rankPositionMin?: number;
+        rankPositionMax?: number;
+      }>
     ) => {
       reads += 1;
-      assert.equal(query.isTracked, true);
+      assert.equal(query.isTracked, undefined);
+      assert.equal(query.rankDimensionKey, undefined);
+      assert.equal(query.rankState, undefined);
+      assert.equal(query.rankPositionMin, undefined);
+      assert.equal(query.rankPositionMax, undefined);
       return {
         data: historyRows,
         page: { hasNext: false, totalApprox: historyRows.length },
@@ -174,11 +198,12 @@ test("background worker builds the position history report in two bounded passes
     const result = await worker.process(stored.id, worker.workerId());
 
     assert.equal(result.outcome, "COMPLETED");
-    assert.equal(result.rowCount, 2);
+    assert.equal(result.rowCount, 3);
     assert.equal(reads, 2);
     const archive = unzipSync(storage.artifact());
     const sheet = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
     assert.match(sheet, /<t xml:space="preserve">первый запрос<\/t>/u);
+    assert.match(sheet, /<t xml:space="preserve">ещё не снимался<\/t>/u);
     assert.match(sheet, /<f>COUNTIFS/u);
   } finally {
     globalThis.fetch = originalFetch;

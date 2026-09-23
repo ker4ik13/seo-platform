@@ -102,6 +102,27 @@ export function createRankEstimateInput(
       "Turbo is available only for an explicit XMLSTOCK Yandex Live estimate"
     );
   }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+    input.xmlStockDepthMode !== "STOP_AFTER_FOUND"
+  ) {
+    throw validationError(
+      "xmlStockDepthMode",
+      "INVALID_ENUM",
+      "Must be STRICT_DEPTH or STOP_AFTER_FOUND"
+    );
+  }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    (input.provider !== "XMLSTOCK" || input.purpose === "COMPETITOR_SERP")
+  ) {
+    throw validationError(
+      "xmlStockDepthMode",
+      "INVALID_COMBINATION",
+      "Available only for XMLSTOCK position tracking"
+    );
+  }
   return {
     trackingContextId: input.trackingContextId.toLowerCase(),
     ...(input.purpose ? { purpose: input.purpose } : {}),
@@ -115,6 +136,9 @@ export function createRankEstimateInput(
     ...(input.searchSource ? { searchSource: input.searchSource } : {}),
     ...(input.yandexLiveMode === "TURBO"
       ? { yandexLiveMode: "TURBO" as const }
+      : {}),
+    ...(input.xmlStockDepthMode
+      ? { xmlStockDepthMode: input.xmlStockDepthMode }
       : {})
   };
 }
@@ -143,14 +167,15 @@ function exactRecord(
         key !== "provider" &&
         key !== "credentialId" &&
         key !== "searchSource" &&
-        key !== "yandexLiveMode"
+        key !== "yandexLiveMode" &&
+        key !== "xmlStockDepthMode"
     ) ||
     !Object.hasOwn(input, "trackingContextId")
   ) {
     throw validationError(
       "$",
       "UNKNOWN_FIELD",
-      "Only trackingContextId, purpose, saveProjectPosition, provider, credentialId, searchSource and yandexLiveMode are allowed"
+      "Only trackingContextId, purpose, saveProjectPosition, provider, credentialId, searchSource, yandexLiveMode and xmlStockDepthMode are allowed"
     );
   }
   return input;

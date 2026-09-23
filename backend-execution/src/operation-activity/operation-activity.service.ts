@@ -264,6 +264,17 @@ export class OperationActivityService {
     };
   }
 
+  public async adminDetail(
+    operationId: string
+  ): Promise<InternalAdminOperationSummary> {
+    const job = await this.prisma.job.findUnique({
+      where: { id: operationId },
+      select: ADMIN_JOB_SELECT
+    });
+    if (!job) throw new NotFoundException("Operation not found");
+    return adminOperationSummary(job);
+  }
+
   public async overview(): Promise<InternalExecutionOverview> {
     const now = Date.now();
     const [active, queued, attention, failed24h, completed30d, groups] = await Promise.all([

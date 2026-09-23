@@ -18,7 +18,10 @@ import {
   integrationCredentialModeLabel,
   integrationProviderLabel
 } from "../lib/integration-presentation";
-import { hasEmptyXmlStockBalance } from "../lib/integration-credential-validation";
+import {
+  hasEmptyXmlStockBalance,
+  supportsAutomaticCredentialValidation
+} from "../lib/integration-credential-validation";
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
 import { ProviderLogo } from "./provider-logo";
 import { SemanticModal } from "./semantic-modal";
@@ -104,6 +107,7 @@ export function IntegrationSettings({
   const [editFieldErrors, setEditFieldErrors] =
     useState<CredentialFieldErrors>({});
   const [reload, setReload] = useState(0);
+  const [routingRevision, setRoutingRevision] = useState(0);
   const createIdempotencyKey = useRef<string | undefined>(undefined);
   const credentialOperationsRef = useRef<Record<
     string,
@@ -201,6 +205,43 @@ export function IntegrationSettings({
     return refreshed;
   }
 
+  async function scheduleAutomaticValidation(
+    credential: Credential
+  ): Promise<Readonly<{ credential: Credential; notice: string }>> {
+    const validationMode = catalog.find(
+      ({ provider }) => provider === credential.provider
+    )?.credentialValidationMode;
+    if (
+      !canTest ||
+      !supportsAutomaticCredentialValidation(validationMode)
+    ) {
+      return { credential, notice: "" };
+    }
+    try {
+      const activeValidation = await browserApiRequest<
+        NonNullable<Credential["activeValidation"]>
+      >(
+        `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/credentials/${encodeURIComponent(credential.id)}/validations`,
+        {
+          method: "POST",
+          idempotencyKey:
+            `automatic-credential-validation:${credential.id}:` +
+            globalThis.crypto.randomUUID()
+        }
+      );
+      return {
+        credential: { ...credential, activeValidation },
+        notice: " Проверка запущена автоматически."
+      };
+    } catch {
+      return {
+        credential,
+        notice:
+          " Автоматическую проверку запустить не удалось — она повторится в фоне."
+      };
+    }
+  }
+
   async function createCredential(): Promise<void> {
     const validationErrors = validateCreateCredential(
       draft,
@@ -219,7 +260,7 @@ export function IntegrationSettings({
     setSuccess(undefined);
     setCreateFieldErrors({});
     try {
-      const credential = await browserApiRequest<Credential>(
+      let credential = await browserApiRequest<Credential>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/credentials`,
         {
           method: "POST",
@@ -236,13 +277,16 @@ export function IntegrationSettings({
           }
         }
       );
+      const validation = await scheduleAutomaticValidation(credential);
+      credential = validation.credential;
       setCredentials((current) => [credential, ...current]);
+      setRoutingRevision((value) => value + 1);
       createIdempotencyKey.current = undefined;
       setDraft({ ...EMPTY_DRAFT, provider: draft.provider });
       setShowCreate(false);
       setCreateFieldErrors({});
       setSuccess(
-        `${integrationProviderLabel(credential.provider)} сохранён в зашифрованном vault`
+        `${integrationProviderLabel(credential.provider)} сохранён в зашифрованном vault.${validation.notice}`
       );
     } catch (requestError) {
       const fieldErrors = integrationFieldErrors(requestError);
@@ -275,32 +319,15 @@ export function IntegrationSettings({
           body: { provider }
         }
       );
-      let validationWarning = "";
-      if (canTest) {
-        try {
-          const activeValidation = await browserApiRequest<
-            NonNullable<Credential["activeValidation"]>
-          >(
-            `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/credentials/${encodeURIComponent(credential.id)}/validations`,
-            {
-              method: "POST",
-              idempotencyKey:
-                `platform-credential-validation:${credential.id}:` +
-                globalThis.crypto.randomUUID()
-            }
-          );
-          credential = { ...credential, activeValidation };
-        } catch {
-          validationWarning =
-            " Автоматическую проверку запустить не удалось — используйте кнопку проверки в списке.";
-        }
-      }
+      const validation = await scheduleAutomaticValidation(credential);
+      credential = validation.credential;
       setCredentials((current) => [
         credential,
         ...current.filter((item) => item.id !== credential.id)
       ]);
+      setRoutingRevision((value) => value + 1);
       setSuccess(
-        `${integrationProviderLabel(provider)} подключён для оплаты внутренними токенами.${validationWarning}`
+        `${integrationProviderLabel(provider)} подключён для оплаты внутренними токенами.${validation.notice}`
       );
     } catch (requestError) {
       setListError(integrationOperationError(requestError));
@@ -351,7 +378,7 @@ export function IntegrationSettings({
     setSuccess(undefined);
     setEditFieldErrors({});
     try {
-      const updated = await browserApiRequest<Credential>(
+      let updated = await browserApiRequest<Credential>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/credentials/${encodeURIComponent(editing.id)}`,
         {
           method: "PATCH",
@@ -365,11 +392,20 @@ export function IntegrationSettings({
           }
         }
       );
+      const secretChanged = Boolean(
+        editApiKey.trim() || editAccountIdentifier.trim()
+      );
+      const validation = secretChanged
+        ? await scheduleAutomaticValidation(updated)
+        : { credential: updated, notice: "" };
+      updated = validation.credential;
       setCredentials((current) =>
         current.map((item) => (item.id === updated.id ? updated : item))
       );
       closeEdit();
-      setSuccess("Подключение обновлено");
+      setSuccess(
+        `Подключение обновлено.${validation.notice}`
+      );
     } catch (requestError) {
       const fieldErrors = integrationFieldErrors(requestError);
       setEditFieldErrors(fieldErrors);
@@ -412,6 +448,7 @@ export function IntegrationSettings({
       setCredentials((current) =>
         current.filter((item) => item.id !== credential.id)
       );
+      setRoutingRevision((value) => value + 1);
       if (editing?.id === credential.id) closeEdit();
       closeRevoke();
       setSuccess("Подключение отключено, секрет перезаписан в активном vault");
@@ -857,7 +894,10 @@ export function IntegrationSettings({
           </div>
         )}
       </section>
-      <WorkspaceIntegrationRouting workspaceId={workspaceId} />
+      <WorkspaceIntegrationRouting
+        revision={routingRevision}
+        workspaceId={workspaceId}
+      />
 
       <section className="integration-catalog-section" aria-label={uiText("Каталог сервисов")}>
         <header>

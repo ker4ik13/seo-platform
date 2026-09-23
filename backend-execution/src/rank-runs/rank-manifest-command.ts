@@ -268,6 +268,9 @@ function copyExecution(
     ...(value.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: value.saveProjectPosition }),
+    ...(value.xmlStockDepthMode === undefined
+      ? {}
+      : { xmlStockDepthMode: value.xmlStockDepthMode }),
     searchEngine: value.searchEngine,
     countryCode: value.countryCode,
     ...(value.regionCode ? { regionCode: value.regionCode } : {}),

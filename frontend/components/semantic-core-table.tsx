@@ -1,9 +1,11 @@
 "use client";
 import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 import { semanticCursorPageIssue } from "../lib/semantic-cursor-page";
+import { moveSemanticColumn } from "../lib/semantic-column-order";
 
 import { CustomSelect } from "./custom-select";
 import { ChoiceToggle } from "./choice-toggle";
+import { InfoTooltip } from "./info-tooltip";
 import { KeywordTagPicker } from "./keyword-tag-picker";
 import { LanguageSelect } from "./locale-selects";
 import { uniqueKeywordTags } from "../lib/keyword-tags";
@@ -195,6 +197,8 @@ import {
   semanticFolderSortViewName,
   semanticFolderSortViewPrefix,
   semanticProjectTableViewName,
+  semanticPersonalViewName,
+  isSemanticPersonalViewName,
   semanticViewConfigForCurrentSchema,
   type SemanticKeywordIntent,
   type SemanticKeywordSort,
@@ -491,7 +495,7 @@ export function SemanticCoreTable({
   const [exportHistoryTo, setExportHistoryTo] = useState(
     () => semanticHistoryDefaultRange().to
   );
-  const [exportHistoryIncludeUntracked, setExportHistoryIncludeUntracked] =
+  const [exportHistoryIncludeAllKeywords, setExportHistoryIncludeAllKeywords] =
     useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportCancelling, setExportCancelling] = useState(false);
@@ -510,7 +514,7 @@ export function SemanticCoreTable({
     new Set()
   );
   const [exportBom, setExportBom] = useState(true);
-  const [, setProjectTableView] = useState<SemanticSavedView>();
+  const [projectTableView, setProjectTableView] = useState<SemanticSavedView>();
   const [tableViewReadyProjectId, setTableViewReadyProjectId] = useState("");
   const [activeSavedView, setActiveSavedView] = useState<SemanticSavedView>();
   const [activeSavedViewBaseline, setActiveSavedViewBaseline] = useState("");
@@ -624,6 +628,7 @@ export function SemanticCoreTable({
   const activeSavedViewRef = useRef<SemanticSavedView | undefined>(undefined);
   const activeSavedViewProjectIdRef = useRef("");
   const projectTableViewRef = useRef<SemanticSavedView | undefined>(undefined);
+  const projectTableAutosaveInFlightRef = useRef<string | undefined>(undefined);
   const [tableViewport, setTableViewport] = useState({
     height: 520,
     scrollTop: 0
@@ -1018,6 +1023,59 @@ export function SemanticCoreTable({
     }, 800);
     return () => window.clearTimeout(timer);
   }, [activeSavedView, currentSavedViewConfig, projectId]);
+
+  useEffect(() => {
+    if (
+      !projectTableView ||
+      activeSavedView?.scope === "PRIVATE" ||
+      tableViewReadyProjectId !== projectId
+    ) return;
+    const config = semanticSavedViewConfigForPersistence({
+      ...currentSavedViewConfig,
+      ...(activeSavedView?.id
+        ? { appliedViewId: activeSavedView.id }
+        : projectTableView.config.appliedViewId
+          ? { appliedViewId: projectTableView.config.appliedViewId }
+          : {})
+    });
+    if (
+      semanticViewConfigSignature(config) ===
+      semanticViewConfigSignature(projectTableView.config)
+    ) return;
+    const requestKey = `${projectId}:${projectTableView.id}`;
+    const timer = window.setTimeout(() => {
+      if (projectTableAutosaveInFlightRef.current === requestKey) return;
+      projectTableAutosaveInFlightRef.current = requestKey;
+      void browserApiRequest<SemanticSavedView>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views/${encodeURIComponent(projectTableView.id)}`,
+        {
+          method: "PATCH",
+          body: { config },
+          ifMatch: projectTableView.version
+        }
+      )
+        .then((saved) => {
+          if (projectTableViewRef.current?.id !== saved.id) return;
+          projectTableViewRef.current = saved;
+          setProjectTableView(saved);
+        })
+        .catch((requestError: unknown) => {
+          setMutationError(savedViewMutationErrorMessage(requestError));
+        })
+        .finally(() => {
+          if (projectTableAutosaveInFlightRef.current === requestKey) {
+            projectTableAutosaveInFlightRef.current = undefined;
+          }
+        });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeSavedView,
+    currentSavedViewConfig,
+    projectId,
+    projectTableView,
+    tableViewReadyProjectId
+  ]);
 
   useEffect(() => {
     if (!rightSidebar) return;
@@ -1419,6 +1477,22 @@ export function SemanticCoreTable({
     return () => controller.abort();
   }, [columnRefreshVersion, projectId]);
 
+  const activateSavedView = useCallback((
+    view?: SemanticSavedView,
+    appliedConfig?: SemanticViewConfig
+  ): void => {
+    const currentConfig = semanticViewConfigForCurrentSchema(
+      appliedConfig ?? view?.config ?? defaultSemanticViewConfig
+    );
+    activeSavedViewRef.current = view;
+    activeSavedViewProjectIdRef.current = view ? projectId : "";
+    setActiveSavedView(view);
+    savedViewAutosaveBaselineRef.current = view
+      ? semanticViewConfigSignature(currentConfig)
+      : "";
+    setActiveSavedViewBaseline(savedViewAutosaveBaselineRef.current);
+  }, [projectId]);
+
   useEffect(() => {
     const controller = new AbortController();
     setTableViewReadyProjectId("");
@@ -1442,6 +1516,12 @@ export function SemanticCoreTable({
             scope === "PRIVATE" &&
             ownerId === currentUserId
         );
+        const personalView = views.find(
+          ({ name, scope, ownerId }) =>
+            scope === "PRIVATE" &&
+            ownerId === currentUserId &&
+            isSemanticPersonalViewName(name)
+        );
         const sortViews = views.filter(
           ({ name, scope, ownerId }) =>
             name.startsWith(semanticFolderSortViewPrefix) &&
@@ -1458,7 +1538,8 @@ export function SemanticCoreTable({
           ? visibleViews.find(({ id }) => id === projectView.config.appliedViewId)
           : undefined;
         const defaultSharedView = preferredProjectSharedView(visibleViews);
-        const appliedView = explicitlyAppliedView ?? defaultSharedView;
+        const appliedView =
+          explicitlyAppliedView ?? personalView ?? defaultSharedView;
         const storedConfig = semanticViewConfigWithoutAppliedView(
           semanticViewConfigForCurrentSchema(
             appliedView?.config ?? projectView?.config ?? defaultSemanticViewConfig
@@ -1472,7 +1553,8 @@ export function SemanticCoreTable({
               sortViews
             );
         if (appliedView || projectView) {
-          const nextPageSize = layoutPreferencesRef.current.pageSize;
+          const nextPageSize = nextConfig.pageSize ??
+            layoutPreferencesRef.current.pageSize;
           const nextGroupSidebarWidth = nextConfig.groupSidebarWidth ??
             layoutPreferencesRef.current.groupSidebarWidth;
           layoutPreferencesRef.current = {
@@ -1508,13 +1590,87 @@ export function SemanticCoreTable({
           setDraftConfig(nextConfig);
           setViewConfig(nextConfig);
         }
+        const initialLayout = semanticSavedViewConfigForPersistence({
+          ...nextConfig,
+          columnWidths: nextConfig.columnWidths ?? {},
+          pageSize: layoutPreferencesRef.current.pageSize,
+          groupSidebarWidth:
+            nextConfig.groupSidebarWidth ??
+            layoutPreferencesRef.current.groupSidebarWidth,
+          expandedGroupIds: nextConfig.expandedGroupIds ?? [],
+          selectedGroupIds: nextConfig.selectedGroupIds ?? []
+        });
+        const personalViewPromise = personalView
+          ? Promise.resolve(personalView)
+          : browserApiRequest<SemanticSavedView>(
+              `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
+              {
+                method: "POST",
+                body: {
+                  name: semanticPersonalViewName,
+                  scope: "PRIVATE",
+                  config: initialLayout
+                }
+              }
+            ).catch(async (requestError: unknown) => {
+              if (
+                !(requestError instanceof BrowserApiError) ||
+                requestError.status !== 409
+              ) {
+                throw requestError;
+              }
+              const currentViews = await browserApiRequest<
+                readonly SemanticSavedView[]
+              >(
+                `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
+                { signal: controller.signal }
+              );
+              const winner = currentViews.find(
+                ({ name, scope, ownerId }) =>
+                  scope === "PRIVATE" &&
+                  ownerId === currentUserId &&
+                  isSemanticPersonalViewName(name)
+              );
+              if (!winner) throw requestError;
+              return winner;
+            });
+        void personalViewPromise
+          .then(async (savedPersonalView) => {
+            if (controller.signal.aborted) return;
+            if (!projectView?.config.appliedViewId) {
+              activateSavedView(savedPersonalView, initialLayout);
+            }
+            if (projectView) return;
+            const savedProjectView = await browserApiRequest<SemanticSavedView>(
+              `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
+              {
+                method: "POST",
+                body: {
+                  name: semanticProjectTableViewName,
+                  scope: "PRIVATE",
+                  config: {
+                    ...initialLayout,
+                    appliedViewId: savedPersonalView.id
+                  }
+                }
+              }
+            );
+            if (controller.signal.aborted) return;
+            projectTableViewRef.current = savedProjectView;
+            setProjectTableView(savedProjectView);
+          })
+          .catch((requestError: unknown) => {
+            if (!controller.signal.aborted) {
+              setMutationError(savedViewMutationErrorMessage(requestError));
+            }
+          });
         setTableViewReadyProjectId(projectId);
       })
       .catch(() => {
         if (!controller.signal.aborted) setTableViewReadyProjectId(projectId);
       });
     return () => controller.abort();
-  }, [currentUserId, projectId]);
+  }, [activateSavedView, currentUserId, projectId]);
 
   useEffect(() => {
     if (!bulkNotice && !exportNotice) return;
@@ -2013,23 +2169,34 @@ export function SemanticCoreTable({
     });
   }
 
-  function moveColumn(column: SemanticViewColumn, target: SemanticViewColumn): void {
+  function moveColumn(
+    column: SemanticViewColumn,
+    target: SemanticViewColumn,
+    placement: "before" | "after"
+  ): void {
     if (column === target) return;
     setDraftConfig((current) => {
       const columnOrder = [...semanticColumnOrderFor(
         current,
         [...semanticAvailableColumns(customColumns), ...rankColumns.map(column => column.key)]
       )];
-      const sourceIndex = columnOrder.indexOf(column);
-      const targetIndex = columnOrder.indexOf(target);
-      if (sourceIndex < 0 || targetIndex < 0) return current;
-      columnOrder.splice(sourceIndex, 1);
-      columnOrder.splice(targetIndex, 0, column);
+      if (!columnOrder.includes(column) || !columnOrder.includes(target)) {
+        return current;
+      }
+      const nextOrder = moveSemanticColumn(
+        columnOrder,
+        column,
+        target,
+        placement
+      );
+      if (nextOrder === columnOrder) return current;
       const enabled = new Set(current.columns);
       return {
         ...current,
-        columns: columnOrder.filter((item) => enabled.has(item)),
-        columnOrder: columnOrder.length > 128 ? columnOrder.filter(item => enabled.has(item)) : columnOrder
+        columns: nextOrder.filter((item) => enabled.has(item)),
+        columnOrder: nextOrder.length > 128
+          ? nextOrder.filter(item => enabled.has(item))
+          : nextOrder
       };
     });
   }
@@ -2318,22 +2485,6 @@ export function SemanticCoreTable({
     } catch (requestError) {
       setMutationError(savedViewMutationErrorMessage(requestError));
     }
-  }
-
-  function activateSavedView(
-    view?: SemanticSavedView,
-    appliedConfig?: SemanticViewConfig
-  ): void {
-    const currentConfig = semanticViewConfigForCurrentSchema(
-      appliedConfig ?? view?.config ?? defaultSemanticViewConfig
-    );
-    activeSavedViewRef.current = view;
-    activeSavedViewProjectIdRef.current = view ? projectId : "";
-    setActiveSavedView(view);
-    savedViewAutosaveBaselineRef.current = view
-      ? semanticViewConfigSignature(currentConfig)
-      : "";
-    setActiveSavedViewBaseline(savedViewAutosaveBaselineRef.current);
   }
 
   async function persistProjectTableLayout(
@@ -3057,7 +3208,7 @@ export function SemanticCoreTable({
     );
     setExportFolderMapGroupIds(regularGroupIds);
     setExportFolderMapDescendantGroupIds(new Set());
-    setExportHistoryIncludeUntracked(false);
+    setExportHistoryIncludeAllKeywords(false);
     setExportBom(
       exportContent === "SEMANTIC" &&
       (exportFormat === "CSV" || exportFormat === "TSV")
@@ -3074,18 +3225,18 @@ export function SemanticCoreTable({
     const selected = selectedItems
       .filter(({ isTracked }) =>
         exportContent !== "POSITION_HISTORY" ||
-        exportHistoryIncludeUntracked ||
+        exportHistoryIncludeAllKeywords ||
         isTracked
       )
       .map(({ id }) => id);
     if (
       exportScope === "SELECTED" &&
       exportContent === "POSITION_HISTORY" &&
-      !exportHistoryIncludeUntracked &&
+      !exportHistoryIncludeAllKeywords &&
       selected.length === 0
     ) {
       setMutationError(
-        "Среди выбранных строк нет отслеживаемых запросов. Включите неотслеживаемые запросы или измените выбор."
+        "Среди выбранных строк нет отслеживаемых запросов. Включите экспорт всех запросов или измените выбор."
       );
       return;
     }
@@ -3122,7 +3273,7 @@ export function SemanticCoreTable({
                   filters: {
                     groupId,
                     ...(exportContent === "POSITION_HISTORY" &&
-                    !exportHistoryIncludeUntracked
+                    !exportHistoryIncludeAllKeywords
                       ? { isTracked: true }
                       : {})
                   }
@@ -3131,7 +3282,7 @@ export function SemanticCoreTable({
               ? {
                   keywordIds: selected,
                   ...(exportContent === "POSITION_HISTORY" &&
-                  !exportHistoryIncludeUntracked
+                  !exportHistoryIncludeAllKeywords
                     ? { filters: { isTracked: true } }
                     : {})
                 }
@@ -3139,7 +3290,7 @@ export function SemanticCoreTable({
                   filters: {
                     ...viewConfig.filters,
                     ...(exportContent === "POSITION_HISTORY" &&
-                    !exportHistoryIncludeUntracked
+                    !exportHistoryIncludeAllKeywords
                       ? { isTracked: true }
                       : {}),
                     ...(multiGroupIds.length > 1
@@ -3158,7 +3309,8 @@ export function SemanticCoreTable({
                     exportHistoryFrom,
                     exportHistoryTo,
                     exportHistoryEngines,
-                    exportHistoryDimensionKeys
+                    exportHistoryDimensionKeys,
+                    exportHistoryIncludeAllKeywords
                   )
                 }
               : {}),
@@ -3960,10 +4112,6 @@ export function SemanticCoreTable({
           <div>
             <dt><UiText text="Кластеров" /></dt>
             <dd>{formatInteger(clusters.length, uiLocale)}</dd>
-          </div>
-          <div>
-            <dt><UiText text="Загружено" /></dt>
-            <dd>{formatInteger(items.length, uiLocale)}</dd>
           </div>
         </dl>
         <div className="semantic-header-actions">
@@ -4865,14 +5013,22 @@ export function SemanticCoreTable({
                 </div>
                 <label className="semantic-control-check semantic-history-export-untracked">
                   <input
-                    checked={exportHistoryIncludeUntracked}
+                    checked={exportHistoryIncludeAllKeywords}
                     disabled={exporting || exportJob?.status === "COMPLETED"}
                     onChange={(event) =>
-                      setExportHistoryIncludeUntracked(event.target.checked)
+                      setExportHistoryIncludeAllKeywords(event.target.checked)
                     }
                     type="checkbox"
                   />
-                  <span><UiText text="Включить неотслеживаемые запросы" /></span>
+                  <span>
+                    <strong>
+                      <UiText text="Экспортировать все запросы" />
+                      <InfoTooltip>
+                        <UiText text="Экспорт включает каждый активный запрос текущего выбранного охвата. Для запросов без съёмов позиции остаются пустыми." />
+                      </InfoTooltip>
+                    </strong>
+                    <small><UiText text="Добавляет активные запросы без единого съёма и неотслеживаемые запросы; ячейки без истории останутся пустыми." /></small>
+                  </span>
                 </label>
                 <div className="semantic-history-export-legend">
                   <span><i className="up" /> <UiText text="Рост или новая позиция" before=" " /></span>
@@ -5159,7 +5315,20 @@ export function SemanticCoreTable({
               />
             </label>
             <div className="semantic-editor-tags">
-              <KeywordTagPicker projectId={projectId} value={editor.draft.tagNames} onChange={tagNames => updateDraft({ tagNames })} disabled={saving} />
+              <KeywordTagPicker
+                projectId={projectId}
+                value={editor.draft.tagNames}
+                onChange={tagNames => updateDraft({ tagNames })}
+                onTagDeleted={(result) => {
+                  setEditor(undefined);
+                  setTagOptionsRevision((value) => value + 1);
+                  setRetryVersion((value) => value + 1);
+                  setBulkNotice(
+                    `Тег «${result.name}» удалён у ${formatInteger(result.detachedKeywordCount, uiLocale)} запросов`
+                  );
+                }}
+                disabled={saving}
+              />
             </div>
             <div className="semantic-editor-choice">
               <span><UiText text="Избранное" /></span>
@@ -5394,6 +5563,15 @@ export function SemanticCoreTable({
                   : "")
             );
             setRetryVersion((value) => value + 1);
+          }}
+          onTagDeleted={(result) => {
+            setActionIds(null);
+            setBulkEditorOpen(false);
+            setTagOptionsRevision((value) => value + 1);
+            setRetryVersion((value) => value + 1);
+            setBulkNotice(
+              `Тег «${result.name}» удалён у ${formatInteger(result.detachedKeywordCount, uiLocale)} запросов`
+            );
           }}
           onSplitCompleted={(result) => {
             setCheckedIds(new Set());
@@ -6559,6 +6737,26 @@ function nextSemanticColumnSort(
       rankSortDimensionKey: rank.dimension.key
     };
   }
+  if (rank?.metric === "aiPosition") {
+    return {
+      sort:
+        currentRankDimensionKey === rank.dimension.key &&
+        current === "RANK_AI_POSITION_ASC"
+          ? "RANK_AI_POSITION_DESC"
+          : "RANK_AI_POSITION_ASC",
+      rankSortDimensionKey: rank.dimension.key
+    };
+  }
+  if (rank?.metric === "aiCheckedAt") {
+    return {
+      sort:
+        currentRankDimensionKey === rank.dimension.key &&
+        current === "RANK_AI_CHECKED_AT_DESC"
+          ? "RANK_AI_CHECKED_AT_ASC"
+          : "RANK_AI_CHECKED_AT_DESC",
+      rankSortDimensionKey: rank.dimension.key
+    };
+  }
   const target = (sort: SemanticKeywordSort) => ({ sort });
   switch (column) {
     case "query":
@@ -6608,7 +6806,9 @@ function semanticColumnSortDirection(
     rank &&
     currentRankDimensionKey === rank.dimension.key &&
     ((rank.metric === "position" && current.startsWith("RANK_POSITION_")) ||
-      (rank.metric === "checkedAt" && current.startsWith("RANK_CHECKED_AT_")))
+      (rank.metric === "checkedAt" && current.startsWith("RANK_CHECKED_AT_")) ||
+      (rank.metric === "aiPosition" && current.startsWith("RANK_AI_POSITION_")) ||
+      (rank.metric === "aiCheckedAt" && current.startsWith("RANK_AI_CHECKED_AT_")))
   ) {
     return current.endsWith("_ASC") ? "ascending" : "descending";
   }
@@ -7644,7 +7844,8 @@ function semanticHistoryExportOptions(
   from: string,
   to: string,
   searchEngines: readonly SemanticPositionHistorySearchEngine[],
-  dimensionKeys: readonly string[]
+  dimensionKeys: readonly string[],
+  includeAllKeywords: boolean
 ) {
   if (
     !validSemanticHistoryDateRange(from, to) ||
@@ -7659,7 +7860,8 @@ function semanticHistoryExportOptions(
     observedFrom: new Date(fromTime).toISOString(),
     observedBefore: new Date(toTime + 24 * 60 * 60 * 1_000).toISOString(),
     searchEngines,
-    dimensionKeys
+    dimensionKeys,
+    ...(includeAllKeywords ? { includeAllKeywords: true } : {})
   };
 }
 

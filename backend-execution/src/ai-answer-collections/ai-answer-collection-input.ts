@@ -33,6 +33,7 @@ export function internalCreateAiAnswerCollectionInput(
     "correlationId",
     "jobCapacity",
     "items",
+    "credentialId",
     "searchEngine",
     "regionCode",
     "device",
@@ -94,6 +95,9 @@ export function internalCreateAiAnswerCollectionInput(
       concurrentJobs: integer(capacity.concurrentJobs, "jobCapacity.concurrentJobs", 1)
     },
     items,
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     searchEngine: member(input.searchEngine, aiAnswerSearchEngines, "searchEngine"),
     regionCode: pattern(input.regionCode, "regionCode", REGION_PATTERN),
     device: member(input.device, aiAnswerDevices, "device"),

@@ -9,6 +9,7 @@ import {
 } from "./frequency-collection-input.js";
 
 const keywordId = "01900000-0000-7000-8000-000000000001";
+const credentialId = "01900000-0000-7000-8000-000000000002";
 
 test("accepts an exact bounded frequency collection command", () => {
   assert.deepEqual(
@@ -31,6 +32,36 @@ test("accepts an exact bounded frequency collection command", () => {
   assert.deepEqual(
     semanticFrequencyContextRoute("EXACT", "213", "MOBILE"),
     { type: "EXACT", regionCode: "213", device: "MOBILE" }
+  );
+});
+
+test("preserves an exact provider route selected in the dialog", () => {
+  assert.deepEqual(
+    createFrequencyCollectionInput({
+      items: [{ id: keywordId, version: 3 }],
+      types: ["BASE"],
+      regionCode: "213",
+      device: "ALL",
+      provider: "XMLSTOCK",
+      credentialId
+    }),
+    {
+      items: [{ id: keywordId, version: 3 }],
+      types: ["BASE"],
+      regionCode: "213",
+      device: "ALL",
+      provider: "XMLSTOCK",
+      credentialId
+    }
+  );
+  assert.throws(() =>
+    createFrequencyCollectionInput({
+      items: [{ id: keywordId, version: 3 }],
+      types: ["BASE"],
+      regionCode: "213",
+      device: "ALL",
+      provider: "XMLSTOCK"
+    })
   );
 });
 

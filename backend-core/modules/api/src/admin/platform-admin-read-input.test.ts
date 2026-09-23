@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
+  adminOperationId,
   adminOperationQuery,
   adminProjectQuery
 } from "./platform-admin-read-input.js";
 
 test("normalizes project and operation administration filters", () => {
+  assert.equal(
+    adminOperationId("01900000-0000-7000-8000-000000000010"),
+    "01900000-0000-7000-8000-000000000010"
+  );
   assert.deepEqual(adminProjectQuery({ q: "  Нейролюб  ", status: " active " }), {
     search: "Нейролюб",
     status: "ACTIVE"
@@ -34,7 +39,8 @@ test("rejects malformed platform administration filters", () => {
     () => adminOperationQuery({ status: "UNKNOWN" }),
     () => adminOperationQuery({ type: "rank check" }),
     () => adminOperationQuery({ cursor: "invalid" }),
-    () => adminOperationQuery({ limit: "500" })
+    () => adminOperationQuery({ limit: "500" }),
+    () => adminOperationId("invalid")
   ]) {
     assert.throws(call, DomainError);
   }

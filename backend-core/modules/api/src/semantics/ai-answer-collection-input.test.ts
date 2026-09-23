@@ -8,11 +8,13 @@ import {
 } from "./ai-answer-collection-input.js";
 
 const keywordId = "01900000-0000-7000-8000-000000000001";
+const credentialId = "01900000-0000-7000-8000-000000000002";
 
 test("accepts a bounded AI answer collection command", () => {
   assert.deepEqual(
     createAiAnswerCollectionInput({
       items: [{ id: keywordId, version: 3 }],
+      credentialId,
       searchEngine: "YANDEX",
       regionCode: "213",
       device: "DESKTOP",
@@ -22,6 +24,7 @@ test("accepts a bounded AI answer collection command", () => {
     }),
     {
       items: [{ id: keywordId, version: 3 }],
+      credentialId,
       searchEngine: "YANDEX",
       regionCode: "213",
       device: "DESKTOP",

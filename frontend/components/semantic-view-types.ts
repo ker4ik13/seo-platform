@@ -109,6 +109,12 @@ export interface SemanticSavedView {
 export const semanticProjectTableViewName = "__project_table_layout__";
 export const positionsProjectTableViewName = "__positions_project_table_layout__";
 export const semanticFolderSortViewPrefix = "__folder_sort__:";
+export const semanticPersonalViewName = "Личное";
+
+export function isSemanticPersonalViewName(name: string): boolean {
+  return name.normalize("NFKC").trim().toLocaleLowerCase("ru-RU") ===
+    semanticPersonalViewName.toLocaleLowerCase("ru-RU");
+}
 
 export function semanticFolderSortViewName(groupId?: string): string {
   return `${semanticFolderSortViewPrefix}${groupId ?? "root"}`;

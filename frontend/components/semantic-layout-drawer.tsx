@@ -65,7 +65,11 @@ export function SemanticLayoutDrawer({
   onApplySavedView: (view: SemanticSavedView) => void;
   onClose: () => void;
   onDensityChange: (density: SemanticViewConfig["density"]) => void;
-  onMoveColumn: (source: SemanticViewColumn, target: SemanticViewColumn) => void;
+  onMoveColumn: (
+    source: SemanticViewColumn,
+    target: SemanticViewColumn,
+    placement: "before" | "after"
+  ) => void;
   onOpenCustomColumns: () => void;
   onReset: () => void;
   onToggleColumn: (column: SemanticViewColumn) => void;
@@ -81,6 +85,10 @@ export function SemanticLayoutDrawer({
   const [tab, setTab] = useState<LayoutTab>("COLUMNS");
   const [search, setSearch] = useState("");
   const [dragged, setDragged] = useState<SemanticViewColumn>();
+  const [dropTarget, setDropTarget] = useState<Readonly<{
+    key: SemanticViewColumn;
+    placement: "before" | "after";
+  }>>();
   const columns = useMemo(() => [
     ...systemColumns,
     ...rankColumns,
@@ -174,17 +182,51 @@ export function SemanticLayoutDrawer({
             {tableColumns.map((column) => (
               <ColumnRow
                 checked={config.columns.includes(column.key)}
+                className={[
+                  dragged === column.key ? "is-dragging" : "",
+                  dropTarget?.key === column.key
+                    ? `drop-${dropTarget.placement}`
+                    : ""
+                ].filter(Boolean).join(" ")}
                 column={column}
                 disabled={!config.columns.includes(column.key) && config.columns.length >= 128}
                 draggable={column.key !== "query"}
                 key={column.key}
-                onDragEnd={() => setDragged(undefined)}
-                onDragOver={(event) => event.preventDefault()}
-                onDragStart={() => setDragged(column.key)}
+                onDragEnd={() => {
+                  setDragged(undefined);
+                  setDropTarget(undefined);
+                }}
+                onDragOver={(event) => {
+                  if (!dragged || dragged === column.key) return;
+                  event.preventDefault();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setDropTarget({
+                    key: column.key,
+                    placement:
+                      event.clientY < bounds.top + bounds.height / 2
+                        ? "before"
+                        : "after"
+                  });
+                }}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", column.key);
+                  setDragged(column.key);
+                  setDropTarget(undefined);
+                }}
                 onDrop={(event) => {
                   event.preventDefault();
-                  if (dragged && dragged !== column.key) onMoveColumn(dragged, column.key);
+                  if (dragged && dragged !== column.key) {
+                    onMoveColumn(
+                      dragged,
+                      column.key,
+                      dropTarget?.key === column.key
+                        ? dropTarget.placement
+                        : "before"
+                    );
+                  }
                   setDragged(undefined);
+                  setDropTarget(undefined);
                 }}
                 onToggle={() => onToggleColumn(column.key)}
               />
@@ -242,6 +284,7 @@ function ColumnRow({
   checked,
   column,
   disabled = false,
+  className,
   onToggle,
   ...dragProps
 }: Readonly<{
@@ -252,11 +295,15 @@ function ColumnRow({
     searchEngine?: "YANDEX" | "GOOGLE";
   }>;
   disabled?: boolean;
+  className?: string;
   onToggle: () => void;
 }> & HTMLAttributes<HTMLLabelElement>) {
   return (
-    <label className="semantic-layout-column-row" {...dragProps}>
-      <span aria-hidden="true" className="semantic-column-grip">⋮⋮</span>
+    <label
+      className={`semantic-layout-column-row${className ? ` ${className}` : ""}`}
+      {...dragProps}
+    >
+      <span aria-hidden="true" className="semantic-column-grip"><Icon name="gripVertical" /></span>
       <input checked={checked} disabled={disabled || column.key === "query"} onChange={onToggle} type="checkbox" />
       <ColumnVisualName column={column} />
       <Icon name={checked ? "eye" : "eyeOff"} />

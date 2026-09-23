@@ -52,6 +52,7 @@ export interface XmlStockRankWireRequest {
   readonly depth: 10 | 20 | 30 | 50 | 100;
   readonly delayed: boolean;
   readonly turbo: boolean;
+  readonly depthMode: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
 }
 
 export type XmlStockRankSubmitResult =
@@ -293,13 +294,11 @@ export class XmlStockRankConnector {
       ? undefined
       : xmlStockRankPageProgress(progressValue);
     const resultsPerPage = progress === undefined
-      ? request.turbo ? undefined : 10
+      ? request.turbo ? 50 : 10
       : progress.schemaVersion === PAGE_PROGRESS_V2_SCHEMA
         ? progress.resultsPerPage
         : 10;
-    const pageCount = resultsPerPage === undefined
-      ? undefined
-      : Math.ceil(request.depth / resultsPerPage);
+    const pageCount = Math.ceil(request.depth / resultsPerPage);
     if (
       progress &&
       (progress.taskId !== taskId ||
@@ -307,7 +306,6 @@ export class XmlStockRankConnector {
         progress.depth !== request.depth ||
         (request.turbo !==
           (progress.schemaVersion === PAGE_PROGRESS_V2_SCHEMA)) ||
-        pageCount === undefined ||
         progress.nextPage >= pageCount)
     ) {
       invalid();
@@ -331,36 +329,41 @@ export class XmlStockRankConnector {
     );
     if (failure) return failure;
     const parsed = parseXmlStockXml(response.value);
-    if (request.turbo && parsed.documentSlots > 50) {
-      return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
-    }
     if (
-      progress?.schemaVersion === PAGE_PROGRESS_V2_SCHEMA &&
-      parsed.documentSlots > progress.resultsPerPage
+      (request.turbo && parsed.documentSlots > 50) ||
+      (!request.turbo && parsed.documentSlots > 100)
     ) {
       return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
     }
-    const detectedResultsPerPage = request.turbo
-      ? progress?.schemaVersion === PAGE_PROGRESS_V2_SCHEMA
-        ? progress.resultsPerPage
-        : turboResultsPerPage(parsed.documentSlots)
-      : 10;
-    const pageWidth = resultsPerPage ?? detectedResultsPerPage ?? 1;
-    documents.push(
-      ...parsed.documents.map((document) => ({
-        ...document,
-        position: page * pageWidth + document.position
-      }))
+    const previousPosition = documents.reduce(
+      (maximum, document) => Math.max(maximum, document.position),
+      0
     );
+    const positionOffset = Math.max(page * resultsPerPage, previousPosition);
+    const pageDocuments = parsed.documents.map((document) => ({
+        ...document,
+        position: positionOffset + document.position
+      }));
+    documents.push(...pageDocuments);
     const nextPage = page + 1;
-    const detectedPageCount = detectedResultsPerPage === undefined
-      ? undefined
-      : Math.ceil(request.depth / detectedResultsPerPage);
+    const stopAfterFound =
+      request.depthMode === "STOP_AFTER_FOUND" &&
+      rankExecutionTracksProjectPosition(intent.execution) &&
+      pageDocuments.some((document) => {
+        try {
+          return matchesProject(
+            new URL(document.url),
+            intent.project.domain,
+            intent.execution.domainMatchRule
+          );
+        } catch {
+          return false;
+        }
+      });
     if (
-      detectedResultsPerPage !== undefined &&
-      parsed.documentSlots === detectedResultsPerPage &&
-      detectedPageCount !== undefined &&
-      nextPage < detectedPageCount
+      !stopAfterFound &&
+      nextPage < pageCount &&
+      (documents.at(-1)?.position ?? 0) < request.depth
     ) {
       const checkpoint = xmlStockRankPageProgress({
         schemaVersion: request.turbo
@@ -370,7 +373,7 @@ export class XmlStockRankConnector {
         engine: request.engine,
         depth: request.depth,
         ...(request.turbo
-          ? { resultsPerPage: detectedResultsPerPage }
+          ? { resultsPerPage }
           : {}),
         nextPage,
         documents
@@ -411,11 +414,18 @@ export function xmlStockRankPageProgress(
     Number(input.nextPage) >=
       Math.ceil(Number(input.depth) / resultsPerPage) ||
     !Array.isArray(input.documents) ||
-    input.documents.length > Number(input.nextPage) * resultsPerPage
+    input.documents.length >
+      Math.min(Number(input.depth), Number(input.nextPage) * 100)
   ) {
     invalid();
   }
-  const maximumPosition = Number(input.nextPage) * resultsPerPage;
+  // XMLStock Live may return more than the nominal ten organic documents on
+  // a page. Persist the complete paid response and keep fetching the fixed
+  // page count; the final wire result is still clipped to the requested Top.
+  const maximumPosition = Math.min(
+    Number(input.depth),
+    Number(input.nextPage) * 100
+  );
   let previousPosition = 0;
   const documents = input.documents.map((document) => {
     const parsed = record(document);
@@ -507,7 +517,8 @@ export function buildXmlStockRankWireRequest(
         "SEARCH_API",
     turbo:
       intent.execution.providerMappingVersion ===
-      "xmlstock-yandex-live@3"
+      "xmlstock-yandex-live@3",
+    depthMode: intent.execution.xmlStockDepthMode ?? "STRICT_DEPTH"
   };
 }
 

@@ -725,6 +725,9 @@ function executionParameters(
     ...(hasField(value, "saveProjectPosition")
       ? ["saveProjectPosition"]
       : []),
+    ...(hasField(value, "xmlStockDepthMode")
+      ? ["xmlStockDepthMode"]
+      : []),
     "searchEngine",
     "countryCode",
     ...(hasField(value, "regionCode") ? ["regionCode"] : []),
@@ -746,6 +749,9 @@ function executionParameters(
       input.purpose !== "COMPETITOR_SERP") ||
     (input.saveProjectPosition !== undefined &&
       typeof input.saveProjectPosition !== "boolean") ||
+    (input.xmlStockDepthMode !== undefined &&
+      input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+      input.xmlStockDepthMode !== "STOP_AFTER_FOUND") ||
     typeof input.countryCode !== "string" ||
     !/^[A-Z]{2}$/u.test(input.countryCode) ||
     ("regionCode" in input &&
@@ -779,6 +785,12 @@ function executionParameters(
     ...(input.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: input.saveProjectPosition }),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode:
+            input.xmlStockDepthMode as "STRICT_DEPTH" | "STOP_AFTER_FOUND"
+        }),
     searchEngine:
       input.searchEngine as InternalRankExecutionParameters["searchEngine"],
     countryCode: input.countryCode,

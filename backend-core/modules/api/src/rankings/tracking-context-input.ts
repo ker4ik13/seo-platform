@@ -145,7 +145,13 @@ function contextInput(
 function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
   const input = exactRecord(
     value,
-    ["searchSource", "includeUntracked", "scope"],
+    [
+      "searchSource",
+      "yandexLiveMode",
+      "xmlStockDepthMode",
+      "includeUntracked",
+      "scope"
+    ],
     "launchProfile"
   );
   const searchSource = enumValue(
@@ -153,6 +159,22 @@ function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
     SEARCH_SOURCES,
     "launchProfile.searchSource"
   ) as TrackingContextLaunchProfile["searchSource"];
+  if (
+    input.yandexLiveMode !== undefined &&
+    input.yandexLiveMode !== "TURBO"
+  ) {
+    invalid("launchProfile.yandexLiveMode", "Must be TURBO");
+  }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+    input.xmlStockDepthMode !== "STOP_AFTER_FOUND"
+  ) {
+    invalid(
+      "launchProfile.xmlStockDepthMode",
+      "Must be STRICT_DEPTH or STOP_AFTER_FOUND"
+    );
+  }
   const scope = exactRecord(
     input.scope,
     ["mode", "groupIds", "descendantGroupIds", "includeDescendants"],
@@ -263,6 +285,16 @@ function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
   }
   return {
     searchSource,
+    ...(input.yandexLiveMode === "TURBO"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {}),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode: input.xmlStockDepthMode as
+            | "STRICT_DEPTH"
+            | "STOP_AFTER_FOUND"
+        }),
     includeUntracked: input.includeUntracked ?? false,
     scope: {
       mode,

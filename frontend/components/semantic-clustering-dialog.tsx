@@ -161,6 +161,7 @@ export function SemanticClusteringDialog({
       const operationPath = `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`;
       const body = {
             items: selections.map(({ id, version }) => ({ id, version })),
+            credentialId: selectedSource.id,
             searchEngine,
             regionCode,
             method,

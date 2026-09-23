@@ -64,6 +64,14 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly onChange?: (event: CustomSelectChangeEvent) => void;
   readonly onSearchChange?: (query: string) => void;
   readonly createOption?: (query: string) => Readonly<{ value: string; label: ReactNode }> | undefined;
+  readonly getOptionAction?: (
+    value: string
+  ) => Readonly<{
+    ariaLabel: string;
+    icon: ReactNode;
+    onAction: () => void;
+    title?: string;
+  }> | undefined;
   readonly placeholder?: string;
   readonly onOptionOrderChange?: (
     values: readonly string[]
@@ -94,6 +102,7 @@ export function CustomSelect({
   onChange,
   onSearchChange,
   createOption,
+  getOptionAction,
   onOptionOrderChange,
   onFocus,
   popoverFooter,
@@ -557,15 +566,20 @@ export function CustomSelect({
             {filteredOptions.length === 0 ? (
               <div className="custom-select-empty"><UiText text={emptyMessage} /></div>
             ) : (
-              filteredOptions.map((option, index) => (
-                <button
+              filteredOptions.map((option, index) => {
+                const action = getOptionAction?.(option.value);
+                return (
+                <div
+                  className={`custom-select-option-shell${action ? " has-action" : ""}`}
+                  key={option.key}
+                >
+                  <button
                   aria-disabled={option.disabled}
                   aria-selected={option.value === selectedValue}
                   className={`custom-select-option${index === activeIndex ? " is-active" : ""}${option.value === selectedValue ? " is-selected" : ""}${draggedValue === option.value ? " is-dragging" : ""}${dropTarget?.value === option.value ? ` drop-${dropTarget.edge}` : ""}${onOptionOrderChange ? " is-reorderable" : ""}`}
                   disabled={option.disabled}
                   draggable={Boolean(onOptionOrderChange && !query && !ordering && !option.disabled)}
                   id={`${listboxId}-option-${index}`}
-                  key={option.key}
                   onClick={() => choose(option)}
                   onDragEnd={endOptionDrag}
                   onDragOver={(event) => updateOptionDropTarget(event, option)}
@@ -585,7 +599,7 @@ export function CustomSelect({
                       className="custom-select-drag-handle"
                       title={uiText("{0}. Также доступно Alt + стрелка", [String(optionOrderLabel)])}
                     >
-                      ⋮⋮
+                      <Icon name="gripVertical" />
                     </span>
                   )}
                   {showSelectedCheck && (
@@ -594,8 +608,26 @@ export function CustomSelect({
                     </span>
                   )}
                   <span>{option.label}</span>
-                </button>
-              ))
+                  </button>
+                  {action && (
+                    <button
+                      aria-label={action.ariaLabel}
+                      className="custom-select-option-action"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        close();
+                        action.onAction();
+                      }}
+                      title={action.title}
+                      type="button"
+                    >
+                      {action.icon}
+                    </button>
+                  )}
+                </div>
+                );
+              })
             )}
           </div>
           {popoverFooter && (

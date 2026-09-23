@@ -15,7 +15,7 @@ const HOST_PATTERN =
 
 export function createAiAnswerCollectionInput(value: unknown): CreateAiAnswerCollectionInput {
   const input = record(value, [
-    "items", "searchEngine", "regionCode", "device", "host",
+    "items", "credentialId", "searchEngine", "regionCode", "device", "host",
     "excludeSubdomains", "brands", "purpose", "saveProjectPosition"
   ]);
   if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > aiAnswerCollectionKeywordLimit) {
@@ -62,6 +62,9 @@ export function createAiAnswerCollectionInput(value: unknown): CreateAiAnswerCol
   ) invalid("saveProjectPosition");
   return {
     items,
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     searchEngine: input.searchEngine as CreateAiAnswerCollectionInput["searchEngine"],
     regionCode: input.regionCode,
     device: input.device as CreateAiAnswerCollectionInput["device"],
@@ -90,6 +93,11 @@ function record(value: unknown, allowed: readonly string[]): Readonly<Record<str
   const input = value as Readonly<Record<string, unknown>>;
   if (Object.keys(input).some((key) => !allowed.includes(key))) invalid("body");
   return input;
+}
+
+function uuid(value: unknown, field: string): string {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) invalid(field);
+  return value.toLowerCase();
 }
 
 function invalid(field: string): never {

@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   defaultSemanticViewConfig,
   isInternalSemanticViewName,
+  isSemanticPersonalViewName,
   semanticFolderSortConfigFor,
   semanticFolderSortFor,
   semanticFolderSortViewName,
+  semanticPersonalViewName,
   type SemanticSavedView,
   type SemanticKeywordSort
 } from "../components/semantic-view-types.ts";
@@ -62,6 +64,9 @@ test("hides technical layout and folder preferences from named saved views", () 
     true
   );
   assert.equal(isInternalSemanticViewName("Мой рабочий вид"), false);
+  assert.equal(isInternalSemanticViewName(semanticPersonalViewName), false);
+  assert.equal(isSemanticPersonalViewName("  личное  "), true);
+  assert.equal(isSemanticPersonalViewName("Командное"), false);
 });
 
 test("restores the exact city and device used by a folder rank sort", () => {

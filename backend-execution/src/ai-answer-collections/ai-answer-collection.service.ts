@@ -48,7 +48,7 @@ export class AiAnswerCollectionService {
       "SERP_COLLECTION",
       input.actorId,
       "ARSENKIN",
-      input.billing?.credentialId
+      input.billing?.credentialId ?? input.credentialId
     );
     if (route.provider !== "ARSENKIN") {
       throw new Error("AI answers require an Arsenkin route");
@@ -271,6 +271,7 @@ function requestHash(input: InternalCreateAiAnswerCollectionInput): string {
     .update(JSON.stringify({
       projectId: input.projectId,
       items: input.items,
+      credentialId: input.credentialId ?? null,
       ...(input.purpose === "COMPETITOR_SERP"
         ? {
             purpose: "COMPETITOR_SERP" as const,

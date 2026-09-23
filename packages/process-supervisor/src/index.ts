@@ -15,6 +15,7 @@ export interface ProcessAlertReporter {
     readonly code: string;
     readonly severity: "ERROR" | "CRITICAL";
     readonly fingerprint?: string;
+    readonly context?: Readonly<Record<string, string>>;
   }): boolean;
   flush(): Promise<void>;
 }
@@ -209,7 +210,8 @@ function observeStderr(
       source,
       code: "CHILD_ERROR_LOG",
       severity: "ERROR",
-      fingerprint
+      fingerprint,
+      context: { log: supervisedErrorExcerpt(line) }
     });
   };
   child.stderr.on("data", (chunk: Buffer | string) => {
@@ -230,6 +232,28 @@ function observeStderr(
     pending += decoder.end();
     if (pending) inspect(pending);
   });
+}
+
+export function supervisedErrorExcerpt(line: string): string {
+  const redacted = line
+    .replaceAll(
+      new RegExp(
+        `${String.fromCodePoint(27)}\\[[0-?]*[ -/]*[@-~]`,
+        "gu"
+      ),
+      ""
+    )
+    .replace(/\b(?:postgres(?:ql)?|redis|https?):\/\/\S+/giu, "[redacted-url]")
+    .replace(/\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)\b\s*[:=]\s*\S+/giu, "[redacted-secret]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, "[redacted-email]");
+  return Array.from(redacted, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127 ? " " : character;
+  })
+    .join("")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 128) || "error log line unavailable";
 }
 
 function captureAlert(

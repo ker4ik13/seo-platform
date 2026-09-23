@@ -1467,7 +1467,13 @@ function launchProfileSnapshot(
   const input = record(value, "tracking context launch profile");
   if (
     Object.keys(input).some(
-      (key) => !["searchSource", "includeUntracked", "scope"].includes(key)
+      (key) => ![
+        "searchSource",
+        "yandexLiveMode",
+        "xmlStockDepthMode",
+        "includeUntracked",
+        "scope"
+      ].includes(key)
     )
   ) {
     throw new Error("Stored tracking context launch profile is invalid");
@@ -1477,6 +1483,19 @@ function launchProfileSnapshot(
     trackingSearchSources,
     "launchProfile.searchSource"
   );
+  if (
+    input.yandexLiveMode !== undefined &&
+    input.yandexLiveMode !== "TURBO"
+  ) {
+    throw new Error("Stored tracking context launch profile is invalid");
+  }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+    input.xmlStockDepthMode !== "STOP_AFTER_FOUND"
+  ) {
+    throw new Error("Stored tracking context launch profile is invalid");
+  }
   const includeUntracked = input.includeUntracked === undefined
     ? false
     : booleanValue(input.includeUntracked, "launchProfile.includeUntracked");
@@ -1536,6 +1555,16 @@ function launchProfileSnapshot(
   }
   return {
     searchSource,
+    ...(input.yandexLiveMode === "TURBO"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {}),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode: input.xmlStockDepthMode as
+            | "STRICT_DEPTH"
+            | "STOP_AFTER_FOUND"
+        }),
     includeUntracked,
     scope: {
       mode,

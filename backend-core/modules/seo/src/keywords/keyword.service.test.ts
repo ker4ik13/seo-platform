@@ -2204,8 +2204,28 @@ test("sorts AI positions in four stable capture-state buckets", async () => {
     { limit: 100, sort: "GOOGLE_AI_CHECKED_AT_DESC" },
     "request-ai-date-sort"
   );
+  await service.list(
+    workspaceId,
+    projectId,
+    {
+      limit: 100,
+      sort: "RANK_AI_POSITION_ASC",
+      rankSortDimensionKey: "GOOGLE|RU|1011973|ru|MOBILE"
+    },
+    "request-ai-slice-position-sort"
+  );
+  await service.list(
+    workspaceId,
+    projectId,
+    {
+      limit: 100,
+      sort: "RANK_AI_CHECKED_AT_DESC",
+      rankSortDimensionKey: "GOOGLE|RU|1011973|ru|MOBILE"
+    },
+    "request-ai-slice-date-sort"
+  );
 
-  assert.equal(rawQueries.length, 3);
+  assert.equal(rawQueries.length, 5);
   assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots current_ai/u);
   for (const query of rawQueries.slice(0, 2)) {
     assert.match(
@@ -2233,6 +2253,16 @@ test("sorts AI positions in four stable capture-state buckets", async () => {
   assert.match(rawQueries[2]?.sql ?? "", /extract\(epoch from latest_ai\.observed_at\)/u);
   assert.match(rawQueries[2]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
   assert.ok(rawQueries[2]?.values.includes("GOOGLE"));
+  for (const query of rawQueries.slice(3)) {
+    assert.ok(query?.values.includes("GOOGLE"));
+    assert.ok(query?.values.includes("1011973"));
+    assert.ok(query?.values.includes("MOBILE"));
+  }
+  assert.match(rawQueries[3]?.sql ?? "", /latest_ai\.site_found/u);
+  assert.match(
+    rawQueries[4]?.sql ?? "",
+    /extract\(epoch from latest_ai\.observed_at\)/u
+  );
 });
 
 test("moves a keyword to the system trash before allowing permanent deletion", async () => {

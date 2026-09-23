@@ -47,8 +47,6 @@ export function internalSealRankManifestInput(
   ]);
   const input = strictRecord(value, [
     ...(Object.hasOwn(raw, "providerPolicyVersion") ? ["providerPolicyVersion"] : []),
-    "purpose",
-    "saveProjectPosition",
     "workspaceId",
     "projectId",
     "actorId",
@@ -129,6 +127,7 @@ export function rankExecutionParameters(
   const input = strictRecord(value, [
     "purpose",
     "saveProjectPosition",
+    "xmlStockDepthMode",
     "searchEngine",
     "countryCode",
     "regionCode",
@@ -158,6 +157,13 @@ export function rankExecutionParameters(
   ) {
     invalid("execution.saveProjectPosition");
   }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+    input.xmlStockDepthMode !== "STOP_AFTER_FOUND"
+  ) {
+    invalid("execution.xmlStockDepthMode");
+  }
   if (input.device !== "DESKTOP" && input.device !== "MOBILE") {
     invalid("execution.device");
   }
@@ -179,6 +185,13 @@ export function rankExecutionParameters(
   if (!VERSION_PATTERN.test(providerMappingVersion)) {
     invalid("execution.providerMappingVersion");
   }
+  if (
+    input.xmlStockDepthMode !== undefined &&
+    (!providerMappingVersion.startsWith("xmlstock-") ||
+      input.purpose === "COMPETITOR_SERP")
+  ) {
+    invalid("execution.xmlStockDepthMode");
+  }
   const regionCode = optionalNormalizedString(
     input.regionCode,
     "execution.regionCode",
@@ -189,6 +202,12 @@ export function rankExecutionParameters(
     ...(input.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: input.saveProjectPosition }),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode:
+            input.xmlStockDepthMode as "STRICT_DEPTH" | "STOP_AFTER_FOUND"
+        }),
     searchEngine: input.searchEngine,
     countryCode: countryCode(input.countryCode),
     ...(regionCode ? { regionCode } : {}),

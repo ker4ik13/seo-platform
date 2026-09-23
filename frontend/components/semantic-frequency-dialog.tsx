@@ -264,6 +264,8 @@ export function SemanticFrequencyDialog({
             types: orderedTypes,
             regionCode,
             device,
+            provider: selectedSource.provider,
+            credentialId: selectedSource.id,
             ...(seasonalityMode
               ? {
                   seasonality: {

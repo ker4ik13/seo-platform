@@ -150,17 +150,17 @@ if [ "${WEB_PUSH_DELIVERY_ENABLED:-false}" = true ]; then
   start_window web-push-worker
 fi
 
-for worker in \
-  system-worker \
-  inspection-worker \
-  import-worker \
-  rank-worker \
-  rank-worker-2 \
-  crawl-worker \
-  connector-worker \
-  connector-worker-2 \
+runtime_workers=(
+  system-worker
+  inspection-worker
+  import-worker
+  rank-worker
+  crawl-worker
+  connector-worker
+  connector-worker-2
   connector-worker-3
-do
+)
+for worker in "${runtime_workers[@]}"; do
   start_window "$worker"
 done
 

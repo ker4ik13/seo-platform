@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import { paidOperationAdmissionInput } from "../paid-operations/paid-operation-admission.js";
 import {
   frequencyCollectionKeywordLimit,
+  frequencyCollectionProviders,
   frequencyCollectionModes,
   parseFrequencySeasonalityRequest,
   operationResultDefaultPageSize,
@@ -62,6 +63,8 @@ export function internalCreateFrequencyCollectionInput(
     "types",
     "regionCode",
     "device",
+    "provider",
+    "credentialId",
     "mode",
     "seasonality"
   ]);
@@ -71,6 +74,12 @@ export function internalCreateFrequencyCollectionInput(
     input.items.length > frequencyCollectionKeywordLimit
   ) {
     invalid("items");
+  }
+  if (
+    (input.provider === undefined) !==
+    (input.credentialId === undefined)
+  ) {
+    invalid("credentialId");
   }
   const items = input.items.map((value, index) => {
     const item = record(value, ["id", "version"]);
@@ -112,9 +121,30 @@ export function internalCreateFrequencyCollectionInput(
     types,
     regionCode: pattern(input.regionCode, "regionCode", REGION_PATTERN),
     device: frequencyDevice(input.device),
+    ...(input.provider === undefined
+      ? {}
+      : {
+          provider: member(
+            input.provider,
+            frequencyCollectionProviders,
+            "provider"
+          )
+        }),
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     mode: mode as "FREQUENCY" | "SEASONALITY",
     ...(seasonality ? { seasonality } : {})
   };
+}
+
+function member<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values,
+  field: string
+): Values[number] {
+  if (typeof value !== "string" || !values.includes(value)) invalid(field);
+  return value as Values[number];
 }
 
 function jobCapacity(value: unknown): InternalCreateFrequencyCollectionInput["jobCapacity"] {

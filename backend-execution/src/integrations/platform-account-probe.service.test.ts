@@ -75,7 +75,7 @@ test("probes the XMLStock API key paired with the configured account", async () 
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 3);
   for (const url of requests) {
     assert.equal(url.searchParams.get("user"), "account-two");
     assert.equal(url.searchParams.get("key"), "xmlstock-key-two");

@@ -9,12 +9,16 @@ import {
 import type {
   IntegrationCredentialSummary,
   IntegrationCredentialValidationSummary,
+  IntegrationCapability,
   IntegrationProvider,
   InternalCreateIntegrationCredentialInput,
   InternalEnablePlatformIntegrationCredentialInput,
   InternalUpdateIntegrationCredentialInput
 } from "@seo-platform/contracts";
-import type { IntegrationCredential } from "../generated/prisma/client.js";
+import {
+  Prisma,
+  type IntegrationCredential
+} from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeIntegrationCredentialCapabilities } from "./integration-credential-capabilities.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
@@ -29,6 +33,7 @@ import {
 } from "./integration-credential-validation-job.js";
 import { integrationProviderMetadata } from "./integration-provider-catalog.js";
 import { PlatformAccountRegistryService } from "./platform-account-registry.service.js";
+import { WorkspaceCredentialRouteProvisioningService } from "./workspace-credential-route-provisioning.service.js";
 
 type IntegrationCredentialSummaryRecord = Pick<
   IntegrationCredential,
@@ -76,7 +81,9 @@ export class IntegrationCredentialService {
   public constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: IntegrationCredentialCryptoService,
-    @Optional() private readonly accounts?: PlatformAccountRegistryService
+    @Optional() private readonly accounts?: PlatformAccountRegistryService,
+    @Optional()
+    private readonly routeProvisioning?: WorkspaceCredentialRouteProvisioningService
   ) {}
 
   public async list(
@@ -144,10 +151,18 @@ export class IntegrationCredentialService {
   public async create(
     input: InternalCreateIntegrationCredentialInput
   ): Promise<IntegrationCredentialSummary> {
-    const existing = await this.findIdempotent(input);
-    if (existing) return toSummary(existing);
-
     const metadata = integrationProviderMetadata(input.provider);
+    const existing = await this.findIdempotent(input);
+    if (existing) {
+      await this.appendWorkspaceRoutes(
+        input.workspaceId,
+        input.actorId,
+        existing.id,
+        metadata.capabilities
+      );
+      return toSummary(existing);
+    }
+
     const credentialId = integrationCredentialId();
     const encrypted = this.crypto.encrypt(
       input.workspaceId,
@@ -164,8 +179,7 @@ export class IntegrationCredentialService {
       requestFingerprintInput(input)
     );
     try {
-      const credential = await this.prisma.integrationCredential.create({
-        data: {
+      const data = {
           id: credentialId,
           workspaceId: input.workspaceId,
           provider: input.provider,
@@ -183,13 +197,34 @@ export class IntegrationCredentialService {
           providerMeta: {
             accountIdentifierConfigured: Boolean(input.accountIdentifier)
           }
-        }
-      });
+        } satisfies Prisma.IntegrationCredentialUncheckedCreateInput;
+      const credential = this.routeProvisioning
+        ? await this.prisma.$transaction(async (transaction) => {
+            const created = await transaction.integrationCredential.create({
+              data
+            });
+            await this.routeProvisioning!.appendInTransaction(transaction, {
+              workspaceId: input.workspaceId,
+              actorId: input.actorId,
+              credentialId: created.id,
+              capabilities: metadata.capabilities
+            });
+            return created;
+          })
+        : await this.prisma.integrationCredential.create({ data });
       return toSummary(credential);
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         const winner = await this.findIdempotent(input);
-        if (winner) return toSummary(winner);
+        if (winner) {
+          await this.appendWorkspaceRoutes(
+            input.workspaceId,
+            input.actorId,
+            winner.id,
+            metadata.capabilities
+          );
+          return toSummary(winner);
+        }
       }
       throw error;
     }
@@ -199,9 +234,16 @@ export class IntegrationCredentialService {
     input: InternalEnablePlatformIntegrationCredentialInput,
     material: readonly PlatformCredentialMaterial[]
   ): Promise<IntegrationCredentialSummary> {
+    const capabilities = integrationProviderMetadata(input.provider).capabilities;
     const existing = await this.findPlatformIdempotent(input, material);
     if (existing) {
       await this.accounts?.register(input.provider, this.crypto.platformCredentialPoolSecret(input.provider, material), existing.id);
+      await this.appendWorkspaceRoutes(
+        input.workspaceId,
+        input.actorId,
+        existing.id,
+        capabilities
+      );
       return toSummary(existing);
     }
     if (await this.findActivePlatform(input)) {
@@ -227,8 +269,7 @@ export class IntegrationCredentialService {
       fingerprintKeyVersion
     );
     try {
-      const credential = await this.prisma.integrationCredential.create({
-        data: {
+      const data = {
           id: credentialId,
           workspaceId: input.workspaceId,
           provider: input.provider,
@@ -242,7 +283,7 @@ export class IntegrationCredentialService {
           updatedBy: input.actorId,
           ...encryptedForDatabase(encrypted),
           displayHint: "Системный",
-          capabilities: [...integrationProviderMetadata(input.provider).capabilities],
+          capabilities: [...capabilities],
           providerMeta: {
             accountIdentifierConfigured: material.every((entry) =>
               Boolean(entry.accountIdentifier)
@@ -250,14 +291,35 @@ export class IntegrationCredentialService {
             platformPoolSize: material.length,
             ...(secret.platformPool ? { platformAccountIds: secret.platformPool.map(entry => entry.id) } : {})
           }
-        }
-      });
+        } satisfies Prisma.IntegrationCredentialUncheckedCreateInput;
+      const credential = this.routeProvisioning
+        ? await this.prisma.$transaction(async (transaction) => {
+            const created = await transaction.integrationCredential.create({
+              data
+            });
+            await this.routeProvisioning!.appendInTransaction(transaction, {
+              workspaceId: input.workspaceId,
+              actorId: input.actorId,
+              credentialId: created.id,
+              capabilities
+            });
+            return created;
+          })
+        : await this.prisma.integrationCredential.create({ data });
       await this.accounts?.register(input.provider, secret, credential.id);
       return toSummary(credential);
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         const winner = await this.findPlatformIdempotent(input, material);
-        if (winner) return toSummary(winner);
+        if (winner) {
+          await this.appendWorkspaceRoutes(
+            input.workspaceId,
+            input.actorId,
+            winner.id,
+            capabilities
+          );
+          return toSummary(winner);
+        }
         if (await this.findActivePlatform(input)) {
           throw platformAlreadyEnabled();
         }
@@ -399,6 +461,20 @@ export class IntegrationCredentialService {
       if (isRecordNotFoundError(error)) throw versionConflict();
       throw error;
     }
+  }
+
+  private async appendWorkspaceRoutes(
+    workspaceId: string,
+    actorId: string,
+    credentialId: string,
+    capabilities: readonly IntegrationCapability[]
+  ): Promise<void> {
+    await this.routeProvisioning?.append({
+      workspaceId,
+      actorId,
+      credentialId,
+      capabilities
+    });
   }
 
   private async load(

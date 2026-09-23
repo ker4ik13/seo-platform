@@ -120,6 +120,15 @@ CSRF token. Повторная аутентификация требуется �
 действительно истекла, отозвана либо high-risk операция явно требует recent
 authentication/MFA.
 
+Текущий раздел admin хранится в query-параметре `screen`. Экран операций
+дополнительно фиксирует `status`, `type` и выбранный `operation` UUID. Reload и
+прямая ссылка восстанавливают тот же список и drawer; операция загружается по
+отдельному bounded GET по ID и не обязана находиться на первой cursor-странице.
+Переход в другой раздел очищает operation-only параметры, а браузерная история
+сохраняет открытие detail. Обычные GET/HEAD требуют действующую MFA-backed
+rotating cookie session, но не короткое recent-auth окно; mutation и high-risk
+команды продолжают требовать recent authentication.
+
 ## 7. Контентная модель
 
 Типизированный public content содержит:

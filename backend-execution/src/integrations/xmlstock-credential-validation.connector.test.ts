@@ -8,11 +8,13 @@ import {
   xmlStockValidationResult
 } from "./xmlstock-credential-validation.connector.js";
 
-test("validates XMLStock against the read-only region catalog", async () => {
+test("validates XMLStock only through read-only account endpoints", async () => {
   let received: URL | undefined;
+  const requests: URL[] = [];
   const connector = new XmlStockCredentialValidationConnector(
     async (input, init) => {
       received = new URL(String(input));
+      requests.push(received);
       assert.equal(init?.redirect, "error");
       if (received.pathname === "/api/" && received.searchParams.get("info") === "user") {
         return Response.json({
@@ -86,13 +88,16 @@ test("validates XMLStock against the read-only region catalog", async () => {
           },
           loadPercent: { GOOGLE_LIVE: 71, YANDEX_LIVE: 33 }
         },
-        wordstat: true,
-        regionCatalogAvailable: true
       }
     }
   );
   assert.equal(received?.origin, "https://xmlstock.com");
-  assert.equal(received?.searchParams.get("pagetype"), "regionsTree");
+  assert.equal(requests.length, 3);
+  assert.ok(requests.every((url) => url.pathname === "/api/"));
+  assert.deepEqual(
+    requests.map((url) => url.searchParams.get("info")),
+    [null, "user", "status"]
+  );
   assert.equal(received?.searchParams.has("query"), false);
   assert.equal(received?.searchParams.get("user"), "12345");
   assert.equal(received?.searchParams.get("key"), "secret-key");

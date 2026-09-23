@@ -21,8 +21,9 @@
 компактный список профилей, параметры выбранного профиля, оценку запуска и
 назначенные ему ключи без отдельного перехода.
 
-Editable launch profile сохраняет тип выдачи и охват следующего запуска:
-весь проект, точный список либо набор папок. Папки отображаются вложенным
+Editable launch profile сохраняет тип выдачи, XMLStock-режим обхода
+`STRICT_DEPTH|STOP_AFTER_FOUND`, выбор Turbo для Яндекс Live и охват следующего
+запуска: весь проект, точный список либо набор папок. Папки отображаются вложенным
 раскрываемым деревом; обычный checkbox включает только прямые запросы папки,
 а компактная кнопка «Вложенные» отдельно включает и отмечает потомков. Сервер
 при сохранении проверяет каждую папку внутри текущего tenant scope. Перед повторным запуском
@@ -92,11 +93,12 @@ Provider-specific region ID и форма provider request получаются 
 mapping при создании immutable execution manifest и не записываются обратно
 в tracking context.
 
-Turbo для XMLStock Яндекс Live является launch-only execution option, а не
-частью tracking context. Он фиксируется immutable mapping
-`xmlstock-yandex-live@3`; обычный Live остаётся на mapping
-`xmlstock-yandex-live@2`. Такой выбор не меняет сохранённый контекст и не может
-неявно распространиться на последующие ручные или автоматические запуски.
+Turbo для XMLStock Яндекс Live сохраняется как явный default launch profile и
+восстанавливается при выборе контекста. При каждом запуске выбор дополнительно
+фиксируется immutable mapping `xmlstock-yandex-live@3`; обычный Live остаётся
+на mapping `xmlstock-yandex-live@2`. Режим глубины так же сохраняется в
+launch profile, а manifest получает его immutable копию. Старые контексты без
+этих полей безопасно читаются как standard Live + `STRICT_DEPTH`.
 
 ## 2. Конфигурация отслеживания
 
@@ -351,7 +353,10 @@ snapshot/hash и task ID, опрашивает `check` и вызывает `get`
 polling без повторного submit; progress в этом состоянии может ещё отсутствовать.
 Остальные значения и противоречивые status/progress комбинации остаются
 fail-closed. Финальный `check-top` ответ нормализуется из
-упорядоченных `collect` и `snippets`; домен проекта ищется в диапазоне
+упорядоченных `collect` и `snippets`. Adapter принимает две однозначные формы,
+зафиксированные provider-ответами: `searchEngine -> query -> URL[]` и
+`query -> searchEngine -> URL[]`; во второй форме для текущего запроса строго
+требуется один поисковик. Домен проекта ищется в диапазоне
 1..sealed depth. Legacy `format=0` ответы продолжают читаться из
 `result.table`, где `position=[1001]` означает not-found.
 Сохраняется только normalized found/not-found output без raw provider body.
@@ -373,6 +378,12 @@ service по одному sealed chunk. Использованные kill-switch
 и не переиспользуются; runtime activation выдаётся только новой generation
 `arsenkin-positions@4`. Connector permission allowlist содержит только exact
 claim/authorize/runtime broker execute и не выдаёт table DML.
+Перед чтением transaction replay issuer берёт `pg_advisory_xact_lock` по
+точному `workspaceId + jobItemId + executionAttempt`. Ожидающий конкурент в
+`READ COMMITTED` видит уже сохранённый receipt и не повторяет INSERT в
+`rank_execution_quota_reservations`; это исключает unique-conflict retry storm
+при нескольких rank coordinators. Штатный runtime запускает один coordinator,
+а provider connector pool масштабируется независимо.
 
 Каждый HTTP-запрос к Arsenkin (`set`, `check`, `get` и credential `info`)
 получает разрешение через общий для всех connector workflows и replicas
@@ -396,13 +407,17 @@ capacity между всеми своими проектами и connector repl
 восстанавливает базовую ёмкость. Redis остаётся только transient capacity
 coordination и работает fail-closed; Job/lease/progress source of truth —
 PostgreSQL. Базовые окна одного credential: Yandex Live — `20 concurrent /
-10 RPS`, Google Live — `48 / 30`, Yandex Search API — `48 / 50`, Wordstat —
-`10 / 10`. XMLStock не использует общий lifecycle limit из пяти задач:
+15 RPS`, Google Live — `48 / 30`, Yandex Search API — `50 / 50`, Wordstat —
+`10 / 20`. Односекундный предел сглаживается общими для replicas окнами по
+100 мс, поэтому заявленная скорость не превращается в отклоняемый burst.
+XMLStock не использует общий lifecycle limit из пяти задач:
 dispatcher может подготовить до 48 keyword chunks одного Job за тик, после
 чего Redis и connector worker concurrency задают фактический предел внешних
 HTTP-вызовов. Лимит пяти provider tasks остаётся только у Arsenkin.
-Штатные три connector process используют по четыре frequency worker slot и
-тем самым заполняют Wordstat bucket до реальных `10 RPS`. Ожидание permit не
+Штатные три connector process используют независимые deterministic dispatch
+shards, по 16 rank slot и по четыре frequency worker slot. Они не создают
+одинаковые BullMQ tick ID и заполняют общий внешний пул до 48 rank-вызовов и
+Wordstat bucket до `20 RPS`. Ожидание permit не
 расходует попытку JobItem и отображается как фаза выполнения с расчётным
 числом provider requests, а не как terminal/error state.
 
@@ -414,6 +429,12 @@ XMLStock Яндекс Live Turbo не использует standard Yandex Live 
 поэтому настройка Turbo в кабинете XMLStock не включает повышенный тариф
 скрытно. Provider pending code `202` в Turbo повторяется через 15 секунд;
 остальные adaptive cooldown правила стандартного Live не меняются.
+Turbo page width зафиксирован в 50: TOP-50 выполняет один GET, TOP-100 — два,
+и каждый checkpoint сохраняет весь нормализованный SERP с конкурентами. Для
+позиционного XMLStock запуска immutable `xmlStockDepthMode` равен
+`STRICT_DEPTH` либо `STOP_AFTER_FOUND`; второй режим завершает обход после
+первой страницы, на которой найден домен проекта, а estimate показывает
+нижнюю и верхнюю стоимость.
 
 ### 3.4. Реализованный read slice истории
 
@@ -976,11 +997,12 @@ snapshot и ключа идемпотентности.
 работает асинхронно через `delayed=1`: connector сохраняет только `req_id`,
 ждёт 15 секунд до первого poll и 25 секунд между pending ответами; коды
 `202/210` означают ещё не готовый результат. Обычные Яндекс Live и Google Live
-синхронны и при глубине TOP-30/50/100 выполняют 3/5/10 страниц по 10
-результатов. Turbo Яндекс Live определяет фактический размер первой полной
-страницы из поддерживаемых XMLStock значений 10/20/30/40/50 и сохраняет его в
-checkpoint `xmlstock-rank-page@2`; TOP-100 поэтому занимает от 2 до 10 GET в
-зависимости от настройки аккаунта. Все найденные позиции переводятся в
+синхронны и при глубине TOP-30/50/100 планируют 3/5/10 страниц по 10
+результатов. Неполная или расширенная страница не завершает strict-обход:
+connector продолжает чтение до выбранной глубины и обрезает итоговый SERP по
+Top. Turbo Яндекс Live использует ровно 50 результатов на страницу и сохраняет
+checkpoint `xmlstock-rank-page@2`; TOP-50 поэтому занимает один GET, а TOP-100
+— два. Все найденные позиции переводятся в
 абсолютный индекс; matching URL сохраняется как ranking/relevant URL, raw XML
 отбрасывается после строгой нормализации. После успешного checkpoint следующая
 Live-страница получает `next_action_at = now` и может сразу перейти свободному
@@ -1025,9 +1047,14 @@ Live. Для Arsenkin Яндекс доступен TOP-30; для Google — TO
 показывает расход в единицах провайдера: Arsenkin Google требует соответственно
 2/3/5 лимитов на ключ, Яндекс — 2 лимита; XMLStock Search API выполняет один
 request на ключ, standard Live — `ceil(depth / 10)` requests на ключ. Для
-Яндекс Live Turbo нижняя граница estimate равна `ceil(depth / 50)`, а
-фактический расход может достигать `ceil(depth / 10)` и зависит от выбранного
-в кабинете XMLStock размера выдачи. Запуск передаёт ровно выбранный
+Яндекс Live Turbo strict estimate равен `ceil(depth / 50)`. При
+`STOP_AFTER_FOUND` нижняя граница — один запрос на ключ, верхняя совпадает со
+strict; для стандартного Live используется такая же граница 1…`ceil(depth/10)`.
+Безопасная публичная проекция задания обязана сохранять признак Turbo, чтобы
+списки операций, итоговое окно и live-логи не подписывали такой съём как
+обычный Яндекс Live. Для старого задания признак восстанавливается только из
+его immutable тарификационного снимка, без обращения к текущей настройке.
+Запуск передаёт ровно выбранный
 `credentialId` и не мутирует routing binding после estimate.
 Перед внешним `set` connector после Redis permit атомарно резервирует один из
 пяти общих для rank/Wordstat Arsenkin slots и записывает durable submit marker.
@@ -1254,6 +1281,9 @@ Fallback запрещён:
 - Успешные элементы сохраняются.
 - Ошибочные элементы имеют retryable/final classification.
 - Повтор можно выполнить только для ошибок.
+- После ручной отмены rank/frequency операция «Продолжить» создаёт новый
+  immutable запуск только для строк без сохранённого результата; завершённые
+  строки старой операции не открываются повторно.
 - Для частичного ручного съёма позиций UI показывает действие «Дособрать
   позиции». Оно создаёт отдельный дочерний Job, а сервер материализует scope
   только из записей закрытого родительского manifest без сохранённого

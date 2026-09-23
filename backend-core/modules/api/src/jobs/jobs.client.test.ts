@@ -368,6 +368,51 @@ test("loads a safe global operation page for platform administration", async () 
   }
 });
 
+test("loads one safe platform operation for an admin deep link", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    return dataResponse({
+      id: crawlJobId,
+      workspaceId,
+      projectId,
+      actorId,
+      type: "MANUAL_RANK_CHECK",
+      status: "RUNNING",
+      stage: "WAITING_EXECUTION_GRANT",
+      provider: "XMLSTOCK",
+      progress: { current: "17", total: "50", unit: "KEYWORDS" },
+      result: { found: 12, notFound: 5 },
+      attempt: 1,
+      maxAttempts: 8,
+      createdAt: "2026-08-11T18:00:00.000Z",
+      startedAt: "2026-08-11T18:00:01.000Z",
+      updatedAt: "2026-08-11T18:00:10.000Z"
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().getAdminOperation(
+      actorId,
+      "request-admin-operation-detail-001",
+      crawlJobId
+    );
+    assert.equal(result.id, crawlJobId);
+    assert.equal(result.result.found, 12);
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/platform-admin/operations/${crawlJobId}`
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards only the trusted storage entitlement with an upload command", async () => {
   const originalFetch = globalThis.fetch;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;

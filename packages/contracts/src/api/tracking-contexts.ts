@@ -29,6 +29,10 @@ export type TrackingContextScopeMode =
  */
 export interface TrackingContextLaunchProfile {
   readonly searchSource: TrackingSearchSource;
+  /** Saved default for XMLStock Yandex Live; absence means standard mode. */
+  readonly yandexLiveMode?: "TURBO";
+  /** Saved XMLStock pagination strategy for future launches. */
+  readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   /** Include keywords whose per-keyword tracking flag is disabled. */
   readonly includeUntracked: boolean;
   readonly scope: {

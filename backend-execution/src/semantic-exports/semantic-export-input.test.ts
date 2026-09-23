@@ -51,13 +51,24 @@ test("accepts a canonical internal position-history export", () => {
       dimensionKeys: [
         "YANDEX|RU|213|ru|DESKTOP",
         "GOOGLE|RU|1011969|ru|MOBILE"
-      ]
+      ],
+      includeAllKeywords: true
     }
   } as const;
   assert.deepEqual(internalCreateSemanticExportInput(input), input);
   assert.throws(
     () => internalCreateSemanticExportInput({ ...input, format: "CSV" }),
     /Invalid semantic export format/u
+  );
+  assert.throws(
+    () => internalCreateSemanticExportInput({
+      ...input,
+      positionHistory: {
+        ...input.positionHistory,
+        includeAllKeywords: "yes"
+      }
+    }),
+    /Invalid semantic export positionHistory.includeAllKeywords/u
   );
 });
 

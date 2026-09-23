@@ -5,7 +5,7 @@ import { IntegrationCredentialRefreshSchedulerService } from "./integration-cred
 import type { IntegrationCredentialExecutionBrokerService } from "./integration-credential-execution-broker.service.js";
 import type { IntegrationCredentialConnectorRegistry } from "./integration-credential-connector.registry.js";
 
-test("schedules hourly refreshes without automatically probing XMLStock", async () => {
+test("schedules hourly read-only refreshes for every supported provider", async () => {
   const calls: unknown[] = [];
   const broker = {
     scheduleValidationRefreshes: async (input: unknown) => {
@@ -34,12 +34,13 @@ test("schedules hourly refreshes without automatically probing XMLStock", async 
   assert.equal(call.limit, 100);
   assert.ok(call.staleBefore.getTime() >= before - 1_000);
   assert.deepEqual(call.connectorVersions, {
+    XMLSTOCK: "xmlstock@test",
     ARSENKIN: "arsenkin@test",
     KEYS_SO: "keys_so@test"
   });
 });
 
-test("schedules an exact non-XMLStock refresh after provider operation", async () => {
+test("schedules an exact refresh after a provider operation", async () => {
   let received: unknown;
   const broker = {
     scheduleValidationRefreshes: async (input: unknown) => {
@@ -59,16 +60,20 @@ test("schedules an exact non-XMLStock refresh after provider operation", async (
 
   assert.deepEqual(received, {
     credentialIds: [credentialId],
+    staleBefore: (received as { staleBefore: Date }).staleBefore,
     connectorVersions: {
-      ARSENKIN: "arsenkin@test",
-      KEYS_SO: "keys_so@test"
+      ARSENKIN: "arsenkin@test"
     },
     reason: "PROVIDER_OPERATION",
     limit: 1
   });
+  assert.ok(
+    (received as { staleBefore: Date }).staleBefore.getTime() <=
+      Date.now() - 60 * 60 * 1_000 + 1_000
+  );
 });
 
-test("never refreshes XMLStock automatically after a provider operation", async () => {
+test("refreshes XMLStock through its read-only account connector", async () => {
   let calls = 0;
   const broker = {
     scheduleValidationRefreshes: async () => {
@@ -88,5 +93,5 @@ test("never refreshes XMLStock automatically after a provider operation", async 
     "XMLSTOCK"
   );
 
-  assert.equal(calls, 0);
+  assert.equal(calls, 1);
 });

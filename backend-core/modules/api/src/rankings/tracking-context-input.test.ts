@@ -73,6 +73,36 @@ test("normalizes the explicit untracked launch override and defaults legacy inpu
   assert.deepEqual(legacy.launchProfile?.scope.descendantGroupIds, []);
 });
 
+test("persists XMLStock depth and Turbo defaults in a tracking context", () => {
+  const result = createTrackingContextInput({
+    ...validInput,
+    launchProfile: {
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO",
+      xmlStockDepthMode: "STOP_AFTER_FOUND",
+      includeUntracked: false,
+      scope: { mode: "ALL", groupIds: [] }
+    }
+  });
+  assert.equal(result.launchProfile?.yandexLiveMode, "TURBO");
+  assert.equal(
+    result.launchProfile?.xmlStockDepthMode,
+    "STOP_AFTER_FOUND"
+  );
+  assert.throws(
+    () => createTrackingContextInput({
+      ...validInput,
+      launchProfile: {
+        searchSource: "LIVE",
+        yandexLiveMode: "FAST",
+        xmlStockDepthMode: "FIRST_PAGE",
+        scope: { mode: "ALL", groupIds: [] }
+      }
+    }),
+    DomainError
+  );
+});
+
 test("keeps descendant expansion as an explicit folder choice", () => {
   const groupId = "01900000-0000-7000-8000-000000000099";
   const directGroupId = "01900000-0000-7000-8000-000000000098";

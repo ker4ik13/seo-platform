@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   AdminOperationSearchResult,
   AdminOperationStatusGroup,
@@ -13,13 +14,48 @@ import { UiText, useUiLocale } from "../../components/ui-locale";
 export function OperationAdministration() {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
-  const [status, setStatus] = useState<AdminOperationStatusGroup>("ALL");
-  const [type, setType] = useState("");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<AdminOperationStatusGroup>(() =>
+    adminOperationStatus(searchParams.get("status"))
+  );
+  const [type, setType] = useState(() => adminOperationType(searchParams.get("type")));
   const [result, setResult] = useState<AdminOperationSearchResult>();
   const [selected, setSelected] = useState<AdminOperationSummary>();
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [selectedLoading, setSelectedLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const selectedOperationId = adminOperationId(searchParams.get("operation"));
+
+  const updateUrl = useCallback((changes: Readonly<{
+    operation?: string | null;
+    status?: AdminOperationStatusGroup;
+    type?: string;
+  }>) => {
+    const next = new URLSearchParams(window.location.search);
+    next.set("screen", "operations");
+    if (changes.status !== undefined) {
+      if (changes.status === "ALL") next.delete("status");
+      else next.set("status", changes.status);
+    }
+    if (changes.type !== undefined) {
+      if (changes.type) next.set("type", changes.type);
+      else next.delete("type");
+    }
+    if (changes.operation !== undefined) {
+      if (changes.operation) next.set("operation", changes.operation);
+      else next.delete("operation");
+    }
+    const href = `/admin?${next.toString()}`;
+    if (changes.operation) router.push(href, { scroll: false });
+    else router.replace(href, { scroll: false });
+  }, [router]);
+
+  useEffect(() => {
+    setStatus(adminOperationStatus(searchParams.get("status")));
+    setType(adminOperationType(searchParams.get("type")));
+  }, [searchParams]);
 
   const load = useCallback(async (cursor?: string, silent = false) => {
     if (!silent) {
@@ -43,13 +79,30 @@ export function OperationAdministration() {
       ? { ...response.data, data: [...current.data, ...response.data.data] }
       : response.data
     );
-    setSelected((current) => current
-      ? response.data.data.find((operation) => operation.id === current.id) ?? current
-      : undefined
-    );
-  }, [status, type]);
+    const requested = selectedOperationId
+      ? response.data.data.find(({ id }) => id === selectedOperationId)
+      : undefined;
+    if (requested) setSelected(requested);
+    else if (!selectedOperationId) setSelected(undefined);
+  }, [selectedOperationId, status, type]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!selectedOperationId || selected?.id === selectedOperationId) return;
+    const controller = new AbortController();
+    setSelectedLoading(true);
+    void adminApi<AdminOperationSummary>(
+      `/api/operations/${encodeURIComponent(selectedOperationId)}`,
+      { signal: controller.signal }
+    ).then((response) => {
+      if (controller.signal.aborted) return;
+      if (response.ok) setSelected(response.data);
+      else setError(response.message);
+    }).finally(() => {
+      if (!controller.signal.aborted) setSelectedLoading(false);
+    });
+    return () => controller.abort();
+  }, [selected?.id, selectedOperationId]);
   useEffect(() => {
     if (status === "COMPLETED" || status === "ATTENTION") return;
     const timer = window.setInterval(() => void load(undefined, true), 15_000);
@@ -73,13 +126,23 @@ export function OperationAdministration() {
         <header className="operation-toolbar">
           <div><h2><UiText text="Журнал выполнения" /></h2><p><UiText text="Без входных payload’ов, секретов и текстов запросов" /></p></div>
           <div className="filters">
-            <select aria-label={uiText("Состояние операций")} onChange={(event) => setStatus(event.target.value as AdminOperationStatusGroup)} value={status}>
+            <select aria-label={uiText("Состояние операций")} onChange={(event) => {
+              const nextStatus = event.target.value as AdminOperationStatusGroup;
+              setStatus(nextStatus);
+              setSelected(undefined);
+              updateUrl({ status: nextStatus, operation: null });
+            }} value={status}>
               <option value="ALL"><UiText text="Все состояния" /></option>
               <option value="ACTIVE"><UiText text="В процессе" /></option>
               <option value="COMPLETED"><UiText text="Завершённые" /></option>
               <option value="ATTENTION"><UiText text="Ошибки и внимание" /></option>
             </select>
-            <select aria-label={uiText("Тип операции")} onChange={(event) => setType(event.target.value)} value={type}>
+            <select aria-label={uiText("Тип операции")} onChange={(event) => {
+              const nextType = event.target.value;
+              setType(nextType);
+              setSelected(undefined);
+              updateUrl({ type: nextType, operation: null });
+            }} value={type}>
               <option value=""><UiText text="Все типы" /></option>
               {visibleTypes.map((item) => <option key={item.type} value={item.type}>{operationType(item.type)} · {formatNumber(item.count, uiLocale)}</option>)}
             </select>
@@ -95,7 +158,10 @@ export function OperationAdministration() {
             <div className="operation-row operation-head" aria-hidden="true">
               <span><UiText text="Операция" /></span><span><UiText text="Контекст" /></span><span><UiText text="Состояние" /></span><span><UiText text="Прогресс / результат" /></span><span><UiText text="Время" /></span><span />
             </div>
-            {result.data.map((operation) => <OperationRow key={operation.id} onOpen={() => setSelected(operation)} operation={operation} />)}
+            {result.data.map((operation) => <OperationRow key={operation.id} onOpen={() => {
+              setSelected(operation);
+              updateUrl({ operation: operation.id });
+            }} operation={operation} />)}
           </div>
         )}
         {result?.nextCursor && (
@@ -104,7 +170,15 @@ export function OperationAdministration() {
           </button>
         )}
       </section>
-      {selected && <OperationDrawer onClose={() => setSelected(undefined)} operation={selected} />}
+      {selectedLoading && (!selected || selected.id !== selectedOperationId) && (
+        <div aria-live="polite" className="admin-detail-loading">
+          <UiText text="Загружаем операцию…" />
+        </div>
+      )}
+      {selected && selected.id === selectedOperationId && <OperationDrawer onClose={() => {
+        setSelected(undefined);
+        updateUrl({ operation: null });
+      }} operation={selected} />}
     </div>
   );
 }
@@ -122,7 +196,7 @@ function OperationRow({ onOpen, operation }: Readonly<{ onOpen: () => void; oper
         <strong>{operation.project?.name ?? <UiText text="Без проекта" />}</strong>
         <small>{operation.workspace?.name ?? operation.workspaceId}</small>
       </div>
-      <div data-label="Состояние"><OperationStatus status={operation.status} type={operation.type} />{operation.stage && <small className="operation-stage">{operation.stage}</small>}</div>
+      <div data-label="Состояние"><OperationStatus status={operation.status} type={operation.type} />{operation.stage && <small className="operation-stage">{operationStage(operation)}</small>}</div>
       <div className="operation-progress" data-label="Прогресс / результат">
         <div><strong>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</strong><small>{<UiText text={resultLabel(operation, uiLocale) ?? ""} />}</small></div>
         {percent !== undefined && <span><i style={{ width: `${percent}%` }} /></span>}
@@ -156,7 +230,7 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label={uiText("Проект")} value={operation.project ? `${operation.project.name} · ${operation.project.domain}` : "Без проекта"} />
           <Snapshot label={uiText("Автор запуска")} value={operation.actor ? `${operation.actor.displayName} · ${operation.actor.email}` : "Системная операция"} />
           <Snapshot label={uiText("Провайдер")} value={operation.provider ?? "—"} />
-          <Snapshot label={uiText("Этап")} value={operation.stage ?? "—"} />
+          <Snapshot label={uiText("Этап")} value={operation.stage ? operationStage(operation) : "—"} />
           <Snapshot label={uiText("Попытка")} value={`${operation.attempt} из ${operation.maxAttempts}`} />
           <Snapshot label={uiText("Результат")} value={resultLabel(operation, uiLocale)} />
           <Snapshot label={uiText("Код ошибки")} value={operation.errorCode ?? "—"} />
@@ -204,7 +278,38 @@ function resultLabel(operation: AdminOperationSummary, uiLocale: string = "ru-RU
   if (operation.result.notFound !== undefined) parts.push(`не найдено ${formatNumber(operation.result.notFound, uiLocale)}`);
   if (operation.result.failed !== undefined) parts.push(`ошибок ${formatNumber(operation.result.failed, uiLocale)}`);
   if (operation.result.issues !== undefined) parts.push(`проблем ${formatNumber(operation.result.issues, uiLocale)}`);
-  return parts.join(" · ") || (operation.errorCode ? `Код: ${operation.errorCode}` : "Результат ещё не сформирован");
+  if (parts.length > 0) return parts.join(" · ");
+  if (operation.errorCode) return `Код: ${operation.errorCode}`;
+  if (
+    operation.type === "MANUAL_RANK_CHECK" &&
+    operation.status === "RUNNING" &&
+    Number(operation.progress.current) > 0
+  ) {
+    return `сохранено позиций: ${formatDecimal(operation.progress.current, uiLocale)}`;
+  }
+  return "Результат ещё не сформирован";
+}
+function operationStage(operation: AdminOperationSummary): string {
+  if (
+    operation.type === "MANUAL_RANK_CHECK" &&
+    operation.stage === "WAITING_EXECUTION_GRANT"
+  ) {
+    return Number(operation.progress.current) > 0
+      ? "Сбор и сохранение позиций"
+      : "Подготовка запросов к съёму";
+  }
+  return ({
+    PREPARING_SCOPE: "Подготовка охвата",
+    WAITING_FOR_QUEUE: "Ожидает очереди",
+    READY_TO_SUBMIT: "Готово к отправке",
+    SUBMITTING: "Отправка провайдеру",
+    WAITING_PROVIDER: "Ожидает ответ провайдера",
+    FETCHING_RESULT: "Получение результата",
+    PERSISTING_RESULT: "Сохранение результата",
+    FINALIZING: "Завершение операции",
+    SUBMIT_OUTCOME_UNKNOWN: "Нужна сверка отправки",
+    FINISHED: "Завершено"
+  } as Readonly<Record<string, string>>)[operation.stage ?? ""] ?? operation.stage ?? "—";
 }
 function progressPercent(operation: AdminOperationSummary): number | undefined {
   if (!operation.progress.total) return undefined;
@@ -217,3 +322,19 @@ function formatDecimal(value: string, uiLocale: string = "ru-RU"): string { cons
 function formatNumber(value: number, uiLocale: string = "ru-RU"): string { return new Intl.NumberFormat(uiLocale).format(value); }
 function formatDate(value: string, uiLocale: string = "ru-RU"): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(date); }
 function shortId(value: string): string { return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value; }
+
+function adminOperationStatus(value: string | null): AdminOperationStatusGroup {
+  return ["ALL", "ACTIVE", "COMPLETED", "ATTENTION"].includes(value ?? "")
+    ? value as AdminOperationStatusGroup
+    : "ALL";
+}
+
+function adminOperationType(value: string | null): string {
+  return value && /^[A-Z][A-Z0-9_]{0,79}$/u.test(value) ? value : "";
+}
+
+function adminOperationId(value: string | null): string | undefined {
+  return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
+    ? value
+    : undefined;
+}

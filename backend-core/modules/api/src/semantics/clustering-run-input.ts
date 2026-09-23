@@ -21,7 +21,7 @@ const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)
 
 export function createClusteringRunInput(value: unknown): CreateClusteringRunInput {
   const input = record(value, [
-    "items", "searchEngine", "regionCode", "method", "overlapCount", "depth",
+    "items", "credentialId", "searchEngine", "regionCode", "method", "overlapCount", "depth",
     "excludeMainPages", "stopDomains", "frequencyTypes", "replaceExistingClusters"
   ]);
   if (
@@ -49,6 +49,9 @@ export function createClusteringRunInput(value: unknown): CreateClusteringRunInp
   if (new Set(frequencyTypes).size !== frequencyTypes.length) invalid("frequencyTypes");
   return {
     items,
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     searchEngine: member(input.searchEngine, clusteringSearchEngines, "searchEngine"),
     regionCode: pattern(input.regionCode, "regionCode", REGION_PATTERN),
     method: member(input.method, clusteringMethods, "method"),

@@ -932,7 +932,11 @@ test("defers an XMLStock poll without an HTTP request when its credential produc
   const quota: XmlStockHttpQuotaGate = {
     async tryAcquire(input) {
       quotaScope = input.credentialId;
-      return { allowed: false, retryAfterSeconds: 2 };
+      return {
+        allowed: false,
+        retryAfterSeconds: 2,
+        retryAfterMilliseconds: 2_000
+      };
     },
     async release() {},
     async penalize() {},

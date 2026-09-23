@@ -16,6 +16,7 @@ import {
   type SemanticKeywordCleaningPreview,
   type SemanticKeywordListItem,
   type SemanticKeywordMergeResult,
+  type SemanticKeywordTagDeleteResult,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
 import { useMemo, useState, type FormEvent } from "react";
@@ -100,6 +101,7 @@ export function SemanticBulkEditor({
   clusters,
   onCancel,
   onCompleted,
+  onTagDeleted,
   onSplitCompleted
 }: Readonly<{
   projectId: string;
@@ -108,6 +110,7 @@ export function SemanticBulkEditor({
   clusters: readonly BulkCluster[];
   onCancel: () => void;
   onCompleted: (result: BulkResult) => void;
+  onTagDeleted: (result: SemanticKeywordTagDeleteResult) => void;
   onSplitCompleted: (result: SplitResult) => void;
 }>) {
   const { t: uiText } = useUiLocale();
@@ -564,6 +567,7 @@ export function SemanticBulkEditor({
           }}
           disabled={saving}
           mode={single ? "edit" : "add"}
+          onTagDeleted={onTagDeleted}
         />
         {!single && <KeywordTagPicker
           projectId={projectId}
@@ -575,6 +579,7 @@ export function SemanticBulkEditor({
           }}
           disabled={saving}
           mode="remove"
+          onTagDeleted={onTagDeleted}
           availableTags={selectedTagNames}
         />}
       </div>

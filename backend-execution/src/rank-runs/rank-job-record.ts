@@ -23,6 +23,7 @@ import type {
   RankJobRun
 } from "../generated/prisma/client.js";
 import type { XmlStockOperationUsageSummary } from "@seo-platform/contracts";
+import { storedXmlStockOperationUsage } from "../integrations/xmlstock-pricing.js";
 
 export const MANUAL_RANK_CHECK_JOB_TYPE = "MANUAL_RANK_CHECK";
 export const RANK_JOB_INPUT_SCHEMA = "manual-rank-check@1";
@@ -116,6 +117,7 @@ export function rankJobScopeJson(
     InternalRankExecutionParameters,
     | "purpose"
     | "saveProjectPosition"
+    | "xmlStockDepthMode"
     | "searchEngine"
     | "depth"
     | "providerMappingVersion"
@@ -151,9 +153,15 @@ export function rankJobScopeJson(
     ...(execution.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: execution.saveProjectPosition }),
+    ...(execution.xmlStockDepthMode === undefined
+      ? {}
+      : { xmlStockDepthMode: execution.xmlStockDepthMode }),
     searchEngine: execution.searchEngine,
     ...geography,
     ...(searchSource ? { searchSource } : {}),
+    ...(estimate?.providerUsage?.product === "YANDEX_TURBO"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {}),
     depth: execution.depth,
     ...(estimate?.routingScope ? { routingScope: estimate.routingScope } : {}),
     ...(estimate?.connectorAttempts
@@ -390,6 +398,7 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
 interface RankExecutionPresentation {
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: "SEARCH_API" | "LIVE";
+  readonly yandexLiveMode?: "TURBO";
   readonly countryCode?: string;
   readonly regionCode?: string;
   readonly language?: string;
@@ -397,6 +406,7 @@ interface RankExecutionPresentation {
   readonly depth?: 10 | 20 | 30 | 50 | 100;
   readonly purpose?: "POSITION_TRACKING" | "COMPETITOR_SERP";
   readonly saveProjectPosition?: boolean;
+  readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
 }
 
 function rankScopeSummary(
@@ -457,9 +467,15 @@ function rankExecutionPresentation(
 ): RankExecutionPresentation {
   const searchEngine = input.searchEngine;
   const searchSource = input.searchSource;
+  const storedUsage = storedXmlStockOperationUsage(input.providerUsage);
+  const yandexLiveMode = input.yandexLiveMode === "TURBO" ||
+      storedUsage?.product === "YANDEX_TURBO"
+    ? "TURBO" as const
+    : undefined;
   const depth = input.depth;
   const purpose = input.purpose;
   const saveProjectPosition = input.saveProjectPosition;
+  const xmlStockDepthMode = input.xmlStockDepthMode;
   const manifestPresentation = manifestExecutionPresentation(manifestCommand);
   const inputGeography = [
     input.countryCode,
@@ -474,9 +490,11 @@ function rankExecutionPresentation(
   if (
     searchEngine === undefined &&
     searchSource === undefined &&
+    yandexLiveMode === undefined &&
     depth === undefined &&
     purpose === undefined &&
     saveProjectPosition === undefined &&
+    xmlStockDepthMode === undefined &&
     !hasInputGeography
   ) {
     return manifestPresentation;
@@ -501,11 +519,16 @@ function rankExecutionPresentation(
       searchSource !== "SEARCH_API" &&
       searchSource !== "LIVE") ||
     (searchEngine === "GOOGLE" && searchSource === "SEARCH_API") ||
+    (yandexLiveMode !== undefined &&
+      (searchEngine !== "YANDEX" || searchSource !== "LIVE")) ||
     (purpose !== undefined &&
       purpose !== "POSITION_TRACKING" &&
       purpose !== "COMPETITOR_SERP") ||
     (saveProjectPosition !== undefined &&
       typeof saveProjectPosition !== "boolean") ||
+    (xmlStockDepthMode !== undefined &&
+      xmlStockDepthMode !== "STRICT_DEPTH" &&
+      xmlStockDepthMode !== "STOP_AFTER_FOUND") ||
     (geography.some(value => value !== undefined) &&
       geography.some(value => value === undefined)) ||
     (countryCode !== undefined &&
@@ -531,6 +554,13 @@ function rankExecutionPresentation(
           manifestPresentation.searchSource
         ? { searchSource: manifestPresentation.searchSource }
         : {}),
+    ...(yandexLiveMode
+      ? { yandexLiveMode }
+      : manifestPresentation.searchEngine === searchEngine &&
+          manifestPresentation.depth === depth &&
+          manifestPresentation.yandexLiveMode
+        ? { yandexLiveMode: manifestPresentation.yandexLiveMode }
+        : {}),
     ...(typeof countryCode === "string" ? { countryCode } : {}),
     ...(typeof regionCode === "string" ? { regionCode } : {}),
     ...(typeof language === "string" ? { language } : {}),
@@ -545,7 +575,12 @@ function rankExecutionPresentation(
       ? manifestPresentation.saveProjectPosition === undefined
         ? {}
         : { saveProjectPosition: manifestPresentation.saveProjectPosition }
-      : { saveProjectPosition })
+      : { saveProjectPosition }),
+    ...(xmlStockDepthMode === undefined
+      ? manifestPresentation.xmlStockDepthMode === undefined
+        ? {}
+        : { xmlStockDepthMode: manifestPresentation.xmlStockDepthMode }
+      : { xmlStockDepthMode })
   };
 }
 
@@ -568,6 +603,7 @@ function manifestExecutionPresentation(
   const depth = stored.depth;
   const purpose = stored.purpose;
   const saveProjectPosition = stored.saveProjectPosition;
+  const xmlStockDepthMode = stored.xmlStockDepthMode;
   const countryCode = stored.countryCode;
   const regionCode = stored.regionCode ?? countryCode;
   const language = stored.language;
@@ -580,6 +616,9 @@ function manifestExecutionPresentation(
       purpose !== "COMPETITOR_SERP") ||
     (saveProjectPosition !== undefined &&
       typeof saveProjectPosition !== "boolean") ||
+    (xmlStockDepthMode !== undefined &&
+      xmlStockDepthMode !== "STRICT_DEPTH" &&
+      xmlStockDepthMode !== "STOP_AFTER_FOUND") ||
     typeof countryCode !== "string" ||
     !/^[A-Z]{2}$/u.test(countryCode) ||
     typeof regionCode !== "string" ||
@@ -610,7 +649,11 @@ function manifestExecutionPresentation(
     ...(saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition }),
+    ...(xmlStockDepthMode === undefined ? {} : { xmlStockDepthMode }),
     ...(searchSource ? { searchSource } : {}),
+    ...(providerMappingVersion === "xmlstock-yandex-live@3"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {}),
     depth: Number(depth) as 10 | 20 | 30 | 50 | 100
   };
 }

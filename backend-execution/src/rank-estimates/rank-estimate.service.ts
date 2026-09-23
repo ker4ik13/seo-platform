@@ -268,7 +268,8 @@ export class RankEstimateService {
             input.searchSource,
             input.yandexLiveMode,
             input.purpose ?? "POSITION_TRACKING",
-            input.saveProjectPosition
+            input.saveProjectPosition,
+            input.xmlStockDepthMode
           );
           const blockers = estimateBlockers(
             input,
@@ -803,7 +804,8 @@ function estimateBlockers(
     input.searchSource,
     input.yandexLiveMode,
     input.purpose ?? "POSITION_TRACKING",
-    input.saveProjectPosition
+    input.saveProjectPosition,
+    input.xmlStockDepthMode
   );
   if (scope.contextStatus === "ARCHIVED") blockers.add("CONTEXT_ARCHIVED");
   if (keywordCount === 0) blockers.add("NO_ASSIGNED_KEYWORDS");
@@ -1043,14 +1045,15 @@ function rankXmlStockProviderUsage(
         ? "YANDEX_TURBO" as const
         : "YANDEX_LIVE" as const;
   const keywordCount = Number(input.scope.keywordCount);
-  const minimumPages = product === "YANDEX_SEARCH_API"
+  const strictPages = product === "YANDEX_SEARCH_API"
     ? 1
     : product === "YANDEX_TURBO"
       ? Math.ceil(input.execution.depth / 50)
       : Math.ceil(input.execution.depth / 10);
-  const maximumPages = product === "YANDEX_TURBO"
-    ? Math.ceil(input.execution.depth / 10)
-    : minimumPages;
+  const stopAfterFound =
+    input.execution.xmlStockDepthMode === "STOP_AFTER_FOUND";
+  const minimumPages = stopAfterFound ? 1 : strictPages;
+  const maximumPages = strictPages;
   return xmlStockOperationUsage(
     input.resolvedRoute.xmlStockPricing,
     product,

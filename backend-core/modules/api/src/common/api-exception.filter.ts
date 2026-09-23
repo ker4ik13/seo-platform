@@ -71,8 +71,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     const exceptionName =
       exception instanceof Error ? exception.name : typeof exception;
+    const diagnostic = safeExceptionDiagnostic(exception);
     this.logger.error(
-      `Unhandled ${exceptionName}; requestId=${requestId}`
+      `Unhandled ${exceptionName}; requestId=${requestId}${diagnostic}`
     );
 
     const response: ApiErrorResponse = {
@@ -85,4 +86,46 @@ export class ApiExceptionFilter implements ExceptionFilter {
     };
     void reply.status(HttpStatus.INTERNAL_SERVER_ERROR).send(response);
   }
+}
+
+export function safeExceptionDiagnostic(value: unknown): string {
+  if (typeof value !== "object" || value === null) return "";
+  const error = value as Readonly<Record<string, unknown>>;
+  const meta = typeof error.meta === "object" && error.meta !== null
+    ? error.meta as Readonly<Record<string, unknown>>
+    : undefined;
+  const fields: string[] = [];
+  const code = safeDiagnosticCode(error.code);
+  const databaseCode = safeDiagnosticCode(
+    error.originalCode ?? meta?.code
+  );
+  if (code) fields.push(`code=${code}`);
+  if (databaseCode && databaseCode !== code) {
+    fields.push(`databaseCode=${databaseCode}`);
+  }
+  const target = safeDiagnosticTarget(meta?.target);
+  if (target) fields.push(`target=${target}`);
+  return fields.length > 0 ? `; ${fields.join("; ")}` : "";
+}
+
+function safeDiagnosticCode(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Z0-9_]{2,40}$/u.test(value)
+    ? value
+    : undefined;
+}
+
+function safeDiagnosticTarget(value: unknown): string | undefined {
+  const values = Array.isArray(value) ? value : [value];
+  if (
+    values.length < 1 ||
+    values.length > 8 ||
+    values.some(
+      (item) =>
+        typeof item !== "string" ||
+        !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/u.test(item)
+    )
+  ) {
+    return undefined;
+  }
+  return (values as string[]).join(",");
 }

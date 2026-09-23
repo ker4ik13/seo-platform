@@ -488,6 +488,47 @@ test("manual retry cannot resubmit an ambiguous paid Arsenkin task", async () =>
   assert.equal(touchedItems, false);
 });
 
+test("manual retry resumes a connector-not-ready job before provider I/O", async () => {
+  let itemUpdate: unknown;
+  const transaction = {
+    job: {
+      findFirst: async () => ({
+        version: 9,
+        status: "ACTION_REQUIRED",
+        credentialMode: "BYOK_API_KEY",
+        errorSummary: { code: "CONNECTOR_NOT_READY" }
+      }),
+      updateMany: async () => ({ count: 1 })
+    },
+    jobItem: {
+      updateMany: async (input: unknown) => {
+        itemUpdate = input;
+        return { count: 2 };
+      },
+      count: async () => 0
+    }
+  };
+  const prisma = {
+    $transaction: async (callback: (value: typeof transaction) => Promise<void>) =>
+      callback(transaction)
+  };
+  const result = await new RetryHarness(
+    prisma as never,
+    route as never
+  ).retryFailed(jobId, {
+    workspaceId,
+    projectId,
+    actorId,
+    version: 9
+  });
+
+  assert.equal(result.status, "QUEUED");
+  assert.deepEqual((itemUpdate as { where: unknown }).where, {
+    jobId,
+    status: "PENDING"
+  });
+});
+
 class RetryHarness extends FrequencyCollectionService {
   public override async get(): Promise<FrequencyCollectionSummary> {
     return {

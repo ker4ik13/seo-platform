@@ -16,6 +16,7 @@ export interface RankTargetBatchInput {
   readonly competitorMode: boolean;
   readonly saveProjectPosition: boolean;
   readonly yandexLiveTurbo: boolean;
+  readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   /** Saved profiles may be reused only after the user explicitly selects one. */
   readonly saveContexts?: boolean;
   /** A new named profile must never attach to an older matching profile. */
@@ -103,7 +104,7 @@ export async function prepareRankTargetBatch(batch: RankTargetBatch, settings: T
         if (!entry.estimate || rankEstimateExpired(entry.estimate.expiresAt, Date.now()) || entry.estimate.status !== "READY") {
           entry.estimateKey ??= `rank-estimate:${crypto.randomUUID()}`;
           const mode = input.yandexLiveTurbo && provider === "XMLSTOCK" && entry.draft.searchEngine === "YANDEX" && entry.draft.searchSource === "LIVE" ? "TURBO" : undefined;
-          const payload = await request<unknown>(rankEstimatesApiPath(input.projectId), { method: "POST", idempotencyKey: entry.estimateKey, body: rankEstimateInput(entry.context.id, provider, input.source.id, entry.draft.searchSource, mode, input.competitorMode ? "COMPETITOR_SERP" : undefined, input.competitorMode ? input.saveProjectPosition : undefined) });
+          const payload = await request<unknown>(rankEstimatesApiPath(input.projectId), { method: "POST", idempotencyKey: entry.estimateKey, body: rankEstimateInput(entry.context.id, provider, input.source.id, entry.draft.searchSource, mode, input.competitorMode ? "COMPETITOR_SERP" : undefined, input.competitorMode ? input.saveProjectPosition : undefined, provider === "XMLSTOCK" && entry.draft.searchSource === "LIVE" && !input.competitorMode ? input.xmlStockDepthMode ?? "STRICT_DEPTH" : undefined) });
           entry.estimate = parseRankEstimate(payload, { projectId: input.projectId, trackingContextId: entry.context.id });
           delete entry.estimateKey;
           if (entry.estimate.scope.contextVersion !== entry.context.version || entry.estimate.scope.configurationVersion !== entry.context.configuration.configurationVersion || entry.estimate.scope.keywordCount !== String(input.selectedKeywordCount)) { delete entry.estimate; throw new Error("Состав или параметры профиля изменились. Рассчитайте съём заново."); }

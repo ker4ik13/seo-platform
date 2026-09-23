@@ -55,11 +55,52 @@ test("semantic scroll: 800 rows, 100-row pages, rich cells and two open tabs rem
   });
   let density = "COMFORTABLE";
   const columns = ["query", "tags", "yandexPosition", "yandexRelevantUrl", "targetUrl", "source"];
-  await context.route(`**/app/api/projects/${project.id}/semantic-saved-views`, route => route.fulfill({ json: { data: [{
+  let projectView = {
     id: randomUUID(), ownerId: fixture.userId, name: "__project_table_layout__", scope: "PRIVATE", version: 1,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     config: { schemaVersion: 4, filters: {}, sort: "CREATED_DESC", columns, density, pageSize: 100, columnWidths: { tags: 90, targetUrl: 90, yandexRelevantUrl: 100 } }
-  }] } }));
+  };
+  let personalView;
+  const savedViewRoute = async route => {
+    if (route.request().method() === "GET") {
+      projectView = { ...projectView, config: { ...projectView.config, density } };
+      if (personalView) {
+        personalView = {
+          ...personalView,
+          config: { ...personalView.config, density }
+        };
+      }
+      await route.fulfill({ json: { data: [projectView, ...(personalView ? [personalView] : [])] } });
+      return;
+    }
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON();
+      personalView = {
+        id: randomUUID(), ownerId: fixture.userId, name: body.name,
+        scope: body.scope, version: 1,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        config: body.config
+      };
+      await route.fulfill({ json: { data: personalView } });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON();
+      const personalRequest = personalView && route.request().url().endsWith(`/${personalView.id}`);
+      const current = personalRequest ? personalView : projectView;
+      const updated = {
+        ...current, config: body.config, version: current.version + 1,
+        updatedAt: new Date().toISOString()
+      };
+      if (personalRequest) personalView = updated;
+      else projectView = updated;
+      await route.fulfill({ json: { data: updated } });
+      return;
+    }
+    await route.abort();
+  };
+  await context.route(`**/app/api/projects/${project.id}/semantic-saved-views`, savedViewRoute);
+  await context.route(`**/app/api/projects/${project.id}/semantic-saved-views/*`, savedViewRoute);
   // Real keyset pages, with deliberately heterogeneous provider projections.
   await context.route(`**/app/api/projects/${project.id}/keywords/list`, async route => {
     const response = await route.fetch();
@@ -90,6 +131,11 @@ test("semantic scroll: 800 rows, 100-row pages, rich cells and two open tabs rem
     await page.locator(".semantic-table tbody tr[data-presence-row-id]").first().waitFor();
     await peer.locator(".semantic-table tbody tr[data-presence-row-id]").first().waitFor();
     await page.waitForTimeout(1500);
+    if (mode === "COMFORTABLE") {
+      const cursorToggle = page.locator(".project-presence-visibility-toggle");
+      await cursorToggle.waitFor();
+      assert.equal(await cursorToggle.getAttribute("aria-pressed"), "false", "cursor sharing must be opt-in");
+    }
     const requestStart = requests.length;
     // Wait for each boundary page, then assert both scrollTop and row geometry.
     for (let batch = 1; batch <= 8; batch++) {
@@ -123,6 +169,14 @@ test("semantic scroll: 800 rows, 100-row pages, rich cells and two open tabs rem
     for (const tab of [page, peer]) assert.deepEqual(await tab.evaluate(() => window.semanticReadEvents), []);
     await page.screenshot({ path: path.join(output, `semantic-scroll-${mode.toLowerCase()}.png`) });
   }
+  const pageSizeSelect = page.locator('.semantic-table-footer-controls [role="combobox"]');
+  await pageSizeSelect.click();
+  await page.getByRole("option", { name: "200", exact: true }).click();
+  await page.waitForTimeout(1_200);
+  assert.equal(personalView?.name, "Личное");
+  assert.equal(personalView?.config.pageSize, 200, "default personal view must persist page size");
+  await page.reload({ waitUntil: "networkidle" });
+  assert.equal((await pageSizeSelect.innerText()).trim(), "200");
   assert.deepEqual(errors, []);
   await writeFile(path.join(output, "semantic-scroll-report.json"), JSON.stringify({ report, requests: requests.length, errors }, null, 2));
 });

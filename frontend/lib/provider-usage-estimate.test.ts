@@ -127,7 +127,7 @@ test("shows the selected XMLStock competitor depth", () => {
   );
 });
 
-test("shows the documented Turbo page range and higher tariff", () => {
+test("shows the exact documented Turbo Top-100 request count and higher tariff", () => {
   const estimate = rankProviderUsageEstimate(
     xmlStock,
     12,
@@ -138,8 +138,45 @@ test("shows the documented Turbo page range and higher tariff", () => {
   );
   assert.match(
     estimate.usage,
-    /^Базовый тариф · 35 ₽ за 1000 · 24–120 запросов · 0,84\s₽–4,20\s₽$/u
+    /^Базовый тариф · 35 ₽ за 1000 · 24 запросов · 0,84\s₽$/u
   );
+});
+
+test("shows a bounded XMLStock request and price range when stopping after the first position", () => {
+  const estimate = rankProviderUsageEstimate(
+    xmlStock,
+    12,
+    "YANDEX",
+    100,
+    "LIVE",
+    "TURBO",
+    "POSITION_TRACKING",
+    "ru-RU",
+    "STOP_AFTER_FOUND"
+  );
+  assert.match(
+    estimate.usage,
+    /^Базовый тариф · 35 ₽ за 1000 · от 12 до 24 запросов · от 0,42\s₽ до 0,84\s₽$/u
+  );
+});
+
+test("renders provider tariff, request range, balance and cost in English", () => {
+  const estimate = rankProviderUsageEstimate(
+    xmlStock,
+    12,
+    "YANDEX",
+    100,
+    "LIVE",
+    "TURBO",
+    "POSITION_TRACKING",
+    "en-US",
+    "STOP_AFTER_FOUND"
+  );
+  assert.match(estimate.tariff ?? "", /^Basic plan · RUB/u);
+  assert.equal(estimate.requestRange, "from 12 to 24 requests");
+  assert.match(estimate.available, /requests/u);
+  assert.match(estimate.costRange ?? "", /^from RUB/u);
+  assert.doesNotMatch(JSON.stringify(estimate), /[А-Яа-яЁё]/u);
 });
 
 test("platform credentials never expose the shared provider account quota", () => {
@@ -151,11 +188,15 @@ test("platform credentials never expose the shared provider account quota", () =
     rankProviderUsageEstimate(platform, 12, "YANDEX", 30, "LIVE"),
     {
       usage: "Точная стоимость после расчёта",
-      available: "Баланс данных рабочей области"
+      available: "Баланс данных рабочей области",
+      tariff: "Платформа",
+      costRange: "Точная стоимость после расчёта"
     }
   );
   assert.deepEqual(frequencyProviderUsageEstimate(platform, 12, 3), {
     usage: "Точная стоимость после расчёта",
-    available: "Баланс данных рабочей области"
+    available: "Баланс данных рабочей области",
+    tariff: "Платформа",
+    costRange: "Точная стоимость после расчёта"
   });
 });

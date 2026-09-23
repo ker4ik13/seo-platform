@@ -148,7 +148,8 @@ export function rankEstimateInput(
   searchSource?: RankSearchSource,
   yandexLiveMode?: RankYandexLiveMode,
   purpose?: RankCollectionPurpose,
-  saveProjectPosition?: boolean
+  saveProjectPosition?: boolean,
+  xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND"
 ): CreateRankEstimateInput {
   return {
     trackingContextId,
@@ -157,7 +158,8 @@ export function rankEstimateInput(
     ...(provider ? { provider } : {}),
     ...(credentialId ? { credentialId } : {}),
     ...(searchSource ? { searchSource } : {}),
-    ...(yandexLiveMode ? { yandexLiveMode } : {})
+    ...(yandexLiveMode ? { yandexLiveMode } : {}),
+    ...(xmlStockDepthMode ? { xmlStockDepthMode } : {})
   };
 }
 
@@ -168,7 +170,8 @@ export function rankEstimatePayloadSignature(
   searchSource?: RankSearchSource,
   yandexLiveMode?: RankYandexLiveMode,
   purpose?: RankCollectionPurpose,
-  saveProjectPosition?: boolean
+  saveProjectPosition?: boolean,
+  xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND"
 ): string {
   return JSON.stringify(
     rankEstimateInput(
@@ -178,7 +181,8 @@ export function rankEstimatePayloadSignature(
       searchSource,
       yandexLiveMode,
       purpose,
-      saveProjectPosition
+      saveProjectPosition,
+      xmlStockDepthMode
     )
   );
 }
@@ -190,7 +194,8 @@ export function rankEstimateCommandSignature(
   searchSource?: RankSearchSource,
   yandexLiveMode?: RankYandexLiveMode,
   purpose?: RankCollectionPurpose,
-  saveProjectPosition?: boolean
+  saveProjectPosition?: boolean,
+  xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND"
 ): string {
   return `${rankEstimatePayloadSignature(
     context.id,
@@ -199,7 +204,8 @@ export function rankEstimateCommandSignature(
     searchSource,
     yandexLiveMode,
     purpose,
-    saveProjectPosition
+    saveProjectPosition,
+    xmlStockDepthMode
   )}:${rankEstimateContextSignature(context)}`;
 }
 
@@ -213,7 +219,8 @@ export function rankEstimateIdempotencyCommand(
   searchSource?: RankSearchSource,
   yandexLiveMode?: RankYandexLiveMode,
   purpose?: RankCollectionPurpose,
-  saveProjectPosition?: boolean
+  saveProjectPosition?: boolean,
+  xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND"
 ): IdempotentCommand {
   return stableIdempotencyCommand(
     explicitRecalculation ? undefined : current,
@@ -224,7 +231,8 @@ export function rankEstimateIdempotencyCommand(
       searchSource,
       yandexLiveMode,
       purpose,
-      saveProjectPosition
+      saveProjectPosition,
+      xmlStockDepthMode
     ),
     createKey
   );

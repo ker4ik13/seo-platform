@@ -16,10 +16,10 @@ const secondMember = "01900000-0000-7000-8000-000000000004";
 
 test("uses the documented XMLStock product windows", () => {
   assert.deepEqual(XMLSTOCK_HTTP_QUOTA_POLICIES, {
-    YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 10 },
+    YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 15 },
     GOOGLE_LIVE: { concurrency: 48, requestsPerSecond: 30 },
-    YANDEX_SEARCH_API: { concurrency: 48, requestsPerSecond: 50 },
-    WORDSTAT: { concurrency: 10, requestsPerSecond: 10 }
+    YANDEX_SEARCH_API: { concurrency: 50, requestsPerSecond: 50 },
+    WORDSTAT: { concurrency: 10, requestsPerSecond: 20 }
   });
 });
 
@@ -62,7 +62,7 @@ test("acquires from only the selected credential and product bucket", async () =
     member: firstMember
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.[1], 5);
+  assert.equal(calls[0]?.[1], 6);
   assert.equal(
     calls[0]?.[2],
     `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:inflight`
@@ -85,7 +85,11 @@ test("returns a bounded retry without issuing a permit when a bucket is full", a
     }
   );
 
-  assert.deepEqual(permit, { allowed: false, retryAfterSeconds: 2 });
+  assert.deepEqual(permit, {
+    allowed: false,
+    retryAfterSeconds: 2,
+    retryAfterMilliseconds: 1_250
+  });
 });
 
 test("release, penalty and recovery mutate only the same bucket", async () => {

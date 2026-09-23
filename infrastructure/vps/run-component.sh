@@ -31,6 +31,7 @@ case "$component" in
       -p 5432 \
       -c password_encryption=scram-sha-256 \
       -c timezone=UTC \
+      -c max_connections="${POSTGRES_MAX_CONNECTIONS:-250}" \
       -c log_timezone=UTC \
       -c log_statement=none \
       -c log_min_error_statement=panic \
@@ -532,13 +533,18 @@ case "$component" in
       "$node_bin" "$project_root/backend-execution/dist/crawl-worker.main.js"
     ;;
   connector-worker|connector-worker-2|connector-worker-3)
+    case "$component" in
+      connector-worker) connector_runtime_shard_index=0 ;;
+      connector-worker-2) connector_runtime_shard_index=1 ;;
+      connector-worker-3) connector_runtime_shard_index=2 ;;
+    esac
     exec env \
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
       TZ=UTC \
       DATABASE_URL="postgresql://jobs_connector:${JOBS_CONNECTOR_DATABASE_PASSWORD}@${postgres_url}/jobs_db" \
-      DATABASE_POOL_MAX=12 \
+      DATABASE_POOL_MAX=23 \
       REDIS_URL="redis://seo_jobs_connector:${REDIS_JOBS_CONNECTOR_PASSWORD}@127.0.0.1:6379" \
       JOBS_TO_SEO_DATA_TOKEN="$JOBS_TO_SEO_DATA_TOKEN" \
       SEO_DATA_URL=http://127.0.0.1:4001 \
@@ -550,7 +556,10 @@ case "$component" in
       INTEGRATION_VALIDATION_DISPATCH_SECONDS=5 \
       INTEGRATION_VALIDATION_CONCURRENCY=1 \
       CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000 \
-      RANK_CONNECTOR_CONCURRENCY=4 \
+      CONNECTOR_PAID_RUNTIME_ENABLED="${SEO_PLATFORM_PAID_CONNECTOR_RUNTIME:-true}" \
+      CONNECTOR_RUNTIME_SHARD_INDEX="$connector_runtime_shard_index" \
+      CONNECTOR_RUNTIME_SHARD_COUNT=3 \
+      RANK_CONNECTOR_CONCURRENCY=16 \
       FREQUENCY_COLLECTION_CONCURRENCY=4 \
       KEYWORD_RESEARCH_CONCURRENCY=1 \
       RANK_PROVIDER_SUBMIT_ENABLED=true \

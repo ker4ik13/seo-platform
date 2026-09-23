@@ -44,6 +44,23 @@ test("requires active MFA confirmed before the current admin session", async () 
   );
 });
 
+test("keeps cookie-backed admin reads alive while retaining recent auth for mutations", async () => {
+  let recentChecks = 0;
+  const guard = makeGuard(user("FINANCE"), () => {
+    recentChecks += 1;
+  });
+  assert.equal(
+    await guard.canActivate(context({ principal }, "GET")),
+    true
+  );
+  assert.equal(recentChecks, 0);
+  assert.equal(
+    await guard.canActivate(context({ principal }, "POST")),
+    true
+  );
+  assert.equal(recentChecks, 1);
+});
+
 test("super admin satisfies role requirements while unrelated staff does not", async () => {
   const superAdmin = makeGuard(user("SUPER_ADMIN"));
   assert.equal(
@@ -60,7 +77,10 @@ test("super admin satisfies role requirements while unrelated staff does not", a
   );
 });
 
-function makeGuard(userResult: unknown): PlatformRoleGuard {
+function makeGuard(
+  userResult: unknown,
+  assertRecent: () => void = () => undefined
+): PlatformRoleGuard {
   return new PlatformRoleGuard(
     {
       getAllAndOverride: () => ["FINANCE"]
@@ -71,7 +91,7 @@ function makeGuard(userResult: unknown): PlatformRoleGuard {
       }
     } as unknown as PrismaService,
     {
-      assert: () => undefined
+      assert: assertRecent
     } as unknown as RecentAuthenticationService
   );
 }
@@ -85,10 +105,11 @@ function user(roleCode: string): unknown {
   };
 }
 
-function context(request: object): ExecutionContext {
+function context(request: object, method = "GET"): ExecutionContext {
+  const routedRequest = Object.assign(request, { method });
   return {
     switchToHttp: () => ({
-      getRequest: () => request
+      getRequest: () => routedRequest
     }),
     getHandler: () => class Handler {},
     getClass: () => class Controller {}

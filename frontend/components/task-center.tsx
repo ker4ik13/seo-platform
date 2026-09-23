@@ -570,8 +570,8 @@ function frequencyTask(value: FrequencyCollectionSummary, uiLocale: string = "ru
     version: value.version,
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
     dismissible: isDismissibleOperationStatus(value.status),
-    retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
-    retryLabel: "Повторить ошибки",
+    retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED", "CANCELLED"].includes(value.status),
+    retryLabel: value.status === "CANCELLED" ? "Продолжить" : "Повторить ошибки",
     inputFacts: [
       { label: "Источник", value: providerLabel(value.provider) },
       { label: seasonality ? "Детализация" : "Виды частотности", value: seasonality ? value.seasonality?.granularity ?? "—" : value.types.map(frequencyTypeLabel).join(" · ") },
@@ -718,14 +718,16 @@ function rankTask(value: RankJobSummary, uiLocale: string = "ru-RU"): ProjectTas
     cancellable: isCancellableRankJob(value),
     dismissible: isDismissibleOperationStatus(value.status),
     retryable:
-      value.status === "PARTIALLY_COMPLETED" &&
-      Number(value.result.failedCount) > 0 &&
-      Number(value.result.submitOutcomeUnknownCount) === 0,
-    retryLabel: competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
+      (value.status === "PARTIALLY_COMPLETED" || value.status === "CANCELLED") &&
+      (value.status === "CANCELLED" || Number(value.result.failedCount) > 0) &&
+      Number(value.result?.submitOutcomeUnknownCount ?? "0") === 0,
+    retryLabel: value.status === "CANCELLED"
+      ? "Продолжить"
+      : competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
     inputFacts: [
       { label: "Провайдер", value: provider },
       ...(value.searchEngine
-        ? [{ label: "Поисковая система", value: rankSearchSystemLabel(value.searchEngine, value.searchSource) }]
+        ? [{ label: "Поисковая система", value: rankSearchSystemLabel(value.searchEngine, value.searchSource, value.yandexLiveMode) }]
         : []),
       ...(depthLabel ? [{ label: "Глубина", value: depthLabel }] : []),
       { label: "Профиль съёма", value: value.trackingContextId },
@@ -871,7 +873,7 @@ function providerLabel(provider: "XMLSTOCK" | "ARSENKIN"): string { return provi
 function rankSearchContextLabel(value: RankJobSummary): string | undefined {
   const parts = [
     value.searchEngine
-      ? rankSearchSystemLabel(value.searchEngine, value.searchSource)
+      ? rankSearchSystemLabel(value.searchEngine, value.searchSource, value.yandexLiveMode)
       : undefined,
     rankCollectionDepthLabel(value, value.depth)
   ].filter((part): part is string => Boolean(part));

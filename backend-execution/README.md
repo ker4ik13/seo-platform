@@ -156,7 +156,7 @@ fail-closed.
   `RANK_PREPARATION_DISPATCH_SECONDS`,
   `RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS`,
   `RANK_PREPARATION_CONCURRENCY`;
-- supervisor-level `RANK_WORKER_PROCESSES` (по умолчанию `2`);
+- supervisor-level `RANK_WORKER_PROCESSES` (по умолчанию `1`; увеличивайте только после проверки конкуренции и нагрузки PostgreSQL);
 - `INTEGRATION_CREDENTIAL_ROLE=DISABLED`.
 
 Lease обязан превышать timeout команды SEO Data минимум на пять секунд.
@@ -318,8 +318,9 @@ Job фиксирует `materialVersion`, поэтому результат ст
 ротации не может активировать новый secret. Успешная внешняя проверка
 обновляет сохранённый capability snapshot текущим provider allowlist; новую
 capability старый ключ получает только после revalidation. XMLStock проверяет
-пару `USER ID + KEY` read-only запросом Wordstat `pagetype=regionsTree`, после
-чего credential может обслуживать `WORDSTAT` и `SERP_RANK_TRACKING`.
+пару `USER ID + KEY` только read-only account запросами `/api/`, `info=user`
+и `info=status`; SERP/Wordstat запросы для проверки не выполняются. Проверка
+автоматически планируется раз в час и после provider operation.
 
 XMLStock rank runtime выполняет Yandex XML асинхронно (`delayed=1`, opaque
 `req_id`, poll 15/25 секунд) и Google XML постранично по 10 результатов.
@@ -327,6 +328,14 @@ XMLStock rank runtime выполняет Yandex XML асинхронно (`delay
 абсолютную позицию и релевантный URL без сохранения raw XML. Wordstat остаётся
 синхронным per-keyword/per-type контрактом BASE/EXACT/FIXED: provider
 `groupby` управляет числом фраз ответа и не является batch входных keywords.
+
+Платный live smoke находится в
+`src/rank-runs/xmlstock-paid-matrix.integration.test.ts`. По умолчанию он
+пропущен и выполняет только бесплатный unit-план на 36 сочетаний. Реальный
+запуск требует явных `XMLSTOCK_PAID_TEST_EXECUTE=true`, account/key, тестового
+query/domain и `XMLSTOCK_PAID_TEST_MAX_RUB`; сначала read-only preflight
+считает верхнюю стоимость 160 запросов по ставкам аккаунта и останавливается,
+если она выше принятого бюджета. Секреты и provider URL тест не печатает.
 
 ## Проектные привязки connectors
 

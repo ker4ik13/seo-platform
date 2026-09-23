@@ -375,6 +375,9 @@ function configFixture(): AppConfig {
     },
     connectorRuntime: {
       dispatchIntervalMs: 1_000,
+      paidExecutionEnabled: true,
+      shardIndex: 0,
+      shardCount: 1,
       rankConcurrency: 1,
       frequencyConcurrency: 1,
       keywordResearchConcurrency: 1

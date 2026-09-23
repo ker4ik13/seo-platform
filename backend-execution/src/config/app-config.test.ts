@@ -28,6 +28,9 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.integrationCredentials.keys.size, 0);
   assert.equal(config.integrationCredentials.fingerprintKeys.size, 0);
   assert.equal(config.connectorRuntime.dispatchIntervalMs, 1_000);
+  assert.equal(config.connectorRuntime.paidExecutionEnabled, true);
+  assert.equal(config.connectorRuntime.shardIndex, 0);
+  assert.equal(config.connectorRuntime.shardCount, 1);
   assert.equal(config.connectorRuntime.rankConcurrency, 4);
   assert.equal(config.rankPreparation.enabled, false);
   assert.equal(config.rankManifestApiToken, undefined);

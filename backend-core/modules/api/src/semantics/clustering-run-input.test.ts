@@ -13,6 +13,7 @@ import {
 const keywordId = "01900000-0000-7000-8000-000000000001";
 const clusterId = "01900000-0000-7000-8000-000000000002";
 const groupId = "01900000-0000-7000-8000-000000000003";
+const credentialId = "01900000-0000-7000-8000-000000000004";
 
 test("uses the documented Arsenkin limit of 300,000 keywords", () => {
   assert.equal(arsenkinClusteringKeywordLimit, 300_000);
@@ -21,6 +22,7 @@ test("uses the documented Arsenkin limit of 300,000 keywords", () => {
 test("accepts and canonicalizes an Arsenkin clustering command", () => {
   assert.deepEqual(createClusteringRunInput({
     items: [{ id: keywordId, version: 4 }],
+    credentialId,
     searchEngine: "YANDEX",
     regionCode: "213",
     method: "SOFT",
@@ -32,6 +34,7 @@ test("accepts and canonicalizes an Arsenkin clustering command", () => {
     replaceExistingClusters: false
   }), {
     items: [{ id: keywordId, version: 4 }],
+    credentialId,
     searchEngine: "YANDEX",
     regionCode: "213",
     method: "SOFT",

@@ -99,7 +99,7 @@ export function ProjectPresenceProvider({
     useState<ProjectPresenceViewContext | null>(null);
   const [currentActivity, setCurrentActivity] =
     useState<ProjectPresenceActivity | null>(null);
-  const [showRemoteActivity, setShowRemoteActivityState] = useState(true);
+  const [showRemoteActivity, setShowRemoteActivityState] = useState(false);
   const [semanticChangeVersion, setSemanticChangeVersion] = useState(0);
   const socketRef = useRef<PresenceSocket | undefined>(undefined);
   const joinedRef = useRef(false);
@@ -110,6 +110,7 @@ export function ProjectPresenceProvider({
   const activityRef = useRef<ProjectPresenceActivity | null>(null);
   const statusRef = useRef<ProjectPresenceUpdateInput["status"]>("ACTIVE");
   const editingRef = useRef(false);
+  const showRemoteActivityRef = useRef(false);
   const sequenceRef = useRef(0);
   const sendRef = useRef<() => void>(() => undefined);
   const semanticChangePendingRef = useRef(false);
@@ -174,16 +175,19 @@ export function ProjectPresenceProvider({
 
   useEffect(() => {
     if (!projectId) {
-      setShowRemoteActivityState(true);
+      showRemoteActivityRef.current = false;
+      setShowRemoteActivityState(false);
       return;
     }
     try {
-      setShowRemoteActivityState(
-        window.localStorage.getItem(presenceVisibilityKey(projectId)) !==
-          "hidden"
-      );
+      const visible =
+        window.localStorage.getItem(presenceVisibilityKey(projectId)) ===
+        "visible";
+      showRemoteActivityRef.current = visible;
+      setShowRemoteActivityState(visible);
     } catch {
-      setShowRemoteActivityState(true);
+      showRemoteActivityRef.current = false;
+      setShowRemoteActivityState(false);
     }
   }, [projectId]);
 
@@ -384,7 +388,9 @@ export function ProjectPresenceProvider({
             const update: ProjectPresenceUpdateInput = {
               route: routeRef.current,
               status: statusRef.current,
-              cursor: cursorRef.current,
+              cursor: showRemoteActivityRef.current
+                ? cursorRef.current
+                : null,
               selection: selectionRef.current,
               view: viewRef.current,
               activity: activityRef.current,
@@ -511,15 +517,20 @@ export function ProjectPresenceProvider({
 
     if (document.visibilityState === "hidden") markAway();
     else markActive();
-    document.addEventListener("pointermove", handlePointerMove, {
-      passive: true
-    });
-    document.addEventListener("pointerdown", handlePointerMove, {
-      passive: true
-    });
-    document.addEventListener("pointerout", handlePointerOut, {
-      passive: true
-    });
+    if (showRemoteActivity) {
+      document.addEventListener("pointermove", handlePointerMove, {
+        passive: true
+      });
+      document.addEventListener("pointerdown", handlePointerMove, {
+        passive: true
+      });
+      document.addEventListener("pointerout", handlePointerOut, {
+        passive: true
+      });
+    } else {
+      cursorRef.current = null;
+      document.addEventListener("pointerdown", markActive, { passive: true });
+    }
     document.addEventListener("wheel", handleScroll, { passive: true });
     document.addEventListener("scroll", handleScroll, {
       capture: true,
@@ -535,6 +546,7 @@ export function ProjectPresenceProvider({
       clearInterval(heartbeat);
       document.removeEventListener("pointermove", handlePointerMove);
       document.removeEventListener("pointerdown", handlePointerMove);
+      document.removeEventListener("pointerdown", markActive);
       document.removeEventListener("pointerout", handlePointerOut);
       document.removeEventListener("wheel", handleScroll);
       document.removeEventListener("scroll", handleScroll, true);
@@ -543,7 +555,7 @@ export function ProjectPresenceProvider({
       document.removeEventListener("focusout", updateEditing);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [projectId]);
+  }, [projectId, showRemoteActivity]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -608,7 +620,10 @@ export function ProjectPresenceProvider({
 
   const setShowRemoteActivity = useCallback(
     (visible: boolean) => {
+      showRemoteActivityRef.current = visible;
+      if (!visible) cursorRef.current = null;
       setShowRemoteActivityState(visible);
+      sendRef.current();
       if (!projectId) return;
       try {
         window.localStorage.setItem(
@@ -765,7 +780,7 @@ function browserClientInstanceId(): string {
 }
 
 function presenceVisibilityKey(projectId: string): string {
-  return `seo-project-presence-visibility:${projectId}`;
+  return `seo-project-presence-visibility:v2:${projectId}`;
 }
 
 function normalizedAppRoute(pathname: string): string {

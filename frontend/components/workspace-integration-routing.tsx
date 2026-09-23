@@ -42,8 +42,9 @@ const FALLBACK_REASON_LABELS: Readonly<Record<ConnectorFallbackReason, string>> 
 };
 
 export function WorkspaceIntegrationRouting({
+  revision = 0,
   workspaceId
-}: Readonly<{ workspaceId: string }>) {
+}: Readonly<{ revision?: number; workspaceId: string }>) {
   const [settings, setSettings] = useState<WorkspaceConnectorRoutingSettings>();
   const [drafts, setDrafts] = useState<ReadonlyMap<IntegrationCapability, RouteDraft>>(
     new Map()
@@ -87,7 +88,7 @@ export function WorkspaceIntegrationRouting({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, revision]);
 
   const optionsByCapability = useMemo(
     () =>

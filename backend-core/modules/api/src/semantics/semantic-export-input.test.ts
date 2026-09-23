@@ -116,7 +116,8 @@ test("accepts only a bounded XLSX position-history report", () => {
       observedFrom: "2026-08-01T00:00:00.000Z",
       observedBefore: "2026-08-20T00:00:00.000Z",
       searchEngines: ["YANDEX", "GOOGLE"],
-      dimensionKeys: [yandexDimension, googleDimension]
+      dimensionKeys: [yandexDimension, googleDimension],
+      includeAllKeywords: true
     }
   });
 
@@ -124,7 +125,8 @@ test("accepts only a bounded XLSX position-history report", () => {
     observedFrom: "2026-08-01T00:00:00.000Z",
     observedBefore: "2026-08-20T00:00:00.000Z",
     searchEngines: ["YANDEX", "GOOGLE"],
-    dimensionKeys: [yandexDimension, googleDimension]
+    dimensionKeys: [yandexDimension, googleDimension],
+    includeAllKeywords: true
   });
   assert.throws(
     () => createSemanticExportInput({
@@ -147,6 +149,16 @@ test("accepts only a bounded XLSX position-history report", () => {
     () => createSemanticExportInput({
       ...input,
       positionHistory: { ...input.positionHistory, searchEngines: [] }
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      positionHistory: {
+        ...input.positionHistory,
+        includeAllKeywords: "yes"
+      }
     }),
     DomainError
   );

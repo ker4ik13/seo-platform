@@ -311,11 +311,12 @@ export function scopedInternalRankOperationResult(
       0,
       rankCommandKeywordLimit - 1
     );
+    const keywordUnavailable = row.keywordAvailable === false;
     if (
       keywordIds.has(keywordId) ||
       sequences.has(sequence) ||
       typeof row.keyword !== "string" ||
-      row.keyword.length < 1 ||
+      (!keywordUnavailable && row.keyword.length < 1) ||
       row.keyword.length > 2_000 ||
       !["PENDING", "FOUND", "NOT_FOUND"].includes(String(row.state)) ||
       !Array.isArray(row.dataQualityFlags) ||

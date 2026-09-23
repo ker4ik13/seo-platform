@@ -43,6 +43,7 @@ export type AiAnswerCollectionStatus =
 
 export interface CreateAiAnswerCollectionInput {
   readonly items: readonly SemanticKeywordBulkSelection[];
+  readonly credentialId?: string;
   readonly searchEngine: AiAnswerSearchEngine;
   readonly regionCode: string;
   readonly device: AiAnswerDevice;

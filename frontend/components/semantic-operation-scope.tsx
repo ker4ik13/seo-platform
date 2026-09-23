@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -208,26 +209,40 @@ export function SemanticOperationScope({
     return [...result.values()];
   }, [queryOptions, querySearch, querySelections]);
 
+  useLayoutEffect(() => {
+    if (mode !== "KEYWORDS") return;
+    onScopeChange?.({
+      mode,
+      groupIds: [],
+      descendantGroupIds: []
+    });
+    onCountChange?.(querySelections.size, false);
+    if (querySelections.size > maxItems) {
+      onChange(
+        [],
+        false,
+        `Выбрано ${querySelections.size} запросов, а этот источник принимает не больше ${maxItems} за запуск.`
+      );
+      return;
+    }
+    onChange([...querySelections.values()], false);
+  }, [
+    maxItems,
+    mode,
+    onChange,
+    onCountChange,
+    onScopeChange,
+    querySelections
+  ]);
+
   useEffect(() => {
+    if (mode === "KEYWORDS") return;
     onScopeChange?.({
       mode,
       groupIds: mode === "GROUPS" ? [...selectedGroupIds] : [],
       descendantGroupIds:
         mode === "GROUPS" ? [...descendantGroupIds] : []
     });
-    if (mode === "KEYWORDS") {
-      onCountChange?.(querySelections.size, false);
-      if (querySelections.size > maxItems) {
-        onChange(
-          [],
-          false,
-          `Выбрано ${querySelections.size} запросов, а этот источник принимает не больше ${maxItems} за запуск.`
-        );
-        return;
-      }
-      onChange([...querySelections.values()], false);
-      return;
-    }
     if (mode === "GROUPS" && resolvedGroupIds.length === 0) {
       onCountChange?.(0, false);
       onChange([], false);

@@ -3,7 +3,8 @@ import {
   type RankCollectionPurpose,
   type RankEstimateEntitlementStatus,
   type RankEstimateQuota,
-  type RankSearchSource
+  type RankSearchSource,
+  type RankYandexLiveMode
 } from "./rank-estimates.js";
 import type {
   TrackingDevice,
@@ -51,6 +52,7 @@ export type RankRuntimeDiagnosticState =
 
 export type RankRuntimeDiagnosticProduct =
   | "YANDEX_LIVE"
+  | "YANDEX_TURBO"
   | "GOOGLE_LIVE"
   | "YANDEX_SEARCH_API";
 
@@ -315,6 +317,7 @@ interface RankJobSummaryBase {
   /** Present on new runs; missing legacy values mean POSITION_TRACKING. */
   readonly purpose?: RankCollectionPurpose;
   readonly saveProjectPosition?: boolean;
+  readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   /**
    * Safe presentation fields copied from the immutable execution snapshot.
    * They are optional only for legacy rows created before the projection was
@@ -322,6 +325,7 @@ interface RankJobSummaryBase {
    */
   readonly searchEngine?: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
+  readonly yandexLiveMode?: RankYandexLiveMode;
   readonly countryCode?: string;
   readonly regionCode?: string;
   readonly language?: string;
@@ -457,6 +461,11 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
       input.searchSource !== "LIVE") ||
     (input.searchSource !== undefined && input.searchEngine === undefined) ||
     (input.searchEngine === "GOOGLE" && input.searchSource === "SEARCH_API") ||
+    (input.yandexLiveMode !== undefined &&
+      (input.yandexLiveMode !== "TURBO" ||
+        input.provider !== "XMLSTOCK" ||
+        input.searchEngine !== "YANDEX" ||
+        input.searchSource !== "LIVE")) ||
     (hasGeography && geographicValues.some(value => value === undefined)) ||
     (hasGeography && input.searchEngine === undefined) ||
     (input.countryCode !== undefined && !/^[A-Z]{2}$/u.test(input.countryCode)) ||
@@ -470,7 +479,12 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
       input.purpose !== "POSITION_TRACKING" &&
       input.purpose !== "COMPETITOR_SERP") ||
     (input.saveProjectPosition !== undefined &&
-      typeof input.saveProjectPosition !== "boolean")
+      typeof input.saveProjectPosition !== "boolean") ||
+    (input.xmlStockDepthMode !== undefined &&
+      input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+      input.xmlStockDepthMode !== "STOP_AFTER_FOUND") ||
+    (input.xmlStockDepthMode !== undefined &&
+      (input.provider !== "XMLSTOCK" || input.purpose === "COMPETITOR_SERP"))
   ) {
     return invalidRankJobLifecycle();
   }
@@ -487,8 +501,12 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
     ...(input.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: input.saveProjectPosition }),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : { xmlStockDepthMode: input.xmlStockDepthMode }),
     ...(input.searchEngine ? { searchEngine: input.searchEngine } : {}),
     ...(input.searchSource ? { searchSource: input.searchSource } : {}),
+    ...(input.yandexLiveMode ? { yandexLiveMode: input.yandexLiveMode } : {}),
     ...(input.countryCode ? { countryCode: input.countryCode } : {}),
     ...(input.regionCode ? { regionCode: input.regionCode } : {}),
     ...(input.language ? { language: input.language } : {}),
@@ -858,6 +876,8 @@ export interface InternalRankExecutionParameters {
   readonly purpose?: RankCollectionPurpose;
   /** Missing legacy values are true for position runs and false for competitor runs. */
   readonly saveProjectPosition?: boolean;
+  /** Missing legacy values mean STRICT_DEPTH. XMLStock position runs only. */
+  readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   readonly searchEngine: "GOOGLE" | "YANDEX";
   readonly countryCode: string;
   readonly regionCode?: string;
@@ -1258,6 +1278,9 @@ function copyRankExecutionParameters(
     ...(execution.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: execution.saveProjectPosition }),
+    ...(execution.xmlStockDepthMode === undefined
+      ? {}
+      : { xmlStockDepthMode: execution.xmlStockDepthMode }),
     searchEngine: execution.searchEngine,
     countryCode: execution.countryCode,
     ...(execution.regionCode === undefined

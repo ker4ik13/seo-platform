@@ -39,7 +39,11 @@ export class PlatformRoleGuard implements CanActivate {
         message: "Authentication required"
       });
     }
-    this.recentAuthentication.assert(principal);
+    // Long-lived admin reads use the same rotating cookie session as the main
+    // application. Mutations still require the configured recent-auth window.
+    if (!["GET", "HEAD"].includes(request.method)) {
+      this.recentAuthentication.assert(principal);
+    }
 
     const user = await this.prisma.user.findUnique({
       where: { id: principal.userId },

@@ -32,6 +32,7 @@ import {
 import {
   aiAnswerCollectionTitle,
   keywordResearchCollectionTitle,
+  rankCollectionDepthLabel,
   rankCollectionTitle
 } from "../lib/operation-collection-purpose";
 import {
@@ -298,10 +299,17 @@ export function SemanticOperationsDrawer({
     setError(undefined);
     try {
       if (operation.kind === "FREQUENCY") {
-        frequencyRetryLoad.current?.abort();
-        const controller = new AbortController(); frequencyRetryLoad.current = controller;
-        const draft = await prepareFrequencyRetry(projectId, operation.id, controller.signal);
-        if (!controller.signal.aborted) setFrequencyRetry(draft);
+        if (operation.errorCode === "CONNECTOR_NOT_READY") {
+          await browserApiRequest(
+            `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(operation.id)}/retry-failed`,
+            { method: "POST", body: { version: operation.version } }
+          );
+        } else {
+          frequencyRetryLoad.current?.abort();
+          const controller = new AbortController(); frequencyRetryLoad.current = controller;
+          const draft = await prepareFrequencyRetry(projectId, operation.id, controller.signal);
+          if (!controller.signal.aborted) setFrequencyRetry(draft);
+        }
       } else {
         frequencyRetryLoad.current?.abort();
         const controller = new AbortController(); frequencyRetryLoad.current = controller;
@@ -613,8 +621,11 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     percent: value.selectedKeywords > 0 ? Math.round(done / value.selectedKeywords * 100) : 0,
     tab: operationTab(value.status),
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
-    retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
-    retryLabel: "Повторить ошибки",
+    retryable: !value.requiresUsageReview && ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED", "CANCELLED"].includes(value.status),
+    retryLabel: value.status === "CANCELLED" ||
+      value.failureCode === "CONNECTOR_NOT_READY"
+      ? "Продолжить"
+      : "Повторить ошибки",
     downloadable: false,
     dismissible: isDismissibleOperationStatus(value.status),
     version: value.version,
@@ -655,12 +666,16 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
   const total = Number(value.progress.total);
   const providerName = value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin";
   const searchSystem = value.searchEngine
-    ? rankSearchSystemLabel(value.searchEngine, value.searchSource)
+    ? rankSearchSystemLabel(
+        value.searchEngine,
+        value.searchSource,
+        value.yandexLiveMode
+      )
     : undefined;
   const description = [
     providerName,
     searchSystem,
-    value.depth ? `Топ-${competitorCollection ? 10 : value.depth}` : undefined
+    rankCollectionDepthLabel(value, value.depth)
   ].filter((part): part is string => Boolean(part)).join(" · ");
   const durationLabel = operationDurationLabel(value);
   return {
@@ -676,10 +691,12 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
     tab: operationTab(value.status),
     cancellable: isCancellableRankJob(value),
     retryable:
-      value.status === "PARTIALLY_COMPLETED" &&
-      Number(value.result.failedCount) > 0 &&
-      Number(value.result.submitOutcomeUnknownCount) === 0,
-    retryLabel: competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
+      (value.status === "PARTIALLY_COMPLETED" || value.status === "CANCELLED") &&
+      (value.status === "CANCELLED" || Number(value.result.failedCount) > 0) &&
+      Number(value.result?.submitOutcomeUnknownCount ?? "0") === 0,
+    retryLabel: value.status === "CANCELLED"
+      ? "Продолжить"
+      : competitorCollection ? "Дособрать конкурентов" : "Дособрать позиции",
     downloadable: false,
     dismissible: isDismissibleOperationStatus(value.status),
     version: 1,

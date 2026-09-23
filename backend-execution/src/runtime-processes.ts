@@ -112,6 +112,9 @@ const CONNECTOR_KEYS = [
   "INTEGRATION_VALIDATION_LEASE_SECONDS",
   "INTEGRATION_VALIDATION_TIMEOUT_MS",
   "CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS",
+  "CONNECTOR_PAID_RUNTIME_ENABLED",
+  "CONNECTOR_RUNTIME_SHARD_COUNT",
+  "CONNECTOR_RUNTIME_SHARD_INDEX",
   "RANK_CONNECTOR_CONCURRENCY",
   "FREQUENCY_COLLECTION_CONCURRENCY",
   "KEYWORD_RESEARCH_CONCURRENCY",
@@ -147,6 +150,12 @@ const AUTH_EMAIL_KEYS = [
 export function executionProcessDefinitions(
   env: NodeJS.ProcessEnv
 ): readonly ProcessDefinition[] {
+  const connectorWorkerProcesses = processCount(
+    env.CONNECTOR_WORKER_PROCESSES,
+    "CONNECTOR_WORKER_PROCESSES",
+    3,
+    16
+  );
   const definitions: ProcessDefinition[] = [
     definition(env, "http", "./http.main.js", HTTP_KEYS, {
       BIND_ADDRESS: env.BIND_ADDRESS ?? "0.0.0.0",
@@ -183,7 +192,7 @@ export function executionProcessDefinitions(
         RANK_PROVIDER_SUBMIT_ENABLED: "false",
         INTEGRATION_CREDENTIAL_ROLE: "DISABLED"
       },
-      processCount(env.RANK_WORKER_PROCESSES, "RANK_WORKER_PROCESSES", 2, 8)
+      processCount(env.RANK_WORKER_PROCESSES, "RANK_WORKER_PROCESSES", 1, 8)
     ),
     definition(env, "crawl-worker", "./crawl-worker.main.js", CRAWL_KEYS, {
       DATABASE_URL: required(env, "EXECUTION_CRAWL_DATABASE_URL"),
@@ -203,12 +212,14 @@ export function executionProcessDefinitions(
         RANK_PROVIDER_SUBMIT_ENABLED:
           env.RANK_PROVIDER_SUBMIT_ENABLED ?? "true"
       },
-      processCount(
-        env.CONNECTOR_WORKER_PROCESSES,
-        "CONNECTOR_WORKER_PROCESSES",
-        3,
-        16
-      )
+      connectorWorkerProcesses,
+      (index) => ({
+        CONNECTOR_MAINTENANCE_ENABLED: index === 0 ? "true" : "false",
+        CONNECTOR_PAID_RUNTIME_ENABLED:
+          env.CONNECTOR_PAID_RUNTIME_ENABLED ?? "true",
+        CONNECTOR_RUNTIME_SHARD_INDEX: String(index),
+        CONNECTOR_RUNTIME_SHARD_COUNT: String(connectorWorkerProcesses)
+      })
     )
   ];
 
@@ -254,7 +265,10 @@ function repeatedDefinitions(
   entrypoint: string,
   keys: readonly string[],
   overrides: Readonly<Record<string, string | undefined>>,
-  count: number
+  count: number,
+  instanceOverrides: (
+    index: number
+  ) => Readonly<Record<string, string | undefined>> = () => ({})
 ): readonly ProcessDefinition[] {
   return Array.from({ length: count }, (_, index) =>
     definition(
@@ -262,7 +276,7 @@ function repeatedDefinitions(
       index === 0 ? name : `${name}-${index + 1}`,
       entrypoint,
       keys,
-      overrides
+      { ...overrides, ...instanceOverrides(index) }
     )
   );
 }

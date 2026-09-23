@@ -540,6 +540,7 @@ test("accepts an XMLStock one-key-per-chunk manifest receipt", async () => {
       countryCode: "RU",
       regionCode: "213",
       depth: 100,
+      xmlStockDepthMode: "STRICT_DEPTH",
       providerMappingVersion: "xmlstock-serp@1"
     }
   };
@@ -559,6 +560,7 @@ test("accepts an XMLStock one-key-per-chunk manifest receipt", async () => {
     assert.equal(result.provider, "XMLSTOCK");
     assert.equal(result.chunkCount, "2");
     assert.equal(result.chunkSize, "1");
+    assert.equal(result.execution.xmlStockDepthMode, "STRICT_DEPTH");
   } finally {
     globalThis.fetch = originalFetch;
   }

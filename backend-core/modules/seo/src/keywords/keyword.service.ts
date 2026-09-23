@@ -4504,6 +4504,10 @@ function keywordOrderBy(
     case "RANK_POSITION_DESC":
     case "RANK_CHECKED_AT_ASC":
     case "RANK_CHECKED_AT_DESC":
+    case "RANK_AI_POSITION_ASC":
+    case "RANK_AI_POSITION_DESC":
+    case "RANK_AI_CHECKED_AT_ASC":
+    case "RANK_AI_CHECKED_AT_DESC":
       throw new Error("Metric keyword sorts are resolved by metricSortedKeywordPage");
   }
 }
@@ -4557,6 +4561,10 @@ function cursorValue(
     case "RANK_POSITION_DESC":
     case "RANK_CHECKED_AT_ASC":
     case "RANK_CHECKED_AT_DESC":
+    case "RANK_AI_POSITION_ASC":
+    case "RANK_AI_POSITION_DESC":
+    case "RANK_AI_CHECKED_AT_ASC":
+    case "RANK_AI_CHECKED_AT_DESC":
       throw new Error("Metric cursor value is provided by metricSortedKeywordPage");
   }
 }
@@ -4605,7 +4613,9 @@ function isMetricKeywordSort(sort: SemanticKeywordSort): boolean {
     sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
     sort.startsWith("GOOGLE_AI_CHECKED_AT_") ||
     sort.startsWith("RANK_POSITION_") ||
-    sort.startsWith("RANK_CHECKED_AT_")
+    sort.startsWith("RANK_CHECKED_AT_") ||
+    sort.startsWith("RANK_AI_POSITION_") ||
+    sort.startsWith("RANK_AI_CHECKED_AT_")
   );
 }
 
@@ -4817,15 +4827,17 @@ async function metricSortedKeywordPage(
     sort.startsWith("RANK_POSITION_");
   const aiPositionSort =
     sort.startsWith("YANDEX_AI_POSITION_") ||
-    sort.startsWith("GOOGLE_AI_POSITION_");
+    sort.startsWith("GOOGLE_AI_POSITION_") ||
+    sort.startsWith("RANK_AI_POSITION_");
   const aiCheckedAtSort =
     sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
-    sort.startsWith("GOOGLE_AI_CHECKED_AT_");
+    sort.startsWith("GOOGLE_AI_CHECKED_AT_") ||
+    sort.startsWith("RANK_AI_CHECKED_AT_");
   const rankSortDimension = query.rankSortDimensionKey
     ? parseSemanticRankDimensionKey(query.rankSortDimensionKey)
     : undefined;
   if (
-    (sort.startsWith("RANK_POSITION_") || sort.startsWith("RANK_CHECKED_AT_")) &&
+    sort.startsWith("RANK_") &&
     !rankSortDimension
   ) {
     throw new Error("Validated rank sort dimension is invalid");
@@ -4928,6 +4940,11 @@ async function metricSortedKeywordPage(
               AND current_ai.project_id = k.project_id
               AND current_ai.keyword_id = k.id
               AND current_ai.search_engine = ${rankEngine}
+              ${rankSortDimension
+                ? Prisma.sql`
+                  AND current_ai.region_code = ${rankSortDimension.regionCode}
+                  AND current_ai.device::text = ${rankSortDimension.device}`
+                : Prisma.empty}
               AND current_ai.position_tracking_enabled = TRUE
             ORDER BY current_ai.observed_at DESC, current_ai.id DESC
             LIMIT 1
@@ -4942,6 +4959,11 @@ async function metricSortedKeywordPage(
             AND latest_ai.project_id = k.project_id
             AND latest_ai.keyword_id = k.id
             AND latest_ai.search_engine = ${rankEngine}
+            ${rankSortDimension
+              ? Prisma.sql`
+                AND latest_ai.region_code = ${rankSortDimension.regionCode}
+                AND latest_ai.device::text = ${rankSortDimension.device}`
+              : Prisma.empty}
             AND latest_ai.position_tracking_enabled = TRUE
           ORDER BY latest_ai.observed_at DESC, latest_ai.id DESC
           LIMIT 1

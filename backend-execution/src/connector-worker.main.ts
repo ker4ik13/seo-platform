@@ -38,12 +38,18 @@ import {
   type FrequencyCollectionRuntimeJobData
 } from "./queue/frequency-collection-runtime.queue.js";
 import { safeErrorSummary } from "./runtime-safe-error.js";
+import {
+  adaptiveRankDispatchBurst,
+  rankRuntimeOutcomeHasWork,
+  shardedDispatchSequence
+} from "./queue/connector-runtime-dispatch.js";
 import { AiAnswerRuntimeService } from "./ai-answer-collections/ai-answer-runtime.service.js";
 import { ClusteringRuntimeService } from "./clustering-runs/clustering-runtime.service.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const ACTIVE_RANK_DISPATCH_HOLD_MS = 5_000;
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(
@@ -67,6 +73,9 @@ async function bootstrap(): Promise<void> {
   const frequencyRuntime = app.get(FrequencyCollectionRuntimeService);
   const aiAnswerRuntime = app.get(AiAnswerRuntimeService);
   const clusteringRuntime = app.get(ClusteringRuntimeService);
+  const maintenanceEnabled =
+    process.env.CONNECTOR_MAINTENANCE_ENABLED !== "false";
+  const paidRuntimeEnabled = config.connectorRuntime.paidExecutionEnabled;
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const validationQueue = new Queue<IntegrationCredentialValidationJobData>(
@@ -105,7 +114,8 @@ async function bootstrap(): Promise<void> {
         config.integrationCredentialValidation.concurrency
     }
   );
-  const rankWorker = new Worker<RankConnectorRuntimeJobData>(
+  let activeRankDispatchUntil = 0;
+  const rankWorker = paidRuntimeEnabled ? new Worker<RankConnectorRuntimeJobData>(
     RANK_CONNECTOR_RUNTIME_QUEUE,
     async (job) => {
       if (
@@ -114,14 +124,21 @@ async function bootstrap(): Promise<void> {
       ) {
         throw new Error("Invalid rank connector runtime job");
       }
-      return rankRuntime.processOne(`connector-rank-${randomUUID()}`);
+      const outcome = await rankRuntime.processOne(
+        `connector-rank-${randomUUID()}`
+      );
+      if (rankRuntimeOutcomeHasWork(outcome)) {
+        activeRankDispatchUntil =
+          Date.now() + ACTIVE_RANK_DISPATCH_HOLD_MS;
+      }
+      return outcome;
     },
     {
       ...bullMqConnectionOptions(workerConnection),
       concurrency: config.connectorRuntime.rankConcurrency
     }
-  );
-  const keywordResearchWorker = new Worker<KeywordResearchRuntimeJobData>(
+  ) : undefined;
+  const keywordResearchWorker = paidRuntimeEnabled ? new Worker<KeywordResearchRuntimeJobData>(
     KEYWORD_RESEARCH_RUNTIME_QUEUE,
     async (job) => {
       if (
@@ -138,8 +155,8 @@ async function bootstrap(): Promise<void> {
       ...bullMqConnectionOptions(workerConnection),
       concurrency: config.connectorRuntime.keywordResearchConcurrency
     }
-  );
-  const frequencyWorker = new Worker<FrequencyCollectionRuntimeJobData>(
+  ) : undefined;
+  const frequencyWorker = paidRuntimeEnabled ? new Worker<FrequencyCollectionRuntimeJobData>(
     FREQUENCY_COLLECTION_RUNTIME_QUEUE,
     async (job) => {
       if (
@@ -166,21 +183,34 @@ async function bootstrap(): Promise<void> {
       ...bullMqConnectionOptions(workerConnection),
       concurrency: config.connectorRuntime.frequencyConcurrency
     }
-  );
+  ) : undefined;
 
   let runtimeDispatching = false;
   async function dispatchRuntime(): Promise<void> {
+    if (!paidRuntimeEnabled) return;
     if (runtimeDispatching) return;
     runtimeDispatching = true;
     try {
       const dispatchBucket = Math.floor(
         Date.now() / config.connectorRuntime.dispatchIntervalMs
       );
-      const rankBurst = config.connectorRuntime.rankConcurrency * 2;
+      const rankDispatchStride =
+        config.connectorRuntime.rankConcurrency * 2;
+      const rankBurst = adaptiveRankDispatchBurst(
+        config.connectorRuntime.rankConcurrency,
+        activeRankDispatchUntil,
+        Date.now()
+      );
       for (let slot = 0; slot < rankBurst; slot += 1) {
         await enqueueRankConnectorRuntime(
           rankQueue,
-          dispatchBucket * rankBurst + slot
+          shardedDispatchSequence(
+            dispatchBucket,
+            rankDispatchStride,
+            config.connectorRuntime.shardIndex,
+            config.connectorRuntime.shardCount,
+            slot
+          )
         );
       }
       for (
@@ -190,7 +220,13 @@ async function bootstrap(): Promise<void> {
       ) {
         await enqueueFrequencyCollectionRuntime(
           frequencyQueue,
-          dispatchBucket * config.connectorRuntime.frequencyConcurrency + slot
+          shardedDispatchSequence(
+            dispatchBucket,
+            config.connectorRuntime.frequencyConcurrency,
+            config.connectorRuntime.shardIndex,
+            config.connectorRuntime.shardCount,
+            slot
+          )
         );
       }
     } catch {
@@ -222,17 +258,19 @@ async function bootstrap(): Promise<void> {
         Date.now() /
           (config.integrationCredentialValidation.dispatchSeconds * 1_000)
       );
-      for (
-        let slot = 0;
-        slot < config.connectorRuntime.keywordResearchConcurrency;
-        slot += 1
-      ) {
-        await enqueueKeywordResearchRuntime(
-          keywordResearchQueue,
-          dispatchBucket *
-            config.connectorRuntime.keywordResearchConcurrency +
-            slot
-        );
+      if (paidRuntimeEnabled) {
+        for (
+          let slot = 0;
+          slot < config.connectorRuntime.keywordResearchConcurrency;
+          slot += 1
+        ) {
+          await enqueueKeywordResearchRuntime(
+            keywordResearchQueue,
+            dispatchBucket *
+              config.connectorRuntime.keywordResearchConcurrency +
+              slot
+          );
+        }
       }
     } catch {
       logger.error("Unable to dispatch connector maintenance work");
@@ -241,24 +279,29 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  await Promise.all([dispatchRuntime(), dispatchMaintenance()]);
+  await Promise.all([
+    dispatchRuntime(),
+    maintenanceEnabled ? dispatchMaintenance() : Promise.resolve()
+  ]);
   const runtimeDispatchTimer = setInterval(
     () => void dispatchRuntime(),
     config.connectorRuntime.dispatchIntervalMs
   );
   runtimeDispatchTimer.unref();
-  const maintenanceDispatchTimer = setInterval(
-    () => void dispatchMaintenance(),
-    config.integrationCredentialValidation.dispatchSeconds * 1_000
-  );
-  maintenanceDispatchTimer.unref();
+  const maintenanceDispatchTimer = maintenanceEnabled
+    ? setInterval(
+        () => void dispatchMaintenance(),
+        config.integrationCredentialValidation.dispatchSeconds * 1_000
+      )
+    : undefined;
+  maintenanceDispatchTimer?.unref();
 
-  const workers = [
+  const workers: Worker[] = [
     validationWorker,
     rankWorker,
     keywordResearchWorker,
     frequencyWorker
-  ] as const;
+  ].filter((worker): worker is Worker => worker !== undefined);
   for (const runtimeWorker of workers) {
     runtimeWorker.on("failed", (job, error) => {
       logger.error(
@@ -287,7 +330,7 @@ async function bootstrap(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(runtimeDispatchTimer);
-    clearInterval(maintenanceDispatchTimer);
+    if (maintenanceDispatchTimer) clearInterval(maintenanceDispatchTimer);
     await Promise.all(workers.map((runtimeWorker) => runtimeWorker.close()));
     await Promise.all([
       validationQueue.close(),

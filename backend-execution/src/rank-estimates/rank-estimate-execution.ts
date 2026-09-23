@@ -56,7 +56,8 @@ export function rankEstimateExecutionParameters(
     configuration.searchEngine === "GOOGLE" ? "LIVE" : "SEARCH_API",
   yandexLiveMode?: "TURBO",
   purpose: RankCollectionPurpose = "POSITION_TRACKING",
-  saveProjectPosition?: boolean
+  saveProjectPosition?: boolean,
+  xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND"
 ): InternalRankExecutionParameters | undefined {
   if (
     !SUPPORTED_SEARCH_ENGINES.includes(configuration.searchEngine) ||
@@ -73,6 +74,8 @@ export function rankEstimateExecutionParameters(
       (provider !== "XMLSTOCK" ||
         configuration.searchEngine !== "YANDEX" ||
         searchSource !== "LIVE")) ||
+    (xmlStockDepthMode !== undefined &&
+      (provider !== "XMLSTOCK" || purpose === "COMPETITOR_SERP")) ||
     !configuration.regionCode ||
     !REGION_ID_PATTERN.test(configuration.regionCode) ||
     configuration.safeSearch ||
@@ -87,6 +90,9 @@ export function rankEstimateExecutionParameters(
           purpose,
           saveProjectPosition: saveProjectPosition ?? false
         }
+      : {}),
+    ...(provider === "XMLSTOCK" && purpose === "POSITION_TRACKING"
+      ? { xmlStockDepthMode: xmlStockDepthMode ?? "STRICT_DEPTH" }
       : {}),
     searchEngine: configuration.searchEngine,
     countryCode: configuration.countryCode,
@@ -158,6 +164,9 @@ export function parseRankExecutionParameters(
     ...(hasField(value, "saveProjectPosition")
       ? ["saveProjectPosition"]
       : []),
+    ...(hasField(value, "xmlStockDepthMode")
+      ? ["xmlStockDepthMode"]
+      : []),
     "searchEngine",
     "countryCode",
     ...(hasField(value, "regionCode") ? ["regionCode"] : []),
@@ -180,6 +189,12 @@ export function parseRankExecutionParameters(
       input.purpose !== "COMPETITOR_SERP") ||
     (input.saveProjectPosition !== undefined &&
       typeof input.saveProjectPosition !== "boolean") ||
+    (input.xmlStockDepthMode !== undefined &&
+      input.xmlStockDepthMode !== "STRICT_DEPTH" &&
+      input.xmlStockDepthMode !== "STOP_AFTER_FOUND") ||
+    (input.xmlStockDepthMode !== undefined &&
+      (!String(input.providerMappingVersion).startsWith("xmlstock-") ||
+        input.purpose === "COMPETITOR_SERP")) ||
     typeof input.countryCode !== "string" ||
     !/^[A-Z]{2}$/u.test(input.countryCode) ||
     ("regionCode" in input &&
@@ -209,6 +224,12 @@ export function parseRankExecutionParameters(
     ...(input.saveProjectPosition === undefined
       ? {}
       : { saveProjectPosition: input.saveProjectPosition }),
+    ...(input.xmlStockDepthMode === undefined
+      ? {}
+      : {
+          xmlStockDepthMode:
+            input.xmlStockDepthMode as "STRICT_DEPTH" | "STOP_AFTER_FOUND"
+        }),
     searchEngine:
       input.searchEngine as InternalRankExecutionParameters["searchEngine"],
     countryCode: input.countryCode,

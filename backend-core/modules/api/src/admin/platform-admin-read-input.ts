@@ -35,6 +35,14 @@ export interface AdminOperationQuery {
   readonly limit: number;
 }
 
+export function adminOperationId(value: unknown): string {
+  const operationId = optionalString(value)?.toLowerCase();
+  if (!operationId || !UUID_PATTERN.test(operationId)) {
+    throw invalid("operationId");
+  }
+  return operationId;
+}
+
 export function adminProjectQuery(input: {
   readonly q?: unknown;
   readonly status?: unknown;

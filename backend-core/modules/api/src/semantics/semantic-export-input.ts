@@ -160,7 +160,13 @@ function positionHistoryOptions(
 ): SemanticPositionHistoryExportOptions {
   const input = exactRecord(
     value,
-    ["observedFrom", "observedBefore", "searchEngines", "dimensionKeys"],
+    [
+      "observedFrom",
+      "observedBefore",
+      "searchEngines",
+      "dimensionKeys",
+      "includeAllKeywords"
+    ],
     "positionHistory"
   );
   const observedFrom = canonicalInstant(
@@ -198,11 +204,18 @@ function positionHistoryOptions(
   const dimensionKeys = input.dimensionKeys === undefined
     ? undefined
     : positionHistoryDimensionKeys(input.dimensionKeys, searchEngines);
+  if (
+    input.includeAllKeywords !== undefined &&
+    typeof input.includeAllKeywords !== "boolean"
+  ) {
+    invalid("positionHistory.includeAllKeywords", "Must be a boolean");
+  }
   return {
     observedFrom,
     observedBefore,
     searchEngines,
-    ...(dimensionKeys ? { dimensionKeys } : {})
+    ...(dimensionKeys ? { dimensionKeys } : {}),
+    ...(input.includeAllKeywords === true ? { includeAllKeywords: true } : {})
   };
 }
 

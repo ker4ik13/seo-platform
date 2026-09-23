@@ -93,7 +93,19 @@ test("projects bounded XMLStock runtime diagnostics without exposing a lease own
           scopeSnapshot: {
             searchEngine: "YANDEX",
             searchSource: "LIVE",
-            depth: 50
+            depth: 100,
+            providerUsage: {
+              provider: "XMLSTOCK",
+              product: "YANDEX_TURBO",
+              tariffCode: "BASIC",
+              currency: "RUB",
+              pricePerThousand: "35",
+              unitPriceMicro: "35000",
+              estimatedRequestCount: { minimum: "4", maximum: "4" },
+              estimatedCostMicro: { minimum: "140000", maximum: "140000" },
+              pricedAt: "2026-08-26T18:29:00.000Z",
+              priceSource: "XMLSTOCK_ACCOUNT_API_WITH_PUBLIC_TURBO_SURCHARGE"
+            }
           }
         })
     },
@@ -138,9 +150,9 @@ test("projects bounded XMLStock runtime diagnostics without exposing a lease own
     jobId,
     generatedAt: now.toISOString(),
     policy: {
-      product: "YANDEX_LIVE",
+      product: "YANDEX_TURBO",
       concurrency: 20,
-      requestsPerSecond: 10
+      requestsPerSecond: 15
     },
     totals: {
       total: 3,
@@ -160,7 +172,7 @@ test("projects bounded XMLStock runtime diagnostics without exposing a lease own
         submitAttempts: 1,
         pollAttempts: 2,
         completedPages: 2,
-        totalPages: 5,
+        totalPages: 2,
         active: true,
         updatedAt: new Date(now.getTime() - 1_000).toISOString()
       }

@@ -81,6 +81,9 @@ export class RankEstimateController {
       ...(input.yandexLiveMode
         ? { yandexLiveMode: input.yandexLiveMode }
         : {}),
+      ...(input.xmlStockDepthMode
+        ? { xmlStockDepthMode: input.xmlStockDepthMode }
+        : {}),
       workspaceId: workspace.id,
       projectId: project.id,
       actorId: principal.userId,

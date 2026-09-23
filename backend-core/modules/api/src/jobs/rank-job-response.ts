@@ -28,8 +28,10 @@ const RESPONSE_FIELDS = [
   "provider",
   "purpose",
   "saveProjectPosition",
+  "xmlStockDepthMode",
   "searchEngine",
   "searchSource",
+  "yandexLiveMode",
   "countryCode",
   "regionCode",
   "language",
@@ -101,6 +103,13 @@ export function scopedRankJobSummary(
       : typeof input.saveProjectPosition === "boolean"
         ? input.saveProjectPosition
         : null;
+  const xmlStockDepthMode =
+    input.xmlStockDepthMode === undefined
+      ? undefined
+      : member(
+          input.xmlStockDepthMode,
+          ["STRICT_DEPTH", "STOP_AFTER_FOUND"] as const
+        );
   const searchEngine =
     input.searchEngine === undefined
       ? undefined
@@ -109,6 +118,10 @@ export function scopedRankJobSummary(
     input.searchSource === undefined
       ? undefined
       : member(input.searchSource, ["SEARCH_API", "LIVE"] as const);
+  const yandexLiveMode =
+    input.yandexLiveMode === undefined
+      ? undefined
+      : member(input.yandexLiveMode, ["TURBO"] as const);
   const countryCode = input.countryCode;
   const regionCode = input.regionCode;
   const language = input.language;
@@ -142,6 +155,9 @@ export function scopedRankJobSummary(
     input.operation !== "POSITIONS" ||
     credentialMode === undefined ||
     saveProjectPosition === null ||
+    (input.xmlStockDepthMode !== undefined && xmlStockDepthMode === undefined) ||
+    (xmlStockDepthMode !== undefined &&
+      (provider !== "XMLSTOCK" || purpose === "COMPETITOR_SERP")) ||
     (purpose === undefined && saveProjectPosition !== undefined) ||
     (purpose === "COMPETITOR_SERP" && saveProjectPosition === undefined) ||
     (purpose === "POSITION_TRACKING" && saveProjectPosition === false) ||
@@ -152,6 +168,11 @@ export function scopedRankJobSummary(
       platformChargeMicro === "0") ||
     (searchSource !== undefined && searchEngine === undefined) ||
     (searchEngine === "GOOGLE" && searchSource === "SEARCH_API") ||
+    (input.yandexLiveMode !== undefined && yandexLiveMode === undefined) ||
+    (yandexLiveMode !== undefined &&
+      (provider !== "XMLSTOCK" ||
+        searchEngine !== "YANDEX" ||
+        searchSource !== "LIVE")) ||
     (hasGeography && geographicValues.some(value => value === undefined)) ||
     (hasGeography && searchEngine === undefined) ||
     (countryCode !== undefined &&
@@ -180,8 +201,10 @@ export function scopedRankJobSummary(
     ...(purpose === undefined
       ? {}
       : { purpose, saveProjectPosition: saveProjectPosition as boolean }),
+    ...(xmlStockDepthMode ? { xmlStockDepthMode } : {}),
     ...(searchEngine === undefined ? {} : { searchEngine }),
     ...(searchSource === undefined ? {} : { searchSource }),
+    ...(yandexLiveMode === undefined ? {} : { yandexLiveMode }),
     ...(typeof countryCode === "string" ? { countryCode } : {}),
     ...(typeof regionCode === "string" ? { regionCode } : {}),
     ...(typeof language === "string" ? { language } : {}),
@@ -383,6 +406,7 @@ export function scopedRankRuntimeDiagnostics(
   ]);
   const product = member(policyInput.product, [
     "YANDEX_LIVE",
+    "YANDEX_TURBO",
     "GOOGLE_LIVE",
     "YANDEX_SEARCH_API"
   ] as const);

@@ -1436,7 +1436,16 @@ test("validates typed custom column definitions and values", () => {
 test("accepts a scoped bounded tracking-context aggregate", () => {
   const result = trackingContextCollection(
     {
-      contexts: [contextResponse],
+      contexts: [{
+        ...contextResponse,
+        launchProfile: {
+          searchSource: "LIVE",
+          yandexLiveMode: "TURBO",
+          xmlStockDepthMode: "STOP_AFTER_FOUND",
+          includeUntracked: false,
+          scope: { mode: "ALL", groupIds: [], descendantGroupIds: [] }
+        }
+      }],
       contextsTruncated: false
     },
     workspaceId,
@@ -1449,6 +1458,11 @@ test("accepts a scoped bounded tracking-context aggregate", () => {
     1
   );
   assert.equal(result.contextsTruncated, false);
+  assert.equal(result.contexts[0]?.launchProfile?.yandexLiveMode, "TURBO");
+  assert.equal(
+    result.contexts[0]?.launchProfile?.xmlStockDepthMode,
+    "STOP_AFTER_FOUND"
+  );
 });
 
 test("rejects malformed, duplicate and cross-tenant tracking contexts", () => {

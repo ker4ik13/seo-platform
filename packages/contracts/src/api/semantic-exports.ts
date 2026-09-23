@@ -148,6 +148,8 @@ export interface SemanticPositionHistoryExportOptions {
   readonly searchEngines: readonly SemanticPositionHistorySearchEngine[];
   /** One explicit city/device slice per selected engine; worker reads it in bounded batches. */
   readonly dimensionKeys?: readonly string[];
+  /** Include every active keyword in the selected scope, even without snapshots. */
+  readonly includeAllKeywords?: boolean;
   /** Internal stable read cutoff owned by the export job. */
   readonly storedBefore?: string;
 }

@@ -42,7 +42,7 @@ const correlationId = "request-rank-grant-001";
 const decidedAt = new Date("2026-07-29T12:00:00.000Z");
 
 test(
-  "creates GRANTED with reservation, exact TTL, canonical locks, policy input and Serializable isolation",
+  "creates GRANTED with reservation, exact TTL, attempt lock and canonical authorization locks",
   async () => {
     const input = grantInput();
     const fixture = serviceFixture({
@@ -72,11 +72,12 @@ test(
       30_000
     );
     assert.deepEqual(fixture.transactionOptions, [
-      { isolationLevel: "Serializable" }
+      { isolationLevel: "ReadCommitted" }
     ]);
     assert.deepEqual(
       fixture.calls.filter((call) => call.startsWith("lock:")),
       [
+        "lock:grant-attempt",
         "lock:workspaces",
         "lock:projects",
         "lock:users",
@@ -323,6 +324,34 @@ test(
       new Date(result.decision.grant.expiresAt).getTime() < Date.now()
     );
     assert.equal(fixture.transactionCalls, 0);
+    assert.equal(fixture.policyCalls.length, 0);
+    assert.equal(fixture.creates.length, 0);
+  }
+);
+
+test(
+  "replays a concurrent winner after the exact-attempt lock without reserving quota again",
+  async () => {
+    const input = grantInput();
+    const winner = grantedReceipt(input);
+    const fixture = serviceFixture({
+      rootIdempotencyResults: [null],
+      transactionReplay: winner
+    });
+
+    const result = await fixture.service.issue(
+      input,
+      idempotencyKey,
+      correlationId
+    );
+
+    assert.equal(result.created, false);
+    assert.deepEqual(result.decision, winner.responseSnapshot);
+    assert.deepEqual(fixture.calls, [
+      "root:idempotency",
+      "lock:grant-attempt",
+      "transaction:idempotency"
+    ]);
     assert.equal(fixture.policyCalls.length, 0);
     assert.equal(fixture.creates.length, 0);
   }
@@ -682,6 +711,11 @@ function serviceFixture(
     },
     $queryRaw: async (...query: readonly unknown[]) => {
       const text = sqlText(query[0]);
+      if (text.includes("pg_advisory_xact_lock")) {
+        assert.match(text, /SELECT true AS locked/u);
+        calls.push("lock:grant-attempt");
+        return [{ locked: true }];
+      }
       if (text.includes('uuidv7()::text AS "grantId"')) {
         calls.push("clock");
         return [{ grantId, decidedAt }];

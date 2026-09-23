@@ -175,7 +175,8 @@ test("builds a secret-free one-key wire request", () => {
     device: "DESKTOP",
     depth: 30,
     delayed: true,
-    turbo: false
+    turbo: false,
+    depthMode: "STRICT_DEPTH"
   });
 });
 
@@ -262,6 +263,82 @@ test("loads documented Yandex Live pages with device and language", async () => 
     ).snapshot.results[0]?.position,
     21
   );
+});
+
+test("does not stop a strict Live Top-50 after a thirteen-result page", async () => {
+  const pages: string[] = [];
+  const connector = new XmlStockRankConnector(async (url) => {
+    const page = Number(new URL(String(url)).searchParams.get("page"));
+    pages.push(String(page));
+    return xml(
+      googleResult(
+        page,
+        page === 3 ? "https://example.com/deep-result" : undefined,
+        13
+      )
+    );
+  });
+  const value = intent("GOOGLE", "xmlstock-google-live@2", { depth: 50 });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await connector.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+
+  const ready = await fetchLiveUntilReady(
+    connector,
+    submitted.taskId,
+    secret,
+    value
+  );
+
+  assert.deepEqual(pages, ["0", "1", "2", "3"]);
+  const result = stageXmlStockRankResult(
+    ready.value,
+    submitted.taskId,
+    value,
+    "2026-09-22T12:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(result?.found, true);
+  assert.equal(result?.serpResults?.length, 50);
+});
+
+test("stops XMLStock Live after the first page containing the project", async () => {
+  const pages: string[] = [];
+  const connector = new XmlStockRankConnector(async (url) => {
+    const page = Number(new URL(String(url)).searchParams.get("page"));
+    pages.push(String(page));
+    return xml(
+      googleResult(
+        page,
+        page === 1 ? "https://example.com/first-match" : undefined
+      )
+    );
+  });
+  const value = intent("GOOGLE", "xmlstock-google-live@2", {
+    depth: 100,
+    xmlStockDepthMode: "STOP_AFTER_FOUND"
+  });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await connector.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+
+  const ready = await fetchLiveUntilReady(
+    connector,
+    submitted.taskId,
+    secret,
+    value
+  );
+
+  assert.deepEqual(pages, ["0", "1"]);
+  const result = stageXmlStockRankResult(
+    ready.value,
+    submitted.taskId,
+    value,
+    "2026-09-22T12:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(result?.position, 11);
+  assert.equal(result?.serpResults?.length, 20);
 });
 
 test("uses Turbo explicitly, accepts fifty results per page and keeps Top-100 positions", async () => {
@@ -590,6 +667,7 @@ function intent(
     readonly depth?: 30 | 50 | 100;
     readonly purpose?: "COMPETITOR_SERP";
     readonly saveProjectPosition?: boolean;
+    readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   } = {}
 ): RankProviderRequestIntentV1 {
   return {
@@ -608,6 +686,9 @@ function intent(
       ...(overrides.saveProjectPosition === undefined
         ? {}
         : { saveProjectPosition: overrides.saveProjectPosition }),
+      ...(overrides.xmlStockDepthMode === undefined
+        ? {}
+        : { xmlStockDepthMode: overrides.xmlStockDepthMode }),
       searchEngine,
       countryCode: "RU",
       regionCode: "213",
