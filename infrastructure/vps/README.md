@@ -121,6 +121,9 @@ Webhook YooKassa для текущего preview нужно направить �
 `payment.canceled` и `refund.succeeded`. Caddy публикует только этот endpoint
 на порту 443; Platform API остаётся на loopback. Merchant credentials runner
 не генерирует, не выводит и в repository не сохраняет.
+Return URL задаётся как
+`https://<PUBLIC_HOST>/app/settings/billing?checkout=return`: параметр запускает
+немедленную сверку pending order после возврата пользователя.
 
 Внутренние error/fatal-события и неожиданные остановки компонентов можно
 направить в отдельный private Telegram chat. Конфигуратор читает bot token без

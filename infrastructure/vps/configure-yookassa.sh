@@ -34,7 +34,7 @@ case "$secret_key" in
   *"'"*|*$'\n'*|*$'\r'*) runtime_fail "YooKassa secret key contains unsupported characters" ;;
 esac
 
-return_url=${SEO_PLATFORM_PUBLIC_URL%/}/app/settings/billing
+return_url=${SEO_PLATFORM_PUBLIC_URL%/}/app/settings/billing?checkout=return
 temporary_env_file=$runtime_root/runtime.env.tmp.$$
 trap 'rm -f "$temporary_env_file"' EXIT INT TERM
 

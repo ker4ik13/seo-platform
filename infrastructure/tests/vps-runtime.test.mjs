@@ -121,6 +121,8 @@ test("VPS YooKassa adapter is operator-configurable and disabled by default", as
   assert.match(startSource, /start_window billing-webhook-proxy/u);
   assert.match(configureSource, /runtime\.env\.tmp\.\$\$/u);
   assert.match(configureSource, /read -r -s entered_secret/u);
+  assert.match(configureSource, /app\/settings\/billing\?checkout=return/u);
+  assert.match(platformBlock, /app\/settings\/billing\?checkout=return/u);
   assert.doesNotMatch(configureSource, /printf[^\n]*secret_key/u);
   assert.match(webhookSource, /\/api\/v1\/billing\/providers\/yookassa\/webhook/u);
   assert.match(webhookSource, /127\.0\.0\.1:4000/u);
