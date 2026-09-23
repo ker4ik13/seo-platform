@@ -149,10 +149,7 @@ export class WorkspaceConnectorRoutingService {
       const enabledPlatformProviders = await enabledPlatformProviderSet(transaction);
       for (const route of input.routes) {
         const credential = credentials.get(route.credentialId);
-        if (
-          !credential ||
-          !routeConfigurationCompatible(input.capability, credential)
-        ) {
+        if (!credential) {
           throw connectorNotReady();
         }
       }
@@ -552,29 +549,6 @@ function routeAvailability(
   return xmlStockBalanceInsufficient(credential, requirement)
     ? "CREDENTIAL_UNAVAILABLE"
     : "READY";
-}
-
-/**
- * Route configuration is durable user intent, not an execution grant.
- * Runtime-only state (balance, rate limit, provider outage or validation
- * freshness) must never prevent reordering or retaining a compatible route.
- */
-function routeConfigurationCompatible(
-  capabilityValue: IntegrationCapability,
-  credential: CredentialRecord
-): boolean {
-  return (
-    credential.deletedAt === null &&
-    credentialModeSupportsCapability(
-      credential.mode,
-      capabilityValue,
-      credential.provider
-    ) &&
-    safeIntegrationCredentialCapabilities(
-      provider(credential.provider),
-      credential.capabilities
-    ).includes(capabilityValue)
-  );
 }
 
 async function enabledPlatformProviderSet(
