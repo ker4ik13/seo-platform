@@ -341,7 +341,7 @@ test("stops XMLStock Live after the first page containing the project", async ()
   assert.equal(result?.serpResults?.length, 20);
 });
 
-test("uses Turbo explicitly, accepts fifty results per page and keeps Top-100 positions", async () => {
+test("forces Turbo Top-50 pages, clips provider overflow and keeps Top-100 positions", async () => {
   const pages: string[] = [];
   const connector = new XmlStockRankConnector(async (url) => {
     const parsed = new URL(String(url));
@@ -349,11 +349,12 @@ test("uses Turbo explicitly, accepts fifty results per page and keeps Top-100 po
     pages.push(String(page));
     assert.equal(parsed.pathname, "/yandexlive/xml/");
     assert.equal(parsed.searchParams.get("tbm"), "turbo");
+    assert.equal(parsed.searchParams.get("groupby"), "50");
     return xml(
       googleResult(
         page,
         page === 1 ? "https://example.com/turbo" : undefined,
-        50
+        51
       )
     );
   });
@@ -395,6 +396,56 @@ test("uses Turbo explicitly, accepts fifty results per page and keeps Top-100 po
   ).snapshot.results[0];
   assert.equal(result?.position, 51);
   assert.equal(result?.serpResults?.length, 100);
+});
+
+test("adapts Turbo paging when the provider ignores groupby=50", async () => {
+  const pages: string[] = [];
+  const connector = new XmlStockRankConnector(async (url) => {
+    const parsed = new URL(String(url));
+    pages.push(parsed.searchParams.get("page") ?? "");
+    assert.equal(parsed.searchParams.get("groupby"), "50");
+    return xml(googleResult(Number(parsed.searchParams.get("page")), undefined, 10));
+  });
+  const value = intent("YANDEX", "xmlstock-yandex-live@3", { depth: 50 });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await connector.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+  let result = await connector.fetchResult(
+    submitted.taskId,
+    secret,
+    1_000,
+    value
+  );
+  for (let page = 1; page < 5; page += 1) {
+    assert.equal(result.status, "CHECKPOINTED");
+    if (result.status !== "CHECKPOINTED") return;
+    assert.equal(
+      result.progress.schemaVersion,
+      "xmlstock-rank-page-progress@2"
+    );
+    if (result.progress.schemaVersion !== "xmlstock-rank-page-progress@2") {
+      return;
+    }
+    assert.equal(result.progress.resultsPerPage, 10);
+    result = await connector.fetchResult(
+      submitted.taskId,
+      secret,
+      1_000,
+      value,
+      result.progress
+    );
+  }
+  assert.equal(result.status, "READY");
+  assert.deepEqual(pages, ["0", "1", "2", "3", "4"]);
+  if (result.status !== "READY") return;
+  const staged = stageXmlStockRankResult(
+    result.value,
+    submitted.taskId,
+    value,
+    "2026-09-23T07:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(staged?.serpResults?.length, 50);
 });
 
 test("retries Turbo code 202 after the documented 10-20 second window", async () => {

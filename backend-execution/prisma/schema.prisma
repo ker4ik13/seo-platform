@@ -764,6 +764,7 @@ model RankConnectorExecution {
   @@index([status, authorizationExpiresAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_claim_due_idx")
   @@index([executionConnectorVersion, status, authorizationExpiresAt, leaseExpiresAt], map: "rank_connector_executions_connector_submit_due_idx")
   @@index([status, nextActionAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_poll_due_idx")
+  @@index([executionConnectorVersion, status, nextActionAt, leaseExpiresAt, pollAttemptCount, createdAt, id], map: "rank_connector_executions_connector_poll_due_idx")
   @@index([credentialId, projectId, provider, status, leaseExpiresAt], map: "rank_connector_executions_credential_project_active_idx")
   @@map("rank_connector_executions")
 }

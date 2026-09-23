@@ -94,7 +94,7 @@ export function rankProviderUsageEstimate(
           ? 1
           : Math.ceil(depth / 50));
       const maximumRequestCount =
-        keywordCount * Math.ceil(depth / 50);
+        keywordCount * Math.ceil(depth / 10);
       return {
         ...xmlStockUsageEstimate(
           source,

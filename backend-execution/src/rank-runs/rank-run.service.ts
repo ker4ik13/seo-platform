@@ -1168,10 +1168,7 @@ function rankRuntimePageProgress(
     ) {
       completedPages = Number(progress.nextPage);
     }
-    if (
-      product !== "YANDEX_TURBO" &&
-      [10, 20, 30, 40, 50].includes(Number(progress.resultsPerPage))
-    ) {
+    if ([10, 20, 30, 40, 50].includes(Number(progress.resultsPerPage))) {
       resultsPerPage = Number(progress.resultsPerPage);
     }
   }

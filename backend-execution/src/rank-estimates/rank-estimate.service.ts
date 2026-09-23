@@ -1045,15 +1045,18 @@ function rankXmlStockProviderUsage(
         ? "YANDEX_TURBO" as const
         : "YANDEX_LIVE" as const;
   const keywordCount = Number(input.scope.keywordCount);
-  const strictPages = product === "YANDEX_SEARCH_API"
+  const strictMinimumPages = product === "YANDEX_SEARCH_API"
     ? 1
     : product === "YANDEX_TURBO"
       ? Math.ceil(input.execution.depth / 50)
       : Math.ceil(input.execution.depth / 10);
+  const strictMaximumPages = product === "YANDEX_TURBO"
+    ? Math.ceil(input.execution.depth / 10)
+    : strictMinimumPages;
   const stopAfterFound =
     input.execution.xmlStockDepthMode === "STOP_AFTER_FOUND";
-  const minimumPages = stopAfterFound ? 1 : strictPages;
-  const maximumPages = strictPages;
+  const minimumPages = stopAfterFound ? 1 : strictMinimumPages;
+  const maximumPages = strictMaximumPages;
   return xmlStockOperationUsage(
     input.resolvedRoute.xmlStockPricing,
     product,

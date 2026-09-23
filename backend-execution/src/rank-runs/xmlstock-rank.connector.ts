@@ -293,12 +293,12 @@ export class XmlStockRankConnector {
     const progress = progressValue === undefined
       ? undefined
       : xmlStockRankPageProgress(progressValue);
-    const resultsPerPage = progress === undefined
+    let resultsPerPage = progress === undefined
       ? request.turbo ? 50 : 10
       : progress.schemaVersion === PAGE_PROGRESS_V2_SCHEMA
         ? progress.resultsPerPage
         : 10;
-    const pageCount = Math.ceil(request.depth / resultsPerPage);
+    let pageCount = Math.ceil(request.depth / resultsPerPage);
     if (
       progress &&
       (progress.taskId !== taskId ||
@@ -329,18 +329,26 @@ export class XmlStockRankConnector {
     );
     if (failure) return failure;
     const parsed = parseXmlStockXml(response.value);
-    if (
-      (request.turbo && parsed.documentSlots > 50) ||
-      (!request.turbo && parsed.documentSlots > 100)
-    ) {
+    if (parsed.documentSlots > 100) {
       return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+    }
+    if (request.turbo && progress === undefined) {
+      resultsPerPage =
+        turboResultsPerPage(parsed.documentSlots) ?? resultsPerPage;
+      pageCount = Math.ceil(request.depth / resultsPerPage);
     }
     const previousPosition = documents.reduce(
       (maximum, document) => Math.max(maximum, document.position),
       0
     );
-    const positionOffset = Math.max(page * resultsPerPage, previousPosition);
-    const pageDocuments = parsed.documents.map((document) => ({
+    const positionOffset = request.turbo
+      ? page * resultsPerPage
+      : Math.max(page * resultsPerPage, previousPosition);
+    const pageDocuments = parsed.documents
+      .filter(
+        (document) => !request.turbo || document.position <= resultsPerPage
+      )
+      .map((document) => ({
         ...document,
         position: positionOffset + document.position
       }));
@@ -710,6 +718,7 @@ function livePageUrl(
   url.searchParams.set("domain", request.countryCode.toLowerCase());
   if (request.engine === "YANDEX") {
     url.searchParams.set("tbm", request.turbo ? "turbo" : "");
+    if (request.turbo) url.searchParams.set("groupby", "50");
     url.searchParams.set(
       "lang",
       request.language.toLowerCase().startsWith("en") ? "en" : "ru"

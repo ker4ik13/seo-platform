@@ -1516,9 +1516,16 @@ claims одновременно. Три штатных процесса полу
 dispatch shard sequence: их BullMQ ticks больше не дедуплицируются между
 процессами, общий rank I/O pool достигает 48 slot, а Wordstat bucket — `20
 RPS`. В простое каждый shard отправляет один probe в секунду; первый реальный
-claim немедленно раскрывает полный pool на пять секунд, поэтому provider
-throughput сохраняется без постоянных пустых SQL claims. Redis не позволяет
-превысить отдельную границу каждого продукта.
+claim немедленно раскрывает ровно configured pool на пять секунд, без прежнего
+двойного BullMQ fan-out. Frequency/AI/clustering scheduler также переходит от
+одного idle probe к четырём slots только после фактической работы. Submit
+broker перед full tenant graph, а Arsenkin ещё и перед provider-wide lock,
+проверяет активный parent Job; отменённые и завершённые операции с ещё
+действующим grant больше не разогревают claim loop. Poll broker сначала
+проверяет dedicated `connector version + due time` index и RUNNING parent Job,
+поэтому будущие `POLL_WAIT` и audit-строки terminal Jobs не открывают полный
+SQL graph. Provider throughput сохраняется, а Redis не
+позволяет превысить отдельную границу каждого продукта.
 Capacity wait показывается
 как нормальная фаза с количеством HTTP-запросов и минимальным оставшимся
 временем, без ложного error code.
@@ -1553,7 +1560,7 @@ Redis scope; raw key и account ID в Redis/Job/log не попадают. Arsen
 ключ, а общий PostgreSQL lifecycle cap пяти task остаётся консервативной
 source-of-truth защитой provider task graph.
 Яндекс Live Turbo является отдельным явно оплаченным mapping: connector
-передаёт `tbm=turbo` и не применяет к нему стандартный Redis bucket XMLStock,
+передаёт `tbm=turbo&groupby=50` и не применяет к нему стандартный Redis bucket XMLStock,
 поскольку provider документирует неограниченное число потоков. Turbo также не
 занимает общий Arsenkin-only лимит пяти активных provider tasks. Обычный
 XMLStock также не занимает этот lifecycle limit: dispatcher за тик готовит до
@@ -1718,9 +1725,12 @@ allowlisted errorCode; Web отделяет неснятые запросы в �
 позиции», не смешивая их с успешными snapshots.
 Для Yandex Live Turbo первая страница определяет документированный размер
 `10/20/30/40/50`, который сохраняется в checkpoint v2; Top-100 поэтому требует
-от двух до десяти GET в зависимости от настройки количества результатов в
-кабинете XMLStock. Код `202` сохраняет текущий checkpoint и повторяет только
-эту страницу через 15 секунд.
+от двух до десяти GET. Текущий connector явно переопределяет настройку кабинета
+через `groupby=50`; если provider проигнорировал параметр и вернул 10/20/30/40,
+фактическая ширина сохраняется в checkpoint и недостающие страницы всё равно
+загружаются. Provider overflow обрезается внутри страницы до её ширины, поэтому
+между позициями 10 и 51 не появляется ложный разрыв. Код `202` сохраняет
+текущий checkpoint и повторяет только эту страницу через 15 секунд.
 Просроченный grant, для
 которого provider submit не начинался, не блокирует Job: rank dispatcher
 создаёт новый execution attempt, сохраняя старую попытку как immutable audit.
@@ -1751,7 +1761,7 @@ Tenant-scoped `GET .../jobs/:jobId/runtime-diagnostics` отдаёт тольк�
 ключа, логический цветной поток, sequence, состояние, счётчики HTTP
 submit/poll, page progress и allowlisted error code.
 Для Turbo diagnostics сохраняет отдельный product `YANDEX_TURBO`, показывает
-реальные страницы по 50 результатов и не приписывает режиму обычный Live
+реальное число страниц из checkpoint и не приписывает режиму обычный Live
 thread/RPS limit. Публичная проекция rank Job также несёт безопасный
 `yandexLiveMode=TURBO`: карточки операций, task center и результат различают
 «Яндекс Turbo» и обычный «Яндекс Live», включая старые Jobs, где режим

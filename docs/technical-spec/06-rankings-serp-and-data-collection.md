@@ -422,19 +422,29 @@ Wordstat bucket до `20 RPS`. Ожидание permit не
 числом provider requests, а не как terminal/error state.
 
 XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос
-явно получает `tbm=turbo`, а внешняя пропускная способность остаётся
+явно получает `tbm=turbo&groupby=50`, а внешняя пропускная способность остаётся
 ограниченной worker concurrency и DB leases платформы. Turbo не занимает
 консервативное окно пяти активных provider tasks и исключается из подсчёта
 этого окна для стандартных запусков. Обычный Live явно передаёт пустой `tbm`,
 поэтому настройка Turbo в кабинете XMLStock не включает повышенный тариф
 скрытно. Provider pending code `202` в Turbo повторяется через 15 секунд;
 остальные adaptive cooldown правила стандартного Live не меняются.
-Turbo page width зафиксирован в 50: TOP-50 выполняет один GET, TOP-100 — два,
-и каждый checkpoint сохраняет весь нормализованный SERP с конкурентами. Для
+Turbo запрашивает page width 50: TOP-50 обычно выполняет один GET, TOP-100 —
+два. Если provider вернул только 10/20/30/40 документов, checkpoint сохраняет
+фактическую ширину и connector дочитывает соответственно 5…2 либо 10…3 страниц.
+Каждый checkpoint сохраняет весь нормализованный SERP с конкурентами. Для
 позиционного XMLStock запуска immutable `xmlStockDepthMode` равен
 `STRICT_DEPTH` либо `STOP_AFTER_FOUND`; второй режим завершает обход после
 первой страницы, на которой найден домен проекта, а estimate показывает
 нижнюю и верхнюю стоимость.
+
+Rank connector dispatcher держит один idle probe на shard и раскрывает только
+configured concurrency после фактической provider-работы. Submit fast paths
+проверяют актуальный parent Job до полного tenant graph и, для Arsenkin, до
+provider-wide advisory lock; terminal Job с ещё действующим execution grant не
+создаёт горячий цикл PostgreSQL. Poll fast path использует индекс
+`connector version + status + next action/lease`, проверяет RUNNING parent Job
+и лишь затем открывает credential/control graph.
 
 ### 3.4. Реализованный read slice истории
 
@@ -1000,9 +1010,11 @@ snapshot и ключа идемпотентности.
 синхронны и при глубине TOP-30/50/100 планируют 3/5/10 страниц по 10
 результатов. Неполная или расширенная страница не завершает strict-обход:
 connector продолжает чтение до выбранной глубины и обрезает итоговый SERP по
-Top. Turbo Яндекс Live использует ровно 50 результатов на страницу и сохраняет
-checkpoint `xmlstock-rank-page@2`; TOP-50 поэтому занимает один GET, а TOP-100
-— два. Все найденные позиции переводятся в
+Top. Turbo Яндекс Live запрашивает 50 результатов параметром `groupby=50` и
+сохраняет фактически подтверждённые 10/20/30/40/50 в checkpoint
+`xmlstock-rank-page@2`; TOP-50 занимает 1…5 GET, а TOP-100 — 2…10. Документы
+сверх подтверждённой ширины страницы безопасно обрезаются до смещения
+следующей страницы. Все найденные позиции переводятся в
 абсолютный индекс; matching URL сохраняется как ranking/relevant URL, raw XML
 отбрасывается после строгой нормализации. После успешного checkpoint следующая
 Live-страница получает `next_action_at = now` и может сразу перейти свободному
@@ -1047,9 +1059,10 @@ Live. Для Arsenkin Яндекс доступен TOP-30; для Google — TO
 показывает расход в единицах провайдера: Arsenkin Google требует соответственно
 2/3/5 лимитов на ключ, Яндекс — 2 лимита; XMLStock Search API выполняет один
 request на ключ, standard Live — `ceil(depth / 10)` requests на ключ. Для
-Яндекс Live Turbo strict estimate равен `ceil(depth / 50)`. При
-`STOP_AFTER_FOUND` нижняя граница — один запрос на ключ, верхняя совпадает со
-strict; для стандартного Live используется такая же граница 1…`ceil(depth/10)`.
+Яндекс Live Turbo strict estimate показывает диапазон
+`ceil(depth / 50)…ceil(depth / 10)`. При `STOP_AFTER_FOUND` нижняя граница —
+один запрос на ключ, верхняя совпадает с Turbo worst case; для стандартного
+Live используется такая же граница 1…`ceil(depth/10)`.
 Безопасная публичная проекция задания обязана сохранять признак Turbo, чтобы
 списки операций, итоговое окно и live-логи не подписывали такой съём как
 обычный Яндекс Live. Для старого задания признак восстанавливается только из

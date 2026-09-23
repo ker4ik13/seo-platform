@@ -53,9 +53,16 @@ export function adaptiveRankDispatchBurst(
   ) {
     throw new TypeError("Invalid adaptive rank dispatch state");
   }
-  return activeUntil > now ? concurrency * 2 : 1;
+  return activeUntil > now ? concurrency : 1;
 }
 
 export function rankRuntimeOutcomeHasWork(outcome: string): boolean {
-  return outcome !== "IDLE" && outcome !== "DISABLED";
+  return [
+    "SUBMITTED",
+    "SUBMIT_TERMINAL",
+    "POLL_PENDING",
+    "POLL_CHECKPOINTED",
+    "RESULT_STAGED",
+    "POLL_TERMINAL"
+  ].includes(outcome);
 }

@@ -599,7 +599,7 @@ export function TrackingContextSettingsPanel({
                 <strong>
                   <UiText text="Turbo режим XMLStock" />
                   <InfoTooltip>
-                    <UiText text="Настройка сохраняется в контексте: Топ-50 выполняется одним Turbo-запросом, Топ-100 — двумя." />
+                    <UiText text="Настройка сохраняется в контексте: Turbo запрашивает до 50 результатов на страницу и автоматически дочитывает недостающие страницы." />
                   </InfoTooltip>
                 </strong>
                 <small><UiText text="Использовать Turbo для будущих запусков этого контекста через XMLStock." /></small>

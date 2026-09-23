@@ -172,7 +172,7 @@ test("projects bounded XMLStock runtime diagnostics without exposing a lease own
         submitAttempts: 1,
         pollAttempts: 2,
         completedPages: 2,
-        totalPages: 2,
+        totalPages: 10,
         active: true,
         updatedAt: new Date(now.getTime() - 1_000).toISOString()
       }

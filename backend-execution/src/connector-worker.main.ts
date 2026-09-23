@@ -50,6 +50,7 @@ const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const ACTIVE_RANK_DISPATCH_HOLD_MS = 5_000;
+const ACTIVE_FREQUENCY_DISPATCH_HOLD_MS = 5_000;
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(
@@ -115,6 +116,7 @@ async function bootstrap(): Promise<void> {
     }
   );
   let activeRankDispatchUntil = 0;
+  let activeFrequencyDispatchUntil = 0;
   const rankWorker = paidRuntimeEnabled ? new Worker<RankConnectorRuntimeJobData>(
     RANK_CONNECTOR_RUNTIME_QUEUE,
     async (job) => {
@@ -175,7 +177,11 @@ async function bootstrap(): Promise<void> {
         const workload = workloads[(start + offset) % workloads.length];
         if (!workload) continue;
         const result = await workload();
-        if (result.processed > 0) return result;
+        if (result.processed > 0) {
+          activeFrequencyDispatchUntil =
+            Date.now() + ACTIVE_FREQUENCY_DISPATCH_HOLD_MS;
+          return result;
+        }
       }
       return { processed: 0, result: "IDLE" };
     },
@@ -194,12 +200,12 @@ async function bootstrap(): Promise<void> {
       const dispatchBucket = Math.floor(
         Date.now() / config.connectorRuntime.dispatchIntervalMs
       );
-      const rankDispatchStride =
-        config.connectorRuntime.rankConcurrency * 2;
+      const now = Date.now();
+      const rankDispatchStride = config.connectorRuntime.rankConcurrency;
       const rankBurst = adaptiveRankDispatchBurst(
         config.connectorRuntime.rankConcurrency,
         activeRankDispatchUntil,
-        Date.now()
+        now
       );
       for (let slot = 0; slot < rankBurst; slot += 1) {
         await enqueueRankConnectorRuntime(
@@ -213,9 +219,14 @@ async function bootstrap(): Promise<void> {
           )
         );
       }
+      const frequencyBurst = adaptiveRankDispatchBurst(
+        config.connectorRuntime.frequencyConcurrency,
+        activeFrequencyDispatchUntil,
+        now
+      );
       for (
         let slot = 0;
-        slot < config.connectorRuntime.frequencyConcurrency;
+        slot < frequencyBurst;
         slot += 1
       ) {
         await enqueueFrequencyCollectionRuntime(

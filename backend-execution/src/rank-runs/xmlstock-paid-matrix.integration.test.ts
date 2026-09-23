@@ -108,6 +108,9 @@ test(
             url.pathname === "/google/xml/" ||
             url.pathname === "/yandexlive/xml/"
           ) {
+            if (matrixCase.turbo) {
+              assert.equal(url.searchParams.get("groupby"), "50");
+            }
             const requestPrice = url.pathname === "/google/xml/"
               ? prices.GOOGLE_LIVE / 1_000
               : url.searchParams.get("tbm") === "turbo"
@@ -149,6 +152,9 @@ test(
         ).snapshot.results[0];
         assert.ok(row);
         assert.ok((row.serpResults?.length ?? 0) <= matrixCase.depth);
+        if (matrixCase.turbo) {
+          assertContiguousSerpPositions(row.serpResults ?? [], label);
+        }
         if (
           matrixCase.turbo &&
           matrixCase.depth === 100 &&
@@ -233,6 +239,19 @@ function assertDistinctTurboPages(
     first.slice(0, Math.min(first.length, second.length)),
     "Turbo Top-100 page=1 must not repeat page=0"
   );
+}
+
+function assertContiguousSerpPositions(
+  results: readonly Readonly<{ readonly position: number }>[],
+  label: string
+): void {
+  for (const [index, result] of results.entries()) {
+    assert.equal(
+      result.position,
+      index + 1,
+      `${label}: Turbo SERP positions must not contain page-width gaps`
+    );
+  }
 }
 
 function maximumPaidRequests(cases: readonly PaidMatrixCase[]): number {

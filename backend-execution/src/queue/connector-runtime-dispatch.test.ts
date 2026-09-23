@@ -33,9 +33,11 @@ test("connector dispatch sequence rejects malformed shard coordinates", () => {
 
 test("rank dispatch keeps one idle probe and restores the full pool on activity", () => {
   assert.equal(adaptiveRankDispatchBurst(16, 9_999, 10_000), 1);
-  assert.equal(adaptiveRankDispatchBurst(16, 10_001, 10_000), 32);
+  assert.equal(adaptiveRankDispatchBurst(16, 10_001, 10_000), 16);
   assert.equal(rankRuntimeOutcomeHasWork("IDLE"), false);
   assert.equal(rankRuntimeOutcomeHasWork("DISABLED"), false);
+  assert.equal(rankRuntimeOutcomeHasWork("LEASE_LOST"), false);
+  assert.equal(rankRuntimeOutcomeHasWork("PROVIDER_CAPACITY_DELAYED"), false);
   assert.equal(rankRuntimeOutcomeHasWork("SUBMITTED"), true);
   assert.equal(rankRuntimeOutcomeHasWork("POLL_PENDING"), true);
 });

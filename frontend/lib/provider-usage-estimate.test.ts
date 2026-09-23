@@ -127,7 +127,7 @@ test("shows the selected XMLStock competitor depth", () => {
   );
 });
 
-test("shows the exact documented Turbo Top-100 request count and higher tariff", () => {
+test("shows the bounded Turbo Top-100 request count and higher tariff", () => {
   const estimate = rankProviderUsageEstimate(
     xmlStock,
     12,
@@ -138,7 +138,7 @@ test("shows the exact documented Turbo Top-100 request count and higher tariff",
   );
   assert.match(
     estimate.usage,
-    /^Базовый тариф · 35 ₽ за 1000 · 24 запросов · 0,84\s₽$/u
+    /^Базовый тариф · 35 ₽ за 1000 · от 24 до 120 запросов · от 0,84\s₽ до 4,20\s₽$/u
   );
 });
 
@@ -156,7 +156,7 @@ test("shows a bounded XMLStock request and price range when stopping after the f
   );
   assert.match(
     estimate.usage,
-    /^Базовый тариф · 35 ₽ за 1000 · от 12 до 24 запросов · от 0,42\s₽ до 0,84\s₽$/u
+    /^Базовый тариф · 35 ₽ за 1000 · от 12 до 120 запросов · от 0,42\s₽ до 4,20\s₽$/u
   );
 });
 
@@ -173,7 +173,7 @@ test("renders provider tariff, request range, balance and cost in English", () =
     "STOP_AFTER_FOUND"
   );
   assert.match(estimate.tariff ?? "", /^Basic plan · RUB/u);
-  assert.equal(estimate.requestRange, "from 12 to 24 requests");
+  assert.equal(estimate.requestRange, "from 12 to 120 requests");
   assert.match(estimate.available, /requests/u);
   assert.match(estimate.costRange ?? "", /^from RUB/u);
   assert.doesNotMatch(JSON.stringify(estimate), /[А-Яа-яЁё]/u);
