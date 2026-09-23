@@ -7,7 +7,7 @@ import {
   type RankConnectorRuntimeJobData
 } from "./rank-connector-runtime.queue.js";
 
-test("queues only an opaque runtime tick on the shared provider queue", async () => {
+test("queues only one removable opaque tick for a fixed runtime lane", async () => {
   const additions: unknown[][] = [];
   const queue = {
     getJob: async () => undefined,
@@ -30,10 +30,18 @@ test("queues only an opaque runtime tick on the shared provider queue", async ()
     (addition[2] as { jobId?: string }).jobId,
     "rank-connector-runtime-123"
   );
+  assert.equal(
+    (addition[2] as { removeOnComplete?: boolean }).removeOnComplete,
+    true
+  );
+  assert.equal(
+    (addition[2] as { removeOnFail?: boolean }).removeOnFail,
+    true
+  );
   assert.doesNotMatch(JSON.stringify(addition[1]), /workspace|api|key/iu);
 });
 
-test("deduplicates a live dispatch bucket and retries a failed tick", async () => {
+test("deduplicates a live lane and retries its failed tick", async () => {
   let added = 0;
   let retried = 0;
   const activeQueue = {

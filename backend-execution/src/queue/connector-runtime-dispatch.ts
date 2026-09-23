@@ -36,6 +36,69 @@ export function shardedDispatchSequence(
 }
 
 /**
+ * Returns one stable queue lane for a worker slot. Unlike a time-based tick
+ * identifier, a lane cannot accumulate while Redis or a consumer is degraded:
+ * at most one waiting/active job exists for every configured slot.
+ */
+export function shardedDispatchLane(
+  localConcurrency: number,
+  shardIndex: number,
+  shardCount: number,
+  slot: number
+): number {
+  if (
+    ![localConcurrency, shardIndex, shardCount, slot].every(
+      Number.isSafeInteger
+    ) ||
+    localConcurrency < 1 ||
+    shardCount < 1 ||
+    shardIndex < 0 ||
+    shardIndex >= shardCount ||
+    slot < 0 ||
+    slot >= localConcurrency
+  ) {
+    throw new TypeError("Invalid connector runtime lane");
+  }
+  const lane = shardIndex * localConcurrency + slot;
+  if (!Number.isSafeInteger(lane)) {
+    throw new TypeError("Connector runtime lane overflow");
+  }
+  return lane;
+}
+
+export function connectorRuntimeLaneCount(
+  localConcurrency: number,
+  shardCount: number
+): number {
+  if (
+    !Number.isSafeInteger(localConcurrency) ||
+    localConcurrency < 1 ||
+    !Number.isSafeInteger(shardCount) ||
+    shardCount < 1
+  ) {
+    throw new TypeError("Invalid connector runtime lane count");
+  }
+  const count = localConcurrency * shardCount;
+  if (!Number.isSafeInteger(count)) {
+    throw new TypeError("Connector runtime lane count overflow");
+  }
+  return count;
+}
+
+export function rankRuntimeJobUsesCurrentLane(
+  jobId: string | undefined,
+  laneCount: number
+): boolean {
+  if (!Number.isSafeInteger(laneCount) || laneCount < 1) {
+    throw new TypeError("Invalid rank runtime lane count");
+  }
+  const match = /^rank-connector-runtime-(\d+)$/u.exec(jobId ?? "");
+  if (!match) return false;
+  const lane = Number(match[1]);
+  return Number.isSafeInteger(lane) && lane >= 0 && lane < laneCount;
+}
+
+/**
  * Keep one cheap probe per shard while idle and open the full pool as soon as
  * any shard observes real work. The fixed sequence stride remains the full
  * burst size, so switching modes cannot collide BullMQ job identifiers.

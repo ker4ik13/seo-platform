@@ -14,7 +14,7 @@ import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent
 interface PaidMatrixCase {
   readonly engine: "YANDEX" | "GOOGLE";
   readonly device: "DESKTOP" | "MOBILE";
-  readonly depth: 30 | 50 | 100;
+  readonly depth: 10 | 30 | 50 | 100;
   readonly depthMode: "STRICT_DEPTH" | "STOP_AFTER_FOUND";
   readonly turbo: boolean;
 }
@@ -22,7 +22,7 @@ interface PaidMatrixCase {
 const paidMatrix = (["YANDEX", "GOOGLE"] as const).flatMap((engine) =>
   (["DESKTOP", "MOBILE"] as const).flatMap((device) =>
     (["STRICT_DEPTH", "STOP_AFTER_FOUND"] as const).flatMap((depthMode) =>
-      ([30, 50, 100] as const).map((depth) => ({
+      ([10, 30, 50, 100] as const).map((depth) => ({
         engine,
         device,
         depth,
@@ -46,8 +46,8 @@ const paidMatrix = (["YANDEX", "GOOGLE"] as const).flatMap((engine) =>
 ) satisfies readonly PaidMatrixCase[];
 
 test("XMLStock paid smoke matrix covers every Live engine, device, depth and paging mode", () => {
-  assert.equal(paidMatrix.length, 36);
-  assert.equal(maximumPaidRequests(paidMatrix), 160);
+  assert.equal(paidMatrix.length, 44);
+  assert.equal(maximumPaidRequests(paidMatrix), 168);
   assert.equal(
     paidMatrix.filter(({ turbo, depth }) => turbo && depth === 50).length,
     4

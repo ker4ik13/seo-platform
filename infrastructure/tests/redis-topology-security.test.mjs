@@ -269,7 +269,7 @@ test("Redis policies separate durable queues and ephemeral realtime", async () =
 
   assert.match(jobs, /^appendonly yes$/mu);
   assert.match(jobs, /^appendfsync everysec$/mu);
-  assert.match(jobs, /^maxmemory 256mb$/mu);
+  assert.match(jobs, /^maxmemory 512mb$/mu);
   assert.match(jobs, /^maxmemory-policy noeviction$/mu);
   assert.equal(
     resolveMapping(serviceMapping(document, "redis-jobs"), document).get(

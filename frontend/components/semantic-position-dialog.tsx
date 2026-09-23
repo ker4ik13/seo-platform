@@ -1103,8 +1103,9 @@ export function SemanticPositionDialog({
                   ...(current.searchEngine === "GOOGLE"
                     ? { searchSource: "LIVE" as const }
                     : {}),
-                  ...(!competitorMode && next?.provider === "ARSENKIN" &&
-                  current.searchEngine === "YANDEX"
+                  ...(!competitorMode &&
+                  next?.provider === "ARSENKIN" &&
+                  (current.searchEngine === "YANDEX" || current.depth === 10)
                     ? { depth: 30 as const }
                     : {})
                 }));
@@ -1116,7 +1117,13 @@ export function SemanticPositionDialog({
               onSearchSourceChange={(source) => {
                 setContextDraft((current) => ({
                   ...current,
-                  searchSource: source
+                  searchSource: source,
+                  ...(source === "SEARCH_API" && current.depth === 10
+                    ? {
+                        depth: 30 as const,
+                        yandexLiveMode: "STANDARD" as const
+                      }
+                    : {})
                 }));
                 setEstimate(undefined);
                 pendingRun.current = undefined;
@@ -1381,7 +1388,9 @@ function PositionRunParameters({
     ? [10, 20, 30, 50, 100]
     : draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
       ? [30]
-      : [30, 50, 100];
+      : provider === "XMLSTOCK" && searchSource === "LIVE"
+        ? [10, 30, 50, 100]
+        : [30, 50, 100];
   const preferredRegion = preferredRegions[draft.searchEngine];
   const regionSource =
     draft.regionCode === preferredRegion.code
@@ -1461,7 +1470,8 @@ function PositionRunParameters({
           </label>
           {draft.searchEngine === "YANDEX" &&
             searchSource === "LIVE" &&
-            provider === "XMLSTOCK" && (
+            provider === "XMLSTOCK" &&
+            draft.depth !== 10 && (
               <label className="semantic-toggle-line semantic-position-turbo-toggle">
                 <input
                   checked={yandexLiveTurbo}
@@ -1589,7 +1599,13 @@ function PositionRunParameters({
                   <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
                     <input
                       checked={draft.depth === depth}
-                      onChange={() => onChange({ ...draft, depth })}
+                      onChange={() => onChange({
+                        ...draft,
+                        depth,
+                        ...(depth === 10
+                          ? { yandexLiveMode: "STANDARD" as const }
+                          : {})
+                      })}
                       type="radio"
                     />
                     <span><UiText text="Топ-" />{depth}</span>

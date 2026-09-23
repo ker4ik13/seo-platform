@@ -4,7 +4,9 @@ import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { RankManifestClient } from "../seo-data/rank-manifest.client.js";
 import {
+  availableRankExecutionDispatchCapacity,
   rankGrantFailureFinalStatus,
+  rankExecutionDispatchLimit,
   rankProviderActiveTaskLimit,
   RankExecutionDispatchService
 } from "./rank-execution-dispatch.service.js";
@@ -78,6 +80,32 @@ test("keeps every XMLStock product outside the Arsenkin lifecycle window", () =>
     ),
     5
   );
+});
+
+test("caps the grant buffer by connector throughput without serializing XMLStock products", () => {
+  assert.equal(rankExecutionDispatchLimit(48, 15), 720);
+  assert.equal(rankExecutionDispatchLimit(48, 60), 1_440);
+  assert.equal(
+    availableRankExecutionDispatchCapacity(720, 0, undefined, 0),
+    720
+  );
+  assert.equal(
+    availableRankExecutionDispatchCapacity(720, 719, undefined, 0),
+    1
+  );
+  assert.equal(
+    availableRankExecutionDispatchCapacity(720, 799, undefined, 0),
+    0
+  );
+  assert.equal(
+    availableRankExecutionDispatchCapacity(720, 2, 5, 4),
+    1
+  );
+  assert.throws(
+    () => availableRankExecutionDispatchCapacity(0, 0, undefined, 0),
+    TypeError
+  );
+  assert.throws(() => rankExecutionDispatchLimit(0, 15), TypeError);
 });
 
 test("finalizes an explicit grant denial before provider submit", async () => {

@@ -9,12 +9,12 @@ export interface RankConnectorRuntimeJobData {
 
 export async function enqueueRankConnectorRuntime(
   queue: Queue<RankConnectorRuntimeJobData>,
-  dispatchBucket: number
+  lane: number
 ): Promise<void> {
-  if (!Number.isSafeInteger(dispatchBucket) || dispatchBucket < 0) {
-    throw new TypeError("Invalid rank connector dispatch bucket");
+  if (!Number.isSafeInteger(lane) || lane < 0) {
+    throw new TypeError("Invalid rank connector dispatch lane");
   }
-  const jobId = `rank-connector-runtime-${dispatchBucket}`;
+  const jobId = `rank-connector-runtime-${lane}`;
   const existing = await queue.getJob(jobId);
   if (existing) {
     const state = await existing.getState();
@@ -30,8 +30,8 @@ export async function enqueueRankConnectorRuntime(
       jobId,
       attempts: 3,
       backoff: { type: "exponential", delay: 5_000 },
-      removeOnComplete: { age: 60 * 60, count: 1_000 },
-      removeOnFail: { age: 24 * 60 * 60, count: 1_000 }
+      removeOnComplete: true,
+      removeOnFail: true
     }
   );
 }

@@ -56,6 +56,7 @@ import {
   rankEstimateExecutionHash,
   rankEstimateExecutionJson,
   rankEstimateExecutionParameters,
+  rankPositionDepthSupported,
   storedRankEstimateExecution
 } from "./rank-estimate-execution.js";
 import {
@@ -830,7 +831,15 @@ function estimateBlockers(
     if (
       ![10, 20, 30, 50, 100].includes(scope.configuration.depth) ||
       (input.purpose !== "COMPETITOR_SERP" &&
-        ![30, 50, 100].includes(scope.configuration.depth)) ||
+        !rankPositionDepthSupported(
+          scope.configuration.depth,
+          provider,
+          input.searchSource ??
+            (scope.configuration.searchEngine === "GOOGLE"
+              ? "LIVE"
+              : "SEARCH_API"),
+          input.yandexLiveMode
+        )) ||
       (provider === "ARSENKIN" &&
         input.purpose !== "COMPETITOR_SERP" &&
         scope.configuration.searchEngine === "YANDEX" &&

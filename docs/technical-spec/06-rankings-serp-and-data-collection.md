@@ -99,6 +99,10 @@ Turbo для XMLStock Яндекс Live сохраняется как явный
 на mapping `xmlstock-yandex-live@2`. Режим глубины так же сохраняется в
 launch profile, а manifest получает его immutable копию. Старые контексты без
 этих полей безопасно читаются как standard Live + `STRICT_DEPTH`.
+Для обычного позиционного запуска XMLStock standard Яндекс Live и Google Live
+контекст также принимает глубину TOP-10; это ровно одна provider-страница на
+keyword. TOP-10 не переносится на Яндекс Search API, Arsenkin или Turbo и при
+смене на несовместимый source/provider UI возвращает глубину TOP-30.
 
 ## 2. Конфигурация отслеживания
 
@@ -411,13 +415,16 @@ PostgreSQL. Базовые окна одного credential: Yandex Live — `20
 `10 / 20`. Односекундный предел сглаживается общими для replicas окнами по
 100 мс, поэтому заявленная скорость не превращается в отклоняемый burst.
 XMLStock не использует общий lifecycle limit из пяти задач:
-dispatcher может подготовить до 48 keyword chunks одного Job за тик, после
-чего Redis и connector worker concurrency задают фактический предел внешних
-HTTP-вызовов. Лимит пяти provider tasks остаётся только у Arsenkin.
+dispatcher может подготовить новые keyword chunks только в пределах свободной
+части общего пула из 48 connector lanes, после чего Redis и per-product limiter
+задают фактический предел внешних HTTP-вызовов. Лимит пяти provider tasks
+остаётся только у Arsenkin.
 Штатные три connector process используют независимые deterministic dispatch
-shards, по 16 rank slot и по четыре frequency worker slot. Они не создают
-одинаковые BullMQ tick ID и заполняют общий внешний пул до 48 rank-вызовов и
-Wordstat bucket до `20 RPS`. Ожидание permit не
+shards, по 16 rank slot и по четыре frequency worker slot. Каждый slot имеет
+фиксированный BullMQ lane ID; waiting/active backlog поэтому ограничен числом
+lanes даже при остановленном consumer. Старый time-based tick после обновления
+завершается без DB claim. Пул заполняется до 48 rank-вызовов, а Wordstat bucket
+— до `20 RPS`. Ожидание permit не
 расходует попытку JobItem и отображается как фаза выполнения с расчётным
 числом provider requests, а не как terminal/error state.
 
@@ -439,12 +446,21 @@ Turbo запрашивает page width 50: TOP-50 обычно выполняе
 нижнюю и верхнюю стоимость.
 
 Rank connector dispatcher держит один idle probe на shard и раскрывает только
-configured concurrency после фактической provider-работы. Submit fast paths
+configured concurrency после фактической provider-работы. Завершённые runtime
+ticks удаляются сразу; Redis Jobs использует `maxmemory 512mb`, `noeviction` и
+container limit `768M`. Submit fast paths
 проверяют актуальный parent Job до полного tenant graph и, для Arsenkin, до
 provider-wide advisory lock; terminal Job с ещё действующим execution grant не
 создаёт горячий цикл PostgreSQL. Poll fast path использует индекс
 `connector version + status + next action/lease`, проверяет RUNNING parent Job
-и лишь затем открывает credential/control graph.
+и лишь затем открывает credential/control graph. Rank grant dispatcher также
+сериализует общий connector budget: grant buffer не превышает число lanes,
+умноженное на dispatch interval и ограниченное 30-секундным grant window
+(720 при 48 lanes и 15 секундах), а один Job получает за проход максимум 48.
+Неиспользованная авторизация допускается к повтору только спустя минуту после
+expiry. Для выбранного Job dispatcher проверяет граф агрегатами и читает только
+очередной bounded slice через latest-attempt lateral lookup, не материализуя
+всю append-only историю executions в памяти worker.
 
 ### 3.4. Реализованный read slice истории
 
@@ -1007,7 +1023,7 @@ snapshot и ключа идемпотентности.
 работает асинхронно через `delayed=1`: connector сохраняет только `req_id`,
 ждёт 15 секунд до первого poll и 25 секунд между pending ответами; коды
 `202/210` означают ещё не готовый результат. Обычные Яндекс Live и Google Live
-синхронны и при глубине TOP-30/50/100 планируют 3/5/10 страниц по 10
+синхронны и при глубине TOP-10/30/50/100 планируют 1/3/5/10 страниц по 10
 результатов. Неполная или расширенная страница не завершает strict-обход:
 connector продолжает чтение до выбранной глубины и обрезает итоговый SERP по
 Top. Turbo Яндекс Live запрашивает 50 результатов параметром `groupby=50` и
@@ -1055,7 +1071,8 @@ Arsenkin batch polling сохраняет собственную более дл
 Источник выдачи является обязательной частью immutable estimate и request
 snapshot. В первом контуре поддерживаются XMLStock Яндекс Search API, Яндекс
 Live и Google Live, а также Arsenkin Яндекс Search API, Яндекс Live и Google
-Live. Для Arsenkin Яндекс доступен TOP-30; для Google — TOP-30/50/100. Estimate
+Live. Для XMLStock standard Яндекс/Google Live доступны TOP-10/30/50/100;
+для Arsenkin Яндекс доступен TOP-30, для Google — TOP-30/50/100. Estimate
 показывает расход в единицах провайдера: Arsenkin Google требует соответственно
 2/3/5 лимитов на ключ, Яндекс — 2 лимита; XMLStock Search API выполняет один
 request на ключ, standard Live — `ceil(depth / 10)` requests на ключ. Для

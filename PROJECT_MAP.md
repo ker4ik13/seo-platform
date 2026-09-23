@@ -584,8 +584,12 @@ launch profile контекста и восстанавливаются в ма�
 профиль без полей читается как standard + `STRICT_DEPTH`. Estimate всё равно
 фиксирует отдельный immutable mapping `xmlstock-yandex-live@3`, а отсутствие
 Turbo сохраняет стандартный Live.
-Turbo всегда использует 50 результатов на страницу: TOP-50 делает один GET,
-TOP-100 — два. Для обычного позиционного запуска `xmlStockDepthMode` выбирает
+Turbo запрашивает 50 результатов на страницу: TOP-50 обычно делает один GET,
+TOP-100 — два, а provider fallback 10/20/30/40 дочитывается без разрыва.
+XMLStock standard Яндекс Live и Google Live дополнительно поддерживают
+позиционный TOP-10 одним GET на keyword; Search API, Arsenkin и Turbo этот
+позиционный режим не принимают. Для обычного позиционного запуска
+`xmlStockDepthMode` выбирает
 строгий обход всего Top либо остановку после первой страницы с найденным
 доменом; immutable estimate, manifest и Job presentation сохраняют выбор.
 Редактор профилей переиспользует bounded multi-city/device selector ручного
@@ -1512,20 +1516,31 @@ quota reservation/receipt.
 Job graph. Исторические `READY_TO_SUBMIT` с истёкшим grant больше не сканируются
 на каждом пустом runtime tick.
 Каждый connector process выполняет до 16 rank claims и четырёх frequency
-claims одновременно. Три штатных процесса получают разные deterministic
-dispatch shard sequence: их BullMQ ticks больше не дедуплицируются между
-процессами, общий rank I/O pool достигает 48 slot, а Wordstat bucket — `20
-RPS`. В простое каждый shard отправляет один probe в секунду; первый реальный
-claim немедленно раскрывает ровно configured pool на пять секунд, без прежнего
-двойного BullMQ fan-out. Frequency/AI/clustering scheduler также переходит от
-одного idle probe к четырём slots только после фактической работы. Submit
+claims одновременно. Три штатных процесса владеют 48 фиксированными
+deterministic BullMQ lanes: для одного lane существует не более одного
+waiting/active tick, а завершённый tick удаляется сразу. Поэтому остановка или
+деградация consumer не может создать неограниченный Redis backlog; старые
+time-based tick ID завершаются без обращения к PostgreSQL. Общий rank I/O pool
+остаётся равен 48 slot, а Wordstat bucket — `20 RPS`. В простое каждый shard
+отправляет один probe в секунду; первый реальный claim раскрывает configured
+pool на пять секунд. Frequency/AI/clustering и keyword-research runtime
+используют такие же bounded lanes. Submit
 broker перед full tenant graph, а Arsenkin ещё и перед provider-wide lock,
 проверяет активный parent Job; отменённые и завершённые операции с ещё
 действующим grant больше не разогревают claim loop. Poll broker сначала
 проверяет dedicated `connector version + due time` index и RUNNING parent Job,
 поэтому будущие `POLL_WAIT` и audit-строки terminal Jobs не открывают полный
-SQL graph. Provider throughput сохраняется, а Redis не
-позволяет превысить отдельную границу каждого продукта.
+SQL graph. Rank grant dispatcher под общим advisory lock ограничивает общий
+короткоживущий grant buffer произведением 48 connector lanes на dispatch
+interval (720 в production, не длиннее 30-секундного grant window), а один Job
+за проход получает не более 48 новых grants. Неиспользованный grant повторяется
+не раньше минутного cooldown. Следующие `JobItem` выбираются bounded SQL slice
+через latest-attempt lateral lookup; весь массив исторических executions больше
+не загружается в Node на каждом цикле. Provider throughput
+сохраняется, а Redis не позволяет превысить отдельную границу каждого продукта.
+Jobs Redis имеет `512mb` внутреннего `maxmemory` при container limit `768M` и
+`noeviction`: bounded queues обязаны освобождать runtime ticks сразу, чтобы
+durable business jobs оставались fail-closed без OOM-loop.
 Capacity wait показывается
 как нормальная фаза с количеством HTTP-запросов и минимальным оставшимся
 временем, без ложного error code.
@@ -1685,8 +1700,9 @@ immutable строки nullable `favicon_url`: сохраняется тольк
 абсолютный `http/https` URL, присутствующий в provider SERP, без отдельного
 запроса к сайту результата.
 
-XMLStock Google Top-100 собирается десятью последовательными страницами по 10
-результатов; XMLStock Yandex Live использует такой же GET-only page mapping,
+XMLStock Google Top-10/30/50/100 собирается 1/3/5/10 последовательными
+страницами по 10 результатов; XMLStock Yandex Live использует такой же
+GET-only page mapping,
 тогда как Yandex Search API остаётся submit/check. Для Live каждая успешно
 оплаченная страница сохраняется в hash-проверяемом secret-free checkpoint в
 `jobs_db`; следующий poll запрашивает ровно следующую страницу, а временный

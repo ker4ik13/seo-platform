@@ -75,6 +75,7 @@ const INSPECTION_KEYS = [
 ] as const;
 const RANK_KEYS = [
   ...DATABASE_POOL,
+  "CONNECTOR_RUNTIME_SHARD_COUNT",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
@@ -83,6 +84,7 @@ const RANK_KEYS = [
   "RANK_PREPARATION_CONCURRENCY",
   "RANK_PREPARATION_DISPATCH_SECONDS",
   "RANK_PREPARATION_LEASE_SECONDS",
+  "RANK_CONNECTOR_CONCURRENCY",
   "RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS",
   "RANK_PROVIDER_KILL_SWITCH_VERSION",
   "SEO_DATA_COMMAND_TIMEOUT_MS",
@@ -156,6 +158,12 @@ export function executionProcessDefinitions(
     3,
     16
   );
+  const rankConnectorConcurrency = processCount(
+    env.RANK_CONNECTOR_CONCURRENCY,
+    "RANK_CONNECTOR_CONCURRENCY",
+    4,
+    64
+  );
   const definitions: ProcessDefinition[] = [
     definition(env, "http", "./http.main.js", HTTP_KEYS, {
       BIND_ADDRESS: env.BIND_ADDRESS ?? "0.0.0.0",
@@ -188,6 +196,8 @@ export function executionProcessDefinitions(
         DATABASE_URL: required(env, "EXECUTION_RANK_DATABASE_URL"),
         DATABASE_POOL_MAX: env.EXECUTION_RANK_DATABASE_POOL_MAX,
         REDIS_URL: required(env, "EXECUTION_RANK_REDIS_URL"),
+        CONNECTOR_RUNTIME_SHARD_COUNT: String(connectorWorkerProcesses),
+        RANK_CONNECTOR_CONCURRENCY: String(rankConnectorConcurrency),
         RANK_PREPARATION_ENABLED: "true",
         RANK_PROVIDER_SUBMIT_ENABLED: "false",
         INTEGRATION_CREDENTIAL_ROLE: "DISABLED"
@@ -210,7 +220,8 @@ export function executionProcessDefinitions(
         REDIS_URL: required(env, "EXECUTION_CONNECTOR_REDIS_URL"),
         INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
         RANK_PROVIDER_SUBMIT_ENABLED:
-          env.RANK_PROVIDER_SUBMIT_ENABLED ?? "true"
+          env.RANK_PROVIDER_SUBMIT_ENABLED ?? "true",
+        RANK_CONNECTOR_CONCURRENCY: String(rankConnectorConcurrency)
       },
       connectorWorkerProcesses,
       (index) => ({

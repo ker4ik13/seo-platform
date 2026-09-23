@@ -85,6 +85,14 @@ test("selects the first workspace fallback that can fund the complete frequency 
 
 test("estimates XMLStock Google pages by selected depth", () => {
   assert.match(
+    rankProviderUsageEstimate(xmlStock, 12, "GOOGLE", 10, "LIVE").usage,
+    /^Базовый тариф · 25 ₽ за 1000 · 12 запросов · 0,30\s₽$/u
+  );
+  assert.match(
+    rankProviderUsageEstimate(xmlStock, 12, "YANDEX", 10, "LIVE").usage,
+    /^Базовый тариф · 25 ₽ за 1000 · 12 запросов · 0,30\s₽$/u
+  );
+  assert.match(
     rankProviderUsageEstimate(xmlStock, 12, "GOOGLE", 30, "LIVE").usage,
     /^Базовый тариф · 25 ₽ за 1000 · 36 запросов · 0,90\s₽$/u
   );

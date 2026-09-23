@@ -14,6 +14,7 @@ import type {
 import { databaseClock } from "../database/database-clock.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeErrorSummary } from "../runtime-safe-error.js";
+import { connectorRuntimeLaneCount } from "../queue/connector-runtime-dispatch.js";
 import {
   RankManifestClient,
   RankManifestClientError
@@ -35,12 +36,8 @@ import {
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const RANK_PROVIDER_ACTIVE_TASK_LIMIT = 5;
-/**
- * Keep enough immutable chunks authorized to fill all connector processes.
- * The provider-specific Redis limiter and fenced DB claims remain the actual
- * XMLStock capacity boundary; this dispatcher only prepares safe work.
- */
-const RANK_JOB_ACTIVE_CHUNK_LIMIT = 48;
+const RANK_GRANT_WINDOW_SECONDS = 30;
+const RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS = 60_000;
 
 export type RankExecutionDispatchOutcome =
   | "DISABLED"
@@ -111,23 +108,15 @@ export class RankExecutionDispatchService {
             AND item."project_id" = j."project_id"
             AND item."job_id" = j."id"
             AND item."status" = 'QUEUED'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM "rank_connector_executions" execution
-              WHERE execution."workspace_id" = item."workspace_id"
-                AND execution."project_id" = item."project_id"
-                AND execution."job_id" = item."job_id"
-                AND execution."job_item_id" = item."id"
-                AND NOT (
-                  execution."status" IN ('READY_TO_SUBMIT', 'CLAIMED')
-                  AND execution."authorization_expires_at" <= clock_timestamp()
-                  AND execution."submit_attempt_count" = 0
-                  AND execution."submit_bytes_started_at" IS NULL
-                  AND execution."provider_task_id" IS NULL
-                )
-            )
         )
-      ORDER BY j."priority" ASC, j."created_at" ASC, j."id" ASC
+      ORDER BY
+        (
+          j."progress_current"::numeric /
+          GREATEST(j."progress_total"::numeric, 1)
+        ) ASC,
+        j."priority" ASC,
+        j."created_at" ASC,
+        j."id" ASC
       LIMIT ${boundedLimit}
     `;
     return rows.map(({ id }) => id);
@@ -251,40 +240,32 @@ export class RankExecutionDispatchService {
           return undefined;
         }
         const run = job.rankRun;
-        const items = await transaction.jobItem.findMany({
-          where: {
-            workspaceId: identity.workspaceId,
-            projectId: identity.projectId,
-            jobId
-          },
-          orderBy: { sequence: "asc" },
-          select: { id: true, sequence: true, status: true }
-        });
-        const executions =
-          await transaction.rankConnectorExecution.findMany({
-            where: {
-              workspaceId: identity.workspaceId,
-              projectId: identity.projectId,
-              jobId
-            },
-            select: {
-              jobItemId: true,
-              status: true,
-              authorizationExpiresAt: true,
-              submitAttemptCount: true,
-              submitBytesStartedAt: true,
-              providerTaskId: true
-            }
-          });
         const provider = job.provider;
+        const itemGraph = await transaction.$queryRaw<readonly [{
+          readonly itemCount: bigint;
+          readonly minimumSequence: number | null;
+          readonly maximumSequence: number | null;
+        }]>(Prisma.sql`
+          SELECT
+            COUNT(*)::bigint AS "itemCount",
+            MIN(item."sequence")::integer AS "minimumSequence",
+            MAX(item."sequence")::integer AS "maximumSequence"
+          FROM "job_items" item
+          WHERE item."workspace_id" = ${identity.workspaceId}::uuid
+            AND item."project_id" = ${identity.projectId}::uuid
+            AND item."job_id" = ${jobId}::uuid
+        `);
+        const itemCount = Number(itemGraph[0]?.itemCount ?? -1n);
         const invalid =
           !run ||
           (provider !== "ARSENKIN" && provider !== "XMLSTOCK") ||
           run.sealState !== "SEALED" ||
           run.finalizationStatus !== null ||
           run.manifestChunkCount === null ||
-          items.length !== run.manifestChunkCount ||
-          items.some(({ sequence }, index) => sequence !== index);
+          !Number.isSafeInteger(itemCount) ||
+          itemCount !== run.manifestChunkCount ||
+          itemGraph[0]?.minimumSequence !== 0 ||
+          itemGraph[0]?.maximumSequence !== itemCount - 1;
         if (invalid) {
           return { jobId, itemIds: [], invalid: true };
         }
@@ -299,9 +280,17 @@ export class RankExecutionDispatchService {
           run.manifestCommandHash,
           commandBinding(job)
         );
+        const connectorLaneCount = connectorRuntimeLaneCount(
+          this.config.connectorRuntime.rankConcurrency,
+          this.config.connectorRuntime.shardCount
+        );
         const capacity = await rankExecutionDispatchCapacity(
           transaction,
           provider,
+          rankExecutionDispatchLimit(
+            connectorLaneCount,
+            this.config.rankPreparation.dispatchSeconds
+          ),
           rankProviderActiveTaskLimit(
             provider,
             command.execution.providerMappingVersion
@@ -311,23 +300,55 @@ export class RankExecutionDispatchService {
           transaction,
           "Unable to read rank dispatch clock"
         );
-        const blockedItemIds = new Set(
-          executions
-            .filter(
-              (execution) =>
-                !isExpiredUnusedAuthorization(execution, now)
-            )
-            .map(({ jobItemId }) => jobItemId)
+        if (capacity === 0) {
+          return { jobId, itemIds: [], invalid: false };
+        }
+        const jobCapacity = Math.min(capacity, connectorLaneCount);
+        const retryBefore = new Date(
+          now.getTime() - RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS
         );
+        const candidates = await transaction.$queryRaw<
+          readonly { readonly id: string }[]
+        >(Prisma.sql`
+          SELECT item."id"::text AS "id"
+          FROM "job_items" item
+          LEFT JOIN LATERAL (
+            SELECT
+              execution."id",
+              execution."status",
+              execution."authorization_expires_at",
+              execution."submit_attempt_count",
+              execution."submit_bytes_started_at",
+              execution."provider_task_id"
+            FROM "rank_connector_executions" execution
+            WHERE execution."workspace_id" = item."workspace_id"
+              AND execution."job_item_id" = item."id"
+            ORDER BY
+              execution."execution_attempt" DESC,
+              execution."id" DESC
+            LIMIT 1
+          ) latest_execution ON true
+          WHERE item."workspace_id" = ${identity.workspaceId}::uuid
+            AND item."project_id" = ${identity.projectId}::uuid
+            AND item."job_id" = ${jobId}::uuid
+            AND item."status" = 'QUEUED'
+            AND (
+              latest_execution."id" IS NULL
+              OR (
+                latest_execution."status" IN ('READY_TO_SUBMIT', 'CLAIMED')
+                AND latest_execution."authorization_expires_at" <=
+                  ${retryBefore}
+                AND latest_execution."submit_attempt_count" = 0
+                AND latest_execution."submit_bytes_started_at" IS NULL
+                AND latest_execution."provider_task_id" IS NULL
+              )
+            )
+          ORDER BY item."sequence" ASC
+          LIMIT ${jobCapacity}
+        `);
         return {
           jobId,
-          itemIds: items
-            .filter(
-              ({ id, status }) =>
-                status === "QUEUED" && !blockedItemIds.has(id)
-            )
-            .slice(0, Math.min(capacity, RANK_JOB_ACTIVE_CHUNK_LIMIT))
-            .map(({ id }) => id),
+          itemIds: candidates.map(({ id }) => id),
           invalid: false
         };
       },
@@ -671,90 +692,230 @@ function dispatchFailureCode(error: unknown): RankJobFailureCode {
 async function rankExecutionDispatchCapacity(
   transaction: Prisma.TransactionClient,
   provider: "ARSENKIN" | "XMLSTOCK",
+  dispatchLimit: number,
   activeTaskLimit: number | undefined
 ): Promise<number> {
   await transaction.$executeRaw`
     SELECT pg_advisory_xact_lock(
       hashtextextended(
-        ${`seo-platform:rank-dispatch:${provider}`}::text,
+        'seo-platform:rank-dispatch:global'::text,
         0
       )
     )
   `;
-  if (activeTaskLimit === undefined) {
-    return RANK_JOB_ACTIVE_CHUNK_LIMIT;
+  const candidateLimit = dispatchLimit * 64;
+  if (!Number.isSafeInteger(candidateLimit)) {
+    throw new TypeError("Rank dispatch candidate limit overflow");
   }
-  const rows = await transaction.$queryRaw<
-    readonly { readonly activeTaskCount: bigint }[]
-  >`
-    SELECT (
+  const globalRows = await transaction.$queryRaw<
+    readonly { readonly activeConnectorCount: bigint }[]
+  >(Prisma.sql`
+    WITH ready_execution AS MATERIALIZED (
       (
-        SELECT COUNT(*)
+        SELECT
+          execution."id",
+          execution."workspace_id",
+          execution."project_id",
+          execution."job_id",
+          execution."job_version"
         FROM "rank_connector_executions" execution
-        JOIN "jobs" rank_job
-          ON rank_job."workspace_id" = execution."workspace_id"
-         AND rank_job."project_id" = execution."project_id"
-         AND rank_job."id" = execution."job_id"
-        WHERE execution."provider" = ${provider}
-          AND rank_job."status" = 'RUNNING'
-          AND rank_job."cancel_requested_at" IS NULL
-          AND (
-            execution."status" IN ('SUBMITTING', 'POLL_WAIT')
-            OR (
-              execution."status" = 'READY_TO_SUBMIT'
-              AND execution."authorization_expires_at" > clock_timestamp()
-            )
-            OR (
-              execution."status" = 'CLAIMED'
-              AND execution."lease_expires_at" > clock_timestamp()
-            )
-            OR (
-              execution."status" = 'FETCHING'
-              AND execution."lease_expires_at" > clock_timestamp()
-            )
-          )
-      ) + (
-        SELECT COUNT(DISTINCT frequency_job."id")
-        FROM "jobs" frequency_job
-        JOIN "job_items" item
-          ON item."job_id" = frequency_job."id"
-         AND item."workspace_id" = frequency_job."workspace_id"
-         AND item."project_id" = frequency_job."project_id"
-        WHERE frequency_job."type" = 'FREQUENCY_COLLECTION'
-          AND frequency_job."provider" = ${provider}
-          AND (
-            (
-              frequency_job."status" IN (
-                'RUNNING',
-                'RETRY_SCHEDULED',
-                'WAITING_RATE_LIMIT',
-                'FAILED_RETRYABLE'
-              )
-              AND item."status" IN ('RUNNING', 'FAILED_RETRYABLE')
-              AND item."provider_request_id" IS NOT NULL
-            )
-            OR (
-              frequency_job."status" = 'ACTION_REQUIRED'
-              AND item."provider_request_id" ~ '^submitting:'
-            )
-          )
+        WHERE execution."status" = 'READY_TO_SUBMIT'
+          AND execution."authorization_expires_at" > statement_timestamp()
+        LIMIT ${candidateLimit}
       )
-    )::bigint AS "activeTaskCount"
-  `;
-  const activeTaskCount = Number(rows[0]?.activeTaskCount ?? 0n);
-  if (!Number.isSafeInteger(activeTaskCount) || activeTaskCount < 0) {
-    throw new Error("Invalid active rank provider task count");
-  }
-  return Math.max(
-    0,
-    activeTaskLimit - activeTaskCount
+      UNION ALL
+      (
+        SELECT
+          execution."id",
+          execution."workspace_id",
+          execution."project_id",
+          execution."job_id",
+          execution."job_version"
+        FROM "rank_connector_executions" execution
+        WHERE execution."status" = 'CLAIMED'
+          AND execution."authorization_expires_at" > statement_timestamp()
+        LIMIT ${candidateLimit}
+      )
+      UNION ALL
+      (
+        SELECT
+          execution."id",
+          execution."workspace_id",
+          execution."project_id",
+          execution."job_id",
+          execution."job_version"
+        FROM "rank_connector_executions" execution
+        WHERE execution."status" = 'SUBMITTING'
+        LIMIT ${candidateLimit}
+      )
+      UNION ALL
+      (
+        SELECT
+          execution."id",
+          execution."workspace_id",
+          execution."project_id",
+          execution."job_id",
+          execution."job_version"
+        FROM "rank_connector_executions" execution
+        WHERE execution."status" = 'POLL_WAIT'
+          AND execution."next_action_at" <= statement_timestamp()
+        LIMIT ${candidateLimit}
+      )
+      UNION ALL
+      (
+        SELECT
+          execution."id",
+          execution."workspace_id",
+          execution."project_id",
+          execution."job_id",
+          execution."job_version"
+        FROM "rank_connector_executions" execution
+        WHERE execution."status" = 'FETCHING'
+        LIMIT ${candidateLimit}
+      )
+    )
+    SELECT COUNT(*)::bigint AS "activeConnectorCount"
+    FROM (
+      SELECT ready_execution."id"
+      FROM ready_execution
+      JOIN "jobs" rank_job
+        ON rank_job."workspace_id" = ready_execution."workspace_id"
+       AND rank_job."project_id" = ready_execution."project_id"
+       AND rank_job."id" = ready_execution."job_id"
+      WHERE rank_job."type" = 'MANUAL_RANK_CHECK'
+        AND rank_job."status" = 'RUNNING'
+        AND rank_job."stage" = 'WAITING_EXECUTION_GRANT'
+        AND rank_job."cancel_requested_at" IS NULL
+        AND rank_job."version" = ready_execution."job_version"
+      LIMIT ${dispatchLimit}
+    ) active_execution
+  `);
+  const activeConnectorCount = Number(
+    globalRows[0]?.activeConnectorCount ?? 0n
   );
+  let activeProviderTaskCount = 0;
+  if (activeTaskLimit !== undefined) {
+    const rows = await transaction.$queryRaw<
+      readonly { readonly activeTaskCount: bigint }[]
+    >`
+      SELECT (
+        (
+          SELECT COUNT(*)
+          FROM "rank_connector_executions" execution
+          JOIN "jobs" rank_job
+            ON rank_job."workspace_id" = execution."workspace_id"
+           AND rank_job."project_id" = execution."project_id"
+           AND rank_job."id" = execution."job_id"
+          WHERE execution."provider" = ${provider}
+            AND rank_job."status" = 'RUNNING'
+            AND rank_job."cancel_requested_at" IS NULL
+            AND (
+              execution."status" IN ('SUBMITTING', 'POLL_WAIT')
+              OR (
+                execution."status" = 'READY_TO_SUBMIT'
+                AND execution."authorization_expires_at" > clock_timestamp()
+              )
+              OR (
+                execution."status" = 'CLAIMED'
+                AND execution."lease_expires_at" > clock_timestamp()
+              )
+              OR (
+                execution."status" = 'FETCHING'
+                AND execution."lease_expires_at" > clock_timestamp()
+              )
+            )
+        ) + (
+          SELECT COUNT(DISTINCT frequency_job."id")
+          FROM "jobs" frequency_job
+          JOIN "job_items" item
+            ON item."job_id" = frequency_job."id"
+           AND item."workspace_id" = frequency_job."workspace_id"
+           AND item."project_id" = frequency_job."project_id"
+          WHERE frequency_job."type" = 'FREQUENCY_COLLECTION'
+            AND frequency_job."provider" = ${provider}
+            AND (
+              (
+                frequency_job."status" IN (
+                  'RUNNING',
+                  'RETRY_SCHEDULED',
+                  'WAITING_RATE_LIMIT',
+                  'FAILED_RETRYABLE'
+                )
+                AND item."status" IN ('RUNNING', 'FAILED_RETRYABLE')
+                AND item."provider_request_id" IS NOT NULL
+              )
+              OR (
+                frequency_job."status" = 'ACTION_REQUIRED'
+                AND item."provider_request_id" ~ '^submitting:'
+              )
+            )
+        )
+      )::bigint AS "activeTaskCount"
+    `;
+    activeProviderTaskCount = Number(rows[0]?.activeTaskCount ?? 0n);
+  }
+  return availableRankExecutionDispatchCapacity(
+    dispatchLimit,
+    activeConnectorCount,
+    activeTaskLimit,
+    activeProviderTaskCount
+  );
+}
+
+export function availableRankExecutionDispatchCapacity(
+  dispatchLimit: number,
+  activeConnectorCount: number,
+  activeProviderTaskLimit: number | undefined,
+  activeProviderTaskCount: number
+): number {
+  if (
+    !Number.isSafeInteger(dispatchLimit) ||
+    dispatchLimit < 1 ||
+    !Number.isSafeInteger(activeConnectorCount) ||
+    activeConnectorCount < 0 ||
+    (activeProviderTaskLimit !== undefined &&
+      (!Number.isSafeInteger(activeProviderTaskLimit) ||
+        activeProviderTaskLimit < 1)) ||
+    !Number.isSafeInteger(activeProviderTaskCount) ||
+    activeProviderTaskCount < 0
+  ) {
+    throw new TypeError("Invalid rank execution dispatch capacity");
+  }
+  const connectorCapacity = Math.max(
+    0,
+    dispatchLimit - activeConnectorCount
+  );
+  const providerCapacity = activeProviderTaskLimit === undefined
+    ? dispatchLimit
+    : Math.max(0, activeProviderTaskLimit - activeProviderTaskCount);
+  return Math.min(connectorCapacity, providerCapacity);
+}
+
+export function rankExecutionDispatchLimit(
+  connectorLaneCount: number,
+  dispatchSeconds: number
+): number {
+  if (
+    !Number.isSafeInteger(connectorLaneCount) ||
+    connectorLaneCount < 1 ||
+    !Number.isSafeInteger(dispatchSeconds) ||
+    dispatchSeconds < 1
+  ) {
+    throw new TypeError("Invalid rank execution dispatch limit");
+  }
+  const limit =
+    connectorLaneCount * Math.min(dispatchSeconds, RANK_GRANT_WINDOW_SECONDS);
+  if (!Number.isSafeInteger(limit)) {
+    throw new TypeError("Rank execution dispatch limit overflow");
+  }
+  return limit;
 }
 
 /**
  * Arsenkin has one shared provider-task lifecycle window. XMLStock is instead
- * bounded per credential and product by the distributed HTTP quota limiter;
- * applying the Arsenkin window here serialized unrelated XMLStock projects.
+ * bounded by the global connector-lane budget above and per credential/product
+ * by the distributed HTTP quota limiter; applying the Arsenkin lifecycle
+ * window here would serialize unrelated XMLStock projects.
  */
 export function rankProviderActiveTaskLimit(
   provider: "ARSENKIN" | "XMLSTOCK",

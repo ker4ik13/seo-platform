@@ -302,6 +302,48 @@ test("does not stop a strict Live Top-50 after a thirteen-result page", async ()
   assert.equal(result?.serpResults?.length, 50);
 });
 
+test("loads XMLStock Yandex and Google Live Top-10 in one page", async () => {
+  for (const engine of ["YANDEX", "GOOGLE"] as const) {
+    const pages: string[] = [];
+    const connector = new XmlStockRankConnector(async (url) => {
+      const parsed = new URL(String(url));
+      pages.push(parsed.searchParams.get("page") ?? "");
+      assert.equal(
+        parsed.pathname,
+        engine === "YANDEX" ? "/yandexlive/xml/" : "/google/xml/"
+      );
+      return xml(googleResult(0, "https://example.com/top-ten", 10));
+    });
+    const value = intent(
+      engine,
+      engine === "YANDEX"
+        ? "xmlstock-yandex-live@2"
+        : "xmlstock-google-live@2",
+      { depth: 10 }
+    );
+    const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+    const submitted = await connector.submit(value, secret, 1_000);
+    assert.equal(submitted.status, "ACCEPTED");
+    if (submitted.status !== "ACCEPTED") continue;
+    const ready = await connector.fetchResult(
+      submitted.taskId,
+      secret,
+      1_000,
+      value
+    );
+    assert.equal(ready.status, "READY");
+    assert.deepEqual(pages, ["0"]);
+    if (ready.status !== "READY") continue;
+    const result = stageXmlStockRankResult(
+      ready.value,
+      submitted.taskId,
+      value,
+      "2026-09-23T09:00:00.000Z"
+    ).snapshot.results[0];
+    assert.equal(result?.serpResults?.length, 10);
+  }
+});
+
 test("stops XMLStock Live after the first page containing the project", async () => {
   const pages: string[] = [];
   const connector = new XmlStockRankConnector(async (url) => {
@@ -715,7 +757,7 @@ function intent(
   providerMappingVersion = "xmlstock-serp@1",
   overrides: {
     readonly device?: "DESKTOP" | "MOBILE";
-    readonly depth?: 30 | 50 | 100;
+    readonly depth?: 10 | 30 | 50 | 100;
     readonly purpose?: "COMPETITOR_SERP";
     readonly saveProjectPosition?: boolean;
     readonly xmlStockDepthMode?: "STRICT_DEPTH" | "STOP_AFTER_FOUND";

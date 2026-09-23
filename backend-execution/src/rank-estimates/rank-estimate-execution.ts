@@ -63,7 +63,12 @@ export function rankEstimateExecutionParameters(
     !SUPPORTED_SEARCH_ENGINES.includes(configuration.searchEngine) ||
     !SUPPORTED_DEPTHS.includes(configuration.depth) ||
     (purpose !== "COMPETITOR_SERP" &&
-      ![30, 50, 100].includes(configuration.depth)) ||
+      !rankPositionDepthSupported(
+        configuration.depth,
+        provider,
+        searchSource,
+        yandexLiveMode
+      )) ||
     (provider === "ARSENKIN" &&
       purpose !== "COMPETITOR_SERP" &&
       configuration.searchEngine === "YANDEX" &&
@@ -117,6 +122,19 @@ export function rankEstimateExecutionParameters(
         yandexLiveMode
       )
   };
+}
+
+export function rankPositionDepthSupported(
+  depth: number,
+  provider: "ARSENKIN" | "XMLSTOCK",
+  searchSource: "SEARCH_API" | "LIVE",
+  yandexLiveMode?: "TURBO"
+): boolean {
+  return [30, 50, 100].includes(depth) ||
+    (provider === "XMLSTOCK" &&
+      searchSource === "LIVE" &&
+      yandexLiveMode === undefined &&
+      depth === 10);
 }
 
 export function rankEstimateExecutionHash(

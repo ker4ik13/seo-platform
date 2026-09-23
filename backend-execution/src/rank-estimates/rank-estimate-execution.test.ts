@@ -85,7 +85,9 @@ test("maps every supported provider, source, device and depth combination", () =
       }))
     ),
     ...(["SEARCH_API", "LIVE"] as const).flatMap((source) =>
-      ([30, 50, 100] as const).flatMap((depth) =>
+      (source === "LIVE"
+        ? [10, 30, 50, 100] as const
+        : [30, 50, 100] as const).flatMap((depth) =>
         (["DESKTOP", "MOBILE"] as const).map((device) => ({
           provider: "XMLSTOCK" as const,
           searchEngine: "YANDEX" as const,
@@ -98,7 +100,7 @@ test("maps every supported provider, source, device and depth combination", () =
         }))
       )
     ),
-    ...([30, 50, 100] as const).flatMap((depth) =>
+    ...([10, 30, 50, 100] as const).flatMap((depth) =>
       (["DESKTOP", "MOBILE"] as const).map((device) => ({
         provider: "XMLSTOCK" as const,
         searchEngine: "GOOGLE" as const,
@@ -110,7 +112,7 @@ test("maps every supported provider, source, device and depth combination", () =
     )
   ];
 
-  assert.equal(cases.length, 28);
+  assert.equal(cases.length, 32);
   for (const value of cases) {
     const execution = rankEstimateExecutionParameters(
       {
@@ -128,6 +130,50 @@ test("maps every supported provider, source, device and depth combination", () =
     assert.ok(execution, JSON.stringify(value));
     assert.equal(execution.providerMappingVersion, value.mapping);
   }
+});
+
+test("allows XMLStock Live Top-10 positions for Yandex and Google only", () => {
+  for (const searchEngine of ["YANDEX", "GOOGLE"] as const) {
+    const topTen = rankEstimateExecutionParameters(
+      {
+        ...configuration,
+        searchEngine,
+        countryCode: "RU",
+        regionCode: "213",
+        language: "ru",
+        depth: 10
+      },
+      "XMLSTOCK",
+      "LIVE"
+    );
+    assert.ok(topTen);
+    assert.equal(topTen.depth, 10);
+  }
+  assert.equal(
+    rankEstimateExecutionParameters(
+      { ...configuration, searchEngine: "YANDEX", depth: 10 },
+      "XMLSTOCK",
+      "SEARCH_API"
+    ),
+    undefined
+  );
+  assert.equal(
+    rankEstimateExecutionParameters(
+      { ...configuration, depth: 10 },
+      "ARSENKIN",
+      "LIVE"
+    ),
+    undefined
+  );
+  assert.equal(
+    rankEstimateExecutionParameters(
+      { ...configuration, searchEngine: "YANDEX", depth: 10 },
+      "XMLSTOCK",
+      "LIVE",
+      "TURBO"
+    ),
+    undefined
+  );
 });
 
 test("seals competitor TOP-10 purpose and optional project position", () => {

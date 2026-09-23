@@ -14,6 +14,13 @@ stack. Итого это восемь long-running containers при включ�
 containers. One-shot containers завершаются до старта backend и не требуют
 отдельного управления как приложения.
 
+Jobs Redis использует внутренний предел `512mb` при container limit `768M` и
+политику `noeviction`. Connector runtime queues состоят из фиксированных lanes,
+поэтому их waiting backlog не должен превышать configured worker pool. Рост
+`rank-connector-runtime:wait` выше числа lanes означает несовместимый старый
+producer или незавершённую эксплуатационную очистку и требует остановить
+`backend-execution` перед удалением только этой transient tick queue.
+
 `backend-execution` запускает по умолчанию два rank и три connector child
 process. Это остаётся одним Dokploy service; масштаб регулируется
 `RANK_WORKER_PROCESSES` и `CONNECTOR_WORKER_PROCESSES`, а отдельные queue

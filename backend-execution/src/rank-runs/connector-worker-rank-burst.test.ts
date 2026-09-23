@@ -17,7 +17,9 @@ test("connector dispatcher probes cheaply and fills the rank pool after activity
   assert.match(source, /const frequencyBurst = adaptiveRankDispatchBurst\(/u);
   assert.match(source, /rankRuntimeOutcomeHasWork\(outcome\)/u);
   assert.match(source, /slot < rankBurst; slot \+= 1/u);
-  assert.match(source, /shardedDispatchSequence\(/u);
+  assert.match(source, /shardedDispatchLane\(/u);
+  assert.match(source, /rankRuntimeJobUsesCurrentLane\(/u);
+  assert.match(source, /return "STALE_DISPATCH_TICK"/u);
   assert.match(source, /config\.connectorRuntime\.shardIndex/u);
   assert.match(source, /config\.connectorRuntime\.shardCount/u);
   assert.match(source, /if \(!paidRuntimeEnabled\) return;/u);

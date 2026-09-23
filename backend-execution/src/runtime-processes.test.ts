@@ -28,6 +28,7 @@ const baseEnvironment = {
   PLATFORM_XMLSTOCK_ACCOUNT_IDS: "platform-account-1,platform-account-2",
   PLATFORM_ARSENKIN_ENABLED: "false",
   PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http",
+  RANK_CONNECTOR_CONCURRENCY: "16",
   RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: "750"
 } satisfies NodeJS.ProcessEnv;
 
@@ -62,6 +63,8 @@ test("execution roles receive only their scoped database and secrets", () => {
     "750"
   );
   assert.equal(rank?.INTEGRATION_CREDENTIAL_KEYS, undefined);
+  assert.equal(rank?.RANK_CONNECTOR_CONCURRENCY, "16");
+  assert.equal(rank?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
   const connector = definitions.find(({ name }) => name === "connector-worker")?.environment;
   const secondaryConnector = definitions.find(
     ({ name }) => name === "connector-worker-2"
@@ -131,6 +134,12 @@ test("rank and connector process counts scale without adding services", () => {
     definitions.filter(({ name }) => name.startsWith("connector-worker")).length,
     4
   );
+  for (const rank of definitions.filter(({ name }) =>
+    name.startsWith("rank-worker")
+  )) {
+    assert.equal(rank.environment.RANK_CONNECTOR_CONCURRENCY, "16");
+    assert.equal(rank.environment.CONNECTOR_RUNTIME_SHARD_COUNT, "4");
+  }
 });
 
 test("optional inspection and email roles are explicit", () => {

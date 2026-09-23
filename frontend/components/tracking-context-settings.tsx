@@ -510,7 +510,13 @@ export function TrackingContextSettingsPanel({
               onChange={(event) =>
                 setDraft({
                   ...draft,
-                  searchSource: event.target.value as "LIVE" | "SEARCH_API"
+                  searchSource: event.target.value as "LIVE" | "SEARCH_API",
+                  ...(event.target.value === "SEARCH_API" && draft.depth === 10
+                    ? {
+                        depth: 30 as const,
+                        yandexLiveMode: "STANDARD" as const
+                      }
+                    : {})
                 })
               }
               value={draft.searchSource}
@@ -533,11 +539,19 @@ export function TrackingContextSettingsPanel({
           <fieldset className="field-span-2 tracking-context-depth-field">
             <legend><UiText text="Глубина" /></legend>
             <div className="tracking-context-segments">
-              {([30, 50, 100] as const).map((depth) => (
+              {(draft.searchSource === "LIVE"
+                ? [10, 30, 50, 100] as const
+                : [30, 50, 100] as const).map((depth) => (
                 <button
                   className={draft.depth === depth ? "selected" : undefined}
                   key={depth}
-                  onClick={() => setDraft({ ...draft, depth })}
+                  onClick={() => setDraft({
+                    ...draft,
+                    depth,
+                    ...(depth === 10
+                      ? { yandexLiveMode: "STANDARD" as const }
+                      : {})
+                  })}
                   type="button"
                 >
                   <UiText text="Топ-" />{depth}
@@ -585,7 +599,9 @@ export function TrackingContextSettingsPanel({
               </div>
             </fieldset>
           )}
-          {draft.searchEngine === "YANDEX" && draft.searchSource === "LIVE" && (
+          {draft.searchEngine === "YANDEX" &&
+          draft.searchSource === "LIVE" &&
+          draft.depth !== 10 && (
             <label className="field-span-2 semantic-toggle-line tracking-context-turbo-toggle">
               <input
                 checked={draft.yandexLiveMode === "TURBO"}

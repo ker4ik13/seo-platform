@@ -40,7 +40,10 @@ import {
 import { safeErrorSummary } from "./runtime-safe-error.js";
 import {
   adaptiveRankDispatchBurst,
+  connectorRuntimeLaneCount,
   rankRuntimeOutcomeHasWork,
+  rankRuntimeJobUsesCurrentLane,
+  shardedDispatchLane,
   shardedDispatchSequence
 } from "./queue/connector-runtime-dispatch.js";
 import { AiAnswerRuntimeService } from "./ai-answer-collections/ai-answer-runtime.service.js";
@@ -117,6 +120,10 @@ async function bootstrap(): Promise<void> {
   );
   let activeRankDispatchUntil = 0;
   let activeFrequencyDispatchUntil = 0;
+  const rankRuntimeLaneCount = connectorRuntimeLaneCount(
+    config.connectorRuntime.rankConcurrency,
+    config.connectorRuntime.shardCount
+  );
   const rankWorker = paidRuntimeEnabled ? new Worker<RankConnectorRuntimeJobData>(
     RANK_CONNECTOR_RUNTIME_QUEUE,
     async (job) => {
@@ -125,6 +132,9 @@ async function bootstrap(): Promise<void> {
         job.data.schemaVersion !== "rank-connector-runtime@1"
       ) {
         throw new Error("Invalid rank connector runtime job");
+      }
+      if (!rankRuntimeJobUsesCurrentLane(job.id, rankRuntimeLaneCount)) {
+        return "STALE_DISPATCH_TICK";
       }
       const outcome = await rankRuntime.processOne(
         `connector-rank-${randomUUID()}`
@@ -210,8 +220,7 @@ async function bootstrap(): Promise<void> {
       for (let slot = 0; slot < rankBurst; slot += 1) {
         await enqueueRankConnectorRuntime(
           rankQueue,
-          shardedDispatchSequence(
-            dispatchBucket,
+          shardedDispatchLane(
             rankDispatchStride,
             config.connectorRuntime.shardIndex,
             config.connectorRuntime.shardCount,
@@ -229,10 +238,17 @@ async function bootstrap(): Promise<void> {
         slot < frequencyBurst;
         slot += 1
       ) {
+        const tick = shardedDispatchSequence(
+          dispatchBucket,
+          config.connectorRuntime.frequencyConcurrency,
+          config.connectorRuntime.shardIndex,
+          config.connectorRuntime.shardCount,
+          slot
+        );
         await enqueueFrequencyCollectionRuntime(
           frequencyQueue,
-          shardedDispatchSequence(
-            dispatchBucket,
+          tick,
+          shardedDispatchLane(
             config.connectorRuntime.frequencyConcurrency,
             config.connectorRuntime.shardIndex,
             config.connectorRuntime.shardCount,
@@ -279,7 +295,8 @@ async function bootstrap(): Promise<void> {
             keywordResearchQueue,
             dispatchBucket *
               config.connectorRuntime.keywordResearchConcurrency +
-              slot
+              slot,
+            slot
           );
         }
       }
