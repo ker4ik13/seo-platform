@@ -92,6 +92,11 @@ export function KeywordResearchWorkspace({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [wordstatOpen, setWordstatOpen] = useState(false);
   const [wordstatSeeds, setWordstatSeeds] = useState("");
+  const [keysRouting, setKeysRouting] =
+    useState<WorkspaceConnectorRoutingSettings>();
+  const [keysCredentialId, setKeysCredentialId] = useState("");
+  const [keysSourcesLoading, setKeysSourcesLoading] = useState(true);
+  const [keysProviderError, setKeysProviderError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -99,6 +104,29 @@ export function KeywordResearchWorkspace({
   const createCommand = useRef<
     OperationAttempt | undefined
   >(undefined);
+  const keysSources = useMemo(
+    () => keysRouting
+      ? workspaceConnectorOptions(
+          keysRouting,
+          "COMPETITOR_RESEARCH"
+        ).filter(({ provider }) => provider === "KEYS_SO")
+      : [],
+    [keysRouting]
+  );
+  const connectedKeysSources = useMemo(
+    () => (keysRouting?.credentialOptions ?? []).filter(
+      (candidate) =>
+        candidate.provider === "KEYS_SO" &&
+        isProjectConnectorCredentialEligible(
+          candidate,
+          "COMPETITOR_RESEARCH"
+        )
+    ),
+    [keysRouting]
+  );
+  const selectedKeysSource = keysSources.find(
+    ({ id }) => id === keysCredentialId
+  );
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -132,6 +160,40 @@ export function KeywordResearchWorkspace({
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setKeysSourcesLoading(true);
+    void browserApiRequest<WorkspaceConnectorRoutingSettings>(
+      `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const configured = workspaceConnectorOptions(
+          result,
+          "COMPETITOR_RESEARCH"
+        ).filter(({ provider }) => provider === "KEYS_SO");
+        setKeysRouting(result);
+        setKeysCredentialId((current) =>
+          configured.some(({ id }) => id === current)
+            ? current
+            : configured[0]?.id ?? ""
+        );
+        setKeysProviderError(undefined);
+      })
+      .catch((caught) => {
+        if (!controller.signal.aborted) {
+          setKeysProviderError(
+            message(caught, "Не удалось загрузить подключения Keys.so.")
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setKeysSourcesLoading(false);
+      });
+    return () => controller.abort();
+  }, [workspaceId]);
 
   const hasActive = useMemo(
     () => collection?.runs.some(({ status }) => ACTIVE.has(status)) ?? false,
@@ -173,13 +235,18 @@ export function KeywordResearchWorkspace({
 
   async function startKeys(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (busy || collection?.access.canRun !== true) return;
+    if (
+      busy ||
+      collection?.access.canRun !== true ||
+      !selectedKeysSource
+    ) return;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
     try {
       const run = await createRun({
         source: "KEYS_SO",
+        credentialId: selectedKeysSource.id,
         domain: domain.trim(),
         database,
         maxKeywords: Number(maxKeywords)
@@ -291,9 +358,35 @@ export function KeywordResearchWorkspace({
             <form className="keyword-research-launch-form" onSubmit={startKeys}>
               <label className="form-field"><span><UiText text="Домен" /></span><input autoComplete="off" onChange={(event) => setDomain(event.target.value)} placeholder="example.ru" required value={domain} /></label>
               <label className="form-field"><span><UiText text="База" /></span><CustomSelect onChange={(event) => setDatabase(event.target.value as KeysSoDatabase)} value={database}>{keysSoDatabases.map((code) => <option key={code} value={code}>{<UiText text={databaseLabel(code) ?? ""} />}</option>)}</CustomSelect></label>
+              <label className="form-field">
+                <span><UiText text="Подключение" /></span>
+                <CustomSelect
+                  disabled={keysSourcesLoading || keysSources.length === 0}
+                  onChange={(event) => setKeysCredentialId(event.target.value)}
+                  value={keysCredentialId}
+                >
+                  {keysSources.length === 0 && (
+                    <option value=""><UiText text="Нет доступных подключений" /></option>
+                  )}
+                  {keysSources.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.label} · Keys.so
+                    </option>
+                  ))}
+                </CustomSelect>
+              </label>
               <label className="form-field"><span><UiText text="Ключей" /></span><input max={500} min={25} onChange={(event) => setMaxKeywords(event.target.value)} required step={25} type="number" value={maxKeywords} /></label>
-              <button className="primary-button" disabled={busy || collection?.access.canRun !== true} type="submit">{busy ? <UiText text="Запускаем…" /> : <UiText text="Получить данные" />}</button>
+              <button className="primary-button" disabled={busy || keysSourcesLoading || !selectedKeysSource || collection?.access.canRun !== true} type="submit">{busy ? <UiText text="Запускаем…" /> : <UiText text="Получить данные" />}</button>
             </form>
+            {keysProviderError && <div className="inline-alert danger" role="alert"><UiText text={keysProviderError} /></div>}
+            {!keysSourcesLoading && !keysProviderError && keysSources.length === 0 && (
+              <div className="inline-alert warning">
+                <span>{connectedKeysSources.length > 0
+                  ? <UiText text="Подключение Keys.so есть, но не включено в маршрут этой операции." />
+                  : <UiText text="Нет проверенного подключения Keys.so." />}</span>{" "}
+                <a href="/app/settings/integrations"><UiText text="Настроить маршрутизацию" /></a>
+              </div>
+            )}
           </section>
           {latestKeysRun?.overview && <KeysOverview run={latestKeysRun} />}
         </>
@@ -911,6 +1004,7 @@ export function WordstatExpansionDialog({
     try {
       await onSubmit({
         source: provider === "XMLSTOCK" ? "XMLSTOCK_WORDSTAT" : "ARSENKIN_WORDSTAT",
+        credentialId: selectedSource.id,
         queries,
         regionCode,
         device,

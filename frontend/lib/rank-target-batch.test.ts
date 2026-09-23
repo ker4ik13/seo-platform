@@ -106,7 +106,14 @@ test("prepares every city/device estimate before sending the first paid run", as
     }
     if (path.endsWith("/rank-estimates") && options.method === "POST") {
       events.push("estimate");
-      const contextId = (options.body as { trackingContextId: string }).trackingContextId;
+      const body = options.body as {
+        trackingContextId: string;
+        provider?: string;
+        credentialId?: string;
+      };
+      assert.equal(body.provider, input.source.provider);
+      assert.equal(body.credentialId, input.source.id);
+      const contextId = body.trackingContextId;
       return readyEstimate(uuid(estimateSequence++), contextId) as T;
     }
     if (path.endsWith("/rank-runs") && options.method === "POST") {

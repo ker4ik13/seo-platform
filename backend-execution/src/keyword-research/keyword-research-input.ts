@@ -63,9 +63,16 @@ export function internalCreateKeywordResearchRunInput(
         ["KEYS_SO", "ARSENKIN_WORDSTAT", "XMLSTOCK_WORDSTAT"] as const
       );
   const fields = source === "KEYS_SO"
-    ? [...commonFields, "domain", "database", "maxKeywords"]
+    ? [
+        ...commonFields,
+        ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
+        "domain",
+        "database",
+        "maxKeywords"
+      ]
     : [
         ...commonFields,
+        ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
         "queries",
         "regionCode",
         "device",
@@ -89,6 +96,9 @@ export function internalCreateKeywordResearchRunInput(
     ? {
         ...common,
         source,
+        ...(input.credentialId === undefined
+          ? {}
+          : { credentialId: uuid(input.credentialId, "credentialId") }),
         domain: domain(input.domain),
         database: database(input.database),
         maxKeywords: integer(input.maxKeywords, "maxKeywords", 25, 500)
@@ -96,6 +106,9 @@ export function internalCreateKeywordResearchRunInput(
     : {
         ...common,
         source,
+        ...(input.credentialId === undefined
+          ? {}
+          : { credentialId: uuid(input.credentialId, "credentialId") }),
         queries: phrases(
           input.queries,
           "queries",

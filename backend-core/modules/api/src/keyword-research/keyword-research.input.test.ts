@@ -6,6 +6,8 @@ import {
   keywordResearchRowsQuery
 } from "./keyword-research.input.js";
 
+const CREDENTIAL_ID = "01900000-0000-7000-8000-000000000001";
+
 test("parses a bounded public keyword result page", () => {
   assert.deepEqual(keywordResearchRowsQuery("500", "200"), {
     cursor: 500,
@@ -21,11 +23,18 @@ test("parses a bounded public keyword result page", () => {
 test("parses public competitor research input", () => {
   assert.deepEqual(
     createKeywordResearchRunInput({
+      credentialId: CREDENTIAL_ID,
       domain: "HTTPS://Example.RU/",
       database: "spb",
       maxKeywords: 250
     }),
-    { source: "KEYS_SO", domain: "example.ru", database: "spb", maxKeywords: 250 }
+    {
+      source: "KEYS_SO",
+      credentialId: CREDENTIAL_ID,
+      domain: "example.ru",
+      database: "spb",
+      maxKeywords: 250
+    }
   );
 });
 
@@ -135,6 +144,7 @@ test("parses a public Arsenkin Wordstat expansion", () => {
   assert.deepEqual(
     createKeywordResearchRunInput({
       source: "ARSENKIN_WORDSTAT",
+      credentialId: CREDENTIAL_ID,
       queries: ["  купить   холодильник "],
       regionCode: "213",
       device: "DESKTOP",
@@ -146,6 +156,7 @@ test("parses a public Arsenkin Wordstat expansion", () => {
     }),
     {
       source: "ARSENKIN_WORDSTAT",
+      credentialId: CREDENTIAL_ID,
       queries: ["купить холодильник"],
       regionCode: "213",
       device: "DESKTOP",

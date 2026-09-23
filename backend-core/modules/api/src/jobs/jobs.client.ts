@@ -528,13 +528,15 @@ export class JobsClient {
     kind: PaidOperationKind,
     source?: string,
     provider?: string,
-    credentialId?: string
+    credentialId?: string,
+    xmlStockRequestCount?: number
   ): Promise<InternalOperationRoute> {
     const value = await this.requestIntegration<unknown>("POST", "/internal/v1/paid-operations/route", context, {
       kind,
       ...(source ? { source } : {}),
       ...(provider ? { provider } : {}),
-      ...(credentialId ? { credentialId } : {})
+      ...(credentialId ? { credentialId } : {}),
+      ...(xmlStockRequestCount === undefined ? {} : { xmlStockRequestCount })
     });
     const input = exactRecord(value, ["workspaceId", "projectId", "actorId", "provider", "credentialMode", "credentialId", "bindingId", "bindingVersion", "routeId"]);
     if (input.workspaceId !== context.tenant.workspaceId || input.projectId !== context.tenant.projectId || input.actorId !== context.actorId || !["XMLSTOCK", "ARSENKIN", "KEYS_SO"].includes(String(input.provider)) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(String(input.credentialMode)) || !Number.isSafeInteger(input.bindingVersion) || Number(input.bindingVersion) < 1) throw invalidJobsResponse();

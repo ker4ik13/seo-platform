@@ -174,6 +174,8 @@ export interface KeywordResearchCollection {
 
 export interface CreateKeysSoKeywordResearchRunInput {
   readonly source: "KEYS_SO";
+  /** Exact workspace connection selected in the launch form. */
+  readonly credentialId?: string;
   readonly domain: string;
   readonly database: KeysSoDatabase;
   readonly maxKeywords: number;
@@ -181,6 +183,8 @@ export interface CreateKeysSoKeywordResearchRunInput {
 
 export interface CreateWordstatExpansionRunInput {
   readonly source: "ARSENKIN_WORDSTAT" | "XMLSTOCK_WORDSTAT";
+  /** Exact workspace connection selected in the launch dialog. */
+  readonly credentialId?: string;
   readonly queries: readonly string[];
   readonly regionCode: string;
   readonly device: WordstatExpansionDevice;

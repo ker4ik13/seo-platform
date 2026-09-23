@@ -1,7 +1,11 @@
 import { Body, Controller, Post, Req, UseGuards, BadRequestException, ConflictException } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { InternalOperationRoute, InternalPaidOperationProof, InternalPaidOperationUsage, IntegrationCapability, IntegrationProvider, PaidOperationKind } from "@seo-platform/contracts";
-import { paidOperationKinds } from "@seo-platform/contracts";
+import {
+  frequencyCollectionKeywordLimit,
+  paidOperationKinds,
+  semanticFrequencyTypes
+} from "@seo-platform/contracts";
 import { PrismaService } from "../database/prisma.service.js";
 import { internalCommandContext, internalUuid } from "../internal/internal-command-context.js";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
@@ -12,6 +16,8 @@ import type { ProviderUsageTicket } from "../generated/prisma/client.js";
 
 const reviewDelayMs = 5 * 60_000;
 const terminalStates = ["COMPLETED", "PARTIALLY_COMPLETED", "CANCELLED", "FAILED_FINAL", "ACTION_REQUIRED"];
+const maxXmlStockRequestCount =
+  frequencyCollectionKeywordLimit * semanticFrequencyTypes.length;
 
 @Controller("internal/v1/paid-operations")
 export class PaidOperationController {
@@ -20,16 +26,19 @@ export class PaidOperationController {
   @Post("route") @UseGuards(IntegrationCredentialApiGuard)
   public async route(@Body() body: unknown, @Req() request: FastifyRequest) {
     const context = scope(request);
-    const input = record(body, ["kind", "source", "provider", "credentialId"]);
+    const input = record(body, [
+      "kind",
+      "source",
+      "provider",
+      "credentialId",
+      "xmlStockRequestCount"
+    ]);
     if (!paidOperationKinds.includes(input.kind as PaidOperationKind)) throw invalid();
     const kind = input.kind as PaidOperationKind;
     const capability: IntegrationCapability = kind === "FREQUENCY_COLLECTION" ? "WORDSTAT" : kind === "AI_ANSWER_COLLECTION" ? "SERP_COLLECTION" : kind === "CLUSTERING_RUN" ? "CLUSTERING" : input.source === "KEYS_SO" ? "COMPETITOR_RESEARCH" : "KEYWORD_RESEARCH";
     if (kind === "KEYWORD_RESEARCH" && !["KEYS_SO", "ARSENKIN_WORDSTAT", "XMLSTOCK_WORDSTAT"].includes(String(input.source))) throw invalid();
     if (
       kind !== "FREQUENCY_COLLECTION" && input.provider !== undefined
-    ) throw invalid();
-    if (
-      kind === "KEYWORD_RESEARCH" && input.credentialId !== undefined
     ) throw invalid();
     if (
       kind === "FREQUENCY_COLLECTION" &&
@@ -43,13 +52,39 @@ export class PaidOperationController {
     const credentialId = input.credentialId !== undefined
       ? internalUuid(String(input.credentialId), "credentialId")
       : undefined;
+    const rawXmlStockRequestCount = input.xmlStockRequestCount;
+    const xmlStockRequirementAllowed = kind === "FREQUENCY_COLLECTION" ||
+      kind === "KEYWORD_RESEARCH" && input.source === "XMLSTOCK_WORDSTAT";
+    if (
+      rawXmlStockRequestCount !== undefined && (
+        !xmlStockRequirementAllowed ||
+        typeof rawXmlStockRequestCount !== "number" ||
+        !Number.isSafeInteger(rawXmlStockRequestCount) ||
+        rawXmlStockRequestCount < 1 ||
+        rawXmlStockRequestCount > maxXmlStockRequestCount
+      )
+    ) throw invalid();
+    const xmlStockRequestCount = rawXmlStockRequestCount as number | undefined;
     const route = await this.routing.resolve(
       context.workspaceId,
       context.projectId,
       capability,
       context.actorId,
       provider,
-      credentialId
+      credentialId,
+      {
+        ...(kind === "FREQUENCY_COLLECTION" || provider === undefined
+          ? {}
+          : { allowedProviders: [provider] }),
+        ...(xmlStockRequestCount === undefined
+          ? {}
+          : {
+              xmlStock: {
+                product: "WORDSTAT" as const,
+                requestCount: xmlStockRequestCount
+              }
+            })
+      }
     );
     if (!["ARSENKIN", "XMLSTOCK", "KEYS_SO"].includes(route.provider) || !["BYOK_API_KEY", "PLATFORM_PAID"].includes(route.credentialMode)) throw invalid();
     const data: InternalOperationRoute = { ...context, provider: route.provider as InternalOperationRoute["provider"], credentialMode: route.credentialMode as InternalOperationRoute["credentialMode"], credentialId: route.credentialId, bindingId: route.bindingId, bindingVersion: route.bindingVersion, routeId: route.routeId };

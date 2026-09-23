@@ -5,7 +5,6 @@ import type {
   ProjectConnectorCredentialOption,
   ProjectConnectorSettings,
   UpdateProjectConnectorBindingInput,
-  WorkspaceConnectorBinding,
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import { credentialModeSupportsCapability } from "@seo-platform/contracts";
@@ -195,28 +194,30 @@ export function workspaceConnectorOptions(
   });
 }
 
-/**
- * A route update cannot contain a credential which is currently unavailable.
- * Replacing one from the settings screen therefore drops only persisted
- * unavailable entries while preserving every ready route and unsaved draft.
- */
 export function workspaceRouteCredentialIdsAfterSelection(
   currentCredentialIds: readonly string[],
-  binding: WorkspaceConnectorBinding | undefined,
   credentialId: string
 ): readonly string[] {
-  const unavailableCredentialIds = new Set(
-    binding?.routes
-      .filter(({ availability }) => availability !== "READY")
-      .map((route) => route.credentialId) ?? []
+  return currentCredentialIds.includes(credentialId)
+    ? currentCredentialIds
+    : [...currentCredentialIds, credentialId];
+}
+
+/**
+ * A workspace route may retain a temporarily unavailable credential. Its
+ * runtime status and balance are evaluated only when an operation starts.
+ */
+export function isWorkspaceConnectorCredentialConfigurable(
+  credential: ProjectConnectorCredentialOption,
+  capability: IntegrationCapability
+): boolean {
+  return (
+    credentialModeSupportsCapability(
+      credential.mode,
+      capability,
+      credential.provider
+    ) && credential.capabilities.includes(capability)
   );
-  return [
-    ...currentCredentialIds.filter(
-      (currentCredentialId) =>
-        !unavailableCredentialIds.has(currentCredentialId)
-    ),
-    credentialId
-  ];
 }
 
 export function projectConnectorIncompatibleOptions(

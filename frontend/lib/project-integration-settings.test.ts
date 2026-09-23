@@ -13,6 +13,7 @@ import {
   createProjectConnectorBindingInput,
   effectiveProjectConnectorOptions,
   isProjectConnectorCredentialEligible,
+  isWorkspaceConnectorCredentialConfigurable,
   projectConnectorBinding,
   projectConnectorCreatePayloadSignature,
   projectConnectorDraft,
@@ -150,6 +151,30 @@ test("only ACTIVE credentials with a mode supporting the capability are eligible
   );
 });
 
+test("workspace routing stays configurable independently of runtime balance", () => {
+  for (const status of [
+    "ACTIVE",
+    "DEGRADED",
+    "RATE_LIMITED",
+    "LOW_BALANCE"
+  ] as const) {
+    assert.equal(
+      isWorkspaceConnectorCredentialConfigurable(
+        { ...activeCredential, status },
+        RANK_TRACKING_CAPABILITY
+      ),
+      true
+    );
+  }
+  assert.equal(
+    isWorkspaceConnectorCredentialConfigurable(
+      { ...activeCredential, capabilities: ["SERP_COLLECTION"] },
+      RANK_TRACKING_CAPABILITY
+    ),
+    false
+  );
+});
+
 test("capability options retain unavailable matching credentials for explanations", () => {
   const pending = {
     ...activeCredential,
@@ -275,7 +300,7 @@ test("dirty and submission rules allow disabling an unavailable current route", 
   );
 });
 
-test("selecting a replacement drops persisted unavailable routes before autosave", () => {
+test("adding a route retains unavailable credentials in the configured order", () => {
   const readyWorkspaceBinding = {
     id: "00000000-0000-7000-8000-000000000091",
     workspaceId: activeCredential.workspaceId,
@@ -307,16 +332,13 @@ test("selecting a replacement drops persisted unavailable routes before autosave
   assert.deepEqual(
     workspaceRouteCredentialIdsAfterSelection(
       [unavailableCredentialId, unsavedReadyCredentialId],
-      {
-        ...readyWorkspaceBinding,
-        routes: readyWorkspaceBinding.routes.map((route) => ({
-          ...route,
-          availability: "CREDENTIAL_UNAVAILABLE" as const
-        }))
-      },
       replacementCredentialId
     ),
-    [unsavedReadyCredentialId, replacementCredentialId]
+    [
+      unavailableCredentialId,
+      unsavedReadyCredentialId,
+      replacementCredentialId
+    ]
   );
 });
 

@@ -32,12 +32,8 @@ export class OperationBillingService {
       command.kind === "FREQUENCY_COLLECTION"
         ? command.command.provider
         : undefined,
-      command.kind === "FREQUENCY_COLLECTION"
-        ? command.command.credentialId
-        : command.kind === "AI_ANSWER_COLLECTION" ||
-            command.kind === "CLUSTERING_RUN"
-          ? command.command.credentialId
-        : undefined
+      selectedCredentialId(command),
+      xmlStockRequestCount(command)
     );
     const quantity = command.kind === "KEYWORD_RESEARCH" ? command.command.source === "KEYS_SO" ? 1 : command.command.queries.length : command.command.items.length;
     const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
@@ -187,6 +183,23 @@ function workload(command: OperationEstimateCommand, provider: "XMLSTOCK" | "ARS
     case "CLUSTERING_RUN": return { provider, operation: "CLUSTERING", keywordCount: command.command.items.length, frequencyVariantCount: command.command.frequencyTypes.length };
     case "KEYWORD_RESEARCH": if (command.command.source === "KEYS_SO") throw unavailable(); return { provider, operation: "WORDSTAT_EXPANSION", keywordCount: command.command.queries.length };
   }
+}
+function selectedCredentialId(
+  command: OperationEstimateCommand
+): string | undefined {
+  return command.command.credentialId;
+}
+function xmlStockRequestCount(command: OperationEstimateCommand): number | undefined {
+  if (command.kind === "FREQUENCY_COLLECTION") {
+    return command.command.items.length * command.command.types.length;
+  }
+  if (
+    command.kind === "KEYWORD_RESEARCH" &&
+    command.command.source === "XMLSTOCK_WORDSTAT"
+  ) {
+    return command.command.queries.length;
+  }
+  return undefined;
 }
 async function lockWorkspace(tx: Prisma.TransactionClient, id: string) { await tx.$queryRaw`SELECT id FROM workspaces WHERE id = ${id}::uuid FOR UPDATE`; }
 function positive(n: bigint) { return n > 0n ? n : 0n; }

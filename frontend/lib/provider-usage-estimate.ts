@@ -12,19 +12,6 @@ export interface ProviderUsageEstimate {
   readonly costRange?: string;
 }
 
-export function frequencyRouteSource(
-  sources: readonly ProjectConnectorCredentialOption[],
-  keywordCount: number,
-  typeCount: number,
-  allowLowBalanceFallback: boolean
-): ProjectConnectorCredentialOption | undefined {
-  const primary = sources[0];
-  if (!primary || !allowLowBalanceFallback) return primary;
-  return sources.find((source) =>
-    frequencySourceCanFund(source, keywordCount, typeCount)
-  ) ?? primary;
-}
-
 export function frequencySourceCanFund(
   source: ProjectConnectorCredentialOption,
   keywordCount: number,

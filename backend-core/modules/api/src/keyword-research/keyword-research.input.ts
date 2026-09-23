@@ -38,8 +38,10 @@ export function createKeywordResearchRunInput(
 ): CreateKeywordResearchRunInput {
   const source = sourceOf(value);
   if (source !== "KEYS_SO") {
+    const raw = value as Readonly<Record<string, unknown>>;
     const input = exact(value, [
       "source",
+      ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
       "queries",
       "regionCode",
       "device",
@@ -51,6 +53,9 @@ export function createKeywordResearchRunInput(
     ]);
     return {
       source,
+      ...(input.credentialId === undefined
+        ? {}
+        : { credentialId: uuid(input.credentialId, "credentialId") }),
       queries: phrases(
         input.queries,
         "queries",
@@ -71,14 +76,19 @@ export function createKeywordResearchRunInput(
       )
     };
   }
-  const input = exact(
-    value,
-    sourceOf(value, true) === undefined
-      ? ["domain", "database", "maxKeywords"]
-      : ["source", "domain", "database", "maxKeywords"]
-  );
+  const raw = value as Readonly<Record<string, unknown>>;
+  const input = exact(value, [
+    ...(sourceOf(value, true) === undefined ? [] : ["source"]),
+    ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
+    "domain",
+    "database",
+    "maxKeywords"
+  ]);
   return {
     source: "KEYS_SO",
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
     domain: domain(input.domain),
     database: database(input.database),
     maxKeywords: integer(input.maxKeywords, "maxKeywords", 25, 500)

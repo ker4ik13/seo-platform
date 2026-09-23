@@ -83,15 +83,18 @@ export class KeywordResearchService {
       capability,
       input.actorId,
       expectedProvider,
-      input.billing?.credentialId,
-      input.source === "XMLSTOCK_WORDSTAT"
-        ? {
-            xmlStock: {
-              product: "WORDSTAT",
-              requestCount: input.queries.length
+      input.billing?.credentialId ?? input.credentialId,
+      {
+        allowedProviders: [expectedProvider],
+        ...(input.source === "XMLSTOCK_WORDSTAT"
+          ? {
+              xmlStock: {
+                product: "WORDSTAT",
+                requestCount: input.queries.length
+              }
             }
-          }
-        : undefined
+          : {})
+      }
     );
     const providerUsage = input.source === "XMLSTOCK_WORDSTAT"
       ? xmlStockOperationUsage(
@@ -533,6 +536,9 @@ function requestHash(input: InternalCreateKeywordResearchRunInput): string {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
         actorId: input.actorId,
+        ...(input.credentialId === undefined
+          ? {}
+          : { credentialId: input.credentialId }),
         input: researchInputSnapshot(input)
       }),
       "utf8"

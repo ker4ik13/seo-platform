@@ -10,6 +10,7 @@ const WORKSPACE_ID = "01900000-0000-7000-8000-000000000001";
 const PROJECT_ID = "01900000-0000-7000-8000-000000000002";
 const ACTOR_ID = "01900000-0000-7000-8000-000000000003";
 const ROW_ID = "01900000-0000-7000-8000-000000000004";
+const CREDENTIAL_ID = "01900000-0000-7000-8000-000000000005";
 
 test("parses a bounded cursor page for collected keywords", () => {
   assert.deepEqual(keywordResearchRowsQuery("500", "200"), {
@@ -37,6 +38,7 @@ test("normalizes a trusted Keys.so research command", () => {
         concurrentJobs: 10
       },
       source: "KEYS_SO",
+      credentialId: CREDENTIAL_ID,
       domain: "https://Example.RU/",
       database: "msk",
       maxKeywords: 100
@@ -53,6 +55,7 @@ test("normalizes a trusted Keys.so research command", () => {
         concurrentJobs: 10
       },
       source: "KEYS_SO",
+      credentialId: CREDENTIAL_ID,
       domain: "example.ru",
       database: "msk",
       maxKeywords: 100
@@ -69,6 +72,7 @@ test("parses one bounded Arsenkin Wordstat expansion", () => {
     correlationId: "request-002",
     jobCapacity: { planCode: "PRO", planVersion: 2, concurrentJobs: 10 },
     source: "ARSENKIN_WORDSTAT",
+    credentialId: CREDENTIAL_ID,
     queries: ["  ремонт   холодильников "],
     regionCode: "213",
     device: "ALL",
@@ -80,6 +84,7 @@ test("parses one bounded Arsenkin Wordstat expansion", () => {
   });
   assert.equal(result.source, "ARSENKIN_WORDSTAT");
   if (result.source !== "ARSENKIN_WORDSTAT") assert.fail();
+  assert.equal(result.credentialId, CREDENTIAL_ID);
   assert.deepEqual(result.queries, ["ремонт холодильников"]);
   assert.deepEqual(result.minusWords, ["бесплатно"]);
 });

@@ -85,19 +85,27 @@ routes, не меняя выбранный основной источник. П
 Одноразовая migration владельца Jobs backfill-ит такие routes для подключений,
 созданных до введения этого правила; connector-worker по-прежнему не получает
 прямого чтения credential и routing tables.
-Выбор Wordstat credential в operation dialog передаётся как exact
-`provider + credentialId` через public/internal contracts, paid quote и Jobs
-resolver. Показанная в UI стоимость поэтому относится к тому же route, который
-записывается в Job и исполняется worker-ом.
-Arsenkin-карточки в модалках ИИ-ответов и кластеризации аналогично передают
-exact `credentialId`; при нескольких аккаунтах UI, quote и worker используют
-один route вместо скрытого возврата к первому аккаунту цепочки.
+Выбор credential в каждом provider-backed operation dialog передаётся как
+exact `provider + credentialId` через public/internal contracts, paid quote
+(если нужен) и Jobs resolver. Это относится к позициям и конкурентной SERP,
+ИИ-ответам и ИИ-выдаче, обычной частотности и сезонности, кластеризации,
+парсингу Wordstat и Keys.so. Показанная в UI стоимость поэтому относится к
+тому же route, который записывается в Job и исполняется worker-ом; при
+нескольких аккаунтах backend не может скрыто вернуться к первому аккаунту
+цепочки.
+Явно выбранный credential всегда является первой попыткой конкретного запуска.
+При разрешённом pre-submit fallback resolver затем обходит всю сохранённую
+workspace chain по порядку, исключая уже выбранный credential и providers,
+которые не могут сохранить семантику операции; его исходная позиция в цепочке
+не может скрыто вернуть запуск на route `0`.
 `ACTION_REQUIRED/CONNECTOR_NOT_READY` возникает до provider I/O и поэтому
 получает действие «Продолжить»: оно version-aware переоткрывает тот же Job и
 его PENDING items после исправления route, не создавая повторного платного
 submit. Неоднозначные provider outcomes по-прежнему не возобновляются.
-Денежный баланс не является условием сохранения workspace route. При создании
-XMLStock Wordstat operation resolver получает точное максимальное число
+Денежный баланс, rate limit и временная provider-недоступность не являются
+условиями сохранения, включения или перестановки статически совместимого
+workspace route. Они повторно проверяются только при подготовке операции. При
+создании XMLStock Wordstat operation resolver получает точное максимальное число
 обращений, сравнивает стоимость всего запуска по последнему проверенному тарифу
 с балансом каждого BYOK credential и применяет `LOW_BALANCE` fallback до
 создания immutable Job. Нулевой `requestLimit` тарифного аккаунта не считается
@@ -609,9 +617,10 @@ Credentials и OAuth connections принадлежат workspace.
 ## 16. Экран интеграций
 
 Workspace-маршруты сохраняются сразу после изменения элемента цепочки. При
-замене недоступного credential клиент исключает его из одной version-aware
-команды и отправляет новый активный credential; промежуточное состояние без
-маршрута не записывается. Обычный сбор частотности (`WORDSTAT`) и расширение
+добавлении нового credential клиент сохраняет уже настроенные временно
+недоступные routes; их удаление остаётся отдельным явным действием. Runtime
+availability не блокирует изменение порядка и не превращает route settings в
+execution grant. Обычный сбор частотности (`WORDSTAT`) и расширение
 семантики через Wordstat (`KEYWORD_RESEARCH`) подписаны разными названиями,
 чтобы пользователь настраивал требуемую операцию явно.
 
@@ -909,16 +918,17 @@ workspace binding, чтобы существующие estimate/execution FK о�
 
 - `sourceKind=WORKSPACE_CREDENTIAL`;
 - non-deleted credential того же workspace;
-- mode только `BYOK_API_KEY`;
-- status `ACTIVE` при create, включении или смене route;
+- mode совместим с capability (`BYOK_API_KEY` либо явно разрешённый
+  `PLATFORM_PAID`);
 - capability одновременно присутствует в сохранённом credential JSON и
   текущем provider catalog.
 
 Если credential после настройки стал pending/invalid/revoked или потерял
-capability, GET сохраняет binding и возвращает явный availability. Отключение
-текущего сломанного route разрешено без повторной проверки `ACTIVE`; включение
-или замена credential всегда проверяются заново. Автоматическое переключение
-на системный ключ запрещено.
+capability, GET сохраняет binding и возвращает явный availability. Runtime
+status, balance и rate limit не входят в инвариант сохранения или перестановки
+workspace route; execution resolver проверяет их заново перед каждым новым
+submit. Автоматическое переключение на системный ключ без заранее настроенного
+route и требуемого согласия запрещено.
 
 После cross-workspace transfer Execution сохраняет выключенный project binding
 и retire-ит routes. Он остаётся audit-состоянием до появления workspace route;

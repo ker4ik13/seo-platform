@@ -41,6 +41,7 @@ import {
 import { safeIntegrationCredentialCapabilities } from "../integrations/integration-credential-capabilities.js";
 import {
   WorkspaceConnectorRoutingService,
+  type ConnectorRouteRequirement,
   type ResolvedConnectorRoute
 } from "../integrations/workspace-connector-routing.service.js";
 import {
@@ -181,6 +182,7 @@ export class RankEstimateService {
     );
     if (replay) return replay;
 
+    const scope = await this.resolveScope(input);
     let resolvedRoute: ResolvedConnectorRoute | undefined;
     try {
       resolvedRoute = await this.routing.resolve(
@@ -189,7 +191,8 @@ export class RankEstimateService {
         "SERP_RANK_TRACKING",
         input.actorId,
         input.provider,
-        input.credentialId
+        input.credentialId,
+        rankConnectorRouteRequirement(input, scope)
       );
     } catch (error) {
       // An estimate must still explain a missing/unavailable connector. Only
@@ -198,7 +201,6 @@ export class RankEstimateService {
       if (!isConnectorNotReady(error)) throw error;
     }
 
-    const scope = await this.resolveScope(input);
     try {
       return await this.prisma.$transaction(
         async (transaction) => {
@@ -250,7 +252,9 @@ export class RankEstimateService {
           );
           const privateSnapshot = credentialSnapshot(projection);
           const credentialMode = rankCredentialMode(projection);
-          const provider = rankProvider(projection, input.provider);
+          const provider = resolvedRoute
+            ? rankExecutionProvider(resolvedRoute.provider)
+            : rankProvider(projection, input.provider);
           const providerPolicyVersion = rankProviderPolicyVersion(provider);
           const projectDomainHash = rankEstimateProjectDomainHash(
             input.project.domain
@@ -1045,34 +1049,86 @@ function rankXmlStockProviderUsage(
   ) {
     return undefined;
   }
-  const mapping = input.execution.providerMappingVersion;
-  const product = input.execution.searchEngine === "GOOGLE"
+  const plan = rankXmlStockRequestPlan(
+    input.execution,
+    Number(input.scope.keywordCount)
+  );
+  return xmlStockOperationUsage(
+    input.resolvedRoute.xmlStockPricing,
+    plan.product,
+    plan.minimumRequestCount,
+    plan.maximumRequestCount,
+    input.calculatedAt
+  );
+}
+
+function rankConnectorRouteRequirement(
+  input: InternalCreateRankEstimateInput,
+  scope: InternalRankEstimateScope
+): ConnectorRouteRequirement {
+  const executionFor = (provider: "ARSENKIN" | "XMLSTOCK") =>
+    rankEstimateExecutionParameters(
+      scope.configuration,
+      provider,
+      input.searchSource,
+      input.yandexLiveMode,
+      input.purpose ?? "POSITION_TRACKING",
+      input.saveProjectPosition,
+      input.xmlStockDepthMode
+    );
+  const xmlStockExecution = executionFor("XMLSTOCK");
+  const allowedProviders = (["ARSENKIN", "XMLSTOCK"] as const).filter(
+    (provider) => executionFor(provider) !== undefined
+  );
+  if (!xmlStockExecution) return { allowedProviders };
+  const plan = rankXmlStockRequestPlan(
+    xmlStockExecution,
+    Number(scope.keywordCount)
+  );
+  return {
+    allowedProviders,
+    xmlStock: {
+      product: plan.product,
+      requestCount: plan.maximumRequestCount
+    }
+  };
+}
+
+function rankXmlStockRequestPlan(
+  execution: InternalRankExecutionParameters,
+  keywordCount: number
+): {
+  readonly product: "YANDEX_SEARCH_API" | "YANDEX_LIVE" | "YANDEX_TURBO" | "GOOGLE_LIVE";
+  readonly minimumRequestCount: number;
+  readonly maximumRequestCount: number;
+} {
+  const mapping = execution.providerMappingVersion;
+  const product = execution.searchEngine === "GOOGLE"
     ? "GOOGLE_LIVE" as const
     : mapping.includes("search-api")
       ? "YANDEX_SEARCH_API" as const
       : mapping === "xmlstock-yandex-live@3"
         ? "YANDEX_TURBO" as const
         : "YANDEX_LIVE" as const;
-  const keywordCount = Number(input.scope.keywordCount);
+  const pricedDepth = rankExecutionPurpose(execution) === "COMPETITOR_SERP"
+    ? 10
+    : execution.depth;
   const strictMinimumPages = product === "YANDEX_SEARCH_API"
     ? 1
     : product === "YANDEX_TURBO"
-      ? Math.ceil(input.execution.depth / 50)
-      : Math.ceil(input.execution.depth / 10);
+      ? Math.ceil(pricedDepth / 50)
+      : Math.ceil(pricedDepth / 10);
   const strictMaximumPages = product === "YANDEX_TURBO"
-    ? Math.ceil(input.execution.depth / 10)
+    ? Math.ceil(pricedDepth / 10)
     : strictMinimumPages;
-  const stopAfterFound =
-    input.execution.xmlStockDepthMode === "STOP_AFTER_FOUND";
-  const minimumPages = stopAfterFound ? 1 : strictMinimumPages;
-  const maximumPages = strictMaximumPages;
-  return xmlStockOperationUsage(
-    input.resolvedRoute.xmlStockPricing,
+  const minimumPages = execution.xmlStockDepthMode === "STOP_AFTER_FOUND"
+    ? 1
+    : strictMinimumPages;
+  return {
     product,
-    keywordCount * minimumPages,
-    keywordCount * maximumPages,
-    input.calculatedAt
-  );
+    minimumRequestCount: keywordCount * minimumPages,
+    maximumRequestCount: keywordCount * strictMaximumPages
+  };
 }
 
 function checkedReplay(
@@ -1377,6 +1433,13 @@ function rankProvider(
   if (requestedProvider) return requestedProvider;
   const candidate = projection.route?.credential.provider;
   return candidate === "XMLSTOCK" ? "XMLSTOCK" : "ARSENKIN";
+}
+
+function rankExecutionProvider(
+  value: IntegrationProvider
+): "ARSENKIN" | "XMLSTOCK" {
+  if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
+  throw new Error("Resolved rank provider is unsupported");
 }
 
 export function rankProviderPolicyVersion(

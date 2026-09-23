@@ -144,6 +144,113 @@ test("starts an explicit launch from the selected credential without mutating th
   assert.equal(result.attempts[0]?.outcome, "SELECTED");
 });
 
+test("falls back through the configured chain after an explicitly selected last route", async () => {
+  const primary = projectRoute(0, "ARSENKIN", "ACTIVE", "WORKSPACE_DEFAULT");
+  const reserve = projectRoute(1, "XMLSTOCK", "ACTIVE", "WORKSPACE_DEFAULT");
+  const selected = projectRoute(2, "XMLSTOCK", "LOW_BALANCE", "WORKSPACE_DEFAULT");
+  const selectedCredentialId = (selected as { credentialId: string }).credentialId;
+  const binding = inheritedProjectBinding({
+    fallbackMode: "NEXT_AVAILABLE",
+    fallbackReasons: ["LOW_BALANCE"],
+    routes: [primary, reserve, selected]
+  });
+
+  const result = await service(binding, workspaceBinding()).resolve(
+    workspaceId,
+    projectId,
+    "SERP_RANK_TRACKING",
+    actorId,
+    "XMLSTOCK",
+    selectedCredentialId
+  );
+
+  assert.equal(result.provider, "ARSENKIN");
+  assert.equal(
+    result.credentialId,
+    (primary as { credentialId: string }).credentialId
+  );
+  assert.deepEqual(
+    result.attempts.map(({ outcome, reasonCode }) => ({ outcome, reasonCode })),
+    [
+      { outcome: "FALLBACK", reasonCode: "LOW_BALANCE" },
+      { outcome: "SELECTED", reasonCode: undefined }
+    ]
+  );
+});
+
+test("provider-specific operations skip incompatible providers in the fallback chain", async () => {
+  const capableCredential = (
+    provider: "XMLSTOCK" | "ARSENKIN",
+    status: "ACTIVE" | "DEGRADED",
+    suffix: string
+  ) => ({
+    ...(credential(provider, status, suffix) as Readonly<Record<string, unknown>>),
+    capabilities: ["SERP_COLLECTION"]
+  });
+  const incompatible = projectRoute(
+    0,
+    "XMLSTOCK",
+    "ACTIVE",
+    "WORKSPACE_DEFAULT",
+    capableCredential("XMLSTOCK", "ACTIVE", "000000000010")
+  );
+  const selected = projectRoute(
+    1,
+    "ARSENKIN",
+    "DEGRADED",
+    "WORKSPACE_DEFAULT",
+    capableCredential("ARSENKIN", "DEGRADED", "000000000011")
+  );
+  const compatibleReserve = projectRoute(
+    2,
+    "ARSENKIN",
+    "ACTIVE",
+    "WORKSPACE_DEFAULT",
+    capableCredential("ARSENKIN", "ACTIVE", "000000000012")
+  );
+  const binding = inheritedProjectBinding({
+    capability: "SERP_COLLECTION",
+    fallbackMode: "NEXT_AVAILABLE",
+    fallbackReasons: ["RETRYABLE_PROVIDER_ERROR"],
+    routes: [incompatible, selected, compatibleReserve]
+  });
+
+  const result = await service(binding, workspaceBinding()).resolve(
+    workspaceId,
+    projectId,
+    "SERP_COLLECTION",
+    actorId,
+    "ARSENKIN",
+    (selected as { credentialId: string }).credentialId,
+    { allowedProviders: ["ARSENKIN"] }
+  );
+
+  assert.equal(result.provider, "ARSENKIN");
+  assert.equal(
+    result.credentialId,
+    (compatibleReserve as { credentialId: string }).credentialId
+  );
+  assert.deepEqual(
+    result.attempts.map(({ provider, outcome, reasonCode }) => ({
+      provider,
+      outcome,
+      reasonCode
+    })),
+    [
+      {
+        provider: "ARSENKIN",
+        outcome: "FALLBACK",
+        reasonCode: "RETRYABLE_PROVIDER_ERROR"
+      },
+      {
+        provider: "ARSENKIN",
+        outcome: "SELECTED",
+        reasonCode: undefined
+      }
+    ]
+  );
+});
+
 test("reports a workspace-inherited route as the workspace default", async () => {
   const workspace = workspaceBinding();
   const binding = inheritedProjectBinding({
@@ -264,15 +371,17 @@ test("does not route new work through a disabled platform provider account", asy
   );
 });
 
-test("allows disabling a workspace route whose credential became degraded", async () => {
-  const credentialValue = credential("XMLSTOCK", "DEGRADED", "000000000010");
+test("saves an enabled route order independently of balance and temporary availability", async () => {
+  const lowBalance = credential("XMLSTOCK", "LOW_BALANCE", "000000000010");
+  const degraded = credential("ARSENKIN", "DEGRADED", "000000000011");
+  let savedRoutes: readonly Readonly<Record<string, unknown>>[] = [];
   const createdBinding = {
     id: workspaceBindingId,
     workspaceId,
     capability: "SERP_RANK_TRACKING",
-    enabled: false,
-    fallbackMode: "NONE",
-    fallbackReasons: [],
+    enabled: true,
+    fallbackMode: "NEXT_AVAILABLE",
+    fallbackReasons: ["LOW_BALANCE", "RETRYABLE_PROVIDER_ERROR"],
     version: 1,
     createdBy: actorId,
     updatedBy: actorId,
@@ -280,28 +389,31 @@ test("allows disabling a workspace route whose credential became degraded", asyn
     updatedAt: now
   };
   const transaction = {
-    integrationCredential: { findMany: async () => [credentialValue] },
+    integrationCredential: { findMany: async () => [lowBalance, degraded] },
     platformProviderAccount: { findMany: async () => [{ provider: "XMLSTOCK" }, { provider: "ARSENKIN" }] },
     workspaceConnectorBinding: {
       findUnique: async () => null,
       create: async () => createdBinding,
       findFirst: async () => ({
         ...createdBinding,
-        routes: [{
-          id: "0190abcd-1000-7000-b000-000000000001",
-          workspaceId,
-          bindingId: workspaceBindingId,
-          position: 0,
-          credentialId: "0190abcd-1000-7000-9000-000000000010",
+        routes: savedRoutes.map((route, index) => ({
+          ...route,
+          id: `0190abcd-1000-7000-b000-${String(index + 1).padStart(12, "0")}`,
           createdAt: now,
           updatedAt: now,
-          credential: credentialValue
-        }]
+          credential: route.credentialId ===
+            "0190abcd-1000-7000-9000-000000000010"
+            ? lowBalance
+            : degraded
+        }))
       })
     },
     workspaceConnectorRoute: {
       deleteMany: async () => ({ count: 0 }),
-      createMany: async () => ({ count: 1 })
+      createMany: async ({ data }: { readonly data: readonly Readonly<Record<string, unknown>>[] }) => {
+        savedRoutes = data;
+        return { count: data.length };
+      }
     }
   };
   const routing = new WorkspaceConnectorRoutingService({
@@ -314,17 +426,37 @@ test("allows disabling a workspace route whose credential became degraded", asyn
     workspaceId,
     actorId,
     capability: "SERP_RANK_TRACKING",
-    enabled: false,
-    routes: [{
-      position: 0,
-      sourceKind: "WORKSPACE_CREDENTIAL",
-      credentialId: "0190abcd-1000-7000-9000-000000000010"
-    }],
-    fallbackPolicy: { mode: "NONE", reasons: [] }
+    enabled: true,
+    routes: [
+      {
+        position: 0,
+        sourceKind: "WORKSPACE_CREDENTIAL",
+        credentialId: "0190abcd-1000-7000-9000-000000000011"
+      },
+      {
+        position: 1,
+        sourceKind: "WORKSPACE_CREDENTIAL",
+        credentialId: "0190abcd-1000-7000-9000-000000000010"
+      }
+    ],
+    fallbackPolicy: {
+      mode: "NEXT_AVAILABLE",
+      reasons: ["LOW_BALANCE", "RETRYABLE_PROVIDER_ERROR"]
+    }
   });
 
-  assert.equal(result.enabled, false);
-  assert.equal(result.routes[0]?.availability, "CREDENTIAL_UNAVAILABLE");
+  assert.equal(result.enabled, true);
+  assert.deepEqual(
+    result.routes.map(({ credentialId }) => credentialId),
+    [
+      "0190abcd-1000-7000-9000-000000000011",
+      "0190abcd-1000-7000-9000-000000000010"
+    ]
+  );
+  assert.deepEqual(
+    result.routes.map(({ availability }) => availability),
+    ["CREDENTIAL_UNAVAILABLE", "CREDENTIAL_UNAVAILABLE"]
+  );
 });
 
 function service(

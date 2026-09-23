@@ -41,7 +41,8 @@ export class ClusteringRunService {
       "CLUSTERING",
       input.actorId,
       "ARSENKIN",
-      input.billing?.credentialId ?? input.credentialId
+      input.billing?.credentialId ?? input.credentialId,
+      { allowedProviders: ["ARSENKIN"] }
     );
     if (route.provider !== "ARSENKIN") throw new Error("Clustering requires an Arsenkin route");
     try {

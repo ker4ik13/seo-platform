@@ -134,6 +134,10 @@ test("derives an executable XMLStock Google workload from the bound route", asyn
   assert.equal(harness.createdData?.minimumSubmitRequestCount, 0);
   assert.equal(harness.createdData?.minimumCheckRequestCount, 0);
   assert.equal(harness.createdData?.minimumGetRequestCount, 9);
+  assert.deepEqual(harness.routingRequirement, {
+    allowedProviders: ["ARSENKIN", "XMLSTOCK"],
+    xmlStock: { product: "GOOGLE_LIVE", requestCount: 9 }
+  });
 });
 
 test("keeps a one-hundred-sixty-thousand-keyword XMLStock workload executable", async () => {
@@ -254,7 +258,7 @@ test("selects the explicitly requested provider from multiple bound routes", asy
   assert.equal(harness.createdData?.credentialId, xmlCredentialId);
 });
 
-test("prefers the explicitly selected primary account when a provider has another route", async () => {
+test("preserves the exact explicitly selected account when a provider has multiple routes", async () => {
   const verifiedAt = new Date(Date.now() - 60_000);
   const primary = binding({ provider: "XMLSTOCK", verifiedAt });
   const secondaryCredentialId = "0190abcd-0000-7000-8000-000000000013";
@@ -277,18 +281,63 @@ test("prefers the explicitly selected primary account when a provider has anothe
   };
   const harness = estimateHarness({
     binding: multiAccountBinding,
-    validation: validation(verifiedAt, { provider: "XMLSTOCK" })
+    validation: validation(verifiedAt, {
+      provider: "XMLSTOCK",
+      credentialId: secondaryCredentialId
+    })
   });
   const estimate = await harness.service.create(
     {
       ...input,
       provider: "XMLSTOCK",
+      credentialId: secondaryCredentialId,
       access: { ...input.access, entitlementStatus: "ALLOWED" }
     },
-    "rank-estimate-primary-xmlstock-account"
+    "rank-estimate-selected-xmlstock-account"
   );
 
   assert.equal(estimate.status, "READY");
+  assert.equal(harness.createdData?.routeId, secondaryRouteId);
+  assert.equal(harness.createdData?.credentialId, secondaryCredentialId);
+});
+
+test("uses the resolved fallback provider instead of the unavailable requested provider", async () => {
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const arsenkin = binding({ provider: "ARSENKIN", verifiedAt });
+  const xmlRouteId = "0190abcd-0000-7000-8000-000000000015";
+  const xmlCredentialId = "0190abcd-0000-7000-8000-000000000016";
+  const xml = binding({ provider: "XMLSTOCK", verifiedAt }).routes[0]!;
+  const multiProviderBinding = {
+    ...arsenkin,
+    routes: [
+      arsenkin.routes[0]!,
+      {
+        ...xml,
+        id: xmlRouteId,
+        position: 1,
+        credentialId: xmlCredentialId,
+        credential: { ...xml.credential, id: xmlCredentialId }
+      }
+    ]
+  };
+  const harness = estimateHarness({
+    binding: multiProviderBinding,
+    resolvedCredentialId: credentialId,
+    validation: validation(verifiedAt, { provider: "ARSENKIN" })
+  });
+
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      provider: "XMLSTOCK",
+      credentialId: xmlCredentialId,
+      access: { ...input.access, entitlementStatus: "ALLOWED" }
+    },
+    "rank-estimate-selected-provider-fallback"
+  );
+
+  assert.equal(estimate.status, "READY");
+  assert.equal(estimate.provider, "ARSENKIN");
   assert.equal(harness.createdData?.routeId, routeId);
   assert.equal(harness.createdData?.credentialId, credentialId);
 });
@@ -786,6 +835,7 @@ function estimateHarness(options: {
   readonly scope?: InternalRankEstimateScope;
   readonly binding?: ReturnType<typeof binding> | null;
   readonly validation?: ReturnType<typeof validation> | null;
+  readonly resolvedCredentialId?: string;
   readonly uniqueConflictOnCreate?: boolean;
 } = {}) {
   let stored: Record<string, unknown> | null = null;
@@ -795,6 +845,7 @@ function estimateHarness(options: {
   let transactionIsolation: string | undefined;
   let seoCalls = 0;
   let transactionCalls = 0;
+  let routingRequirement: unknown;
   const selectedBinding =
     options.binding === undefined ? binding() : options.binding;
   const selectedValidation =
@@ -852,13 +903,22 @@ function estimateHarness(options: {
       _projectId: string,
       _capability: string,
       _actorId: string,
-      requestedProvider?: "ARSENKIN" | "XMLSTOCK"
+      requestedProvider?: "ARSENKIN" | "XMLSTOCK",
+      requestedCredentialId?: string,
+      requirement?: unknown
     ) => {
-      const selectedRoute = requestedProvider === undefined
-        ? selectedBinding?.routes[0]
-        : selectedBinding?.routes.find(
-            ({ credential }) => credential.provider === requestedProvider
-          );
+      routingRequirement = requirement;
+      const exactCredentialId = options.resolvedCredentialId ??
+        requestedCredentialId;
+      const selectedRoute = exactCredentialId
+        ? selectedBinding?.routes.find(
+            ({ credentialId: candidate }) => candidate === exactCredentialId
+          )
+        : requestedProvider === undefined
+          ? selectedBinding?.routes[0]
+          : selectedBinding?.routes.find(
+              ({ credential }) => credential.provider === requestedProvider
+            );
       if (!selectedBinding || !selectedRoute) {
         throw new ConflictException({
           code: "CONNECTOR_NOT_READY",
@@ -906,6 +966,9 @@ function estimateHarness(options: {
     },
     get transactionCalls() {
       return transactionCalls;
+    },
+    get routingRequirement() {
+      return routingRequirement;
     },
     changeStored(change: Readonly<Record<string, unknown>>) {
       if (!stored) throw new Error("No stored estimate");

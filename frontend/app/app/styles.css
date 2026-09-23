@@ -13955,7 +13955,12 @@ svg { display: block; }
 
 .keyword-research-launch-form {
   display: grid;
-  grid-template-columns: minmax(220px, 1.6fr) minmax(190px, 1fr) 130px auto;
+  grid-template-columns:
+    minmax(200px, 1.5fr)
+    minmax(150px, 0.8fr)
+    minmax(200px, 1fr)
+    110px
+    auto;
   align-items: end;
   gap: 14px;
   margin-top: 20px;

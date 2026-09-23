@@ -25,7 +25,10 @@ import { Icon } from "./icon";
 import { IntegrationStatusBadge } from "./integration-status-badge";
 import { ProviderLogo } from "./provider-logo";
 import { UiText, useUiLocale } from "./ui-locale";
-import { workspaceRouteCredentialIdsAfterSelection } from "../lib/project-integration-settings";
+import {
+  isWorkspaceConnectorCredentialConfigurable,
+  workspaceRouteCredentialIdsAfterSelection
+} from "../lib/project-integration-settings";
 
 
 type RouteDraft = {
@@ -288,11 +291,6 @@ function CapabilityRoutingRow({
   const available = options.filter(
     (option) => !draft.credentialIds.includes(option.id)
   );
-  const availableSelected = selected.filter(
-    (credential) => !routeIsUnavailable(binding, credential.id)
-  );
-  const replacingUnavailableRoute =
-    selected.length > 0 && availableSelected.length === 0;
   const move = (index: number, direction: -1 | 1): void => {
     const target = index + direction;
     if (target < 0 || target >= draft.credentialIds.length) return;
@@ -377,15 +375,12 @@ function CapabilityRoutingRow({
         <label className="form-field integration-route-add">
           <span>{selected.length === 0
             ? <UiText text="Основное подключение" />
-            : replacingUnavailableRoute
-              ? <UiText text="Заменить недоступное подключение" />
-              : <UiText text="Добавить резерв" />}</span>
+            : <UiText text="Добавить резерв" />}</span>
           <CustomSelect
-            disabled={saving || (!replacingUnavailableRoute && selected.length > 0 && !canManageFallback)}
+            disabled={saving || (selected.length > 0 && !canManageFallback)}
             onChange={(event) => onChange((current) => {
               const credentialIds = workspaceRouteCredentialIdsAfterSelection(
                 current.credentialIds,
-                binding,
                 event.target.value
               );
               return {
@@ -406,15 +401,10 @@ function CapabilityRoutingRow({
             <option disabled value=""><UiText text="Выберите подключение" /></option>
             {available.map((credential) => (
               <option
-                disabled={
-                  credential.status !== "ACTIVE" ||
-                  !credential.capabilities.includes(capability) ||
-                  !credentialModeSupportsCapability(
-                    credential.mode,
-                    capability,
-                    credential.provider
-                  )
-                }
+                disabled={!isWorkspaceConnectorCredentialConfigurable(
+                  credential,
+                  capability
+                )}
                 key={credential.id}
                 value={credential.id}
               >

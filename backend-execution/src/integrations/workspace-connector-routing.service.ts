@@ -86,6 +86,8 @@ export interface ResolvedConnectorRoute {
 }
 
 export interface ConnectorRouteRequirement {
+  /** Providers which can preserve this operation's immutable semantics. */
+  readonly allowedProviders?: readonly IntegrationProvider[];
   readonly xmlStock?: {
     readonly product: XmlStockOperationProduct;
     readonly requestCount: number;
@@ -147,15 +149,10 @@ export class WorkspaceConnectorRoutingService {
       const enabledPlatformProviders = await enabledPlatformProviderSet(transaction);
       for (const route of input.routes) {
         const credential = credentials.get(route.credentialId);
-        if (!credential || (
-          input.enabled &&
-          routeAvailability(
-            input.capability,
-            credential,
-            undefined,
-            enabledPlatformProviders
-          ) !== "READY"
-        )) {
+        if (
+          !credential ||
+          !routeConfigurationCompatible(input.capability, credential)
+        ) {
           throw connectorNotReady();
         }
       }
@@ -245,9 +242,21 @@ export class WorkspaceConnectorRoutingService {
             (candidate) =>
               provider(candidate.route.credential.provider) === requestedProvider
           );
-    const candidates = requestedIndex < 0
+    const orderedCandidates = requestedIndex < 0
       ? []
-      : allCandidates.slice(requestedIndex);
+      : requestedIndex === 0
+        ? allCandidates
+        : [
+            allCandidates[requestedIndex]!,
+            ...allCandidates.filter((_, index) => index !== requestedIndex)
+          ];
+    const allowedProviders = requirement?.allowedProviders;
+    const candidates = allowedProviders
+      ? orderedCandidates.filter((candidate, index) =>
+          index === 0 ||
+          allowedProviders.includes(provider(candidate.route.credential.provider))
+        )
+      : orderedCandidates;
     const attempts: ConnectorOperationAttemptSummary[] = [];
     for (const [index, candidate] of candidates.entries()) {
       const availability = routeAvailability(
@@ -543,6 +552,29 @@ function routeAvailability(
   return xmlStockBalanceInsufficient(credential, requirement)
     ? "CREDENTIAL_UNAVAILABLE"
     : "READY";
+}
+
+/**
+ * Route configuration is durable user intent, not an execution grant.
+ * Runtime-only state (balance, rate limit, provider outage or validation
+ * freshness) must never prevent reordering or retaining a compatible route.
+ */
+function routeConfigurationCompatible(
+  capabilityValue: IntegrationCapability,
+  credential: CredentialRecord
+): boolean {
+  return (
+    credential.deletedAt === null &&
+    credentialModeSupportsCapability(
+      credential.mode,
+      capabilityValue,
+      credential.provider
+    ) &&
+    safeIntegrationCredentialCapabilities(
+      provider(credential.provider),
+      credential.capabilities
+    ).includes(capabilityValue)
+  );
 }
 
 async function enabledPlatformProviderSet(
