@@ -185,15 +185,21 @@ export class YookassaClient {
       ? PROVIDER_NETWORK_ATTEMPTS
       : 1;
     let response: Response | undefined;
+    let text: string | undefined;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        response = await fetch(`${provider.apiBaseUrl}${path}`, {
-          method,
-          headers,
-          ...(body ? { body: JSON.stringify(body) } : {}),
-          redirect: "error",
-          signal: AbortSignal.timeout(provider.requestTimeoutMs)
-        });
+        const result = await yookassaResponseWithin(
+          `${provider.apiBaseUrl}${path}`,
+          {
+            method,
+            headers,
+            ...(body ? { body: JSON.stringify(body) } : {}),
+            redirect: "error"
+          },
+          provider.requestTimeoutMs
+        );
+        response = result.response;
+        text = result.text;
         break;
       } catch {
         if (attempt === attempts) {
@@ -204,11 +210,10 @@ export class YookassaClient {
         }
       }
     }
-    if (!response) {
+    if (!response || text === undefined) {
       throw new YookassaProviderError("PAYMENT_PROVIDER_UNAVAILABLE", true);
     }
 
-    const text = await boundedText(response);
     const payload = parseJson(text);
     if (!response.ok) {
       const providerError = providerErrorDetails(payload, response.status);
@@ -236,6 +241,35 @@ export class YookassaClient {
     if (!/^[A-Za-z0-9_-]{8,64}$/u.test(value)) {
       throw new Error("Invalid YooKassa idempotency key");
     }
+  }
+}
+
+async function yookassaResponseWithin(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Readonly<{ response: Response; text: string }>> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error("YooKassa request timed out"));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      (async () => {
+        const response = await fetch(url, {
+          ...init,
+          signal: controller.signal
+        });
+        return { response, text: await boundedText(response) };
+      })(),
+      deadline
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 

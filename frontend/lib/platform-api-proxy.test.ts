@@ -45,6 +45,26 @@ test("gives every large semantic read one consistent upstream timeout", () => {
   );
 });
 
+test("keeps the BFF open through the bounded provider payment attempt", () => {
+  for (const path of [
+    ["workspaces", "workspace-id", "billing", "checkout"],
+    ["workspaces", "workspace-id", "billing", "top-ups"],
+    ["workspaces", "workspace-id", "billing", "orders", "order-id", "refresh"],
+    ["workspaces", "workspace-id", "billing", "payments", "payment-id", "refunds"]
+  ]) {
+    assert.equal(browserApiUpstreamTimeoutMs(path), 45_000);
+  }
+  assert.equal(
+    browserApiUpstreamTimeoutMs([
+      "workspaces",
+      "workspace-id",
+      "billing",
+      "balance"
+    ]),
+    10_000
+  );
+});
+
 test("proxies an assignment PUT through the safe same-origin BFF", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamUrl: string | undefined;

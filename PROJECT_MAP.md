@@ -1102,6 +1102,11 @@ Launch dialogs используют `prepared-project-integrations.ts`, зате
 `save_payment_method` не отправляется обычному магазину. Его можно включить
 только после выдачи магазину права на автоплатежи со стороны ЮKassa; это
 предотвращает `403 forbidden` у обычного разового checkout.
+YooKassa adapter ограничивает каждым `YOOKASSA_REQUEST_TIMEOUT_MS` весь
+provider response, включая чтение body, даже если underlying fetch не
+реагирует на abort. Три idempotent network attempts укладываются в отдельный
+45-секундный BFF timeout платёжных команд; браузер поэтому получает точный
+provider error или checkout URL, а не ложный `Platform API is unavailable`.
 
 Смена/продление подписки получает Core-owned `service_value_minor`, timestamp
 оценки и начало цепочки оплаченного остатка. `billing/subscription-value.ts`

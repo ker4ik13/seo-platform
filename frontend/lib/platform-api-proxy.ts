@@ -49,6 +49,7 @@ const CLUSTERING_RUN_COMMAND_TIMEOUT_MS = 120_000;
 const TRACKING_CONTEXT_MATERIALIZE_TIMEOUT_MS = 75_000;
 const SEMANTIC_EXPORT_FILE_TIMEOUT_MS = 15 * 60_000;
 const SEMANTIC_LARGE_READ_TIMEOUT_MS = 35_000;
+const BILLING_PROVIDER_COMMAND_TIMEOUT_MS = 45_000;
 
 export async function proxyPlatformApi(
   request: NextRequest,
@@ -192,7 +193,29 @@ export function browserApiUpstreamTimeoutMs(
   if (isSemanticLargeReadPath(pathSegments)) {
     return SEMANTIC_LARGE_READ_TIMEOUT_MS;
   }
+  if (isBillingProviderCommandPath(pathSegments)) {
+    return BILLING_PROVIDER_COMMAND_TIMEOUT_MS;
+  }
   return DEFAULT_PLATFORM_API_TIMEOUT_MS;
+}
+
+function isBillingProviderCommandPath(
+  pathSegments: readonly string[]
+): boolean {
+  if (
+    pathSegments[0] !== "workspaces" ||
+    pathSegments[2] !== "billing"
+  ) {
+    return false;
+  }
+  return (
+    pathSegments.length === 4 &&
+      (pathSegments[3] === "checkout" || pathSegments[3] === "top-ups")
+  ) || (
+    pathSegments.length === 6 &&
+      ((pathSegments[3] === "orders" && pathSegments[5] === "refresh") ||
+        (pathSegments[3] === "payments" && pathSegments[5] === "refunds"))
+  );
 }
 
 function isSemanticLargeReadPath(

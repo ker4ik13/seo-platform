@@ -179,6 +179,47 @@ test("retries transient network failures with the same idempotency key", async (
   ]);
 });
 
+test("bounds the complete provider response even when fetch ignores abort", {
+  timeout: 5_000
+}, async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Promise<Response>(() => undefined);
+  };
+  const startedAt = Date.now();
+  try {
+    const client = new YookassaClient(loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      YOOKASSA_ENABLED: "true",
+      YOOKASSA_SHOP_ID: "123456",
+      YOOKASSA_SECRET_KEY: "s".repeat(32),
+      YOOKASSA_RETURN_URL: "https://app.example.test/billing/return",
+      YOOKASSA_API_BASE_URL: "http://provider.test/v3",
+      YOOKASSA_REQUEST_TIMEOUT_MS: "1000"
+    }));
+    await assert.rejects(
+      () => client.createPayment({
+        idempotencyKey: "boundedtimeout123",
+        amountMinor: 10_000,
+        description: "Balance top-up",
+        returnUrl: "https://app.example.test/billing/return",
+        orderId: "order-1",
+        workspaceId: "workspace-1",
+        savePaymentMethod: false
+      }),
+      (error) => error instanceof YookassaProviderError &&
+        error.code === "PAYMENT_PROVIDER_UNAVAILABLE"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(attempts, 3);
+  assert.ok(Date.now() - startedAt < 4_000);
+});
+
 test("preserves a safe YooKassa error parameter for operational diagnostics", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
