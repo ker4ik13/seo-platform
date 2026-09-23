@@ -453,7 +453,9 @@ container limit `768M`. Submit fast paths
 provider-wide advisory lock; terminal Job с ещё действующим execution grant не
 создаёт горячий цикл PostgreSQL. Poll fast path использует индекс
 `connector version + status + next action/lease`, проверяет RUNNING parent Job
-и лишь затем открывает credential/control graph. Rank grant dispatcher также
+и лишь затем открывает credential/control graph. Для активного poll отдельный
+индекс `job + connector version + status + due time` исключает повторное чтение
+всей append-only истории executions текущего Job на каждом worker lane. Rank grant dispatcher также
 сериализует общий connector budget: grant buffer не превышает число lanes,
 умноженное на dispatch interval и ограниченное 30-секундным grant window
 (720 при 48 lanes и 15 секундах), а один Job получает за проход максимум 48.
@@ -1036,6 +1038,9 @@ Top. Turbo Яндекс Live запрашивает 50 результатов п
 Live-страница получает `next_action_at = now` и может сразу перейти свободному
 worker; provider pending/retry остаётся отложенным и worker во время ожидания
 не блокируется.
+Первая страница обычного XMLStock Яндекс/Google Live запускается так же сразу
+после локального submit. Стартовая пауза 15 секунд сохраняется только для
+XMLStock Яндекс Search API с `delayed=true`.
 
 Органическая проекция терпимо обрабатывает provider `<doc>` без URL: блок
 учитывается в размере страницы и абсолютном смещении позиций, но не сохраняется

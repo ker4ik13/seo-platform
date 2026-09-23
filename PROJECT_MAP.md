@@ -1530,7 +1530,10 @@ broker перед full tenant graph, а Arsenkin ещё и перед provider-w
 действующим grant больше не разогревают claim loop. Poll broker сначала
 проверяет dedicated `connector version + due time` index и RUNNING parent Job,
 поэтому будущие `POLL_WAIT` и audit-строки terminal Jobs не открывают полный
-SQL graph. Rank grant dispatcher под общим advisory lock ограничивает общий
+SQL graph. Активный poll дополнительно использует
+`job + connector version + status + due time` index: append-only история
+остальных выполнений этого Job больше не пересекается с глобальным due index
+на каждом из 48 worker lanes. Rank grant dispatcher под общим advisory lock ограничивает общий
 короткоживущий grant buffer произведением 48 connector lanes на dispatch
 interval (720 в production, не длиннее 30-секундного grant window), а один Job
 за проход получает не более 48 новых grants. Неиспользованный grant повторяется
@@ -1720,6 +1723,9 @@ lease-expiry/reclaim цикла. RPS buckets, число worker-потоков, 
 distributed RPS limiter всё равно сериализует внешний GET. Provider pending
 и retryable failure остаются в отложенной очереди с `next_action_at` и не
 удерживают connector worker.
+Первая страница обычного XMLStock Яндекс/Google Live также получает
+`next_action_at = now`; 15-секундная стартовая пауза применяется только к
+асинхронному Яндекс Search API (`delayed=true`).
 Live-страница с количеством документов, отличным от десяти, больше не считается
 концом выдачи: connector продолжает обход до глубины или до первой найденной
 позиции, сохраняет bounded checkpoint и обрезает итог строго по выбранному Top.

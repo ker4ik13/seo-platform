@@ -153,23 +153,27 @@ export class RankExecutionDispatchService {
         }
         return "RETRY_PENDING";
       } catch (error) {
-        this.logger.error(
-          JSON.stringify({
-            event: "rank_execution_dispatch_failed",
+        if (error instanceof RankExecutionGrantAttemptError) {
+          const payload = JSON.stringify({
+            event: "rank_execution_grant_failed",
             jobId: dispatchable.jobId,
             itemId,
-            error: safeErrorSummary(error)
-          })
-        );
-        if (error instanceof RankExecutionGrantAttemptError) {
+            code: error.code,
+            retryable: error.retryable,
+            detail: error.detail ?? "unspecified"
+          });
+          if (error.retryable) {
+            this.logger.warn(payload);
+          } else {
+            this.logger.error(payload);
+          }
+        } else {
           this.logger.error(
             JSON.stringify({
-              event: "rank_execution_grant_failed",
+              event: "rank_execution_dispatch_failed",
               jobId: dispatchable.jobId,
               itemId,
-              code: error.code,
-              retryable: error.retryable,
-              detail: error.detail ?? "unspecified"
+              error: safeErrorSummary(error)
             })
           );
         }
