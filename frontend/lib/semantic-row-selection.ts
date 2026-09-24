@@ -39,6 +39,34 @@ export interface SemanticSelectionScope {
   }>;
 }
 
+export interface SemanticExportSelection {
+  readonly keywordIds: readonly string[];
+  readonly knownToContainNoTrackedKeywords: boolean;
+}
+
+/**
+ * Export selection is authoritative independently of the currently loaded
+ * presentation pages. Loaded rows are used only for a safe local empty-state
+ * check when every selected ID is still present in memory.
+ */
+export function semanticExportSelection<Row extends Readonly<{
+  id: string;
+  isTracked: boolean;
+}>>(
+  selectedIds: ReadonlySet<string>,
+  loadedRows: readonly Row[]
+): SemanticExportSelection {
+  const keywordIds = [...selectedIds];
+  const loadedSelected = loadedRows.filter(({ id }) => selectedIds.has(id));
+  return {
+    keywordIds,
+    knownToContainNoTrackedKeywords:
+      keywordIds.length > 0 &&
+      loadedSelected.length === keywordIds.length &&
+      loadedSelected.every(({ isTracked }) => !isTracked)
+  };
+}
+
 /**
  * Identifies the visible row scope without coupling selection to pagination,
  * sorting or background refresh counters.

@@ -51,7 +51,7 @@ export type XmlStockWordstatExpansionResult =
   | ProviderFailure;
 
 export class XmlStockWordstatConnector {
-  public readonly version = "xmlstock-wordstat@2.0.0";
+  public readonly version = "xmlstock-wordstat@2.1.0";
 
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
 
@@ -71,9 +71,8 @@ export class XmlStockWordstatConnector {
     url.searchParams.set("key", secret.apiKey);
     url.searchParams.set("query", wordstatQuery(input.keyword, input.type));
     url.searchParams.set("pagetype", "words");
-    // XMLStock returns an exact aggregate row for operator queries only when
-    // grouping is requested. Live responses can omit `totalCount` in that
-    // shape, so the parser below also verifies the matching result row.
+    // Operator frequency belongs to the grouped result row. `totalCount` is
+    // the broad all-words aggregate and is valid only for BASE collections.
     url.searchParams.set("groupby", "1");
     url.searchParams.set(
       "regions",
@@ -90,7 +89,8 @@ export class XmlStockWordstatConnector {
       const result = xmlStockWordstatResult(
         response.status,
         response.value,
-        input.keyword
+        input.keyword,
+        input.type
       );
       return !result.ok && result.retryable && response.retryAfterSeconds !== undefined
         ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
@@ -286,14 +286,17 @@ function validQuery(value: string): string {
 export function xmlStockWordstatResult(
   status: number,
   value: unknown,
-  keyword?: string
+  keyword: string,
+  type: SemanticFrequencyType
 ): WordstatCollectionResult {
   const requestFailure = providerRequestFailure(status, value);
   if (requestFailure) return requestFailure;
   const body = record(value);
   if (!body) return failure("PROVIDER_INVALID_RESPONSE", true);
-  const count = decimal(body.totalCount ?? body.total_count);
-  if (count !== undefined) return { ok: true, value: count };
+  if (type === "BASE") {
+    const count = decimal(body.totalCount ?? body.total_count);
+    if (count !== undefined) return { ok: true, value: count };
+  }
 
   const results = body.results;
   if (!Array.isArray(results)) {

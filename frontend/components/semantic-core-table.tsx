@@ -88,6 +88,7 @@ import {
 import {
   initialSemanticCreateGroupId,
   semanticClipboardText,
+  semanticExportSelection,
   semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
   semanticSelectionAfterDeletion,
@@ -3219,21 +3220,15 @@ export function SemanticCoreTable({
 
   async function downloadExport(uiLocale: string = "ru-RU"): Promise<void> {
     if (exporting) return;
-    const selectedItems = exportScope === "SELECTED"
-      ? items.filter(({ id }) => checkedIds.has(id))
+    const exportSelection = semanticExportSelection(checkedIds, items);
+    const selected = exportScope === "SELECTED"
+      ? exportSelection.keywordIds
       : [];
-    const selected = selectedItems
-      .filter(({ isTracked }) =>
-        exportContent !== "POSITION_HISTORY" ||
-        exportHistoryIncludeAllKeywords ||
-        isTracked
-      )
-      .map(({ id }) => id);
     if (
       exportScope === "SELECTED" &&
       exportContent === "POSITION_HISTORY" &&
       !exportHistoryIncludeAllKeywords &&
-      selected.length === 0
+      exportSelection.knownToContainNoTrackedKeywords
     ) {
       setMutationError(
         "Среди выбранных строк нет отслеживаемых запросов. Включите экспорт всех запросов или измените выбор."

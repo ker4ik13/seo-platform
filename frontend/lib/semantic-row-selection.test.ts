@@ -4,6 +4,7 @@ import {
   initialSemanticCreateGroupId,
   semanticBulkSelectionBatches,
   semanticClipboardText,
+  semanticExportSelection,
   semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
   semanticSelectionAfterDeletion,
@@ -160,6 +161,38 @@ test("bulk editor keeps all 457 selected rows while respecting the 200-row API b
   assert.deepEqual(
     semanticBulkSelectionBatches(selections, 200).map((batch) => batch.length),
     [200, 200, 57]
+  );
+});
+
+test("export keeps all selected IDs beyond the currently loaded pages", () => {
+  const selectedIds = new Set(
+    Array.from({ length: 9_006 }, (_, index) => `keyword-${index}`)
+  );
+  const loadedRows = Array.from({ length: 1_200 }, (_, index) => ({
+    id: `keyword-${index}`,
+    isTracked: index % 2 === 0
+  }));
+
+  const result = semanticExportSelection(selectedIds, loadedRows);
+
+  assert.equal(result.keywordIds.length, 9_006);
+  assert.equal(result.keywordIds.at(-1), "keyword-9005");
+  assert.equal(result.knownToContainNoTrackedKeywords, false);
+});
+
+test("export detects a fully loaded selection without tracked keywords", () => {
+  assert.deepEqual(
+    semanticExportSelection(
+      new Set(["one", "two"]),
+      [
+        { id: "one", isTracked: false },
+        { id: "two", isTracked: false }
+      ]
+    ),
+    {
+      keywordIds: ["one", "two"],
+      knownToContainNoTrackedKeywords: true
+    }
   );
 });
 

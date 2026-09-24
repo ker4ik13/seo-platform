@@ -186,7 +186,8 @@ test("accepts a single aggregate row when XMLStock normalizes its phrase", () =>
     xmlStockWordstatResult(
       200,
       { results: [{ phrase: "купим ии фото", count: "16" }] },
-      "купить ии фото"
+      "купить ии фото",
+      "EXACT"
     ),
     { ok: true, value: "16" }
   );
@@ -202,7 +203,8 @@ test("does not attribute several non-matching Wordstat rows to the keyword", () 
           { phrase: "ещё запрос", count: "21" }
         ]
       },
-      "исходный запрос"
+      "исходный запрос",
+      "EXACT"
     ),
     {
       ok: false,
@@ -214,7 +216,46 @@ test("does not attribute several non-matching Wordstat rows to the keyword", () 
 
 test("accepts an empty Wordstat result as zero frequency", () => {
   assert.deepEqual(
-    xmlStockWordstatResult(200, { results: [], associations: [] }, "нет спроса"),
+    xmlStockWordstatResult(
+      200,
+      { results: [], associations: [] },
+      "нет спроса",
+      "FIXED"
+    ),
+    { ok: true, value: "0" }
+  );
+});
+
+test("never substitutes broad totalCount for phrase or fixed frequency", () => {
+  const response = {
+    totalCount: "244",
+    results: [{ phrase: "промты для нейросети ии", count: "2" }]
+  };
+  assert.deepEqual(
+    xmlStockWordstatResult(
+      200,
+      response,
+      "промты для нейросети ии",
+      "BASE"
+    ),
+    { ok: true, value: "244" }
+  );
+  assert.deepEqual(
+    xmlStockWordstatResult(
+      200,
+      response,
+      "промты для нейросети ии",
+      "EXACT"
+    ),
+    { ok: true, value: "2" }
+  );
+  assert.deepEqual(
+    xmlStockWordstatResult(
+      200,
+      { totalCount: "244", results: [] },
+      "промты для нейросети ии",
+      "FIXED"
+    ),
     { ok: true, value: "0" }
   );
 });
@@ -293,27 +334,27 @@ test("rejects a malformed XMLStock expansion response", () => {
 });
 
 test("normalizes XMLStock low balance and rate-limit errors", () => {
-  assert.deepEqual(xmlStockWordstatResult(200, { error: 200 }), {
+  assert.deepEqual(xmlStockWordstatResult(200, { error: 200 }, "запрос", "BASE"), {
     ok: false,
     code: "PROVIDER_LOW_BALANCE",
     retryable: false
   });
-  assert.deepEqual(xmlStockWordstatResult(200, { error: 55 }), {
+  assert.deepEqual(xmlStockWordstatResult(200, { error: 55 }, "запрос", "BASE"), {
     ok: false,
     code: "PROVIDER_RATE_LIMITED",
     retryable: true
   });
-  assert.deepEqual(xmlStockWordstatResult(503, { error: 503 }), {
+  assert.deepEqual(xmlStockWordstatResult(503, { error: 503 }, "запрос", "BASE"), {
     ok: false,
     code: "PROVIDER_RATE_LIMITED",
     retryable: true
   });
-  assert.deepEqual(xmlStockWordstatResult(200, { error: 32 }), {
+  assert.deepEqual(xmlStockWordstatResult(200, { error: 32 }, "запрос", "BASE"), {
     ok: false,
     code: "PROVIDER_RATE_LIMITED",
     retryable: true
   });
-  assert.deepEqual(xmlStockWordstatResult(200, { error: 110 }), {
+  assert.deepEqual(xmlStockWordstatResult(200, { error: 110 }, "запрос", "BASE"), {
     ok: false,
     code: "PROVIDER_RATE_LIMITED",
     retryable: true
