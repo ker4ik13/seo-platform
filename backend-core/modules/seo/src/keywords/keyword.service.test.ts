@@ -1571,10 +1571,11 @@ test("does not delete frequency contexts for an unavailable keyword", async () =
   assert.equal(deleteCalls, 0);
 });
 
-test("projects context-independent previous positions into keyword insights", async () => {
+test("keeps every configured dimension of a reused context in keyword insights", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000015";
   const contextId = "01900000-0000-7000-8000-000000000079";
   const snapshotId = "01900000-0000-7000-8000-000000000080";
+  const newerSnapshotId = "01900000-0000-7000-8000-000000000081";
   const rankSnapshotWheres: unknown[] = [];
   let contextWhere: unknown;
   const service = new KeywordService(
@@ -1593,19 +1594,34 @@ test("projects context-independent previous positions into keyword insights", as
       frequencySeasonalityPoint: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: {
-        findMany: async () => [{
-          workspaceId,
-          projectId,
-          keywordId,
-          trackingContextId: contextId,
-          configurationVersion: 1,
-          found: true,
-          position: 7,
-          previousPosition: null,
-          rankingUrl: "https://example.com/current",
-          observedAt: new Date("2026-08-18T12:00:00.000Z"),
-          snapshotId
-        }]
+        findMany: async () => [
+          {
+            workspaceId,
+            projectId,
+            keywordId,
+            trackingContextId: contextId,
+            configurationVersion: 2,
+            found: true,
+            position: 12,
+            previousPosition: null,
+            rankingUrl: "https://example.com/spb",
+            observedAt: new Date("2026-08-19T12:00:00.000Z"),
+            snapshotId: newerSnapshotId
+          },
+          {
+            workspaceId,
+            projectId,
+            keywordId,
+            trackingContextId: contextId,
+            configurationVersion: 1,
+            found: true,
+            position: 7,
+            previousPosition: null,
+            rankingUrl: "https://example.com/current",
+            observedAt: new Date("2026-08-18T12:00:00.000Z"),
+            snapshotId
+          }
+        ]
       },
       aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: {
@@ -1621,17 +1637,30 @@ test("projects context-independent previous positions into keyword insights", as
         }
       },
       trackingContextVersion: {
-        findMany: async () => [{
-          contextId,
-          configurationVersion: 1,
-          searchEngine: "YANDEX",
-          device: "DESKTOP",
-          regionCode: "213",
-          regionLabel: "Москва",
-          countryCode: "RU",
-          language: "ru",
-          depth: 50
-        }]
+        findMany: async () => [
+          {
+            contextId,
+            configurationVersion: 1,
+            searchEngine: "YANDEX",
+            device: "DESKTOP",
+            regionCode: "213",
+            regionLabel: "Москва",
+            countryCode: "RU",
+            language: "ru",
+            depth: 50
+          },
+          {
+            contextId,
+            configurationVersion: 2,
+            searchEngine: "YANDEX",
+            device: "DESKTOP",
+            regionCode: "2",
+            regionLabel: "Санкт-Петербург",
+            countryCode: "RU",
+            language: "ru",
+            depth: 50
+          }
+        ]
       }
     } as unknown as PrismaService,
     semanticVersions()
@@ -1639,22 +1668,39 @@ test("projects context-independent previous positions into keyword insights", as
 
   const result = await service.insights(workspaceId, projectId, keywordId);
 
-  assert.deepEqual(result.positions, [{
-    trackingContextId: contextId,
-    contextName: "Новый профиль",
-    searchEngine: "YANDEX",
-    countryCode: "RU",
-    device: "DESKTOP",
-    regionCode: "213",
-    regionLabel: "Москва",
-    language: "ru",
-    dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
-    found: true,
-    position: 7,
-    previousPosition: 11,
-    rankingUrl: "https://example.com/current",
-    observedAt: "2026-08-18T12:00:00.000Z"
-  }]);
+  assert.deepEqual(result.positions, [
+    {
+      trackingContextId: contextId,
+      contextName: "Новый профиль",
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      device: "DESKTOP",
+      regionCode: "2",
+      regionLabel: "Санкт-Петербург",
+      language: "ru",
+      dimensionKey: "YANDEX|RU|2|ru|DESKTOP",
+      found: true,
+      position: 12,
+      rankingUrl: "https://example.com/spb",
+      observedAt: "2026-08-19T12:00:00.000Z"
+    },
+    {
+      trackingContextId: contextId,
+      contextName: "Новый профиль",
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      device: "DESKTOP",
+      regionCode: "213",
+      regionLabel: "Москва",
+      language: "ru",
+      dimensionKey: "YANDEX|RU|213|ru|DESKTOP",
+      found: true,
+      position: 7,
+      previousPosition: 11,
+      rankingUrl: "https://example.com/current",
+      observedAt: "2026-08-18T12:00:00.000Z"
+    }
+  ]);
   assert.equal((contextWhere as { status?: unknown }).status, undefined);
   assert.equal(
     rankSnapshotWheres.some((where) =>

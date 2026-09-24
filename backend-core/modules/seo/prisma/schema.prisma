@@ -1242,7 +1242,7 @@ model CurrentRank {
   version              Int            @default(1)
   updatedAt            DateTime       @map("updated_at") @db.Timestamptz(6)
 
-  @@id([workspaceId, projectId, keywordId, trackingContextId])
+  @@id([workspaceId, projectId, keywordId, trackingContextId, configurationVersion])
   @@index([workspaceId, projectId, trackingContextId, position], map: "current_ranks_context_position_idx")
   @@map("current_ranks")
 }

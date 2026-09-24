@@ -991,12 +991,13 @@ Indexes per partition:
 - `(project_id, captured_at, position)`;
 - BRIN captured_at.
 
-#### `rank_current`
+#### `current_ranks`
 
 Projection:
 
 - keyword_id;
 - context_id;
+- configuration_version;
 - snapshot_id;
 - position;
 - previous_position;
@@ -1005,7 +1006,13 @@ Projection:
 - delta;
 - quality.
 
-Primary key `(keyword_id, context_id)`.
+Tenant primary key
+`(workspace_id, project_id, keyword_id, context_id, configuration_version)`.
+Один logical context может последовательно использовать разные immutable
+конфигурации города или устройства; новая конфигурация не имеет права
+перезаписывать текущую проекцию предыдущего точного среза. При переходе со
+старой identity проекция полностью восстанавливается из append-only
+`rank_snapshots`, поэтому повторный provider-съём не требуется.
 
 #### `project_position_history_revisions` и `project_position_history_projections`
 

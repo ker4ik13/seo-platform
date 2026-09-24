@@ -764,7 +764,8 @@ async function upsertCurrentRanks(
         "workspace_id",
         "project_id",
         "keyword_id",
-        "tracking_context_id"
+        "tracking_context_id",
+        "configuration_version"
       )
       DO UPDATE SET
         "configuration_version" = EXCLUDED."configuration_version",

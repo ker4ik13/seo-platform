@@ -2111,7 +2111,13 @@ async function persistImportedRankSnapshot(
       1,
       ${importedAt}
     )`))}
-    ON CONFLICT (workspace_id, project_id, keyword_id, tracking_context_id)
+    ON CONFLICT (
+      workspace_id,
+      project_id,
+      keyword_id,
+      tracking_context_id,
+      configuration_version
+    )
     DO UPDATE SET
       configuration_version = EXCLUDED.configuration_version,
       observed_at = EXCLUDED.observed_at,

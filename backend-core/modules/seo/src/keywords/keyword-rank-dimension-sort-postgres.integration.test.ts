@@ -34,6 +34,17 @@ const configurations = [
   {
     workspace_id: workspaceId,
     project_id: projectId,
+    context_id: targetContext,
+    configuration_version: 2,
+    search_engine: "YANDEX",
+    country_code: "RU",
+    region_code: "2",
+    language: "ru",
+    device: "DESKTOP"
+  },
+  {
+    workspace_id: workspaceId,
+    project_id: projectId,
     context_id: otherContext,
     configuration_version: 1,
     search_engine: "GOOGLE",
@@ -45,6 +56,7 @@ const configurations = [
 ];
 const currentRanks = [
   current(1, targetContext, true, 2, "2026-09-04T10:00:00.000Z"),
+  current(1, targetContext, true, 41, "2026-09-08T10:00:00.000Z", 2),
   current(2, targetContext, true, 7, "2026-09-02T10:00:00.000Z"),
   current(3, targetContext, false, null, "2026-09-05T10:00:00.000Z"),
   current(4, targetContext, false, null, "2026-09-01T10:00:00.000Z"),
@@ -151,19 +163,20 @@ function current(
   context: string,
   found: boolean,
   position: number | null,
-  observedAt: string
+  observedAt: string,
+  configurationVersion = 1
 ) {
   return {
     workspace_id: workspaceId,
     project_id: projectId,
     keyword_id: id(keyword),
     tracking_context_id: context,
-    configuration_version: 1,
+    configuration_version: configurationVersion,
     found,
     position,
     previous_position: null,
     observed_at: observedAt,
-    snapshot_id: id(1_000 + keyword)
+    snapshot_id: id(1_000 + keyword * 10 + configurationVersion)
   };
 }
 
