@@ -783,6 +783,107 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   );
 });
 
+test("aggregates URL indicators across the latest snapshot of every rank dimension", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000012";
+  const moscowContextId = "01900000-0000-7000-8000-000000000071";
+  const spbContextId = "01900000-0000-7000-8000-000000000072";
+  const mobileContextId = "01900000-0000-7000-8000-000000000073";
+  const staleMoscowSnapshotId = "01900000-0000-7000-8000-000000000081";
+  const moscowSnapshotId = "01900000-0000-7000-8000-000000000082";
+  const spbSnapshotId = "01900000-0000-7000-8000-000000000083";
+  const mobileSnapshotId = "01900000-0000-7000-8000-000000000084";
+  let inspectedSnapshotIds: readonly unknown[] = [];
+  const row = {
+    ...keyword(keywordId, "2026-09-24T08:00:00.000Z"),
+    typedCustomValues: []
+  };
+  const service = new KeywordService({
+    $queryRaw: async (query: Prisma.Sql) => {
+      inspectedSnapshotIds = query.values;
+      return [{ snapshotId: mobileSnapshotId }];
+    },
+    keyword: {
+      findMany: async () => [row],
+      count: async () => 1
+    },
+    page: {
+      findMany: async () => [{
+        id: row.targetPageId,
+        url: "https://example.com/target"
+      }]
+    },
+    currentRank: {
+      findMany: async () => [
+        {
+          keywordId,
+          trackingContextId: spbContextId,
+          configurationVersion: 1,
+          found: true,
+          position: 2,
+          rankingUrl: "https://example.com/target",
+          observedAt: new Date("2026-09-24T12:00:00.000Z"),
+          snapshotId: spbSnapshotId
+        },
+        {
+          keywordId,
+          trackingContextId: moscowContextId,
+          configurationVersion: 2,
+          found: true,
+          position: 35,
+          rankingUrl: "https://example.com/wrong",
+          observedAt: new Date("2026-09-23T12:00:00.000Z"),
+          snapshotId: moscowSnapshotId
+        },
+        {
+          keywordId,
+          trackingContextId: mobileContextId,
+          configurationVersion: 1,
+          found: true,
+          position: 8,
+          rankingUrl: "https://example.com/target",
+          observedAt: new Date("2026-09-23T11:00:00.000Z"),
+          snapshotId: mobileSnapshotId
+        },
+        {
+          keywordId,
+          trackingContextId: moscowContextId,
+          configurationVersion: 1,
+          found: true,
+          position: 7,
+          rankingUrl: "https://example.com/target",
+          observedAt: new Date("2026-09-20T12:00:00.000Z"),
+          snapshotId: staleMoscowSnapshotId
+        }
+      ]
+    },
+    rankDimensionHistoryDeletion: { findMany: async () => [] },
+    trackingContextVersion: {
+      findMany: async () => [
+        rankConfiguration(spbContextId, 1, "2", "DESKTOP"),
+        rankConfiguration(moscowContextId, 2, "213", "DESKTOP"),
+        rankConfiguration(mobileContextId, 1, "213", "MOBILE"),
+        rankConfiguration(moscowContextId, 1, "213", "DESKTOP")
+      ]
+    }
+  } as unknown as PrismaService, semanticVersions());
+
+  const result = await service.list(workspaceId, projectId, {
+    limit: 100,
+    metricProjection: [
+      "BASE",
+      "TARGET_URL_INDICATOR",
+      "MULTIPLE_URL_INDICATOR"
+    ]
+  }, "request-url-indicators");
+
+  assert.equal(result.data[0]?.hasTargetUrlMismatch, true);
+  assert.equal(result.data[0]?.hasMultipleRankingUrls, true);
+  assert.ok(inspectedSnapshotIds.includes(moscowSnapshotId));
+  assert.ok(inspectedSnapshotIds.includes(spbSnapshotId));
+  assert.ok(inspectedSnapshotIds.includes(mobileSnapshotId));
+  assert.equal(inspectedSnapshotIds.includes(staleMoscowSnapshotId), false);
+});
+
 test("hydrates every selectable keyword page size in bounded Prisma batches", async () => {
   const rows = Array.from({ length: 1_001 }, (_, index) => ({
     ...keyword(
@@ -3379,6 +3480,24 @@ function keyword(id: string, createdAt: string) {
       }
     ],
     tags: [{ tag: { name: "Приоритет" } }]
+  };
+}
+
+function rankConfiguration(
+  contextId: string,
+  configurationVersion: number,
+  regionCode: string,
+  device: "DESKTOP" | "MOBILE"
+) {
+  return {
+    contextId,
+    configurationVersion,
+    searchEngine: "YANDEX" as const,
+    countryCode: "RU",
+    regionCode,
+    regionLabel: regionCode === "213" ? "Москва" : "Санкт-Петербург",
+    language: "ru",
+    device
   };
 }
 

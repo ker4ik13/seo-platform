@@ -1019,6 +1019,21 @@ export class KeywordService {
             device: true
           }
         });
+    const indicatorDimensionMergeTargets = resolvedRankDimensionMergeTargets(
+      currentRanks.length === 0 ||
+        (!includeTargetUrlIndicator && !includeMultipleUrlIndicator)
+        ? []
+        : await (this.prisma.rankDimensionMerge?.findMany({
+            where: { workspaceId, projectId },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            take: 2_000,
+            select: {
+              sourceDimensionKey: true,
+              targetDimensionKey: true,
+              targetRegionLabel: true
+            }
+          }) ?? Promise.resolve([]))
+    );
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
     const visibleCurrentRanks = currentRanks.filter((rank) => {
       const configuration = rankConfigurations.find((candidate) =>
@@ -1121,15 +1136,29 @@ export class KeywordService {
         searchEngine: RankSearchEngine;
       }>
     >();
+    const latestRankByKeywordDimension = new Map<
+      string,
+      (typeof visibleCurrentRanks)[number]
+    >();
     for (const rank of visibleCurrentRanks) {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
       if (!configuration) continue;
       const searchEngine = configuration.searchEngine as RankSearchEngine;
-      const key = `${visibleKeywordId(rank.keywordId)}:${searchEngine}`;
-      if (!latestRankByKeywordEngine.has(key)) {
-        latestRankByKeywordEngine.set(key, { rank, searchEngine });
+      const targetKeywordId = visibleKeywordId(rank.keywordId);
+      const engineKey = `${targetKeywordId}:${searchEngine}`;
+      if (!latestRankByKeywordEngine.has(engineKey)) {
+        latestRankByKeywordEngine.set(engineKey, { rank, searchEngine });
+      }
+      const storedDimensionKey = storedRankDimensionKey(configuration);
+      const dimensionKey = storedDimensionKey
+        ? indicatorDimensionMergeTargets.get(storedDimensionKey)?.key ??
+          storedDimensionKey
+        : `${rank.trackingContextId}:${rank.configurationVersion}`;
+      const keywordDimensionKey = `${targetKeywordId}:${dimensionKey}`;
+      if (!latestRankByKeywordDimension.has(keywordDimensionKey)) {
+        latestRankByKeywordDimension.set(keywordDimensionKey, rank);
       }
     }
     const previousPositions = includePositions
@@ -1145,7 +1174,10 @@ export class KeywordService {
           }))
         )
       : new Map<string, number>();
-    const currentRankSnapshotIds = visibleCurrentRanks.map(({ snapshotId }) => snapshotId);
+    const currentDimensionRanks = [...latestRankByKeywordDimension.values()];
+    const currentRankSnapshotIds = currentDimensionRanks.map(
+      ({ snapshotId }) => snapshotId
+    );
     const currentSerpSnapshots =
       !includeRankingSiteResults || currentRankSnapshotIds.length === 0
       ? []
@@ -1191,7 +1223,7 @@ export class KeywordService {
       ])
     );
     const keywordsWithMultipleRankingUrls = new Set(
-      visibleCurrentRanks.flatMap((rank) =>
+      currentDimensionRanks.flatMap((rank) =>
         multipleResultSnapshotIds.has(rank.snapshotId)
           ? [visibleKeywordId(rank.keywordId)]
           : []
@@ -1204,7 +1236,7 @@ export class KeywordService {
     const keywordsWithTargetUrlMismatch = new Set<string>();
     if (includeTargetUrlIndicator) {
       const rowById = new Map(pageRows.map((row) => [row.id, row]));
-      for (const { rank } of latestRankByKeywordEngine.values()) {
+      for (const rank of currentDimensionRanks) {
         if (!rank.found || !rank.rankingUrl) continue;
         const keywordId = visibleKeywordId(rank.keywordId);
         const row = rowById.get(keywordId);
@@ -5509,6 +5541,31 @@ function rankIsExcluded(
     deletion.device === configuration.device &&
     observedAt <= deletion.excludedThrough
   );
+}
+
+function storedRankDimensionKey(
+  configuration: Readonly<{
+    searchEngine: string;
+    countryCode?: string;
+    regionCode?: string | null;
+    language?: string;
+    device?: string;
+  }>
+): string | undefined {
+  if (
+    (configuration.searchEngine !== "YANDEX" &&
+      configuration.searchEngine !== "GOOGLE") ||
+    !configuration.countryCode ||
+    !configuration.language ||
+    (configuration.device !== "DESKTOP" && configuration.device !== "MOBILE")
+  ) return undefined;
+  return semanticRankDimensionKey({
+    searchEngine: configuration.searchEngine,
+    countryCode: configuration.countryCode,
+    regionCode: configuration.regionCode ?? configuration.countryCode,
+    language: configuration.language,
+    device: configuration.device
+  });
 }
 
 async function snapshotIdsWithMultipleProjectUrls(
