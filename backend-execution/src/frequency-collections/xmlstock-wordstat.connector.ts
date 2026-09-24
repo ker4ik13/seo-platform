@@ -12,6 +12,13 @@ import {
 } from "../integrations/provider-json-request.js";
 
 const XMLSTOCK_WORDSTAT_URL = "https://xmlstock.com/wordstat/json/";
+const WORDSTAT_REQUIRED_STOP_WORDS = new Set([
+  "а", "без", "близ", "бы", "был", "была", "были", "было", "в", "ведь",
+  "во", "вот", "все", "для", "до", "же", "за", "и", "из", "или", "к",
+  "как", "ко", "ли", "либо", "между", "мы", "на", "над", "не", "ни",
+  "но", "о", "об", "от", "по", "под", "при", "про", "с", "со", "то",
+  "только", "у", "через", "что", "чтобы", "это", "я"
+]);
 
 export type WordstatCollectionResult =
   | { readonly ok: true; readonly value: string }
@@ -51,7 +58,7 @@ export type XmlStockWordstatExpansionResult =
   | ProviderFailure;
 
 export class XmlStockWordstatConnector {
-  public readonly version = "xmlstock-wordstat@2.1.0";
+  public readonly version = "xmlstock-wordstat@2.2.0";
 
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
 
@@ -71,8 +78,8 @@ export class XmlStockWordstatConnector {
     url.searchParams.set("key", secret.apiKey);
     url.searchParams.set("query", wordstatQuery(input.keyword, input.type));
     url.searchParams.set("pagetype", "words");
-    // Operator frequency belongs to the grouped result row. `totalCount` is
-    // the broad all-words aggregate and is valid only for BASE collections.
+    // Bound the unrelated popular-phrase rows. Frequency itself is read only
+    // from totalCount; a zero operator query can omit that field entirely.
     url.searchParams.set("groupby", "1");
     url.searchParams.set(
       "regions",
@@ -89,7 +96,6 @@ export class XmlStockWordstatConnector {
       const result = xmlStockWordstatResult(
         response.status,
         response.value,
-        input.keyword,
         input.type
       );
       return !result.ok && result.retryable && response.retryAfterSeconds !== undefined
@@ -270,12 +276,19 @@ export function wordstatQuery(
     return validQuery(`"${normalized.replaceAll('"', "")}"`);
   }
   const fixed = words
-    .map((word) => word.replace(/^!+/u, ""))
+    .map((word) => word.replace(/^[!+]+/u, "").replaceAll('"', ""))
     .filter(Boolean)
-    .map((word) => `!${word}`)
+    .map((word) => `${wordstatRequiredOperator(word)}${word}`)
     .join(" ");
   if (!fixed) throw new WordstatQueryError();
-  return validQuery(`"${fixed.replaceAll('"', "")}"`);
+  return validQuery(`"${fixed}"`);
+}
+
+function wordstatRequiredOperator(word: string): "!" | "+" {
+  const normalized = word
+    .toLocaleLowerCase("ru-RU")
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  return WORDSTAT_REQUIRED_STOP_WORDS.has(normalized) ? "+" : "!";
 }
 
 function validQuery(value: string): string {
@@ -286,47 +299,28 @@ function validQuery(value: string): string {
 export function xmlStockWordstatResult(
   status: number,
   value: unknown,
-  keyword: string,
   type: SemanticFrequencyType
 ): WordstatCollectionResult {
   const requestFailure = providerRequestFailure(status, value);
   if (requestFailure) return requestFailure;
   const body = record(value);
   if (!body) return failure("PROVIDER_INVALID_RESPONSE", true);
-  if (type === "BASE") {
-    const count = decimal(body.totalCount ?? body.total_count);
-    if (count !== undefined) return { ok: true, value: count };
+  const rawCount = body.totalCount ?? body.total_count;
+  const count = decimal(rawCount);
+  if (count !== undefined) return { ok: true, value: count };
+  if (rawCount !== undefined) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
   }
 
   const results = body.results;
   if (!Array.isArray(results)) {
     return failure("PROVIDER_INVALID_RESPONSE", true);
   }
-  if (results.length === 0) return { ok: true, value: "0" };
-  // With groupby=1 XMLStock returns the aggregate operator result as the only
-  // row, but Yandex can normalize its displayed phrase (for example change a
-  // grammatical form). The count is still the result for the submitted query.
-  // Requiring the display phrase to equal the source keyword therefore turns
-  // a successful provider response into a false PROVIDER_INVALID_RESPONSE.
-  if (results.length === 1) {
-    const onlyRow = record(results[0]);
-    const onlyCount = decimal(onlyRow?.count);
-    return onlyCount === undefined
-      ? failure("PROVIDER_INVALID_RESPONSE", true)
-      : { ok: true, value: onlyCount };
-  }
-  const expectedPhrase = normalizedPhrase(keyword);
-  if (!expectedPhrase) return failure("PROVIDER_INVALID_RESPONSE", true);
-  for (const candidate of results) {
-    const row = record(candidate);
-    if (
-      normalizedPhrase(row?.phrase) === expectedPhrase
-    ) {
-      const rowCount = decimal(row?.count);
-      return rowCount === undefined
-        ? failure("PROVIDER_INVALID_RESPONSE", true)
-        : { ok: true, value: rowCount };
-    }
+  if (type !== "BASE") {
+    // XMLStock omits totalCount for a zero operator query while still
+    // returning broad popular phrases in results. Those rows are not the
+    // requested operator frequency and must never be used as a substitute.
+    return { ok: true, value: "0" };
   }
   return failure("PROVIDER_INVALID_RESPONSE", true);
 }
@@ -530,12 +524,6 @@ function decimal(value: unknown): string | undefined {
     return value;
   }
   return undefined;
-}
-
-function normalizedPhrase(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().replace(/\s+/gu, " ").toLocaleLowerCase("ru");
-  return normalized || undefined;
 }
 
 function providerError(value: unknown): string | undefined {
