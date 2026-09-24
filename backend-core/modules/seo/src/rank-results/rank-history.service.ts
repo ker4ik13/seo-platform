@@ -177,16 +177,15 @@ export class RankHistoryService {
         sourceMode: { in: ["BYOK", "PLATFORM", "IMPORT"] },
         provider: { in: ["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR", "MANUAL_IMPORT"] },
         ...(query.mode === "SERP" ? { serpResults: { some: {} } } : { positionTrackingEnabled: true }),
-        manifest: {
-          context: { status: "ACTIVE" },
-          ...(sourceDimensions
-            ? {
+        ...(sourceDimensions
+          ? {
+              manifest: {
                 configuration: rankDimensionConfigurationWhereAny(
                   sourceDimensions
                 )
               }
-            : {})
-        },
+            }
+          : {}),
         observedAt: {
           gte: new Date(query.observedFrom),
           lt: new Date(query.observedBefore)

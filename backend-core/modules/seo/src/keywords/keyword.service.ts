@@ -173,7 +173,7 @@ type KeywordMutationAggregate = Prisma.KeywordGetPayload<{
 
 const KEYWORD_AGGREGATE_HYDRATION_BATCH_SIZE = 250;
 const POSITION_HISTORY_PROJECTION_SCHEMA_VERSION =
-  "project-position-history@1";
+  "project-position-history@2";
 const POSITION_HISTORY_REBUILD_ATTEMPTS = 2;
 
 type RankSearchEngine = SemanticKeywordListPosition["searchEngine"];
@@ -241,11 +241,6 @@ export class KeywordService {
        AND configuration.project_id = current.project_id
        AND configuration.context_id = current.tracking_context_id
        AND configuration.configuration_version = current.configuration_version
-      JOIN tracking_contexts context
-        ON context.workspace_id = current.workspace_id
-       AND context.project_id = current.project_id
-       AND context.id = current.tracking_context_id
-       AND context.status::text = 'ACTIVE'
       WHERE current.workspace_id = ${workspaceId}::uuid
         AND current.project_id = ${projectId}::uuid
         AND keyword.status::text = 'ACTIVE'
@@ -490,11 +485,6 @@ export class KeywordService {
          AND configuration.project_id = snapshot.project_id
          AND configuration.context_id = snapshot.tracking_context_id
          AND configuration.configuration_version = snapshot.configuration_version
-        INNER JOIN tracking_contexts context
-          ON context.workspace_id = snapshot.workspace_id
-         AND context.project_id = snapshot.project_id
-         AND context.id = snapshot.tracking_context_id
-         AND context.status::text = 'ACTIVE'
         WHERE snapshot.workspace_id = ${workspaceId}::uuid
           AND snapshot.project_id = ${projectId}::uuid
           AND snapshot.position_tracking_enabled = TRUE
@@ -1013,7 +1003,6 @@ export class KeywordService {
           where: {
             workspaceId,
             projectId,
-            context: { status: "ACTIVE" },
             OR: currentRanks.map((rank) => ({
               contextId: rank.trackingContextId,
               configurationVersion: rank.configurationVersion
@@ -1719,16 +1708,15 @@ export class KeywordService {
           projectId,
           keywordId: { in: keywordIdentityIds },
           ...(snapshotId ? { id: snapshotId } : {}),
-          manifest: {
-            context: { status: "ACTIVE" },
-            ...(insightDimensions
-              ? {
+          ...(insightDimensions
+            ? {
+                manifest: {
                   configuration: rankDimensionConfigurationWhereAny(
                     insightDimensions
                   )
                 }
-              : {})
-          },
+              }
+            : {}),
           ...(rankDeletions.length === 0
             ? {}
             : { AND: rankDeletions.map(rankDeletionExclusionWhere) })
@@ -1841,8 +1829,7 @@ export class KeywordService {
             where: {
               workspaceId,
               projectId,
-              id: { in: contextIds },
-              status: "ACTIVE"
+              id: { in: contextIds }
             },
             select: { id: true, name: true }
           }),

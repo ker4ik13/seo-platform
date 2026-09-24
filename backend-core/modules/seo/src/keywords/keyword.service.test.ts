@@ -364,6 +364,7 @@ test("averages the latest found position once per active keyword", async () => {
   });
   assert.match(summaryQuery?.sql ?? "", /rank_dimension_history_deletions/u);
   assert.match(summaryQuery?.sql ?? "", /keyword\.is_tracked/u);
+  assert.doesNotMatch(summaryQuery?.sql ?? "", /tracking_contexts|context\.status/u);
 });
 
 test("position summary stays inside one exact project rank dimension", async () => {
@@ -466,6 +467,7 @@ test("carries every keyword's latest known position through later capture days",
   assert.match(queries[0]?.sql ?? "", /UNBOUNDED PRECEDING AND CURRENT ROW/u);
   assert.match(queries[0]?.sql ?? "", /snapshot\.keyword_id/u);
   assert.match(queries[0]?.sql ?? "", /keyword\.is_tracked = TRUE/u);
+  assert.doesNotMatch(queries[0]?.sql ?? "", /tracking_contexts|context\.status/u);
   assert.equal(queries[0]?.values.includes(false), true);
 });
 
@@ -558,6 +560,7 @@ test("reuses a persistent position-history projection until its source revision 
 test("returns a scoped cursor page with groups, tags and target URLs", async () => {
   const snapshotId = "01900000-0000-7000-8000-000000000074";
   let observedWhere: unknown;
+  let observedRankConfigurationWhere: unknown;
   const rows = [
     {
       ...keyword(
@@ -676,13 +679,16 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
       }]
     },
     trackingContextVersion: {
-      findMany: async () => [
-        {
-          contextId: "01900000-0000-7000-8000-000000000070",
-          configurationVersion: 1,
-          searchEngine: "YANDEX"
-        }
-      ]
+      findMany: async ({ where }: { where: unknown }) => {
+        observedRankConfigurationWhere = where;
+        return [
+          {
+            contextId: "01900000-0000-7000-8000-000000000070",
+            configurationVersion: 1,
+            searchEngine: "YANDEX"
+          }
+        ];
+      }
     }
   } as unknown as PrismaService, semanticVersions());
 
@@ -741,6 +747,10 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
       observedAt: "2026-08-01T10:00:00.000Z"
     }
   ]);
+  assert.equal(
+    (observedRankConfigurationWhere as { context?: unknown }).context,
+    undefined
+  );
   assert.equal(result.page.hasNext, true);
   assert.equal(result.page.totalApprox, 2);
   assert.ok(result.page.nextCursor);
@@ -1565,6 +1575,8 @@ test("projects context-independent previous positions into keyword insights", as
   const keywordId = "01900000-0000-7000-8000-000000000015";
   const contextId = "01900000-0000-7000-8000-000000000079";
   const snapshotId = "01900000-0000-7000-8000-000000000080";
+  const rankSnapshotWheres: unknown[] = [];
+  let contextWhere: unknown;
   const service = new KeywordService(
     {
       $queryRaw: async () => [{
@@ -1596,9 +1608,17 @@ test("projects context-independent previous positions into keyword insights", as
         }]
       },
       aiAnswerSnapshot: { findMany: async () => [] },
-      rankSnapshot: { findMany: async () => [] },
+      rankSnapshot: {
+        findMany: async ({ where }: { where: unknown }) => {
+          rankSnapshotWheres.push(where);
+          return [];
+        }
+      },
       trackingContext: {
-        findMany: async () => [{ id: contextId, name: "Новый профиль" }]
+        findMany: async ({ where }: { where: unknown }) => {
+          contextWhere = where;
+          return [{ id: contextId, name: "Новый профиль" }];
+        }
       },
       trackingContextVersion: {
         findMany: async () => [{
@@ -1635,6 +1655,13 @@ test("projects context-independent previous positions into keyword insights", as
     rankingUrl: "https://example.com/current",
     observedAt: "2026-08-18T12:00:00.000Z"
   }]);
+  assert.equal((contextWhere as { status?: unknown }).status, undefined);
+  assert.equal(
+    rankSnapshotWheres.some((where) =>
+      Boolean((where as { manifest?: { context?: unknown } }).manifest?.context)
+    ),
+    false
+  );
 });
 
 test("filters a keyword page by the union of selected groups", async () => {

@@ -52,6 +52,7 @@ test("returns tenant-scoped history and authenticates its keyset cursor", async 
   assert.equal(harness.wheres[0]?.projectId, projectId);
   assert.deepEqual(harness.wheres[0]?.sourceMode, { in: ["BYOK", "PLATFORM", "IMPORT"] });
   assert.deepEqual(harness.wheres[0]?.provider, { in: ["ARSENKIN", "XMLSTOCK", "KEY_COLLECTOR", "MANUAL_IMPORT"] });
+  assert.equal(harness.wheres[0]?.manifest, undefined);
 
   const second = await service.list({
     ...query(),

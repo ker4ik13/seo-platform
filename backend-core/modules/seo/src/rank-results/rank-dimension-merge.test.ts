@@ -16,7 +16,7 @@ const scope = {
 const sourceKey = "GOOGLE|RU|global|ru|DESKTOP";
 const targetKey = "GOOGLE|RU|213|ru|DESKTOP";
 
-test("rank catalog probes each configuration without scanning full imported history", async () => {
+test("rank catalog keeps archived context history without scanning full imported history", async () => {
   let queryText = "";
   await rawRankDimensionCatalog({
     $queryRaw: async (query: unknown) => {
@@ -27,7 +27,7 @@ test("rank catalog probes each configuration without scanning full imported hist
   } as unknown as PrismaService, scope);
 
   assert.match(queryText, /FROM tracking_context_versions configuration/u);
-  assert.match(queryText, /context\.status = 'ACTIVE'/u);
+  assert.doesNotMatch(queryText, /tracking_contexts|context\.status/u);
   assert.match(queryText, /JOIN LATERAL/u);
   assert.match(queryText, /snapshot\.tracking_context_id = configuration\.context_id/u);
   assert.match(queryText, /LIMIT 1/u);

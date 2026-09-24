@@ -39,11 +39,6 @@ export async function rawRankDimensionCatalog(
       configuration.language,
       configuration.device::text AS device
     FROM tracking_context_versions configuration
-    JOIN tracking_contexts context
-      ON context.workspace_id = configuration.workspace_id
-      AND context.project_id = configuration.project_id
-      AND context.id = configuration.context_id
-      AND context.status = 'ACTIVE'
     JOIN LATERAL (
       SELECT 1
       FROM rank_snapshots snapshot
