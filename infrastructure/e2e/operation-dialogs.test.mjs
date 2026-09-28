@@ -6,7 +6,7 @@ import test from "node:test";
 import { chromium, request } from "playwright";
 
 const base = process.env.SEO_PLATFORM_PUBLIC_URL, output = process.env.SEO_PLATFORM_E2E_OUTPUT_DIR;
-test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty-provider states and no accidental paid launch", { skip: process.env.SEO_PLATFORM_E2E_CONFIRM !== "CREATE_TEST_DATA", timeout: 360_000 }, async t => {
+test("operation dialogs and workspace routing through Caddy: locale, drag-and-drop, scope and no accidental paid launch", { skip: process.env.SEO_PLATFORM_E2E_CONFIRM !== "CREATE_TEST_DATA", timeout: 360_000 }, async t => {
   assert.ok(base?.startsWith("https://")); assert.ok(output?.startsWith("/"));
   await mkdir(output, { recursive: true, mode: 0o700 });
   const fixture = process.env.SEO_PLATFORM_SESSION_FIXTURES ? JSON.parse(await readFile(process.env.SEO_PLATFORM_SESSION_FIXTURES, "utf8"))[12] : undefined;
@@ -88,11 +88,12 @@ test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty
     }
   }
   await context.unroute(`**/app/api/workspaces/${workspace.id}/integrations/routing`);
-  const personalId = randomUUID(); let routeOrder = [credentialId, personalId], routeVersion = 1, staleReadPending = true;
+  const personalId = randomUUID(), arsenkinId = randomUUID();
+  let routeOrder = [credentialId, personalId, arsenkinId], routeVersion = 1, staleReadPending = true;
   const initialRouteOrder = [...routeOrder];
   const routingBinding = (order = routeOrder) => ({
     id: bindingId, workspaceId: workspace.id, capability: "SERP_RANK_TRACKING", enabled: true,
-    routes: order.map((id, position) => ({ id: randomUUID(), bindingId, workspaceId: workspace.id, position, credentialId: id, provider: "XMLSTOCK", credentialMode: "BYOK_API_KEY", availability: "READY", createdAt: now, updatedAt: now })),
+    routes: order.map((id, position) => ({ id: randomUUID(), bindingId, workspaceId: workspace.id, position, credentialId: id, provider: id === arsenkinId ? "ARSENKIN" : "XMLSTOCK", credentialMode: "BYOK_API_KEY", availability: "READY", createdAt: now, updatedAt: now })),
     fallbackPolicy: { mode: "NEXT_AVAILABLE", reasons: ["CREDENTIAL_UNAVAILABLE", "LOW_BALANCE"] },
     version: routeVersion, createdBy: fixture?.userId ?? credentialId, updatedBy: fixture?.userId ?? credentialId, createdAt: now, updatedAt: now
   });
@@ -103,7 +104,8 @@ test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty
     return route.fulfill({ json: { data: {
       bindings: [routingBinding(stale ? initialRouteOrder : routeOrder)], credentialOptions: [
         { id: credentialId, workspaceId: workspace.id, provider: "XMLSTOCK", label: "Legend", mode: "BYOK_API_KEY", status: "ACTIVE", capabilities: ["SERP_RANK_TRACKING"] },
-        { id: personalId, workspaceId: workspace.id, provider: "XMLSTOCK", label: "Personal", mode: "BYOK_API_KEY", status: "INVALID", capabilities: ["SERP_RANK_TRACKING"] }
+        { id: personalId, workspaceId: workspace.id, provider: "XMLSTOCK", label: "Personal", mode: "BYOK_API_KEY", status: "INVALID", capabilities: ["SERP_RANK_TRACKING"] },
+        { id: arsenkinId, workspaceId: workspace.id, provider: "ARSENKIN", label: "Arsenkin", mode: "BYOK_API_KEY", status: "ACTIVE", capabilities: ["SERP_RANK_TRACKING"] }
       ], credentialOptionsTruncated: false, access: { canUpdateBindings: true, canManageFallback: true }
     } } });
   });
@@ -115,14 +117,23 @@ test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty
   });
   await page.goto(`${base}/app/settings/integrations`, { waitUntil: "networkidle" });
   const routingRow = page.locator("#routing-serp-rank-tracking");
-  await routingRow.locator(".integration-route-item").nth(1).locator(".integration-route-controls button").first().click();
+  await routingRow.locator(".integration-route-item").nth(2).locator(".integration-route-drag-handle")
+    .dragTo(routingRow.locator(".integration-route-item").first(), { targetPosition: { x: 50, y: 5 } });
+  await page.waitForFunction(() => {
+    const row = document.querySelector("#routing-serp-rank-tracking");
+    return row?.querySelector(".integration-route-item strong")?.textContent === "Arsenkin" &&
+      Boolean(row.querySelector(".integration-save-success"));
+  });
+  assert.deepEqual(routeOrder, [arsenkinId, credentialId, personalId]);
+  assert.equal(routeVersion, 3, "a stale GET must not be treated as saved");
+  await routingRow.locator(".integration-route-item").nth(2).locator(".integration-route-drag-handle")
+    .dragTo(routingRow.locator(".integration-route-item").first(), { targetPosition: { x: 50, y: 5 } });
   await page.waitForFunction(() => {
     const row = document.querySelector("#routing-serp-rank-tracking");
     return row?.querySelector(".integration-route-item strong")?.textContent === "Personal" &&
       Boolean(row.querySelector(".integration-save-success"));
   });
-  assert.deepEqual(routeOrder, [personalId, credentialId]);
-  assert.equal(routeVersion, 3, "a stale GET must not be treated as saved");
+  assert.deepEqual(routeOrder, [personalId, arsenkinId, credentialId]);
   await page.reload({ waitUntil: "networkidle" });
   assert.equal(await routingRow.locator(".integration-route-item strong").first().textContent(), "Personal");
   await writeFile(path.join(output, "operation-dialogs-report.json"), JSON.stringify({ report, errors, launches }, null, 2), { mode: 0o600 });

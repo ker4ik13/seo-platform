@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   connectorFallbackReasons,
   credentialModeSupportsCapability,
@@ -27,8 +27,10 @@ import { ProviderLogo } from "./provider-logo";
 import { UiText, useUiLocale } from "./ui-locale";
 import {
   isWorkspaceConnectorCredentialConfigurable,
+  reorderWorkspaceRouteCredentialIds,
   workspaceRouteCredentialIdsAfterSelection,
   workspaceRouteMatchesBinding,
+  workspaceRouteSelectedOptions,
   workspaceRouteUpdateInput
 } from "../lib/project-integration-settings";
 
@@ -37,6 +39,12 @@ type RouteDraft = {
   readonly enabled: boolean;
   readonly credentialIds: readonly string[];
   readonly fallbackReasons: readonly ConnectorFallbackReason[];
+};
+type RouteDrag = {
+  readonly pointerId: number;
+  readonly sourceId: string;
+  readonly targetId?: string;
+  readonly placement?: "BEFORE" | "AFTER";
 };
 
 const FALLBACK_REASON_LABELS: Readonly<Record<ConnectorFallbackReason, string>> = {
@@ -258,6 +266,7 @@ export function WorkspaceIntegrationRouting({
             draft={drafts.get(capability) ?? emptyDraft()}
             key={capability}
             onChange={(update) => updateDraft(capability, update)}
+            onReorderStart={() => setSuccess(undefined)}
             onSave={() => void save(capability)}
             options={optionsByCapability.get(capability) ?? []}
             failed={failed === capability}
@@ -282,6 +291,7 @@ function CapabilityRoutingRow({
   draft,
   failed,
   onChange,
+  onReorderStart,
   onSave,
   options,
   saving,
@@ -294,29 +304,75 @@ function CapabilityRoutingRow({
   draft: RouteDraft;
   failed: boolean;
   onChange: (update: (current: RouteDraft) => RouteDraft) => void;
+  onReorderStart: () => void;
   onSave: () => void;
   options: readonly ProjectConnectorCredentialOption[];
   saving: boolean;
   success: boolean;
 }>) {
   const { t: uiText } = useUiLocale();
-  const selected = draft.credentialIds
-    .map((id) => options.find((option) => option.id === id))
-    .filter((option): option is ProjectConnectorCredentialOption => Boolean(option));
+  const chainRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<RouteDrag | undefined>(undefined);
+  const [dragVisual, setDragVisual] = useState<RouteDrag>();
+  const selected = workspaceRouteSelectedOptions(
+    draft.credentialIds, options, binding, capability
+  );
   const available = options.filter(
     (option) => !draft.credentialIds.includes(option.id)
   );
   const move = (index: number, direction: -1 | 1): void => {
     const target = index + direction;
-    if (target < 0 || target >= draft.credentialIds.length) return;
+    const sourceId = selected[index]?.id;
+    const targetId = selected[target]?.id;
+    if (!sourceId || !targetId) return;
     onChange((current) => {
-      const credentialIds = [...current.credentialIds];
-      [credentialIds[index], credentialIds[target]] = [
-        credentialIds[target]!,
-        credentialIds[index]!
-      ];
-      return { ...current, credentialIds };
+      return {
+        ...current,
+        credentialIds: reorderWorkspaceRouteCredentialIds(
+          current.credentialIds,
+          sourceId,
+          targetId,
+          direction === -1 ? "BEFORE" : "AFTER"
+        )
+      };
     });
+  };
+  const trackDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const current = dragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const target = element?.closest<HTMLElement>("[data-routing-credential-id]");
+    const targetId = target?.dataset.routingCredentialId;
+    let next: RouteDrag = { pointerId: current.pointerId, sourceId: current.sourceId };
+    if (target && targetId && targetId !== current.sourceId && chainRef.current?.contains(target)) {
+      const bounds = target.getBoundingClientRect();
+      next = {
+        ...next,
+        targetId,
+        placement: event.clientY < bounds.top + bounds.height / 2 ? "BEFORE" : "AFTER"
+      };
+    }
+    if (current.targetId === next.targetId && current.placement === next.placement) return;
+    dragRef.current = next;
+    setDragVisual(next);
+  };
+  const endDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    trackDrag(event);
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = undefined;
+    setDragVisual(undefined);
+    const { sourceId, targetId, placement } = drag;
+    if (!targetId || !placement) return;
+    if (reorderWorkspaceRouteCredentialIds(
+      draft.credentialIds, sourceId, targetId, placement
+    ) === draft.credentialIds) return;
+    onChange((current) => ({
+      ...current,
+      credentialIds: reorderWorkspaceRouteCredentialIds(
+        current.credentialIds, sourceId, targetId, placement
+      )
+    }));
   };
 
   return (
@@ -341,9 +397,39 @@ function CapabilityRoutingRow({
           <span>{draft.enabled ? <UiText text="Включено" /> : <UiText text="Выключено" />}</span>
         </label>
       </div>
-      <div className="integration-route-chain">
+      <div className="integration-route-chain" ref={chainRef}>
         {selected.map((credential, index) => (
-          <div className="integration-route-item" key={credential.id}>
+          <div
+            className={routeItemClass(credential.id, dragVisual)}
+            data-routing-credential-id={credential.id}
+            key={credential.id}
+          >
+            {canUpdate && (
+              <button
+                aria-label={uiText("Перетащить подключение {0}", [credential.label])}
+                className="integration-route-drag-handle"
+                disabled={selected.length < 2}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp" && index > 0) { event.preventDefault(); move(index, -1); }
+                  if (event.key === "ArrowDown" && index < selected.length - 1) { event.preventDefault(); move(index, 1); }
+                }}
+                onLostPointerCapture={() => { dragRef.current = undefined; setDragVisual(undefined); }}
+                onPointerCancel={() => { dragRef.current = undefined; setDragVisual(undefined); }}
+                onPointerDown={(event) => {
+                  if (event.button !== 0 || selected.length < 2) return;
+                  event.preventDefault();
+                  onReorderStart();
+                  const drag = { pointerId: event.pointerId, sourceId: credential.id };
+                  dragRef.current = drag;
+                  setDragVisual(drag);
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerMove={trackDrag}
+                onPointerUp={endDrag}
+                title={uiText("Перетащите, чтобы изменить порядок")}
+                type="button"
+              ><Icon name="gripVertical" /></button>
+            )}
             <span className="integration-route-position">{index + 1}</span>
             <ProviderLogo provider={credential.provider} size="compact" />
             <div className="integration-route-copy">
@@ -494,6 +580,14 @@ function draftFromBinding(binding: WorkspaceConnectorBinding | undefined): Route
         fallbackReasons: binding.fallbackPolicy.reasons ?? []
       }
     : emptyDraft();
+}
+
+function routeItemClass(credentialId: string, drag: RouteDrag | undefined): string {
+  if (drag?.sourceId === credentialId) return "integration-route-item is-routing-dragging";
+  if (drag?.targetId !== credentialId) return "integration-route-item";
+  return drag.placement === "BEFORE"
+    ? "integration-route-item route-drop-before"
+    : "integration-route-item route-drop-after";
 }
 
 function emptyDraft(): RouteDraft {

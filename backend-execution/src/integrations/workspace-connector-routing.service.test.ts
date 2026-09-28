@@ -463,6 +463,34 @@ test("saves an enabled route order independently of balance and temporary availa
   );
 });
 
+test("keeps every configured route visible when its platform provider is disabled", async () => {
+  const configured = {
+    ...(credential("XMLSTOCK", "DEGRADED", "000000000010") as Readonly<Record<string, unknown>>),
+    mode: "PLATFORM_PAID"
+  };
+  const route = workspaceRoute(0, projectRoute(
+    0, "XMLSTOCK", "DEGRADED", "WORKSPACE_DEFAULT", configured
+  ));
+  const unrelated = credential("ARSENKIN", "ACTIVE", "000000000011");
+  const prisma = {
+    workspaceConnectorBinding: {
+      findMany: async () => [workspaceBinding({ routes: [route] })]
+    },
+    integrationCredential: { findMany: async () => [unrelated] },
+    platformProviderAccount: { findMany: async () => [] },
+    $transaction: async (queries: readonly Promise<unknown>[]) => Promise.all(queries)
+  };
+  const routing = new WorkspaceConnectorRoutingService(prisma as unknown as PrismaService);
+
+  const settings = await routing.settings(workspaceId);
+
+  assert.deepEqual(settings.credentialOptions.map(({ id }) => id), [
+    "0190abcd-1000-7000-9000-000000000010",
+    "0190abcd-1000-7000-9000-000000000011"
+  ]);
+  assert.equal(settings.bindings[0]?.routes[0]?.availability, "CREDENTIAL_UNAVAILABLE");
+});
+
 test("reorders an existing workspace route without a project or expected version", async () => {
   const first = "0190abcd-1000-7000-9000-000000000010";
   const second = "0190abcd-1000-7000-9000-000000000011";

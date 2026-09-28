@@ -21,12 +21,14 @@ import {
   projectConnectorIncompatibleOptions,
   projectConnectorOptions,
   RANK_TRACKING_CAPABILITY,
+  reorderWorkspaceRouteCredentialIds,
   reconcileProjectConnectorCreate,
   sameProjectConnectorBindingRevision,
   stableProjectConnectorCreateCommand,
   workspaceConnectorOptions,
   workspaceRouteCredentialIdsAfterSelection,
   workspaceRouteMatchesBinding,
+  workspaceRouteSelectedOptions,
   workspaceRouteUpdateInput
 } from "./project-integration-settings.ts";
 
@@ -390,6 +392,12 @@ test("confirms the exact workspace order regardless of route version and availab
     version: 999
   }, desired), true);
   assert.equal(workspaceRouteMatchesBinding(undefined, desired), false);
+  assert.deepEqual(
+    workspaceRouteSelectedOptions(desired.credentialIds, [], workspaceBinding, RANK_TRACKING_CAPABILITY)
+      .map(({ id }) => id),
+    desired.credentialIds,
+    "configured routes must remain draggable when options are temporarily missing"
+  );
   assert.deepEqual(workspaceRouteUpdateInput(desired), {
     enabled: true,
     routes: desired.credentialIds.map((credentialId, position) => ({
@@ -404,6 +412,36 @@ test("confirms the exact workspace order regardless of route version and availab
     credentialIds: [ids[0]!],
     fallbackReasons: ["LOW_BALANCE"]
   }).fallbackPolicy, { mode: "NONE", reasons: [] });
+});
+
+test("drag-and-drop reorders mixed providers by credential ID only", () => {
+  const ids = ["xmlstock-legend", "xmlstock-personal", "arsenkin-legend"];
+  assert.deepEqual(
+    reorderWorkspaceRouteCredentialIds(ids, "arsenkin-legend", "xmlstock-legend", "BEFORE"),
+    ["arsenkin-legend", "xmlstock-legend", "xmlstock-personal"]
+  );
+  assert.deepEqual(
+    reorderWorkspaceRouteCredentialIds(ids, "xmlstock-legend", "arsenkin-legend", "AFTER"),
+    ["xmlstock-personal", "arsenkin-legend", "xmlstock-legend"]
+  );
+  assert.equal(
+    reorderWorkspaceRouteCredentialIds(ids, "xmlstock-legend", "xmlstock-personal", "BEFORE"),
+    ids
+  );
+  assert.equal(
+    reorderWorkspaceRouteCredentialIds(ids, "missing", "xmlstock-personal", "AFTER"),
+    ids
+  );
+  assert.deepEqual(
+    reorderWorkspaceRouteCredentialIds(
+      ["xmlstock-legend", "temporarily-hidden", "xmlstock-personal", "arsenkin-legend"],
+      "arsenkin-legend",
+      "xmlstock-personal",
+      "BEFORE"
+    ),
+    ["xmlstock-legend", "temporarily-hidden", "arsenkin-legend", "xmlstock-personal"],
+    "a missing option must not turn visible row indexes into the wrong stored indexes"
+  );
 });
 
 test("a transfer-reset binding starts with no selected credential", () => {

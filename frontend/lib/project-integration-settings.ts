@@ -206,6 +206,53 @@ export function workspaceRouteCredentialIdsAfterSelection(
     : [...currentCredentialIds, credentialId];
 }
 
+export function reorderWorkspaceRouteCredentialIds(
+  currentCredentialIds: readonly string[],
+  sourceCredentialId: string,
+  targetCredentialId: string,
+  placement: "BEFORE" | "AFTER"
+): readonly string[] {
+  if (
+    sourceCredentialId === targetCredentialId ||
+    !currentCredentialIds.includes(sourceCredentialId) ||
+    !currentCredentialIds.includes(targetCredentialId)
+  ) return currentCredentialIds;
+  const withoutSource = currentCredentialIds.filter((id) => id !== sourceCredentialId);
+  const targetIndex = withoutSource.indexOf(targetCredentialId);
+  const insertAt = targetIndex + (placement === "AFTER" ? 1 : 0);
+  const reordered = [
+    ...withoutSource.slice(0, insertAt),
+    sourceCredentialId,
+    ...withoutSource.slice(insertAt)
+  ];
+  return reordered.every((id, index) => id === currentCredentialIds[index])
+    ? currentCredentialIds
+    : reordered;
+}
+
+export function workspaceRouteSelectedOptions(
+  credentialIds: readonly string[],
+  options: readonly ProjectConnectorCredentialOption[],
+  binding: WorkspaceConnectorBinding | undefined,
+  capability: IntegrationCapability
+): readonly ProjectConnectorCredentialOption[] {
+  return credentialIds.flatMap((id) => {
+    const configured = options.find((option) => option.id === id);
+    if (configured) return [configured];
+    const route = binding?.routes.find((candidate) => candidate.credentialId === id);
+    if (!route) return [];
+    return [{
+      id,
+      workspaceId: route.workspaceId,
+      provider: route.provider,
+      label: `API #${id.slice(-6)}`,
+      mode: route.credentialMode,
+      status: "DEGRADED",
+      capabilities: [capability]
+    }];
+  });
+}
+
 export function workspaceRouteMatchesBinding(
   binding: WorkspaceConnectorBinding | undefined,
   draft: {

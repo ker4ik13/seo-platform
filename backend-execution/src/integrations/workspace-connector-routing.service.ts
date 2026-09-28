@@ -99,38 +99,50 @@ export class WorkspaceConnectorRoutingService {
   public constructor(private readonly prisma: PrismaService) {}
 
   public async settings(workspaceId: string): Promise<WorkspaceConnectorRoutingSettings> {
-    const [bindings, credentials, enabledPlatformAccounts] = await this.prisma.$transaction([
-      this.prisma.workspaceConnectorBinding.findMany({
-        where: { workspaceId },
-        include: WORKSPACE_BINDING_INCLUDE,
-        orderBy: [{ capability: "asc" }, { id: "asc" }]
-      }),
-      this.prisma.integrationCredential.findMany({
-        where: { workspaceId, deletedAt: null },
-        select: CREDENTIAL_SELECT,
-        orderBy: [{ label: "asc" }, { id: "asc" }],
-        take: MAX_CREDENTIAL_OPTIONS + 1
-      }),
-      this.prisma.platformProviderAccount.findMany({
-        where: { enabled: true },
-        select: { provider: true }
-      })
-    ]);
+    const [bindings, credentials, enabledPlatformAccounts] = await this.prisma.$transaction(
+      [
+        this.prisma.workspaceConnectorBinding.findMany({
+          where: { workspaceId },
+          include: WORKSPACE_BINDING_INCLUDE,
+          orderBy: [{ capability: "asc" }, { id: "asc" }]
+        }),
+        this.prisma.integrationCredential.findMany({
+          where: { workspaceId, deletedAt: null },
+          select: CREDENTIAL_SELECT,
+          orderBy: [{ label: "asc" }, { id: "asc" }],
+          take: MAX_CREDENTIAL_OPTIONS + 1
+        }),
+        this.prisma.platformProviderAccount.findMany({
+          where: { enabled: true },
+          select: { provider: true }
+        })
+      ],
+      { isolationLevel: "RepeatableRead" }
+    );
     const enabledPlatformProviders = new Set(
       enabledPlatformAccounts.map(({ provider: value }) => value)
     );
+    const configuredCredentials = new Map<string, CredentialRecord>();
+    for (const binding of bindings) {
+      for (const route of binding.routes) {
+        configuredCredentials.set(route.credentialId, route.credential);
+      }
+    }
+    const options = [
+      ...configuredCredentials.values(),
+      ...credentials.filter((credential) =>
+        !configuredCredentials.has(credential.id) &&
+        (credential.mode !== "PLATFORM_PAID" ||
+          enabledPlatformProviders.has(credential.provider))
+      )
+    ];
     return {
       bindings: bindings.map(binding =>
         workspaceBindingSummary(binding, enabledPlatformProviders)
       ),
-      credentialOptions: credentials
-        .slice(0, MAX_CREDENTIAL_OPTIONS)
-        .filter(credential =>
-          credential.mode !== "PLATFORM_PAID" ||
-          enabledPlatformProviders.has(credential.provider)
-        )
-        .map(credentialOption),
-      credentialOptionsTruncated: credentials.length > MAX_CREDENTIAL_OPTIONS,
+      credentialOptions: options.slice(0, MAX_CREDENTIAL_OPTIONS).map(credentialOption),
+      credentialOptionsTruncated:
+        credentials.length > MAX_CREDENTIAL_OPTIONS || options.length > MAX_CREDENTIAL_OPTIONS,
       access: { canUpdateBindings: false, canManageFallback: false }
     };
   }

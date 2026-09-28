@@ -9392,6 +9392,7 @@ svg { display: block; }
 }
 
 .integration-route-item {
+  position: relative;
   gap: 8px;
   min-height: 44px;
   padding: 6px 8px;
@@ -9399,6 +9400,36 @@ svg { display: block; }
   border-radius: 12px;
   background: #fff;
 }
+.integration-route-item.is-routing-dragging { opacity: .55; }
+.integration-route-item.route-drop-before::before,
+.integration-route-item.route-drop-after::after {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--brand);
+  content: "";
+}
+.integration-route-item.route-drop-before::before { top: -5px; }
+.integration-route-item.route-drop-after::after { bottom: -5px; }
+.integration-route-drag-handle {
+  display: inline-flex;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.integration-route-drag-handle:active { cursor: grabbing; }
+.integration-route-drag-handle:disabled { cursor: default; opacity: .35; }
+.integration-route-drag-handle svg { width: 16px; height: 16px; }
 
 .integration-route-position {
   display: grid;
