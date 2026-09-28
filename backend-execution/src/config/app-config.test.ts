@@ -37,9 +37,29 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.rankGrantApiToken, undefined);
   assert.equal(config.rankExecution.submitEnabled, false);
   assert.deepEqual(config.platformProviderCredentials, {});
+  assert.equal(config.xmlStockSoftId, undefined);
   assert.equal(
     config.rankExecution.killSwitchVersion,
     "arsenkin-positions@4"
+  );
+});
+
+test("loads the XMLStock partner ID independently of platform credentials", () => {
+  const softId = "a".repeat(32);
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_XMLSTOCK_SOFT_ID: ` ${softId} `
+  });
+  assert.equal(config.xmlStockSoftId, softId);
+  assert.deepEqual(config.platformProviderCredentials, {});
+  assert.throws(
+    () => loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      PLATFORM_XMLSTOCK_SOFT_ID: "invalid"
+    }),
+    /PLATFORM_XMLSTOCK_SOFT_ID must be a 32-character hexadecimal identifier/u
   );
 });
 

@@ -10,6 +10,7 @@ import {
   canonicalizeJson
 } from "@seo-platform/contracts/canonical-json";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
+import { xmlStockAuthenticatedUrl } from "../integrations/xmlstock-request-url.js";
 import type { XmlStockHttpProduct } from "../integrations/xmlstock-http-quota-limiter.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import {
@@ -155,7 +156,10 @@ export interface XmlStockStagedRankResult {
  * provider does not expose a batch SERP endpoint.
  */
 export class XmlStockRankConnector {
-  public constructor(private readonly fetcher: ProviderFetch = fetch) {}
+  public constructor(
+    private readonly fetcher: ProviderFetch = fetch,
+    private readonly softId?: string
+  ) {}
 
   public async submit(
     intentValue: unknown,
@@ -173,7 +177,7 @@ export class XmlStockRankConnector {
         };
       }
       const response = await providerTextRequest(
-        yandexSubmitUrl(request, secret),
+        yandexSubmitUrl(request, secret, this.softId),
         requestInit(),
         timeoutMs,
         this.fetcher,
@@ -253,7 +257,7 @@ export class XmlStockRankConnector {
     intent: RankProviderRequestIntentV1
   ): Promise<XmlStockRankFetchResult> {
     const response = await providerTextRequest(
-      yandexPollUrl(taskId, secret),
+      yandexPollUrl(taskId, secret, this.softId),
       requestInit(),
       timeoutMs,
       this.fetcher,
@@ -313,7 +317,7 @@ export class XmlStockRankConnector {
     const page = progress?.nextPage ?? 0;
     const documents = [...(progress?.documents ?? [])];
     const response = await providerTextRequest(
-      livePageUrl(request, secret, page),
+      livePageUrl(request, secret, page, this.softId),
       requestInit(),
       timeoutMs,
       this.fetcher,
@@ -681,9 +685,10 @@ function normalizeXmlStockRankResult(
 
 function yandexSubmitUrl(
   request: XmlStockRankWireRequest,
-  secret: IntegrationCredentialSecret
+  secret: IntegrationCredentialSecret,
+  softId?: string
 ): URL {
-  const url = authenticatedUrl(YANDEX_URL, secret);
+  const url = xmlStockAuthenticatedUrl(YANDEX_URL, secret, softId);
   url.searchParams.set("query", request.query);
   url.searchParams.set("lr", request.regionCode);
   url.searchParams.set("groupby", String(request.depth));
@@ -695,9 +700,10 @@ function yandexSubmitUrl(
 
 function yandexPollUrl(
   taskId: string,
-  secret: IntegrationCredentialSecret
+  secret: IntegrationCredentialSecret,
+  softId?: string
 ): URL {
-  const url = authenticatedUrl(YANDEX_URL, secret);
+  const url = xmlStockAuthenticatedUrl(YANDEX_URL, secret, softId);
   url.searchParams.set("req_id", taskId);
   return url;
 }
@@ -705,11 +711,13 @@ function yandexPollUrl(
 function livePageUrl(
   request: XmlStockRankWireRequest,
   secret: IntegrationCredentialSecret,
-  page: number
+  page: number,
+  softId?: string
 ): URL {
-  const url = authenticatedUrl(
+  const url = xmlStockAuthenticatedUrl(
     request.engine === "YANDEX" ? YANDEX_LIVE_URL : GOOGLE_URL,
-    secret
+    secret,
+    softId
   );
   url.searchParams.set("query", request.query);
   url.searchParams.set("lr", request.regionCode);
@@ -726,17 +734,6 @@ function livePageUrl(
   } else {
     url.searchParams.set("hl", request.language.split("-", 1)[0] ?? "ru");
   }
-  return url;
-}
-
-function authenticatedUrl(
-  base: URL,
-  secret: IntegrationCredentialSecret
-): URL {
-  if (!secret.accountIdentifier) invalid();
-  const url = new URL(base);
-  url.searchParams.set("user", secret.accountIdentifier);
-  url.searchParams.set("key", secret.apiKey);
   return url;
 }
 

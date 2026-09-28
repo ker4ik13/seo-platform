@@ -79,6 +79,8 @@ test("platform provider flags, prices and source credentials stay in their ownin
   }
   assert.equal(core.has("PLATFORM_XMLSTOCK_API_KEY"), false);
   assert.equal(core.has("PLATFORM_XMLSTOCK_API_KEYS"), false);
+  assert.equal(core.has("PLATFORM_XMLSTOCK_SOFT_ID"), false);
+  assert.equal(execution.has("PLATFORM_XMLSTOCK_SOFT_ID"), true);
   assert.equal(core.has("PLATFORM_ARSENKIN_API_KEY"), false);
   assert.equal(core.has("PLATFORM_ARSENKIN_API_KEYS"), false);
   assert.equal(
@@ -135,6 +137,7 @@ test("the deploy example keeps platform usage disabled and provider secrets empt
   assert.match(rootEnv, /^PLATFORM_XMLSTOCK_ACCOUNT_IDS=$/mu);
   assert.match(rootEnv, /^PLATFORM_XMLSTOCK_API_KEY=$/mu);
   assert.match(rootEnv, /^PLATFORM_XMLSTOCK_ACCOUNT_ID=$/mu);
+  assert.match(rootEnv, /^PLATFORM_XMLSTOCK_SOFT_ID=$/mu);
   assert.match(rootEnv, /^PLATFORM_ARSENKIN_ENABLED=false$/mu);
   assert.match(rootEnv, /^PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR=$/mu);
   assert.match(rootEnv, /^PLATFORM_ARSENKIN_MONTHLY_SPEND_LIMIT_MINOR=$/mu);

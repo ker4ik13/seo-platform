@@ -66,7 +66,10 @@ test("probes the XMLStock API key paired with the configured account", async () 
   const service = new PlatformAccountProbeService(
     prisma as never,
     accounts as never,
-    { integrationCredentialValidation: { timeoutMs: 8_000 } } as never
+    {
+      integrationCredentialValidation: { timeoutMs: 8_000 },
+      xmlStockSoftId: "a".repeat(32)
+    } as never
   );
 
   try {
@@ -79,6 +82,7 @@ test("probes the XMLStock API key paired with the configured account", async () 
   for (const url of requests) {
     assert.equal(url.searchParams.get("user"), "account-two");
     assert.equal(url.searchParams.get("key"), "xmlstock-key-two");
+    assert.equal(url.searchParams.get("soft_id"), "a".repeat(32));
   }
   assert.equal(writes.length, 2);
   assert.deepEqual(

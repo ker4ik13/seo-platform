@@ -310,6 +310,7 @@ PLATFORM_XMLSTOCK_API_KEYS=
 PLATFORM_XMLSTOCK_ACCOUNT_IDS=
 PLATFORM_XMLSTOCK_API_KEY=
 PLATFORM_XMLSTOCK_ACCOUNT_ID=
+PLATFORM_XMLSTOCK_SOFT_ID=
 PLATFORM_ARSENKIN_ENABLED=false
 PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR=
 PLATFORM_ARSENKIN_DAILY_SPEND_LIMIT_MINOR=
@@ -321,6 +322,9 @@ PLATFORM_ARSENKIN_API_KEY=
 В `PLATFORM_XMLSTOCK_API_KEYS` и `PLATFORM_XMLSTOCK_ACCOUNT_IDS` должно быть
 одинаковое число элементов. Пара с индексом `i` всегда образует один физический
 аккаунт XMLStock; один account ID нельзя повторять для нескольких API-ключей.
+`PLATFORM_XMLSTOCK_SOFT_ID` задаёт выданный XMLStock партнёрский идентификатор
+для всех исходящих запросов: системных, BYOK, проверки аккаунта и опроса
+отложенного результата. Значение не зависит от `PLATFORM_XMLSTOCK_ENABLED`.
 
 Цена задаётся в minor units за одну keyword-context проверку, положительным
 целым не больше `61489146912`. При включённом provider flag обязательны цена и

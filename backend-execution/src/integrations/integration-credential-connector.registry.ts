@@ -1,9 +1,12 @@
 import {
+  Inject,
   Injectable,
   Optional,
   UnprocessableEntityException
 } from "@nestjs/common";
 import type { IntegrationProvider } from "@seo-platform/contracts";
+import type { AppConfig } from "../config/app-config.js";
+import { APP_CONFIG } from "../config/config.module.js";
 import { ArsenkinCredentialValidationConnector } from "./arsenkin-credential-validation.connector.js";
 import {
   ArsenkinHttpRateLimiter,
@@ -26,10 +29,11 @@ export class IntegrationCredentialConnectorRegistry {
   >;
 
   public constructor(
-    @Optional() rateLimiter?: ArsenkinHttpRateLimiter
+    @Optional() rateLimiter?: ArsenkinHttpRateLimiter,
+    @Optional() @Inject(APP_CONFIG) config?: AppConfig
   ) {
     const connectors: readonly IntegrationCredentialValidationConnector[] = [
-      new XmlStockCredentialValidationConnector(),
+      new XmlStockCredentialValidationConnector(fetch, config?.xmlStockSoftId),
       new ArsenkinCredentialValidationConnector(
         rateLimiter ?? ARSENKIN_VALIDATION_DISABLED_GATE
       ),

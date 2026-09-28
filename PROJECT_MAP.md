@@ -84,6 +84,11 @@ backup Dokploy запускает `pg_dump` внутри контейнера и
 | `docs/technical-spec` | нормативное продуктовое и техническое ТЗ |
 | `docs/adr` | принятые архитектурные решения и rollback paths |
 
+Общий `backend-execution/src/integrations/xmlstock-request-url.ts` формирует
+XMLStock GET URL для проверки аккаунта, Wordstat и съёма позиций. Необязательный
+`PLATFORM_XMLSTOCK_SOFT_ID` поступает только в HTTP и connector child roles и
+добавляется к каждому такому запросу, независимо от источника API-ключа.
+
 Frontend-представление состояния фоновых операций централизовано в
 `frontend/lib/operation-status-presentation.ts`: штатное ожидание асинхронного
 ответа провайдера и ожидание его свободного слота не отображаются как ошибочный

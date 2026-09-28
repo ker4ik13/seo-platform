@@ -6,6 +6,7 @@ import type {
 import { frequencySeasonalitySeriesPointLimit } from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
+import { xmlStockAuthenticatedUrl } from "../integrations/xmlstock-request-url.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -60,7 +61,10 @@ export type XmlStockWordstatExpansionResult =
 export class XmlStockWordstatConnector {
   public readonly version = "xmlstock-wordstat@2.2.0";
 
-  public constructor(private readonly fetcher: ProviderFetch = fetch) {}
+  public constructor(
+    private readonly fetcher: ProviderFetch = fetch,
+    private readonly softId?: string
+  ) {}
 
   public async collect(
     input: {
@@ -73,9 +77,7 @@ export class XmlStockWordstatConnector {
     timeoutMs: number
   ): Promise<WordstatCollectionResult> {
     if (!secret.accountIdentifier) return failure("INVALID_CREDENTIAL", false);
-    const url = new URL(XMLSTOCK_WORDSTAT_URL);
-    url.searchParams.set("user", secret.accountIdentifier);
-    url.searchParams.set("key", secret.apiKey);
+    const url = xmlStockAuthenticatedUrl(XMLSTOCK_WORDSTAT_URL, secret, this.softId);
     url.searchParams.set("query", wordstatQuery(input.keyword, input.type));
     url.searchParams.set("pagetype", "words");
     // Bound the unrelated popular-phrase rows. Frequency itself is read only
@@ -121,9 +123,7 @@ export class XmlStockWordstatConnector {
     timeoutMs: number
   ): Promise<XmlStockSeasonalityResult> {
     if (!secret.accountIdentifier) return failure("INVALID_CREDENTIAL", false);
-    const url = new URL(XMLSTOCK_WORDSTAT_URL);
-    url.searchParams.set("user", secret.accountIdentifier);
-    url.searchParams.set("key", secret.apiKey);
+    const url = xmlStockAuthenticatedUrl(XMLSTOCK_WORDSTAT_URL, secret, this.softId);
     url.searchParams.set("query", wordstatQuery(input.keyword, input.type));
     url.searchParams.set("pagetype", "history");
     url.searchParams.set("period", providerSeasonalityPeriod(input.seasonality.granularity));
@@ -178,9 +178,7 @@ export class XmlStockWordstatConnector {
       }
       throw error;
     }
-    const url = new URL(XMLSTOCK_WORDSTAT_URL);
-    url.searchParams.set("user", secret.accountIdentifier);
-    url.searchParams.set("key", secret.apiKey);
+    const url = xmlStockAuthenticatedUrl(XMLSTOCK_WORDSTAT_URL, secret, this.softId);
     url.searchParams.set("query", query);
     url.searchParams.set("pagetype", "words");
     url.searchParams.set("groupby", String(Math.min(2_000, input.maxKeywords)));

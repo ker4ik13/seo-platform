@@ -25,6 +25,7 @@ const ids = {
 
 test("submits one delayed Yandex request and polls only by req_id", async () => {
   const calls: URL[] = [];
+  const softId = "a".repeat(32);
   const responses = [
     xml(`<?xml version="1.0"?><yandexsearch><response><req_id>task_123</req_id></response></yandexsearch>`),
     xml(`<?xml version="1.0"?><yandexsearch><response><error code="202">pending</error></response></yandexsearch>`),
@@ -36,7 +37,7 @@ test("submits one delayed Yandex request and polls only by req_id", async () => 
     const response = responses.shift();
     assert.ok(response);
     return response;
-  });
+  }, softId);
   const value = intent("YANDEX");
   const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
 
@@ -64,6 +65,7 @@ test("submits one delayed Yandex request and polls only by req_id", async () => 
   assert.equal(calls[1]?.searchParams.get("req_id"), "task_123");
   assert.equal(calls[1]?.searchParams.has("query"), false);
   assert.equal(calls[2]?.searchParams.get("req_id"), "task_123");
+  assert.ok(calls.every((url) => url.searchParams.get("soft_id") === softId));
 
   if (ready.status !== "READY") return;
   const staged = stageXmlStockRankResult(
@@ -303,6 +305,7 @@ test("does not stop a strict Live Top-50 after a thirteen-result page", async ()
 });
 
 test("loads XMLStock Yandex and Google Live Top-10 in one page", async () => {
+  const softId = "a".repeat(32);
   for (const engine of ["YANDEX", "GOOGLE"] as const) {
     const pages: string[] = [];
     const connector = new XmlStockRankConnector(async (url) => {
@@ -312,8 +315,9 @@ test("loads XMLStock Yandex and Google Live Top-10 in one page", async () => {
         parsed.pathname,
         engine === "YANDEX" ? "/yandexlive/xml/" : "/google/xml/"
       );
+      assert.equal(parsed.searchParams.get("soft_id"), softId);
       return xml(googleResult(0, "https://example.com/top-ten", 10));
-    });
+    }, softId);
     const value = intent(
       engine,
       engine === "YANDEX"

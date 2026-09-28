@@ -17,7 +17,7 @@ const LEASE_MS = 90_000;
 export class PlatformAccountProbeService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly owner = `account-probe-${randomUUID()}`;
   private readonly logger = new Logger(PlatformAccountProbeService.name);
-  private readonly xmlStock = new XmlStockCredentialValidationConnector();
+  private readonly xmlStock: XmlStockCredentialValidationConnector;
   private readonly arsenkin = new ArsenkinCredentialValidationConnector({
     async tryAcquire() {
       return { allowed: true as const };
@@ -31,7 +31,12 @@ export class PlatformAccountProbeService implements OnApplicationBootstrap, OnMo
     private readonly prisma: PrismaService,
     private readonly accounts: PlatformAccountRegistryService,
     @Inject(APP_CONFIG) private readonly config: AppConfig
-  ) {}
+  ) {
+    this.xmlStock = new XmlStockCredentialValidationConnector(
+      fetch,
+      config.xmlStockSoftId
+    );
+  }
 
   public onApplicationBootstrap(): void {
     this.schedule(1_000);

@@ -104,6 +104,7 @@ export interface AppConfig {
   readonly malwareScanner: MalwareScannerConfig;
   readonly integrationCredentials: IntegrationCredentialEncryptionConfig;
   readonly platformProviderCredentials: PlatformProviderCredentialsConfig;
+  readonly xmlStockSoftId?: string;
   readonly integrationCredentialValidation: {
     readonly timeoutMs: number;
     readonly leaseSeconds: number;
@@ -273,6 +274,7 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "PLATFORM_XMLSTOCK_API_KEYS",
   "PLATFORM_XMLSTOCK_ACCOUNT_ID",
   "PLATFORM_XMLSTOCK_ACCOUNT_IDS",
+  "PLATFORM_XMLSTOCK_SOFT_ID",
   "PLATFORM_ARSENKIN_ENABLED",
   "PLATFORM_ARSENKIN_API_KEY",
   "PLATFORM_ARSENKIN_API_KEYS",
@@ -884,6 +886,10 @@ export function loadAppConfig(
   const platformXmlstockEnabled = bool(
     env.PLATFORM_XMLSTOCK_ENABLED
   );
+  const xmlStockSoftId = optional(env, "PLATFORM_XMLSTOCK_SOFT_ID");
+  if (xmlStockSoftId && !/^[a-f0-9]{32}$/iu.test(xmlStockSoftId)) {
+    throw new Error("PLATFORM_XMLSTOCK_SOFT_ID must be a 32-character hexadecimal identifier");
+  }
   const platformArsenkinEnabled = bool(
     env.PLATFORM_ARSENKIN_ENABLED
   );
@@ -1645,6 +1651,7 @@ export function loadAppConfig(
     databaseUrl: required(env, "DATABASE_URL"),
     databasePoolMax,
     redisUrl: env.REDIS_URL?.trim() || "redis://127.0.0.1:6379",
+    ...(xmlStockSoftId ? { xmlStockSoftId } : {}),
     ...(platformApiToken ? { platformApiToken } : {}),
     ...(seoDataApiToken ? { seoDataApiToken } : {}),
     ...(integrationCredentialApiToken

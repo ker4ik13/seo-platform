@@ -26,6 +26,7 @@ const baseEnvironment = {
   PLATFORM_XMLSTOCK_ENABLED: "true",
   PLATFORM_XMLSTOCK_API_KEYS: "must-stay-in-http-1,must-stay-in-http-2",
   PLATFORM_XMLSTOCK_ACCOUNT_IDS: "platform-account-1,platform-account-2",
+  PLATFORM_XMLSTOCK_SOFT_ID: "a".repeat(32),
   PLATFORM_ARSENKIN_ENABLED: "false",
   PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http",
   RANK_CONNECTOR_CONCURRENCY: "16",
@@ -51,6 +52,7 @@ test("execution roles receive only their scoped database and secrets", () => {
   assert.equal(http?.PLATFORM_API_URL, "http://backend-core:4000");
   assert.equal(http?.PLATFORM_API_COMMAND_TIMEOUT_MS, "7000");
   assert.equal(http?.PLATFORM_XMLSTOCK_ENABLED, "true");
+  assert.equal(http?.PLATFORM_XMLSTOCK_SOFT_ID, "a".repeat(32));
   assert.equal(
     http?.PLATFORM_XMLSTOCK_API_KEYS,
     "must-stay-in-http-1,must-stay-in-http-2"
@@ -82,6 +84,9 @@ test("execution roles receive only their scoped database and secrets", () => {
   assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_INDEX, "1");
   assert.equal(connector?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
   assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
+  assert.equal(connector?.PLATFORM_XMLSTOCK_SOFT_ID, "a".repeat(32));
+  assert.equal(secondaryConnector?.PLATFORM_XMLSTOCK_SOFT_ID, "a".repeat(32));
+  assert.equal(rank?.PLATFORM_XMLSTOCK_SOFT_ID, undefined);
   assert.equal(
     connector?.RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS,
     undefined

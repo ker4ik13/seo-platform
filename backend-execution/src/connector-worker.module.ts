@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
+import type { AppConfig } from "./config/app-config.js";
 import { PaidOperationRuntimeService } from "./paid-operations/paid-operation-runtime.service.js";
-import { ConfigModule } from "./config/config.module.js";
+import { APP_CONFIG, ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { IntegrationCredentialConnectorRegistry } from "./integrations/integration-credential-connector.registry.js";
 import { IntegrationCredentialCryptoService } from "./integrations/integration-credential-crypto.service.js";
@@ -70,7 +71,9 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     ClusteringRuntimeService,
     {
       provide: XmlStockWordstatConnector,
-      useFactory: () => new XmlStockWordstatConnector()
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) =>
+        new XmlStockWordstatConnector(fetch, config.xmlStockSoftId)
     },
     {
       provide: ArsenkinWordstatConnector,
@@ -108,7 +111,9 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     },
     {
       provide: XMLSTOCK_RANK_CONNECTOR,
-      useFactory: () => new XmlStockRankConnector()
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) =>
+        new XmlStockRankConnector(fetch, config.xmlStockSoftId)
     }
   ]
 })

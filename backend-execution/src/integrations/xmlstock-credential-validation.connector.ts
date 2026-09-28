@@ -11,6 +11,7 @@ import {
   ProviderTransportError
 } from "./provider-json-request.js";
 import { xmlStockPricingMetadata } from "./xmlstock-pricing.js";
+import { xmlStockAuthenticatedUrl } from "./xmlstock-request-url.js";
 
 const XMLSTOCK_ACCOUNT_URL = "https://xmlstock.com/api/";
 
@@ -21,16 +22,19 @@ export class XmlStockCredentialValidationConnector
   public readonly version =
     XMLSTOCK_CREDENTIAL_VALIDATION_CONNECTOR_VERSION;
 
-  public constructor(private readonly fetcher: ProviderFetch = fetch) {}
+  public constructor(
+    private readonly fetcher: ProviderFetch = fetch,
+    private readonly softId?: string
+  ) {}
 
   public async validate(
     secret: IntegrationCredentialSecret,
     timeoutMs: number
   ): Promise<CredentialValidationResult> {
     if (!secret.accountIdentifier) return invalidCredential();
-    const accountUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
-    const userInfoUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
-    const statusInfoUrl = authenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret);
+    const accountUrl = xmlStockAuthenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret, this.softId);
+    const userInfoUrl = xmlStockAuthenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret, this.softId);
+    const statusInfoUrl = xmlStockAuthenticatedUrl(XMLSTOCK_ACCOUNT_URL, secret, this.softId);
     userInfoUrl.searchParams.set("info", "user");
     statusInfoUrl.searchParams.set("info", "status");
     try {
@@ -286,16 +290,6 @@ function record(
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
-}
-
-function authenticatedUrl(
-  endpoint: string,
-  secret: IntegrationCredentialSecret
-): URL {
-  const url = new URL(endpoint);
-  url.searchParams.set("user", secret.accountIdentifier ?? "");
-  url.searchParams.set("key", secret.apiKey);
-  return url;
 }
 
 function providerInteger(value: unknown): number | undefined {

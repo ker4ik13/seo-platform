@@ -10,6 +10,7 @@ import {
 
 test("validates XMLStock only through read-only account endpoints", async () => {
   let received: URL | undefined;
+  const softId = "a".repeat(32);
   const requests: URL[] = [];
   const connector = new XmlStockCredentialValidationConnector(
     async (input, init) => {
@@ -48,7 +49,8 @@ test("validates XMLStock only through read-only account endpoints", async () => 
             days: 14
           })
         : Response.json({ regions: [{ id: 225, name: "Россия" }] });
-    }
+    },
+    softId
   );
   assert.deepEqual(
     await connector.validate(
@@ -93,6 +95,7 @@ test("validates XMLStock only through read-only account endpoints", async () => 
   );
   assert.equal(received?.origin, "https://xmlstock.com");
   assert.equal(requests.length, 3);
+  assert.ok(requests.every((url) => url.searchParams.get("soft_id") === softId));
   assert.ok(requests.every((url) => url.pathname === "/api/"));
   assert.deepEqual(
     requests.map((url) => url.searchParams.get("info")),

@@ -28,10 +28,11 @@ test("rejects an operator-expanded query beyond the provider limit", () => {
 
 test("collects frequency without exposing credentials outside the request URL", async () => {
   let url: URL | undefined;
+  const softId = "a".repeat(32);
   const connector = new XmlStockWordstatConnector(async (input) => {
     url = new URL(String(input));
     return Response.json({ totalCount: "8960", results: [] });
-  });
+  }, softId);
   assert.deepEqual(
     await connector.collect(
       { keyword: "генератор изображений", type: "BASE", regionCode: "213", device: "ALL" },
@@ -44,10 +45,12 @@ test("collects frequency without exposing credentials outside the request URL", 
   assert.equal(url?.searchParams.get("groupby"), "1");
   assert.equal(url?.searchParams.get("regions"), "213");
   assert.equal(url?.searchParams.get("device"), "all");
+  assert.equal(url?.searchParams.get("soft_id"), softId);
 });
 
 test("collects XMLStock monthly seasonality with explicit operators and range", async () => {
   let url: URL | undefined;
+  const softId = "a".repeat(32);
   const connector = new XmlStockWordstatConnector(async (input) => {
     url = new URL(String(input));
     return Response.json({
@@ -56,7 +59,7 @@ test("collects XMLStock monthly seasonality with explicit operators and range", 
         { date: "2025-02-01T00:00:00Z", count: "80", share: "0.00008" }
       ]
     });
-  });
+  }, softId);
   assert.deepEqual(await connector.collectSeasonality({
     keyword: "купить слона",
     type: "FIXED",
@@ -81,6 +84,7 @@ test("collects XMLStock monthly seasonality with explicit operators and range", 
   assert.equal(url?.searchParams.get("end"), "28.02.2025");
   assert.equal(url?.searchParams.get("regions"), "225");
   assert.equal(url?.searchParams.get("device"), "desktop");
+  assert.equal(url?.searchParams.get("soft_id"), softId);
 });
 
 test("accepts the numeric share currently returned by the live history endpoint", () => {
@@ -271,6 +275,7 @@ test("pins explicit all-region collection instead of inheriting account defaults
 
 test("expands a phrase through XMLStock results and associations", async () => {
   let url: URL | undefined;
+  const softId = "a".repeat(32);
   const connector = new XmlStockWordstatConnector(async (input) => {
     url = new URL(String(input));
     return Response.json({
@@ -281,7 +286,7 @@ test("expands a phrase through XMLStock results and associations", async () => {
       ],
       associations: [{ phrase: "морозильная камера", count: "21" }]
     });
-  });
+  }, softId);
 
   const result = await connector.expand(
     {
@@ -313,6 +318,7 @@ test("expands a phrase through XMLStock results and associations", async () => {
   assert.equal(url?.searchParams.get("groupby"), "500");
   assert.equal(url?.searchParams.get("regions"), "225");
   assert.equal(url?.searchParams.get("query"), "холодильник -бесплатно");
+  assert.equal(url?.searchParams.get("soft_id"), softId);
 });
 
 test("rejects a malformed XMLStock expansion response", () => {
