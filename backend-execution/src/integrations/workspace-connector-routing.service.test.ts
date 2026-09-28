@@ -389,9 +389,11 @@ test("saves an enabled route order independently of balance and temporary availa
     updatedAt: now
   };
   const transaction = {
+    $queryRaw: async () => [{ locked: true }],
     integrationCredential: {
+      count: async () => 2,
       findMany: async () => {
-        throw new Error("Reordering must not revalidate credential state");
+        throw new Error("Reordering must not revalidate balance or status");
       }
     },
     platformProviderAccount: { findMany: async () => [{ provider: "XMLSTOCK" }, { provider: "ARSENKIN" }] },
@@ -507,6 +509,8 @@ test("reorders an existing workspace route without a project or expected version
     updatedAt: now
   } as Readonly<Record<string, unknown>>;
   const transaction = {
+    $queryRaw: async () => [{ locked: true }],
+    integrationCredential: { count: async () => 2 },
     platformProviderAccount: { findMany: async () => [] },
     workspaceConnectorBinding: {
       findUnique: async () => existing,
@@ -552,6 +556,32 @@ test("reorders an existing workspace route without a project or expected version
 
   assert.equal(result.version, 48);
   assert.deepEqual(result.routes.map(({ credentialId }) => credentialId), [second, first]);
+});
+
+test("does not re-add a disconnected credential from a stale routing screen", async () => {
+  const transaction = {
+    $queryRaw: async () => [{ locked: true }],
+    integrationCredential: { count: async () => 0 }
+  };
+  const routing = new WorkspaceConnectorRoutingService({
+    $transaction: async (callback: (value: typeof transaction) => Promise<unknown>) =>
+      callback(transaction)
+  } as unknown as PrismaService);
+  await assert.rejects(
+    routing.upsert({
+      workspaceId,
+      actorId,
+      capability: "SERP_RANK_TRACKING",
+      enabled: true,
+      routes: [{
+        position: 0,
+        sourceKind: "WORKSPACE_CREDENTIAL",
+        credentialId: "0190abcd-1000-7000-9000-000000000010"
+      }],
+      fallbackPolicy: { mode: "NONE", reasons: [] }
+    }),
+    (error: unknown) => error instanceof ConflictException
+  );
 });
 
 function service(

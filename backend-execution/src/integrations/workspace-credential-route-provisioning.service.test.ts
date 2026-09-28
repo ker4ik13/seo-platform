@@ -105,3 +105,68 @@ test("appends a new credential last to every compatible workspace route", async 
     }
   }]);
 });
+
+test("revoking a credential removes it from every workspace route and retires project references", async () => {
+  const otherCredential = "01900000-0000-7000-8000-000000000099";
+  const bindings = [
+    { id: "01900000-0000-7000-8000-000000000010", workspaceId, enabled: true, fallbackMode: "NEXT_AVAILABLE", version: 3 },
+    { id: "01900000-0000-7000-8000-000000000011", workspaceId, enabled: true, fallbackMode: "NONE", version: 2 }
+  ];
+  const routes = [
+    { id: "01900000-0000-7000-8000-000000000020", workspaceId, bindingId: bindings[0]!.id, credentialId, position: 0 },
+    { id: "01900000-0000-7000-8000-000000000021", workspaceId, bindingId: bindings[0]!.id, credentialId: otherCredential, position: 1 },
+    { id: "01900000-0000-7000-8000-000000000022", workspaceId, bindingId: bindings[1]!.id, credentialId, position: 0 }
+  ];
+  let retiredProjectRoutes = false;
+  const transaction = {
+    $queryRaw: async () => [{ locked: true }],
+    workspaceConnectorBinding: {
+      findMany: async () => bindings
+        .filter((binding) => routes.some((route) => route.bindingId === binding.id && route.credentialId === credentialId))
+        .map((binding) => ({
+          ...binding,
+          routes: routes.filter((route) => route.bindingId === binding.id)
+        })),
+      update: async ({ where, data }: any) => {
+        const binding = bindings.find((candidate) => candidate.id === where.id)!;
+        binding.enabled = data.enabled;
+        if (data.fallbackMode) binding.fallbackMode = data.fallbackMode;
+        binding.version += 1;
+        return binding;
+      }
+    },
+    workspaceConnectorRoute: {
+      deleteMany: async ({ where }: any) => {
+        const index = routes.findIndex((route) =>
+          route.workspaceId === where.workspaceId &&
+          route.bindingId === where.bindingId &&
+          route.credentialId === where.credentialId
+        );
+        if (index >= 0) routes.splice(index, 1);
+        return { count: index >= 0 ? 1 : 0 };
+      },
+      update: async ({ where, data }: any) => {
+        const route = routes.find((candidate) => candidate.id === where.id)!;
+        route.position = data.position;
+        return route;
+      }
+    },
+    projectConnectorRoute: {
+      updateMany: async ({ where, data }: any) => {
+        assert.deepEqual(where, { workspaceId, credentialId, retiredAt: null });
+        assert.ok(data.retiredAt instanceof Date);
+        retiredProjectRoutes = true;
+        return { count: 2 };
+      }
+    }
+  };
+  await new WorkspaceCredentialRouteProvisioningService({} as PrismaService)
+    .removeInTransaction(transaction as any, { workspaceId, actorId, credentialId });
+
+  assert.equal(routes.some((route) => route.credentialId === credentialId), false);
+  assert.deepEqual(routes.map(({ position }) => position), [0]);
+  assert.equal(bindings[0]?.fallbackMode, "NONE");
+  assert.equal(bindings[1]?.enabled, false);
+  assert.deepEqual(bindings.map(({ version }) => version), [4, 3]);
+  assert.equal(retiredProjectRoutes, true);
+});

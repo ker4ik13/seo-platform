@@ -17,6 +17,7 @@ import type {
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
 import { internalCreateIntegrationCredentialInput } from "./integration-credential-input.js";
 import { IntegrationCredentialService } from "./integration-credential.service.js";
+import type { WorkspaceCredentialRouteProvisioningService } from "./workspace-credential-route-provisioning.service.js";
 import {
   INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
   INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
@@ -639,19 +640,32 @@ test("destroys encrypted material on a tenant-scoped revoke", async () => {
     readonly where: Readonly<Record<string, unknown>>;
     readonly data: Readonly<Record<string, unknown>>;
   } | undefined;
-  const prisma = {
+  let removedRoutes = false;
+  const transaction = {
     integrationCredential: {
-      findFirst: async ({ where }: { where: unknown }) => {
-        lookup = where;
-        return current;
-      },
       update: async (input: typeof update) => {
         update = input;
         return current;
       }
     }
+  };
+  const prisma = {
+    integrationCredential: {
+      findFirst: async ({ where }: { where: unknown }) => {
+        lookup = where;
+        return current;
+      }
+    },
+    $transaction: async (run: (client: typeof transaction) => Promise<void>) => run(transaction)
   } as unknown as PrismaService;
-  const service = new IntegrationCredentialService(prisma, crypto);
+  const routes = {
+    removeInTransaction: async (_client: unknown, input: { credentialId: string; workspaceId: string }) => {
+      assert.equal(input.credentialId, credentialId);
+      assert.equal(input.workspaceId, workspaceId);
+      removedRoutes = true;
+    }
+  } as unknown as WorkspaceCredentialRouteProvisioningService;
+  const service = new IntegrationCredentialService(prisma, crypto, undefined, routes);
 
   await service.revoke(credentialId, workspaceId, 1, actorId);
 
@@ -660,6 +674,7 @@ test("destroys encrypted material on a tenant-scoped revoke", async () => {
     workspaceId,
     deletedAt: null
   });
+  assert.equal(removedRoutes, true);
   assert.deepEqual(update?.where, {
     id: credentialId,
     workspaceId,

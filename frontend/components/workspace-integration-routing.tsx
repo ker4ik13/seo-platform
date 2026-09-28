@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import {
   connectorFallbackReasons,
   credentialModeSupportsCapability,
-  integrationCapabilities,
   type ConnectorFallbackReason,
   type IntegrationCapability,
   type ProjectConnectorCredentialOption,
@@ -33,6 +32,7 @@ import {
   workspaceRouteSelectedOptions,
   workspaceRouteUpdateInput
 } from "../lib/project-integration-settings";
+import { visibleRoutingCapabilities } from "../lib/integration-visibility";
 
 
 type RouteDraft = {
@@ -57,9 +57,8 @@ const ROUTE_CONFIRMATION_ERROR =
   "Сервер не подтвердил новый порядок маршрута. Повторите сохранение.";
 
 export function WorkspaceIntegrationRouting({
-  revision = 0,
   workspaceId
-}: Readonly<{ revision?: number; workspaceId: string }>) {
+}: Readonly<{ workspaceId: string }>) {
   const [settings, setSettings] = useState<WorkspaceConnectorRoutingSettings>();
   const [drafts, setDrafts] = useState<ReadonlyMap<IntegrationCapability, RouteDraft>>(
     new Map()
@@ -90,7 +89,7 @@ export function WorkspaceIntegrationRouting({
       setSuccess(undefined);
       setFailed(undefined);
       const nextDrafts = new Map(
-          integrationCapabilities.map((capability) => {
+          visibleRoutingCapabilities.map((capability) => {
             const binding = value.bindings.find(
               (candidate) => candidate.capability === capability
             );
@@ -110,12 +109,12 @@ export function WorkspaceIntegrationRouting({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, revision]);
+  }, [load]);
 
   const optionsByCapability = useMemo(
     () =>
       new Map(
-        integrationCapabilities.map((capability) => [
+        visibleRoutingCapabilities.map((capability) => [
           capability,
           (settings?.credentialOptions ?? []).filter((credential) => {
             const configured = settings?.bindings
@@ -251,7 +250,7 @@ export function WorkspaceIntegrationRouting({
       </header>
       {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
       <div className="integration-routing-list">
-        {integrationCapabilities.map((capability) => (
+        {visibleRoutingCapabilities.map((capability) => (
           <CapabilityRoutingRow
             {...(settings.bindings.find(
               (binding) => binding.capability === capability

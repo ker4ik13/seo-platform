@@ -64,9 +64,9 @@ test("advertises platform-paid mode only for configured providers", () => {
     catalog.find(({ provider }) => provider === "ARSENKIN")?.supportedModes,
     ["BYOK_API_KEY"]
   );
-  assert.match(
+  assert.doesNotMatch(
     catalog.find(({ provider }) => provider === "XMLSTOCK")
-      ?.subscriptionNotice ?? "",
-    /баланса данных/u
+      ?.description ?? "",
+    /системное подключение/u
   );
 });

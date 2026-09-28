@@ -3,7 +3,6 @@ import { SettingsTabs } from "../../../../../components/settings-tabs";
 import {
   canManageWorkspaceIntegrations,
   canTestWorkspaceIntegrations,
-  canUseWorkspaceSystemCredentials,
   canViewWorkspaceIntegrations
 } from "../../../../../lib/app-permissions";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
@@ -23,10 +22,6 @@ export default async function IntegrationSettingsPage() {
   const canTest =
     canTestWorkspaceIntegrations(context.workspace?.roleCode) &&
     context.workspace?.status === "ACTIVE";
-  const canUsePlatform =
-    canUseWorkspaceSystemCredentials(context.workspace?.roleCode) &&
-    context.workspace?.status === "ACTIVE";
-
   return (
     <>
       <section className="page-heading">
@@ -34,7 +29,7 @@ export default async function IntegrationSettingsPage() {
           <h1><UiText text="Подключения SEO API" /></h1>
           <p>
             {canView
-              ? <UiText text="Используйте собственные API-ключи или системные XMLStock и Arsenkin с оплатой внутренними токенами. Секреты после подключения не показываются." />
+              ? <UiText text="Подключите собственные API-ключи XMLStock и Arsenkin Tools. Секреты после подключения не показываются." />
               : <UiText text="Управление workspace-подключениями доступно только участникам с разрешением на просмотр интеграций." />}
           </p>
         </div>
@@ -67,7 +62,6 @@ export default async function IntegrationSettingsPage() {
         <IntegrationSettings
           canManage={canManage}
           canTest={canTest}
-          canUsePlatform={canUsePlatform}
           readOnly={context.workspace.status === "READ_ONLY"}
           workspaceId={context.workspace.id}
         />

@@ -1429,6 +1429,44 @@ test("accepts the safe XMLStock quota in workspace routing credential options", 
   }
 });
 
+test("accepts an empty disabled workspace route after the only key is disconnected", async () => {
+  const originalFetch = globalThis.fetch;
+  const binding = {
+    id: bindingId,
+    workspaceId,
+    capability: "SERP_RANK_TRACKING",
+    enabled: false,
+    routes: [],
+    fallbackPolicy: { mode: "NONE", reasons: [] },
+    version: 2,
+    createdBy: actorId,
+    updatedBy: actorId,
+    createdAt: "2026-09-28T12:00:00.000Z",
+    updatedAt: "2026-09-28T12:01:00.000Z"
+  };
+  const response = (candidate: typeof binding) => dataResponse({
+    bindings: [candidate],
+    credentialOptions: [],
+    credentialOptionsTruncated: false,
+    access: { canUpdateBindings: true, canManageFallback: true }
+  });
+  try {
+    globalThis.fetch = (async () => response(binding)) as typeof fetch;
+    const settings = await client().workspaceConnectorRouting(
+      context("request-workspace-routing-after-revoke-001")
+    );
+    assert.deepEqual(settings.bindings[0]?.routes, []);
+    assert.equal(settings.bindings[0]?.enabled, false);
+    globalThis.fetch = (async () => response({ ...binding, enabled: true })) as typeof fetch;
+    await assert.rejects(
+      client().workspaceConnectorRouting(context("request-workspace-routing-invalid-empty-001")),
+      DomainError
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects scoped, duplicate and secret-bearing project connector responses", async () => {
   const originalFetch = globalThis.fetch;
   const badPayloads: readonly unknown[] = [

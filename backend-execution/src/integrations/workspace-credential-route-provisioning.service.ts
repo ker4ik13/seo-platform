@@ -13,6 +13,21 @@ interface AppendWorkspaceCredentialRoutesInput {
   readonly capabilities: readonly IntegrationCapability[];
 }
 
+interface RemoveWorkspaceCredentialRoutesInput {
+  readonly workspaceId: string;
+  readonly actorId: string;
+  readonly credentialId: string;
+}
+
+export async function lockWorkspaceCredentialRoutes(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string
+): Promise<void> {
+  await transaction.$queryRaw(
+    Prisma.sql`SELECT true AS locked FROM pg_advisory_xact_lock(hashtextextended(${`workspace-credential-routes:${workspaceId}`}, 0))`
+  );
+}
+
 /**
  * Adds a newly created credential to the end of every compatible workspace
  * route without changing the existing primary source or route order.
@@ -31,9 +46,7 @@ export class WorkspaceCredentialRouteProvisioningService {
     transaction: Prisma.TransactionClient,
     input: AppendWorkspaceCredentialRoutesInput
   ): Promise<void> {
-    await transaction.$queryRaw(
-      Prisma.sql`SELECT true AS locked FROM pg_advisory_xact_lock(hashtextextended(${`workspace-credential-routes:${input.workspaceId}`}, 0))`
-    );
+    await lockWorkspaceCredentialRoutes(transaction, input.workspaceId);
     for (const capability of [...new Set(input.capabilities)].sort()) {
       let binding = await transaction.workspaceConnectorBinding.findUnique({
         where: {
@@ -93,5 +106,60 @@ export class WorkspaceCredentialRouteProvisioningService {
         });
       }
     }
+  }
+
+  public async removeInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: RemoveWorkspaceCredentialRoutesInput
+  ): Promise<void> {
+    await lockWorkspaceCredentialRoutes(transaction, input.workspaceId);
+    const bindings = await transaction.workspaceConnectorBinding.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        routes: { some: { credentialId: input.credentialId } }
+      },
+      include: { routes: { orderBy: [{ position: "asc" }, { id: "asc" }] } }
+    });
+    for (const binding of bindings) {
+      await transaction.workspaceConnectorRoute.deleteMany({
+        where: {
+          workspaceId: input.workspaceId,
+          bindingId: binding.id,
+          credentialId: input.credentialId
+        }
+      });
+      const remaining = binding.routes.filter(
+        (route) => route.credentialId !== input.credentialId
+      );
+      for (const [position, route] of remaining.entries()) {
+        if (route.position !== position) {
+          await transaction.workspaceConnectorRoute.update({
+            where: { id: route.id },
+            data: { position }
+          });
+        }
+      }
+      await transaction.workspaceConnectorBinding.update({
+        where: { id: binding.id },
+        data: {
+          enabled: remaining.length > 0 && binding.enabled,
+          ...(remaining.length < 2
+            ? { fallbackMode: "NONE", fallbackReasons: [] }
+            : {}),
+          updatedBy: input.actorId,
+          version: { increment: 1 }
+        }
+      });
+    }
+    // Project routes are immutable job references. Retire their active view,
+    // but retain rows referenced by prior operations and their result history.
+    await transaction.projectConnectorRoute.updateMany({
+      where: {
+        workspaceId: input.workspaceId,
+        credentialId: input.credentialId,
+        retiredAt: null
+      },
+      data: { retiredAt: new Date() }
+    });
   }
 }

@@ -175,6 +175,24 @@ test("production runtime through Caddy: tenant security, real writes and respons
           assert.equal(await page.locator('.billing-cancel-subscription').count(), 0, "A permanent free tier has no paid renewal to cancel");
           assert.equal(/9999|10000/u.test(await page.locator('.billing-stack').innerText()), false, "Do not expose the free-tier date sentinel");
         }
+        if (path === "/app/settings/integrations") {
+          const cards = page.locator(".integration-catalog-grid .integration-provider-card");
+          assert.equal(await cards.count(), 2, "Only XMLStock and Arsenkin appear in the catalog");
+          const registration = cards.locator("a.integration-registration-button");
+          assert.equal(await registration.count(), 2);
+          assert.equal(await registration.nth(0).getAttribute("href"), "https://xmlstock.com/?refid=14832");
+          assert.equal(await registration.nth(1).getAttribute("href"), "https://arsenkin.ru/tools/?ref=152654pxfB");
+          assert.equal(await page.getByRole("button", { name: "Подключить за токены" }).count(), 0);
+          assert.equal(await page.locator("#routing-competitor-research").count(), 0);
+          for (const card of await cards.all()) {
+            const actions = card.locator(".integration-provider-actions");
+            const first = await actions.locator("a").boundingBox();
+            const second = await actions.locator("button").boundingBox();
+            assert.ok(first && second && second.y >= first.y + first.height - 1, "Registration and own-key buttons must form two rows");
+          }
+          await page.locator(".integration-catalog-section").scrollIntoViewIfNeeded();
+          await page.screenshot({ path: join(output, `integration-catalog-${width}.png`) });
+        }
         const filename = `settings-${width}-${index}.png`;
         await page.screenshot({ path: join(output, filename), fullPage: true });
         report.push({ width, screen: index, status: response.status(), ...dimensions, screenshot: filename });
@@ -241,6 +259,36 @@ test("production runtime through Caddy: tenant security, real writes and respons
     await page.waitForLoadState("networkidle");
     assert.equal(await page.getByText("Сервис временно недоступен", { exact: true }).count(), 0);
     await page.unroute(path);
+  });
+
+  await t.test("disconnecting a key removes every workspace route without paid provider calls", async () => {
+    const label = `Отключаемый E2E ${randomUUID()}`;
+    const prefix = `workspaces/${first.workspace.id}/integrations`;
+    const credential = await command(first.api, "POST", `${prefix}/credentials`, {
+      provider: "ARSENKIN",
+      label,
+      apiKey: `disposable-not-a-provider-key-${randomUUID()}`
+    });
+    const before = await command(first.api, "GET", `${prefix}/routing`);
+    assert.ok(before.bindings.some(binding => binding.routes.some(route => route.credentialId === credential.id)));
+
+    await page.goto(`${base}/app/settings/integrations`, { waitUntil: "networkidle" });
+    const card = page.locator(".integration-credential-row").filter({ hasText: label });
+    await card.waitFor();
+    await card.getByRole("button", { name: "Отключить", exact: true }).click();
+    await page.getByRole("alertdialog", { name: "Отключить подключение?" })
+      .getByRole("button", { name: "Отключить", exact: true }).click();
+    await card.waitFor({ state: "detached" });
+    await page.locator(".integration-routing-list").waitFor();
+    await page.waitForFunction(id =>
+      !document.querySelector(`[data-routing-credential-id="${id}"]`),
+      credential.id
+    );
+
+    const after = await command(first.api, "GET", `${prefix}/routing`);
+    assert.equal(after.bindings.some(binding => binding.routes.some(route => route.credentialId === credential.id)), false);
+    const credentials = await command(first.api, "GET", `${prefix}/credentials`);
+    assert.equal(credentials.some(item => item.id === credential.id), false);
   });
 });
 

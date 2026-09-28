@@ -3515,7 +3515,6 @@ function workspaceConnectorBinding(
     (expectedCapability !== undefined && capability !== expectedCapability) ||
     typeof input.enabled !== "boolean" ||
     !Array.isArray(input.routes) ||
-    input.routes.length < 1 ||
     input.routes.length > 8
   ) {
     throw invalidJobsResponse();
@@ -3528,13 +3527,17 @@ function workspaceConnectorBinding(
   if (new Set(routes.map(({ credentialId }) => credentialId)).size !== routes.length) {
     throw invalidJobsResponse();
   }
+  const fallbackPolicy = projectFallbackPolicy(input.fallbackPolicy);
+  if (routes.length === 0 && (input.enabled || fallbackPolicy.mode !== "NONE")) {
+    throw invalidJobsResponse();
+  }
   return {
     id,
     workspaceId,
     capability,
     enabled: input.enabled,
     routes,
-    fallbackPolicy: projectFallbackPolicy(input.fallbackPolicy),
+    fallbackPolicy,
     version: positiveInteger(input.version),
     createdBy: uuidValue(input.createdBy),
     updatedBy: uuidValue(input.updatedBy),

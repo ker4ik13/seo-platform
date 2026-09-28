@@ -28,6 +28,7 @@ import { safeIntegrationCredentialCapabilities } from "./integration-credential-
 import { safeCredentialQuota } from "./integration-credential.service.js";
 import { xmlStockOperationUsage } from "./xmlstock-pricing.js";
 import { replaceActiveProjectConnectorRoutes } from "./project-connector-route-lifecycle.js";
+import { lockWorkspaceCredentialRoutes } from "./workspace-credential-route-provisioning.service.js";
 
 const CAPABILITIES = new Set<string>(integrationCapabilities);
 const PROVIDERS = new Set<string>(integrationProviders);
@@ -153,6 +154,20 @@ export class WorkspaceConnectorRoutingService {
     assertCapability(input.capability);
     assertWorkspaceRoutes(input);
     return this.prisma.$transaction(async (transaction) => {
+      await lockWorkspaceCredentialRoutes(transaction, input.workspaceId);
+      const activeCredentials = await transaction.integrationCredential.count({
+        where: {
+          workspaceId: input.workspaceId,
+          id: { in: input.routes.map(({ credentialId }) => credentialId) },
+          deletedAt: null
+        }
+      });
+      if (activeCredentials !== input.routes.length) {
+        throw new ConflictException({
+          code: "CONNECTOR_CREDENTIAL_REVOKED",
+          message: "A selected connection has been disconnected"
+        });
+      }
       const enabledPlatformProviders = await enabledPlatformProviderSet(transaction);
 
       const current = await transaction.workspaceConnectorBinding.findUnique({

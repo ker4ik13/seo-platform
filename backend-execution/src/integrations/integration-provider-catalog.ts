@@ -75,12 +75,7 @@ export function operationalIntegrationProviderCatalogForPlatform(
     }
     return {
       ...item,
-      description:
-        `${item.description} Доступны собственный ключ и системное подключение с оплатой по балансу данных.`,
-      supportedModes: ["BYOK_API_KEY", "PLATFORM_PAID"],
-      subscriptionNotice:
-        `${item.subscriptionNotice} Для системного подключения ` +
-        "стоимость показывается до запуска и списывается с баланса данных."
+      supportedModes: ["BYOK_API_KEY", "PLATFORM_PAID"]
     };
   });
 }

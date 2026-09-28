@@ -428,34 +428,45 @@ export class IntegrationCredentialService {
   ): Promise<void> {
     const current = await this.load(credentialId, workspaceId);
     if (current.version !== version) throw versionConflict();
+    const routeProvisioning = this.routeProvisioning;
+    if (!routeProvisioning) {
+      throw new Error("Workspace credential route provisioning is unavailable");
+    }
     try {
-      await this.prisma.integrationCredential.update({
-        where: {
-          id: credentialId,
+      await this.prisma.$transaction(async (transaction) => {
+        await routeProvisioning.removeInTransaction(transaction, {
           workspaceId,
-          deletedAt: null,
-          version
-        },
-        data: {
-          status: "REVOKED",
-          updatedBy: actorId,
-          deletedAt: new Date(),
-          ciphertext: databaseBytes(
-            randomBytes(Math.max(current.ciphertext.length, 32))
-          ),
-          nonce: databaseBytes(randomBytes(12)),
-          authTag: databaseBytes(randomBytes(16)),
-          encryptedDataKey: databaseBytes(
-            randomBytes(Math.max(current.encryptedDataKey.length, 32))
-          ),
-          dataKeyNonce: databaseBytes(randomBytes(12)),
-          dataKeyAuthTag: databaseBytes(randomBytes(16)),
-          requestFingerprint: databaseBytes(randomBytes(32)),
-          displayHint: null,
-          providerMeta: {},
-          materialVersion: { increment: 1 },
-          version: { increment: 1 }
-        }
+          actorId,
+          credentialId
+        });
+        await transaction.integrationCredential.update({
+          where: {
+            id: credentialId,
+            workspaceId,
+            deletedAt: null,
+            version
+          },
+          data: {
+            status: "REVOKED",
+            updatedBy: actorId,
+            deletedAt: new Date(),
+            ciphertext: databaseBytes(
+              randomBytes(Math.max(current.ciphertext.length, 32))
+            ),
+            nonce: databaseBytes(randomBytes(12)),
+            authTag: databaseBytes(randomBytes(16)),
+            encryptedDataKey: databaseBytes(
+              randomBytes(Math.max(current.encryptedDataKey.length, 32))
+            ),
+            dataKeyNonce: databaseBytes(randomBytes(12)),
+            dataKeyAuthTag: databaseBytes(randomBytes(16)),
+            requestFingerprint: databaseBytes(randomBytes(32)),
+            displayHint: null,
+            providerMeta: {},
+            materialVersion: { increment: 1 },
+            version: { increment: 1 }
+          }
+        });
       });
     } catch (error) {
       if (isRecordNotFoundError(error)) throw versionConflict();

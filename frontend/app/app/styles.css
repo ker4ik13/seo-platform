@@ -1148,13 +1148,18 @@ svg { display: block; }
 .integration-provider-actions {
   align-items: center;
   border-top: 1px solid var(--line);
-  display: flex;
+  display: grid;
   gap: 8px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr);
   margin-top: auto;
   padding-top: 10px;
 }
-.integration-provider-actions .secondary-button { min-height: 32px !important; }
+.integration-provider-actions :where(.primary-button, .secondary-button) {
+  justify-content: center;
+  min-height: 42px !important;
+  width: 100%;
+}
+.integration-registration-button { align-items: center; display: inline-flex; gap: 7px; }
 .integration-dialog-backdrop {
   align-items: center;
   background: rgba(17, 20, 29, .48);
@@ -2254,7 +2259,7 @@ svg { display: block; }
 .integration-settings-stack { display: grid; gap: 14px; max-width: none; }
 .integration-loading { align-items: center; display: flex; gap: 13px; min-height: 130px; }
 .integration-loading p { color: var(--muted); font-size: 12px; }
-.integration-catalog-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.integration-catalog-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .integration-provider-card { display: grid; gap: 15px; min-width: 0; }
 .integration-provider-card header { align-items: flex-start; display: flex; gap: 11px; }
 .integration-provider-card header > div { min-width: 0; }

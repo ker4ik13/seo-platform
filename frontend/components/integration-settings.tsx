@@ -27,6 +27,7 @@ import { ProviderLogo } from "./provider-logo";
 import { SemanticModal } from "./semantic-modal";
 import { WorkspaceIntegrationRouting } from "./workspace-integration-routing";
 import { UiText, useUiLocale } from "./ui-locale";
+import { isVisibleIntegrationProvider } from "../lib/integration-visibility";
 
 
 type Provider = IntegrationProvider;
@@ -50,7 +51,6 @@ interface IntegrationOperationError {
 
 type CredentialOperationKind =
   | "create"
-  | "enable-platform"
   | "update"
   | "revoke"
   | "validation";
@@ -59,28 +59,34 @@ type CredentialOperationState = Readonly<
 >;
 
 const EMPTY_DRAFT: CredentialDraft = {
-  provider: "KEYS_SO",
+  provider: "XMLSTOCK",
   label: "",
   apiKey: "",
   accountIdentifier: ""
 };
 const CREATE_OPERATION_KEY = "__create_credential__";
+const REGISTRATION_URLS: Partial<Readonly<Record<Provider, string>>> = {
+  XMLSTOCK: "https://xmlstock.com/?refid=14832",
+  ARSENKIN: "https://arsenkin.ru/tools/?ref=152654pxfB"
+};
 
 export function IntegrationSettings({
   workspaceId,
   canManage,
   canTest,
-  canUsePlatform,
   readOnly
 }: Readonly<{
   workspaceId: string;
   canManage: boolean;
   canTest: boolean;
-  canUsePlatform: boolean;
   readOnly: boolean;
 }>) {
   const { t: uiText } = useUiLocale();
   const [catalog, setCatalog] = useState<readonly ProviderCatalogItem[]>([]);
+  const visibleCatalog = useMemo(
+    () => catalog.filter(({ provider }) => isVisibleIntegrationProvider(provider)),
+    [catalog]
+  );
   const [credentials, setCredentials] = useState<readonly Credential[]>([]);
   const [draft, setDraft] = useState<CredentialDraft>(EMPTY_DRAFT);
   const [editing, setEditing] = useState<Credential>();
@@ -300,39 +306,6 @@ export function IntegrationSettings({
       );
     } finally {
       releaseCredentialOperation("create");
-    }
-  }
-
-  async function enablePlatformCredential(
-    provider: "XMLSTOCK" | "ARSENKIN"
-  ): Promise<void> {
-    const operationKey = platformOperationKey(provider);
-    if (!acquireCredentialOperation("enable-platform", operationKey)) return;
-    setListError(undefined);
-    setSuccess(undefined);
-    try {
-      let credential = await browserApiRequest<Credential>(
-        `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/platform-credentials`,
-        {
-          method: "POST",
-          idempotencyKey: `platform-credential:${provider}:${globalThis.crypto.randomUUID()}`,
-          body: { provider }
-        }
-      );
-      const validation = await scheduleAutomaticValidation(credential);
-      credential = validation.credential;
-      setCredentials((current) => [
-        credential,
-        ...current.filter((item) => item.id !== credential.id)
-      ]);
-      setRoutingRevision((value) => value + 1);
-      setSuccess(
-        `${integrationProviderLabel(provider)} подключён для оплаты внутренними токенами.${validation.notice}`
-      );
-    } catch (requestError) {
-      setListError(integrationOperationError(requestError));
-    } finally {
-      releaseCredentialOperation("enable-platform", operationKey);
     }
   }
 
@@ -569,7 +542,7 @@ export function IntegrationSettings({
         <IntegrationOverviewStat
           icon="disabled"
           label={uiText("сервисов в каталоге")}
-          value={catalog.length}
+          value={visibleCatalog.length}
         />
       </section>
 
@@ -608,7 +581,7 @@ export function IntegrationSettings({
                 required
                 value={draft.provider}
               >
-                {catalog.map((item) => (
+                {visibleCatalog.map((item) => (
                   <option key={item.provider} value={item.provider}>
                     <span className="integration-provider-select-option">
                       <ProviderLogo provider={item.provider} size="compact" />
@@ -773,7 +746,7 @@ export function IntegrationSettings({
           <div className="panel-empty compact integration-empty">
             <strong><UiText text="Подключений пока нет" /></strong>
             <p>
-              <UiText text="Добавьте собственный ключ или включите системный XMLStock либо Arsenkin с оплатой внутренними токенами." /></p>
+              <UiText text="Добавьте собственный API-ключ XMLStock или Arsenkin Tools." /></p>
           </div>
         ) : (
           <div className="integration-list">
@@ -895,7 +868,7 @@ export function IntegrationSettings({
         )}
       </section>
       <WorkspaceIntegrationRouting
-        revision={routingRevision}
+        key={`${workspaceId}:${routingRevision}`}
         workspaceId={workspaceId}
       />
 
@@ -907,23 +880,8 @@ export function IntegrationSettings({
           </div>
         </header>
         <div className="integration-catalog-grid">
-          {catalog.map((provider) => {
-            const platformProvider =
-              provider.provider === "XMLSTOCK" ||
-              provider.provider === "ARSENKIN"
-                ? provider.provider
-                : undefined;
-            const platformSupported =
-              platformProvider !== undefined &&
-              provider.supportedModes.includes("PLATFORM_PAID");
-            const platformConnected = credentials.some(
-              (credential) =>
-                credential.provider === provider.provider &&
-                credential.mode === "PLATFORM_PAID"
-            );
-            const platformOperation = platformProvider
-                ? credentialOperations[platformOperationKey(platformProvider)]
-                : undefined;
+          {visibleCatalog.map((provider) => {
+            const registrationUrl = REGISTRATION_URLS[provider.provider];
             return (
             <article className="panel integration-provider-card" key={provider.provider}>
               <header>
@@ -942,14 +900,15 @@ export function IntegrationSettings({
               </div>
               <small><UiText text={provider.subscriptionNotice} /></small>
               <div className="integration-provider-actions">
-                {provider.provider === "KEYS_SO" && (
-                  <a className="text-button integration-workflow-link" href="/app/competitors">
-                    <UiText text="Собрать семантику конкурента" /></a>
-                )}
-                {(provider.provider === "ARSENKIN" ||
-                  provider.provider === "XMLSTOCK") && (
-                  <a className="text-button integration-workflow-link" href="/app/semantics">
-                    <UiText text="Проверить позиции" /></a>
+                {registrationUrl && (
+                  <a
+                    className="primary-button integration-registration-button"
+                    href={registrationUrl}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    <UiText text="Регистрация" /><span aria-hidden="true">↗</span>
+                  </a>
                 )}
                 {canManage && (
                   <button
@@ -962,22 +921,6 @@ export function IntegrationSettings({
                     type="button"
                   >
                     <UiText text="Подключить свой ключ" /></button>
-                )}
-                {canUsePlatform && platformSupported && platformProvider && (
-                  <button
-                    className="primary-button"
-                    disabled={platformConnected || Boolean(platformOperation)}
-                    onClick={() =>
-                      void enablePlatformCredential(platformProvider)
-                    }
-                    type="button"
-                  >
-                    {platformOperation === "enable-platform"
-                      ? <UiText text="Подключаем…" />
-                      : platformConnected
-                        ? <UiText text="Подключено за токены" />
-                        : <UiText text="Подключить за токены" />}
-                  </button>
                 )}
               </div>
             </article>
@@ -1443,10 +1386,6 @@ function validateEditCredential(
 
 function newCredentialIdempotencyKey(): string {
   return `credential:${globalThis.crypto.randomUUID()}`;
-}
-
-function platformOperationKey(provider: "XMLSTOCK" | "ARSENKIN"): string {
-  return `__platform_credential_${provider}__`;
 }
 
 function apiKeyValidationError(value: string): string | undefined {
