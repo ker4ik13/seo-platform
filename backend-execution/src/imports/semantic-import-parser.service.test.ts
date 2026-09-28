@@ -380,7 +380,8 @@ function configFixture(): AppConfig {
       shardCount: 1,
       rankConcurrency: 1,
       frequencyConcurrency: 1,
-      keywordResearchConcurrency: 1
+      keywordResearchConcurrency: 1,
+      xmlStockGlobalHttpConcurrency: 96
     },
     rankPreparation: {
       enabled: false,

@@ -29,13 +29,10 @@ test("encrypts and authenticates integration secrets with workspace AAD", () => 
     encrypted.ciphertext.includes(Buffer.from("secret-api-key")),
     false
   );
-  assert.deepEqual(
-    executor.decrypt(workspaceId, "XMLSTOCK", credentialId, encrypted),
-    {
-      apiKey: "secret-api-key",
-      accountIdentifier: "12345"
-    }
-  );
+  const decrypted = executor.decrypt(workspaceId, "XMLSTOCK", credentialId, encrypted);
+  assert.equal(decrypted.apiKey, "secret-api-key");
+  assert.equal(decrypted.accountIdentifier, "12345");
+  assert.match(decrypted.rateLimitScopeId ?? "", /^[0-9a-f-]{36}$/u);
   assert.throws(
     () =>
       manager.decrypt(
@@ -66,6 +63,23 @@ test("encrypts and authenticates integration secrets with workspace AAD", () => 
       ),
     ServiceUnavailableException
   );
+});
+
+test("shares one XMLStock physical rate scope across workspace aliases", () => {
+  const key = Buffer.alloc(32, 7).toString("base64url");
+  const manager = managementCrypto(`3:${key}`, 3);
+  const executor = executionCrypto(`3:${key}`, 3);
+  const otherWorkspace = "01900000-0000-7000-8000-000000000011";
+  const sameMaterial = { apiKey: "same-secret-key", accountIdentifier: "42" };
+  const first = executor.decrypt(workspaceId, "XMLSTOCK", credentialId,
+    manager.encrypt(workspaceId, "XMLSTOCK", credentialId, sameMaterial));
+  const second = executor.decrypt(otherWorkspace, "XMLSTOCK", credentialId,
+    manager.encrypt(otherWorkspace, "XMLSTOCK", credentialId, sameMaterial));
+  const different = executor.decrypt(workspaceId, "XMLSTOCK", credentialId,
+    manager.encrypt(workspaceId, "XMLSTOCK", credentialId,
+      { ...sameMaterial, apiKey: "another-secret-key" }));
+  assert.equal(first.rateLimitScopeId, second.rateLimitScopeId);
+  assert.notEqual(first.rateLimitScopeId, different.rateLimitScopeId);
 });
 
 test("rejects tampered payloads and wrapped data keys", () => {

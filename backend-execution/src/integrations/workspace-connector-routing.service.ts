@@ -141,18 +141,7 @@ export class WorkspaceConnectorRoutingService {
     assertCapability(input.capability);
     assertWorkspaceRoutes(input);
     return this.prisma.$transaction(async (transaction) => {
-      const credentials = await lockedCredentials(
-        transaction,
-        input.workspaceId,
-        input.routes.map(({ credentialId }) => credentialId)
-      );
       const enabledPlatformProviders = await enabledPlatformProviderSet(transaction);
-      for (const route of input.routes) {
-        const credential = credentials.get(route.credentialId);
-        if (!credential) {
-          throw connectorNotReady();
-        }
-      }
 
       const current = await transaction.workspaceConnectorBinding.findUnique({
         where: {
@@ -559,18 +548,6 @@ async function enabledPlatformProviderSet(
     select: { provider: true }
   });
   return new Set(rows.map(({ provider: value }) => value));
-}
-
-async function lockedCredentials(
-  transaction: Prisma.TransactionClient,
-  workspaceId: string,
-  ids: readonly string[]
-): Promise<Map<string, CredentialRecord>> {
-  const rows = await transaction.integrationCredential.findMany({
-    where: { workspaceId, id: { in: [...ids] } },
-    select: CREDENTIAL_SELECT
-  });
-  return new Map(rows.map((row) => [row.id, row]));
 }
 
 function assertWorkspaceRoutes(input: InternalUpsertWorkspaceConnectorBindingInput): void {

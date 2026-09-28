@@ -141,9 +141,7 @@ export class IntegrationCredentialValidationWorkerService {
     ) {
       // Do not spend provider quota under a lease that can expire while the
       // request is in flight. The DB dispatcher will reclaim it after expiry.
-      throw new CredentialValidationRetryError(
-        "CREDENTIAL_VALIDATION_LEASE_BUDGET_EXHAUSTED"
-      );
+      return claim.summary;
     }
 
     let result: CredentialValidationResult;
@@ -178,9 +176,6 @@ export class IntegrationCredentialValidationWorkerService {
       claim,
       failure
     );
-    if (summary.status === "RETRY_SCHEDULED") {
-      throw new CredentialValidationRetryError(failure.errorCode);
-    }
     return summary;
   }
 
@@ -203,17 +198,7 @@ export class IntegrationCredentialValidationWorkerService {
       errorCode,
       retryAfterSeconds
     );
-    if (summary.status === "RETRY_SCHEDULED") {
-      throw new CredentialValidationRetryError(errorCode);
-    }
     return summary;
-  }
-}
-
-class CredentialValidationRetryError extends Error {
-  public constructor(public readonly code: string) {
-    super(code);
-    this.name = "CredentialValidationRetryError";
   }
 }
 

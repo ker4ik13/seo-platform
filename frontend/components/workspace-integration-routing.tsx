@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   connectorFallbackReasons,
   credentialModeSupportsCapability,
@@ -59,6 +59,10 @@ export function WorkspaceIntegrationRouting({
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<IntegrationCapability>();
   const [failed, setFailed] = useState<IntegrationCapability>();
+  const settingsRef = useRef<WorkspaceConnectorRoutingSettings | undefined>(undefined);
+  const draftsRef = useRef<ReadonlyMap<IntegrationCapability, RouteDraft>>(new Map());
+  const pendingSaves = useRef(new Map<IntegrationCapability, RouteDraft>());
+  const activeSaves = useRef(new Set<IntegrationCapability>());
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -69,17 +73,18 @@ export function WorkspaceIntegrationRouting({
         signal ? { signal } : {}
       );
       if (signal?.aborted) return;
+      settingsRef.current = value;
       setSettings(value);
-      setDrafts(
-        new Map(
+      const nextDrafts = new Map(
           integrationCapabilities.map((capability) => {
             const binding = value.bindings.find(
               (candidate) => candidate.capability === capability
             );
             return [capability, draftFromBinding(binding)] as const;
           })
-        )
-      );
+        );
+      draftsRef.current = nextDrafts;
+      setDrafts(nextDrafts);
     } catch (cause) {
       if (!signal?.aborted) setError(requestErrorMessage(cause));
     } finally {
@@ -122,8 +127,10 @@ export function WorkspaceIntegrationRouting({
   ): void {
     setSuccess(undefined);
     setFailed(undefined);
-    const nextDraft = update(drafts.get(capability) ?? emptyDraft());
-    setDrafts((current) => new Map(current).set(capability, nextDraft));
+    const nextDraft = update(draftsRef.current.get(capability) ?? emptyDraft());
+    const nextDrafts = new Map(draftsRef.current).set(capability, nextDraft);
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
     if (nextDraft.credentialIds.length > 0) {
       void save(capability, nextDraft);
     }
@@ -131,63 +138,96 @@ export function WorkspaceIntegrationRouting({
 
   async function save(
     capability: IntegrationCapability,
-    draft = drafts.get(capability) ?? emptyDraft()
+    draft = draftsRef.current.get(capability) ?? emptyDraft()
   ): Promise<void> {
-    if (draft.enabled && draft.credentialIds.length === 0) {
-      setError("Для включённой операции выберите хотя бы одно подключение.");
-      setFailed(capability);
-      return;
-    }
-    const current = settings?.bindings.find(
-      (binding) => binding.capability === capability
-    );
+    pendingSaves.current.set(capability, draft);
+    if (activeSaves.current.has(capability)) return;
+    activeSaves.current.add(capability);
     setSaving((current) => new Set(current).add(capability));
-    setError(undefined);
-    setSuccess(undefined);
-    setFailed(undefined);
+    let versionRetries = 0;
     try {
-      const saved = await browserApiRequest<WorkspaceConnectorBinding>(
-        `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing/${encodeURIComponent(capability)}`,
-        {
-          method: "PUT",
-          body: {
-            enabled: draft.enabled,
-            routes: draft.credentialIds.map((credentialId, position) => ({
-              position,
-              sourceKind: "WORKSPACE_CREDENTIAL",
-              credentialId
-            })),
-            fallbackPolicy: {
-              mode: draft.credentialIds.length > 1 ? "NEXT_AVAILABLE" : "NONE",
-              reasons: draft.credentialIds.length > 1 ? draft.fallbackReasons : []
-            },
-            ...(current ? { version: current.version } : {})
-          }
+      while (pendingSaves.current.has(capability)) {
+        const nextDraft = pendingSaves.current.get(capability)!;
+        pendingSaves.current.delete(capability);
+        if (nextDraft.enabled && nextDraft.credentialIds.length === 0) {
+          setError("Для включённой операции выберите хотя бы одно подключение.");
+          setFailed(capability);
+          continue;
         }
-      );
-      setSettings((value) =>
-        value
-          ? {
-              ...value,
-              bindings: [
-                ...value.bindings.filter(
-                  (binding) => binding.capability !== capability
-                ),
-                saved
-              ]
+        const current = settingsRef.current?.bindings.find(
+          (binding) => binding.capability === capability
+        );
+        setError(undefined);
+        setSuccess(undefined);
+        setFailed(undefined);
+        try {
+          const saved = await browserApiRequest<WorkspaceConnectorBinding>(
+            `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing/${encodeURIComponent(capability)}`,
+            {
+              method: "PUT",
+              body: {
+                enabled: nextDraft.enabled,
+                routes: nextDraft.credentialIds.map((credentialId, position) => ({
+                  position,
+                  sourceKind: "WORKSPACE_CREDENTIAL",
+                  credentialId
+                })),
+                fallbackPolicy: {
+                  mode: nextDraft.credentialIds.length > 1 ? "NEXT_AVAILABLE" : "NONE",
+                  reasons: nextDraft.credentialIds.length > 1 ? nextDraft.fallbackReasons : []
+                },
+                ...(current ? { version: current.version } : {})
+              }
             }
-          : value
-      );
-      setDrafts((value) => {
-        const next = new Map(value);
-        next.set(capability, draftFromBinding(saved));
-        return next;
-      });
-      setSuccess(capability);
-    } catch (cause) {
-      setError(requestErrorMessage(cause));
-      setFailed(capability);
+          );
+          const nextSettings = settingsRef.current
+            ? {
+                ...settingsRef.current,
+                bindings: [
+                  ...settingsRef.current.bindings.filter(
+                    (binding) => binding.capability !== capability
+                  ),
+                  saved
+                ]
+              }
+            : undefined;
+          settingsRef.current = nextSettings;
+          setSettings(nextSettings);
+          versionRetries = 0;
+          if (!pendingSaves.current.has(capability)) {
+            const nextDrafts = new Map(draftsRef.current).set(
+              capability,
+              draftFromBinding(saved)
+            );
+            draftsRef.current = nextDrafts;
+            setDrafts(nextDrafts);
+            setSuccess(capability);
+          }
+        } catch (cause) {
+          if (cause instanceof BrowserApiError && cause.status === 412 && versionRetries < 1) {
+            versionRetries += 1;
+            try {
+              const latest = await browserApiRequest<WorkspaceConnectorRoutingSettings>(
+                `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`
+              );
+              settingsRef.current = latest;
+              setSettings(latest);
+              if (!pendingSaves.current.has(capability)) {
+                pendingSaves.current.set(capability, nextDraft);
+              }
+              continue;
+            } catch (refreshError) {
+              setError(requestErrorMessage(refreshError));
+              setFailed(capability);
+              continue;
+            }
+          }
+          setError(requestErrorMessage(cause));
+          setFailed(capability);
+        }
+      }
     } finally {
+      activeSaves.current.delete(capability);
       setSaving((current) => {
         const next = new Set(current);
         next.delete(capability);

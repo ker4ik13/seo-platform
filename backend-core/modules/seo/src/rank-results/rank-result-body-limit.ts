@@ -16,7 +16,7 @@ export function applyRankResultBodyLimit(
     : [options.method];
   if (
     methods.some((method) => String(method).toUpperCase() === "POST") &&
-    /^\/internal\/v1\/projects\/[^/]+\/rank-manifests\/[^/]+\/chunks\/[^/]+\/results\/?$/u.test(
+    /^\/internal\/v1\/projects\/[^/]+\/rank-manifests\/[^/]+\/chunks\/(?:[^/]+\/results|results-batch)\/?$/u.test(
       options.url
     )
   ) {

@@ -63,6 +63,46 @@ test("ingests through only the dedicated result boundary", async () => {
   }
 });
 
+test("validates every receipt in one scoped rank-result batch", async () => {
+  const first = { ...command(), provider: "XMLSTOCK" as const };
+  const second = {
+    ...first,
+    chunkIndex: 1,
+    jobItemId: "01900000-0000-7000-8000-000000000009"
+  };
+  const input = {
+    schemaVersion: "rank-ingest-batch@1" as const,
+    workspaceId: ids.workspaceId,
+    projectId: ids.projectId,
+    actorId: ids.actorId,
+    manifestId: ids.manifestId,
+    items: [first, second]
+  };
+  const originalFetch = globalThis.fetch;
+  let path = "";
+  globalThis.fetch = (async (request) => {
+    path = new URL(String(request)).pathname;
+    return Response.json({
+      data: [receiptFor(first), receiptFor(second)],
+      meta: { requestId: "rank-result-batch" }
+    });
+  }) as typeof fetch;
+  try {
+    assert.equal((await new RankResultClient(config).ingestBatch(input)).length, 2);
+    assert.equal(path, `/internal/v1/projects/${ids.projectId}/rank-manifests/${ids.manifestId}/chunks/results-batch`);
+    globalThis.fetch = (async () => Response.json({
+      data: [receiptFor(first), { ...receiptFor(second), chunkIndex: 2 }],
+      meta: { requestId: "rank-result-batch-invalid" }
+    })) as typeof fetch;
+    await assert.rejects(
+      () => new RankResultClient(config).ingestBatch(input),
+      RankResultClientError
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects a forged or extensible ingest receipt", async () => {
   const originalFetch = globalThis.fetch;
   for (const data of [
@@ -116,7 +156,10 @@ function command(): InternalIngestRankChunkInput {
 }
 
 function receipt(): InternalRankChunkIngestReceipt {
-  const input = command();
+  return receiptFor(command());
+}
+
+function receiptFor(input: InternalIngestRankChunkInput): InternalRankChunkIngestReceipt {
   return {
     schemaVersion: "rank-ingest@1",
     workspaceId: input.workspaceId,

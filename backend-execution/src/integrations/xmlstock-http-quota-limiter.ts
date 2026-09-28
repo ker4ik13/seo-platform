@@ -11,6 +11,7 @@ import { APP_CONFIG } from "../config/config.module.js";
 
 export type XmlStockHttpProduct =
   | "YANDEX_LIVE"
+  | "YANDEX_TURBO"
   | "GOOGLE_LIVE"
   | "YANDEX_SEARCH_API"
   | "WORDSTAT";
@@ -23,14 +24,16 @@ export interface XmlStockHttpQuotaPolicy {
 export const XMLSTOCK_HTTP_QUOTA_POLICIES: Readonly<
   Record<XmlStockHttpProduct, XmlStockHttpQuotaPolicy>
 > = {
-  YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 15 },
-  GOOGLE_LIVE: { concurrency: 48, requestsPerSecond: 30 },
+  YANDEX_LIVE: { concurrency: 10, requestsPerSecond: 10 },
+  YANDEX_TURBO: { concurrency: 50, requestsPerSecond: 50 },
+  GOOGLE_LIVE: { concurrency: 15, requestsPerSecond: 30 },
   YANDEX_SEARCH_API: { concurrency: 50, requestsPerSecond: 50 },
-  WORDSTAT: { concurrency: 10, requestsPerSecond: 20 }
+  WORDSTAT: { concurrency: 10, requestsPerSecond: 10 }
 };
 
 export const XMLSTOCK_HTTP_QUOTA_NAMESPACE =
   "seo-platform:jobs:v1:provider-rate-limit:xmlstock";
+export const XMLSTOCK_GLOBAL_HTTP_CONCURRENCY = 96;
 export const XMLSTOCK_HTTP_QUOTA_COMMAND_TIMEOUT_MS = 2_000;
 
 export type XmlStockHttpQuotaPermit =
@@ -77,6 +80,7 @@ local base_rps = tonumber(ARGV[2])
 local request_cost = tonumber(ARGV[3])
 local lease_ms = tonumber(ARGV[4])
 local member = ARGV[5]
+local global_concurrency = tonumber(ARGV[6])
 local smoothing_window_ms = 100
 local penalty = tonumber(redis.call('GET', KEYS[4]) or '0')
 local divisor = 2 ^ penalty
@@ -91,6 +95,13 @@ end
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now_ms - 1000)
 redis.call('ZREMRANGEBYSCORE', KEYS[6], '-inf', now_ms - smoothing_window_ms)
+redis.call('ZREMRANGEBYSCORE', KEYS[7], '-inf', now_ms)
+
+if redis.call('ZCARD', KEYS[7]) >= global_concurrency then
+  local oldest = redis.call('ZRANGE', KEYS[7], 0, 0, 'WITHSCORES')
+  local retry_ms = math.max(1, math.ceil(tonumber(oldest[2]) - now_ms))
+  return {0, retry_ms, concurrency, rps}
+end
 
 local inflight = redis.call('ZCARD', KEYS[1])
 if inflight >= concurrency then
@@ -115,6 +126,7 @@ if smoothed_recent + request_cost > smoothing_limit then
 end
 
 redis.call('ZADD', KEYS[1], now_ms + lease_ms, member)
+redis.call('ZADD', KEYS[7], now_ms + lease_ms, member)
 for index = 1, request_cost do
   redis.call('ZADD', KEYS[2], now_ms, member .. ':' .. tostring(index))
   redis.call('ZADD', KEYS[6], now_ms, member .. ':' .. tostring(index))
@@ -122,11 +134,14 @@ end
 redis.call('PEXPIRE', KEYS[1], lease_ms + 5000)
 redis.call('PEXPIRE', KEYS[2], 6000)
 redis.call('PEXPIRE', KEYS[6], 1000)
+redis.call('PEXPIRE', KEYS[7], math.max(redis.call('PTTL', KEYS[7]), lease_ms + 5000))
 return {1, 0, concurrency, rps}
 `;
 
 const RELEASE_SCRIPT = `
-return redis.call('ZREM', KEYS[1], ARGV[1])
+local removed = redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[1])
+return removed
 `;
 
 const PENALIZE_SCRIPT = `
@@ -164,10 +179,9 @@ return level
 `;
 
 /**
- * Distributed XMLStock capacity keyed by physical credential scope and
- * provider product. BYOK uses the credential-row UUID; platform-paid pools
- * use an opaque HMAC-derived UUID shared by every workspace that routes
- * through the same physical key.
+ * Distributed XMLStock capacity keyed by physical credential scope, product,
+ * and one shared platform HTTP ceiling. Equal BYOK keys use the same opaque
+ * HMAC scope across workspaces.
  */
 @Injectable()
 export class XmlStockHttpQuotaLimiter
@@ -175,8 +189,10 @@ export class XmlStockHttpQuotaLimiter
 {
   private readonly logger = new Logger(XmlStockHttpQuotaLimiter.name);
   private readonly connection: Redis;
+  private readonly globalConcurrency: number;
 
   public constructor(@Inject(APP_CONFIG) config: AppConfig) {
+    this.globalConcurrency = config.connectorRuntime.xmlStockGlobalHttpConcurrency;
     this.connection = new Redis(config.redisUrl, {
       connectTimeout: 5_000,
       maxRetriesPerRequest: 1,
@@ -198,7 +214,7 @@ export class XmlStockHttpQuotaLimiter
       while (true) {
         const permit = await acquireXmlStockHttpQuotaPermit(
           this.connection,
-          { ...input, member: randomUUID() }
+          { ...input, member: randomUUID(), globalConcurrency: this.globalConcurrency }
         );
         if (permit.allowed) return permit;
         if (
@@ -268,6 +284,7 @@ export async function acquireXmlStockHttpQuotaPermit(
     readonly requestCost?: number;
     readonly leaseMs: number;
     readonly member: string;
+    readonly globalConcurrency?: number;
   }
 ): Promise<XmlStockHttpQuotaPermit> {
   const scope = quotaScope(input.credentialId, input.product);
@@ -280,6 +297,9 @@ export async function acquireXmlStockHttpQuotaPermit(
     input.leaseMs < 1_000 ||
     input.leaseMs > 120_000 ||
     !UUID_PATTERN.test(input.member)
+    || (input.globalConcurrency !== undefined &&
+      (!Number.isSafeInteger(input.globalConcurrency) ||
+        input.globalConcurrency < 1 || input.globalConcurrency > 512))
   ) {
     throw new TypeError("Invalid XMLStock quota acquisition");
   }
@@ -287,18 +307,20 @@ export async function acquireXmlStockHttpQuotaPermit(
   const response = await commandWithTimeout(
     redis.eval(
       ACQUIRE_SCRIPT,
-      6,
+      7,
       `${scope}:inflight`,
       `${scope}:rps`,
       `${scope}:cooldown`,
       `${scope}:penalty`,
       `${scope}:success`,
       `${scope}:smoothing`,
+      `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,
       String(policy.concurrency),
       String(policy.requestsPerSecond),
       String(requestCost),
       String(input.leaseMs),
-      input.member
+      input.member,
+      String(input.globalConcurrency ?? XMLSTOCK_GLOBAL_HTTP_CONCURRENCY)
     )
   );
   if (
@@ -333,7 +355,13 @@ export async function releaseXmlStockHttpQuotaPermit(
     throw new TypeError("Invalid XMLStock quota permit");
   }
   const response = await commandWithTimeout(
-    redis.eval(RELEASE_SCRIPT, 1, `${scope}:inflight`, permit.member)
+    redis.eval(
+      RELEASE_SCRIPT,
+      2,
+      `${scope}:inflight`,
+      `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,
+      permit.member
+    )
   );
   if (response !== 0 && response !== 1) {
     throw new Error("Invalid XMLStock quota release response");

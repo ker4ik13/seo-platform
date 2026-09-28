@@ -333,7 +333,7 @@ async function bootstrap(): Promise<void> {
   for (const runtimeWorker of workers) {
     runtimeWorker.on("failed", (job, error) => {
       logger.error(
-        `Connector operation failed for job ${job?.id ?? "unknown"}: ${safeErrorSummary(error)}`
+        `Connector operation failed: ${safeErrorSummary(error)}; job ${job?.id ?? "unknown"}`
       );
     });
     runtimeWorker.on("error", (error) => {

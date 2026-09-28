@@ -37,29 +37,29 @@ test("connector dispatch sequence rejects malformed shard coordinates", () => {
 test("connector slots map to a fixed bounded lane set", () => {
   const lanes = new Set<number>();
   for (let shard = 0; shard < 3; shard += 1) {
-    for (let slot = 0; slot < 16; slot += 1) {
-      lanes.add(shardedDispatchLane(16, shard, 3, slot));
+    for (let slot = 0; slot < 32; slot += 1) {
+      lanes.add(shardedDispatchLane(32, shard, 3, slot));
     }
   }
-  assert.equal(connectorRuntimeLaneCount(16, 3), 48);
+  assert.equal(connectorRuntimeLaneCount(32, 3), 96);
   assert.deepEqual(
     [...lanes].sort((left, right) => left - right),
-    Array.from({ length: 48 }, (_, index) => index)
+    Array.from({ length: 96 }, (_, index) => index)
   );
   assert.equal(
-    rankRuntimeJobUsesCurrentLane("rank-connector-runtime-47", 48),
+    rankRuntimeJobUsesCurrentLane("rank-connector-runtime-95", 96),
     true
   );
   assert.equal(
-    rankRuntimeJobUsesCurrentLane("rank-connector-runtime-48", 48),
+    rankRuntimeJobUsesCurrentLane("rank-connector-runtime-96", 96),
     false
   );
   assert.equal(
-    rankRuntimeJobUsesCurrentLane("rank-connector-runtime-84500000000", 48),
+    rankRuntimeJobUsesCurrentLane("rank-connector-runtime-84500000000", 96),
     false
   );
   assert.throws(
-    () => shardedDispatchLane(16, 3, 3, 0),
+    () => shardedDispatchLane(32, 3, 3, 0),
     /Invalid connector runtime lane/u
   );
 });

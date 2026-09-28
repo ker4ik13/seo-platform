@@ -78,7 +78,8 @@ export class IntegrationCredentialValidationService {
       deduplicationKey
     );
     if (active) {
-      throw validationAlreadyRunning();
+      await this.enqueueIfPending(active);
+      return toValidationSummary(active);
     }
 
     const connectorVersion = this.connectors.version(provider);
@@ -170,14 +171,8 @@ export class IntegrationCredentialValidationService {
       this.assertIdempotentRequest(idempotent, requestHash);
       return idempotent;
     }
-    if (
-      await this.findActiveForMaterial(
-        workspaceId,
-        deduplicationKey
-      )
-    ) {
-      throw validationAlreadyRunning();
-    }
+    const active = await this.findActiveForMaterial(workspaceId, deduplicationKey);
+    if (active) return active;
     return undefined;
   }
 
@@ -298,12 +293,6 @@ function validationNotFound(): NotFoundException {
 function idempotencyConflict(): ConflictException {
   return new ConflictException(
     "Idempotency key was already used for another credential validation request"
-  );
-}
-
-function validationAlreadyRunning(): ConflictException {
-  return new ConflictException(
-    "A credential validation is already running for this credential version"
   );
 }
 

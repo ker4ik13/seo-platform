@@ -126,6 +126,15 @@ Transactional email в текущем Compose включён и требует �
 `AUTH_EMAIL_*` credentials. Недоступная capability должна возвращать честное
 degraded/unavailable состояние, а не имитировать успех.
 
+Стартовый профиль XMLStock для 8 CPU / 16 GiB: три connector process по
+`RANK_CONNECTOR_CONCURRENCY=32`, общий Redis-предел
+`XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=96`, PostgreSQL pool каждого connector
+`JOBS_CONNECTOR_DATABASE_POOL_MAX=16`, Redis Jobs `maxmemory 1gb` внутри
+контейнера `1536M`. Это конфигурация для нагрузочной проверки, а не
+подтверждённая гарантия 96 одновременных ответов провайдера. Сохранённые в
+Dokploy env значения перекрывают Compose defaults: при развёртывании обновить
+их вручную и следить за CPU, RSS, Redis и PostgreSQL wait/connection count.
+
 ## Проверка
 
 ```bash

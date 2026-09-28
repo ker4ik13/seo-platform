@@ -99,12 +99,9 @@ test("maps a finite provider rate-limit result through the atomic broker finish"
     })
   });
 
-  await assert.rejects(
-    fixture.worker.process(validationId, leaseOwner),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "CredentialValidationRetryError" &&
-      error.message === "PROVIDER_RATE_LIMITED"
+  assert.equal(
+    (await fixture.worker.process(validationId, leaseOwner)).status,
+    "RETRY_SCHEDULED"
   );
   assert.deepEqual(fixture.calls.providerFailures, [
     {
@@ -133,12 +130,9 @@ test("keeps decrypt failures on the job-only finish path", async () => {
     })
   });
 
-  await assert.rejects(
-    fixture.worker.process(validationId, leaseOwner),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "CredentialValidationRetryError" &&
-      error.message === "CREDENTIAL_DECRYPTION_FAILED"
+  assert.equal(
+    (await fixture.worker.process(validationId, leaseOwner)).status,
+    "RETRY_SCHEDULED"
   );
   assert.deepEqual(fixture.calls.jobFailures, [
     "CREDENTIAL_DECRYPTION_FAILED"
@@ -157,12 +151,9 @@ for (const [name, leaseExpiresAt] of [
       result: { ok: true }
     });
 
-    await assert.rejects(
-      fixture.worker.process(validationId, leaseOwner),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.name === "CredentialValidationRetryError" &&
-        error.message === "CREDENTIAL_VALIDATION_LEASE_BUDGET_EXHAUSTED"
+    assert.equal(
+      (await fixture.worker.process(validationId, leaseOwner)).status,
+      "RUNNING"
     );
     assert.deepEqual(fixture.observedSecrets, []);
     assert.deepEqual(fixture.observedTimeouts, []);
@@ -186,9 +177,9 @@ test("fails closed on a provider response outside the finite vocabulary", async 
     })
   });
 
-  await assert.rejects(
-    fixture.worker.process(validationId, leaseOwner),
-    /CREDENTIAL_VALIDATION_INTERNAL_ERROR/u
+  assert.equal(
+    (await fixture.worker.process(validationId, leaseOwner)).status,
+    "RETRY_SCHEDULED"
   );
   assert.deepEqual(fixture.calls.jobFailures, [
     "CREDENTIAL_VALIDATION_INTERNAL_ERROR"

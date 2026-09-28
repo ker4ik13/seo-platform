@@ -389,7 +389,11 @@ test("saves an enabled route order independently of balance and temporary availa
     updatedAt: now
   };
   const transaction = {
-    integrationCredential: { findMany: async () => [lowBalance, degraded] },
+    integrationCredential: {
+      findMany: async () => {
+        throw new Error("Reordering must not revalidate credential state");
+      }
+    },
     platformProviderAccount: { findMany: async () => [{ provider: "XMLSTOCK" }, { provider: "ARSENKIN" }] },
     workspaceConnectorBinding: {
       findUnique: async () => null,

@@ -199,6 +199,38 @@ test("persists normalized XMLStock SERP evidence with its immutable snapshot", a
   });
 });
 
+test("commits multiple XMLStock keyword chunks in one transaction with separate receipts", async () => {
+  const harness = resultHarness(1, "XMLSTOCK", positionExecution(), 2);
+  const firstChunk = sealedChunk(1, 0);
+  const secondChunk = sealedChunk(1, 1);
+  const firstCommand = command({ provider: "XMLSTOCK" });
+  const secondCommand = command({
+    provider: "XMLSTOCK",
+    chunkIndex: 1,
+    jobItemId: testUuid(900_001),
+    manifestChunkHash: secondChunk.chunkHash,
+    results: [{
+      ...firstCommand.results[0]!,
+      manifestEntryId: secondChunk.entries[0]!.id,
+      keywordId: secondChunk.entries[0]!.keywordId
+    }]
+  });
+  const input = {
+    schemaVersion: "rank-ingest-batch@1" as const,
+    workspaceId, projectId, actorId, manifestId,
+    items: [
+      { ...firstCommand, ingestEnvelopeHash: rankChunkIngestHash(firstCommand, firstChunk) },
+      { ...secondCommand, ingestEnvelopeHash: rankChunkIngestHash(secondCommand, secondChunk) }
+    ]
+  };
+
+  const receipts = await new RankResultService(harness.prisma).ingestBatch(input);
+  assert.deepEqual(receipts.map(({ chunkIndex }) => chunkIndex), [0, 1]);
+  assert.equal(harness.transactionOptions.length, 1);
+  assert.equal(harness.snapshotWrites, 2);
+  assert.equal(harness.receiptWrites, 2);
+});
+
 test("persists Arsenkin Check Top competitors when position projection is disabled", async () => {
   const base = command();
   const item = base.results[0]!;
@@ -335,16 +367,16 @@ function command(
   };
 }
 
-function sealedChunk(entryCount = 1): InternalRankManifestChunk {
+function sealedChunk(entryCount = 1, chunkIndex = 0): InternalRankManifestChunk {
   const entries = Array.from({ length: entryCount }, (_, index) =>
-    manifestEntry(index)
+    manifestEntry(chunkIndex + index)
   );
   const withoutHash: InternalRankManifestChunk = {
     workspaceId,
     projectId,
     jobId,
     manifestId,
-    chunkIndex: 0,
+    chunkIndex,
     hashSchemaVersion: "rank-manifest-chunk@1",
     chunkHash: hash("0".repeat(64)),
     entries
@@ -386,10 +418,11 @@ function hash(value: string): RankManifestHash {
 function resultHarness(
   entryCount = 1,
   manifestProvider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN",
-  manifestExecution: Record<string, unknown> = positionExecution()
+  manifestExecution: Record<string, unknown> = positionExecution(),
+  chunkCount = 1
 ) {
   let status: "SEALED" | "CLOSED" = "SEALED";
-  let receipt: Record<string, unknown> | null = null;
+  const receipts = new Map<number, Record<string, unknown>>();
   let snapshotWrites = 0;
   let currentUpserts = 0;
   let currentInputCount = 0;
@@ -400,7 +433,7 @@ function resultHarness(
   const snapshotBatchSizes: number[] = [];
   const transactionOptions: unknown[] = [];
 
-  const chunk = sealedChunk(entryCount);
+  let allocationIndex = 0;
   const transaction = {
     $queryRaw: async (
       strings: TemplateStringsArray,
@@ -427,8 +460,8 @@ function resultHarness(
             provider: manifestProvider,
             operation: "POSITIONS",
             execution: manifestExecution,
-            pairCount: entryCount,
-            chunkCount: 1,
+            pairCount: entryCount * chunkCount,
+            chunkCount,
             chunkSize: manifestProvider === "XMLSTOCK" ? 1 : 15_000,
             status,
             appliedAt
@@ -438,12 +471,13 @@ function resultHarness(
       if (
         sql.includes('FROM "rank_execution_manifest_chunks"')
       ) {
+        const chunk = sealedChunk(entryCount, Number(values[3]));
         return [
           {
             workspaceId,
             projectId,
             manifestId,
-            chunkIndex: 0,
+            chunkIndex: chunk.chunkIndex,
             hashSchemaVersion: "rank-manifest-chunk@1",
             chunkHash: Buffer.from(chunk.chunkHash.value, "hex"),
             entryCount
@@ -451,10 +485,13 @@ function resultHarness(
         ];
       }
       if (sql.includes("SELECT ARRAY(")) {
+        allocationIndex += 1;
         return [
           {
             ids: Array.from({ length: entryCount }, (_, index) =>
-              index === 0 ? snapshotId : testUuid(400_000 + index)
+              allocationIndex === 1 && index === 0
+                ? snapshotId
+                : testUuid(400_000 + allocationIndex * entryCount + index)
             )
           }
         ];
@@ -468,8 +505,9 @@ function resultHarness(
       throw new Error(`Unexpected SQL in rank result test: ${sql}`);
     },
     rankExecutionManifestEntry: {
-      findMany: async () =>
-        chunk.entries.map((entry) => ({
+      findMany: async ({ where }: { where: { chunkIndex: number } }) => {
+        const chunk = sealedChunk(entryCount, where.chunkIndex);
+        return chunk.entries.map((entry) => ({
           id: entry.id,
           sequence: entry.sequence,
           assignmentId: entry.assignmentId,
@@ -481,10 +519,12 @@ function resultHarness(
             "hex"
           ),
           language: entry.language
-        }))
+        }));
+      }
     },
     rankChunkIngestReceipt: {
-      findUnique: async () => receipt,
+      findUnique: async ({ where }: { where: { manifestId_chunkIndex: { chunkIndex: number } } }) =>
+        receipts.get(where.manifestId_chunkIndex.chunkIndex) ?? null,
       findFirst: async () => null,
       create: async ({
         data
@@ -492,8 +532,8 @@ function resultHarness(
         data: Record<string, unknown>;
       }) => {
         receiptWrites += 1;
-        receipt = { ...data };
-        return receipt;
+        receipts.set(Number(data.chunkIndex), { ...data });
+        return data;
       }
     },
     rankSnapshot: {

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   InternalIngestRankChunkInput,
+  InternalIngestRankBatchInput,
   InternalRankChunkIngestReceipt
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
@@ -93,6 +94,60 @@ export class RankResultClient {
       throw new RankResultClientError("UNAVAILABLE", true);
     }
     return receipt(envelope.data, input);
+  }
+
+  public async ingestBatch(
+    input: InternalIngestRankBatchInput
+  ): Promise<readonly InternalRankChunkIngestReceipt[]> {
+    const token = this.config.rankResultApiToken;
+    if (!token) throw new RankResultClientError("UNAVAILABLE", true);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/rank-manifests/${encodeURIComponent(input.manifestId)}/chunks/results-batch`,
+      this.config.services.seoData
+    );
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Rank-Result-Token": token,
+          "X-Workspace-Id": input.workspaceId,
+          "X-Project-Id": input.projectId,
+          "X-Actor-Id": input.actorId
+        },
+        body: JSON.stringify(input),
+        redirect: "error",
+        signal: AbortSignal.timeout(
+          Math.max(this.config.internalCommandTimeoutMs, 130_000)
+        )
+      });
+    } catch {
+      throw new RankResultClientError("UNAVAILABLE", true);
+    }
+    const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+    const declared = response.headers.get("content-length");
+    if (
+      contentType !== "application/json" ||
+      (declared !== null &&
+        (!/^(?:0|[1-9]\d*)$/u.test(declared) || Number(declared) > RESPONSE_MAX_BYTES))
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new RankResultClientError("UNAVAILABLE", true);
+    }
+    const payload = await boundedJson(response);
+    if (!response.ok) throw responseError(response.status);
+    const envelope = exactRecord(payload, ["data", "meta"]);
+    const meta = envelope ? exactRecord(envelope.meta, ["requestId"]) : undefined;
+    const data = envelope?.data;
+    if (
+      !meta || typeof meta.requestId !== "string" ||
+      meta.requestId.length < 1 || meta.requestId.length > 200 ||
+      !Array.isArray(data) ||
+      data.length !== input.items.length
+    ) throw new RankResultClientError("UNAVAILABLE", true);
+    return input.items.map((item, index) => receipt(data[index], item));
   }
 }
 

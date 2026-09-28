@@ -547,13 +547,8 @@ export function xmlStockRankHttpProduct(
   request: XmlStockRankWireRequest
 ): Exclude<XmlStockHttpProduct, "WORDSTAT"> {
   if (request.delayed) return "YANDEX_SEARCH_API";
+  if (request.turbo) return "YANDEX_TURBO";
   return request.engine === "GOOGLE" ? "GOOGLE_LIVE" : "YANDEX_LIVE";
-}
-
-export function xmlStockRankUsesQuota(
-  request: XmlStockRankWireRequest
-): boolean {
-  return !request.turbo;
 }
 
 export function stageXmlStockRankResult(

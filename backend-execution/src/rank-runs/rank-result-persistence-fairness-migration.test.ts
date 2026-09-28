@@ -42,7 +42,7 @@ test("rank result persistence has a separate bounded runtime dispatcher", async 
   assert.match(source, /let resultDispatching = false/u);
   assert.match(
     source,
-    /Array\.from\([\s\S]*length: config\.rankPreparation\.concurrency[\s\S]*resultPersistence\.processOne/u
+    /Array\.from\([\s\S]*length: config\.rankPreparation\.concurrency[\s\S]*resultPersistence\.processBatch/u
   );
   assert.match(
     source,

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
-import { internalIngestRankChunkInput } from "./rank-result-input.js";
+import {
+  internalIngestRankBatchInput,
+  internalIngestRankChunkInput
+} from "./rank-result-input.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
@@ -40,6 +43,40 @@ test("accepts an exact normalized found result", () => {
   assert.equal(parsed.workspaceId, workspaceId);
   assert.equal(parsed.results[0]?.found, true);
   assert.equal(parsed.results[0]?.position, 3);
+});
+
+test("accepts only distinct one-key XMLStock chunks in a trusted batch", () => {
+  const item = {
+    ...command({
+      manifestEntryId,
+      keywordId,
+      dataQualityFlags: ["PROVIDER_OBSERVED_AT_UNAVAILABLE"],
+      found: false,
+      position: null
+    }),
+    provider: "XMLSTOCK"
+  };
+  const batch = {
+    schemaVersion: "rank-ingest-batch@1",
+    workspaceId,
+    projectId,
+    actorId,
+    manifestId,
+    items: [item, { ...item, chunkIndex: 1 }]
+  };
+  assert.equal(internalIngestRankBatchInput(batch).items.length, 2);
+  assert.throws(
+    () => internalIngestRankBatchInput({ ...batch, items: [item, item] }),
+    BadRequestException
+  );
+  assert.throws(
+    () => internalIngestRankBatchInput({ ...batch, items: [{ ...item, provider: "ARSENKIN" }] }),
+    BadRequestException
+  );
+  assert.throws(
+    () => internalIngestRankBatchInput({ ...batch, items: [{ ...item, projectId: workspaceId }] }),
+    BadRequestException
+  );
 });
 
 test("accepts TOP-100 and rejects positions outside the database contract", () => {

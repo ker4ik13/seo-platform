@@ -31,7 +31,6 @@ import {
   buildXmlStockRankWireRequest,
   stageXmlStockRankResult,
   xmlStockRankHttpProduct,
-  xmlStockRankUsesQuota,
   xmlStockRankWireRequestHash
 } from "./xmlstock-rank.connector.js";
 import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent.js";
@@ -160,7 +159,7 @@ export class RankConnectorRuntimeService {
     let quotaProduct: XmlStockHttpProduct | undefined;
     if (claim.provider === "XMLSTOCK") {
       const request = buildXmlStockRankWireRequest(requestIntent);
-      if (request.delayed && xmlStockRankUsesQuota(request)) {
+      if (request.delayed) {
         quotaProduct = xmlStockRankHttpProduct(request);
         const acquired = await this.xmlStockQuota.tryAcquire({
           credentialId: providerCredentialScopeId,
@@ -281,7 +280,21 @@ export class RankConnectorRuntimeService {
       | Awaited<ReturnType<ArsenkinRankConnector["fetchResult"]>>;
     if (claim.provider === "XMLSTOCK") {
       const request = xmlStockRequest!;
-      if (!xmlStockRankUsesQuota(request)) {
+      const product = xmlStockRankHttpProduct(request);
+      const acquired = await this.xmlStockQuota.tryAcquire({
+        credentialId: providerCredentialScopeId,
+        product,
+        leaseMs:
+          this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
+      });
+      if (!acquired.allowed) {
+        await this.broker.deferPollForProviderCapacity(
+          claim,
+          Math.max(5, acquired.retryAfterSeconds)
+        );
+        return "PROVIDER_CAPACITY_DELAYED";
+      }
+      try {
         if (lateSettlement?.required) {
           await this.settleUsage(
             "HOLD",
@@ -297,45 +310,13 @@ export class RankConnectorRuntimeService {
           claim.request,
           claim.providerProgress
         );
-      } else {
-        const product = xmlStockRankHttpProduct(request);
-        const acquired = await this.xmlStockQuota.tryAcquire({
-          credentialId: providerCredentialScopeId,
+        await this.observeXmlStockQuota(
+          providerCredentialScopeId,
           product,
-          leaseMs:
-            this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
-        });
-        if (!acquired.allowed) {
-          await this.broker.deferPollForProviderCapacity(
-            claim,
-            Math.max(5, acquired.retryAfterSeconds)
-          );
-          return "PROVIDER_CAPACITY_DELAYED";
-        }
-        try {
-          if (lateSettlement?.required) {
-            await this.settleUsage(
-              "HOLD",
-              lateSettlement,
-              claim.request,
-              claim.executionId
-            );
-          }
-          outcome = await this.xmlStockConnector.fetchResult(
-            claim.providerTaskId,
-            secret,
-            this.providerRequestTimeoutMs(),
-            claim.request,
-            claim.providerProgress
-          );
-          await this.observeXmlStockQuota(
-            providerCredentialScopeId,
-            product,
-            outcome
-          );
-        } finally {
-          await this.xmlStockQuota.release(acquired);
-        }
+          outcome
+        );
+      } finally {
+        await this.xmlStockQuota.release(acquired);
       }
     } else {
       outcome = await this.connector.fetchResult(

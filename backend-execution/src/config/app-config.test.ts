@@ -32,6 +32,7 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.connectorRuntime.shardIndex, 0);
   assert.equal(config.connectorRuntime.shardCount, 1);
   assert.equal(config.connectorRuntime.rankConcurrency, 4);
+  assert.equal(config.connectorRuntime.xmlStockGlobalHttpConcurrency, 96);
   assert.equal(config.rankPreparation.enabled, false);
   assert.equal(config.rankManifestApiToken, undefined);
   assert.equal(config.rankGrantApiToken, undefined);
@@ -773,7 +774,7 @@ test("requires database capacity for all connector worker queues", () => {
         },
         "CONNECTOR_WORKER"
       ),
-    /DATABASE_POOL_MAX must be at least 29/u
+    /DATABASE_POOL_MAX must be at least 8/u
   );
 
   const config = loadAppConfig(

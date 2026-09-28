@@ -719,7 +719,7 @@ test("terminally records a corrupt XMLStock checkpoint without provider I/O", as
   });
 });
 
-test("runs XMLStock Yandex Live Turbo without the standard account quota gate", async () => {
+test("runs XMLStock Yandex Live Turbo through its own capacity bucket", async () => {
   const pollClaim: RankConnectorPollClaim = {
     ...claim(),
     provider: "XMLSTOCK",
@@ -751,9 +751,16 @@ test("runs XMLStock Yandex Live Turbo without the standard account quota gate", 
       };
     }
   } as unknown as RankConnectorRuntimeBrokerService;
+  let selectedProduct: string | undefined;
   const quota: XmlStockHttpQuotaGate = {
-    async tryAcquire() {
-      throw new Error("Turbo must not acquire the standard XMLStock limiter");
+    async tryAcquire(input) {
+      selectedProduct = input.product;
+      return {
+        allowed: true,
+        credentialId: input.credentialId,
+        product: input.product,
+        member: ids.lease
+      };
     },
     async release() {},
     async penalize() {},
@@ -779,6 +786,7 @@ test("runs XMLStock Yandex Live Turbo without the standard account quota gate", 
     "POLL_PENDING"
   );
   assert.equal(providerCalls, 1);
+  assert.equal(selectedProduct, "YANDEX_TURBO");
   assert.deepEqual(completed, {
     outcome: "PENDING",
     retryAfterSeconds: 15

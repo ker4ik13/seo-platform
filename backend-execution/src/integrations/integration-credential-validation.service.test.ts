@@ -227,7 +227,7 @@ test("only reschedules an idempotent rate-limit validation after retryAt", async
   assert.deepEqual(enqueued, [existing.id]);
 });
 
-test("rejects another idempotency command while the credential material is being validated", async () => {
+test("joins an active validation for the same credential material", async () => {
   const active = jobRecord({
     requestHash: Uint8Array.from(
       integrationCredentialValidationRequestHash({
@@ -258,19 +258,15 @@ test("rejects another idempotency command while the credential material is being
   } as unknown as PrismaService;
   const service = validationService(prisma, enqueued);
 
-  await assert.rejects(
-    service.request(
-      credentialId,
-      { ...input, idempotencyKey: "credential-validation-002" },
-      "request-3"
-    ),
-    (error: unknown) =>
-      error instanceof ConflictException &&
-      error.message.includes("already running")
+  const joined = await service.request(
+    credentialId,
+    { ...input, idempotencyKey: "credential-validation-002" },
+    "request-3"
   );
 
+  assert.equal(joined.id, active.id);
   assert.equal(createCount, 0);
-  assert.deepEqual(enqueued, []);
+  assert.deepEqual(enqueued, [active.id]);
   assert.deepEqual(activeLookups, [
     {
       where: {
@@ -335,7 +331,7 @@ test("returns the persisted idempotent winner after a concurrent create", async 
   assert.deepEqual(enqueued, [winner.id]);
 });
 
-test("returns conflict when another idempotency command wins the active-key race", async () => {
+test("joins the winning validation when another command creates it concurrently", async () => {
   const credential = credentialRecord();
   const active = jobRecord();
   let activeLookup = 0;
@@ -357,19 +353,15 @@ test("returns conflict when another idempotency command wins the active-key race
   } as unknown as PrismaService;
   const service = validationService(prisma, enqueued);
 
-  await assert.rejects(
-    service.request(
-      credentialId,
-      { ...input, idempotencyKey: "credential-validation-002" },
-      "request-5"
-    ),
-    (error: unknown) =>
-      error instanceof ConflictException &&
-      error.message.includes("already running")
+  const joined = await service.request(
+    credentialId,
+    { ...input, idempotencyKey: "credential-validation-002" },
+    "request-5"
   );
 
+  assert.equal(joined.id, active.id);
   assert.equal(activeLookup, 2);
-  assert.deepEqual(enqueued, []);
+  assert.deepEqual(enqueued, [active.id]);
 });
 
 test("hides a validation requested for another credential", async () => {

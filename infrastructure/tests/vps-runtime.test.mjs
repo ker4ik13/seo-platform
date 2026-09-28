@@ -231,10 +231,10 @@ test("VPS uses one rank coordinator and multiple bounded connector processes", a
   );
   assert.match(rankBlock, /RANK_PREPARATION_CONCURRENCY=5/u);
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_DISPATCH_SECONDS=5/u);
-  assert.match(connectorBlock, /DATABASE_POOL_MAX=23/u);
+  assert.match(connectorBlock, /DATABASE_POOL_MAX=16/u);
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_CONCURRENCY=1/u);
   assert.match(connectorBlock, /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000/u);
-  assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=16/u);
+  assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=32/u);
   assert.match(
     connectorBlock,
     /CONNECTOR_PAID_RUNTIME_ENABLED="\$\{SEO_PLATFORM_PAID_CONNECTOR_RUNTIME:-true\}"/u

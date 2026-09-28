@@ -367,15 +367,6 @@ export function useIntegrationCredentialValidation({
           }
         }
       }
-      if (
-        !isTerminalCredentialValidationStatus(current.status) &&
-        !shouldAutoResumeCredentialValidation(current)
-      ) {
-        setSummary(current);
-        setError({ message: STALE_ACTIVE_VALIDATION_MESSAGE });
-        setPhase("error");
-        return;
-      }
       setSummary(current);
       const pollingDeadline = Date.now() + VALIDATION_POLL_TIMEOUT_MS;
 

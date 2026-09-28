@@ -151,8 +151,8 @@ test("projects bounded XMLStock runtime diagnostics without exposing a lease own
     generatedAt: now.toISOString(),
     policy: {
       product: "YANDEX_TURBO",
-      concurrency: 20,
-      requestsPerSecond: 15
+      concurrency: 50,
+      requestsPerSecond: 50
     },
     totals: {
       total: 3,

@@ -340,7 +340,10 @@ integer без продуктовой границы `1999`. Правый кли
 выбираются для persistence справедливо сначала между workspace, затем между
 Job; короткий PostgreSQL claim учитывает уже активные lease, а отдельный
 bounded dispatcher запускает свободные persistence lanes раз в секунду,
-поэтому большой старый съём не блокирует прогресс нового. Поиск применяет 300 ms
+поэтому большой старый съём не блокирует прогресс нового. XMLStock результаты
+одного manifest сохраняются в Core пачками до 16 chunks в одной транзакции
+с отдельными идемпотентными receipts; другие провайдеры сохраняются по одному.
+Поиск применяет 300 ms
 debounce и имеет одну явную очистку с безопасными внутренними отступами.
 Его placeholder показывает фактический scope: название обычной или системной
 папки, весь проект либо число одновременно открытых групп. Фоновые и realtime-
@@ -1512,12 +1515,14 @@ claim/renew/submit/defer/fail/complete. Роль connector-а имеет `EXECUT
 проверяется по Job type, project/credential route, version, lease и точному
 набору items при каждом переходе.
 XMLStock HTTP ограничивается распределёнными Redis buckets по
-`physicalCredentialScopeId + product` (`YANDEX_LIVE`, `GOOGLE_LIVE`,
-`YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют друг друга,
-один ключ делит лимит между своими проектами. Permit удерживает только внешний
+`physicalCredentialScopeId + product` (`YANDEX_LIVE`, `YANDEX_TURBO`,
+`GOOGLE_LIVE`, `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют
+друг друга, а одинаковые BYOK-ключи разных workspace делят один лимит.
+Один ключ делит лимит между своими проектами. Permit удерживает только внешний
 HTTP, не `POLL_WAIT`; базовые окна соответствуют provider boundary:
-Yandex Live — `20 concurrent / 15 RPS`, Google Live — `48 / 30`, Yandex
-Search API — `50 / 50`, Wordstat — `10 / 20`. RPS дополнительно сглаживается
+Yandex Live — `10 concurrent / 10 RPS`, Turbo — `50 / 50`, Google Live — `15 / 30`, Yandex
+Search API — `50 / 50`, Wordstat — `10 / 10`. Сверху действует общий Redis
+потолок `XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=96`. RPS дополнительно сглаживается
 100-миллисекундными distributed окнами, чтобы replicas не создавали один
 provider burst. Throttling адаптивно уменьшает окно. Состояние limiter
 хранится только в connector ACL namespace
@@ -1535,13 +1540,13 @@ quota reservation/receipt.
 `connector version + status + authorization expiry` index до соединения всего
 Job graph. Исторические `READY_TO_SUBMIT` с истёкшим grant больше не сканируются
 на каждом пустом runtime tick.
-Каждый connector process выполняет до 16 rank claims и четырёх frequency
-claims одновременно. Три штатных процесса владеют 48 фиксированными
+Каждый connector process выполняет до 32 rank claims и четырёх frequency
+claims одновременно. Три штатных процесса владеют 96 фиксированными rank
 deterministic BullMQ lanes: для одного lane существует не более одного
 waiting/active tick, а завершённый tick удаляется сразу. Поэтому остановка или
 деградация consumer не может создать неограниченный Redis backlog; старые
 time-based tick ID завершаются без обращения к PostgreSQL. Общий rank I/O pool
-остаётся равен 48 slot, а Wordstat bucket — `20 RPS`. В простое каждый shard
+равен 96 slot, а Wordstat bucket — `10 RPS` на физический ключ. В простое каждый shard
 отправляет один probe в секунду; первый реальный claim раскрывает configured
 pool на пять секунд. Frequency/AI/clustering и keyword-research runtime
 используют такие же bounded lanes. Submit
@@ -1553,15 +1558,15 @@ broker перед full tenant graph, а Arsenkin ещё и перед provider-w
 SQL graph. Активный poll дополнительно использует
 `job + connector version + status + due time` index: append-only история
 остальных выполнений этого Job больше не пересекается с глобальным due index
-на каждом из 48 worker lanes. Rank grant dispatcher под общим advisory lock ограничивает общий
-короткоживущий grant buffer произведением 48 connector lanes на dispatch
-interval (720 в production, не длиннее 30-секундного grant window), а один Job
-за проход получает не более 48 новых grants. Неиспользованный grant повторяется
+на каждом из 96 worker lanes. Rank grant dispatcher под общим advisory lock ограничивает общий
+короткоживущий grant buffer произведением 96 connector lanes на dispatch
+interval (1440 в production, не длиннее 30-секундного grant window), а один Job
+за проход получает не более 96 новых grants. Неиспользованный grant повторяется
 не раньше минутного cooldown. Следующие `JobItem` выбираются bounded SQL slice
 через latest-attempt lateral lookup; весь массив исторических executions больше
 не загружается в Node на каждом цикле. Provider throughput
 сохраняется, а Redis не позволяет превысить отдельную границу каждого продукта.
-Jobs Redis имеет `512mb` внутреннего `maxmemory` при container limit `768M` и
+Jobs Redis имеет `1gb` внутреннего `maxmemory` при container limit `1536M` и
 `noeviction`: bounded queues обязаны освобождать runtime ticks сразу, чтобы
 durable business jobs оставались fail-closed без OOM-loop.
 Capacity wait показывается
@@ -1855,6 +1860,14 @@ connector-worker не читает credential/routing tables напрямую.
 или удаления. Добавление нового credential сохраняет уже настроенные строки,
 включая временно недоступные; удалить такую строку можно отдельным явным
 действием, и её состояние не блокирует сохранение порядка.
+Перестановки одной операции сохраняются последовательно; stale-version ответ
+перечитывает серверную версию и один раз повторяет последнюю пользовательскую
+правку. Повторная ручная проверка credential присоединяется к уже работающей
+автопроверке того же материала без мгновенного конфликта в интерфейсе.
+Ожидаемый retry после provider rate limit/временной недоступности завершает
+BullMQ tick без ERROR-лога; due Job в PostgreSQL повторно ставится в очередь
+по `retryAt`. Неожиданный worker failure по-прежнему вызывает alert, причём
+код ошибки стоит перед длинным Job ID и попадает в короткий Telegram excerpt.
 Сам маршрут, его включённость и порядок можно сохранить независимо от текущего
 денежного баланса, status, mode, capability, rate limit или временной
 недоступности credential: это durable пользовательская настройка, а не
@@ -1895,6 +1908,14 @@ Wordstat-сценариев явно передают `credentialId`; извес
 После передачи проекта отключённый binding остаётся tenant-scoped audit row
 без активного маршрута; следующий запуск разрешается только после настройки
 соответствующего workspace route.
+
+XMLStock connector использует три процесса по 32 rank HTTP-lane (96 суммарно)
+и отдельный распределённый глобальный потолок 96 одновременных внешних
+XMLStock запросов. Лимиты product bucket применяются к физическому ключу:
+совпадающие BYOK `accountIdentifier + apiKey` в разных workspace получают
+один непрозрачный HMAC scope. Redis Jobs настроен на `maxmemory 1gb` и
+контейнерный предел `1536M`; connector PostgreSQL pool — 16 соединений на
+процесс, поскольку ожидание provider HTTP не удерживает соединение.
 
 ### Проверка ИИ-ответов
 

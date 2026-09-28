@@ -391,9 +391,7 @@ export class RankRunService {
     }
     const summary = toRankJobSummary(stored);
     const product = rankRuntimeProduct(summary, stored.scopeSnapshot);
-    const policy = XMLSTOCK_HTTP_QUOTA_POLICIES[
-      product === "YANDEX_TURBO" ? "YANDEX_LIVE" : product
-    ];
+    const policy = XMLSTOCK_HTTP_QUOTA_POLICIES[product];
     const [clock, totalsByStatus, rows] = await Promise.all([
       databaseClock(this.prisma, "Unable to read rank diagnostics clock"),
       this.prisma.$queryRaw<readonly RankRuntimeStatusCountRow[]>(

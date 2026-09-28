@@ -2,9 +2,11 @@ import { rankCommandKeywordLimit } from "@seo-platform/contracts";
 import { BadRequestException } from "@nestjs/common";
 import {
   normalizedRankDataQualityFlags,
+  rankResultBatchMaxItems,
   rankProviderKeywordLimit,
   rankSerpResultMaxCount,
   type InternalIngestRankChunkInput,
+  type InternalIngestRankBatchInput,
   type InternalNormalizedRankResult,
   type InternalNormalizedRankSerpResult,
   type NormalizedRankDataQualityFlag,
@@ -95,6 +97,38 @@ export function internalIngestRankChunkInput(
       input.ingestEnvelopeHash,
       "ingestEnvelopeHash"
     )
+  };
+}
+
+export function internalIngestRankBatchInput(value: unknown): InternalIngestRankBatchInput {
+  const input = strictRecord(value, [
+    "schemaVersion", "workspaceId", "projectId", "actorId", "manifestId", "items"
+  ]);
+  if (
+    input.schemaVersion !== "rank-ingest-batch@1" ||
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > rankResultBatchMaxItems
+  ) invalid("batch");
+  const workspaceId = uuidV7(input.workspaceId, "workspaceId");
+  const projectId = uuidV7(input.projectId, "projectId");
+  const actorId = uuidV7(input.actorId, "actorId");
+  const manifestId = uuidV7(input.manifestId, "manifestId");
+  const items = input.items.map(internalIngestRankChunkInput);
+  if (
+    items.some((item) =>
+      item.workspaceId !== workspaceId ||
+      item.projectId !== projectId ||
+      item.actorId !== actorId ||
+      item.manifestId !== manifestId ||
+      item.provider !== "XMLSTOCK" ||
+      item.results.length !== 1
+    ) ||
+    new Set(items.map(({ chunkIndex }) => chunkIndex)).size !== items.length
+  ) invalid("items");
+  return {
+    schemaVersion: "rank-ingest-batch@1",
+    workspaceId, projectId, actorId, manifestId, items
   };
 }
 

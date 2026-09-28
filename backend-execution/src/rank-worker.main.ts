@@ -126,12 +126,12 @@ async function bootstrap(): Promise<void> {
           { length: config.rankPreparation.concurrency },
           async () => {
             try {
-              await resultPersistence.processOne(
+              await resultPersistence.processBatch(
                 `rank-result-${randomUUID()}`
               );
             } catch (error) {
               logger.error(
-                `Unable to persist one rank result: ${safeErrorSummary(error)}`
+                `Unable to persist rank result batch: ${safeErrorSummary(error)}`
               );
             }
           }

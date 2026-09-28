@@ -114,6 +114,68 @@ test("returns a staged chunk to PostgreSQL after retryable ingest failure", asyn
   assert.equal(persisted, false);
 });
 
+test("persists several XMLStock chunks through one bounded transaction request", async () => {
+  const first = {
+    ...claim(),
+    request: { ...claim().request, provider: "XMLSTOCK" as const }
+  };
+  const secondChunkWithoutHash = {
+    ...sealedChunk(),
+    chunkIndex: 1,
+    entries: sealedChunk().entries.map((entry) => ({ ...entry, sequence: 1 }))
+  };
+  const secondChunk = {
+    ...secondChunkWithoutHash,
+    chunkHash: {
+      algorithm: "SHA_256" as const,
+      value: canonicalJsonSha256(
+        "rank-manifest-chunk@1",
+        rankManifestChunkHashPreimage(secondChunkWithoutHash)
+      )
+    }
+  };
+  const second = {
+    ...claim(),
+    executionId: "01900000-0000-7000-8000-00000000000d",
+    jobItemId: "01900000-0000-7000-8000-00000000000e",
+    manifestChunkIndex: 1,
+    manifestChunkHash: secondChunk.chunkHash,
+    request: {
+      ...first.request,
+      jobItemId: "01900000-0000-7000-8000-00000000000e"
+    }
+  };
+  const claims = [first, second];
+  const completions: Array<{ id: string; persisted: boolean }> = [];
+  const broker = {
+    async claim() { return claims.shift(); },
+    async complete(value: RankResultPersistenceClaim, persisted: boolean) {
+      completions.push({ id: value.executionId, persisted });
+      return "PERSISTED";
+    }
+  } as unknown as RankResultPersistenceBrokerService;
+  const manifests = {
+    async getChunk(input: { chunkIndex: number }) {
+      return input.chunkIndex === 1 ? secondChunk : sealedChunk();
+    }
+  } as unknown as RankManifestClient;
+  let batchCount = 0;
+  const results = {
+    async ingestBatch(input: { items: readonly InternalIngestRankChunkInput[] }) {
+      batchCount += 1;
+      assert.equal(input.items.length, 2);
+    },
+    async ingest() { assert.fail("One-key HTTP writes must be batched"); }
+  } as unknown as RankResultClient;
+
+  assert.equal(await service(broker, manifests, results).processBatch("rank-result-worker"), 2);
+  assert.equal(batchCount, 1);
+  assert.deepEqual(completions, [
+    { id: first.executionId, persisted: true },
+    { id: second.executionId, persisted: true }
+  ]);
+});
+
 function service(
   broker: RankResultPersistenceBrokerService,
   manifests: RankManifestClient,

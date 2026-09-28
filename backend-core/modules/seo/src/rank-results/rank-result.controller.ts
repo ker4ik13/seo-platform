@@ -24,6 +24,7 @@ import {
 } from "../rank-manifests/rank-manifest-route-context.js";
 import {
   internalIngestRankChunkInput,
+  internalIngestRankBatchInput,
   resultChunkIndex
 } from "./rank-result-input.js";
 import { RankResultService } from "./rank-result.service.js";
@@ -32,6 +33,25 @@ import { RankResultService } from "./rank-result.service.js";
 @UseGuards(RankResultApiGuard)
 export class RankResultController {
   public constructor(private readonly rankResults: RankResultService) {}
+
+  @Post(":manifestId/chunks/results-batch")
+  public async ingestBatch(
+    @Param("projectId") projectId: string,
+    @Param("manifestId") manifestId: string,
+    @Body() body: unknown,
+    @Headers() headers: RankManifestInternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly InternalRankChunkIngestReceipt[]>> {
+    const input = internalIngestRankBatchInput(body);
+    assertInternalContext(input, rankManifestRouteContext(projectId, headers));
+    if (internalUuid(manifestId, "manifestId") !== input.manifestId) {
+      throw new BadRequestException("Rank result batch route does not match the command");
+    }
+    return {
+      data: await this.rankResults.ingestBatch(input),
+      meta: { requestId: request.id }
+    };
+  }
 
   @Post(":manifestId/chunks/:chunkIndex/results")
   public async ingest(

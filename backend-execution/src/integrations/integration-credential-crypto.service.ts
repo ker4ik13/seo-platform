@@ -136,7 +136,18 @@ export class IntegrationCredentialCryptoService {
         },
         payloadAad(workspaceId, provider, credentialId)
       ).toString("utf8");
-      return credentialSecret(JSON.parse(plaintext) as unknown);
+      const secret = credentialSecret(JSON.parse(plaintext) as unknown);
+      if (provider === "XMLSTOCK" && !secret.platformPool && secret.accountIdentifier) {
+        return {
+          ...secret,
+          rateLimitScopeId: xmlStockPhysicalKeyScopeId(
+            this.oldestEncryptionKey(),
+            secret.accountIdentifier,
+            secret.apiKey
+          )
+        };
+      }
+      return secret;
     } catch {
       throw encryptionUnavailable();
     } finally {
@@ -362,6 +373,16 @@ export class IntegrationCredentialCryptoService {
     return { key, version: oldestVersion };
   }
 
+  private oldestEncryptionKey(): Buffer {
+    const oldestVersion = [...this.config.integrationCredentials.keys.keys()]
+      .sort((left, right) => left - right)[0];
+    const key = oldestVersion === undefined
+      ? undefined
+      : this.config.integrationCredentials.keys.get(oldestVersion);
+    if (!key) throw encryptionUnavailable();
+    return key;
+  }
+
   private assertManagementRole(): void {
     if (this.config.integrationCredentials.role !== "MANAGEMENT") {
       throw encryptionUnavailable();
@@ -526,6 +547,28 @@ function platformPoolEntryId(
     hex.slice(16, 20),
     hex.slice(20)
   ].join("-");
+}
+
+function xmlStockPhysicalKeyScopeId(
+  masterKey: Buffer,
+  accountIdentifier: string,
+  apiKey: string
+): string {
+  const scopeKey = createHmac("sha256", masterKey)
+    .update("seo-platform:xmlstock-physical-key-scope-key@1", "utf8")
+    .digest();
+  const bytes = createHmac("sha256", scopeKey)
+    .update("seo-platform:xmlstock-physical-key@1\0", "utf8")
+    .update(accountIdentifier.trim(), "utf8")
+    .update("\0", "utf8")
+    .update(apiKey, "utf8")
+    .digest()
+    .subarray(0, 16);
+  scopeKey.fill(0);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x80;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
 
 const UUID_PATTERN =

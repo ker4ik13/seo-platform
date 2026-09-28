@@ -121,6 +121,7 @@ const CONNECTOR_KEYS = [
   "RANK_CONNECTOR_CONCURRENCY",
   "FREQUENCY_COLLECTION_CONCURRENCY",
   "KEYWORD_RESEARCH_CONCURRENCY",
+  "XMLSTOCK_GLOBAL_HTTP_CONCURRENCY",
   "RANK_PROVIDER_KILL_SWITCH_VERSION",
   "PLATFORM_XMLSTOCK_SOFT_ID"
 ] as const;
@@ -163,7 +164,7 @@ export function executionProcessDefinitions(
   const rankConnectorConcurrency = processCount(
     env.RANK_CONNECTOR_CONCURRENCY,
     "RANK_CONNECTOR_CONCURRENCY",
-    4,
+    32,
     64
   );
   const definitions: ProcessDefinition[] = [

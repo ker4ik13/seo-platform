@@ -16,10 +16,11 @@ const secondMember = "01900000-0000-7000-8000-000000000004";
 
 test("uses the documented XMLStock product windows", () => {
   assert.deepEqual(XMLSTOCK_HTTP_QUOTA_POLICIES, {
-    YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 15 },
-    GOOGLE_LIVE: { concurrency: 48, requestsPerSecond: 30 },
+    YANDEX_LIVE: { concurrency: 10, requestsPerSecond: 10 },
+    YANDEX_TURBO: { concurrency: 50, requestsPerSecond: 50 },
+    GOOGLE_LIVE: { concurrency: 15, requestsPerSecond: 30 },
     YANDEX_SEARCH_API: { concurrency: 50, requestsPerSecond: 50 },
-    WORDSTAT: { concurrency: 10, requestsPerSecond: 20 }
+    WORDSTAT: { concurrency: 10, requestsPerSecond: 10 }
   });
 });
 
@@ -51,7 +52,8 @@ test("acquires from only the selected credential and product bucket", async () =
       credentialId: firstCredential,
       product: "YANDEX_LIVE",
       leaseMs: 13_000,
-      member: firstMember
+      member: firstMember,
+      globalConcurrency: 96
     }
   );
 
@@ -62,7 +64,7 @@ test("acquires from only the selected credential and product bucket", async () =
     member: firstMember
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.[1], 6);
+  assert.equal(calls[0]?.[1], 7);
   assert.equal(
     calls[0]?.[2],
     `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:inflight`
@@ -71,6 +73,8 @@ test("acquires from only the selected credential and product bucket", async () =
     calls[0]?.[3],
     `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:rps`
   );
+  assert.equal(calls[0]?.[8], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:inflight");
+  assert.equal(calls[0]?.[14], "96");
 });
 
 test("returns a bounded retry without issuing a permit when a bucket is full", async () => {
@@ -97,7 +101,7 @@ test("release, penalty and recovery mutate only the same bucket", async () => {
   const redis = {
     eval: async (...args: unknown[]) => {
       calls.push(args);
-      if (args[1] === 1) return 1;
+      if (args[1] === 2) return 1;
       if (args[1] === 3) return [1, 5_000];
       return 0;
     }
@@ -129,4 +133,5 @@ test("release, penalty and recovery mutate only the same bucket", async () => {
       )
     );
   }
+  assert.equal(calls[0]?.[3], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:inflight");
 });

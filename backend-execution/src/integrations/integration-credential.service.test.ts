@@ -612,8 +612,7 @@ test("rotates only a complete replacement secret and uses optimistic locking", a
   assert.equal(result.version, 2);
   assert.equal(state.materialVersion, 2);
   assert.deepEqual(state.requestFingerprint, originalFingerprint);
-  assert.deepEqual(
-    executor.decrypt(workspaceId, "XMLSTOCK", credentialId, {
+  const decrypted = executor.decrypt(workspaceId, "XMLSTOCK", credentialId, {
       ciphertext: Buffer.from(state.ciphertext),
       nonce: Buffer.from(state.nonce),
       authTag: Buffer.from(state.authTag),
@@ -621,7 +620,10 @@ test("rotates only a complete replacement secret and uses optimistic locking", a
       dataKeyNonce: Buffer.from(state.dataKeyNonce),
       dataKeyAuthTag: Buffer.from(state.dataKeyAuthTag),
       keyVersion: state.keyVersion
-    }),
+    });
+  assert.match(decrypted.rateLimitScopeId ?? "", /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(
+    { apiKey: decrypted.apiKey, accountIdentifier: decrypted.accountIdentifier },
     {
       apiKey: "replacement-api-key",
       accountIdentifier: "account-2"

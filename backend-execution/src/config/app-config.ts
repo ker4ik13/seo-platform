@@ -119,6 +119,7 @@ export interface AppConfig {
     readonly rankConcurrency: number;
     readonly frequencyConcurrency: number;
     readonly keywordResearchConcurrency: number;
+    readonly xmlStockGlobalHttpConcurrency: number;
   };
   readonly rankPreparation: {
     readonly enabled: boolean;
@@ -282,6 +283,7 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "RANK_CONNECTOR_CONCURRENCY",
   "FREQUENCY_COLLECTION_CONCURRENCY",
   "KEYWORD_RESEARCH_CONCURRENCY",
+  "XMLSTOCK_GLOBAL_HTTP_CONCURRENCY",
   "RANK_PREPARATION_ENABLED",
   "RANK_PREPARATION_LEASE_SECONDS",
   "RANK_PREPARATION_DISPATCH_SECONDS",
@@ -1601,15 +1603,11 @@ export function loadAppConfig(
     );
   }
   if (processRole === "CONNECTOR_WORKER") {
-    const connectorConcurrency =
-      integrationValidationConcurrency +
-      rankConnectorConcurrency +
-      frequencyCollectionConcurrency +
-      keywordResearchConcurrency;
-    const minimumDatabasePoolMax = connectorConcurrency + 1;
-    if (databasePoolMax < minimumDatabasePoolMax) {
+    // Provider HTTP waits do not hold a PostgreSQL connection. The pg pool
+    // queues short broker calls independently of the external HTTP lanes.
+    if (databasePoolMax < 8) {
       throw new Error(
-        `DATABASE_POOL_MAX must be at least ${minimumDatabasePoolMax} for the configured connector concurrency`
+        "DATABASE_POOL_MAX must be at least 8 for the connector worker"
       );
     }
   }
@@ -1787,7 +1785,14 @@ export function loadAppConfig(
       shardCount: connectorRuntimeShardCount,
       rankConcurrency: rankConnectorConcurrency,
       frequencyConcurrency: frequencyCollectionConcurrency,
-      keywordResearchConcurrency
+      keywordResearchConcurrency,
+      xmlStockGlobalHttpConcurrency: boundedInteger(
+        env.XMLSTOCK_GLOBAL_HTTP_CONCURRENCY,
+        96,
+        "XMLSTOCK_GLOBAL_HTTP_CONCURRENCY",
+        1,
+        512
+      )
     },
     rankPreparation: {
       enabled: rankPreparationEnabled,

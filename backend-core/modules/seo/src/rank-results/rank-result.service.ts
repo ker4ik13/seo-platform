@@ -13,6 +13,7 @@ import {
   rankExecutionTracksProjectPosition,
   rankManifestChunkHashPreimage,
   type InternalIngestRankChunkInput,
+  type InternalIngestRankBatchInput,
   type InternalNormalizedRankResult,
   type InternalRankChunkIngestCommand,
   type InternalRankChunkIngestReceipt,
@@ -137,7 +138,38 @@ export class RankResultService {
     input: InternalIngestRankChunkInput
   ): Promise<InternalRankChunkIngestReceipt> {
     return this.prisma.$transaction(
+      (transaction) => this.ingestInTransaction(transaction, input),
+      {
+        isolationLevel: "ReadCommitted",
+        maxWait: RESULT_TRANSACTION_MAX_WAIT_MS,
+        timeout: RESULT_TRANSACTION_TIMEOUT_MS
+      }
+    );
+  }
+
+  public async ingestBatch(
+    input: InternalIngestRankBatchInput
+  ): Promise<readonly InternalRankChunkIngestReceipt[]> {
+    return this.prisma.$transaction(
       async (transaction) => {
+        const receipts: InternalRankChunkIngestReceipt[] = [];
+        for (const item of input.items) {
+          receipts.push(await this.ingestInTransaction(transaction, item));
+        }
+        return receipts;
+      },
+      {
+        isolationLevel: "ReadCommitted",
+        maxWait: RESULT_TRANSACTION_MAX_WAIT_MS,
+        timeout: RESULT_TRANSACTION_TIMEOUT_MS
+      }
+    );
+  }
+
+  private async ingestInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: InternalIngestRankChunkInput
+  ): Promise<InternalRankChunkIngestReceipt> {
         const manifest = await lockManifest(transaction, input);
         if (!manifest) {
           throw new NotFoundException(
@@ -361,13 +393,6 @@ export class RankResultService {
             select: RECEIPT_SELECT
           });
         return storedReceipt(created, expectedHash);
-      },
-      {
-        isolationLevel: "ReadCommitted",
-        maxWait: RESULT_TRANSACTION_MAX_WAIT_MS,
-        timeout: RESULT_TRANSACTION_TIMEOUT_MS
-      }
-    );
   }
 }
 

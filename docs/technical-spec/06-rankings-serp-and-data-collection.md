@@ -401,36 +401,38 @@ validation, а claim lease рассчитывается для двух посл
 lifecycle.
 
 XMLStock использует отдельный distributed limiter по
-`credentialId + product`: Yandex Live, Google Live, Yandex Search API и
+`physical key + product`: Yandex Live, Yandex Turbo, Google Live, Yandex Search API и
 Wordstat имеют независимые bounded concurrency/RPS buckets. Поэтому разные
-BYOK-ключи не блокируют друг друга, а один ключ корректно делит provider
+BYOK-ключи не блокируют друг друга, одинаковый ключ в разных workspace
+делит один bucket, а один ключ корректно делит provider
 capacity между всеми своими проектами и connector replicas. Permit занимает
 только реальный внешний HTTP-вызов; `POLL_WAIT`, локальный submit Live и
 внутренние DB/SEO Data операции его не удерживают. Коды provider throttling
 понижают окно и включают cooldown, а серия успешных ответов постепенно
 восстанавливает базовую ёмкость. Redis остаётся только transient capacity
 coordination и работает fail-closed; Job/lease/progress source of truth —
-PostgreSQL. Базовые окна одного credential: Yandex Live — `20 concurrent /
-15 RPS`, Google Live — `48 / 30`, Yandex Search API — `50 / 50`, Wordstat —
-`10 / 20`. Односекундный предел сглаживается общими для replicas окнами по
+PostgreSQL. Базовые окна одного физического ключа: Yandex Live — `10 concurrent /
+10 RPS`, Turbo — `50 / 50`, Google Live — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
+`10 / 10`. Сверху действует отдельный общий предел 96 внешних XMLStock HTTP-вызовов.
+Односекундный предел сглаживается общими для replicas окнами по
 100 мс, поэтому заявленная скорость не превращается в отклоняемый burst.
 XMLStock не использует общий lifecycle limit из пяти задач:
 dispatcher может подготовить новые keyword chunks только в пределах свободной
-части общего пула из 48 connector lanes, после чего Redis и per-product limiter
+части общего пула из 96 connector rank lanes, после чего Redis и per-product limiter
 задают фактический предел внешних HTTP-вызовов. Лимит пяти provider tasks
 остаётся только у Arsenkin.
 Штатные три connector process используют независимые deterministic dispatch
-shards, по 16 rank slot и по четыре frequency worker slot. Каждый slot имеет
+shards, по 32 rank slot и по четыре frequency worker slot. Каждый slot имеет
 фиксированный BullMQ lane ID; waiting/active backlog поэтому ограничен числом
 lanes даже при остановленном consumer. Старый time-based tick после обновления
-завершается без DB claim. Пул заполняется до 48 rank-вызовов, а Wordstat bucket
-— до `20 RPS`. Ожидание permit не
+завершается без DB claim. Пул заполняется до 96 rank-вызовов, а Wordstat bucket
+— до `10 RPS` на физический ключ. Ожидание permit не
 расходует попытку JobItem и отображается как фаза выполнения с расчётным
 числом provider requests, а не как terminal/error state.
 
 XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос
-явно получает `tbm=turbo&groupby=50`, а внешняя пропускная способность остаётся
-ограниченной worker concurrency и DB leases платформы. Turbo не занимает
+явно получает `tbm=turbo&groupby=50` и отдельный distributed quota bucket;
+общий XMLStock HTTP ceiling и worker concurrency также сохраняются. Turbo не занимает
 консервативное окно пяти активных provider tasks и исключается из подсчёта
 этого окна для стандартных запусков. Обычный Live явно передаёт пустой `tbm`,
 поэтому настройка Turbo в кабинете XMLStock не включает повышенный тариф
@@ -447,8 +449,8 @@ Turbo запрашивает page width 50: TOP-50 обычно выполняе
 
 Rank connector dispatcher держит один idle probe на shard и раскрывает только
 configured concurrency после фактической provider-работы. Завершённые runtime
-ticks удаляются сразу; Redis Jobs использует `maxmemory 512mb`, `noeviction` и
-container limit `768M`. Submit fast paths
+ticks удаляются сразу; Redis Jobs использует `maxmemory 1gb`, `noeviction` и
+container limit `1536M`. Submit fast paths
 проверяют актуальный parent Job до полного tenant graph и, для Arsenkin, до
 provider-wide advisory lock; terminal Job с ещё действующим execution grant не
 создаёт горячий цикл PostgreSQL. Poll fast path использует индекс

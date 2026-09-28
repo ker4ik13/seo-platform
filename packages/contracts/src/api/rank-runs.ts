@@ -1463,6 +1463,18 @@ export interface InternalIngestRankChunkInput
   readonly ingestEnvelopeHash: RankManifestHash;
 }
 
+/** Bounded XMLStock one-key chunks committed in one SEO Data transaction. */
+export const rankResultBatchMaxItems = 16;
+
+export interface InternalIngestRankBatchInput {
+  readonly schemaVersion: "rank-ingest-batch@1";
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly manifestId: string;
+  readonly items: readonly InternalIngestRankChunkInput[];
+}
+
 /**
  * Exact replay returns the same receipt. The same manifest/chunk identity
  * with another hash is an idempotency conflict. currentSkippedCount records

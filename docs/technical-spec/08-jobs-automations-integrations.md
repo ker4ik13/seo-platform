@@ -313,14 +313,16 @@ adapter credential останавливает процесс fail-closed. Эта
 Rate limiting настраивается по provider, credential и provider product. Нельзя
 полагаться только на общий limiter очереди; connector поддерживает
 распределённые Redis quota buckets. XMLStock разделяет `YANDEX_LIVE`,
-`GOOGLE_LIVE`, `YANDEX_SEARCH_API` и `WORDSTAT`; разные credentials никогда не
-делят bucket, а один credential делит его между своими проектами и всеми
-replicas. Permit удерживается только вокруг фактического provider HTTP, не во
+`YANDEX_TURBO`, `GOOGLE_LIVE`, `YANDEX_SEARCH_API` и `WORDSTAT`; одинаковые
+физические BYOK-ключи разных workspace делят bucket, разные ключи — нет.
+Один ключ делит его между своими проектами и всеми replicas. Permit удерживается
+только вокруг фактического provider HTTP, не во
 время `POLL_WAIT` или внутренних операций. Throttling включает bounded
 adaptive cooldown, успешные ответы постепенно восстанавливают окно, а
 недоступный limiter блокирует внешний вызов fail-closed. Начальные окна на
-один credential: Yandex Live — `20 concurrent / 15 RPS`, Google Live —
-`48 / 30`, Yandex Search API — `50 / 50`, Wordstat — `10 / 20`; provider
+один физический ключ: Yandex Live — `10 concurrent / 10 RPS`, Turbo —
+`50 / 50`, Google Live — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
+`10 / 10`; provider
 ответы `55`, `110`, `429` и `503` уменьшают только соответствующее окно.
 Distributed 100-ms smoothing не даёт нескольким replicas выбрать весь
 секундный budget одним burst; короткий permit wait остаётся внутри текущего
@@ -335,8 +337,8 @@ Arsenkin provider-task capacity считается глобально между
 maintenance queue dispatch выполняет только первый process instance. Runtime
 tick dispatch выполняют все экземпляры через непересекающиеся deterministic
 shard sequence, поэтому BullMQ deduplication не схлопывает три configured пула
-в один. Это убирает одинаковые фоновые сканы и сохраняет полные 48
-provider-I/O slot.
+в один. Это убирает одинаковые фоновые сканы и даёт 96 rank provider-I/O
+slots при стандартных трёх процессах по 32.
 При `CONNECTOR_PAID_RUNTIME_ENABLED=false` процесс продолжает credential
 validation/refresh, но не создаёт BullMQ consumers и ticks для rank,
 frequency, keyword research, AI answers и clustering. Режим предназначен для
@@ -354,8 +356,8 @@ connector-процессы за один queue burst заполняют своб
 provider HTTP выполняется параллельно уже вне этой блокировки. XMLStock
 capacity miss возвращает poll/item в ожидание без списания attempt.
 XMLStock не участвует в общей DB capacity из пяти provider tasks: rank
-dispatcher подготавливает до 48 keyword executions одного Job за проход,
-чтобы заполнить три connector process по 16 rank workers. Общая DB capacity
+dispatcher подготавливает до 96 keyword executions одного Job за проход,
+чтобы заполнить три connector process по 32 rank workers. Общая DB capacity
 из пяти задач остаётся Arsenkin-only; один XMLStock credential всё равно
 строго ограничен своим Redis product bucket.
 
@@ -365,7 +367,9 @@ dispatcher подготавливает до 48 keyword executions одного 
 вернуться из `check` в `queue|queued|wait|waiting|pending`; такой ответ не
 является ошибкой и продолжает bounded polling без повторного submit.
 Нормализованные `STAGED` rank-results сохраняются отдельным секундным bounded
-dispatcher. Короткий PostgreSQL claim сначала выравнивает число активных
+dispatcher. До 16 XMLStock chunks одного manifest отправляются в Core одной
+командой и фиксируются в одной транзакции; отдельные receipts и fenced leases
+сохраняют идемпотентный повтор. Короткий PostgreSQL claim сначала выравнивает число активных
 persistence leases между workspace, затем между Job одного workspace и только
 после этого выбирает oldest chunk внутри Job; крупный старый съём поэтому не
 может скрыто удерживать весь ingest новых съёмов.
