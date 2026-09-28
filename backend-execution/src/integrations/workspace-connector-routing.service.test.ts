@@ -463,6 +463,69 @@ test("saves an enabled route order independently of balance and temporary availa
   );
 });
 
+test("reorders an existing workspace route without a project or expected version", async () => {
+  const first = "0190abcd-1000-7000-9000-000000000010";
+  const second = "0190abcd-1000-7000-9000-000000000011";
+  let savedRoutes: readonly { readonly position: number; readonly credentialId: string }[] = [];
+  const existing = {
+    ...(workspaceBinding() as Readonly<Record<string, unknown>>),
+    id: workspaceBindingId,
+    version: 47,
+    fallbackMode: "NEXT_AVAILABLE",
+    fallbackReasons: ["LOW_BALANCE"],
+    createdBy: actorId,
+    updatedBy: actorId,
+    createdAt: now,
+    updatedAt: now
+  } as Readonly<Record<string, unknown>>;
+  const transaction = {
+    platformProviderAccount: { findMany: async () => [] },
+    workspaceConnectorBinding: {
+      findUnique: async () => existing,
+      update: async () => ({ ...existing, version: 48 }),
+      findFirst: async () => ({
+        ...existing,
+        version: 48,
+        routes: savedRoutes.map((route, index) => ({
+          ...route,
+          id: `0190abcd-1000-7000-b000-${String(index + 1).padStart(12, "0")}`,
+          bindingId: workspaceBindingId,
+          workspaceId,
+          createdAt: now,
+          updatedAt: now,
+          credential: credential("XMLSTOCK", "DEGRADED", route.credentialId.slice(-12))
+        }))
+      })
+    },
+    workspaceConnectorRoute: {
+      deleteMany: async () => ({ count: 2 }),
+      createMany: async ({ data }: { readonly data: typeof savedRoutes }) => {
+        savedRoutes = data;
+        return { count: data.length };
+      }
+    }
+  };
+  const routing = new WorkspaceConnectorRoutingService({
+    $transaction: async (callback: (value: typeof transaction) => Promise<unknown>) =>
+      callback(transaction)
+  } as unknown as PrismaService);
+
+  const result = await routing.upsert({
+    workspaceId,
+    actorId,
+    capability: "SERP_RANK_TRACKING",
+    enabled: true,
+    routes: [
+      { position: 0, sourceKind: "WORKSPACE_CREDENTIAL", credentialId: second },
+      { position: 1, sourceKind: "WORKSPACE_CREDENTIAL", credentialId: first }
+    ],
+    fallbackPolicy: { mode: "NEXT_AVAILABLE", reasons: ["LOW_BALANCE"] }
+  });
+
+  assert.equal(result.version, 48);
+  assert.deepEqual(result.routes.map(({ credentialId }) => credentialId), [second, first]);
+});
+
 function service(
   project: unknown,
   workspace: unknown = null,

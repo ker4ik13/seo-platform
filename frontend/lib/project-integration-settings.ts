@@ -1,10 +1,13 @@
 import type {
   CreateProjectConnectorBindingInput,
+  ConnectorFallbackReason,
   IntegrationCapability,
   ProjectConnectorBinding,
   ProjectConnectorCredentialOption,
   ProjectConnectorSettings,
   UpdateProjectConnectorBindingInput,
+  UpsertWorkspaceConnectorBindingInput,
+  WorkspaceConnectorBinding,
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import { credentialModeSupportsCapability } from "@seo-platform/contracts";
@@ -201,6 +204,47 @@ export function workspaceRouteCredentialIdsAfterSelection(
   return currentCredentialIds.includes(credentialId)
     ? currentCredentialIds
     : [...currentCredentialIds, credentialId];
+}
+
+export function workspaceRouteMatchesBinding(
+  binding: WorkspaceConnectorBinding | undefined,
+  draft: {
+    readonly enabled: boolean;
+    readonly credentialIds: readonly string[];
+    readonly fallbackReasons: readonly ConnectorFallbackReason[];
+  }
+): boolean {
+  if (!binding || binding.enabled !== draft.enabled) return false;
+  const actualIds = binding.routes.map(({ credentialId }) => credentialId);
+  if (
+    actualIds.length !== draft.credentialIds.length ||
+    actualIds.some((id, index) => id !== draft.credentialIds[index])
+  ) return false;
+  const fallbackEnabled = draft.credentialIds.length > 1;
+  const actualReasons = binding.fallbackPolicy.reasons ?? [];
+  return binding.fallbackPolicy.mode === (fallbackEnabled ? "NEXT_AVAILABLE" : "NONE") &&
+    actualReasons.length === (fallbackEnabled ? draft.fallbackReasons.length : 0) &&
+    (!fallbackEnabled || draft.fallbackReasons.every((reason) => actualReasons.includes(reason)));
+}
+
+export function workspaceRouteUpdateInput(draft: {
+  readonly enabled: boolean;
+  readonly credentialIds: readonly string[];
+  readonly fallbackReasons: readonly ConnectorFallbackReason[];
+}): UpsertWorkspaceConnectorBindingInput {
+  const fallbackEnabled = draft.credentialIds.length > 1;
+  return {
+    enabled: draft.enabled,
+    routes: draft.credentialIds.map((credentialId, position) => ({
+      position,
+      sourceKind: "WORKSPACE_CREDENTIAL",
+      credentialId
+    })),
+    fallbackPolicy: {
+      mode: fallbackEnabled ? "NEXT_AVAILABLE" : "NONE",
+      reasons: fallbackEnabled ? draft.fallbackReasons : []
+    }
+  };
 }
 
 /**

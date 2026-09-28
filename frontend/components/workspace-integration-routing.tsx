@@ -27,7 +27,9 @@ import { ProviderLogo } from "./provider-logo";
 import { UiText, useUiLocale } from "./ui-locale";
 import {
   isWorkspaceConnectorCredentialConfigurable,
-  workspaceRouteCredentialIdsAfterSelection
+  workspaceRouteCredentialIdsAfterSelection,
+  workspaceRouteMatchesBinding,
+  workspaceRouteUpdateInput
 } from "../lib/project-integration-settings";
 
 
@@ -43,6 +45,8 @@ const FALLBACK_REASON_LABELS: Readonly<Record<ConnectorFallbackReason, string>> 
   RATE_LIMITED: "лимит запросов",
   RETRYABLE_PROVIDER_ERROR: "временная ошибка провайдера"
 };
+const ROUTE_CONFIRMATION_ERROR =
+  "Сервер не подтвердил новый порядок маршрута. Повторите сохранение.";
 
 export function WorkspaceIntegrationRouting({
   revision = 0,
@@ -59,12 +63,13 @@ export function WorkspaceIntegrationRouting({
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<IntegrationCapability>();
   const [failed, setFailed] = useState<IntegrationCapability>();
-  const settingsRef = useRef<WorkspaceConnectorRoutingSettings | undefined>(undefined);
   const draftsRef = useRef<ReadonlyMap<IntegrationCapability, RouteDraft>>(new Map());
   const pendingSaves = useRef(new Map<IntegrationCapability, RouteDraft>());
   const activeSaves = useRef(new Set<IntegrationCapability>());
+  const mutationEpoch = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const startedAtEpoch = mutationEpoch.current;
     setLoading(true);
     setError(undefined);
     try {
@@ -72,9 +77,10 @@ export function WorkspaceIntegrationRouting({
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
         signal ? { signal } : {}
       );
-      if (signal?.aborted) return;
-      settingsRef.current = value;
+      if (signal?.aborted || startedAtEpoch !== mutationEpoch.current || activeSaves.current.size > 0) return;
       setSettings(value);
+      setSuccess(undefined);
+      setFailed(undefined);
       const nextDrafts = new Map(
           integrationCapabilities.map((capability) => {
             const binding = value.bindings.find(
@@ -127,6 +133,7 @@ export function WorkspaceIntegrationRouting({
   ): void {
     setSuccess(undefined);
     setFailed(undefined);
+    mutationEpoch.current += 1;
     const nextDraft = update(draftsRef.current.get(capability) ?? emptyDraft());
     const nextDrafts = new Map(draftsRef.current).set(capability, nextDraft);
     draftsRef.current = nextDrafts;
@@ -143,8 +150,8 @@ export function WorkspaceIntegrationRouting({
     pendingSaves.current.set(capability, draft);
     if (activeSaves.current.has(capability)) return;
     activeSaves.current.add(capability);
+    mutationEpoch.current += 1;
     setSaving((current) => new Set(current).add(capability));
-    let versionRetries = 0;
     try {
       while (pendingSaves.current.has(capability)) {
         const nextDraft = pendingSaves.current.get(capability)!;
@@ -154,74 +161,42 @@ export function WorkspaceIntegrationRouting({
           setFailed(capability);
           continue;
         }
-        const current = settingsRef.current?.bindings.find(
-          (binding) => binding.capability === capability
-        );
         setError(undefined);
         setSuccess(undefined);
         setFailed(undefined);
         try {
-          const saved = await browserApiRequest<WorkspaceConnectorBinding>(
-            `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing/${encodeURIComponent(capability)}`,
-            {
-              method: "PUT",
-              body: {
-                enabled: nextDraft.enabled,
-                routes: nextDraft.credentialIds.map((credentialId, position) => ({
-                  position,
-                  sourceKind: "WORKSPACE_CREDENTIAL",
-                  credentialId
-                })),
-                fallbackPolicy: {
-                  mode: nextDraft.credentialIds.length > 1 ? "NEXT_AVAILABLE" : "NONE",
-                  reasons: nextDraft.credentialIds.length > 1 ? nextDraft.fallbackReasons : []
-                },
-                ...(current ? { version: current.version } : {})
+          let confirmed: WorkspaceConnectorRoutingSettings | undefined;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            const saved = await browserApiRequest<WorkspaceConnectorBinding>(
+              `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing/${encodeURIComponent(capability)}`,
+              {
+                method: "PUT",
+                body: workspaceRouteUpdateInput(nextDraft)
               }
-            }
-          );
-          const nextSettings = settingsRef.current
-            ? {
-                ...settingsRef.current,
-                bindings: [
-                  ...settingsRef.current.bindings.filter(
-                    (binding) => binding.capability !== capability
-                  ),
-                  saved
-                ]
-              }
-            : undefined;
-          settingsRef.current = nextSettings;
-          setSettings(nextSettings);
-          versionRetries = 0;
-          if (!pendingSaves.current.has(capability)) {
-            const nextDrafts = new Map(draftsRef.current).set(
-              capability,
-              draftFromBinding(saved)
             );
-            draftsRef.current = nextDrafts;
-            setDrafts(nextDrafts);
-            setSuccess(capability);
-          }
-        } catch (cause) {
-          if (cause instanceof BrowserApiError && cause.status === 412 && versionRetries < 1) {
-            versionRetries += 1;
-            try {
-              const latest = await browserApiRequest<WorkspaceConnectorRoutingSettings>(
-                `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`
-              );
-              settingsRef.current = latest;
-              setSettings(latest);
-              if (!pendingSaves.current.has(capability)) {
-                pendingSaves.current.set(capability, nextDraft);
-              }
-              continue;
-            } catch (refreshError) {
-              setError(requestErrorMessage(refreshError));
-              setFailed(capability);
-              continue;
+            if (!workspaceRouteMatchesBinding(saved, nextDraft)) continue;
+            const latest = await browserApiRequest<WorkspaceConnectorRoutingSettings>(
+              `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`
+            );
+            if (workspaceRouteMatchesBinding(
+              latest.bindings.find((binding) => binding.capability === capability),
+              nextDraft
+            )) {
+              confirmed = latest;
+              break;
             }
           }
+          if (!confirmed) {
+            throw new Error(ROUTE_CONFIRMATION_ERROR);
+          }
+          mutationEpoch.current += 1;
+          setSettings(confirmed);
+          if (pendingSaves.current.has(capability)) continue;
+          const nextDrafts = new Map(draftsRef.current).set(capability, nextDraft);
+          draftsRef.current = nextDrafts;
+          setDrafts(nextDrafts);
+          setSuccess(capability);
+        } catch (cause) {
           setError(requestErrorMessage(cause));
           setFailed(capability);
         }
@@ -549,6 +524,9 @@ function capabilityDescription(capability: IntegrationCapability): string {
 }
 
 function requestErrorMessage(cause: unknown): string {
+  if (cause instanceof Error && cause.message === ROUTE_CONFIRMATION_ERROR) {
+    return ROUTE_CONFIRMATION_ERROR;
+  }
   if (cause instanceof BrowserApiError) {
     return `${cause.message}${cause.requestId ? ` Код запроса: ${cause.requestId}.` : ""}`;
   }

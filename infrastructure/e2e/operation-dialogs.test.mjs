@@ -87,6 +87,44 @@ test("operation dialogs through Caddy: RU/EN, real scope reads, responsive empty
       }
     }
   }
+  await context.unroute(`**/app/api/workspaces/${workspace.id}/integrations/routing`);
+  const personalId = randomUUID(); let routeOrder = [credentialId, personalId], routeVersion = 1, staleReadPending = true;
+  const initialRouteOrder = [...routeOrder];
+  const routingBinding = (order = routeOrder) => ({
+    id: bindingId, workspaceId: workspace.id, capability: "SERP_RANK_TRACKING", enabled: true,
+    routes: order.map((id, position) => ({ id: randomUUID(), bindingId, workspaceId: workspace.id, position, credentialId: id, provider: "XMLSTOCK", credentialMode: "BYOK_API_KEY", availability: "READY", createdAt: now, updatedAt: now })),
+    fallbackPolicy: { mode: "NEXT_AVAILABLE", reasons: ["CREDENTIAL_UNAVAILABLE", "LOW_BALANCE"] },
+    version: routeVersion, createdBy: fixture?.userId ?? credentialId, updatedBy: fixture?.userId ?? credentialId, createdAt: now, updatedAt: now
+  });
+  const routingPath = `**/app/api/workspaces/${workspace.id}/integrations/routing`;
+  await context.route(routingPath, route => {
+    const stale = routeVersion === 2 && staleReadPending;
+    if (stale) staleReadPending = false;
+    return route.fulfill({ json: { data: {
+      bindings: [routingBinding(stale ? initialRouteOrder : routeOrder)], credentialOptions: [
+        { id: credentialId, workspaceId: workspace.id, provider: "XMLSTOCK", label: "Legend", mode: "BYOK_API_KEY", status: "ACTIVE", capabilities: ["SERP_RANK_TRACKING"] },
+        { id: personalId, workspaceId: workspace.id, provider: "XMLSTOCK", label: "Personal", mode: "BYOK_API_KEY", status: "INVALID", capabilities: ["SERP_RANK_TRACKING"] }
+      ], credentialOptionsTruncated: false, access: { canUpdateBindings: true, canManageFallback: true }
+    } } });
+  });
+  await context.route(`${routingPath}/SERP_RANK_TRACKING`, route => {
+    const body = route.request().postDataJSON();
+    assert.equal("version" in body, false, "workspace reorder must not depend on a project or binding version");
+    routeOrder = body.routes.map(({ credentialId: id }) => id); routeVersion += 1;
+    return route.fulfill({ json: { data: routingBinding() } });
+  });
+  await page.goto(`${base}/app/settings/integrations`, { waitUntil: "networkidle" });
+  const routingRow = page.locator("#routing-serp-rank-tracking");
+  await routingRow.locator(".integration-route-item").nth(1).locator(".integration-route-controls button").first().click();
+  await page.waitForFunction(() => {
+    const row = document.querySelector("#routing-serp-rank-tracking");
+    return row?.querySelector(".integration-route-item strong")?.textContent === "Personal" &&
+      Boolean(row.querySelector(".integration-save-success"));
+  });
+  assert.deepEqual(routeOrder, [personalId, credentialId]);
+  assert.equal(routeVersion, 3, "a stale GET must not be treated as saved");
+  await page.reload({ waitUntil: "networkidle" });
+  assert.equal(await routingRow.locator(".integration-route-item strong").first().textContent(), "Personal");
   await writeFile(path.join(output, "operation-dialogs-report.json"), JSON.stringify({ report, errors, launches }, null, 2), { mode: 0o600 });
   assert.deepEqual(errors, []); assert.deepEqual(launches, []);
   const allowed = new Set(["Настройки", "сохранить настройки", "новый проект"]);

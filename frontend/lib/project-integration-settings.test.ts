@@ -25,7 +25,9 @@ import {
   sameProjectConnectorBindingRevision,
   stableProjectConnectorCreateCommand,
   workspaceConnectorOptions,
-  workspaceRouteCredentialIdsAfterSelection
+  workspaceRouteCredentialIdsAfterSelection,
+  workspaceRouteMatchesBinding,
+  workspaceRouteUpdateInput
 } from "./project-integration-settings.ts";
 
 const activeCredential: ProjectConnectorCredentialOption = {
@@ -340,6 +342,68 @@ test("adding a route retains unavailable credentials in the configured order", (
       replacementCredentialId
     ]
   );
+});
+
+test("confirms the exact workspace order regardless of route version and availability", () => {
+  const ids = [
+    "00000000-0000-7000-8000-000000000091",
+    "00000000-0000-7000-8000-000000000092",
+    "00000000-0000-7000-8000-000000000093"
+  ];
+  const workspaceBinding: WorkspaceConnectorBinding = {
+    id: binding.id,
+    workspaceId: binding.workspaceId,
+    capability: RANK_TRACKING_CAPABILITY,
+    enabled: true,
+    routes: ids.map((credentialId, position) => ({
+      id: credentialId,
+      bindingId: binding.id,
+      workspaceId: binding.workspaceId,
+      position,
+      credentialId,
+      provider: "XMLSTOCK",
+      credentialMode: "BYOK_API_KEY",
+      availability: "CREDENTIAL_UNAVAILABLE",
+      createdAt: binding.createdAt,
+      updatedAt: binding.updatedAt
+    })),
+    fallbackPolicy: { mode: "NEXT_AVAILABLE", reasons: ["LOW_BALANCE"] },
+    version: 47,
+    createdBy: binding.createdBy,
+    updatedBy: binding.updatedBy,
+    createdAt: binding.createdAt,
+    updatedAt: binding.updatedAt
+  };
+  const desired = {
+    enabled: true,
+    credentialIds: [ids[1]!, ids[0]!, ids[2]!],
+    fallbackReasons: ["LOW_BALANCE"] as const
+  };
+  assert.equal(workspaceRouteMatchesBinding(workspaceBinding, desired), false);
+  assert.equal(workspaceRouteMatchesBinding({
+    ...workspaceBinding,
+    routes: [
+      { ...workspaceBinding.routes[1]!, position: 0 },
+      { ...workspaceBinding.routes[0]!, position: 1 },
+      workspaceBinding.routes[2]!
+    ],
+    version: 999
+  }, desired), true);
+  assert.equal(workspaceRouteMatchesBinding(undefined, desired), false);
+  assert.deepEqual(workspaceRouteUpdateInput(desired), {
+    enabled: true,
+    routes: desired.credentialIds.map((credentialId, position) => ({
+      position,
+      sourceKind: "WORKSPACE_CREDENTIAL",
+      credentialId
+    })),
+    fallbackPolicy: { mode: "NEXT_AVAILABLE", reasons: ["LOW_BALANCE"] }
+  });
+  assert.deepEqual(workspaceRouteUpdateInput({
+    enabled: false,
+    credentialIds: [ids[0]!],
+    fallbackReasons: ["LOW_BALANCE"]
+  }).fallbackPolicy, { mode: "NONE", reasons: [] });
 });
 
 test("a transfer-reset binding starts with no selected credential", () => {
