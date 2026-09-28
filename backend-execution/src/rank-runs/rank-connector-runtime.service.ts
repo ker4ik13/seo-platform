@@ -163,6 +163,7 @@ export class RankConnectorRuntimeService {
         quotaProduct = xmlStockRankHttpProduct(request);
         const acquired = await this.xmlStockQuota.tryAcquire({
           credentialId: providerCredentialScopeId,
+          workspaceId: claim.workspaceId,
           product: quotaProduct,
           leaseMs:
             this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
@@ -283,6 +284,7 @@ export class RankConnectorRuntimeService {
       const product = xmlStockRankHttpProduct(request);
       const acquired = await this.xmlStockQuota.tryAcquire({
         credentialId: providerCredentialScopeId,
+        workspaceId: claim.workspaceId,
         product,
         leaseMs:
           this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
@@ -290,7 +292,7 @@ export class RankConnectorRuntimeService {
       if (!acquired.allowed) {
         await this.broker.deferPollForProviderCapacity(
           claim,
-          Math.max(5, acquired.retryAfterSeconds)
+          Math.max(1, acquired.retryAfterSeconds)
         );
         return "PROVIDER_CAPACITY_DELAYED";
       }

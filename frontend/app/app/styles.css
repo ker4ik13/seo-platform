@@ -5335,6 +5335,21 @@ svg { display: block; }
   transform: translate(-50%, 0);
   visibility: visible;
 }
+@media (max-width: 760px) {
+  .tracking-context-settings .info-tooltip-content {
+    bottom: 12px;
+    left: 12px;
+    max-width: none;
+    position: fixed;
+    right: 12px;
+    transform: translateY(4px);
+    width: auto;
+  }
+  .tracking-context-settings .info-tooltip:hover .info-tooltip-content,
+  .tracking-context-settings .info-tooltip:focus-within .info-tooltip-content {
+    transform: translateY(0);
+  }
+}
 .semantic-xmlstock-depth-mode legend {
   align-items: center;
   display: inline-flex;

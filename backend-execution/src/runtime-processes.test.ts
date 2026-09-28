@@ -30,6 +30,8 @@ const baseEnvironment = {
   PLATFORM_ARSENKIN_ENABLED: "false",
   PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http",
   RANK_CONNECTOR_CONCURRENCY: "16",
+  UPLOAD_FILE_RETENTION_DAYS: "14",
+  EXPORT_FILE_RETENTION_DAYS: "3",
   RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: "750"
 } satisfies NodeJS.ProcessEnv;
 
@@ -58,6 +60,10 @@ test("execution roles receive only their scoped database and secrets", () => {
     "must-stay-in-http-1,must-stay-in-http-2"
   );
   assert.equal(system?.PLATFORM_API_URL, undefined);
+  const importWorker = definitions.find(({ name }) => name === "import-worker")?.environment;
+  assert.equal(importWorker?.UPLOAD_FILE_RETENTION_DAYS, "14");
+  assert.equal(importWorker?.EXPORT_FILE_RETENTION_DAYS, "3");
+  assert.equal(http?.UPLOAD_FILE_RETENTION_DAYS, undefined);
   const rank = definitions.find(({ name }) => name === "rank-worker")?.environment;
   assert.equal(rank?.DATABASE_URL, "postgresql://rank");
   assert.equal(

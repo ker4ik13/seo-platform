@@ -297,7 +297,7 @@ export class RankConnectorRuntimeBrokerService {
     retryAfterSeconds: number
   ): Promise<RankConnectorCompletion> {
     const retryAfter = boundedRetryAfter(retryAfterSeconds);
-    if (retryAfter === undefined || retryAfter < 5) {
+    if (retryAfter === undefined || retryAfter < 1) {
       throw new TypeError("Invalid rank connector capacity retry delay");
     }
     return this.complete(

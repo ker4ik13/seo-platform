@@ -39,10 +39,26 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.rankExecution.submitEnabled, false);
   assert.deepEqual(config.platformProviderCredentials, {});
   assert.equal(config.xmlStockSoftId, undefined);
+  assert.deepEqual(config.fileRetention, { uploadDays: 30, exportDays: 7 });
   assert.equal(
     config.rankExecution.killSwitchVersion,
     "arsenkin-positions@4"
   );
+});
+
+test("configures uploaded and exported file retention in whole days", () => {
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    UPLOAD_FILE_RETENTION_DAYS: "14",
+    EXPORT_FILE_RETENTION_DAYS: "3"
+  });
+  assert.deepEqual(config.fileRetention, { uploadDays: 14, exportDays: 3 });
+  assert.throws(() => loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    UPLOAD_FILE_RETENTION_DAYS: "0"
+  }), /UPLOAD_FILE_RETENTION_DAYS/u);
 });
 
 test("loads the XMLStock partner ID independently of platform credentials", () => {

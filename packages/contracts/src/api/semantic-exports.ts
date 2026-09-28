@@ -87,6 +87,7 @@ export const semanticExportJobStatuses = [
   "CANCELLED",
   "RETRY_SCHEDULED",
   "COMPLETED",
+  "EXPIRED",
   "FAILED_RETRYABLE",
   "FAILED_FINAL"
 ] as const;

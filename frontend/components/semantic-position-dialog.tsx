@@ -1464,7 +1464,9 @@ function PositionRunParameters({
                 <option value="SEARCH_API"><UiText text="Яндекс XML / Search API" /></option>
               )}
               <option value="LIVE">
-                {draft.searchEngine === "YANDEX" ? <UiText text="Яндекс Live" /> : "Google Live"}
+                {draft.searchEngine === "YANDEX"
+                  ? <UiText text="Яндекс Live" />
+                  : provider === "XMLSTOCK" ? "Google XML" : "Google Live"}
               </option>
             </CustomSelect>
           </label>

@@ -420,6 +420,8 @@ case "$component" in
       S3_BUCKET_UPLOADS="$S3_BUCKET_UPLOADS" \
       S3_BUCKET_ARTIFACTS="$S3_BUCKET_ARTIFACTS" \
       S3_FORCE_PATH_STYLE=true \
+      UPLOAD_FILE_RETENTION_DAYS="${UPLOAD_FILE_RETENTION_DAYS:-30}" \
+      EXPORT_FILE_RETENTION_DAYS="${EXPORT_FILE_RETENTION_DAYS:-7}" \
       EMAIL_ENABLED=false \
       MALWARE_SCANNER_ENABLED=false \
       "$node_bin" "$project_root/backend-execution/dist/import-worker.main.js"

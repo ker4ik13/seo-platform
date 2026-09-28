@@ -670,6 +670,8 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Сначала добавьте новое подключение": "Add the replacement connection first",
   "Сохраняем маршрут…": "Saving route…",
   "Сохранено автоматически": "Saved automatically",
+  "Для некоторых фраз ответ XMLStock не подтверждён. Остальные фразы обработаны и доступны для импорта; спорные запросы не отправлялись повторно.": "XMLStock did not confirm the response for some phrases. The others were processed and can be imported; uncertain requests were not sent again.",
+  "Ответ XMLStock по некоторым фразам не подтверждён. Остальные фразы продолжают обрабатываться; спорные запросы не отправлялись повторно.": "XMLStock did not confirm the response for some phrases. The remaining phrases are still being processed; uncertain requests were not sent again.",
   "Сервер не подтвердил новый порядок маршрута. Повторите сохранение.": "The server did not confirm the new route order. Retry saving.",
   "Повторить сохранение": "Retry saving",
   "Заменить недоступное подключение": "Replace unavailable connection",

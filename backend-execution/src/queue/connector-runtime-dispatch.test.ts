@@ -23,6 +23,17 @@ test("connector processes publish non-overlapping runtime jobs", () => {
   );
 });
 
+test("keyword research gets one independent lane per connector process", () => {
+  assert.deepEqual(
+    Array.from({ length: 3 }, (_, shard) => shardedDispatchLane(1, shard, 3, 0)),
+    [0, 1, 2]
+  );
+  assert.deepEqual(
+    Array.from({ length: 3 }, (_, shard) => shardedDispatchSequence(12, 1, shard, 3, 0)),
+    [36, 37, 38]
+  );
+});
+
 test("connector dispatch sequence rejects malformed shard coordinates", () => {
   assert.throws(
     () => shardedDispatchSequence(1, 4, 3, 3, 0),

@@ -998,6 +998,7 @@ model KeywordResearchRun {
   credential IntegrationCredential   @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "keyword_research_runs_credential_tenant_fkey")
   pages      KeywordResearchPage[]
   rows       KeywordResearchRow[]
+  seedCheckpoints KeywordResearchSeedCheckpoint[]
 
   @@unique([workspaceId, projectId, id], map: "keyword_research_runs_tenant_project_id_key")
   @@unique([workspaceId, projectId, jobId], map: "keyword_research_runs_tenant_project_job_key")
@@ -1021,6 +1022,27 @@ model KeywordResearchPage {
   @@unique([runId, page], map: "keyword_research_pages_run_page_key")
   @@index([workspaceId, projectId, runId, page], map: "keyword_research_pages_tenant_run_page_idx")
   @@map("keyword_research_pages")
+}
+
+model KeywordResearchSeedCheckpoint {
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  projectId    String    @map("project_id") @db.Uuid
+  runId        String    @map("run_id") @db.Uuid
+  seedIndex    Int       @map("seed_index")
+  state        String    @db.VarChar(16)
+  leaseToken   String    @map("lease_token") @db.Uuid
+  rows         Json?
+  responseHash Bytes?    @map("response_hash")
+  errorCode    String?   @map("error_code") @db.VarChar(64)
+  attempt      Int       @default(1)
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  run KeywordResearchRun @relation(fields: [workspaceId, projectId, runId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "keyword_research_seed_checkpoints_run_tenant_fkey")
+
+  @@id([runId, seedIndex], map: "keyword_research_seed_checkpoints_pkey")
+  @@index([workspaceId, projectId, runId, state], map: "keyword_research_seed_checkpoints_tenant_state_idx")
+  @@map("keyword_research_seed_checkpoints")
 }
 
 model KeywordResearchRow {
@@ -1070,6 +1092,7 @@ model Upload {
   idempotencyKey        String       @map("idempotency_key") @db.VarChar(180)
   scanResult            Json?        @map("scan_result")
   expiresAt             DateTime     @map("expires_at") @db.Timestamptz(6)
+  objectDeletedAt       DateTime?    @map("object_deleted_at") @db.Timestamptz(6)
   uploadedAt            DateTime?    @map("uploaded_at") @db.Timestamptz(6)
   abortedAt             DateTime?    @map("aborted_at") @db.Timestamptz(6)
   inspectionStartedAt   DateTime?    @map("inspection_started_at") @db.Timestamptz(6)

@@ -727,7 +727,7 @@ function rankTask(value: RankJobSummary, uiLocale: string = "ru-RU"): ProjectTas
     inputFacts: [
       { label: "Провайдер", value: provider },
       ...(value.searchEngine
-        ? [{ label: "Поисковая система", value: rankSearchSystemLabel(value.searchEngine, value.searchSource, value.yandexLiveMode) }]
+        ? [{ label: "Поисковая система", value: rankSearchSystemLabel(value.searchEngine, value.searchSource, value.yandexLiveMode, value.provider) }]
         : []),
       ...(depthLabel ? [{ label: "Глубина", value: depthLabel }] : []),
       { label: "Профиль съёма", value: value.trackingContextId },
@@ -873,7 +873,7 @@ function providerLabel(provider: "XMLSTOCK" | "ARSENKIN"): string { return provi
 function rankSearchContextLabel(value: RankJobSummary): string | undefined {
   const parts = [
     value.searchEngine
-      ? rankSearchSystemLabel(value.searchEngine, value.searchSource, value.yandexLiveMode)
+      ? rankSearchSystemLabel(value.searchEngine, value.searchSource, value.yandexLiveMode, value.provider)
       : undefined,
     rankCollectionDepthLabel(value, value.depth)
   ].filter((part): part is string => Boolean(part));

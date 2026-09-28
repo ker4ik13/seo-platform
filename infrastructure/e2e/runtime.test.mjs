@@ -156,7 +156,13 @@ test("production runtime through Caddy: tenant security, real writes and respons
         assert.equal(await page.locator("h1").count(), 1, `${index}: one page heading`);
         assert.equal(await page.locator(".settings-tabs a[aria-current=page]").count(), 1, `${index}: current settings section`);
         const dimensions = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
-        assert.ok(dimensions.document <= width + 1, `${index} overflows at ${width}px`);
+        const overflow = dimensions.document > width + 1
+          ? await page.evaluate(() => [...document.querySelectorAll("body *")]
+            .filter(node => node.getBoundingClientRect().right > innerWidth + 1)
+            .slice(0, 5)
+            .map(node => ({ tag: node.tagName, className: typeof node.className === "string" ? node.className : "", right: Math.round(node.getBoundingClientRect().right) })))
+          : [];
+        assert.ok(dimensions.document <= width + 1, `${index} overflows at ${width}px: ${JSON.stringify(overflow)}`);
         const heading = await page.locator('.page-heading').boundingBox();
         const navigation = await page.locator('.settings-tabs').boundingBox();
         const separated = heading && navigation && (

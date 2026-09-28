@@ -308,7 +308,7 @@ function competitorSourceLabel(
     : snapshot.provider === "KEY_COLLECTOR"
       ? "Key Collector · импорт"
       : "Arsenkin Tools";
-  return `${rankSearchSystemLabel(snapshot.searchEngine, searchSource)} · ${provider}`;
+  return `${rankSearchSystemLabel(snapshot.searchEngine, searchSource, snapshot.provider)} · ${provider}`;
 }
 
 type CompetitorSnapshot =

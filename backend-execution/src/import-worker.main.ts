@@ -31,6 +31,7 @@ import {
   type SemanticExportJobData
 } from "./queue/semantic-export.queue.js";
 import { SemanticExportWorkerService } from "./semantic-exports/semantic-export-worker.service.js";
+import { FileRetentionService } from "./file-retention/file-retention.service.js";
 
 const logger = new Logger("SemanticImportWorker");
 const UUID_PATTERN =
@@ -47,6 +48,7 @@ async function bootstrap(): Promise<void> {
   const publisher = app.get(SemanticImportPublisherService);
   const keywordResearch = app.get(KeywordResearchImportService);
   const semanticExports = app.get(SemanticExportWorkerService);
+  const fileRetention = app.get(FileRetentionService);
   const leaseOwner = `keyword-import-${randomUUID()}`;
   const exportLeaseOwner = semanticExports.workerId();
   const workerConnection = redis(config.redisUrl);
@@ -182,6 +184,22 @@ async function bootstrap(): Promise<void> {
   );
   dispatchTimer.unref();
 
+  let sweepingFiles = false;
+  async function sweepFiles(): Promise<void> {
+    if (sweepingFiles) return;
+    sweepingFiles = true;
+    try {
+      await fileRetention.sweep();
+    } catch {
+      logger.error("Unable to sweep expired uploaded and exported files");
+    } finally {
+      sweepingFiles = false;
+    }
+  }
+  void sweepFiles();
+  const fileRetentionTimer = setInterval(() => void sweepFiles(), 60 * 60 * 1_000);
+  fileRetentionTimer.unref();
+
   worker.on("failed", (job, error) => {
     logger.error(
       `Semantic import failed for job ${job?.id ?? "unknown"} (${safeFailureCode(error)})`
@@ -198,6 +216,7 @@ async function bootstrap(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(dispatchTimer);
+    clearInterval(fileRetentionTimer);
     await worker.close();
     await exportWorker.close();
     await queue.close();

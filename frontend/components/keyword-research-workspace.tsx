@@ -667,7 +667,15 @@ export function KeywordResearchRunPreview({
 
   return (
     <div className={`keyword-research-run-preview${ready ? " is-ready" : ""}`}>
-      {run.failureCode && <div className="inline-error keyword-research-preview-error"><UiText text="Ошибка:" after=" " />{run.failureCode}</div>}
+      {run.failureCode && (
+        <div className="inline-error keyword-research-preview-error">
+          {run.failureCode === "XMLSTOCK_OUTCOME_UNKNOWN"
+            ? ["READY_TO_IMPORT", "IMPORT_QUEUED", "IMPORTING", "COMPLETED"].includes(run.status)
+              ? <UiText text="Для некоторых фраз ответ XMLStock не подтверждён. Остальные фразы обработаны и доступны для импорта; спорные запросы не отправлялись повторно." />
+              : <UiText text="Ответ XMLStock по некоторым фразам не подтверждён. Остальные фразы продолжают обрабатываться; спорные запросы не отправлялись повторно." />
+            : <><UiText text="Ошибка:" after=" " />{run.failureCode}</>}
+        </div>
+      )}
       {retryableImport && (
         <div className="keyword-research-retry-import">
           <span><strong><UiText text="Сбор завершён, не прошёл только импорт." /></strong><small><UiText text="Запросы и выбранные папки сохранены — повторный парсинг не нужен." /></small></span>

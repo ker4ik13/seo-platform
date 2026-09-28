@@ -2105,7 +2105,7 @@ function rankRuntimeProductLabel(value: RankRuntimeDiagnostics["policy"]["produc
   return ({
     YANDEX_LIVE: "Яндекс Live",
     YANDEX_TURBO: "Яндекс Turbo",
-    GOOGLE_LIVE: "Google Live",
+    GOOGLE_LIVE: "Google XML",
     YANDEX_SEARCH_API: "Яндекс XML Proxy"
   } as const)[value];
 }
@@ -2644,7 +2644,8 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
     const searchSystem = rankSearchSystemLabel(
       value.execution.searchEngine,
       searchSource,
-      value.providerUsage?.product === "YANDEX_TURBO" ? "TURBO" : undefined
+      value.providerUsage?.product === "YANDEX_TURBO" ? "TURBO" : undefined,
+      value.job.provider
     );
     return {
       title: rankCollectionTitle(value.execution),

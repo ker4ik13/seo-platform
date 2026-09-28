@@ -669,7 +669,8 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
     ? rankSearchSystemLabel(
         value.searchEngine,
         value.searchSource,
-        value.yandexLiveMode
+        value.yandexLiveMode,
+        value.provider
       )
     : undefined;
   const description = [
@@ -956,6 +957,7 @@ function exportStatusLabel(status: SemanticExportJobSummary["status"]): string {
     CANCELLED: "Остановлен",
     RETRY_SCHEDULED: "Повтор запланирован",
     COMPLETED: "Файл готов",
+    EXPIRED: "Файл удалён по сроку хранения",
     FAILED_RETRYABLE: "Временная ошибка",
     FAILED_FINAL: "Ошибка"
   }[status];

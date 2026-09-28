@@ -5,6 +5,8 @@ import { SemanticImportParserModule } from "./imports/semantic-import-parser.mod
 import { KeywordResearchImportService } from "./keyword-research/keyword-research-import.service.js";
 import { SeoDataModule } from "./seo-data/seo-data.module.js";
 import { SemanticExportWorkerModule } from "./semantic-exports/semantic-export-worker.module.js";
+import { FileRetentionService } from "./file-retention/file-retention.service.js";
+import { StorageModule } from "./storage/storage.module.js";
 
 @Module({
   imports: [
@@ -12,8 +14,9 @@ import { SemanticExportWorkerModule } from "./semantic-exports/semantic-export-w
     DatabaseModule,
     SemanticImportParserModule,
     SeoDataModule,
-    SemanticExportWorkerModule
+    SemanticExportWorkerModule,
+    StorageModule
   ],
-  providers: [KeywordResearchImportService]
+  providers: [KeywordResearchImportService, FileRetentionService]
 })
 export class ImportWorkerModule {}

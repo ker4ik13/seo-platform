@@ -1386,6 +1386,13 @@ Readiness marker создаётся только после успешного w
 - vacuum/analyze monitoring;
 - index bloat/reindex planning;
 - expired uploads/exports cleanup;
+  Import-worker раз в час удаляет старые исходные upload-объекты и готовые
+  export-артефакты по `UPLOAD_FILE_RETENTION_DAYS` (30) и
+  `EXPORT_FILE_RETENTION_DAYS` (7). Сначала блокируется создание нового
+  импорта для истекающей загрузки, затем после успешного S3 удаления
+  фиксируется его результат; при ошибке S3 удаление повторяется. Активный
+  импорт не затрагивается. Экспорт после удаления отображается как
+  `EXPIRED`, скачивание возвращает 410; Job и audit-метаданные остаются.
 - old session/token cleanup;
 - bounded global refresh-session expiry sweeper, который использует тот же
   family revoke/outbox helper; текущий Platform API runtime реализует его и

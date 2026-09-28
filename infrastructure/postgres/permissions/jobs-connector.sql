@@ -412,6 +412,36 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
+    public.reserve_xmlstock_wordstat_research_seed(
+      UUID, TEXT, UUID, INTEGER, INTEGER, INTEGER, BOOLEAN
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.finish_xmlstock_wordstat_research_seed_checkpoint(
+      UUID, TEXT, UUID, INTEGER, INTEGER, INTEGER, TEXT, JSONB, BYTEA, TEXT
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.skip_unknown_xmlstock_wordstat_research_seed(
+      UUID, TEXT, UUID, INTEGER, INTEGER, INTEGER
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
     public.mark_keyword_research_submitting(
       UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER
     )
@@ -693,6 +723,9 @@ BEGIN
     'public.claim_keyword_research_run(text,integer)'::regprocedure::oid,
     'public.complete_keyword_research_page(uuid,text,uuid,integer,integer,jsonb,bytea,integer,boolean,jsonb,jsonb)'::regprocedure::oid,
     'public.complete_xmlstock_wordstat_research_seed(uuid,text,uuid,integer,integer,jsonb,bytea)'::regprocedure::oid,
+    'public.reserve_xmlstock_wordstat_research_seed(uuid,text,uuid,integer,integer,integer,boolean)'::regprocedure::oid,
+    'public.finish_xmlstock_wordstat_research_seed_checkpoint(uuid,text,uuid,integer,integer,integer,text,jsonb,bytea,text)'::regprocedure::oid,
+    'public.skip_unknown_xmlstock_wordstat_research_seed(uuid,text,uuid,integer,integer,integer)'::regprocedure::oid,
     'public.mark_keyword_research_submitting(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid,
     'public.transition_wordstat_keyword_research_run(uuid,text,uuid,integer,integer,text,text,integer,text,jsonb,bytea)'::regprocedure::oid,
     'public.fail_keyword_research_run(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid,

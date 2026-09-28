@@ -92,6 +92,19 @@ export class SemanticImportService {
           input.workspaceId,
           input.jobCapacity
         );
+        const lockedUpload = await transaction.$queryRaw<
+          Array<{ status: string }>
+        >`
+          SELECT status::text AS status
+          FROM uploads
+          WHERE id = ${upload.id}::uuid
+            AND workspace_id = ${input.workspaceId}::uuid
+            AND project_id = ${input.projectId}::uuid
+          FOR UPDATE
+        `;
+        if (lockedUpload[0]?.status !== "READY") {
+          throw new ConflictException("Only a READY upload can be imported");
+        }
         const semanticImport = await transaction.semanticImport.create({
           data: {
             workspaceId: input.workspaceId,

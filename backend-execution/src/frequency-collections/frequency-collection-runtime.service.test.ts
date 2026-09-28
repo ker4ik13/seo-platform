@@ -452,7 +452,7 @@ test("an XMLStock credential quota miss is deferred without calling Wordstat", a
   assert.equal(await runtime.processOne("connector-123456"), "RETRY_SCHEDULED");
   assert.equal(providerCalls, 0);
   assert.equal(releases.length, 1);
-  assert.equal(releases[0]?.[1], 5);
+  assert.equal(releases[0]?.[1], 2);
 });
 
 class RuntimeHarness extends FrequencyCollectionRuntimeService {

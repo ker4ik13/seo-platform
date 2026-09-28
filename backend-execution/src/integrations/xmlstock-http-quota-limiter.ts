@@ -40,6 +40,7 @@ export type XmlStockHttpQuotaPermit =
   | {
       readonly allowed: true;
       readonly credentialId: string;
+      readonly workspaceId: string;
       readonly product: XmlStockHttpProduct;
       readonly member: string;
     }
@@ -52,6 +53,7 @@ export type XmlStockHttpQuotaPermit =
 export interface XmlStockHttpQuotaGate {
   tryAcquire(input: {
     readonly credentialId: string;
+    readonly workspaceId: string;
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
@@ -81,6 +83,8 @@ local request_cost = tonumber(ARGV[3])
 local lease_ms = tonumber(ARGV[4])
 local member = ARGV[5]
 local global_concurrency = tonumber(ARGV[6])
+local physical_key = ARGV[7]
+local workspace_id = ARGV[8]
 local smoothing_window_ms = 100
 local penalty = tonumber(redis.call('GET', KEYS[4]) or '0')
 local divisor = 2 ^ penalty
@@ -96,22 +100,47 @@ redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now_ms - 1000)
 redis.call('ZREMRANGEBYSCORE', KEYS[6], '-inf', now_ms - smoothing_window_ms)
 redis.call('ZREMRANGEBYSCORE', KEYS[7], '-inf', now_ms)
+redis.call('ZREMRANGEBYSCORE', KEYS[8], '-inf', now_ms)
+redis.call('ZREMRANGEBYSCORE', KEYS[9], '-inf', now_ms)
 
-if redis.call('ZCARD', KEYS[7]) >= global_concurrency then
-  local oldest = redis.call('ZRANGE', KEYS[7], 0, 0, 'WITHSCORES')
-  local retry_ms = math.max(1, math.ceil(tonumber(oldest[2]) - now_ms))
-  return {0, retry_ms, concurrency, rps}
+-- Workspaces sharing one physical key share both its concurrent requests and
+-- its one-second budget. Idle shares may be borrowed until another workspace
+-- actually requests capacity.
+redis.call('ZADD', KEYS[9], now_ms + 2000, workspace_id)
+redis.call('PEXPIRE', KEYS[9], 5000)
+local local_keys = {}
+local own_local_inflight = 0
+local local_members = redis.call('ZRANGE', KEYS[1], 0, -1)
+for _, local_member in ipairs(local_members) do
+  local key = string.sub(local_member, 1, 36)
+  if string.sub(local_member, 37, 37) ~= ':' then key = 'legacy' end
+  local_keys[key] = true
+  if key == workspace_id then own_local_inflight = own_local_inflight + 1 end
+end
+local own_recent = 0
+local recent_members = redis.call('ZRANGE', KEYS[2], 0, -1)
+for _, recent_member in ipairs(recent_members) do
+  local key = string.sub(recent_member, 1, 36)
+  if string.sub(recent_member, 74, 74) ~= ':' then key = 'legacy' end
+  local_keys[key] = true
+  if key == workspace_id then own_recent = own_recent + 1 end
+end
+local other_local_waiting = false
+for _, waiting_workspace in ipairs(redis.call('ZRANGE', KEYS[9], 0, -1)) do
+  local_keys[waiting_workspace] = true
+  if waiting_workspace ~= workspace_id then other_local_waiting = true end
+end
+local local_count = 0
+for _ in pairs(local_keys) do local_count = local_count + 1 end
+local local_fair_concurrency = math.max(1, math.ceil(concurrency / local_count))
+local local_fair_rps = math.max(request_cost, math.ceil(rps / local_count))
+if #local_members >= concurrency or
+   (other_local_waiting and own_local_inflight >= local_fair_concurrency) or
+   (other_local_waiting and own_recent + request_cost > local_fair_rps) then
+  return {0, 250, concurrency, rps}
 end
 
-local inflight = redis.call('ZCARD', KEYS[1])
-if inflight >= concurrency then
-  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
-  local retry_ms = math.max(1, math.ceil(tonumber(oldest[2]) - now_ms))
-  return {0, retry_ms, concurrency, rps}
-end
-
-local recent = redis.call('ZCARD', KEYS[2])
-if recent + request_cost > rps then
+if #recent_members + request_cost > rps then
   local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
   local retry_ms = math.max(1, math.ceil(tonumber(oldest[2]) + 1000 - now_ms))
   return {0, retry_ms, concurrency, rps}
@@ -125,10 +154,42 @@ if smoothed_recent + request_cost > smoothing_limit then
   return {0, retry_ms, concurrency, rps}
 end
 
-redis.call('ZADD', KEYS[1], now_ms + lease_ms, member)
-redis.call('ZADD', KEYS[7], now_ms + lease_ms, member)
+-- A waiting physical key reserves a fair share of the global ceiling. Keys
+-- already above that share may keep borrowing idle slots only while nobody
+-- else is waiting. A short expiry returns unused shares automatically.
+redis.call('ZADD', KEYS[8], now_ms + 2000, physical_key)
+redis.call('PEXPIRE', KEYS[8], 5000)
+local active_keys = {}
+local own_inflight = 0
+local global_members = redis.call('ZRANGE', KEYS[7], 0, -1)
+for _, global_member in ipairs(global_members) do
+  local key = string.sub(global_member, 1, 36)
+  if string.sub(global_member, 37, 37) ~= ':' then key = 'legacy' end
+  active_keys[key] = true
+  if key == physical_key then own_inflight = own_inflight + 1 end
+end
+local other_waiting = false
+for _, waiting_key in ipairs(redis.call('ZRANGE', KEYS[8], 0, -1)) do
+  active_keys[waiting_key] = true
+  if waiting_key ~= physical_key then other_waiting = true end
+end
+local active_count = 0
+for _ in pairs(active_keys) do active_count = active_count + 1 end
+local fair_share = math.max(1, math.ceil(global_concurrency / active_count))
+if #global_members >= global_concurrency or
+   (other_waiting and own_inflight >= fair_share) then
+  return {0, 250, concurrency, rps}
+end
+
+redis.call('ZADD', KEYS[1], now_ms + lease_ms, workspace_id .. ':' .. member)
+redis.call('ZADD', KEYS[7], now_ms + lease_ms, physical_key .. ':' .. member)
+if own_inflight + 1 >= fair_share then redis.call('ZREM', KEYS[8], physical_key) end
+if own_local_inflight + 1 >= local_fair_concurrency and
+   own_recent + request_cost >= local_fair_rps then
+  redis.call('ZREM', KEYS[9], workspace_id)
+end
 for index = 1, request_cost do
-  redis.call('ZADD', KEYS[2], now_ms, member .. ':' .. tostring(index))
+  redis.call('ZADD', KEYS[2], now_ms, workspace_id .. ':' .. member .. ':' .. tostring(index))
   redis.call('ZADD', KEYS[6], now_ms, member .. ':' .. tostring(index))
 end
 redis.call('PEXPIRE', KEYS[1], lease_ms + 5000)
@@ -139,8 +200,8 @@ return {1, 0, concurrency, rps}
 `;
 
 const RELEASE_SCRIPT = `
-local removed = redis.call('ZREM', KEYS[1], ARGV[1])
-redis.call('ZREM', KEYS[2], ARGV[1])
+local removed = redis.call('ZREM', KEYS[1], ARGV[3] .. ':' .. ARGV[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[2] .. ':' .. ARGV[1], ARGV[1])
 return removed
 `;
 
@@ -205,6 +266,7 @@ export class XmlStockHttpQuotaLimiter
 
   public async tryAcquire(input: {
     readonly credentialId: string;
+    readonly workspaceId: string;
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
@@ -218,8 +280,8 @@ export class XmlStockHttpQuotaLimiter
         );
         if (permit.allowed) return permit;
         if (
-          permit.retryAfterMilliseconds > 100 ||
-          Date.now() - startedAt + permit.retryAfterMilliseconds > 1_000
+          permit.retryAfterMilliseconds > 250 ||
+          Date.now() - startedAt + permit.retryAfterMilliseconds > 500
         ) {
           return permit;
         }
@@ -280,6 +342,7 @@ export async function acquireXmlStockHttpQuotaPermit(
   redis: RedisEvalPort,
   input: {
     readonly credentialId: string;
+    readonly workspaceId: string;
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
@@ -296,7 +359,8 @@ export async function acquireXmlStockHttpQuotaPermit(
     !Number.isSafeInteger(input.leaseMs) ||
     input.leaseMs < 1_000 ||
     input.leaseMs > 120_000 ||
-    !UUID_PATTERN.test(input.member)
+    !UUID_PATTERN.test(input.member) ||
+    !UUID_PATTERN.test(input.workspaceId)
     || (input.globalConcurrency !== undefined &&
       (!Number.isSafeInteger(input.globalConcurrency) ||
         input.globalConcurrency < 1 || input.globalConcurrency > 512))
@@ -307,7 +371,7 @@ export async function acquireXmlStockHttpQuotaPermit(
   const response = await commandWithTimeout(
     redis.eval(
       ACQUIRE_SCRIPT,
-      7,
+      9,
       `${scope}:inflight`,
       `${scope}:rps`,
       `${scope}:cooldown`,
@@ -315,12 +379,16 @@ export async function acquireXmlStockHttpQuotaPermit(
       `${scope}:success`,
       `${scope}:smoothing`,
       `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,
+      `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:waiters`,
+      `${scope}:workspace-waiters`,
       String(policy.concurrency),
       String(policy.requestsPerSecond),
       String(requestCost),
       String(input.leaseMs),
       input.member,
-      String(input.globalConcurrency ?? XMLSTOCK_GLOBAL_HTTP_CONCURRENCY)
+      String(input.globalConcurrency ?? XMLSTOCK_GLOBAL_HTTP_CONCURRENCY),
+      input.credentialId.toLowerCase(),
+      input.workspaceId.toLowerCase()
     )
   );
   if (
@@ -335,6 +403,7 @@ export async function acquireXmlStockHttpQuotaPermit(
     return {
       allowed: true,
       credentialId: input.credentialId.toLowerCase(),
+      workspaceId: input.workspaceId.toLowerCase(),
       product: input.product,
       member: input.member.toLowerCase()
     };
@@ -351,7 +420,7 @@ export async function releaseXmlStockHttpQuotaPermit(
   permit: Extract<XmlStockHttpQuotaPermit, { readonly allowed: true }>
 ): Promise<void> {
   const scope = quotaScope(permit.credentialId, permit.product);
-  if (!UUID_PATTERN.test(permit.member)) {
+  if (!UUID_PATTERN.test(permit.member) || !UUID_PATTERN.test(permit.workspaceId)) {
     throw new TypeError("Invalid XMLStock quota permit");
   }
   const response = await commandWithTimeout(
@@ -360,7 +429,9 @@ export async function releaseXmlStockHttpQuotaPermit(
       2,
       `${scope}:inflight`,
       `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,
-      permit.member
+      permit.member,
+      permit.credentialId.toLowerCase(),
+      permit.workspaceId.toLowerCase()
     )
   );
   if (response !== 0 && response !== 1) {

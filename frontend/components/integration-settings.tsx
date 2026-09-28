@@ -1312,7 +1312,7 @@ function IntegrationCredentialQuota({
         <section className="integration-xmlstock-pricing">
           <strong>{xmlStockTariffName(quota.xmlStockPricing.tariffCode)}</strong>
           <small>
-            Google {quota.xmlStockPricing.pricesPerThousand.GOOGLE_LIVE} · Яндекс Live {quota.xmlStockPricing.pricesPerThousand.YANDEX_LIVE} · Search API {quota.xmlStockPricing.pricesPerThousand.YANDEX_SEARCH_API} · Wordstat {quota.xmlStockPricing.pricesPerThousand.WORDSTAT} ₽ / 1000
+            Google XML {quota.xmlStockPricing.pricesPerThousand.GOOGLE_LIVE} · Яндекс Live {quota.xmlStockPricing.pricesPerThousand.YANDEX_LIVE} · Search API {quota.xmlStockPricing.pricesPerThousand.YANDEX_SEARCH_API} · Wordstat {quota.xmlStockPricing.pricesPerThousand.WORDSTAT} ₽ / 1000
           </small>
         </section>
       )}

@@ -758,6 +758,7 @@ test("runs XMLStock Yandex Live Turbo through its own capacity bucket", async ()
       return {
         allowed: true,
         credentialId: input.credentialId,
+        workspaceId: input.workspaceId,
         product: input.product,
         member: ids.lease
       };
@@ -971,7 +972,7 @@ test("defers an XMLStock poll without an HTTP request when its credential produc
     "PROVIDER_CAPACITY_DELAYED"
   );
   assert.equal(providerCalls, 0);
-  assert.equal(deferredBy, 5);
+  assert.equal(deferredBy, 2);
   assert.equal(
     quotaScope,
     selectIntegrationCredentialSecret(
@@ -1030,6 +1031,7 @@ function allowXmlStockQuota(): XmlStockHttpQuotaGate {
       return {
         allowed: true,
         credentialId: input.credentialId,
+        workspaceId: input.workspaceId,
         product: input.product,
         member: ids.lease
       };

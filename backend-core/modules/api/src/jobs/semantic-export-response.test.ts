@@ -29,6 +29,16 @@ test("maps a bounded tenant-scoped semantic export", () => {
   );
 });
 
+test("accepts an expired export without exposing a download URL", () => {
+  const summary = scopedSemanticExportSummary(
+    { ...validSummary(), status: "EXPIRED", stage: "expired" },
+    workspaceId,
+    projectId,
+    exportId
+  );
+  assert.equal(summary.status, "EXPIRED");
+});
+
 test("rejects cross-tenant and extensible export responses", () => {
   assert.throws(() =>
     scopedSemanticExportSummary(

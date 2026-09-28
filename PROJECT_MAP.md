@@ -1475,7 +1475,10 @@ Arsenkin `@3.0.0`/XMLStock `@2.0.0`; существующие receipts не пе
 - `src/worker.main.ts` — Redis-only system dispatcher;
 - `src/import-worker.main.ts` — semantic import, keyword-research import и
   streaming semantic export через отдельные очереди `semantic-import` и
-  `exports`;
+  `exports`; тот же процесс ежечасно запускает bounded
+  `src/file-retention/file-retention.service.ts` для удаления старых S3-файлов
+  загрузок и экспортов. Метаданные и импортированные данные остаются в БД,
+  активные импорты защищены от очистки;
 - `src/rank-worker.main.ts` — параллельные rank preparation/grant/result;
 - `src/crawl-worker.main.ts` — technical crawl;
 - `src/connector-worker.main.ts` — provider I/O и credential broker с
@@ -1518,10 +1521,18 @@ XMLStock HTTP ограничивается распределёнными Redis 
 `physicalCredentialScopeId + product` (`YANDEX_LIVE`, `YANDEX_TURBO`,
 `GOOGLE_LIVE`, `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют
 друг друга, а одинаковые BYOK-ключи разных workspace делят один лимит.
-Один ключ делит лимит между своими проектами. Permit удерживает только внешний
+Один ключ делит лимит между своими проектами. Для занятых 96 общих слотов
+Redis резервирует справедливую долю каждому ожидающему физическому ключу;
+свободную долю можно временно занимать. Внутри одного key/product такую же
+долю получают одновременно ожидающие workspace (например, 5/5 из 10
+Яндекс Live), без жёсткого простоя, когда второй workspace не работает.
+Capacity-denial перечитывается через одну секунду, а не ждёт защитного lease;
+provider-error backoff остаётся отдельным. Permit удерживает только внешний
 HTTP, не `POLL_WAIT`; базовые окна соответствуют provider boundary:
 Yandex Live — `10 concurrent / 10 RPS`, Turbo — `50 / 50`, Google Live — `15 / 30`, Yandex
-Search API — `50 / 50`, Wordstat — `10 / 10`. Сверху действует общий Redis
+Search API — `50 / 50`, Wordstat — `10 / 10`. Для XMLStock Google user-facing
+название — «Google XML», внутренний product ID `GOOGLE_LIVE` остаётся прежним
+для совместимости сохранённых Job и цен. Сверху действует общий Redis
 потолок `XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=96`. RPS дополнительно сглаживается
 100-миллисекундными distributed окнами, чтобы replicas не создавали один
 provider burst. Throttling адаптивно уменьшает окно. Состояние limiter
@@ -2187,6 +2198,28 @@ submit marker fenced; известный task только poll-ится, а н�
 outcome не приводит к повторному платному `set`. Wordstat expansion делит общий
 предел пяти Arsenkin provider tasks с позициями, частотностью, ИИ-ответами и
 кластеризацией. Additive migration
+`20260928150000_parallel_xmlstock_wordstat_research` добавляет
+`keyword_research_seed_checkpoints` для XMLStock: один Job одновременно
+запускает до безопасного числа разных исходных фраз в пределах одного
+key/product permit
+bucket, но перед каждым платным GET фиксирует `STARTED`. Нормализованный
+`ACCEPTED` результат сохраняется до обновления preview и позже применяется в
+исходном порядке; повторный claim читает checkpoint без второго HTTP.
+`REJECTED` означает подтверждённый неоплачиваемый отказ и может безопасно
+повторяться, `UNKNOWN` пропускает только проблемную seed-фразу и сохраняет
+предупреждение частичного результата; остальные фразы продолжаются и доступны
+для импорта без повторной отправки потенциально оплаченного запроса.
+После checkpoint короткий bounded drain применяет до 10 готовых seed-страниц
+за один connector tick без второго provider HTTP; это не ограничивает большой
+run одной страницей в секунду. Отдельное явное «Дособрать спорные фразы»
+остаётся будущим действием.
+Fanout ограничен остатком `maxKeywords / 2000`,
+поэтому не покупает лишние фразы на хвосте: при текущем максимуме результата
+10 000 строк первая пачка содержит не больше пяти GET. Keyword research ticks получили
+отдельные фиксированные lanes для каждого connector process и секундный
+dispatcher вместо одного общего 15-секундного lane; actor/scope/lease
+проверяются через exact SQL broker-функции без прямого DML connector-роли.
+Additive migration
 `backend-execution/prisma/migrations/20260826160000_keys_so_wordstat_expansion`
 обобщает существующий Keys.so staging без нового deployable или очереди, а
 `20260826173000_arsenkin_keyword_research_capability` добавляет отдельную
@@ -2195,7 +2228,7 @@ fence и безопасный backfill project routes, а additive migration
 `20260826190000_keyword_research_row_destinations` хранит режим раскладки run
 и необязательную целевую папку preview-строки. Runtime-роль `jobs_connector`
 получает только точные `EXECUTE` ACL на claim, page/XMLStock completion,
-Arsenkin submit/transition и fail broker-функции; прямой доступ к таблицам
+seed checkpoint/reserve/quarantine, Arsenkin submit/transition и fail broker-функции; прямой доступ к таблицам
 по-прежнему запрещён и проверяется инфраструктурным allowlist-тестом.
 
 Единый `OperationResultWorkspace` обслуживает результаты частотности,

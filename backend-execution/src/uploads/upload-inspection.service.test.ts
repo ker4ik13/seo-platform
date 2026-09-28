@@ -179,6 +179,7 @@ function uploadRecord(): Upload {
     idempotencyKey: "upload-01900000-0000-7000-8000-000000000004",
     scanResult: null,
     expiresAt: new Date(now.getTime() + 60_000),
+    objectDeletedAt: null,
     uploadedAt: now,
     abortedAt: null,
     inspectionStartedAt: null,
@@ -282,6 +283,7 @@ function configFixture(): AppConfig {
       inspectionHeartbeatSeconds: 60,
       inspectionConcurrency: 2
     },
+    fileRetention: { uploadDays: 30, exportDays: 7 },
     imports: {
       parseLeaseMinutes: 30,
       parseDispatchSeconds: 30,

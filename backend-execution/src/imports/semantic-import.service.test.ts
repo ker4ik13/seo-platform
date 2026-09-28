@@ -69,6 +69,7 @@ test("creates an idempotent import only from a READY project upload", async () =
     ) =>
       callback({
         $executeRaw: async () => 1,
+        $queryRaw: async () => [{ status: "READY" }],
         job: { count: async () => 0 },
         semanticImport: {
           count: async () => 0,
@@ -279,6 +280,7 @@ function uploadRecord(): Upload {
     idempotencyKey: "upload-test-1",
     scanResult: { status: "CLEAN" },
     expiresAt: new Date(now.getTime() + 60_000),
+    objectDeletedAt: null,
     uploadedAt: now,
     abortedAt: null,
     inspectionStartedAt: now,

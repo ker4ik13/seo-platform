@@ -167,6 +167,10 @@ export interface AppConfig {
     readonly inspectionHeartbeatSeconds: number;
     readonly inspectionConcurrency: number;
   };
+  readonly fileRetention: {
+    readonly uploadDays: number;
+    readonly exportDays: number;
+  };
   readonly imports: {
     readonly parseLeaseMinutes: number;
     readonly parseDispatchSeconds: number;
@@ -1952,6 +1956,22 @@ export function loadAppConfig(
         env.UPLOAD_INSPECTION_CONCURRENCY,
         2,
         "UPLOAD_INSPECTION_CONCURRENCY"
+      )
+    },
+    fileRetention: {
+      uploadDays: boundedInteger(
+        env.UPLOAD_FILE_RETENTION_DAYS,
+        30,
+        "UPLOAD_FILE_RETENTION_DAYS",
+        1,
+        3650
+      ),
+      exportDays: boundedInteger(
+        env.EXPORT_FILE_RETENTION_DAYS,
+        7,
+        "EXPORT_FILE_RETENTION_DAYS",
+        1,
+        3650
       )
     },
     imports: {

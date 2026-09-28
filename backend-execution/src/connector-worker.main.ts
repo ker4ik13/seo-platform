@@ -120,6 +120,7 @@ async function bootstrap(): Promise<void> {
   );
   let activeRankDispatchUntil = 0;
   let activeFrequencyDispatchUntil = 0;
+  let activeKeywordResearchDispatchUntil = 0;
   const rankRuntimeLaneCount = connectorRuntimeLaneCount(
     config.connectorRuntime.rankConcurrency,
     config.connectorRuntime.shardCount
@@ -159,9 +160,20 @@ async function bootstrap(): Promise<void> {
       ) {
         throw new Error("Invalid keyword research runtime job");
       }
-      return keywordResearchRuntime.processOne(
-        `connector-keyword-research-${randomUUID()}`
-      );
+      let outcome = "IDLE";
+      let processed = 0;
+      for (let index = 0; index < 10; index += 1) {
+        outcome = await keywordResearchRuntime.processOne(
+          `connector-keyword-research-${randomUUID()}`
+        );
+        if (outcome !== "IDLE" && outcome !== "LEASE_LOST") processed += 1;
+        if (outcome !== "XMLSTOCK_SEED_APPLIED") break;
+      }
+      if (processed > 0) {
+        activeKeywordResearchDispatchUntil =
+          Date.now() + ACTIVE_FREQUENCY_DISPATCH_HOLD_MS;
+      }
+      return outcome;
     },
     {
       ...bullMqConnectionOptions(workerConnection),
@@ -256,6 +268,29 @@ async function bootstrap(): Promise<void> {
           )
         );
       }
+      const researchBurst = adaptiveRankDispatchBurst(
+        config.connectorRuntime.keywordResearchConcurrency,
+        activeKeywordResearchDispatchUntil,
+        now
+      );
+      for (let slot = 0; slot < researchBurst; slot += 1) {
+        await enqueueKeywordResearchRuntime(
+          keywordResearchQueue,
+          shardedDispatchSequence(
+            dispatchBucket,
+            config.connectorRuntime.keywordResearchConcurrency,
+            config.connectorRuntime.shardIndex,
+            config.connectorRuntime.shardCount,
+            slot
+          ),
+          shardedDispatchLane(
+            config.connectorRuntime.keywordResearchConcurrency,
+            config.connectorRuntime.shardIndex,
+            config.connectorRuntime.shardCount,
+            slot
+          )
+        );
+      }
     } catch {
       logger.error("Unable to dispatch connector runtime work");
     } finally {
@@ -280,25 +315,6 @@ async function bootstrap(): Promise<void> {
           validationQueue,
           validationJobId
         );
-      }
-      const dispatchBucket = Math.floor(
-        Date.now() /
-          (config.integrationCredentialValidation.dispatchSeconds * 1_000)
-      );
-      if (paidRuntimeEnabled) {
-        for (
-          let slot = 0;
-          slot < config.connectorRuntime.keywordResearchConcurrency;
-          slot += 1
-        ) {
-          await enqueueKeywordResearchRuntime(
-            keywordResearchQueue,
-            dispatchBucket *
-              config.connectorRuntime.keywordResearchConcurrency +
-              slot,
-            slot
-          );
-        }
       }
     } catch {
       logger.error("Unable to dispatch connector maintenance work");

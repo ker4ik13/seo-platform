@@ -369,6 +369,7 @@ export class FrequencyCollectionRuntimeService {
         }
         const acquired = await this.xmlStockQuota.tryAcquire({
           credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
+          workspaceId: activeClaim.workspaceId,
           product: "WORDSTAT",
           requestCost: activeClaim.types.length,
           leaseMs:
@@ -378,7 +379,7 @@ export class FrequencyCollectionRuntimeService {
         if (!acquired.allowed) {
           await this.broker.releaseForProviderCapacity(
             activeClaim,
-            Math.max(5, acquired.retryAfterSeconds)
+            Math.max(1, acquired.retryAfterSeconds)
           );
           return "RETRY_SCHEDULED";
         }
@@ -510,6 +511,7 @@ export class FrequencyCollectionRuntimeService {
     }
     const acquired = await this.xmlStockQuota.tryAcquire({
       credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
+      workspaceId: activeClaim.workspaceId,
       product: "WORDSTAT",
       requestCost: activeClaim.types.length,
       leaseMs: timeoutMs * activeClaim.types.length + FREQUENCY_PERSISTENCE_MARGIN_MS
@@ -517,7 +519,7 @@ export class FrequencyCollectionRuntimeService {
     if (!acquired.allowed) {
       await this.broker.releaseForProviderCapacity(
         activeClaim,
-        Math.max(5, acquired.retryAfterSeconds)
+        Math.max(1, acquired.retryAfterSeconds)
       );
       return "RETRY_SCHEDULED";
     }

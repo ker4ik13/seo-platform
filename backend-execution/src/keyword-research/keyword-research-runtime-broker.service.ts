@@ -252,6 +252,75 @@ export class KeywordResearchRuntimeBrokerService {
     requiredCompletion(rows);
   }
 
+  public async xmlStockSeedCheckpoint(
+    claim: Extract<KeywordResearchClaim, { readonly source: "XMLSTOCK_WORDSTAT" }>,
+    seedIndex: number,
+    begin = false
+  ): Promise<
+    | { readonly state: "STARTED" | "AVAILABLE" | "REJECTED" | "UNKNOWN"; readonly errorCode?: string }
+    | { readonly state: "ACCEPTED"; readonly rows: readonly XmlStockWordstatExpansionRow[]; readonly responseHash: Buffer }
+  > {
+    if (!Number.isSafeInteger(seedIndex) || seedIndex < claim.page || seedIndex >= claim.page + 10) invalid();
+    const rows = await this.prisma.$queryRaw<readonly XmlStockSeedReservationRow[]>(Prisma.sql`
+      SELECT * FROM public.reserve_xmlstock_wordstat_research_seed(
+        ${claim.runId}::uuid, ${claim.leaseOwner}::text, ${claim.leaseToken}::uuid,
+        ${claim.runVersion}::integer, ${claim.jobVersion}::integer,
+        ${seedIndex}::integer, ${begin}::boolean
+      )
+    `);
+    if (rows.length !== 1 || !rows[0]) invalid();
+    const row = rows[0];
+    if (
+      ["STARTED", "AVAILABLE", "REJECTED", "UNKNOWN"].includes(row.state) &&
+      row.rows === null && row.responseHash === null
+    ) {
+      return {
+        state: row.state as "STARTED" | "AVAILABLE" | "REJECTED" | "UNKNOWN",
+        ...(row.errorCode ? { errorCode: row.errorCode } : {})
+      };
+    }
+    if (row.state !== "ACCEPTED" || !row.responseHash || row.responseHash.length !== 32) invalid();
+    return {
+      state: "ACCEPTED",
+      rows: xmlStockCheckpointRows(row.rows),
+      responseHash: Buffer.from(row.responseHash)
+    };
+  }
+
+  public async finishXmlStockSeedCheckpoint(
+    claim: Extract<KeywordResearchClaim, { readonly source: "XMLSTOCK_WORDSTAT" }>,
+    seedIndex: number,
+    input:
+      | { readonly state: "ACCEPTED"; readonly rows: readonly XmlStockWordstatExpansionRow[]; readonly responseHash: Buffer }
+      | { readonly state: "REJECTED" | "UNKNOWN"; readonly errorCode: string }
+  ): Promise<void> {
+    if (!Number.isSafeInteger(seedIndex) || seedIndex < claim.page || seedIndex >= claim.page + 10) invalid();
+    const rows = await this.prisma.$queryRaw<readonly { readonly finished: boolean }[]>(Prisma.sql`
+      SELECT public.finish_xmlstock_wordstat_research_seed_checkpoint(
+        ${claim.runId}::uuid, ${claim.leaseOwner}::text, ${claim.leaseToken}::uuid,
+        ${claim.runVersion}::integer, ${claim.jobVersion}::integer, ${seedIndex}::integer,
+        ${input.state}::text,
+        ${input.state === "ACCEPTED" ? JSON.stringify(input.rows) : null}::jsonb,
+        ${input.state === "ACCEPTED" ? input.responseHash : null}::bytea,
+        ${input.state === "ACCEPTED" ? null : input.errorCode}::text
+      ) AS finished
+    `);
+    if (rows.length !== 1 || rows[0]?.finished !== true) invalid();
+  }
+
+  public async skipUnknownXmlStockSeed(
+    claim: Extract<KeywordResearchClaim, { readonly source: "XMLSTOCK_WORDSTAT" }>
+  ): Promise<void> {
+    const rows = await this.prisma.$queryRaw<readonly { readonly skipped: boolean }[]>(Prisma.sql`
+      SELECT public.skip_unknown_xmlstock_wordstat_research_seed(
+        ${claim.runId}::uuid, ${claim.leaseOwner}::text, ${claim.leaseToken}::uuid,
+        ${claim.runVersion}::integer, ${claim.jobVersion}::integer,
+        ${claim.page}::integer
+      ) AS skipped
+    `);
+    if (rows.length !== 1 || rows[0]?.skipped !== true) invalid();
+  }
+
   public async fail(
     claim: KeywordResearchClaim,
     input: {
@@ -308,6 +377,32 @@ interface ClaimRow {
   readonly dataKeyNonce: Uint8Array;
   readonly dataKeyAuthTag: Uint8Array;
   readonly keyVersion: number;
+}
+
+interface XmlStockSeedReservationRow {
+  readonly state: string;
+  readonly rows: unknown;
+  readonly responseHash: Uint8Array | null;
+  readonly errorCode: string | null;
+}
+
+function xmlStockCheckpointRows(value: unknown): readonly XmlStockWordstatExpansionRow[] {
+  if (!Array.isArray(value) || value.length > 2_000) invalid();
+  return value.map((item) => {
+    const row = jsonRecord(item);
+    if (
+      typeof row.keyword !== "string" || row.keyword.length < 1 || row.keyword.length > 2_000 ||
+      typeof row.sourceQuery !== "string" || row.sourceQuery.length < 1 ||
+      !Number.isSafeInteger(row.frequencyBase) || Number(row.frequencyBase) < 0 ||
+      (row.sourceColumn !== "LEFT" && row.sourceColumn !== "RIGHT")
+    ) invalid();
+    return {
+      keyword: row.keyword,
+      frequencyBase: Number(row.frequencyBase),
+      sourceQuery: row.sourceQuery,
+      sourceColumn: row.sourceColumn
+    };
+  });
 }
 
 interface SubmittingRow extends CompletionRow {

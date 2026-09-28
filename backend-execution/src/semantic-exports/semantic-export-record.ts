@@ -11,7 +11,9 @@ export function semanticExportSummary(job: Job): SemanticExportJobSummary {
   const result = record(job.resultSummary);
   const format = exportFormat(input?.format);
   const scope = exportScope(input?.scope);
-  const status = exportStatus(job.status);
+  const status = job.status === "COMPLETED" && job.stage === "expired"
+    ? "EXPIRED"
+    : exportStatus(job.status);
   const processedRows = count(job.progressCurrent);
   const totalRows = job.progressTotal === null ? undefined : count(job.progressTotal);
   const rowCount = optionalCount(result?.rowCount);
@@ -117,7 +119,7 @@ function exportScope(value: unknown): SemanticExportScope | undefined {
 }
 
 function exportStatus(value: string): SemanticExportJobStatus | undefined {
-  return value === "QUEUED" || value === "RUNNING" ||
+  return value === "QUEUED" || value === "RUNNING" || value === "EXPIRED" ||
     value === "CANCEL_REQUESTED" || value === "CANCELLED" ||
     value === "RETRY_SCHEDULED" || value === "COMPLETED" ||
     value === "FAILED_RETRYABLE" || value === "FAILED_FINAL"

@@ -166,6 +166,12 @@ export class SemanticExportService {
     exportId: string
   ): Promise<SemanticExportDownload> {
     const job = await this.required(workspaceId, projectId, exportId);
+    if (job.status === "COMPLETED" && job.stage === "expired") {
+      throw new HttpException(
+        { code: "EXPORT_FILE_EXPIRED", message: "Export file has expired" },
+        HttpStatus.GONE
+      );
+    }
     const result = semanticExportResult(job);
     if (job.status !== "COMPLETED" || !result) {
       throw new ConflictException("Semantic export is not ready for download");

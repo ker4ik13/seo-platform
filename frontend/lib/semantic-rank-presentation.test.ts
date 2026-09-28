@@ -101,6 +101,7 @@ test("names the exact search result source when history contains it", () => {
   assert.equal(rankSearchSystemLabel("YANDEX", "SEARCH_API"), "Яндекс XML");
   assert.equal(rankSearchSystemLabel("YANDEX", "LIVE"), "Яндекс Live");
   assert.equal(rankSearchSystemLabel("GOOGLE", "LIVE"), "Google Live");
+  assert.equal(rankSearchSystemLabel("GOOGLE", "LIVE", "XMLSTOCK"), "Google XML");
 });
 
 test("labels imported Key Collector history without treating it as a live provider", () => {

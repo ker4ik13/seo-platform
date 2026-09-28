@@ -126,6 +126,13 @@ Transactional email в текущем Compose включён и требует �
 `AUTH_EMAIL_*` credentials. Недоступная capability должна возвращать честное
 degraded/unavailable состояние, а не имитировать успех.
 
+Для файлов S3 import-worker принимает `UPLOAD_FILE_RETENTION_DAYS=30` и
+`EXPORT_FILE_RETENTION_DAYS=7`. Значения задают срок хранения исходных
+загрузок и готовых экспортов в днях, не срок хранения строк в PostgreSQL и
+не срок хранения backup. Очистка запускается при старте и каждый час;
+незавершённые импорты не теряют исходный файл. Изменение env применяется
+после redeploy и к уже существующим файлам старше нового срока.
+
 Стартовый профиль XMLStock для 8 CPU / 16 GiB: три connector process по
 `RANK_CONNECTOR_CONCURRENCY=32`, общий Redis-предел
 `XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=96`, PostgreSQL pool каждого connector
@@ -134,6 +141,16 @@ degraded/unavailable состояние, а не имитировать успе
 подтверждённая гарантия 96 одновременных ответов провайдера. Сохранённые в
 Dokploy env значения перекрывают Compose defaults: при развёртывании обновить
 их вручную и следить за CPU, RSS, Redis и PostgreSQL wait/connection count.
+Redis выдаёт эти слоты с work-conserving fair share между физическими
+XMLStock-ключами; один key/product делит свой потолок между активными
+workspace с одинаковым ключом. `RANK_WORKER_PROCESSES` и
+`SYSTEM_WORKER_CONCURRENCY` не задают число внешних XMLStock HTTP-потоков.
+Один XMLStock `Парсинг Wordstat` запускает параллельно столько seed-запросов,
+сколько допускает остаток результата без лишнего списания (при лимите
+10 000 строк — первоначально до пяти); `KEYWORD_RESEARCH_CONCURRENCY` ограничивает
+число одновременных research Jobs на процесс, а не запросов внутри одного Job.
+Research lanes распределены между connector process и запускаются секундным
+dispatcher, поэтому для одного запуска не нужно повышать этот параметр выше 1.
 
 ## Проверка
 

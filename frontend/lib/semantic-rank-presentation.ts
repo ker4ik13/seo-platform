@@ -382,10 +382,13 @@ export function rankChangePresentation(
 
 export function rankSearchSystemLabel(
   engine: SemanticRankEngine,
-  searchSource: "LIVE" | "SEARCH_API" | undefined
+  searchSource: "LIVE" | "SEARCH_API" | undefined,
+  provider?: SemanticKeywordPositionHistoryProvider
 ): string {
   if (engine === "GOOGLE") {
-    return searchSource === "LIVE" ? "Google Live" : "Google";
+    return searchSource === "LIVE"
+      ? provider === "XMLSTOCK" ? "Google XML" : "Google Live"
+      : "Google";
   }
   if (searchSource === "LIVE") return "Яндекс Live";
   if (searchSource === "SEARCH_API") return "Яндекс XML";

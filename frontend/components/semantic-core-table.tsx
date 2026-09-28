@@ -6439,6 +6439,8 @@ function semanticExportStatusLabel(job: SemanticExportJobSummary): string {
       return "Временно недоступно — повторяем";
     case "COMPLETED":
       return "Файл готов";
+    case "EXPIRED":
+      return "Срок хранения файла истёк";
     case "CANCELLED":
       return "Экспорт отменён";
     case "FAILED_FINAL":

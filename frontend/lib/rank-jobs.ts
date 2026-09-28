@@ -464,10 +464,13 @@ export function parseRankJobSummary(
 export function rankSearchSystemLabel(
   searchEngine: "GOOGLE" | "YANDEX",
   searchSource?: RankSearchSource,
-  yandexLiveMode?: "TURBO"
+  yandexLiveMode?: "TURBO",
+  provider?: RankJobSummary["provider"]
 ): string {
   if (searchEngine === "GOOGLE") {
-    return searchSource === "LIVE" ? "Google Live" : "Google";
+    return searchSource === "LIVE"
+      ? provider === "XMLSTOCK" ? "Google XML" : "Google Live"
+      : "Google";
   }
   if (searchSource === "LIVE") {
     return yandexLiveMode === "TURBO" ? "Яндекс Turbo" : "Яндекс Live";

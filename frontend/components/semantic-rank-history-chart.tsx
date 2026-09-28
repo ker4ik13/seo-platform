@@ -353,7 +353,7 @@ function RankPointTooltip({
     >
       <header>
         <SearchEngineLogo engine={series.searchEngine} size="compact" />
-        <strong>{<UiText text={rankSearchSystemLabel(series.searchEngine, point.searchSource) ?? ""} />}</strong>
+        <strong>{<UiText text={rankSearchSystemLabel(series.searchEngine, point.searchSource, point.provider) ?? ""} />}</strong>
         <span>{position}</span>
       </header>
       <dl>
@@ -463,7 +463,7 @@ function pointAriaLabel({ point, series }: PlottedRankPoint, uiLocale: string = 
   const status = isPositionPoint(point)
     ? `позиция ${point.position}`
     : "позиция не найдена";
-  return `${rankSearchSystemLabel(series.searchEngine, point.searchSource)}, ${status}, ${rankHistoryProviderLabel(point.provider)}, ${formatDateTime(point.observedAt, uiLocale)}`;
+  return `${rankSearchSystemLabel(series.searchEngine, point.searchSource, point.provider)}, ${status}, ${rankHistoryProviderLabel(point.provider)}, ${formatDateTime(point.observedAt, uiLocale)}`;
 }
 
 function deviceLabel(device: "DESKTOP" | "MOBILE"): string {

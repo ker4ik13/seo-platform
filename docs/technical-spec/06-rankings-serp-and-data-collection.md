@@ -401,7 +401,7 @@ validation, а claim lease рассчитывается для двух посл
 lifecycle.
 
 XMLStock использует отдельный distributed limiter по
-`physical key + product`: Yandex Live, Yandex Turbo, Google Live, Yandex Search API и
+`physical key + product`: Yandex Live, Yandex Turbo, Google XML (`GOOGLE_LIVE`), Yandex Search API и
 Wordstat имеют независимые bounded concurrency/RPS buckets. Поэтому разные
 BYOK-ключи не блокируют друг друга, одинаковый ключ в разных workspace
 делит один bucket, а один ключ корректно делит provider
@@ -412,7 +412,7 @@ capacity между всеми своими проектами и connector repl
 восстанавливает базовую ёмкость. Redis остаётся только transient capacity
 coordination и работает fail-closed; Job/lease/progress source of truth —
 PostgreSQL. Базовые окна одного физического ключа: Yandex Live — `10 concurrent /
-10 RPS`, Turbo — `50 / 50`, Google Live — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
+10 RPS`, Turbo — `50 / 50`, Google XML — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
 `10 / 10`. Сверху действует отдельный общий предел 96 внешних XMLStock HTTP-вызовов.
 Односекундный предел сглаживается общими для replicas окнами по
 100 мс, поэтому заявленная скорость не превращается в отклоняемый burst.
@@ -1177,15 +1177,23 @@ scroll не меняет смысл выбора, а импорт полного
 `/wordstat/json/` с `pagetype=words` для каждой seed-фразы и ограничивает
 `groupby` официальным пределом 2 000. Поля `results` и `associations`
 нормализуются в те же строки `LEFT|RIGHT` с исходной seed-фразой и
-частотностью. Начальный регион обоих вариантов всегда Россия (`225`).
+частотностью. Разные seed-фразы одного XMLStock run отправляются параллельно
+в рамках общего лимита физического ключа. Fanout дополнительно ограничен
+остатком `maxKeywords / 2000`: при текущем пределе результата 10 000 строк
+первая пачка содержит максимум пять GET, чтобы не оплачивать лишние фразы.
+Начальный регион обоих вариантов всегда Россия (`225`).
 
 Run проходит состояния `QUEUED → RUNNING → READY_TO_IMPORT`; закрытие или
 повторный poll не запускают платную задачу повторно. Если transport outcome
 после начала `set` неизвестен, операция изолируется для ручного решения.
 Provider task разделяет общий предел пяти активных Arsenkin tasks с позициями,
 обычной частотностью, ИИ-ответами и кластеризацией. XMLStock запросы получают
-отдельный per-credential `WORDSTAT` permit и fenced completion каждого seed;
-retry не повторяет уже сохранённую страницу. Preview и импорт у обоих
+отдельный per-physical-key `WORDSTAT` permit и fenced checkpoint каждого seed:
+`STARTED` записывается перед HTTP, `ACCEPTED` сохраняет нормализованный
+результат до публикации preview, а неопределённый оплаченный outcome
+пропускается с предупреждением без повторной отправки; остальные seed-фразы
+обрабатываются до конца. Готовые результаты применяются по
+исходному порядку, включая восстановление после сбоя worker. Preview и импорт у обоих
 провайдеров используют тот же выбор существующей/новой папки, что и Keys.so.
 Импорт Wordstat не создаёт автоматические теги провайдера или источника:
 происхождение остаётся в run metadata и custom values строки. После завершения

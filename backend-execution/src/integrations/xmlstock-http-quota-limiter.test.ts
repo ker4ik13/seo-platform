@@ -11,6 +11,8 @@ import {
 
 const firstCredential = "01900000-0000-7000-8000-000000000001";
 const secondCredential = "01900000-0000-7000-8000-000000000002";
+const firstWorkspace = "01900000-0000-7000-8000-000000000011";
+const secondWorkspace = "01900000-0000-7000-8000-000000000012";
 const firstMember = "01900000-0000-7000-8000-000000000003";
 const secondMember = "01900000-0000-7000-8000-000000000004";
 
@@ -50,6 +52,7 @@ test("acquires from only the selected credential and product bucket", async () =
     } as never,
     {
       credentialId: firstCredential,
+      workspaceId: firstWorkspace,
       product: "YANDEX_LIVE",
       leaseMs: 13_000,
       member: firstMember,
@@ -60,11 +63,12 @@ test("acquires from only the selected credential and product bucket", async () =
   assert.deepEqual(permit, {
     allowed: true,
     credentialId: firstCredential,
+    workspaceId: firstWorkspace,
     product: "YANDEX_LIVE",
     member: firstMember
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.[1], 7);
+  assert.equal(calls[0]?.[1], 9);
   assert.equal(
     calls[0]?.[2],
     `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:inflight`
@@ -74,7 +78,11 @@ test("acquires from only the selected credential and product bucket", async () =
     `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:rps`
   );
   assert.equal(calls[0]?.[8], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:inflight");
-  assert.equal(calls[0]?.[14], "96");
+  assert.equal(calls[0]?.[9], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:waiters");
+  assert.equal(calls[0]?.[10], `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:workspace-waiters`);
+  assert.equal(calls[0]?.[16], "96");
+  assert.equal(calls[0]?.[17], firstCredential);
+  assert.equal(calls[0]?.[18], firstWorkspace);
 });
 
 test("returns a bounded retry without issuing a permit when a bucket is full", async () => {
@@ -82,6 +90,7 @@ test("returns a bounded retry without issuing a permit when a bucket is full", a
     { eval: async () => [0, 1_250, 4, 4] } as never,
     {
       credentialId: secondCredential,
+      workspaceId: secondWorkspace,
       product: "WORDSTAT",
       requestCost: 3,
       leaseMs: 35_000,
@@ -110,6 +119,7 @@ test("release, penalty and recovery mutate only the same bucket", async () => {
   await releaseXmlStockHttpQuotaPermit(redis, {
     allowed: true,
     credentialId: firstCredential,
+    workspaceId: firstWorkspace,
     product: "GOOGLE_LIVE",
     member: firstMember
   });
@@ -134,4 +144,6 @@ test("release, penalty and recovery mutate only the same bucket", async () => {
     );
   }
   assert.equal(calls[0]?.[3], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:inflight");
+  assert.equal(calls[0]?.[5], firstCredential);
+  assert.equal(calls[0]?.[6], firstWorkspace);
 });

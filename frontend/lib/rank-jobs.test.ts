@@ -116,6 +116,7 @@ test("labels exact SERP sources without guessing legacy jobs", () => {
     "Яндекс Turbo"
   );
   assert.equal(rankSearchSystemLabel("GOOGLE", "LIVE"), "Google Live");
+  assert.equal(rankSearchSystemLabel("GOOGLE", "LIVE", undefined, "XMLSTOCK"), "Google XML");
   assert.equal(rankSearchSystemLabel("YANDEX"), "Яндекс");
 });
 
