@@ -326,42 +326,53 @@ export class RankResultFinalizationService {
         );
         assertReceiptMatchesPlan(receipt, claim, plan);
 
-        for (const execution of plan.executions) {
-          const persisted = execution.status === "PERSISTED";
-          const changed = await transaction.jobItem.updateMany({
-            where: {
-              id: execution.jobItemId,
-              workspaceId: claim.workspaceId,
-              projectId: claim.projectId,
-              jobId: claim.jobId,
-              sequence: execution.manifestChunkIndex,
-              status: "QUEUED"
-            },
-            data: {
-              status: persisted ? "COMPLETED" : "FAILED_FINAL",
-              providerRequestId: execution.providerTaskId,
-              outputReference: persisted
-                ? {
-                    schemaVersion: "rank-job-item-output@1",
-                    manifestId: claim.manifestId,
-                    chunkIndex: execution.manifestChunkIndex
-                  }
-                : Prisma.DbNull,
-              actualCostMicro: 0n,
-              error: persisted
-                ? Prisma.DbNull
-                : rankJobFailureJson(
-                    execution.status === "SUBMIT_OUTCOME_UNKNOWN"
-                      ? "SUBMIT_OUTCOME_UNKNOWN"
-                      : failureCode(execution.lastErrorCode)
-                  ),
-              attempt: 1,
-              retryAt: null
-            }
-          });
-          if (changed.count !== 1) {
-            throw new Error("Rank JobItem finalization race");
-          }
+        const itemUpdates = plan.executions.map((execution) => ({
+          jobItemId: execution.jobItemId,
+          sequence: execution.manifestChunkIndex,
+          persisted: execution.status === "PERSISTED",
+          providerTaskId: execution.providerTaskId,
+          error: execution.status === "PERSISTED"
+            ? null
+            : rankJobFailureJson(
+                execution.status === "SUBMIT_OUTCOME_UNKNOWN"
+                  ? "SUBMIT_OUTCOME_UNKNOWN"
+                  : failureCode(execution.lastErrorCode)
+              )
+        }));
+        const changedItems = await transaction.$executeRaw(Prisma.sql`
+          UPDATE public.job_items item
+          SET "status" = CASE WHEN updates."persisted"
+                THEN 'COMPLETED'::public."JobItemStatus"
+                ELSE 'FAILED_FINAL'::public."JobItemStatus" END,
+              "provider_request_id" = updates."providerTaskId",
+              "output_reference" = CASE WHEN updates."persisted"
+                THEN jsonb_build_object(
+                  'schemaVersion', 'rank-job-item-output@1',
+                  'manifestId', ${claim.manifestId}::text,
+                  'chunkIndex', updates."sequence"
+                ) ELSE NULL END,
+              "actual_cost_micro" = 0,
+              "error" = updates."error",
+              "attempt" = 1,
+              "retry_at" = NULL,
+              "updated_at" = clock_timestamp()
+          FROM jsonb_to_recordset(${JSON.stringify(itemUpdates)}::jsonb)
+            AS updates(
+              "jobItemId" uuid,
+              "sequence" integer,
+              "persisted" boolean,
+              "providerTaskId" text,
+              "error" jsonb
+            )
+          WHERE item."id" = updates."jobItemId"
+            AND item."workspace_id" = ${claim.workspaceId}::uuid
+            AND item."project_id" = ${claim.projectId}::uuid
+            AND item."job_id" = ${claim.jobId}::uuid
+            AND item."sequence" = updates."sequence"
+            AND item."status" = 'QUEUED'
+        `);
+        if (changedItems !== itemUpdates.length) {
+          throw new Error("Rank JobItem finalization race");
         }
 
         const finalizedAt = new Date(receipt.finalizedAt);
@@ -431,7 +442,7 @@ export class RankResultFinalizationService {
           throw new Error("Rank Job finalization optimistic lock was lost");
         }
       },
-      { isolationLevel: "ReadCommitted" }
+      { isolationLevel: "ReadCommitted", timeout: 30_000 }
     );
   }
 

@@ -32,6 +32,7 @@ test("claims, finalizes and atomically closes one persisted rank Job", async () 
   const storedJob = job();
   let finalizedInput: unknown;
   let itemStatus: string | undefined;
+  let itemUpdateQueries = 0;
   const transaction = {
     $queryRaw: async (
       strings: TemplateStringsArray
@@ -95,15 +96,25 @@ test("claims, finalizes and atomically closes one persisted rank Job", async () 
         return { count: 1 };
       }
     },
-    jobItem: {
-      updateMany: async ({
-        data
-      }: {
-        readonly data: Record<string, unknown>;
-      }) => {
-        itemStatus = String(data.status);
-        return { count: 1 };
-      }
+    $executeRaw: async (query: {
+      readonly strings: readonly string[];
+      readonly values: readonly unknown[];
+    }) => {
+      itemUpdateQueries += 1;
+      const sql = query.strings.join(" ");
+      assert.match(sql, /UPDATE public\.job_items item/u);
+      assert.match(sql, /jsonb_to_recordset/u);
+      const assignments = query.values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => {
+          try { return JSON.parse(value) as unknown; }
+          catch { return null; }
+        })
+        .find(Array.isArray);
+      assert.ok(Array.isArray(assignments));
+      assert.equal(assignments.length, 1);
+      itemStatus = assignments[0]?.persisted ? "COMPLETED" : "FAILED_FINAL";
+      return assignments.length;
     },
     rankJobRun: {
       updateMany: async () => {
@@ -162,6 +173,7 @@ test("claims, finalizes and atomically closes one persisted rank Job", async () 
     status: "COMPLETED"
   });
   assert.equal(itemStatus, "COMPLETED");
+  assert.equal(itemUpdateQueries, 1);
   assert.equal(storedJob.status, "COMPLETED");
   assert.equal(storedJob.stage, "FINISHED");
   assert.equal(storedJob.rankRun.sealState, "FINALIZED");
