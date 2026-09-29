@@ -1559,8 +1559,10 @@ waiting/active tick, а завершённый tick удаляется сраз�
 деградация consumer не может создать неограниченный Redis backlog; старые
 time-based tick ID завершаются без обращения к PostgreSQL. Общий rank I/O pool
 равен 64 slot, а Wordstat bucket — `10 RPS` на физический ключ. В простое каждый shard
-отправляет один probe в секунду; первый реальный claim раскрывает configured
-pool на пять секунд. Frequency/AI/clustering и keyword-research runtime
+отправляет один probe в секунду; rank pool расширяется по фактически найденной
+работе и ожидающим HTTP, а при пустых claims или отказе Redis capacity
+сжимается до числа занятых слотов с небольшим резервом. Настроенные 64 lane
+остаются потолком, а не постоянным числом DB probes. Frequency/AI/clustering и keyword-research runtime
 используют такие же bounded lanes. Submit
 broker перед full tenant graph, а Arsenkin ещё и перед provider-wide lock,
 проверяет активный parent Job; отменённые и завершённые операции с ещё

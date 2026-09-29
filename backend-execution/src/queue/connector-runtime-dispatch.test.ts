@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AdaptiveRankLaneDemand,
   adaptiveRankDispatchBurst,
   connectorRuntimeLaneCount,
   rankRuntimeOutcomeHasWork,
@@ -85,4 +86,43 @@ test("rank dispatch keeps one idle probe and restores the full pool on activity"
   assert.equal(rankRuntimeOutcomeHasWork("STALE_DISPATCH_TICK"), false);
   assert.equal(rankRuntimeOutcomeHasWork("SUBMITTED"), true);
   assert.equal(rankRuntimeOutcomeHasWork("POLL_PENDING"), true);
+});
+
+test("rank demand grows to the full pool but shrinks near one saturated key", () => {
+  const demand = new AdaptiveRankLaneDemand(32);
+  let burst = demand.nextBurst();
+  assert.equal(burst, 1);
+
+  for (let round = 0; round < 9; round += 1) {
+    for (let slot = 0; slot < burst; slot += 1) {
+      demand.started();
+      demand.finished("POLL_CHECKPOINTED");
+    }
+    burst = demand.nextBurst();
+  }
+  assert.equal(burst, 32);
+
+  for (let slot = 0; slot < burst; slot += 1) {
+    demand.started();
+    demand.finished(slot < 10 ? "POLL_CHECKPOINTED" : "PROVIDER_CAPACITY_DELAYED");
+  }
+  assert.equal(demand.nextBurst(), 12);
+
+  for (let slot = 0; slot < 12; slot += 1) {
+    demand.started();
+    demand.finished("IDLE");
+  }
+  assert.equal(demand.nextBurst(), 1);
+  assert.throws(() => demand.finished("IDLE"), TypeError);
+});
+
+test("rank demand opens more probes while provider HTTP calls are pending", () => {
+  const demand = new AdaptiveRankLaneDemand(32);
+  demand.started();
+  assert.equal(demand.nextBurst(), 2);
+  demand.started();
+  assert.equal(demand.nextBurst(), 3);
+  demand.finished("POLL_PENDING");
+  demand.finished("POLL_PENDING");
+  assert.equal(demand.nextBurst(), 5);
 });

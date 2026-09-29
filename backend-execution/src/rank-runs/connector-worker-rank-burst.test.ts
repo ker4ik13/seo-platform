@@ -11,11 +11,12 @@ test("connector dispatcher probes cheaply and fills the rank pool after activity
     source,
     /const rankDispatchStride = config\.connectorRuntime\.rankConcurrency;/u
   );
-  assert.match(source, /const rankBurst = adaptiveRankDispatchBurst\(/u);
-  assert.match(source, /activeRankDispatchUntil/u);
+  assert.match(source, /new AdaptiveRankLaneDemand\(/u);
+  assert.match(source, /const rankBurst = rankDemand\.nextBurst\(\)/u);
+  assert.match(source, /rankDemand\.started\(\)/u);
+  assert.match(source, /rankDemand\.finished\(outcome\)/u);
   assert.match(source, /activeFrequencyDispatchUntil/u);
   assert.match(source, /const frequencyBurst = adaptiveRankDispatchBurst\(/u);
-  assert.match(source, /rankRuntimeOutcomeHasWork\(outcome\)/u);
   assert.match(source, /slot < rankBurst; slot \+= 1/u);
   assert.match(source, /shardedDispatchLane\(/u);
   assert.match(source, /rankRuntimeJobUsesCurrentLane\(/u);

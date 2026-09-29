@@ -39,9 +39,9 @@ import {
 } from "./queue/frequency-collection-runtime.queue.js";
 import { safeErrorSummary } from "./runtime-safe-error.js";
 import {
+  AdaptiveRankLaneDemand,
   adaptiveRankDispatchBurst,
   connectorRuntimeLaneCount,
-  rankRuntimeOutcomeHasWork,
   rankRuntimeJobUsesCurrentLane,
   shardedDispatchLane,
   shardedDispatchSequence
@@ -52,7 +52,6 @@ import { ClusteringRuntimeService } from "./clustering-runs/clustering-runtime.s
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const ACTIVE_RANK_DISPATCH_HOLD_MS = 5_000;
 const ACTIVE_FREQUENCY_DISPATCH_HOLD_MS = 5_000;
 
 async function bootstrap(): Promise<void> {
@@ -118,7 +117,9 @@ async function bootstrap(): Promise<void> {
         config.integrationCredentialValidation.concurrency
     }
   );
-  let activeRankDispatchUntil = 0;
+  const rankDemand = new AdaptiveRankLaneDemand(
+    config.connectorRuntime.rankConcurrency
+  );
   let activeFrequencyDispatchUntil = 0;
   let activeKeywordResearchDispatchUntil = 0;
   const rankRuntimeLaneCount = connectorRuntimeLaneCount(
@@ -137,14 +138,16 @@ async function bootstrap(): Promise<void> {
       if (!rankRuntimeJobUsesCurrentLane(job.id, rankRuntimeLaneCount)) {
         return "STALE_DISPATCH_TICK";
       }
-      const outcome = await rankRuntime.processOne(
-        `connector-rank-${randomUUID()}`
-      );
-      if (rankRuntimeOutcomeHasWork(outcome)) {
-        activeRankDispatchUntil =
-          Date.now() + ACTIVE_RANK_DISPATCH_HOLD_MS;
+      rankDemand.started();
+      let outcome: string | undefined;
+      try {
+        outcome = await rankRuntime.processOne(
+          `connector-rank-${randomUUID()}`
+        );
+        return outcome;
+      } finally {
+        rankDemand.finished(outcome);
       }
-      return outcome;
     },
     {
       ...bullMqConnectionOptions(workerConnection),
@@ -224,11 +227,7 @@ async function bootstrap(): Promise<void> {
       );
       const now = Date.now();
       const rankDispatchStride = config.connectorRuntime.rankConcurrency;
-      const rankBurst = adaptiveRankDispatchBurst(
-        config.connectorRuntime.rankConcurrency,
-        activeRankDispatchUntil,
-        now
-      );
+      const rankBurst = rankDemand.nextBurst();
       for (let slot = 0; slot < rankBurst; slot += 1) {
         await enqueueRankConnectorRuntime(
           rankQueue,

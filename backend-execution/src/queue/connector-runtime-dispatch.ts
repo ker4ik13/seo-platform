@@ -119,6 +119,68 @@ export function adaptiveRankDispatchBurst(
   return activeUntil > now ? concurrency : 1;
 }
 
+/**
+ * Keeps DB claim probes close to real provider demand. The maximum remains
+ * available to different physical keys, but one saturated key cannot keep
+ * every connector lane probing PostgreSQL once per second.
+ */
+export class AdaptiveRankLaneDemand {
+  private target = 1;
+  private running = 0;
+  private completed = 0;
+  private capacityDelayed = 0;
+  private idle = 0;
+
+  public constructor(private readonly maximum: number) {
+    if (!Number.isSafeInteger(maximum) || maximum < 1) {
+      throw new TypeError("Invalid rank lane maximum");
+    }
+  }
+
+  public started(): void {
+    this.running += 1;
+  }
+
+  public finished(outcome: string | undefined): void {
+    if (this.running < 1) {
+      throw new TypeError("Rank lane completed without starting");
+    }
+    this.running -= 1;
+    if (outcome === "PROVIDER_CAPACITY_DELAYED") {
+      this.capacityDelayed += 1;
+    } else if (outcome && rankRuntimeOutcomeHasWork(outcome)) {
+      this.completed += 1;
+    } else {
+      this.idle += 1;
+    }
+  }
+
+  public nextBurst(): number {
+    const useful = this.running + this.completed;
+    if (this.capacityDelayed > 0 || this.idle > 0) {
+      this.target = Math.min(
+        this.target,
+        Math.max(1, useful + (this.capacityDelayed > 0 ? 2 : 1))
+      );
+    } else if (
+      this.completed > 0 ||
+      (this.running > 0 && this.running >= this.target)
+    ) {
+      this.target = Math.min(
+        this.maximum,
+        Math.max(this.target + 1, Math.ceil(this.target * 1.5))
+      );
+    } else if (this.running === 0) {
+      this.target = 1;
+    }
+
+    this.completed = 0;
+    this.capacityDelayed = 0;
+    this.idle = 0;
+    return Math.min(this.maximum, Math.max(this.target, this.running + 1));
+  }
+}
+
 export function rankRuntimeOutcomeHasWork(outcome: string): boolean {
   return [
     "SUBMITTED",

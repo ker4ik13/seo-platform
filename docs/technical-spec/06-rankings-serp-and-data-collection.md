@@ -458,8 +458,10 @@ Turbo запрашивает page width 50: TOP-50 обычно выполняе
 первой страницы, на которой найден домен проекта, а estimate показывает
 нижнюю и верхнюю стоимость.
 
-Rank connector dispatcher держит один idle probe на shard и раскрывает только
-configured concurrency после фактической provider-работы. Завершённые runtime
+Rank connector dispatcher держит один idle probe на shard и наращивает
+число rank lanes по фактической работе и ожидающим HTTP. Отказы Redis
+capacity и пустые claims уменьшают число probes до необходимого уровня;
+configured concurrency остаётся только потолком. Завершённые runtime
 ticks удаляются сразу; Redis Jobs использует `maxmemory 1gb`, `noeviction` и
 container limit `1536M`. Submit fast paths
 проверяют актуальный parent Job до полного tenant graph и, для Arsenkin, до
