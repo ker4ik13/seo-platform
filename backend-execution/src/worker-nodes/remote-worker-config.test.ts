@@ -6,11 +6,37 @@ import test from "node:test";
 import { loadRemoteWorkerConfig } from "./remote-worker-config.js";
 
 const id = "01900000-0000-7000-8000-000000000001";
+const token = `wn_${"a".repeat(43)}`;
+
+test("remote worker accepts one exact token from the environment", async () => {
+  const env = {
+    WORKER_CONTROL_URL: "https://144.31.221.28:4000",
+    WORKER_NODE_ID: id,
+    WORKER_NODE_TOKEN: token,
+    WORKER_HTTP_SLOTS: "16",
+    WORKER_RANK_SLOTS: "8"
+  };
+  const config = await loadRemoteWorkerConfig(env);
+  assert.equal(config.token, token);
+  assert.equal(config.rankSlots, 8);
+  await assert.rejects(() => loadRemoteWorkerConfig({
+    ...env, WORKER_NODE_TOKEN: "REPLACE_WITH_TOKEN_FROM_ADMIN"
+  }));
+  await assert.rejects(() => loadRemoteWorkerConfig({
+    ...env, WORKER_NODE_TOKEN: ` ${token}`
+  }));
+  await assert.rejects(() => loadRemoteWorkerConfig({
+    ...env, WORKER_NODE_TOKEN_FILE: "/run/secrets/worker-node-token"
+  }));
+  await assert.rejects(() => loadRemoteWorkerConfig({
+    WORKER_CONTROL_URL: env.WORKER_CONTROL_URL,
+    WORKER_NODE_ID: id
+  }));
+});
 
 test("remote worker requires a private token file and verified HTTPS origin", async () => {
   const directory = await mkdtemp(join(tmpdir(), "worker-config-"));
   const tokenFile = join(directory, "token");
-  const token = `wn_${"a".repeat(43)}`;
   try {
     await writeFile(tokenFile, `${token}\n`, { mode: 0o600 });
     const env = {

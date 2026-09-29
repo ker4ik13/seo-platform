@@ -3,24 +3,18 @@ services:
     build:
       context: ..
       dockerfile: infrastructure/docker/backend.Dockerfile
-      target: runtime
+      target: remote-worker
       args:
         PACKAGE_NAME: "@seo-platform/backend-execution"
-    command: ["node", "dist/remote-worker.main.js"]
     environment:
       NODE_ENV: production
       WORKER_CONTROL_URL: ${WORKER_CONTROL_URL:?HTTPS control URL is required}
       WORKER_NODE_ID: ${WORKER_NODE_ID:?Worker node ID is required}
-      WORKER_NODE_TOKEN_FILE: /run/secrets/worker-node-token
+      WORKER_NODE_TOKEN: ${WORKER_NODE_TOKEN:?Worker node token is required}
       WORKER_HTTP_SLOTS: ${WORKER_HTTP_SLOTS:-16}
       WORKER_RANK_SLOTS: ${WORKER_RANK_SLOTS:-0}
       WORKER_CPU_SLOTS: ${WORKER_CPU_SLOTS:-2}
       WORKER_HEARTBEAT_MS: ${WORKER_HEARTBEAT_MS:-10000}
-    volumes:
-      - type: bind
-        source: ${WORKER_NODE_TOKEN_SOURCE:?Private token file is required}
-        target: /run/secrets/worker-node-token
-        read_only: true
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m

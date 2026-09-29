@@ -19,9 +19,13 @@ export async function loadRemoteWorkerConfig(
 ): Promise<RemoteWorkerConfig> {
   const rawUrl = env.WORKER_CONTROL_URL;
   const rawId = env.WORKER_NODE_ID;
+  const envToken = env.WORKER_NODE_TOKEN;
   const tokenPath = env.WORKER_NODE_TOKEN_FILE;
-  if (!rawUrl || !rawId || !tokenPath || !tokenPath.startsWith("/")) {
-    throw new Error("Worker control URL, node ID and absolute token file are required");
+  if (!rawUrl || !rawId) {
+    throw new Error("Worker control URL and node ID are required");
+  }
+  if ((envToken === undefined) === (tokenPath === undefined)) {
+    throw new Error("Provide exactly one worker node token source");
   }
   let controlUrl: URL;
   try {
@@ -40,12 +44,20 @@ export async function loadRemoteWorkerConfig(
     throw new Error("Worker control URL must be an HTTPS origin without credentials");
   }
   if (!UUID_PATTERN.test(rawId)) throw new Error("Invalid worker node ID");
-  const file = await lstat(tokenPath);
-  if (!file.isFile() || (file.mode & 0o077) !== 0) {
-    throw new Error("Worker node token must be a private regular file");
+  let token = envToken;
+  if (tokenPath !== undefined) {
+    if (!tokenPath.startsWith("/")) {
+      throw new Error("Worker node token file path must be absolute");
+    }
+    const file = await lstat(tokenPath);
+    if (!file.isFile() || (file.mode & 0o077) !== 0) {
+      throw new Error("Worker node token must be a private regular file");
+    }
+    token = (await readFile(tokenPath, "utf8")).trim();
   }
-  const token = (await readFile(tokenPath, "utf8")).trim();
-  if (!TOKEN_PATTERN.test(token)) throw new Error("Invalid worker node token");
+  if (token === undefined || !TOKEN_PATTERN.test(token)) {
+    throw new Error("Invalid worker node token");
+  }
   const httpSlots = bounded(env.WORKER_HTTP_SLOTS, 16, 1, 512);
   const rankSlots = bounded(env.WORKER_RANK_SLOTS, 0, 0, httpSlots);
   return {

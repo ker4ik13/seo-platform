@@ -35,15 +35,15 @@ JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE=BOTH
 2. Скопируйте показанные **один раз** UUID узла и его токен. У каждого
    сервера — отдельный узел и отдельный токен. В админке можно сразу
    выключить или плавно остановить узел, а также перевыпустить его токен.
-3. Не добавляйте токен в `.env`, командную строку, Git или Docker image.
-   Контейнер запускается от UID 1000 и принимает только файл с правами,
-   закрытыми для группы и остальных пользователей (`0600` или строже).
+3. Токен задаётся в окружении **только удалённого воркера**. Не добавляйте
+   его в Git, Docker image, URL, логи или конфигурацию главного сервера.
+   Доступ к Environment в Dokploy и к Docker на узле оставьте доверенным
+   администраторам: они могут прочитать переменные контейнера.
 
 ## Dokploy на удалённом сервере
 
 Для одного узла удобнее создать **Application**, а не Compose. Это позволяет
-взять build-stage `remote-worker` из общего Dockerfile и добавить токен через
-постоянный File Mount. В Dokploy выберите GitHub/Git-источник,
+взять build-stage `remote-worker` из общего Dockerfile. В Dokploy выберите GitHub/Git-источник,
 `ker4ik13/seo-platform` и ветку `codex/worker-fleet-db-pilot`.
 Настройки сборки ([Build Type](https://docs.dokploy.com/docs/core/applications/build-type)):
 
@@ -62,20 +62,17 @@ JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE=BOTH
 ```dotenv
 WORKER_CONTROL_URL=https://144.31.221.28:4000
 WORKER_NODE_ID=<UUID_ИЗ_АДМИНКИ>
-WORKER_NODE_TOKEN_FILE=/run/secrets/worker-node-token
+WORKER_NODE_TOKEN=<ТОКЕН_ИЗ_АДМИНКИ>
 WORKER_HTTP_SLOTS=16
 WORKER_RANK_SLOTS=0
 WORKER_CPU_SLOTS=2
 WORKER_HEARTBEAT_MS=10000
 ```
 
-В **Advanced → Mounts** ([описание Dokploy](https://docs.dokploy.com/docs/core/applications/advanced)) добавьте `File Mount`: File Path —
-`worker-node-token`, Mount Path — `/run/secrets/worker-node-token`,
-Content — одноразовый токен узла. Это не
-загружает токен в Docker image. Файл на хосте должен читаться UID 1000 и
-иметь права `0600`; если Dokploy создаст его с иными правами, агент намеренно
-не запустится. Исправьте права точного host-файла монтирования и повторите
-деплой; не ослабляйте проверку и не кладите токен в переменные окружения.
+Значение `WORKER_NODE_TOKEN` сохраните в Environment самого приложения
+Dokploy, а не в репозитории. [Dokploy записывает переменные Compose в `.env`](https://docs.dokploy.com/docs/core/docker-compose);
+доступ к ним и к Docker-инспекции равнозначен доступу к ключу воркера.
+Если ключ станет известен посторонним, перевыпустите его в админке.
 Не настраивайте Domain или опубликованный порт: агент сам обращается к
 центру исходящими HTTPS-запросами.
 
@@ -97,13 +94,14 @@ curl -i https://144.31.221.28:4000/api/v1/workspaces
 
 ## Обычный Docker Compose вне Dokploy
 
-На удалённом Linux-сервере создайте приватный файл с токеном, доступный
-UID 1000 только для чтения. Скопируйте `infrastructure/.env.worker.example` в локальный
-`infrastructure/.env.worker` и укажите `WORKER_NODE_ID`, абсолютный путь
-`WORKER_NODE_TOKEN_SOURCE` и `WORKER_CONTROL_URL`. Для тестового VPS:
+Скопируйте `infrastructure/.env.worker.example` в локальный
+`infrastructure/.env.worker` и укажите `WORKER_NODE_ID`, `WORKER_NODE_TOKEN`
+и `WORKER_CONTROL_URL`. Файл `.env.worker` должен оставаться вне Git и быть
+доступен только администратору сервера. Для тестового VPS:
 
 ```dotenv
 WORKER_CONTROL_URL=https://144.31.221.28:4000
+WORKER_NODE_TOKEN=<ТОКЕН_ИЗ_АДМИНКИ>
 WORKER_HTTP_SLOTS=16
 WORKER_RANK_SLOTS=8
 WORKER_CPU_SLOTS=2
