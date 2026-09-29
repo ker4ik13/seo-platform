@@ -65,6 +65,7 @@ import {
   storedXmlStockOperationUsage,
   xmlStockUsageWithActual
 } from "../integrations/xmlstock-pricing.js";
+import { rankSourcesFromStoredJob } from "./rank-operation-provenance.service.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -276,8 +277,7 @@ export class RankRunService {
     limit: number,
     cursor?: number
   ): Promise<InternalRankOperationScope> {
-    const [job, attempts] = await Promise.all([
-      this.prisma.job.findFirst({
+    const job = await this.prisma.job.findFirst({
       where: {
         id: jobId,
         workspaceId,
@@ -287,6 +287,11 @@ export class RankRunService {
       },
       select: {
         scopeSnapshot: true,
+        provider: true,
+        credentialMode: true,
+        rankRun: {
+          select: { estimate: { select: { credentialId: true } } }
+        },
         items: {
           ...(cursor === undefined
             ? {}
@@ -300,19 +305,17 @@ export class RankRunService {
           }
         }
       }
-      }),
-      this.prisma.rankConnectorExecution.aggregate({
-        where: { workspaceId, projectId, jobId, provider: "XMLSTOCK" },
-        _sum: { submitAttemptCount: true, pollAttemptCount: true }
-      })
-    ]);
+      });
     if (!job) throw rankJobNotFound("XMLStock rank result scope not found");
 
     const items = job.items.slice(0, limit);
     const sequences = items.map(({ sequence }) => sequence);
-    const executions = sequences.length === 0
-      ? []
-      : await this.prisma.rankConnectorExecution.findMany({
+    const [sources, executions] = await Promise.all([
+      rankSourcesFromStoredJob(this.prisma, {
+        workspaceId, projectId, jobId
+      }, job),
+      sequences.length === 0 ? Promise.resolve([]) :
+        this.prisma.rankConnectorExecution.findMany({
           where: {
             workspaceId,
             projectId,
@@ -330,7 +333,8 @@ export class RankRunService {
             pollAttemptCount: true,
             lastErrorCode: true
           }
-        });
+        })
+    ]);
     const latestBySequence = new Map<
       number,
       (typeof executions)[number]
@@ -356,9 +360,15 @@ export class RankRunService {
     const storedUsage = storedXmlStockOperationUsage(
       storedRecord(job.scopeSnapshot)?.providerUsage
     );
-    const actualRequests = storedUsage?.product === "YANDEX_SEARCH_API"
-      ? attempts._sum.submitAttemptCount ?? 0
-      : attempts._sum.pollAttemptCount ?? 0;
+    const requestTotal = sources.reduce(
+      (total, source) => total +
+        (source.provider === "XMLSTOCK" ? BigInt(source.requestCount) : 0n),
+      0n
+    );
+    if (requestTotal > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("Rank provider usage exceeds the safe count range");
+    }
+    const actualRequests = Number(requestTotal);
     const providerUsage = xmlStockUsageWithActual(
       storedUsage,
       actualRequests,
@@ -369,6 +379,7 @@ export class RankRunService {
       projectId,
       jobId,
       ...(providerUsage ? { providerUsage } : {}),
+      sources,
       items: scopeItems,
       page: {
         hasNext,

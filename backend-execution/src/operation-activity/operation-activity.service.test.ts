@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PrismaService } from "../database/prisma.service.js";
+import type { RankOperationProvenanceService } from "../rank-runs/rank-operation-provenance.service.js";
 import { OperationActivityService } from "./operation-activity.service.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
@@ -9,9 +10,15 @@ const secondProjectId = "01900000-0000-7000-8000-000000000003";
 const actorId = "01900000-0000-7000-8000-000000000004";
 const jobId = "01900000-0000-7000-8000-000000000005";
 
+function activityService(prisma: PrismaService): OperationActivityService {
+  return new OperationActivityService(prisma, {
+    selectedForJobs: async () => new Map()
+  } as unknown as RankOperationProvenanceService);
+}
+
 test("counts only active user-visible operations by project", async () => {
   let query: unknown;
-  const service = new OperationActivityService({
+  const service = activityService({
     job: {
       groupBy: async (value: unknown) => {
         query = value;
@@ -77,7 +84,7 @@ test("dismisses a failed operation and advances the guarded Job version", async 
       }
     }
   };
-  const service = new OperationActivityService({
+  const service = activityService({
     $transaction: async (run: (client: typeof transaction) => unknown) => run(transaction)
   } as unknown as PrismaService);
 
@@ -129,7 +136,7 @@ test("dismisses a failed operation and advances the guarded Job version", async 
 test("keeps completed operations visible and replays an existing dismissal", async () => {
   const dismissedAt = new Date("2026-09-11T12:45:00.000Z");
   const serviceFor = (current: Readonly<Record<string, unknown>>) =>
-    new OperationActivityService({
+    activityService({
       $transaction: async (run: (client: unknown) => unknown) => run({
         job: {
           findFirst: async () => current,
@@ -155,7 +162,7 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
   let countCall = 0;
   const countQueries: unknown[] = [];
   const createdAt = new Date("2026-08-11T18:00:00.000Z");
-  const service = new OperationActivityService({
+  const service = activityService({
     job: {
       findMany: async () => [
         {
@@ -273,9 +280,85 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
   });
 });
 
+test("admin operation row includes search engine, exact connection and active workers", async () => {
+  const createdAt = new Date("2026-08-11T18:00:00.000Z");
+  const rankJobId = "01900000-0000-7000-8000-000000000010";
+  const nodeId = "01900000-0000-7000-8000-000000000012";
+  const prisma = {
+    job: {
+      findMany: async () => [{
+        id: rankJobId, workspaceId, projectId: firstProjectId,
+        actorId, type: "MANUAL_RANK_CHECK", status: "RUNNING",
+        stage: "COLLECTING", provider: "XMLSTOCK",
+        credentialMode: "BYOK_API_KEY",
+        scopeSnapshot: { searchEngine: "YANDEX", privateKey: "must-not-leak" },
+        progressCurrent: 4n, progressTotal: 50n, progressUnit: "KEYWORDS",
+        actualCostMicro: null, currency: "RUB", attempt: 1,
+        maxAttempts: 8, errorSummary: null, resultSummary: null,
+        createdAt, queuedAt: createdAt, startedAt: createdAt,
+        finishedAt: null, updatedAt: createdAt
+      }],
+      count: async () => 1,
+      groupBy: async () => []
+    },
+    $queryRaw: async () => [
+      { nodeId: "main", jobId: rankJobId, activeTasks: 1n },
+      { nodeId, jobId: rankJobId, activeTasks: 3n }
+    ],
+    executionWorkerNode: {
+      findMany: async () => [{ id: nodeId, name: "Офисный воркер" }]
+    }
+  } as unknown as PrismaService;
+  const service = new OperationActivityService(prisma, {
+    selectedForJobs: async () => new Map([[rankJobId,
+      { label: "Личный", displayHint: "••••b313" }]])
+  } as unknown as RankOperationProvenanceService);
+  const page = await service.adminList({ statusGroup: "ACTIVE", limit: 50 });
+  assert.deepEqual(page.data[0]?.connection,
+    { label: "Личный", displayHint: "••••b313" });
+  assert.equal(page.data[0]?.searchEngine, "YANDEX");
+  assert.deepEqual(page.data[0]?.workers, [
+    { name: "Основной сервер", activeTasks: 1 },
+    { name: "Офисный воркер", activeTasks: 3 }
+  ]);
+  assert.doesNotMatch(JSON.stringify(page), /must-not-leak/u);
+});
+
+test("running Wordstat shows its own key and main server without rank scans", async () => {
+  const createdAt = new Date("2026-08-11T18:00:00.000Z");
+  const prisma = {
+    job: {
+      findUnique: async () => ({
+        id: jobId, workspaceId, projectId: firstProjectId, actorId,
+        type: "FREQUENCY_COLLECTION", status: "RUNNING", stage: "collecting",
+        provider: "XMLSTOCK", credentialMode: "BYOK_API_KEY",
+        scopeSnapshot: { credentialId: "01900000-0000-7000-8000-000000000020" },
+        progressCurrent: 1n, progressTotal: 10n, progressUnit: "keywords",
+        actualCostMicro: null, currency: "RUB", attempt: 1,
+        maxAttempts: 8, errorSummary: null, resultSummary: null,
+        createdAt, queuedAt: createdAt, startedAt: createdAt,
+        finishedAt: null, updatedAt: createdAt
+      })
+    },
+    $queryRaw: async () => { throw new Error("not a rank Job"); }
+  } as unknown as PrismaService;
+  const service = new OperationActivityService(prisma, {
+    selectedForJobs: async (jobs: readonly { readonly credentialId?: string }[]) => {
+      assert.equal(jobs[0]?.credentialId,
+        "01900000-0000-7000-8000-000000000020");
+      return new Map([[jobId, { label: "Wordstat ключ" }]]);
+    }
+  } as unknown as RankOperationProvenanceService);
+  const result = await service.adminDetail(jobId);
+  assert.equal(result.searchEngine, "YANDEX");
+  assert.deepEqual(result.connection, { label: "Wordstat ключ" });
+  assert.deepEqual(result.workers,
+    [{ name: "Основной сервер", activeTasks: 1 }]);
+});
+
 test("loads one safe platform operation summary for a deep link", async () => {
   const createdAt = new Date("2026-08-11T18:00:00.000Z");
-  const service = new OperationActivityService({
+  const service = activityService({
     job: {
       findUnique: async () => ({
         id: jobId,
@@ -312,7 +395,7 @@ test("loads one safe platform operation summary for a deep link", async () => {
 
 test("classifies exhausted credential validation as attention", async () => {
   let findManyQuery: unknown;
-  const service = new OperationActivityService({
+  const service = activityService({
     job: {
       findMany: async (value: unknown) => {
         findManyQuery = value;
@@ -349,6 +432,8 @@ test("classifies exhausted credential validation as attention", async () => {
       status: true,
       stage: true,
       provider: true,
+      credentialMode: true,
+      scopeSnapshot: true,
       progressCurrent: true,
       progressTotal: true,
       progressUnit: true,

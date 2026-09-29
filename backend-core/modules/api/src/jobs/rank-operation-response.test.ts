@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
-import { scopedRankOperationScope } from "./rank-operation-response.js";
+import {
+  scopedRankOperationScope,
+  scopedRankOperationSources
+} from "./rank-operation-response.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
@@ -71,4 +74,26 @@ test("rejects extensible, out-of-order or unbounded rank operation scopes", () =
       DomainError
     );
   }
+});
+
+test("accepts safe rank connection usage and rejects secret or foreign sources", () => {
+  const input = {
+    workspaceId, projectId, jobId,
+    sources: [{ provider: "XMLSTOCK", label: "Личный",
+      displayHint: "••••b313", requestCount: "7", selected: true }]
+  };
+  assert.deepEqual(scopedRankOperationSources(
+    input, workspaceId, projectId, jobId
+  ), input);
+  assert.throws(() => scopedRankOperationSources({
+    ...input, sources: [{ ...input.sources[0], apiKey: "secret" }]
+  }, workspaceId, projectId, jobId), DomainError);
+  assert.throws(() => scopedRankOperationSources({
+    ...input, workspaceId: "01900000-0000-7000-8000-000000000099"
+  }, workspaceId, projectId, jobId), DomainError);
+  const scope = scopedRankOperationScope({
+    workspaceId, projectId, jobId, items: [], page: { hasNext: false },
+    sources: input.sources
+  }, workspaceId, projectId, jobId, 200);
+  assert.deepEqual(scope.sources, input.sources);
 });

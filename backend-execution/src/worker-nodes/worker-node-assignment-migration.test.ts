@@ -18,3 +18,15 @@ test("admin worker assignments are projected by a bounded secret-free function",
   ), "utf8");
   assert.match(permissions, /list_remote_worker_rank_assignments\(integer\)/u);
 });
+
+test("operation activity includes fenced local and remote provider leases", async () => {
+  const sql = await readFile(new URL(
+    "../../prisma/migrations/20260930002000_rank_worker_activity_for_admin/migration.sql",
+    import.meta.url
+  ), "utf8");
+  assert.match(sql, /ELSE 'main' END/u);
+  assert.match(sql, /'SUBMITTING', 'FETCHING'/u);
+  assert.match(sql, /execution\."lease_expires_at" > clock_timestamp\(\)/u);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.list_remote_worker_rank_assignments/u);
+  assert.doesNotMatch(sql, /keywordText|apiKey|ciphertext/u);
+});

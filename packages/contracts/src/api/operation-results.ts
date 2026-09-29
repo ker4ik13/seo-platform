@@ -197,7 +197,24 @@ export interface InternalRankOperationScope {
   readonly jobId: string;
   readonly items: readonly InternalRankOperationScopeItem[];
   readonly providerUsage?: XmlStockOperationUsageSummary;
+  readonly sources?: readonly RankOperationSourceUsage[];
   readonly page: OperationResultPageInfo;
+}
+
+/** Safe connection identity and actual provider HTTP calls for one rank Job. */
+export interface RankOperationSourceUsage {
+  readonly provider: "XMLSTOCK" | "ARSENKIN";
+  readonly label: string;
+  readonly displayHint?: string;
+  readonly requestCount: string;
+  readonly selected: boolean;
+}
+
+export interface InternalRankOperationSources {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly sources: readonly RankOperationSourceUsage[];
 }
 
 export interface RankOperationResultRow {
@@ -257,6 +274,8 @@ export interface RankOperationResult
   extends Omit<InternalRankOperationResult, "workspaceId" | "projectId"> {
   readonly job: RankJobSummary;
   readonly providerUsage?: XmlStockOperationUsageSummary;
+  /** Missing only when the metadata service is temporarily unavailable. */
+  readonly sources?: readonly RankOperationSourceUsage[];
 }
 
 export interface CrawlOperationIssue {

@@ -8,9 +8,11 @@ import type {
   AdminOperationSummary
 } from "@seo-platform/contracts";
 import { adminApi } from "../../lib/admin-browser-api";
+import {
+  adminOperationRefreshIntervals,
+  adminOperationRefreshSeconds
+} from "../../lib/admin-operation-refresh";
 import { UiText, useUiLocale } from "../../components/ui-locale";
-
-const REFRESH_INTERVALS = [3, 5, 10, 15] as const;
 
 export function OperationAdministration() {
   const uiLocale = useUiLocale().locale;
@@ -26,7 +28,9 @@ export function OperationAdministration() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedLoading, setSelectedLoading] = useState(false);
-  const [refreshSeconds, setRefreshSeconds] = useState<number>(15);
+  const [refreshSeconds, setRefreshSeconds] = useState(() =>
+    adminOperationRefreshSeconds(searchParams.get("refresh"))
+  );
   const [error, setError] = useState<string>();
   const latestBaseRequest = useRef<AbortController | null>(null);
   const selectedOperationId = adminOperationId(searchParams.get("operation"));
@@ -35,6 +39,7 @@ export function OperationAdministration() {
     operation?: string | null;
     status?: AdminOperationStatusGroup;
     type?: string;
+    refresh?: number;
   }>) => {
     const next = new URLSearchParams(window.location.search);
     next.set("screen", "operations");
@@ -50,6 +55,7 @@ export function OperationAdministration() {
       if (changes.operation) next.set("operation", changes.operation);
       else next.delete("operation");
     }
+    if (changes.refresh !== undefined) next.set("refresh", String(changes.refresh));
     const href = `/admin?${next.toString()}`;
     if (changes.operation) router.push(href, { scroll: false });
     else router.replace(href, { scroll: false });
@@ -58,6 +64,7 @@ export function OperationAdministration() {
   useEffect(() => {
     setStatus(adminOperationStatus(searchParams.get("status")));
     setType(adminOperationType(searchParams.get("type")));
+    setRefreshSeconds(adminOperationRefreshSeconds(searchParams.get("refresh")));
   }, [searchParams]);
 
   const load = useCallback(async (cursor?: string, silent = false) => {
@@ -131,11 +138,13 @@ export function OperationAdministration() {
           <span className="system-state"><i /> <UiText text="Автообновление" before=" " /></span>
           <select aria-label={uiText("Интервал обновления")} onChange={(event) => {
             const seconds = Number(event.target.value);
-            if (REFRESH_INTERVALS.some((value) => value === seconds)) {
-              setRefreshSeconds(seconds);
+            const valid = adminOperationRefreshIntervals.find((value) => value === seconds);
+            if (valid !== undefined) {
+              setRefreshSeconds(valid);
+              updateUrl({ refresh: valid });
             }
           }} value={refreshSeconds}>
-            {REFRESH_INTERVALS.map((seconds) => (
+            {adminOperationRefreshIntervals.map((seconds) => (
               <option key={seconds} value={seconds}>{seconds} <UiText text="сек." /></option>
             ))}
           </select>
@@ -181,7 +190,7 @@ export function OperationAdministration() {
         ) : (
           <div className="operation-table-wrap">
             <div className="operation-row operation-head" aria-hidden="true">
-              <span><UiText text="Операция" /></span><span><UiText text="Контекст" /></span><span><UiText text="Состояние" /></span><span><UiText text="Прогресс / результат" /></span><span><UiText text="Время" /></span><span />
+              <span><UiText text="Операция" /></span><span><UiText text="Контекст" /></span><span><UiText text="Источник / воркеры" /></span><span><UiText text="Состояние" /></span><span><UiText text="Прогресс / результат" /></span><span><UiText text="Время" /></span><span />
             </div>
             {result.data.map((operation) => <OperationRow key={operation.id} onOpen={() => {
               setSelected(operation);
@@ -209,7 +218,7 @@ export function OperationAdministration() {
 }
 
 function OperationRow({ onOpen, operation }: Readonly<{ onOpen: () => void; operation: AdminOperationSummary }>) {
-  const uiLocale = useUiLocale().locale;
+  const { locale: uiLocale, t: uiText } = useUiLocale();
   const percent = progressPercent(operation);
   return (
     <article className="operation-row">
@@ -220,6 +229,21 @@ function OperationRow({ onOpen, operation }: Readonly<{ onOpen: () => void; oper
       <div className="operation-context" data-label="Контекст">
         <strong>{operation.project?.name ?? <UiText text="Без проекта" />}</strong>
         <small>{operation.workspace?.name ?? operation.workspaceId}</small>
+      </div>
+      <div className="operation-source" data-label="Источник / воркеры">
+        <strong>{[
+          operation.searchEngine === "YANDEX" ? "Яндекс" :
+            operation.searchEngine === "GOOGLE" ? "Google" : undefined,
+          operation.connection
+            ? `${operation.connection.label}${operation.connection.displayHint
+              ? ` · ${operation.connection.displayHint}` : ""}`
+            : undefined
+        ].filter(Boolean).join(" · ") || "—"}</strong>
+        <small>{operation.workers?.length
+          ? operation.workers.map((worker) =>
+              `${worker.name === "Основной сервер" ? uiText("Основной сервер") : worker.name} (${worker.activeTasks})`
+            ).join(" · ")
+          : <UiText text="Нет активных назначений" />}</small>
       </div>
       <div data-label="Состояние"><OperationStatus status={operation.status} type={operation.type} />{operation.stage && <small className="operation-stage">{operationStage(operation)}</small>}</div>
       <div className="operation-progress" data-label="Прогресс / результат">
@@ -255,6 +279,9 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label={uiText("Проект")} value={operation.project ? `${operation.project.name} · ${operation.project.domain}` : "Без проекта"} />
           <Snapshot label={uiText("Автор запуска")} value={operation.actor ? `${operation.actor.displayName} · ${operation.actor.email}` : "Системная операция"} />
           <Snapshot label={uiText("Провайдер")} value={operation.provider ?? "—"} />
+          <Snapshot label={uiText("Поисковая система")} value={operation.searchEngine === "YANDEX" ? "Яндекс" : operation.searchEngine === "GOOGLE" ? "Google" : "—"} />
+          <Snapshot label={uiText("Подключение")} value={operation.connection ? `${operation.connection.label}${operation.connection.displayHint ? ` · ${operation.connection.displayHint}` : ""}` : "—"} />
+          <Snapshot label={uiText("Воркеры")} value={operation.workers?.length ? operation.workers.map((worker) => `${worker.name === "Основной сервер" ? uiText("Основной сервер") : worker.name} (${worker.activeTasks})`).join(" · ") : uiText("Нет активных назначений")} />
           <Snapshot label={uiText("Этап")} value={operation.stage ? operationStage(operation) : "—"} />
           <Snapshot label={uiText("Попытка")} value={`${operation.attempt} из ${operation.maxAttempts}`} />
           <Snapshot label={uiText("Результат")} value={resultLabel(operation, uiLocale)} />

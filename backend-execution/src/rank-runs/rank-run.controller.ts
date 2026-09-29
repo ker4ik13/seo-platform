@@ -16,6 +16,7 @@ import {
 import type {
   ApiResponse,
   InternalRankOperationScope,
+  InternalRankOperationSources,
   RankJobSummary,
   RankRuntimeDiagnostics
 } from "@seo-platform/contracts";
@@ -36,11 +37,15 @@ import {
   rankRunIdempotencyKey
 } from "./rank-run-input.js";
 import { RankRunService } from "./rank-run.service.js";
+import { RankOperationProvenanceService } from "./rank-operation-provenance.service.js";
 
 @Controller("internal/v1/workspaces/:workspaceId/projects/:projectId")
 @UseGuards(IntegrationCredentialApiGuard)
 export class RankRunController {
-  public constructor(private readonly rankRuns: RankRunService) {}
+  public constructor(
+    private readonly rankRuns: RankRunService,
+    private readonly provenance: RankOperationProvenanceService
+  ) {}
 
   @Get("rank-runs")
   public async list(
@@ -150,6 +155,32 @@ export class RankRunController {
         rankResultPageLimit(limit),
         rankResultCursor(cursor)
       ),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get("jobs/:jobId/sources")
+  public async sources(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalRankOperationSources>> {
+    const context = internalCommandContext(headers);
+    assertPathContext(workspaceId, projectId, context);
+    const canonicalJobId = internalUuid(jobId, "jobId");
+    return {
+      data: {
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
+        jobId: canonicalJobId,
+        sources: await this.provenance.sourcesForJob({
+          workspaceId: context.workspaceId,
+          projectId: context.projectId,
+          jobId: canonicalJobId
+        })
+      },
       meta: { requestId: request.id }
     };
   }

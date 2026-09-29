@@ -10,6 +10,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { IntegrationCredentialApiGuard } from "../integrations/integration-credential-api.guard.js";
 import { RankRunController } from "./rank-run.controller.js";
 import type { RankRunService } from "./rank-run.service.js";
+import type { RankOperationProvenanceService } from "./rank-operation-provenance.service.js";
 
 const workspaceId = "0190abcd-0000-7000-8000-000000000001";
 const projectId = "0190abcd-0000-7000-8000-000000000002";
@@ -43,6 +44,10 @@ test("declares the dedicated internal guard and exact route boundary", () => {
     "jobs/:jobId"
   );
   assert.equal(
+    Reflect.getMetadata(PATH_METADATA, prototype.sources),
+    "jobs/:jobId/sources"
+  );
+  assert.equal(
     Reflect.getMetadata(PATH_METADATA, prototype.cancel),
     "jobs/:jobId/cancel"
   );
@@ -56,6 +61,27 @@ test("declares the dedicated internal guard and exact route boundary", () => {
   );
 });
 
+test("returns only tenant-scoped safe connection sources", async () => {
+  const request = { id: "request-rank-source-1" } as FastifyRequest;
+  const controller = new RankRunController({} as RankRunService, {
+    sourcesForJob: async () => [{
+      provider: "XMLSTOCK", label: "Личный", displayHint: "••••b313",
+      requestCount: "4", selected: true
+    }]
+  } as unknown as RankOperationProvenanceService);
+  const response = await controller.sources(
+    workspaceId, projectId, jobId, headers(), request
+  );
+  assert.deepEqual(response.data, {
+    workspaceId, projectId, jobId,
+    sources: [{ provider: "XMLSTOCK", label: "Личный",
+      displayHint: "••••b313", requestCount: "4", selected: true }]
+  });
+  await assert.rejects(() => controller.sources(
+    workspaceId, otherProjectId, jobId, headers(), request
+  ), BadRequestException);
+});
+
 test("accepts only an exact body matching route and trusted headers", async () => {
   const calls: unknown[][] = [];
   const service = {
@@ -64,7 +90,7 @@ test("accepts only an exact body matching route and trusted headers", async () =
       return preparingSummary();
     }
   } as unknown as RankRunService;
-  const controller = new RankRunController(service);
+  const controller = new RankRunController(service, {} as RankOperationProvenanceService);
   const responseHeaders = new Map<string, string>();
   const response = {
     header: (name: string, value: string) => {
@@ -131,7 +157,7 @@ test("requires the cancel route Job identifier to match the exact command", asyn
       return preparingSummary();
     }
   } as unknown as RankRunService;
-  const controller = new RankRunController(service);
+  const controller = new RankRunController(service, {} as RankOperationProvenanceService);
   const request = { id: "request-rank-cancel-1" } as FastifyRequest;
 
   await assert.rejects(
@@ -160,7 +186,7 @@ test("accepts an exact missing-position continuation command", async () => {
       return preparingSummary();
     }
   } as unknown as RankRunService;
-  const controller = new RankRunController(service);
+  const controller = new RankRunController(service, {} as RankOperationProvenanceService);
   const responseHeaders = new Map<string, string>();
   const response = {
     header: (name: string, value: string) => {

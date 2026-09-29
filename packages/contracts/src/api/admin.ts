@@ -254,6 +254,15 @@ export interface InternalAdminOperationSummary {
   readonly status: AdminOperationStatus;
   readonly stage?: string;
   readonly provider?: string;
+  readonly searchEngine?: "YANDEX" | "GOOGLE";
+  readonly connection?: {
+    readonly label: string;
+    readonly displayHint?: string;
+  };
+  readonly workers?: readonly {
+    readonly name: string;
+    readonly activeTasks: number;
+  }[];
   readonly progress: AdminOperationProgress;
   readonly result: AdminOperationResultMetrics;
   readonly errorCode?: string;

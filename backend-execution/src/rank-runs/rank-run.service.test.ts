@@ -208,10 +208,25 @@ test("does not expose runtime diagnostics for a non-XMLStock rank run", async ()
 });
 
 test("returns the paged per-key XMLStock result scope with the latest poll count", async () => {
+  const credentialId = "0190abcd-0000-7000-8000-000000000011";
   const prisma = {
     job: {
       findFirst: async () => ({
-        scopeSnapshot: {},
+        scopeSnapshot: {
+          searchSource: "LIVE",
+          providerUsage: {
+            provider: "XMLSTOCK", product: "YANDEX_LIVE",
+            tariffCode: "BASIC", currency: "RUB",
+            pricePerThousand: "25", unitPriceMicro: "25000",
+            estimatedRequestCount: { minimum: "2", maximum: "60" },
+            estimatedCostMicro: { minimum: "50000", maximum: "1500000" },
+            pricedAt: "2026-08-26T18:29:00.000Z",
+            priceSource: "XMLSTOCK_ACCOUNT_API"
+          }
+        },
+        provider: "XMLSTOCK",
+        credentialMode: "BYOK_API_KEY",
+        rankRun: { estimate: { credentialId } },
         items: [
           { sequence: 0, status: "COMPLETED", error: null },
           {
@@ -223,9 +238,10 @@ test("returns the paged per-key XMLStock result scope with the latest poll count
       })
     },
     rankConnectorExecution: {
-      aggregate: async () => ({
+      groupBy: async () => [{
+        credentialId, provider: "XMLSTOCK",
         _sum: { submitAttemptCount: 2, pollAttemptCount: 55 }
-      }),
+      }],
       findMany: async () => [
         {
           manifestChunkIndex: 0,
@@ -243,6 +259,12 @@ test("returns the paged per-key XMLStock result scope with the latest poll count
           lastErrorCode: null
         }
       ]
+    },
+    integrationCredential: {
+      findMany: async () => [{
+        id: credentialId, provider: "XMLSTOCK",
+        label: "Личный", displayHint: "••••b313"
+      }]
     }
   } as unknown as PrismaService;
 
@@ -253,10 +275,17 @@ test("returns the paged per-key XMLStock result scope with the latest poll count
     200
   );
 
-  assert.deepEqual(scope, {
+  assert.deepEqual(scope.providerUsage?.actualRequestCount,
+    { minimum: "55", maximum: "55" });
+  assert.deepEqual(scope.providerUsage?.actualCostMicro,
+    { minimum: "1375000", maximum: "1375000" });
+  const { providerUsage: _providerUsage, ...safeScope } = scope;
+  assert.deepEqual(safeScope, {
     workspaceId,
     projectId,
     jobId,
+    sources: [{ provider: "XMLSTOCK", label: "Личный",
+      displayHint: "••••b313", requestCount: "55", selected: true }],
     items: [
       { sequence: 0, status: "COMPLETED", pollAttempts: 5 },
       {

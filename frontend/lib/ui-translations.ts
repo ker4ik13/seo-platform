@@ -5245,5 +5245,11 @@ export const uiEnglish: Readonly<Record<string, string>> = {
   "Проверка остановлена": "Validation stopped",
   "Теперь подключение можно отключить.": "The integration can now be disconnected.",
   "Проверка давно не обновлялась и больше не блокирует управление подключением. Её можно повторить позже или отключить ключ сейчас.": "The validation has not updated for a while and no longer blocks integration controls. Retry it later or disconnect the key now.",
-  "Остаться": "Stay"
+  "Остаться": "Stay",
+  "Источник / воркеры": "Source / workers",
+  "Воркеры": "Workers",
+  "Нет активных назначений": "No active assignments",
+  "Маршрутизация": "Routing",
+  "почему переключились и сколько запросов ушло по каждому ключу": "why the route changed and how many requests used each key",
+  "Основной сервер": "Main server"
 };

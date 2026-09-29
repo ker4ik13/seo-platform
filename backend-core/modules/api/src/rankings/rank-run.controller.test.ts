@@ -20,6 +20,7 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import type { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { TenantService } from "../tenants/tenant.service.js";
 import { RankRunController } from "./rank-run.controller.js";
 
@@ -331,6 +332,37 @@ test("continues only the server-selected missing positions", async () => {
       "ranking.rank_job.retry_missing_started"
     ]
   );
+});
+
+test("rank result includes the safe connection source from Jobs", async () => {
+  const controller = new RankRunController(
+    {
+      getRankJob: async () => preparingJob(),
+      getRankOperationSources: async () => ({
+        workspaceId, projectId, jobId,
+        sources: [{ provider: "ARSENKIN", label: "Рабочий",
+          displayHint: "••••863c", requestCount: "2", selected: true }]
+      })
+    } as unknown as JobsClient,
+    tenantService(),
+    auditService([]),
+    billingEntitlements(),
+    {
+      rankOperationResult: async () => ({
+        workspaceId, projectId, jobId,
+        trackingContextId: contextId, contextName: "Москва",
+        execution: {}, counts: { foundCount: 0, notFoundCount: 0 },
+        rows: [], page: { hasNext: false }
+      })
+    } as unknown as SeoDataClient
+  );
+  const response = await controller.result(
+    jobId, undefined, undefined, request(), principal
+  );
+  assert.deepEqual(response.data.sources, [{
+    provider: "ARSENKIN", label: "Рабочий", displayHint: "••••863c",
+    requestCount: "2", selected: true
+  }]);
 });
 
 test("rejects stale lifecycle and access snapshots before audit or RPC", async () => {

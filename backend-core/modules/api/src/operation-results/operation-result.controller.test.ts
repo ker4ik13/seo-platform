@@ -150,7 +150,10 @@ test("returns rank and crawl results without internal tenant envelope fields", a
       getRankJob: async (context: unknown) => {
         assert.deepEqual(context, internalContext());
         return { id: jobId, workspaceId, projectId };
-      }
+      },
+      getRankOperationSources: async () => ({
+        workspaceId, projectId, jobId, sources: []
+      })
     } as unknown as JobsClient,
     {} as TenantService,
     {} as AuditService,
@@ -256,6 +259,9 @@ test("joins XMLStock rank rows with per-key attempts and final errors", async ()
         projectId,
         provider: "XMLSTOCK"
       }),
+      getRankOperationSources: async () => {
+        throw new Error("XMLStock scope already contains the sources");
+      },
       getRankOperationScope: async (
         _context: unknown,
         requestedJobId: string,
@@ -269,6 +275,8 @@ test("joins XMLStock rank rows with per-key attempts and final errors", async ()
           workspaceId,
           projectId,
           jobId,
+          sources: [{ provider: "XMLSTOCK", label: "Личный",
+            displayHint: "••••b313", requestCount: "5", selected: true }],
           items: [
             { sequence: 0, status: "COMPLETED", pollAttempts: 5 },
             {
@@ -322,6 +330,8 @@ test("joins XMLStock rank rows with per-key attempts and final errors", async ()
     request(),
     principal
   );
+
+  assert.equal(response.data.sources?.[0]?.label, "Личный");
 
   assert.deepEqual(
     response.data.rows.map(({ sequence, status, pollAttempts, errorCode }) => ({

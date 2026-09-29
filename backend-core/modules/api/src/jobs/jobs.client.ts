@@ -99,6 +99,7 @@ import type {
   RankRunConflictReason,
   RankJobSummary,
   InternalRankOperationScope,
+  InternalRankOperationSources,
   RankRuntimeDiagnostics,
   SemanticImportPreviewRowsPage,
   SemanticImportPreviewRowsQuery,
@@ -163,7 +164,10 @@ import {
   scopedRankJobSummary,
   scopedRankRuntimeDiagnostics
 } from "./rank-job-response.js";
-import { scopedRankOperationScope } from "./rank-operation-response.js";
+import {
+  scopedRankOperationScope,
+  scopedRankOperationSources
+} from "./rank-operation-response.js";
 import { scopedRankEstimate } from "./rank-estimate-response.js";
 import {
   scopedAutomation,
@@ -2204,6 +2208,24 @@ export class JobsClient {
     );
   }
 
+  public async getRankOperationSources(
+    context: InternalContext,
+    jobId: string
+  ): Promise<InternalRankOperationSources> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      `${rankJobPath(context.tenant.workspaceId, projectId, jobId)}/sources`,
+      context
+    );
+    return scopedRankOperationSources(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
+    );
+  }
+
   public async getRankRuntimeDiagnostics(
     context: InternalContext,
     jobId: string
@@ -2507,6 +2529,9 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     "status",
     "stage",
     "provider",
+    "searchEngine",
+    "connection",
+    "workers",
     "progress",
     "result",
     "errorCode",
@@ -2527,6 +2552,8 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     !ADMIN_OPERATION_STATUSES.has(input.status) ||
     (input.stage !== undefined && !shortSafeString(input.stage, 64)) ||
     (input.provider !== undefined && !shortSafeString(input.provider, 64)) ||
+    (input.searchEngine !== undefined &&
+      input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") ||
     (input.errorCode !== undefined &&
       (typeof input.errorCode !== "string" ||
         !/^[A-Z][A-Z0-9_]{0,99}$/u.test(input.errorCode))) ||
@@ -2561,6 +2588,28 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
   ) as AdminOperationResultMetrics;
   const projectId = optionalUuid(input.projectId);
   const actorId = optionalUuid(input.actorId);
+  const connection = input.connection === undefined
+    ? undefined
+    : allowlistedRecord(input.connection, ["label", "displayHint"]);
+  if (connection &&
+    (!shortSafeString(connection.label, 160) ||
+      (connection.displayHint !== undefined &&
+        !shortSafeString(connection.displayHint, 100)))) {
+    throw invalidJobsResponse();
+  }
+  if (input.workers !== undefined &&
+    (!Array.isArray(input.workers) || input.workers.length > 32)) {
+    throw invalidJobsResponse();
+  }
+  const workers = input.workers === undefined ? undefined :
+    (input.workers as unknown[]).map((value) => {
+      const worker = allowlistedRecord(value, ["name", "activeTasks"]);
+      if (!shortSafeString(worker.name, 100)) throw invalidJobsResponse();
+      return {
+        name: worker.name,
+        activeTasks: nonNegativeInteger(worker.activeTasks, 1000)
+      };
+    });
   const queuedAt = optionalIsoDate(input.queuedAt);
   const startedAt = optionalIsoDate(input.startedAt);
   const finishedAt = optionalIsoDate(input.finishedAt);
@@ -2573,6 +2622,16 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     status: input.status as AdminOperationStatus,
     ...(typeof input.stage === "string" ? { stage: input.stage } : {}),
     ...(typeof input.provider === "string" ? { provider: input.provider } : {}),
+    ...(input.searchEngine === "YANDEX" || input.searchEngine === "GOOGLE"
+      ? { searchEngine: input.searchEngine } : {}),
+    ...(connection ? {
+      connection: {
+        label: connection.label as string,
+        ...(typeof connection.displayHint === "string"
+          ? { displayHint: connection.displayHint } : {})
+      }
+    } : {}),
+    ...(workers?.length ? { workers } : {}),
     progress: {
       current: String(progress.current),
       ...(typeof progress.total === "string" ? { total: progress.total } : {}),

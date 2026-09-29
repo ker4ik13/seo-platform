@@ -75,6 +75,7 @@ export function AdminApp() {
       next.delete("status");
       next.delete("type");
       next.delete("operation");
+      next.delete("refresh");
     }
     router.push(`/admin${next.size > 0 ? `?${next.toString()}` : ""}`, {
       scroll: false

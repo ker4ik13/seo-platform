@@ -112,9 +112,20 @@ export class RankRunController {
         page.cursor
       )
     ]);
+    const loadSources = () => this.jobs.getRankOperationSources(
+      context, canonicalJobId
+    ).catch(() => {
+      this.logger.warn("Rank operation source summary unavailable");
+      return undefined;
+    });
     const { workspaceId: _workspaceId, projectId: _projectId, ...safe } = result;
     if (job.provider !== "XMLSTOCK") {
-      return apiResponse(request, { ...safe, job });
+      const sources = await loadSources();
+      return apiResponse(request, {
+        ...safe,
+        job,
+        ...(sources ? { sources: sources.sources } : {})
+      });
     }
     const scope = await this.jobs.getRankOperationScope(
       context,
@@ -129,9 +140,11 @@ export class RankRunController {
     ) {
       throw new Error("XMLStock rank operation scope does not match result page");
     }
+    const sources = scope.sources ?? (await loadSources())?.sources;
     return apiResponse(request, {
       ...safe,
       job,
+      ...(sources ? { sources } : {}),
       ...(scope.providerUsage ? { providerUsage: scope.providerUsage } : {}),
       rows: safe.rows.map((row, index) => {
         const item = scope.items[index];

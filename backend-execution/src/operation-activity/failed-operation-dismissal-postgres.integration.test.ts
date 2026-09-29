@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { OperationActivityService } from "./operation-activity.service.js";
+import type { RankOperationProvenanceService } from "../rank-runs/rank-operation-provenance.service.js";
 
 const databaseUrl = process.env.JOBS_NOTIFICATION_TEST_DATABASE_URL;
 
@@ -13,7 +14,7 @@ test(
   async () => {
     assert.ok(databaseUrl);
     const prisma = new PrismaService({ databaseUrl } as AppConfig);
-    const service = new OperationActivityService(prisma);
+    const service = new OperationActivityService(prisma, {} as RankOperationProvenanceService);
     const workspaceId = randomUUID();
     const projectId = randomUUID();
     const actorId = randomUUID();

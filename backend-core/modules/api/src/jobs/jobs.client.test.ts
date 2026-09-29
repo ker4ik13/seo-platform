@@ -335,6 +335,9 @@ test("loads a safe global operation page for platform administration", async () 
         status: "RUNNING",
         stage: "COLLECTING",
         provider: "XMLSTOCK",
+        searchEngine: "YANDEX",
+        connection: { label: "Личный", displayHint: "••••b313" },
+        workers: [{ name: "Офисный воркер", activeTasks: 4 }],
         progress: { current: "17", total: "50", unit: "KEYWORDS" },
         result: { found: 12, notFound: 5 },
         attempt: 1,
@@ -355,6 +358,11 @@ test("loads a safe global operation page for platform administration", async () 
       { statusGroup: "ACTIVE", type: "MANUAL_RANK_CHECK", limit: 50 }
     );
     assert.equal(result.data[0]?.result.found, 12);
+    assert.equal(result.data[0]?.searchEngine, "YANDEX");
+    assert.deepEqual(result.data[0]?.connection,
+      { label: "Личный", displayHint: "••••b313" });
+    assert.deepEqual(result.data[0]?.workers,
+      [{ name: "Офисный воркер", activeTasks: 4 }]);
     assert.equal(
       captured?.url.pathname,
       "/internal/v1/platform-admin/operations"
@@ -363,6 +371,29 @@ test("loads a safe global operation page for platform administration", async () 
     assert.equal(captured?.url.searchParams.get("type"), "MANUAL_RANK_CHECK");
     assert.equal(captured?.headers.get("x-actor-id"), actorId);
     assert.equal(captured?.headers.get("x-internal-token"), "i".repeat(32));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("loads tenant-scoped rank source usage without accepting API keys", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (input: string | URL | Request): Promise<Response> => {
+    capturedUrl = new URL(input instanceof Request ? input.url : input.toString());
+    return dataResponse({
+      workspaceId, projectId, jobId: crawlJobId,
+      sources: [{ provider: "XMLSTOCK", label: "Личный",
+        displayHint: "••••b313", requestCount: "4", selected: true }]
+    });
+  }) as typeof fetch;
+  try {
+    const result = await client().getRankOperationSources(
+      projectContext("rank-source-request-001"), crawlJobId
+    );
+    assert.equal(result.sources[0]?.label, "Личный");
+    assert.equal(capturedUrl?.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${crawlJobId}/sources`);
   } finally {
     globalThis.fetch = originalFetch;
   }

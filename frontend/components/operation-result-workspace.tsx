@@ -78,6 +78,11 @@ import {
 } from "../lib/rank-jobs";
 import { rankOperationCounts } from "../lib/rank-operation-counts";
 import {
+  hasRankRouting,
+  rankRoutingLines,
+  rankSourceLabel
+} from "../lib/rank-operation-source";
+import {
   searchContextDisplayName,
   searchRegionDisplayName,
   seoRegionDisplayName
@@ -496,6 +501,12 @@ export function OperationResultWorkspace({
           </div>
         ))}
       </div>
+
+      {data.kind === "rank" && hasRankRouting(
+        data.value.job.connectorAttempts, data.value.sources
+      ) && (
+        <RankRoutingDetails result={data.value} uiLocale={uiLocale} />
+      )}
 
       {visibleError && (
         <div className={styles.inlineError} role="alert">
@@ -2544,6 +2555,28 @@ interface SummaryView {
   readonly facts: readonly Readonly<{ label: string; value: string }>[];
 }
 
+function RankRoutingDetails({ result, uiLocale }: Readonly<{
+  result: RankOperationResult;
+  uiLocale: string;
+}>) {
+  const { attemptLines, sourceLines } = rankRoutingLines(
+    result.job.connectorAttempts, result.sources, uiLocale
+  );
+  return (
+    <details className={styles.routingDisclosure}>
+      <summary title={[...attemptLines, ...sourceLines].join("\n")}>
+        <UiText text="Маршрутизация" /> · <UiText text="почему переключились и сколько запросов ушло по каждому ключу" />
+      </summary>
+      <div>
+        {attemptLines.length > 0 && <ol>{attemptLines.map((line, index) =>
+          <li key={index}>{line}</li>
+        )}</ol>}
+        <ul>{sourceLines.map((line, index) => <li key={index}>{line}</li>)}</ul>
+      </div>
+    </details>
+  );
+}
+
 function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU"): SummaryView {
   if (data.kind === "frequency") {
     const value = data.value.collection;
@@ -2677,6 +2710,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
         { label: "Ошибок", value: formatInteger(failed, uiLocale) },
         { label: "Регион", value: searchRegionDisplayName(value.execution.searchEngine, value.execution.regionCode) },
         { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—" },
+        { label: "Подключение", value: rankSourceLabel(value.sources, uiLocale) },
         ...xmlStockUsageFacts(value.providerUsage, uiLocale),
         ...("failure" in value.job && value.job.failure
           ? [{ label: "Код ошибки", value: value.job.failure.code }]

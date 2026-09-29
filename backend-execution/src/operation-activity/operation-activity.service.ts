@@ -22,6 +22,7 @@ import {
   type JobStatus
 } from "../generated/prisma/client.js";
 import { INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE } from "../integrations/integration-credential-validation-job.js";
+import { RankOperationProvenanceService } from "../rank-runs/rank-operation-provenance.service.js";
 import type { PlatformAdminOperationQuery } from "./platform-admin-operation-input.js";
 
 import { ACTIVE_JOB_STATUSES, ACTIVE_IMPORT_STATUSES } from "../jobs/job-capacity.js";
@@ -36,6 +37,8 @@ const visibleOperationTypes = [
   "KEYWORD_RESEARCH",
   "SEMANTIC_EXPORT"
 ] as const;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 const activeOperationStatuses = [
   "PREPARING",
@@ -85,6 +88,8 @@ const ADMIN_JOB_SELECT = {
   status: true,
   stage: true,
   provider: true,
+  credentialMode: true,
+  scopeSnapshot: true,
   progressCurrent: true,
   progressTotal: true,
   progressUnit: true,
@@ -105,7 +110,10 @@ type AdminJob = Prisma.JobGetPayload<{ select: typeof ADMIN_JOB_SELECT }>;
 
 @Injectable()
 export class OperationActivityService {
-  public constructor(private readonly prisma: PrismaService) {}
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly provenance: RankOperationProvenanceService
+  ) {}
 
   public async list(
     workspaceId: string
@@ -251,8 +259,13 @@ export class OperationActivityService {
         })
       ]);
     const page = jobs.slice(0, query.limit);
+    const presentation = await this.adminRankPresentation(page);
     return {
-      data: page.map(adminOperationSummary),
+      data: page.map((job) => adminOperationSummary(
+        job,
+        presentation.connections.get(job.id),
+        presentation.workers.get(job.id)
+      )),
       ...(jobs.length > query.limit && page.length > 0
         ? { nextCursor: page[page.length - 1]!.id }
         : {}),
@@ -272,7 +285,91 @@ export class OperationActivityService {
       select: ADMIN_JOB_SELECT
     });
     if (!job) throw new NotFoundException("Operation not found");
-    return adminOperationSummary(job);
+    const presentation = await this.adminRankPresentation([job]);
+    return adminOperationSummary(
+      job,
+      presentation.connections.get(job.id),
+      presentation.workers.get(job.id)
+    );
+  }
+
+  private async adminRankPresentation(jobs: readonly AdminJob[]): Promise<{
+    readonly connections: ReadonlyMap<string, {
+      readonly label: string;
+      readonly displayHint?: string;
+    }>;
+    readonly workers: ReadonlyMap<string, readonly {
+      readonly name: string;
+      readonly activeTasks: number;
+    }[]>;
+  }> {
+    const providerJobs = jobs.filter((job) =>
+      (job.credentialMode === "BYOK_API_KEY" ||
+        job.credentialMode === "PLATFORM_PAID") &&
+      (job.provider === "XMLSTOCK" || job.provider === "ARSENKIN")
+    );
+    const rankJobs = providerJobs.filter((job) => job.type === "MANUAL_RANK_CHECK");
+    const [connections, assignments] = await Promise.all([
+      this.provenance.selectedForJobs(providerJobs.map((job) => ({
+        id: job.id,
+        workspaceId: job.workspaceId,
+        type: job.type,
+        credentialMode: job.credentialMode as "BYOK_API_KEY" | "PLATFORM_PAID",
+        provider: job.provider,
+        ...(typeof record(job.scopeSnapshot)?.credentialId === "string" &&
+          UUID_PATTERN.test(record(job.scopeSnapshot)?.credentialId as string)
+          ? { credentialId: record(job.scopeSnapshot)?.credentialId as string }
+          : {})
+      }))),
+      rankJobs.length === 0 ? Promise.resolve([]) : this.prisma.$queryRaw<readonly {
+        readonly nodeId: string;
+        readonly jobId: string;
+        readonly activeTasks: bigint;
+      }[]>`SELECT "nodeId", "jobId", "activeTasks"
+          FROM public.list_remote_worker_rank_assignments(1000)`
+    ]);
+    const relevantIds = new Set(rankJobs.map((job) => job.id));
+    const nodeIds = [...new Set(assignments.flatMap((item) =>
+      item.nodeId === "main" || !relevantIds.has(item.jobId)
+        ? [] : [item.nodeId]
+    ))];
+    const nodes = nodeIds.length === 0 ? [] : await this.prisma.executionWorkerNode.findMany({
+      where: { id: { in: nodeIds } },
+      select: { id: true, name: true }
+    });
+    const nameById = new Map(nodes.map((node) => [node.id, node.name]));
+    const workersByJob = new Map<string, Map<string, {
+      name: string;
+      activeTasks: number;
+    }>>();
+    for (const assignment of assignments) {
+      if (!relevantIds.has(assignment.jobId)) continue;
+      const name = assignment.nodeId === "main"
+        ? "Основной сервер"
+        : nameById.get(assignment.nodeId) ?? "Удалённый воркер";
+      const byNode = workersByJob.get(assignment.jobId) ?? new Map();
+      const existing = byNode.get(assignment.nodeId);
+      if (existing) existing.activeTasks += Number(assignment.activeTasks);
+      else byNode.set(assignment.nodeId, {
+        name, activeTasks: Number(assignment.activeTasks)
+      });
+      workersByJob.set(assignment.jobId, byNode);
+    }
+    const workers = new Map([...workersByJob].map(([jobId, byNode]) =>
+      [jobId, [...byNode.entries()]
+        .sort(([leftId, left], [rightId, right]) =>
+          (leftId === "main" ? -1 : rightId === "main" ? 1 : 0) ||
+          left.name.localeCompare(right.name, "ru") ||
+          leftId.localeCompare(rightId)
+        )
+        .map(([, value]) => value)] as const
+    ));
+    for (const job of jobs) {
+      if (job.type !== "MANUAL_RANK_CHECK" && job.status === "RUNNING") {
+        workers.set(job.id, [{ name: "Основной сервер", activeTasks: 1 }]);
+      }
+    }
+    return { connections, workers };
   }
 
   public async overview(): Promise<InternalExecutionOverview> {
@@ -324,8 +421,18 @@ function adminAttentionWhere(): Prisma.JobWhereInput {
   };
 }
 
-function adminOperationSummary(job: AdminJob): InternalAdminOperationSummary {
+function adminOperationSummary(
+  job: AdminJob,
+  connection?: { readonly label: string; readonly displayHint?: string },
+  workers?: readonly { readonly name: string; readonly activeTasks: number }[]
+): InternalAdminOperationSummary {
   const errorCode = safeErrorCode(job.errorSummary);
+  const scope = record(job.scopeSnapshot);
+  const searchEngine = scope?.searchEngine === "YANDEX" ||
+    scope?.searchEngine === "GOOGLE" ? scope.searchEngine :
+    (job.type === "FREQUENCY_COLLECTION" || job.type === "KEYWORD_RESEARCH") &&
+      (job.provider === "XMLSTOCK" || job.provider === "ARSENKIN")
+      ? "YANDEX" : undefined;
   return {
     id: job.id,
     workspaceId: job.workspaceId,
@@ -335,6 +442,9 @@ function adminOperationSummary(job: AdminJob): InternalAdminOperationSummary {
     status: job.status as AdminOperationStatus,
     ...(job.stage ? { stage: job.stage } : {}),
     ...(job.provider ? { provider: job.provider } : {}),
+    ...(searchEngine ? { searchEngine } : {}),
+    ...(connection ? { connection } : {}),
+    ...(workers?.length ? { workers } : {}),
     progress: {
       current: job.progressCurrent.toString(),
       ...(job.progressTotal === null

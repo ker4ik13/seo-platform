@@ -3,7 +3,8 @@ import {
   parseXmlStockOperationUsageSummary,
   rankCommandKeywordLimit,
   type InternalRankOperationScope,
-  type InternalRankOperationScopeItem
+  type InternalRankOperationScopeItem,
+  type InternalRankOperationSources
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 
@@ -21,11 +22,19 @@ export function scopedRankOperationScope(
   const input = exact(
     value,
     ["workspaceId", "projectId", "jobId", "items", "page"],
-    ["providerUsage"]
+    ["providerUsage", "sources"]
   );
   const providerUsage = input.providerUsage === undefined
     ? undefined
     : safeProviderUsage(input.providerUsage);
+  const sources = input.sources === undefined
+    ? undefined
+    : scopedRankOperationSources({
+        workspaceId,
+        projectId,
+        jobId,
+        sources: input.sources
+      }, workspaceId, projectId, jobId).sources;
   const page = exact(input.page, ["hasNext"], ["nextCursor"]);
   if (
     input.workspaceId !== workspaceId ||
@@ -82,6 +91,7 @@ export function scopedRankOperationScope(
     projectId,
     jobId,
     ...(providerUsage ? { providerUsage } : {}),
+    ...(sources ? { sources } : {}),
     items,
     page: {
       hasNext: page.hasNext,
@@ -90,6 +100,41 @@ export function scopedRankOperationScope(
         : {})
     }
   };
+}
+
+export function scopedRankOperationSources(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  jobId: string
+): InternalRankOperationSources {
+  const input = exact(value, ["workspaceId", "projectId", "jobId", "sources"]);
+  if (input.workspaceId !== workspaceId || input.projectId !== projectId ||
+    uuid(input.jobId) !== jobId || !Array.isArray(input.sources) ||
+    input.sources.length > 16) invalid();
+  const sources = input.sources.map((value) => {
+    const source = exact(value, ["provider", "label", "requestCount", "selected"],
+      ["displayHint"]);
+    if ((source.provider !== "XMLSTOCK" && source.provider !== "ARSENKIN") ||
+      typeof source.label !== "string" || source.label.length < 1 ||
+      source.label.length > 160 ||
+      (source.displayHint !== undefined &&
+        (typeof source.displayHint !== "string" ||
+          source.displayHint.length < 1 || source.displayHint.length > 100)) ||
+      typeof source.requestCount !== "string" ||
+      !/^(?:0|[1-9][0-9]{0,15})$/u.test(source.requestCount) ||
+      typeof source.selected !== "boolean") invalid();
+    return {
+      provider: source.provider as "XMLSTOCK" | "ARSENKIN",
+      label: source.label,
+      ...(typeof source.displayHint === "string"
+        ? { displayHint: source.displayHint } : {}),
+      requestCount: source.requestCount,
+      selected: source.selected
+    };
+  });
+  if (sources.filter((source) => source.selected).length > 1) invalid();
+  return { workspaceId, projectId, jobId, sources };
 }
 
 function safeProviderUsage(value: unknown) {
