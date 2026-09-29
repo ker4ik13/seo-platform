@@ -202,6 +202,24 @@ test(
         )
       );
 
+      // A second deploy must accept the private diagnostics extension that
+      // the first bootstrap created after database preparation.
+      const repeatedBootstrap = await runProcess(
+        "/bin/sh",
+        [roleProvisionerPath],
+        { ...admin, ...passwords }
+      );
+      assert.equal(
+        repeatedBootstrap.code,
+        0,
+        `repeated role bootstrap failed:\n${repeatedBootstrap.stderr}`
+      );
+      await Promise.all(
+        mappings.map((mapping) =>
+          provisionRuntime(admin, mapping, passwords[mapping.ownerSecret])
+        )
+      );
+
       await assertRoleCatalog(admin);
       await createFutureRuntimeProbes(admin, passwords);
       await assertRuntimeCrudAndBoundaries(admin, passwords);

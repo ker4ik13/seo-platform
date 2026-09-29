@@ -491,7 +491,9 @@ Jobs и не расходуется на уже отправленные стр�
 каждого Job свежие неподанные grants выбираются прежде почти истёкших.
 Targeted claim одного execution ID не выполняет повторный `COUNT(*)`
 активных executions для сортировки: это не меняет выбор и неоправданно
-нагружает PostgreSQL при большом append-only журнале.
+нагружает PostgreSQL при большом append-only журнале. Exact execution
+материализуется по primary key до полного graph join; lock и permission
+fences остаются прежними.
 Неиспользованная авторизация допускается к повтору только спустя минуту после
 expiry. Для выбранного Job dispatcher проверяет граф агрегатами и читает только
 очередной bounded slice через latest-attempt lateral lookup, не материализуя
