@@ -473,7 +473,9 @@ provider-wide advisory lock; terminal Job с ещё действующим execu
 всей append-only истории executions текущего Job на каждом worker lane.
 Poll claim считает живые `FETCHING` leases одной materialized агрегацией на
 проход; коррелированный `COUNT(*)` для каждой из тысяч ожидающих страниц
-запрещён. Пустые poll claims одного connector process объединяются и
+запрещён. XMLStock берёт до 30 ID ожидающих страниц за один выборочный SQL,
+но каждая страница отдельно получает полный атомарный targeted lease перед
+HTTP; ID не является резервом и после сбоя снова доступен. Пустые poll claims одного connector process объединяются и
 повторяются не чаще чем через 500 мс; положительный claim и lease не
 кешируются. Rank grant dispatcher также
 сериализует общий connector budget: для XMLStock 30-секундный grant buffer
@@ -487,10 +489,15 @@ Jobs и не расходуется на уже отправленные стр�
 секунд, а один provider HTTP-запрос ограничен 10 секундами. Системный
 оплачиваемый ключ сохраняет запас на hold/capture. Внутри fairness-очереди
 каждого Job свежие неподанные grants выбираются прежде почти истёкших.
+Targeted claim одного execution ID не выполняет повторный `COUNT(*)`
+активных executions для сортировки: это не меняет выбор и неоправданно
+нагружает PostgreSQL при большом append-only журнале.
 Неиспользованная авторизация допускается к повтору только спустя минуту после
 expiry. Для выбранного Job dispatcher проверяет граф агрегатами и читает только
 очередной bounded slice через latest-attempt lateral lookup, не материализуя
-всю append-only историю executions в памяти worker.
+всю append-only историю executions в памяти worker. Готовые результаты
+закрепляются set-based claim пачкой до 16 с отдельным lease каждой строки;
+XMLStock ingest сохраняет эту пачку в одной Core-транзакции.
 
 ### 3.4. Реализованный read slice истории
 

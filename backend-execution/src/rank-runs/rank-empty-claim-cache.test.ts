@@ -11,8 +11,11 @@ test("concurrent empty poll lanes share one database probe per provider", async 
   const calls = new Map<string, number>();
   const prisma = {
     async $queryRaw(query: { strings: readonly string[]; values: readonly unknown[] }) {
-      assert.match(query.strings.join("?"), /claim_rank_connector_poll/u);
-      const version = String(query.values[2]);
+      const source = query.strings.join("?");
+      assert.match(source, /(?:claim_rank_connector_poll|list_rank_connector_poll_candidates)/u);
+      const version = String(query.values[
+        source.includes("list_rank_connector_poll_candidates") ? 0 : 2
+      ]);
       calls.set(version, (calls.get(version) ?? 0) + 1);
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
       return [];

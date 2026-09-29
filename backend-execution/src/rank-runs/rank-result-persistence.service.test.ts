@@ -145,10 +145,12 @@ test("persists several XMLStock chunks through one bounded transaction request",
       jobItemId: "01900000-0000-7000-8000-00000000000e"
     }
   };
-  const claims = [first, second];
   const completions: Array<{ id: string; persisted: boolean }> = [];
   const broker = {
-    async claim() { return claims.shift(); },
+    async claimBatch(_owner: string, _leaseSeconds: number, maxItems: number) {
+      assert.equal(maxItems, 16);
+      return [first, second];
+    },
     async complete(value: RankResultPersistenceClaim, persisted: boolean) {
       completions.push({ id: value.executionId, persisted });
       return "PERSISTED";

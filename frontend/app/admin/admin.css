@@ -52,6 +52,9 @@ h1, h2, p { margin: 0; }
 .system-state i, .health-dot { background: var(--green); border-radius: 50%; display: inline-block; height: 6px; width: 6px; }
 .system-state.degraded i, .health-dot.degraded { background: var(--amber); }
 .system-state.unavailable i, .health-dot.unavailable { background: var(--red); }
+.operation-refresh-control { align-items: center; display: flex; gap: 8px; }
+.operation-refresh-control select { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 11px; padding: 7px 9px; }
+.operation-refresh-control select:focus { border-color: var(--brand); outline: 2px solid rgba(136, 119, 255, .12); }
 .topbar-actions { align-items: center; display: flex; gap: 8px; }
 .ghost { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: #c4c9d2; font-size: 11px; padding: 7px 10px; }
 .content { margin: 0 auto; max-width: 1440px; padding: 34px clamp(22px, 3vw, 44px) 60px; }

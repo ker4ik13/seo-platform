@@ -1,4 +1,4 @@
-import { rankCommandKeywordLimit } from "@seo-platform/contracts";
+import { rankCommandKeywordLimit, rankResultBatchMaxItems } from "@seo-platform/contracts";
 import { timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import type { RankManifestHash } from "@seo-platform/contracts";
@@ -48,14 +48,7 @@ export class RankResultPersistenceBrokerService {
     leaseOwner: string,
     leaseSeconds: number
   ): Promise<RankResultPersistenceClaim | undefined> {
-    if (
-      !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,99}$/u.test(leaseOwner) ||
-      !Number.isSafeInteger(leaseSeconds) ||
-      leaseSeconds < 10 ||
-      leaseSeconds > 300
-    ) {
-      throw new TypeError("Invalid rank result persistence claim");
-    }
+    validateClaimInput(leaseOwner, leaseSeconds);
     const rows = await this.prisma.$queryRaw<
       readonly PersistenceClaimRow[]
     >(
@@ -69,7 +62,36 @@ export class RankResultPersistenceBrokerService {
     );
     if (rows.length === 0) return undefined;
     if (rows.length !== 1 || !rows[0]) invalid("claim cardinality");
-    const row = rows[0];
+    return this.parseClaim(rows[0], leaseOwner);
+  }
+
+  public async claimBatch(
+    leaseOwner: string,
+    leaseSeconds: number,
+    maxItems: number
+  ): Promise<readonly RankResultPersistenceClaim[]> {
+    validateClaimInput(leaseOwner, leaseSeconds);
+    if (!Number.isSafeInteger(maxItems) || maxItems < 1 ||
+      maxItems > rankResultBatchMaxItems) {
+      throw new TypeError("Invalid rank result persistence batch size");
+    }
+    const rows = await this.prisma.$queryRaw<readonly PersistenceClaimRow[]>(
+      Prisma.sql`
+        SELECT * FROM public.claim_rank_staged_results(
+          ${leaseOwner}::text,
+          ${leaseSeconds}::integer,
+          ${maxItems}::integer
+        )
+      `
+    );
+    if (rows.length > maxItems) invalid("batch claim cardinality");
+    return rows.map((row) => this.parseClaim(row, leaseOwner));
+  }
+
+  private parseClaim(
+    row: PersistenceClaimRow,
+    leaseOwner: string
+  ): RankResultPersistenceClaim {
     const request = rankProviderRequestIntent(row.requestSnapshot);
     const staged = request.provider === "XMLSTOCK"
       ? xmlStockStagedRankResult(row.normalizedResultSnapshot)
@@ -151,6 +173,16 @@ export class RankResultPersistenceBrokerService {
       invalid("completion");
     }
     return row.status as "STAGED" | "PERSISTED";
+  }
+}
+
+function validateClaimInput(leaseOwner: string, leaseSeconds: number): void {
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,99}$/u.test(leaseOwner) ||
+    !Number.isSafeInteger(leaseSeconds) ||
+    leaseSeconds < 10 || leaseSeconds > 300
+  ) {
+    throw new TypeError("Invalid rank result persistence claim");
   }
 }
 

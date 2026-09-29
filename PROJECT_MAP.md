@@ -23,6 +23,10 @@ one-shot migration/permission/preflight containers — deploy steps. Они не
 включённом inspection profile и четырнадцать one-shot containers. Все
 persistent local data используют named volumes; repository configs запекаются
 в infrastructure image stages и не зависят от transient Dokploy checkout.
+PostgreSQL preload-ит `pg_stat_statements` с учётом вложенных SQL-функций;
+one-shot database roles создаёт extension в закрытой схеме
+`jobs_db.diagnostics` для измерения нагрузки без выдачи runtime-ролям
+доступа к текстам запросов.
 
 ```text
 browser ──> frontend ──> backend-core ──> backend-execution
@@ -338,7 +342,8 @@ integer без продуктовой границы `1999`. Правый кли
 истины, а браузер по изменению safe progress-проекции перечитывает уже
 загруженные строки таблицы без full-page reload. Нормализованные rank-results
 выбираются для persistence справедливо сначала между workspace, затем между
-Job; короткий PostgreSQL claim учитывает уже активные lease, а отдельный
+Job; один set-based PostgreSQL claim закрепляет до 16 результатов выбранного
+Job с отдельными lease и учитывает уже активные claims, а отдельный
 bounded dispatcher запускает свободные persistence lanes раз в секунду,
 поэтому большой старый съём не блокирует прогресс нового. XMLStock результаты
 одного manifest сохраняются в Core пачками до 16 chunks в одной транзакции
@@ -1584,12 +1589,17 @@ credential, route, grant и lease graph; ключи и долгие резерв
 Локальные claims одного Job сериализуются, чтобы не конкурировать за lock
 его родительской строки. Stale ID просто пропускается, после падения процесса
 остальные ID доступны другим worker-ам.
+Targeted claim не пересчитывает активные executions для сортировки одного
+точного ID: этот подсчёт принадлежит только пакетному поиску кандидатов.
 Для BYOK XMLStock кандидат и targeted claim используют 17-секундный submit
 lease внутри 30-секундного grant: он покрывает один 10-секундный HTTP-запрос с
 запасом, но оставляет реальное время для получения claim. Платный системный
 ключ сохраняет прежний lease с запасом на hold/capture. Внутри справедливой
 очереди каждого Job submit-кандидаты выбираются от свежих grants к старым,
 чтобы не выдавать коннектору уже почти истёкшую авторизацию.
+XMLStock poll аналогично выбирает до 30 ID страниц на несколько секунд и для
+каждой страницы отдельно получает атомарный targeted lease. Достигшие
+границы 50 попыток завершаются без нового платного запроса.
 Rank grant dispatcher под общим advisory lock ограничивает XMLStock grant
 buffer одним коротким окном connector lanes (64 в production), а не прежними
 960 разрешениями за 15 секунд: 30-секундная авторизация должна успеть дойти до
@@ -2532,6 +2542,9 @@ Scope выбранных строк передаёт полный authoritative 
 таблицы; server-side фильтры применяются уже к этому полному набору.
 Состояние и row progress
 остаются PostgreSQL-owned; истёкший lease восстанавливается dispatcher-ом.
+Отмена сразу переводит экспорт в `CANCELLED` и запрещает активному worker
+публиковать артефакт; старые `CANCEL_REQUESTED` dispatcher завершает без
+повторной генерации файла.
 Диалог экспорта использует широкий modal: длинные системные и Key Collector
 поля расположены в двухколоночных строках, не перекрывают соседние checkbox и
 прокручиваются внутри bounded списка при закреплённом действии экспорта.
@@ -2690,6 +2703,8 @@ Admin BFF отдельно allowlist-ит collection route `projects`, collectio
 Execution endpoint отдаёт не более 100 Jobs на страницу по immutable cursor,
 а totals разделяет на active, completed и attention. Эти экраны являются
 read-only и не обходят существующие service/database ownership boundaries.
+Экран операций позволяет выбирать автообновление каждые 3, 5, 10 или 15
+секунд; ответ прежнего запроса не перезаписывает более свежий список.
 Admin URL хранит `screen`; журнал дополнительно хранит `status`, `type` и
 `operation`. Поэтому reload/deep link восстанавливает тот же фильтр и drawer,
 даже если операция находится не на первой странице. Read-only GET/HEAD

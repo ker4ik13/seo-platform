@@ -140,6 +140,7 @@ async function bootstrap(): Promise<void> {
     if (dispatching) return;
     dispatching = true;
     try {
+      await semanticExports.reconcileCancellations();
       const [importIds, validations, publications, researchRunIds, exportIds] = await Promise.all([
         parser.pendingImportIds(),
         validator.pendingImports(),

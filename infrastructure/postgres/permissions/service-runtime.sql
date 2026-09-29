@@ -157,11 +157,36 @@ BEGIN
       'pg_catalog',
       'information_schema'
     )
+      AND NOT (
+        current_database() = 'jobs_db'
+        AND namespace.nspname = 'diagnostics'
+      )
       AND namespace.nspname NOT LIKE 'pg_toast%'
       AND namespace.nspname NOT LIKE 'pg_temp_%'
   ) THEN
     RAISE EXCEPTION
       'service database contains an unexpected non-system schema';
+  END IF;
+
+  IF current_database() = 'jobs_db' AND EXISTS (
+    SELECT 1 FROM pg_namespace WHERE nspname = 'diagnostics'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_extension extension_record
+      JOIN pg_namespace namespace
+        ON namespace.oid = extension_record.extnamespace
+      WHERE extension_record.extname = 'pg_stat_statements'
+        AND namespace.nspname = 'diagnostics'
+    ) OR has_schema_privilege('jobs_runtime', 'diagnostics', 'USAGE')
+      OR has_schema_privilege('jobs_rank_runtime', 'diagnostics', 'USAGE')
+      OR COALESCE(
+        has_schema_privilege(to_regrole('jobs_connector'), 'diagnostics', 'USAGE'),
+        false
+      )
+    THEN
+      RAISE EXCEPTION 'query diagnostics schema is not isolated';
+    END IF;
   END IF;
 
   IF pg_get_userbyid((
@@ -643,6 +668,7 @@ FROM unnest(ARRAY[
   'public.rank_execution_grant_request_is_exact(jsonb,uuid,uuid,uuid,uuid,integer,integer,bytea)',
   'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)',
   'public.claim_rank_staged_result(text,integer)',
+  'public.claim_rank_staged_results(text,integer,integer)',
   'public.complete_rank_staged_result(uuid,uuid,text,uuid,integer,integer,boolean)'
 ]) AS rank_required_routine(routine_signature)
 WHERE current_database() = 'jobs_db'

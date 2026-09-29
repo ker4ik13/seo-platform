@@ -40,14 +40,68 @@ const SUBMIT_CANDIDATE_EXCLUSION_MS = 2_000;
 const SUBMIT_CANDIDATE_MAX_ATTEMPTS = 4;
 const EMPTY_CLAIM_RECHECK_MS = 500;
 
-interface SubmitCandidateRow {
+interface RankCandidateRow {
   readonly executionId: string;
   readonly jobId: string;
 }
 
-interface SubmitCandidate {
+interface RankCandidate {
   readonly executionId: string;
   readonly jobId: string;
+}
+
+/** Short-lived ID hints only; PostgreSQL still owns every fenced lease. */
+class RankCandidateWindow {
+  private candidates: RankCandidate[] = [];
+  private fetchedAt = 0;
+  private refill: Promise<void> | undefined;
+  private emptyUntil = 0;
+  private readonly recent: Array<{ readonly id: string; readonly at: number }> = [];
+
+  public async next(
+    load: (excluded: readonly string[]) => Promise<readonly RankCandidate[]>
+  ): Promise<RankCandidate | undefined> {
+    if (Date.now() - this.fetchedAt > SUBMIT_CANDIDATE_TTL_MS) {
+      this.candidates = [];
+    }
+    if (this.candidates.length === 0) {
+      if (Date.now() < this.emptyUntil) return undefined;
+      if (!this.refill) {
+        this.refill = this.reload(load).finally(() => {
+          this.refill = undefined;
+        });
+      }
+      await this.refill;
+    }
+    const candidate = this.candidates.shift();
+    if (candidate) this.recent.push({ id: candidate.executionId, at: Date.now() });
+    return candidate;
+  }
+
+  private async reload(
+    load: (excluded: readonly string[]) => Promise<readonly RankCandidate[]>
+  ): Promise<void> {
+    const now = Date.now();
+    while (
+      this.recent.length > 0 &&
+      now - this.recent[0]!.at > SUBMIT_CANDIDATE_EXCLUSION_MS
+    ) this.recent.shift();
+    const candidates = await load(this.recent.slice(-120).map(({ id }) => id));
+    if (candidates.length > SUBMIT_CANDIDATE_BATCH_SIZE) {
+      invalid("connector candidate batch cardinality");
+    }
+    this.candidates = [...candidates];
+    this.fetchedAt = Date.now();
+    if (candidates.length === 0) {
+      this.emptyUntil = Date.now() + SUBMIT_CANDIDATE_RETRY_MS;
+    }
+  }
+}
+
+function excludedCandidateIds(excluded: readonly string[]): Prisma.Sql {
+  return excluded.length > 0
+    ? Prisma.sql`ARRAY[${Prisma.join(excluded.map((id) => Prisma.sql`${id}::uuid`))}]::uuid[]`
+    : Prisma.sql`ARRAY[]::uuid[]`;
 }
 
 export interface RankConnectorClaim {
@@ -94,14 +148,8 @@ export interface RankConnectorCompletion {
 
 @Injectable()
 export class RankConnectorRuntimeBrokerService {
-  private submitCandidates: SubmitCandidate[] = [];
-  private submitCandidatesFetchedAt = 0;
-  private submitCandidateRefill: Promise<void> | undefined;
-  private submitCandidateEmptyUntil = 0;
-  private readonly recentlyAttemptedCandidates: Array<{
-    readonly id: string;
-    readonly at: number;
-  }> = [];
+  private readonly submitCandidates = new RankCandidateWindow();
+  private readonly pollCandidates = new RankCandidateWindow();
   private readonly submitJobClaims = new Map<string, Promise<void>>();
   private readonly emptyClaimUntil = new Map<string, number>();
   private readonly claimProbes = new Map<string, Promise<boolean>>();
@@ -182,9 +230,10 @@ export class RankConnectorRuntimeBrokerService {
     connectorVersion: string
   ): Promise<RankConnectorSubmitClaim | undefined> {
     for (let attempt = 0; attempt < SUBMIT_CANDIDATE_MAX_ATTEMPTS; attempt++) {
-      const candidate = await this.nextSubmitCandidate(
-        connectorVersion,
-        leaseSeconds
+      const candidate = await this.submitCandidates.next(
+        (excluded) => this.loadSubmitCandidates(
+          connectorVersion, leaseSeconds, excluded
+        )
       );
       if (!candidate) return undefined;
 
@@ -208,74 +257,25 @@ export class RankConnectorRuntimeBrokerService {
     return undefined;
   }
 
-  private async nextSubmitCandidate(
+  private async loadSubmitCandidates(
     connectorVersion: string,
-    leaseSeconds: number
-  ): Promise<SubmitCandidate | undefined> {
-    if (Date.now() - this.submitCandidatesFetchedAt > SUBMIT_CANDIDATE_TTL_MS) {
-      this.submitCandidates = [];
-    }
-    if (this.submitCandidates.length === 0) {
-      if (Date.now() < this.submitCandidateEmptyUntil) return undefined;
-      if (!this.submitCandidateRefill) {
-        this.submitCandidateRefill = this.refillSubmitCandidates(
-          connectorVersion,
-          leaseSeconds
-        ).finally(() => {
-          this.submitCandidateRefill = undefined;
-        });
-      }
-      await this.submitCandidateRefill;
-    }
-    const candidate = this.submitCandidates.shift();
-    if (candidate) {
-      this.recentlyAttemptedCandidates.push({
-        id: candidate.executionId,
-        at: Date.now()
-      });
-    }
-    return candidate;
-  }
-
-  private async refillSubmitCandidates(
-    connectorVersion: string,
-    leaseSeconds: number
-  ): Promise<void> {
-    const now = Date.now();
-    while (
-      this.recentlyAttemptedCandidates.length > 0 &&
-      now - this.recentlyAttemptedCandidates[0]!.at >
-        SUBMIT_CANDIDATE_EXCLUSION_MS
-    ) {
-      this.recentlyAttemptedCandidates.shift();
-    }
-    const excluded = this.recentlyAttemptedCandidates
-      .slice(-120)
-      .map((candidate) => candidate.id);
-    const excludedSql = excluded.length > 0
-      ? Prisma.sql`ARRAY[${Prisma.join(excluded.map((id) => Prisma.sql`${id}::uuid`))}]::uuid[]`
-      : Prisma.sql`ARRAY[]::uuid[]`;
-    const rows = await this.prisma.$queryRaw<readonly SubmitCandidateRow[]>(
+    leaseSeconds: number,
+    excluded: readonly string[]
+  ): Promise<readonly RankCandidate[]> {
+    const rows = await this.prisma.$queryRaw<readonly RankCandidateRow[]>(
       Prisma.sql`
         SELECT * FROM public.list_rank_connector_submit_candidates(
           ${connectorVersion}::text,
           ${leaseSeconds}::integer,
           ${SUBMIT_CANDIDATE_BATCH_SIZE}::integer,
-          ${excludedSql}
+          ${excludedCandidateIds(excluded)}
         )
       `
     );
-    if (rows.length > SUBMIT_CANDIDATE_BATCH_SIZE) {
-      invalid("submit candidate batch cardinality");
-    }
-    this.submitCandidates = rows.map((row) => ({
+    return rows.map((row) => ({
       executionId: uuid(row.executionId, "submit candidate id"),
       jobId: uuid(row.jobId, "submit candidate job id")
     }));
-    this.submitCandidatesFetchedAt = Date.now();
-    if (rows.length === 0) {
-      this.submitCandidateEmptyUntil = Date.now() + SUBMIT_CANDIDATE_RETRY_MS;
-    }
   }
 
   private async withSubmitJobClaim<T>(
@@ -452,6 +452,27 @@ export class RankConnectorRuntimeBrokerService {
     connectorVersion: string
   ): Promise<RankConnectorPollClaim | undefined> {
     validateClaimInput(leaseOwner, leaseSeconds, connectorVersion);
+    if (connectorVersion === XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION) {
+      for (let attempt = 0; attempt < SUBMIT_CANDIDATE_MAX_ATTEMPTS; attempt++) {
+        const candidate = await this.pollCandidates.next(
+          (excluded) => this.loadPollCandidates(connectorVersion, excluded)
+        );
+        if (!candidate) return undefined;
+        const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(
+          Prisma.sql`
+            SELECT * FROM public.claim_rank_connector_poll_targeted(
+              ${leaseOwner}::text,
+              ${leaseSeconds}::integer,
+              ${connectorVersion}::text,
+              ${candidate.executionId}::uuid
+            )
+          `
+        );
+        if (rows.length > 1) invalid("targeted poll claim cardinality");
+        if (rows[0]) return this.pollClaim(rows[0], leaseOwner);
+      }
+      return undefined;
+    }
     return this.claimWhenDue(`poll:${connectorVersion}`, async () => {
       const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(
         Prisma.sql`
@@ -465,30 +486,52 @@ export class RankConnectorRuntimeBrokerService {
       );
       if (rows.length === 0) return undefined;
       if (rows.length !== 1 || !rows[0]) invalid("poll claim cardinality");
-      const row = rows[0];
-      const provider = rankProvider(row.provider);
-      let providerProgress: XmlStockRankPageProgress | undefined;
-      let providerProgressInvalid = false;
-      try {
-        providerProgress = storedProviderProgress(
-          provider,
-          row.providerProgressSnapshot,
-          row.providerProgressHash
-        );
-      } catch (error) {
-        if (provider !== "XMLSTOCK" || !(error instanceof TypeError)) {
-          throw error;
-        }
-        providerProgressInvalid = true;
-      }
-      return {
-        ...claim(row, leaseOwner),
-        providerTaskId: taskId(row.providerTaskId),
-        request: rankProviderRequestIntent(row.requestSnapshot),
-        ...(providerProgress ? { providerProgress } : {}),
-        ...(providerProgressInvalid ? { providerProgressInvalid: true } : {})
-      };
+      return this.pollClaim(rows[0], leaseOwner);
     });
+  }
+
+  private async loadPollCandidates(
+    connectorVersion: string,
+    excluded: readonly string[]
+  ): Promise<readonly RankCandidate[]> {
+    const rows = await this.prisma.$queryRaw<readonly RankCandidateRow[]>(
+      Prisma.sql`
+        SELECT * FROM public.list_rank_connector_poll_candidates(
+          ${connectorVersion}::text,
+          ${SUBMIT_CANDIDATE_BATCH_SIZE}::integer,
+          ${excludedCandidateIds(excluded)}
+        )
+      `
+    );
+    return rows.map((row) => ({
+      executionId: uuid(row.executionId, "poll candidate id"),
+      jobId: uuid(row.jobId, "poll candidate job id")
+    }));
+  }
+
+  private pollClaim(row: PollClaimRow, leaseOwner: string): RankConnectorPollClaim {
+    const provider = rankProvider(row.provider);
+    let providerProgress: XmlStockRankPageProgress | undefined;
+    let providerProgressInvalid = false;
+    try {
+      providerProgress = storedProviderProgress(
+        provider,
+        row.providerProgressSnapshot,
+        row.providerProgressHash
+      );
+    } catch (error) {
+      if (provider !== "XMLSTOCK" || !(error instanceof TypeError)) {
+        throw error;
+      }
+      providerProgressInvalid = true;
+    }
+    return {
+      ...claim(row, leaseOwner),
+      providerTaskId: taskId(row.providerTaskId),
+      request: rankProviderRequestIntent(row.requestSnapshot),
+      ...(providerProgress ? { providerProgress } : {}),
+      ...(providerProgressInvalid ? { providerProgressInvalid: true } : {})
+    };
   }
 
   public deferPollForProviderCapacity(

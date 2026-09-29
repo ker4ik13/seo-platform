@@ -131,6 +131,15 @@ prepare_database seo_db seo_owner
 prepare_database jobs_db jobs_owner
 prepare_database realtime_db realtime_owner
 
+# Nested broker statements are the expensive part of rank/frequency work.
+# Keep diagnostics in a schema unavailable to runtime roles; the extension
+# collects all databases on this PostgreSQL instance after shared preload.
+PGDATABASE=jobs_db psql --no-psqlrc --set=ON_ERROR_STOP=1 <<'SQL'
+CREATE SCHEMA IF NOT EXISTS diagnostics;
+REVOKE ALL ON SCHEMA diagnostics FROM PUBLIC;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA diagnostics;
+SQL
+
 set_role_password() {
   role_name=$1
   role_password=$2

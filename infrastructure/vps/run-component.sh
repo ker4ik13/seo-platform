@@ -32,6 +32,9 @@ case "$component" in
       -c password_encryption=scram-sha-256 \
       -c timezone=UTC \
       -c max_connections="${POSTGRES_MAX_CONNECTIONS:-250}" \
+      -c shared_preload_libraries=pg_stat_statements \
+      -c pg_stat_statements.track=all \
+      -c pg_stat_statements.max=5000 \
       -c log_timezone=UTC \
       -c log_statement=none \
       -c log_min_error_statement=panic \

@@ -74,6 +74,9 @@ export class SemanticExportWorkerService {
     exportId: string,
     leaseOwner: string
   ): Promise<SemanticExportWorkerResult> {
+    if (await this.completePendingCancellation(exportId)) {
+      return { exportId, outcome: "CANCELLED" };
+    }
     const claimed = await this.claim(exportId, leaseOwner);
     if (!claimed) return { exportId, outcome: "SKIPPED" };
 
@@ -228,6 +231,7 @@ export class SemanticExportWorkerService {
       where: {
         type: "SEMANTIC_EXPORT",
         OR: [
+          { status: "CANCEL_REQUESTED" },
           { status: "QUEUED" },
           { status: "RETRY_SCHEDULED", retryAt: { lte: now } },
           { status: "FAILED_RETRYABLE", retryAt: { lte: now } },
@@ -242,6 +246,27 @@ export class SemanticExportWorkerService {
       take: MAX_PENDING_EXPORTS
     });
     return jobs.map(({ id }) => id);
+  }
+
+  /** Clears legacy cancellations even when the old BullMQ job is still active. */
+  public async reconcileCancellations(): Promise<number> {
+    const result = await this.prisma.job.updateMany({
+      where: { type: "SEMANTIC_EXPORT", status: "CANCEL_REQUESTED" },
+      data: cancelledExportData()
+    });
+    return result.count;
+  }
+
+  private async completePendingCancellation(exportId: string): Promise<boolean> {
+    const cancelled = await this.prisma.job.updateMany({
+      where: {
+        id: exportId,
+        type: "SEMANTIC_EXPORT",
+        status: "CANCEL_REQUESTED"
+      },
+      data: cancelledExportData()
+    });
+    return cancelled.count === 1;
   }
 
   private async claim(exportId: string, leaseOwner: string): Promise<Job | undefined> {
@@ -754,6 +779,18 @@ async function* counted<Row>(
     counter.value += 1;
     yield row;
   }
+}
+
+function cancelledExportData(): Prisma.JobUpdateManyMutationInput {
+  return {
+    status: "CANCELLED",
+    stage: "cancelled",
+    finishedAt: new Date(),
+    retryAt: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    version: { increment: 1 }
+  };
 }
 
 function claimable(job: Job, now: Date): boolean {

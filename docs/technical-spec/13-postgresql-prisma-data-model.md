@@ -34,12 +34,17 @@ First-match HBA разрешает каждой family только точную
 
 ## 3. PostgreSQL extensions
 
+Включено:
+
+- `pg_stat_statements` — для всех баз через PostgreSQL preload;
+  extension доступен для чтения из закрытой схемы `jobs_db.diagnostics`,
+  включая вложенные broker-запросы.
+
 Планируемые:
 
 - `pg_trgm`;
 - `citext` при подтверждённой необходимости;
 - `btree_gin`/`btree_gist` по результатам query design;
-- `pg_stat_statements`;
 - UUIDv7 используется встроенной функцией PostgreSQL 18.
 
 Любое расширение включается migration и должно быть доступно в выбранном deployment.

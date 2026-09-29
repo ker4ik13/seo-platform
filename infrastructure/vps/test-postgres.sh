@@ -28,7 +28,7 @@ cleanup_test_cluster() {
 trap cleanup_test_cluster EXIT
 printf 'postgres-tests artifacts=%s port=%s\n' "$test_root" "$test_port"
 "$pg_bin/initdb" -D "$test_root/data" --username=postgres --pwfile="$test_root/password" --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8 --no-locale > "$test_root/init.log"
-"$pg_bin/pg_ctl" -D "$test_root/data" -l "$test_root/server.log" -o "-h 127.0.0.1 -p $test_port -k $test_root/socket -c timezone=UTC -c log_timezone=UTC -c log_min_error_statement=panic -c log_error_verbosity=terse -c log_parameter_max_length_on_error=0" --wait start > /dev/null
+"$pg_bin/pg_ctl" -D "$test_root/data" -l "$test_root/server.log" -o "-h 127.0.0.1 -p $test_port -k $test_root/socket -c timezone=UTC -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all -c log_timezone=UTC -c log_min_error_statement=panic -c log_error_verbosity=terse -c log_parameter_max_length_on_error=0" --wait start > /dev/null
 cd "$project_root"
 SERVICE_DATABASE_ROLE_TEST_ADMIN_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:$test_port/postgres" SERVICE_DATABASE_ROLE_TEST_PSQL="$pg_bin/psql" node --test infrastructure/tests/service-database-role-isolation-postgres.test.mjs > "$test_root/postgres-isolation.log" 2>&1
 export PGHOST=127.0.0.1 PGPORT="$test_port" PGUSER=postgres PGDATABASE=postgres

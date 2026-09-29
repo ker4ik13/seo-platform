@@ -56,12 +56,11 @@ export class RankResultPersistenceService {
   }
 
   public async processBatch(leaseOwner: string): Promise<number> {
-    const claims: RankResultPersistenceClaim[] = [];
-    for (let index = 0; index < rankResultBatchMaxItems; index += 1) {
-      const claim = await this.broker.claim(leaseOwner, this.batchLeaseSeconds());
-      if (!claim) break;
-      claims.push(claim);
-    }
+    const claims = await this.broker.claimBatch(
+      leaseOwner,
+      this.batchLeaseSeconds(),
+      rankResultBatchMaxItems
+    );
     const groups = new Map<string, RankResultPersistenceClaim[]>();
     for (const claim of claims) {
       const key = claim.request.provider === "XMLSTOCK"

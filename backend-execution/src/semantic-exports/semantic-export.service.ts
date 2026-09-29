@@ -32,6 +32,7 @@ const CREATE_SCOPE_PREFIX = "semantic-export:create";
 const CANCELLABLE = new Set([
   "QUEUED",
   "RUNNING",
+  "CANCEL_REQUESTED",
   "RETRY_SCHEDULED",
   "FAILED_RETRYABLE"
 ]);
@@ -136,23 +137,17 @@ export class SemanticExportService {
   ): Promise<SemanticExportJobSummary> {
     const current = await this.required(input.workspaceId, input.projectId, exportId);
     if (current.version !== input.version) versionConflict();
-    if (current.status === "CANCEL_REQUESTED") return semanticExportSummary(current);
     if (!CANCELLABLE.has(current.status)) return semanticExportSummary(current);
-    const immediately = current.status !== "RUNNING";
     const updated = await this.prisma.job.updateMany({
       where: { id: exportId, status: current.status, version: current.version },
       data: {
-        status: immediately ? "CANCELLED" : "CANCEL_REQUESTED",
+        status: "CANCELLED",
         cancelRequestedAt: current.cancelRequestedAt ?? new Date(),
-        ...(immediately
-          ? {
-              stage: "cancelled",
-              finishedAt: new Date(),
-              retryAt: null,
-              leaseOwner: null,
-              leaseExpiresAt: null
-            }
-          : { stage: "cancelling" }),
+        stage: "cancelled",
+        finishedAt: new Date(),
+        retryAt: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
         version: { increment: 1 }
       }
     });

@@ -18,6 +18,67 @@ import type {
 import { semanticExportResult } from "./semantic-export-record.js";
 import { SemanticExportWorkerService } from "./semantic-export-worker.service.js";
 
+test("recovers an abandoned cancellation without resuming export I/O", async () => {
+  let stored = {
+    ...queuedJob(),
+    status: "CANCEL_REQUESTED",
+    stage: "cancelling",
+    leaseOwner: "previous-worker",
+    leaseExpiresAt: new Date("2026-08-12T10:10:00.000Z"),
+    progressCurrent: 3723n,
+    progressTotal: 5854n
+  } as Job;
+  const prisma = memoryPrisma(() => stored, (next) => { stored = next; });
+  const worker = new SemanticExportWorkerService(
+    prisma,
+    {} as SeoDataClient,
+    { isEnabled: () => { assert.fail("Cancelled export must not read storage"); } } as unknown as ObjectStoragePort
+  );
+
+  assert.deepEqual(await worker.process(stored.id, worker.workerId()), {
+    exportId: stored.id,
+    outcome: "CANCELLED"
+  });
+  assert.equal(stored.status, "CANCELLED");
+  assert.equal(stored.progressCurrent, 3723n);
+  assert.equal(stored.leaseOwner, null);
+});
+
+test("dispatches cancelled exports for durable terminal recovery", async () => {
+  let pendingFilter: unknown;
+  const worker = new SemanticExportWorkerService(
+    { job: { findMany: async ({ where }: { where: unknown }) => {
+      pendingFilter = where;
+      return [];
+    } } } as unknown as PrismaService,
+    {} as SeoDataClient,
+    {} as ObjectStoragePort
+  );
+  assert.deepEqual(await worker.pendingIds(), []);
+  assert.deepEqual(
+    (pendingFilter as { OR: readonly { status: string }[] }).OR[0],
+    { status: "CANCEL_REQUESTED" }
+  );
+});
+
+test("reconciles cancellation even while an old queue lease remains active", async () => {
+  let stored = {
+    ...queuedJob(),
+    status: "CANCEL_REQUESTED",
+    stage: "cancelling",
+    leaseOwner: "stuck-worker",
+    leaseExpiresAt: new Date(Date.now() + 600_000)
+  } as Job;
+  const worker = new SemanticExportWorkerService(
+    memoryPrisma(() => stored, (next) => { stored = next; }),
+    {} as SeoDataClient,
+    {} as ObjectStoragePort
+  );
+  assert.equal(await worker.reconcileCancellations(), 1);
+  assert.equal(stored.status, "CANCELLED");
+  assert.equal(stored.leaseOwner, null);
+});
+
 test("background worker exports all 2,002 rows and commits one artifact", async () => {
   let stored = queuedJob();
   const prisma = memoryPrisma(

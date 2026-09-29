@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
   AdminOperationSearchResult,
@@ -10,6 +10,7 @@ import type {
 import { adminApi } from "../../lib/admin-browser-api";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
+const REFRESH_INTERVALS = [3, 5, 10, 15] as const;
 
 export function OperationAdministration() {
   const uiLocale = useUiLocale().locale;
@@ -25,7 +26,9 @@ export function OperationAdministration() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedLoading, setSelectedLoading] = useState(false);
+  const [refreshSeconds, setRefreshSeconds] = useState<number>(15);
   const [error, setError] = useState<string>();
+  const latestBaseRequest = useRef<AbortController | null>(null);
   const selectedOperationId = adminOperationId(searchParams.get("operation"));
 
   const updateUrl = useCallback((changes: Readonly<{
@@ -58,6 +61,11 @@ export function OperationAdministration() {
   }, [searchParams]);
 
   const load = useCallback(async (cursor?: string, silent = false) => {
+    const controller = cursor ? undefined : new AbortController();
+    if (controller) {
+      latestBaseRequest.current?.abort();
+      latestBaseRequest.current = controller;
+    }
     if (!silent) {
       if (cursor) setLoadingMore(true);
       else setLoading(true);
@@ -67,8 +75,10 @@ export function OperationAdministration() {
     if (type) params.set("type", type);
     if (cursor) params.set("cursor", cursor);
     const response = await adminApi<AdminOperationSearchResult>(
-      `/api/operations?${params.toString()}`
+      `/api/operations?${params.toString()}`,
+      controller ? { signal: controller.signal } : undefined
     );
+    if (controller?.signal.aborted) return;
     setLoading(false);
     setLoadingMore(false);
     if (!response.ok) {
@@ -87,6 +97,7 @@ export function OperationAdministration() {
   }, [selectedOperationId, status, type]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => () => latestBaseRequest.current?.abort(), []);
   useEffect(() => {
     if (!selectedOperationId || selected?.id === selectedOperationId) return;
     const controller = new AbortController();
@@ -104,17 +115,31 @@ export function OperationAdministration() {
     return () => controller.abort();
   }, [selected?.id, selectedOperationId]);
   useEffect(() => {
-    if (status === "COMPLETED" || status === "ATTENTION") return;
-    const timer = window.setInterval(() => void load(undefined, true), 15_000);
+    const timer = window.setInterval(
+      () => void load(undefined, true),
+      refreshSeconds * 1_000
+    );
     return () => window.clearInterval(timer);
-  }, [load, status]);
+  }, [load, refreshSeconds]);
 
   const visibleTypes = useMemo(() => result?.types ?? [], [result]);
   return (
     <div className="content operation-admin">
       <section className="heading">
         <div><p>Execution control plane</p><h1><UiText text="Операции" /></h1></div>
-        <span className="system-state"><i /> <UiText text="Обновление каждые 15 секунд" before=" " /></span>
+        <label className="operation-refresh-control">
+          <span className="system-state"><i /> <UiText text="Автообновление" before=" " /></span>
+          <select aria-label={uiText("Интервал обновления")} onChange={(event) => {
+            const seconds = Number(event.target.value);
+            if (REFRESH_INTERVALS.some((value) => value === seconds)) {
+              setRefreshSeconds(seconds);
+            }
+          }} value={refreshSeconds}>
+            {REFRESH_INTERVALS.map((seconds) => (
+              <option key={seconds} value={seconds}>{seconds} <UiText text="сек." /></option>
+            ))}
+          </select>
+        </label>
       </section>
       <section className="metric-grid workspace-metrics">
         <Metric label={uiText("Всего")} value={result?.totals.total} tone="neutral" />
