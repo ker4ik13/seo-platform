@@ -1943,10 +1943,9 @@ export function RankRuntimeDiagnosticsModal({
     };
   }, [active, load]);
 
-  const activeLanes = snapshot?.entries
+  const activeRows = snapshot?.entries
     .filter((entry) => entry.active)
-    .map(({ lane }) => lane)
-    .filter((lane, index, values) => values.indexOf(lane) === index)
+    .map(({ sequence }) => sequence + 1)
     .sort((left, right) => left - right) ?? [];
 
   return (
@@ -1977,7 +1976,7 @@ export function RankRuntimeDiagnosticsModal({
               <small>{snapshot ? uiText(rankRuntimeProductLabel(snapshot.policy.product)) : <UiText text="Подключаем монитор…" />}</small>
             </div>
           </div>
-          <RuntimeMetric label={uiText("Активных потоков")} value={snapshot?.totals.active ?? 0} />
+          <RuntimeMetric label={uiText("Заданий в обработке")} value={snapshot?.totals.active ?? 0} />
           <RuntimeMetric label={uiText("Ожидают провайдера")} value={snapshot?.totals.waitingProvider ?? 0} />
           <RuntimeMetric label={uiText("Завершено")} value={snapshot?.totals.completed ?? 0} />
           <RuntimeMetric label={uiText("Ошибок")} value={snapshot?.totals.failed ?? 0} tone="error" />
@@ -1994,16 +1993,13 @@ export function RankRuntimeDiagnosticsModal({
         </div>
 
         <div className={styles.runtimeLaneBar}>
-          <strong><UiText text="Сейчас выполняются" /></strong>
+          <strong><UiText text="Активные строки журнала" /></strong>
           <div>
-            {activeLanes.length > 0 ? activeLanes.map((lane) => (
-              <span
-                key={lane}
-                style={{ "--runtime-lane-color": rankRuntimeLaneColor(lane) } as CSSProperties}
-              >
-                <UiText text="Поток" after=" " />{lane}
+            {activeRows.length > 0 ? activeRows.map((row) => (
+              <span key={row}>
+                <UiText text="Строка" after=" " />{row}
               </span>
-            )) : <small>{refreshing ? <UiText text="Обновляем…" /> : <UiText text="Свободные потоки ожидают запросы" />}</small>}
+            )) : <small>{refreshing ? <UiText text="Обновляем…" /> : <UiText text="Нет заданий в обработке" />}</small>}
           </div>
           <button
             disabled={refreshing}
@@ -2014,6 +2010,13 @@ export function RankRuntimeDiagnosticsModal({
           </button>
         </div>
 
+        {snapshot && <p className={styles.runtimeCapacityNote}>
+          <UiText
+            text="Одновременных HTTP-запросов на один ключ — не более {0}; задания в обработке включают ожидание."
+            values={[String(snapshot.policy.concurrency)]}
+          />
+        </p>}
+
         {error && <div className={styles.runtimeLogError} role="alert">{<UiText text={error ?? ""} />}</div>}
 
         <div className={styles.runtimeLogTableWrap}>
@@ -2022,7 +2025,7 @@ export function RankRuntimeDiagnosticsModal({
             <thead>
               <tr>
                 <th><UiText text="Время" /></th>
-                <th><UiText text="Поток" /></th>
+                <th>№</th>
                 <th><UiText text="Запрос" /></th>
                 <th><UiText text="Состояние" /></th>
                 <th><UiText text="HTTP-попытки" /></th>
@@ -2035,12 +2038,7 @@ export function RankRuntimeDiagnosticsModal({
                 <tr key={entry.eventKey}>
                   <td>{formatRuntimeTime(entry.updatedAt, uiLocale)}</td>
                   <td>
-                    <span
-                      className={styles.runtimeLane}
-                      style={{ "--runtime-lane-color": rankRuntimeLaneColor(entry.lane) } as CSSProperties}
-                    >
-                      {entry.lane}
-                    </span>
+                    <span className={styles.runtimeLane}>{entry.sequence + 1}</span>
                   </td>
                   <td className={styles.runtimeKeyword}>
                     <strong>{entry.keyword}</strong>
@@ -2113,7 +2111,7 @@ function rankRuntimeProductLabel(value: RankRuntimeDiagnostics["policy"]["produc
 function rankRuntimeStateLabel(value: RankRuntimeDiagnosticEntry["state"]): string {
   return ({
     QUEUED: "Подготовлен",
-    REQUESTING: "HTTP-запрос",
+    REQUESTING: "В обработке",
     WAITING_PROVIDER: "Ждёт XMLStock",
     WAITING_NEXT_PAGE: "Следующая страница",
     SAVING: "Сохранение",
@@ -2121,10 +2119,6 @@ function rankRuntimeStateLabel(value: RankRuntimeDiagnosticEntry["state"]): stri
     RETRY_WAIT: "Повтор",
     FAILED: "Ошибка"
   } as const)[value];
-}
-
-function rankRuntimeLaneColor(lane: number): string {
-  return `hsl(${(lane * 47 + 238) % 360} 72% 52%)`;
 }
 
 function formatRuntimeTime(value: string, uiLocale: string = "ru-RU"): string {

@@ -38,6 +38,7 @@ const SUBMIT_CANDIDATE_TTL_MS = 5_000;
 const SUBMIT_CANDIDATE_RETRY_MS = 250;
 const SUBMIT_CANDIDATE_EXCLUSION_MS = 2_000;
 const SUBMIT_CANDIDATE_MAX_ATTEMPTS = 4;
+const EMPTY_CLAIM_RECHECK_MS = 500;
 
 interface SubmitCandidateRow {
   readonly executionId: string;
@@ -102,6 +103,8 @@ export class RankConnectorRuntimeBrokerService {
     readonly at: number;
   }> = [];
   private readonly submitJobClaims = new Map<string, Promise<void>>();
+  private readonly emptyClaimUntil = new Map<string, number>();
+  private readonly claimProbes = new Map<string, Promise<boolean>>();
 
   public constructor(private readonly prisma: PrismaService) {}
 
@@ -118,19 +121,59 @@ export class RankConnectorRuntimeBrokerService {
         connectorVersion
       );
     }
-    const rows = await this.prisma.$queryRaw<readonly SubmitClaimRow[]>(
-      Prisma.sql`
-        SELECT *
-        FROM public.claim_rank_connector_submit_bounded(
-          ${leaseOwner}::text,
-          ${leaseSeconds}::integer,
-          ${connectorVersion}::text
-        )
-      `
-    );
-    if (rows.length === 0) return undefined;
-    if (rows.length !== 1 || !rows[0]) invalid("submit claim cardinality");
-    return claim(rows[0], leaseOwner);
+    return this.claimWhenDue(`submit:${connectorVersion}`, async () => {
+      const rows = await this.prisma.$queryRaw<readonly SubmitClaimRow[]>(
+        Prisma.sql`
+          SELECT *
+          FROM public.claim_rank_connector_submit_bounded(
+            ${leaseOwner}::text,
+            ${leaseSeconds}::integer,
+            ${connectorVersion}::text
+          )
+        `
+      );
+      if (rows.length === 0) return undefined;
+      if (rows.length !== 1 || !rows[0]) invalid("submit claim cardinality");
+      return claim(rows[0], leaseOwner);
+    });
+  }
+
+  private async claimWhenDue<T>(
+    key: string,
+    attempt: () => Promise<T | undefined>
+  ): Promise<T | undefined> {
+    if (Date.now() < (this.emptyClaimUntil.get(key) ?? 0)) {
+      return undefined;
+    }
+    const pending = this.claimProbes.get(key);
+    if (pending && !(await pending)) return undefined;
+    if (Date.now() < (this.emptyClaimUntil.get(key) ?? 0)) {
+      return undefined;
+    }
+
+    // Concurrent idle lanes share only a negative result. A positive claim
+    // stays owned by its caller and every other lane performs its own fenced
+    // claim; no paid operation or lease is cached here.
+    let resolveProbe!: (hasWork: boolean) => void;
+    const probe = new Promise<boolean>((resolve) => {
+      resolveProbe = resolve;
+    });
+    this.claimProbes.set(key, probe);
+    try {
+      const result = await attempt();
+      if (result === undefined) {
+        this.emptyClaimUntil.set(key, Date.now() + EMPTY_CLAIM_RECHECK_MS);
+      }
+      resolveProbe(result !== undefined);
+      return result;
+    } catch (error) {
+      resolveProbe(true);
+      throw error;
+    } finally {
+      if (this.claimProbes.get(key) === probe) {
+        this.claimProbes.delete(key);
+      }
+    }
   }
 
   private async claimPrefetchedXmlStockSubmit(
@@ -409,41 +452,43 @@ export class RankConnectorRuntimeBrokerService {
     connectorVersion: string
   ): Promise<RankConnectorPollClaim | undefined> {
     validateClaimInput(leaseOwner, leaseSeconds, connectorVersion);
-    const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(
-      Prisma.sql`
-        SELECT *
-        FROM public.claim_rank_connector_poll(
-          ${leaseOwner}::text,
-          ${leaseSeconds}::integer,
-          ${connectorVersion}::text
-        )
-      `
-    );
-    if (rows.length === 0) return undefined;
-    if (rows.length !== 1 || !rows[0]) invalid("poll claim cardinality");
-    const row = rows[0];
-    const provider = rankProvider(row.provider);
-    let providerProgress: XmlStockRankPageProgress | undefined;
-    let providerProgressInvalid = false;
-    try {
-      providerProgress = storedProviderProgress(
-        provider,
-        row.providerProgressSnapshot,
-        row.providerProgressHash
+    return this.claimWhenDue(`poll:${connectorVersion}`, async () => {
+      const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(
+        Prisma.sql`
+          SELECT *
+          FROM public.claim_rank_connector_poll(
+            ${leaseOwner}::text,
+            ${leaseSeconds}::integer,
+            ${connectorVersion}::text
+          )
+        `
       );
-    } catch (error) {
-      if (provider !== "XMLSTOCK" || !(error instanceof TypeError)) {
-        throw error;
+      if (rows.length === 0) return undefined;
+      if (rows.length !== 1 || !rows[0]) invalid("poll claim cardinality");
+      const row = rows[0];
+      const provider = rankProvider(row.provider);
+      let providerProgress: XmlStockRankPageProgress | undefined;
+      let providerProgressInvalid = false;
+      try {
+        providerProgress = storedProviderProgress(
+          provider,
+          row.providerProgressSnapshot,
+          row.providerProgressHash
+        );
+      } catch (error) {
+        if (provider !== "XMLSTOCK" || !(error instanceof TypeError)) {
+          throw error;
+        }
+        providerProgressInvalid = true;
       }
-      providerProgressInvalid = true;
-    }
-    return {
-      ...claim(row, leaseOwner),
-      providerTaskId: taskId(row.providerTaskId),
-      request: rankProviderRequestIntent(row.requestSnapshot),
-      ...(providerProgress ? { providerProgress } : {}),
-      ...(providerProgressInvalid ? { providerProgressInvalid: true } : {})
-    };
+      return {
+        ...claim(row, leaseOwner),
+        providerTaskId: taskId(row.providerTaskId),
+        request: rankProviderRequestIntent(row.requestSnapshot),
+        ...(providerProgress ? { providerProgress } : {}),
+        ...(providerProgressInvalid ? { providerProgressInvalid: true } : {})
+      };
+    });
   }
 
   public deferPollForProviderCapacity(

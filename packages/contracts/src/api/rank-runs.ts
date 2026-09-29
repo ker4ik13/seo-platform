@@ -65,6 +65,7 @@ export interface RankRuntimeDiagnosticPolicy {
 export interface RankRuntimeDiagnosticTotals {
   readonly total: number;
   readonly prepared: number;
+  /** Live database leases, including work waiting for an XMLStock HTTP permit. */
   readonly active: number;
   readonly waitingProvider: number;
   readonly completed: number;
@@ -74,7 +75,8 @@ export interface RankRuntimeDiagnosticTotals {
 /**
  * Safe live projection for one XMLStock keyword execution. Provider request
  * IDs, credential identities, raw payloads and physical worker names are not
- * exposed. `lane` is a stable logical lane used only for visual monitoring.
+ * exposed. `active` means a live database lease, not an in-flight HTTP call;
+ * `lane` is a legacy synthetic display group, not a provider thread.
  */
 export interface RankRuntimeDiagnosticEntry {
   readonly sequence: number;

@@ -1570,7 +1570,11 @@ broker перед full tenant graph, а Arsenkin ещё и перед provider-w
 SQL graph. Активный poll дополнительно использует
 `job + connector version + status + due time` index: append-only история
 остальных выполнений этого Job больше не пересекается с глобальным due index
-на каждом из 64 worker lanes. XMLStock submit broker читает до 30 ID
+на каждом из 64 worker lanes. Poll-claim агрегирует живые `FETCHING` leases
+один раз на проход вместо коррелированного `COUNT(*)` для каждого ожидающего
+execution. Пустой poll/Arsenkin submit внутри одного connector process
+совместно кешируется на 500 мс; положительный claim и DB lease не кешируются.
+XMLStock submit broker читает до 30 ID
 кандидатов за один fairness-упорядоченный SQL-поиск и держит только эти ID
 в памяти процесса не более пяти секунд. Для каждого ID отдельный короткий
 `SECURITY DEFINER` claim через primary key повторно проверяет полный tenant,
@@ -1825,7 +1829,7 @@ provider slot. Для XMLStock `POLL_WAIT` вообще не занимает HT
 выдаётся выбранному credential/product непосредственно перед запросом.
 Tenant-scoped `GET .../jobs/:jobId/runtime-diagnostics` отдаёт только
 безопасный live-снимок XMLStock execution: текст доступного пользователю
-ключа, логический цветной поток, sequence, состояние, счётчики HTTP
+ключа, номер строки, sequence, состояние, счётчики HTTP
 submit/poll, page progress и allowlisted error code.
 Для Turbo diagnostics сохраняет отдельный product `YANDEX_TURBO`, показывает
 реальное число страниц из checkpoint и не приписывает режиму обычный Live
@@ -1840,6 +1844,10 @@ General `jobs_runtime` по-прежнему не читает private
 tenant-scoped allowlist полей через owner-owned
 `read_rank_runtime_diagnostics_entries`, где active-state вычисляется внутри
 БД без выдачи физического lease owner.
+`active` означает живой DB lease, а не занятый HTTP permit. Web показывает
+этот счётчик как задания в обработке, не рисует фиктивные «потоки» по
+`sequence % concurrency` и отдельно поясняет лимит одновременных XMLStock
+HTTP-запросов на один физический ключ.
 Для XMLStock-съёма кнопка входа в этот монитор находится прямо в header
 результата, открытого из сайдбара операций, а не занимает место в таблице или
 контекстной строке результата.

@@ -468,7 +468,12 @@ provider-wide advisory lock; terminal Job с ещё действующим execu
 `connector version + status + next action/lease`, проверяет RUNNING parent Job
 и лишь затем открывает credential/control graph. Для активного poll отдельный
 индекс `job + connector version + status + due time` исключает повторное чтение
-всей append-only истории executions текущего Job на каждом worker lane. Rank grant dispatcher также
+всей append-only истории executions текущего Job на каждом worker lane.
+Poll claim считает живые `FETCHING` leases одной materialized агрегацией на
+проход; коррелированный `COUNT(*)` для каждой из тысяч ожидающих страниц
+запрещён. Пустые poll claims одного connector process объединяются и
+повторяются не чаще чем через 500 мс; положительный claim и lease не
+кешируются. Rank grant dispatcher также
 сериализует общий connector budget: grant buffer не превышает число lanes,
 умноженное на dispatch interval и ограниченное 30-секундным grant window
 (960 при 64 lanes и 15 секундах), а один Job получает за проход максимум 64.
@@ -1078,13 +1083,18 @@ Malformed XML, несовместимый сохранённый checkpoint ил
 
 Для XMLStock run доступен tenant-scoped live diagnostics read. Он показывает
 ограниченный снимок последних keyword executions, доступный пользователю текст
-ключа, логические цветные потоки, submit/poll attempts, page progress,
+ключа, номер строки, submit/poll attempts, page progress,
 следующее действие и allowlisted error code. Физические worker ID, `req_id`,
 credentials и raw provider responses не выдаются. Web опрашивает endpoint
 только при открытой подмодалке «Логи XMLStock» и хранит не более 500
 изменившихся записей локально. В модалке результата XMLStock-съёма, открытой
 из сайдбара операций, явная кнопка «Логи» находится в header; для других
 провайдеров она не отображается.
+Показатель `active` означает число живых DB leases, включая ожидание Redis
+permit, и в интерфейсе называется «Заданий в обработке». Он не именуется
+числом HTTP-потоков; синтетическое `sequence % concurrency` не выдаётся за
+физический поток. Лимит одновременных HTTP-запросов на один ключ показан
+отдельно.
 Private provider intent не открывается general Jobs runtime таблицей:
 owner-owned tenant-scoped projection возвращает только текст ключа и
 allowlisted execution-поля, а active-state вычисляет без физического имени
