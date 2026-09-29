@@ -34,6 +34,13 @@ connector shards вытеснять API/SEO соединения под нагр
 остальные Caddy routes. Watcher восстанавливает этот route после reload Caddy,
 а `stop-runtime.sh` удаляет его.
 
+При `WORKER_GATEWAY_ENABLED=true` watcher `public-api-proxy.sh` добавляет
+только `/worker/v1` и `/worker/v1/*` в существующий HTTPS Web listener
+`SEO_PLATFORM_PUBLIC_URL` и проксирует их на loopback Jobs `:4002`.
+Остальные Web-пути остаются у Next.js, а `/internal/v1/*` наружу не выходит.
+Watcher восстанавливает маршрут после Caddy reload; остановка runtime удаляет
+только управляемый worker-маршрут.
+
 ## Команды
 
 Запускать из корня repository:

@@ -265,7 +265,7 @@ test("public object-storage proxy is exact, TLS-enabled and never receives crede
   );
 });
 
-test("public API proxy exposes only versioned API routes over TLS", async () => {
+test("public API proxy exposes only bounded API and worker routes over TLS", async () => {
   const proxySource = await readVpsFile("public-api-proxy.sh");
   const componentSource = await readVpsFile("run-component.sh");
   const runtimeLibrarySource = await readVpsFile("runtime-lib.sh");
@@ -276,8 +276,14 @@ test("public API proxy exposes only versioned API routes over TLS", async () => 
   assert.match(proxySource, /api_listen=\$public_host:443/u);
   assert.match(proxySource, /public_authority=\$public_host:4000/u);
   assert.match(proxySource, /"\/api\/v1", "\/api\/v1\/\*"/u);
+  assert.match(proxySource, /web_worker_route_id=seo_platform_worker_gateway_web/u);
+  assert.match(proxySource, /"\/worker\/v1", "\/worker\/v1\/\*"/u);
+  assert.match(proxySource, /web_routes_url.*routes\/0\/handle\/0\/routes/u);
+  assert.match(proxySource, /apply_web_worker_route/u);
+  assert.match(proxySource, /remove_web_worker_route/u);
   assert.doesNotMatch(proxySource, /\/internal\/v1/u);
   assert.match(proxySource, /upstreams: \[\{dial: "127\.0\.0\.1:4000"\}\]/u);
+  assert.match(proxySource, /upstreams: \[\{dial: "127\.0\.0\.1:4002"\}\]/u);
   assert.match(proxySource, /tls_connection_policies: \[\{\}\]/u);
   assert.match(runtimeLibrarySource, /if \[ -n "\$\{API_PUBLIC_URL:-\}" \]/u);
   assert.match(runtimeLibrarySource, /printf '%s\\n' "\$API_PUBLIC_URL"/u);

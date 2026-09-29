@@ -14,7 +14,9 @@ email и в целевой архитектуре остаётся на осно
 
 ## Центр
 
-На тестовом VPS `https://144.31.221.28:4000` шлюз уже включён локально.
+На тестовом VPS публичный worker-маршрут доступен через
+`https://144.31.221.28:3000/worker/v1/*`. Отдельный API listener `:4000`
+может быть недоступен с удалённого сервера; для воркера используйте `:3000`.
 Для другого стенда одновременно нужны:
 
 ```dotenv
@@ -60,7 +62,7 @@ JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE=BOTH
 В Environment приложения задайте:
 
 ```dotenv
-WORKER_CONTROL_URL=https://144.31.221.28:4000
+WORKER_CONTROL_URL=https://144.31.221.28:3000
 WORKER_NODE_ID=<UUID_ИЗ_АДМИНКИ>
 WORKER_NODE_TOKEN=<ТОКЕН_ИЗ_АДМИНКИ>
 WORKER_HTTP_SLOTS=16
@@ -86,10 +88,11 @@ nanoCPU и байты, не `4` и не `8g`.
 Из сети удалённого сервера сначала проверьте TLS без `-k`:
 
 ```bash
-curl -i https://144.31.221.28:4000/api/v1/workspaces
+curl -i -H 'Content-Type: application/json' -d '{}' \
+  https://144.31.221.28:3000/worker/v1/heartbeat
 ```
 
-Ожидается HTTP 401 без авторизации. Ошибка проверки сертификата, DNS или
+Ожидается HTTP 400 без заголовков идентификации узла. Ошибка проверки сертификата, DNS или
 соединения означает, что запускать узел пока нельзя.
 
 ## Обычный Docker Compose вне Dokploy
@@ -100,7 +103,7 @@ curl -i https://144.31.221.28:4000/api/v1/workspaces
 доступен только администратору сервера. Для тестового VPS:
 
 ```dotenv
-WORKER_CONTROL_URL=https://144.31.221.28:4000
+WORKER_CONTROL_URL=https://144.31.221.28:3000
 WORKER_NODE_TOKEN=<ТОКЕН_ИЗ_АДМИНКИ>
 WORKER_HTTP_SLOTS=16
 WORKER_RANK_SLOTS=8
