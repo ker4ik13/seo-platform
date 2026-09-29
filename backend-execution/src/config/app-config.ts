@@ -117,6 +117,7 @@ export interface AppConfig {
     readonly shardIndex: number;
     readonly shardCount: number;
     readonly rankConcurrency: number;
+    readonly rankClaimConcurrency: number;
     readonly frequencyConcurrency: number;
     readonly keywordResearchConcurrency: number;
     readonly xmlStockGlobalHttpConcurrency: number;
@@ -1474,6 +1475,13 @@ export function loadAppConfig(
     1,
     64
   );
+  const rankConnectorClaimConcurrency = boundedInteger(
+    env.RANK_CONNECTOR_CLAIM_CONCURRENCY,
+    Math.min(4, rankConnectorConcurrency),
+    "RANK_CONNECTOR_CLAIM_CONCURRENCY",
+    1,
+    rankConnectorConcurrency
+  );
   const connectorRuntimeShardCount = boundedInteger(
     env.CONNECTOR_RUNTIME_SHARD_COUNT,
     1,
@@ -1788,11 +1796,12 @@ export function loadAppConfig(
       shardIndex: connectorRuntimeShardIndex,
       shardCount: connectorRuntimeShardCount,
       rankConcurrency: rankConnectorConcurrency,
+      rankClaimConcurrency: rankConnectorClaimConcurrency,
       frequencyConcurrency: frequencyCollectionConcurrency,
       keywordResearchConcurrency,
       xmlStockGlobalHttpConcurrency: boundedInteger(
         env.XMLSTOCK_GLOBAL_HTTP_CONCURRENCY,
-        96,
+        64,
         "XMLSTOCK_GLOBAL_HTTP_CONCURRENCY",
         1,
         512

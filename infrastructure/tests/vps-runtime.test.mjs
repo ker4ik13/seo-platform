@@ -134,7 +134,7 @@ test("VPS platform rank credentials preserve price and secret boundaries", async
   const bootstrapSource = await readVpsFile("bootstrap-runtime.sh");
   const coreBlock = source.match(/  backend-core\)[\s\S]*?    ;;/u)?.[0] ?? "";
   const executionBlock = source.match(/  backend-execution\)[\s\S]*?    ;;/u)?.[0] ?? "";
-  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\|connector-worker-3\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
 
   assert.match(coreBlock, /PLATFORM_XMLSTOCK_RANK_KEYWORD_PRICE_MINOR/u);
   assert.match(coreBlock, /PLATFORM_ARSENKIN_RANK_KEYWORD_PRICE_MINOR/u);
@@ -222,7 +222,7 @@ test("VPS uses one rank coordinator and multiple bounded connector processes", a
     readVpsFile("start-runtime.sh")
   ]);
   const rankBlock = source.match(/  rank-worker\|rank-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
-  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\|connector-worker-3\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
 
   assert.match(rankBlock, /RANK_PREPARATION_DISPATCH_SECONDS=5/u);
   assert.match(
@@ -235,17 +235,19 @@ test("VPS uses one rank coordinator and multiple bounded connector processes", a
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_CONCURRENCY=1/u);
   assert.match(connectorBlock, /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000/u);
   assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=32/u);
+  assert.match(connectorBlock, /RANK_CONNECTOR_CLAIM_CONCURRENCY=4/u);
+  assert.match(connectorBlock, /XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=64/u);
   assert.match(
     connectorBlock,
     /CONNECTOR_PAID_RUNTIME_ENABLED="\$\{SEO_PLATFORM_PAID_CONNECTOR_RUNTIME:-true\}"/u
   );
   assert.match(connectorBlock, /CONNECTOR_RUNTIME_SHARD_INDEX="\$connector_runtime_shard_index"/u);
-  assert.match(connectorBlock, /CONNECTOR_RUNTIME_SHARD_COUNT=3/u);
-  assert.match(connectorBlock, /FREQUENCY_COLLECTION_CONCURRENCY=4/u);
+  assert.match(connectorBlock, /CONNECTOR_RUNTIME_SHARD_COUNT=2/u);
+  assert.match(connectorBlock, /FREQUENCY_COLLECTION_CONCURRENCY=5/u);
   assert.match(connectorBlock, /KEYWORD_RESEARCH_CONCURRENCY=1/u);
   assert.doesNotMatch(startSource, /start_window rank-worker-2/u);
   assert.match(startSource, /connector-worker-2/u);
-  assert.match(startSource, /connector-worker-3/u);
+  assert.doesNotMatch(startSource, /connector-worker-3/u);
 });
 
 test("public object-storage proxy is exact, TLS-enabled and never receives credentials", async () => {

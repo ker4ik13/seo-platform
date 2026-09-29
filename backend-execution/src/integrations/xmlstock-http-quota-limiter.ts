@@ -33,7 +33,7 @@ export const XMLSTOCK_HTTP_QUOTA_POLICIES: Readonly<
 
 export const XMLSTOCK_HTTP_QUOTA_NAMESPACE =
   "seo-platform:jobs:v1:provider-rate-limit:xmlstock";
-export const XMLSTOCK_GLOBAL_HTTP_CONCURRENCY = 96;
+export const XMLSTOCK_GLOBAL_HTTP_CONCURRENCY = 64;
 export const XMLSTOCK_HTTP_QUOTA_COMMAND_TIMEOUT_MS = 2_000;
 
 export type XmlStockHttpQuotaPermit =

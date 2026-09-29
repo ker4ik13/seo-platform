@@ -39,9 +39,12 @@ test("rank work is a scoped child role of backend-execution", async () => {
     execution,
     /RANK_CONNECTOR_CONCURRENCY: \$\{RANK_CONNECTOR_CONCURRENCY:-32\}/u
   );
+  assert.match(execution, /CONNECTOR_WORKER_PROCESSES: \$\{CONNECTOR_WORKER_PROCESSES:-2\}/u);
+  assert.match(execution, /RANK_CONNECTOR_CLAIM_CONCURRENCY: \$\{RANK_CONNECTOR_CLAIM_CONCURRENCY:-4\}/u);
+  assert.match(execution, /XMLSTOCK_GLOBAL_HTTP_CONCURRENCY: \$\{XMLSTOCK_GLOBAL_HTTP_CONCURRENCY:-64\}/u);
   assert.match(
     execution,
-    /FREQUENCY_COLLECTION_CONCURRENCY: \$\{FREQUENCY_COLLECTION_CONCURRENCY:-4\}/u
+    /FREQUENCY_COLLECTION_CONCURRENCY: \$\{FREQUENCY_COLLECTION_CONCURRENCY:-5\}/u
   );
   assert.match(
     execution,

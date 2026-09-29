@@ -158,7 +158,6 @@ runtime_workers=(
   crawl-worker
   connector-worker
   connector-worker-2
-  connector-worker-3
 )
 for worker in "${runtime_workers[@]}"; do
   start_window "$worker"

@@ -121,6 +121,7 @@ const CONNECTOR_KEYS = [
   "CONNECTOR_RUNTIME_SHARD_COUNT",
   "CONNECTOR_RUNTIME_SHARD_INDEX",
   "RANK_CONNECTOR_CONCURRENCY",
+  "RANK_CONNECTOR_CLAIM_CONCURRENCY",
   "FREQUENCY_COLLECTION_CONCURRENCY",
   "KEYWORD_RESEARCH_CONCURRENCY",
   "XMLSTOCK_GLOBAL_HTTP_CONCURRENCY",
@@ -160,7 +161,7 @@ export function executionProcessDefinitions(
   const connectorWorkerProcesses = processCount(
     env.CONNECTOR_WORKER_PROCESSES,
     "CONNECTOR_WORKER_PROCESSES",
-    3,
+    2,
     16
   );
   const rankConnectorConcurrency = processCount(

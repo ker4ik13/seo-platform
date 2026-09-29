@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 24 сентября 2026 года.
+Актуально на 29 сентября 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -1498,7 +1498,7 @@ child processes (`RANK_WORKER_PROCESSES`, `CONNECTOR_WORKER_PROCESSES`), но
 не являются отдельными deployable-сервисами. Connector runtime dispatch
 работает отдельным быстрым тиком (по умолчанию 1 секунда), а credential
 maintenance сохраняет собственный медленный интервал. Одноузловой VPS runtime
-запускает три connector child process, совпадая с production default Compose.
+запускает два connector child process, совпадая с production default Compose.
 Оба backend supervisors и Frontend отправляют внутренние ошибки в private
 receiver через отдельный `OPERATIONAL_ALERT_TOKEN`; только Core child
 `alert.main.ts` получает Telegram bot destination. Exact envelope не содержит
@@ -1521,7 +1521,7 @@ XMLStock HTTP ограничивается распределёнными Redis 
 `physicalCredentialScopeId + product` (`YANDEX_LIVE`, `YANDEX_TURBO`,
 `GOOGLE_LIVE`, `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют
 друг друга, а одинаковые BYOK-ключи разных workspace делят один лимит.
-Один ключ делит лимит между своими проектами. Для занятых 96 общих слотов
+Один ключ делит лимит между своими проектами. Для занятых 64 общих слотов
 Redis резервирует справедливую долю каждому ожидающему физическому ключу;
 свободную долю можно временно занимать. Внутри одного key/product такую же
 долю получают одновременно ожидающие workspace (например, 5/5 из 10
@@ -1533,7 +1533,7 @@ Yandex Live — `10 concurrent / 10 RPS`, Turbo — `50 / 50`, Google Live — `
 Search API — `50 / 50`, Wordstat — `10 / 10`. Для XMLStock Google user-facing
 название — «Google XML», внутренний product ID `GOOGLE_LIVE` остаётся прежним
 для совместимости сохранённых Job и цен. Сверху действует общий Redis
-потолок `XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=96`. RPS дополнительно сглаживается
+потолок `XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=64`. RPS дополнительно сглаживается
 100-миллисекундными distributed окнами, чтобы replicas не создавали один
 provider burst. Throttling адаптивно уменьшает окно. Состояние limiter
 хранится только в connector ACL namespace
@@ -1551,13 +1551,14 @@ quota reservation/receipt.
 `connector version + status + authorization expiry` index до соединения всего
 Job graph. Исторические `READY_TO_SUBMIT` с истёкшим grant больше не сканируются
 на каждом пустом runtime tick.
-Каждый connector process выполняет до 32 rank claims и четырёх frequency
-claims одновременно. Три штатных процесса владеют 96 фиксированными rank
+Каждый connector process выполняет до 32 rank HTTP-операций, но не более
+четырёх одновременных тяжёлых rank claims и пяти frequency claims.
+Два штатных процесса владеют 64 фиксированными rank
 deterministic BullMQ lanes: для одного lane существует не более одного
 waiting/active tick, а завершённый tick удаляется сразу. Поэтому остановка или
 деградация consumer не может создать неограниченный Redis backlog; старые
 time-based tick ID завершаются без обращения к PostgreSQL. Общий rank I/O pool
-равен 96 slot, а Wordstat bucket — `10 RPS` на физический ключ. В простое каждый shard
+равен 64 slot, а Wordstat bucket — `10 RPS` на физический ключ. В простое каждый shard
 отправляет один probe в секунду; первый реальный claim раскрывает configured
 pool на пять секунд. Frequency/AI/clustering и keyword-research runtime
 используют такие же bounded lanes. Submit
@@ -1569,10 +1570,18 @@ broker перед full tenant graph, а Arsenkin ещё и перед provider-w
 SQL graph. Активный poll дополнительно использует
 `job + connector version + status + due time` index: append-only история
 остальных выполнений этого Job больше не пересекается с глобальным due index
-на каждом из 96 worker lanes. Rank grant dispatcher под общим advisory lock ограничивает общий
-короткоживущий grant buffer произведением 96 connector lanes на dispatch
-interval (1440 в production, не длиннее 30-секундного grant window), а один Job
-за проход получает не более 96 новых grants. Неиспользованный grant повторяется
+на каждом из 64 worker lanes. XMLStock submit broker читает до 30 ID
+кандидатов за один fairness-упорядоченный SQL-поиск и держит только эти ID
+в памяти процесса не более пяти секунд. Для каждого ID отдельный короткий
+`SECURITY DEFINER` claim через primary key повторно проверяет полный tenant,
+credential, route, grant и lease graph; ключи и долгие резервы не кешируются.
+Локальные claims одного Job сериализуются, чтобы не конкурировать за lock
+его родительской строки. Stale ID просто пропускается, после падения процесса
+остальные ID доступны другим worker-ам.
+Rank grant dispatcher под общим advisory lock ограничивает общий
+короткоживущий grant buffer произведением 64 connector lanes на dispatch
+interval (960 в production, не длиннее 30-секундного grant window), а один Job
+за проход получает не более 64 новых grants. Неиспользованный grant повторяется
 не раньше минутного cooldown. Следующие `JobItem` выбираются bounded SQL slice
 через latest-attempt lateral lookup; весь массив исторических executions больше
 не загружается в Node на каждом цикле. Provider throughput
@@ -1941,13 +1950,14 @@ Wordstat-сценариев явно передают `credentialId`; извес
 без активного маршрута; следующий запуск разрешается только после настройки
 соответствующего workspace route.
 
-XMLStock connector использует три процесса по 32 rank HTTP-lane (96 суммарно)
-и отдельный распределённый глобальный потолок 96 одновременных внешних
+XMLStock connector использует два процесса по 32 rank HTTP-lane (64 суммарно)
+и отдельный распределённый глобальный потолок 64 одновременных внешних
 XMLStock запросов. Лимиты product bucket применяются к физическому ключу:
 совпадающие BYOK `accountIdentifier + apiKey` в разных workspace получают
 один непрозрачный HMAC scope. Redis Jobs настроен на `maxmemory 1gb` и
-контейнерный предел `1536M`; connector PostgreSQL pool — 16 соединений на
-процесс, поскольку ожидание provider HTTP не удерживает соединение.
+контейнерный предел `1536M`; connector PostgreSQL pool — максимум 16
+соединений на процесс, но тяжёлые rank claims ограничены четырьмя; ожидание
+provider HTTP не удерживает соединение.
 
 ### Проверка ИИ-ответов
 

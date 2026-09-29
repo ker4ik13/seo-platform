@@ -56,7 +56,7 @@ test("acquires from only the selected credential and product bucket", async () =
       product: "YANDEX_LIVE",
       leaseMs: 13_000,
       member: firstMember,
-      globalConcurrency: 96
+      globalConcurrency: 64
     }
   );
 
@@ -80,7 +80,7 @@ test("acquires from only the selected credential and product bucket", async () =
   assert.equal(calls[0]?.[8], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:inflight");
   assert.equal(calls[0]?.[9], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:waiters");
   assert.equal(calls[0]?.[10], `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:workspace-waiters`);
-  assert.equal(calls[0]?.[16], "96");
+  assert.equal(calls[0]?.[16], "64");
   assert.equal(calls[0]?.[17], firstCredential);
   assert.equal(calls[0]?.[18], firstWorkspace);
 });

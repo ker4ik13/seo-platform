@@ -34,6 +34,7 @@ import {
   xmlStockRankWireRequestHash
 } from "./xmlstock-rank.connector.js";
 import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent.js";
+import { RankClaimCapacity } from "./rank-claim-capacity.js";
 
 export const ARSENKIN_RANK_CONNECTOR = Symbol(
   "ARSENKIN_RANK_CONNECTOR"
@@ -59,6 +60,7 @@ export type RankConnectorRuntimeOutcome =
 @Injectable()
 export class RankConnectorRuntimeService {
   private nextProvider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN";
+  private readonly claimCapacity: RankClaimCapacity;
 
   public constructor(
     private readonly broker: RankConnectorRuntimeBrokerService,
@@ -71,7 +73,11 @@ export class RankConnectorRuntimeService {
     private readonly settlements: RankBillingSettlementClient,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
-  ) {}
+  ) {
+    this.claimCapacity = new RankClaimCapacity(
+      config.connectorRuntime.rankClaimConcurrency
+    );
+  }
 
   /**
    * Performs one submit/status request, plus one result request only after a
@@ -83,13 +89,17 @@ export class RankConnectorRuntimeService {
   ): Promise<RankConnectorRuntimeOutcome> {
     try {
       if (this.config.rankExecution.submitEnabled) {
-        const submit = await this.claimSubmit(leaseOwner);
+        const submit = await this.claimCapacity.run(() =>
+          this.claimSubmit(leaseOwner)
+        );
         if (submit) {
           return await this.submit(submit);
         }
       }
 
-      const poll = await this.claimPoll(leaseOwner);
+      const poll = await this.claimCapacity.run(() =>
+        this.claimPoll(leaseOwner)
+      );
       if (poll) {
         return await this.poll(poll);
       }

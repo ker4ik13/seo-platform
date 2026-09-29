@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION } from "./rank-execution-evidence.js";
 import type { EncryptedIntegrationCredential } from "../integrations/integration-credential-crypto.service.js";
 import {
   rankProviderRequestIntent,
@@ -32,6 +33,21 @@ const STATUS_VALUES = new Set([
   "FAILED_FINAL",
   "STAGED"
 ]);
+const SUBMIT_CANDIDATE_BATCH_SIZE = 30;
+const SUBMIT_CANDIDATE_TTL_MS = 5_000;
+const SUBMIT_CANDIDATE_RETRY_MS = 250;
+const SUBMIT_CANDIDATE_EXCLUSION_MS = 2_000;
+const SUBMIT_CANDIDATE_MAX_ATTEMPTS = 4;
+
+interface SubmitCandidateRow {
+  readonly executionId: string;
+  readonly jobId: string;
+}
+
+interface SubmitCandidate {
+  readonly executionId: string;
+  readonly jobId: string;
+}
 
 export interface RankConnectorClaim {
   readonly provider: "ARSENKIN" | "XMLSTOCK";
@@ -77,6 +93,16 @@ export interface RankConnectorCompletion {
 
 @Injectable()
 export class RankConnectorRuntimeBrokerService {
+  private submitCandidates: SubmitCandidate[] = [];
+  private submitCandidatesFetchedAt = 0;
+  private submitCandidateRefill: Promise<void> | undefined;
+  private submitCandidateEmptyUntil = 0;
+  private readonly recentlyAttemptedCandidates: Array<{
+    readonly id: string;
+    readonly at: number;
+  }> = [];
+  private readonly submitJobClaims = new Map<string, Promise<void>>();
+
   public constructor(private readonly prisma: PrismaService) {}
 
   public async claimSubmit(
@@ -85,6 +111,13 @@ export class RankConnectorRuntimeBrokerService {
     connectorVersion: string
   ): Promise<RankConnectorSubmitClaim | undefined> {
     validateClaimInput(leaseOwner, leaseSeconds, connectorVersion);
+    if (connectorVersion === XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION) {
+      return this.claimPrefetchedXmlStockSubmit(
+        leaseOwner,
+        leaseSeconds,
+        connectorVersion
+      );
+    }
     const rows = await this.prisma.$queryRaw<readonly SubmitClaimRow[]>(
       Prisma.sql`
         SELECT *
@@ -98,6 +131,127 @@ export class RankConnectorRuntimeBrokerService {
     if (rows.length === 0) return undefined;
     if (rows.length !== 1 || !rows[0]) invalid("submit claim cardinality");
     return claim(rows[0], leaseOwner);
+  }
+
+  private async claimPrefetchedXmlStockSubmit(
+    leaseOwner: string,
+    leaseSeconds: number,
+    connectorVersion: string
+  ): Promise<RankConnectorSubmitClaim | undefined> {
+    for (let attempt = 0; attempt < SUBMIT_CANDIDATE_MAX_ATTEMPTS; attempt++) {
+      const candidate = await this.nextSubmitCandidate(
+        connectorVersion,
+        leaseSeconds
+      );
+      if (!candidate) return undefined;
+
+      // The prefetch is not a reservation. The exact, version-fenced graph
+      // claim still owns the authority to move this execution to CLAIMED.
+      const rows = await this.withSubmitJobClaim(candidate.jobId, () =>
+        this.prisma.$queryRaw<readonly SubmitClaimRow[]>(
+          Prisma.sql`
+            SELECT * FROM public.claim_rank_connector_submit_targeted(
+              ${leaseOwner}::text,
+              ${leaseSeconds}::integer,
+              ${connectorVersion}::text,
+              ${candidate.executionId}::uuid
+            )
+          `
+        )
+      );
+      if (rows.length > 1) invalid("targeted submit claim cardinality");
+      if (rows[0]) return claim(rows[0], leaseOwner);
+    }
+    return undefined;
+  }
+
+  private async nextSubmitCandidate(
+    connectorVersion: string,
+    leaseSeconds: number
+  ): Promise<SubmitCandidate | undefined> {
+    if (Date.now() - this.submitCandidatesFetchedAt > SUBMIT_CANDIDATE_TTL_MS) {
+      this.submitCandidates = [];
+    }
+    if (this.submitCandidates.length === 0) {
+      if (Date.now() < this.submitCandidateEmptyUntil) return undefined;
+      if (!this.submitCandidateRefill) {
+        this.submitCandidateRefill = this.refillSubmitCandidates(
+          connectorVersion,
+          leaseSeconds
+        ).finally(() => {
+          this.submitCandidateRefill = undefined;
+        });
+      }
+      await this.submitCandidateRefill;
+    }
+    const candidate = this.submitCandidates.shift();
+    if (candidate) {
+      this.recentlyAttemptedCandidates.push({
+        id: candidate.executionId,
+        at: Date.now()
+      });
+    }
+    return candidate;
+  }
+
+  private async refillSubmitCandidates(
+    connectorVersion: string,
+    leaseSeconds: number
+  ): Promise<void> {
+    const now = Date.now();
+    while (
+      this.recentlyAttemptedCandidates.length > 0 &&
+      now - this.recentlyAttemptedCandidates[0]!.at >
+        SUBMIT_CANDIDATE_EXCLUSION_MS
+    ) {
+      this.recentlyAttemptedCandidates.shift();
+    }
+    const excluded = this.recentlyAttemptedCandidates
+      .slice(-120)
+      .map((candidate) => candidate.id);
+    const excludedSql = excluded.length > 0
+      ? Prisma.sql`ARRAY[${Prisma.join(excluded.map((id) => Prisma.sql`${id}::uuid`))}]::uuid[]`
+      : Prisma.sql`ARRAY[]::uuid[]`;
+    const rows = await this.prisma.$queryRaw<readonly SubmitCandidateRow[]>(
+      Prisma.sql`
+        SELECT * FROM public.list_rank_connector_submit_candidates(
+          ${connectorVersion}::text,
+          ${leaseSeconds}::integer,
+          ${SUBMIT_CANDIDATE_BATCH_SIZE}::integer,
+          ${excludedSql}
+        )
+      `
+    );
+    if (rows.length > SUBMIT_CANDIDATE_BATCH_SIZE) {
+      invalid("submit candidate batch cardinality");
+    }
+    this.submitCandidates = rows.map((row) => ({
+      executionId: uuid(row.executionId, "submit candidate id"),
+      jobId: uuid(row.jobId, "submit candidate job id")
+    }));
+    this.submitCandidatesFetchedAt = Date.now();
+    if (rows.length === 0) {
+      this.submitCandidateEmptyUntil = Date.now() + SUBMIT_CANDIDATE_RETRY_MS;
+    }
+  }
+
+  private async withSubmitJobClaim<T>(
+    jobId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const predecessor = this.submitJobClaims.get(jobId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.submitJobClaims.set(jobId, current);
+    if (predecessor) await predecessor;
+    try {
+      return await operation();
+    } finally {
+      if (this.submitJobClaims.get(jobId) === current) {
+        this.submitJobClaims.delete(jobId);
+      }
+      release();
+    }
   }
 
   public async readSubmitRequest(

@@ -505,7 +505,7 @@ case "$component" in
       RANK_PREPARATION_DISPATCH_SECONDS=5 \
       RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS=1000 \
       RANK_PREPARATION_CONCURRENCY=5 \
-      CONNECTOR_RUNTIME_SHARD_COUNT=3 \
+      CONNECTOR_RUNTIME_SHARD_COUNT=2 \
       RANK_CONNECTOR_CONCURRENCY=32 \
       RANK_PROVIDER_SUBMIT_ENABLED=false \
       INTEGRATION_CREDENTIAL_ROLE=DISABLED \
@@ -537,11 +537,10 @@ case "$component" in
       MALWARE_SCANNER_ENABLED=false \
       "$node_bin" "$project_root/backend-execution/dist/crawl-worker.main.js"
     ;;
-  connector-worker|connector-worker-2|connector-worker-3)
+  connector-worker|connector-worker-2)
     case "$component" in
       connector-worker) connector_runtime_shard_index=0 ;;
       connector-worker-2) connector_runtime_shard_index=1 ;;
-      connector-worker-3) connector_runtime_shard_index=2 ;;
     esac
     exec env \
       -i \
@@ -564,10 +563,11 @@ case "$component" in
       CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000 \
       CONNECTOR_PAID_RUNTIME_ENABLED="${SEO_PLATFORM_PAID_CONNECTOR_RUNTIME:-true}" \
       CONNECTOR_RUNTIME_SHARD_INDEX="$connector_runtime_shard_index" \
-      CONNECTOR_RUNTIME_SHARD_COUNT=3 \
+      CONNECTOR_RUNTIME_SHARD_COUNT=2 \
       RANK_CONNECTOR_CONCURRENCY=32 \
-      FREQUENCY_COLLECTION_CONCURRENCY=4 \
-      XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=96 \
+      RANK_CONNECTOR_CLAIM_CONCURRENCY=4 \
+      FREQUENCY_COLLECTION_CONCURRENCY=5 \
+      XMLSTOCK_GLOBAL_HTTP_CONCURRENCY=64 \
       KEYWORD_RESEARCH_CONCURRENCY=1 \
       RANK_PROVIDER_SUBMIT_ENABLED=true \
       RANK_PROVIDER_KILL_SWITCH_VERSION=arsenkin-positions@4 \

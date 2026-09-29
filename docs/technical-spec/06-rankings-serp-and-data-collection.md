@@ -413,22 +413,33 @@ capacity между всеми своими проектами и connector repl
 coordination и работает fail-closed; Job/lease/progress source of truth —
 PostgreSQL. Базовые окна одного физического ключа: Yandex Live — `10 concurrent /
 10 RPS`, Turbo — `50 / 50`, Google XML — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
-`10 / 10`. Сверху действует отдельный общий предел 96 внешних XMLStock HTTP-вызовов.
+`10 / 10`. Сверху действует отдельный общий предел 64 внешних XMLStock HTTP-вызовов.
 Односекундный предел сглаживается общими для replicas окнами по
 100 мс, поэтому заявленная скорость не превращается в отклоняемый burst.
 XMLStock не использует общий lifecycle limit из пяти задач:
 dispatcher может подготовить новые keyword chunks только в пределах свободной
-части общего пула из 96 connector rank lanes, после чего Redis и per-product limiter
+части общего пула из 64 connector rank lanes, после чего Redis и per-product limiter
 задают фактический предел внешних HTTP-вызовов. Лимит пяти provider tasks
 остаётся только у Arsenkin.
-Штатные три connector process используют независимые deterministic dispatch
-shards, по 32 rank slot и по четыре frequency worker slot. Каждый slot имеет
+Штатные два connector process используют независимые deterministic dispatch
+shards, по 32 rank slot и по пять frequency worker slot. Каждый slot имеет
 фиксированный BullMQ lane ID; waiting/active backlog поэтому ограничен числом
 lanes даже при остановленном consumer. Старый time-based tick после обновления
-завершается без DB claim. Пул заполняется до 96 rank-вызовов, а Wordstat bucket
+завершается без DB claim. Пул заполняется до 64 rank-вызовов, а Wordstat bucket
 — до `10 RPS` на физический ключ. Ожидание permit не
 расходует попытку JobItem и отображается как фаза выполнения с расчётным
 числом provider requests, а не как terminal/error state.
+
+Для XMLStock rank submit один fairness-поиск возвращает не более 30
+candidate execution ID; connector process держит только эти ID в памяти не
+дольше пяти секунд и распределяет их между свободными lanes. Каждый ID перед
+платным запросом проходит targeted claim по primary key с прежними полными
+tenant/credential/route/grant/lease проверками и атомарным переходом в
+`CLAIMED`. Кандидатный список не является резервом; после падения процесса
+другой worker может занять ещё не claimed executions. Claims одного Job
+локально сериализуются из-за canonical lock родительского Job, а число
+одновременных тяжёлых claims ограничено четырьмя на процесс. Отозванный
+кандидат пропускается без HTTP; Redis не хранит API-ключи или состояние Job.
 
 XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос
 явно получает `tbm=turbo&groupby=50` и отдельный distributed quota bucket;
@@ -460,7 +471,7 @@ provider-wide advisory lock; terminal Job с ещё действующим execu
 всей append-only истории executions текущего Job на каждом worker lane. Rank grant dispatcher также
 сериализует общий connector budget: grant buffer не превышает число lanes,
 умноженное на dispatch interval и ограниченное 30-секундным grant window
-(720 при 48 lanes и 15 секундах), а один Job получает за проход максимум 48.
+(960 при 64 lanes и 15 секундах), а один Job получает за проход максимум 64.
 Неиспользованная авторизация допускается к повтору только спустя минуту после
 expiry. Для выбранного Job dispatcher проверяет граф агрегатами и читает только
 очередной bounded slice через latest-attempt lateral lookup, не материализуя

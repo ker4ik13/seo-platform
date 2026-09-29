@@ -380,6 +380,7 @@ function config(): AppConfig {
       shardIndex: 0,
       shardCount: 1,
       rankConcurrency: 1,
+      rankClaimConcurrency: 1,
       frequencyConcurrency: 1,
       keywordResearchConcurrency: 1,
       xmlStockGlobalHttpConcurrency: 96

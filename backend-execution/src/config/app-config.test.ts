@@ -32,7 +32,8 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.connectorRuntime.shardIndex, 0);
   assert.equal(config.connectorRuntime.shardCount, 1);
   assert.equal(config.connectorRuntime.rankConcurrency, 4);
-  assert.equal(config.connectorRuntime.xmlStockGlobalHttpConcurrency, 96);
+  assert.equal(config.connectorRuntime.xmlStockGlobalHttpConcurrency, 64);
+  assert.equal(config.connectorRuntime.rankClaimConcurrency, 4);
   assert.equal(config.rankPreparation.enabled, false);
   assert.equal(config.rankManifestApiToken, undefined);
   assert.equal(config.rankGrantApiToken, undefined);
@@ -799,6 +800,7 @@ test("requires database capacity for all connector worker queues", () => {
       DATABASE_POOL_MAX: "12",
       INTEGRATION_VALIDATION_CONCURRENCY: "1",
       RANK_CONNECTOR_CONCURRENCY: "4",
+      RANK_CONNECTOR_CLAIM_CONCURRENCY: "2",
       FREQUENCY_COLLECTION_CONCURRENCY: "1",
       KEYWORD_RESEARCH_CONCURRENCY: "1"
     },
@@ -806,6 +808,7 @@ test("requires database capacity for all connector worker queues", () => {
   );
   assert.equal(config.databasePoolMax, 12);
   assert.equal(config.connectorRuntime.rankConcurrency, 4);
+  assert.equal(config.connectorRuntime.rankClaimConcurrency, 2);
   assert.equal(config.connectorRuntime.frequencyConcurrency, 1);
   assert.equal(config.connectorRuntime.keywordResearchConcurrency, 1);
   assert.equal(config.integrationCredentialValidation.concurrency, 1);

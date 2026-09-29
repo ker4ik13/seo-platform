@@ -30,6 +30,7 @@ const baseEnvironment = {
   PLATFORM_ARSENKIN_ENABLED: "false",
   PLATFORM_ARSENKIN_API_KEYS: "staged-must-stay-in-http",
   RANK_CONNECTOR_CONCURRENCY: "16",
+  RANK_CONNECTOR_CLAIM_CONCURRENCY: "4",
   UPLOAD_FILE_RETENTION_DAYS: "14",
   EXPORT_FILE_RETENTION_DAYS: "3",
   RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS: "750"
@@ -44,8 +45,7 @@ test("execution roles receive only their scoped database and secrets", () => {
     "rank-worker",
     "crawl-worker",
     "connector-worker",
-    "connector-worker-2",
-    "connector-worker-3"
+    "connector-worker-2"
   ]);
   const system = definitions.find(({ name }) => name === "system-worker")?.environment;
   assert.equal(system?.DATABASE_URL, undefined);
@@ -72,7 +72,7 @@ test("execution roles receive only their scoped database and secrets", () => {
   );
   assert.equal(rank?.INTEGRATION_CREDENTIAL_KEYS, undefined);
   assert.equal(rank?.RANK_CONNECTOR_CONCURRENCY, "16");
-  assert.equal(rank?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
+  assert.equal(rank?.CONNECTOR_RUNTIME_SHARD_COUNT, "2");
   const connector = definitions.find(({ name }) => name === "connector-worker")?.environment;
   const secondaryConnector = definitions.find(
     ({ name }) => name === "connector-worker-2"
@@ -88,8 +88,9 @@ test("execution roles receive only their scoped database and secrets", () => {
   assert.equal(secondaryConnector?.CONNECTOR_MAINTENANCE_ENABLED, "false");
   assert.equal(connector?.CONNECTOR_RUNTIME_SHARD_INDEX, "0");
   assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_INDEX, "1");
-  assert.equal(connector?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
-  assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_COUNT, "3");
+  assert.equal(connector?.CONNECTOR_RUNTIME_SHARD_COUNT, "2");
+  assert.equal(secondaryConnector?.CONNECTOR_RUNTIME_SHARD_COUNT, "2");
+  assert.equal(connector?.RANK_CONNECTOR_CLAIM_CONCURRENCY, "4");
   assert.equal(connector?.PLATFORM_XMLSTOCK_SOFT_ID, "a".repeat(32));
   assert.equal(secondaryConnector?.PLATFORM_XMLSTOCK_SOFT_ID, "a".repeat(32));
   assert.equal(rank?.PLATFORM_XMLSTOCK_SOFT_ID, undefined);

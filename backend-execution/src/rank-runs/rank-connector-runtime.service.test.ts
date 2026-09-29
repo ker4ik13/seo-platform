@@ -1002,7 +1002,8 @@ function service(
   const config = {
     integrationCredentialValidation: { timeoutMs },
     platformApiCommandTimeoutMs: 2_500,
-    rankExecution: { submitEnabled }
+    rankExecution: { submitEnabled },
+    connectorRuntime: { rankClaimConcurrency: 4 }
   } as unknown as AppConfig;
   return new RankConnectorRuntimeService(
     broker,
