@@ -493,7 +493,8 @@ Targeted claim одного execution ID не выполняет повторн�
 активных executions для сортировки: это не меняет выбор и неоправданно
 нагружает PostgreSQL при большом append-only журнале. Exact execution
 материализуется по primary key до полного graph join; lock и permission
-fences остаются прежними.
+fences остаются прежними. Пакетный поиск submit-кандидатов не делает
+дополнительный `NOT EXISTS` по тому же журналу перед основным query.
 Неиспользованная авторизация допускается к повтору только спустя минуту после
 expiry. Для выбранного Job dispatcher проверяет граф агрегатами и читает только
 очередной bounded slice через latest-attempt lateral lookup, не материализуя
