@@ -712,6 +712,14 @@ async function rankExecutionDispatchCapacity(
       )
     )
   `;
+  // XMLStock grants live for only 30 seconds and a submit claim needs most of
+  // that window for its fenced lease. Preparing 15 seconds of *all* connector
+  // lanes at once floods the short window with grants that expire before the
+  // connector can claim them. Poll-waiting pages have their own durable state
+  // and do not reserve a new submit slot.
+  const grantWindow = provider === "XMLSTOCK"
+    ? Math.min(dispatchLimit, connectorLaneCount)
+    : dispatchLimit;
   let activeJobCount = 1;
   if (provider === "XMLSTOCK") {
     const jobs = await transaction.$queryRaw<
@@ -724,6 +732,7 @@ async function rankExecutionDispatchCapacity(
        AND run."project_id" = job."project_id"
        AND run."job_id" = job."id"
       WHERE job."type" = 'MANUAL_RANK_CHECK'
+        AND job."provider" = 'XMLSTOCK'
         AND job."status" IN ('QUEUED', 'RUNNING')
         AND job."stage" IN ('WAITING_FOR_QUEUE', 'WAITING_EXECUTION_GRANT')
         AND job."cancel_requested_at" IS NULL
@@ -735,9 +744,9 @@ async function rankExecutionDispatchCapacity(
     activeJobCount = Math.max(1, Number(jobs[0]?.activeJobCount ?? 0n));
   }
   const hardLimit = provider === "XMLSTOCK"
-    ? rankDispatchHardLimit(dispatchLimit)
-    : dispatchLimit;
-  const candidateLimit = dispatchLimit * 64;
+    ? rankDispatchHardLimit(grantWindow)
+    : grantWindow;
+  const candidateLimit = grantWindow * 64;
   if (!Number.isSafeInteger(candidateLimit)) {
     throw new TypeError("Rank dispatch candidate limit overflow");
   }
@@ -795,6 +804,7 @@ async function rankExecutionDispatchCapacity(
           execution."job_version"
         FROM "rank_connector_executions" execution
         WHERE execution."status" = 'POLL_WAIT'
+          AND ${provider}::text = 'ARSENKIN'
           AND execution."next_action_at" <= statement_timestamp()
         LIMIT ${candidateLimit}
       )
@@ -812,9 +822,11 @@ async function rankExecutionDispatchCapacity(
       )
     )
     SELECT COUNT(*)::bigint AS "activeConnectorCount",
-           COUNT(*) FILTER (
-             WHERE active_execution."job_id" = ${jobId}::uuid
-           )::bigint AS "jobConnectorCount"
+           (
+             SELECT COUNT(*)::bigint
+             FROM ready_execution own_execution
+             WHERE own_execution."job_id" = ${jobId}::uuid
+           ) AS "jobConnectorCount"
     FROM (
       SELECT ready_execution."id", ready_execution."job_id"
       FROM ready_execution
@@ -897,7 +909,7 @@ async function rankExecutionDispatchCapacity(
   }
   if (provider === "XMLSTOCK") {
     return fairXmlStockRankDispatchCapacity(
-      dispatchLimit,
+      grantWindow,
       connectorLaneCount,
       activeJobCount,
       activeConnectorCount,
@@ -939,8 +951,7 @@ export function fairXmlStockRankDispatchCapacity(
     ![dispatchLimit, connectorLaneCount, activeJobCount,
       activeConnectorCount, jobConnectorCount].every(Number.isSafeInteger) ||
     dispatchLimit < 1 || connectorLaneCount < 1 || activeJobCount < 1 ||
-    activeConnectorCount < 0 || jobConnectorCount < 0 ||
-    jobConnectorCount > activeConnectorCount
+    activeConnectorCount < 0 || jobConnectorCount < 0
   ) {
     throw new TypeError("Invalid fair rank dispatch capacity");
   }
@@ -953,10 +964,15 @@ export function fairXmlStockRankDispatchCapacity(
   if (normalCapacity > 0) {
     return Math.min(connectorLaneCount, normalCapacity, jobHeadroom);
   }
+  const recoveryTarget = dispatchLimit <= connectorLaneCount
+    ? fairShare
+    : Math.min(
+        fairShare,
+        rankDispatchFairBootstrap(connectorLaneCount, activeJobCount)
+      );
   const recoveryHeadroom = Math.max(
     0,
-    rankDispatchFairBootstrap(connectorLaneCount, activeJobCount) -
-      jobConnectorCount
+    recoveryTarget - jobConnectorCount
   );
   return Math.min(
     jobHeadroom, recoveryHeadroom,

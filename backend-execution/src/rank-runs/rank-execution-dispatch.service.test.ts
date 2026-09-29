@@ -110,6 +110,14 @@ test("caps the grant buffer by connector throughput without serializing XMLStock
 });
 
 test("fair XMLStock grants rescue starved Jobs without unbounded overcommit", () => {
+  // Only one short-lived connector window is admitted at a time. A due poll
+  // belongs to an already submitted execution, not a new submit grant.
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 0, 0), 16);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 64, 0), 16);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 80, 0), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 64, 16), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 20, 64, 0), 3);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 20, 64, 100), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 0, 0), 64);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 990, 0), 32);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1022, 0), 32);

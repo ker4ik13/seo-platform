@@ -17,6 +17,9 @@ test("rank dispatch selects only a bounded latest-attempt slice", async () => {
   assert.match(source, /RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS/u);
   assert.match(source, /seo-platform:rank-dispatch:global/u);
   assert.match(source, /LIMIT \$\{hardLimit\}/u);
+  assert.match(source, /Math\.min\(dispatchLimit, connectorLaneCount\)/u);
+  assert.match(source, /AND \$\{provider\}::text = 'ARSENKIN'/u);
+  assert.match(source, /job\."provider" = 'XMLSTOCK'/u);
   assert.match(source, /jobConnectorCount/u);
   assert.match(source, /rankDispatchHardLimit/u);
   assert.doesNotMatch(
