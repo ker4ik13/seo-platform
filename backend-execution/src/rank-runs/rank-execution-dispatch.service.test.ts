@@ -5,6 +5,7 @@ import type { PrismaService } from "../database/prisma.service.js";
 import type { RankManifestClient } from "../seo-data/rank-manifest.client.js";
 import {
   availableRankExecutionDispatchCapacity,
+  fairXmlStockRankDispatchCapacity,
   rankGrantFailureFinalStatus,
   rankExecutionDispatchLimit,
   rankProviderActiveTaskLimit,
@@ -106,6 +107,34 @@ test("caps the grant buffer by connector throughput without serializing XMLStock
     TypeError
   );
   assert.throws(() => rankExecutionDispatchLimit(0, 15), TypeError);
+});
+
+test("fair XMLStock grants rescue starved Jobs without unbounded overcommit", () => {
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 0, 0), 64);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 990, 0), 32);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1022, 0), 32);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1022, 32), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 990, 900), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1200, 0), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 960, 0), 7);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 1099, 0), 7);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 990, 7), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 1200, 0), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 950, 48), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 500, 48), 64);
+  let occupied = 990;
+  for (let job = 0; job < 20; job += 1) {
+    const granted = fairXmlStockRankDispatchCapacity(
+      960, 64, 20, occupied, 0
+    );
+    assert.equal(granted, 7);
+    occupied += granted;
+  }
+  assert.equal(occupied, 1_130);
+  assert.throws(
+    () => fairXmlStockRankDispatchCapacity(960, 64, 0, 990, 0),
+    TypeError
+  );
 });
 
 test("finalizes an explicit grant denial before provider submit", async () => {

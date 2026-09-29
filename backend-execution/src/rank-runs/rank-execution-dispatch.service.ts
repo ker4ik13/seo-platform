@@ -110,6 +110,7 @@ export class RankExecutionDispatchService {
             AND item."status" = 'QUEUED'
         )
       ORDER BY
+        j."updated_at" ASC,
         (
           j."progress_current"::numeric /
           GREATEST(j."progress_total"::numeric, 1)
@@ -291,6 +292,8 @@ export class RankExecutionDispatchService {
         const capacity = await rankExecutionDispatchCapacity(
           transaction,
           provider,
+          jobId,
+          connectorLaneCount,
           rankExecutionDispatchLimit(
             connectorLaneCount,
             this.config.rankPreparation.dispatchSeconds
@@ -696,6 +699,8 @@ function dispatchFailureCode(error: unknown): RankJobFailureCode {
 async function rankExecutionDispatchCapacity(
   transaction: Prisma.TransactionClient,
   provider: "ARSENKIN" | "XMLSTOCK",
+  jobId: string,
+  connectorLaneCount: number,
   dispatchLimit: number,
   activeTaskLimit: number | undefined
 ): Promise<number> {
@@ -707,12 +712,40 @@ async function rankExecutionDispatchCapacity(
       )
     )
   `;
+  let activeJobCount = 1;
+  if (provider === "XMLSTOCK") {
+    const jobs = await transaction.$queryRaw<
+      readonly { readonly activeJobCount: bigint }[]
+    >`
+      SELECT COUNT(*)::bigint AS "activeJobCount"
+      FROM "jobs" job
+      JOIN "rank_job_runs" run
+        ON run."workspace_id" = job."workspace_id"
+       AND run."project_id" = job."project_id"
+       AND run."job_id" = job."id"
+      WHERE job."type" = 'MANUAL_RANK_CHECK'
+        AND job."status" IN ('QUEUED', 'RUNNING')
+        AND job."stage" IN ('WAITING_FOR_QUEUE', 'WAITING_EXECUTION_GRANT')
+        AND job."cancel_requested_at" IS NULL
+        AND run."seal_state" = 'SEALED'
+        AND run."finalization_status" IS NULL
+        AND (job."progress_total" IS NULL
+          OR job."progress_current" < job."progress_total")
+    `;
+    activeJobCount = Math.max(1, Number(jobs[0]?.activeJobCount ?? 0n));
+  }
+  const hardLimit = provider === "XMLSTOCK"
+    ? rankDispatchHardLimit(dispatchLimit)
+    : dispatchLimit;
   const candidateLimit = dispatchLimit * 64;
   if (!Number.isSafeInteger(candidateLimit)) {
     throw new TypeError("Rank dispatch candidate limit overflow");
   }
   const globalRows = await transaction.$queryRaw<
-    readonly { readonly activeConnectorCount: bigint }[]
+    readonly {
+      readonly activeConnectorCount: bigint;
+      readonly jobConnectorCount: bigint;
+    }[]
   >(Prisma.sql`
     WITH ready_execution AS MATERIALIZED (
       (
@@ -778,9 +811,12 @@ async function rankExecutionDispatchCapacity(
         LIMIT ${candidateLimit}
       )
     )
-    SELECT COUNT(*)::bigint AS "activeConnectorCount"
+    SELECT COUNT(*)::bigint AS "activeConnectorCount",
+           COUNT(*) FILTER (
+             WHERE active_execution."job_id" = ${jobId}::uuid
+           )::bigint AS "jobConnectorCount"
     FROM (
-      SELECT ready_execution."id"
+      SELECT ready_execution."id", ready_execution."job_id"
       FROM ready_execution
       JOIN "jobs" rank_job
         ON rank_job."workspace_id" = ready_execution."workspace_id"
@@ -791,12 +827,13 @@ async function rankExecutionDispatchCapacity(
         AND rank_job."stage" = 'WAITING_EXECUTION_GRANT'
         AND rank_job."cancel_requested_at" IS NULL
         AND rank_job."version" = ready_execution."job_version"
-      LIMIT ${dispatchLimit}
+      LIMIT ${hardLimit}
     ) active_execution
   `);
   const activeConnectorCount = Number(
     globalRows[0]?.activeConnectorCount ?? 0n
   );
+  const jobConnectorCount = Number(globalRows[0]?.jobConnectorCount ?? 0n);
   let activeProviderTaskCount = 0;
   if (activeTaskLimit !== undefined) {
     const rows = await transaction.$queryRaw<
@@ -858,11 +895,72 @@ async function rankExecutionDispatchCapacity(
     `;
     activeProviderTaskCount = Number(rows[0]?.activeTaskCount ?? 0n);
   }
+  if (provider === "XMLSTOCK") {
+    return fairXmlStockRankDispatchCapacity(
+      dispatchLimit,
+      connectorLaneCount,
+      activeJobCount,
+      activeConnectorCount,
+      jobConnectorCount
+    );
+  }
   return availableRankExecutionDispatchCapacity(
-    dispatchLimit,
-    activeConnectorCount,
-    activeTaskLimit,
-    activeProviderTaskCount
+    dispatchLimit, activeConnectorCount, activeTaskLimit, activeProviderTaskCount
+  );
+}
+
+function rankDispatchFairBootstrap(
+  connectorLaneCount: number,
+  activeJobCount: number
+): number {
+  return Math.max(
+    1,
+    Math.min(connectorLaneCount, Math.ceil(2 * connectorLaneCount / activeJobCount))
+  );
+}
+
+function rankDispatchHardLimit(dispatchLimit: number): number {
+  const hardLimit = dispatchLimit + Math.floor(dispatchLimit / 4);
+  if (!Number.isSafeInteger(hardLimit)) {
+    throw new TypeError("Rank dispatch recovery limit overflow");
+  }
+  return hardLimit;
+}
+
+/** A bounded recovery share prevents an old Job's due pages from starving peers. */
+export function fairXmlStockRankDispatchCapacity(
+  dispatchLimit: number,
+  connectorLaneCount: number,
+  activeJobCount: number,
+  activeConnectorCount: number,
+  jobConnectorCount: number
+): number {
+  if (
+    ![dispatchLimit, connectorLaneCount, activeJobCount,
+      activeConnectorCount, jobConnectorCount].every(Number.isSafeInteger) ||
+    dispatchLimit < 1 || connectorLaneCount < 1 || activeJobCount < 1 ||
+    activeConnectorCount < 0 || jobConnectorCount < 0 ||
+    jobConnectorCount > activeConnectorCount
+  ) {
+    throw new TypeError("Invalid fair rank dispatch capacity");
+  }
+  const fairShare = Math.max(1, Math.floor(dispatchLimit / activeJobCount));
+  const normalCapacity = Math.max(0, dispatchLimit - activeConnectorCount);
+  if (activeConnectorCount < dispatchLimit - connectorLaneCount) {
+    return Math.min(connectorLaneCount, normalCapacity);
+  }
+  const jobHeadroom = Math.max(0, fairShare - jobConnectorCount);
+  if (normalCapacity > 0) {
+    return Math.min(connectorLaneCount, normalCapacity, jobHeadroom);
+  }
+  const recoveryHeadroom = Math.max(
+    0,
+    rankDispatchFairBootstrap(connectorLaneCount, activeJobCount) -
+      jobConnectorCount
+  );
+  return Math.min(
+    jobHeadroom, recoveryHeadroom,
+    Math.max(0, rankDispatchHardLimit(dispatchLimit) - activeConnectorCount)
   );
 }
 

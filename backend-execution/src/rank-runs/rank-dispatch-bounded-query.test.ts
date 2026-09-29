@@ -16,7 +16,9 @@ test("rank dispatch selects only a bounded latest-attempt slice", async () => {
   assert.match(source, /LIMIT \$\{jobCapacity\}/u);
   assert.match(source, /RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS/u);
   assert.match(source, /seo-platform:rank-dispatch:global/u);
-  assert.match(source, /LIMIT \$\{dispatchLimit\}/u);
+  assert.match(source, /LIMIT \$\{hardLimit\}/u);
+  assert.match(source, /jobConnectorCount/u);
+  assert.match(source, /rankDispatchHardLimit/u);
   assert.doesNotMatch(
     source,
     /transaction\.rankConnectorExecution\.findMany\(\{[\s\S]*?jobId[\s\S]*?select:/u
