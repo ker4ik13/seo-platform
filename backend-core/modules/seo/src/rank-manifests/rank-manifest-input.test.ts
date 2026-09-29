@@ -3,6 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
   internalGetRankManifestChunkInput,
+  internalGetRankManifestChunksInput,
   internalRankManifestChunkQuery,
   internalSealRankManifestInput
 } from "./rank-manifest-input.js";
@@ -202,6 +203,26 @@ test("normalizes a bounded manifest chunk query", () => {
         manifestId,
         chunkIndex: "300000"
       }),
+    BadRequestException
+  );
+});
+
+test("accepts only unique bounded manifest chunk batches", () => {
+  const batch = {
+    workspaceId, projectId, actorId, jobId, manifestId,
+    chunkIndices: [0, 2, 1]
+  };
+  assert.deepEqual(internalGetRankManifestChunksInput(batch), batch);
+  assert.throws(
+    () => internalGetRankManifestChunksInput({ ...batch, chunkIndices: [0, 0] }),
+    BadRequestException
+  );
+  assert.throws(
+    () => internalGetRankManifestChunksInput({ ...batch, chunkIndices: Array.from({ length: 65 }, (_, index) => index) }),
+    BadRequestException
+  );
+  assert.throws(
+    () => internalGetRankManifestChunksInput({ ...batch, extra: "not allowed" }),
     BadRequestException
   );
 });

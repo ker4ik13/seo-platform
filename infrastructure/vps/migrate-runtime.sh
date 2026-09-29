@@ -76,6 +76,7 @@ grant_runtime_permissions() {
     PGDATABASE="$database_name" \
     PGUSER="$database_user" \
     PGPASSWORD="$database_password" \
+    WORKER_GATEWAY_ENABLED="${WORKER_GATEWAY_ENABLED:-false}" \
     /bin/sh \
     "$project_root/infrastructure/postgres/permissions/provision-service-runtime-role.sh" \
     >/dev/null

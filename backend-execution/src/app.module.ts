@@ -25,6 +25,7 @@ import { OperationActivityModule } from "./operation-activity/operation-activity
 import { SemanticExportModule } from "./semantic-exports/semantic-export.module.js";
 import { AiAnswerCollectionModule } from "./ai-answer-collections/ai-answer-collection.module.js";
 import { ClusteringRunModule } from "./clustering-runs/clustering-run.module.js";
+import { WorkerNodeModule } from "./worker-nodes/worker-node.module.js";
 
 @Module({
   imports: [
@@ -53,7 +54,8 @@ import { ClusteringRunModule } from "./clustering-runs/clustering-run.module.js"
     OperationActivityModule,
     SemanticExportModule,
     AiAnswerCollectionModule,
-    ClusteringRunModule
+    ClusteringRunModule,
+    WorkerNodeModule
   ]
 })
 export class AppModule {}

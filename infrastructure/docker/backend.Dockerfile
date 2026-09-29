@@ -33,6 +33,10 @@ COPY --from=build --chown=node:node /deploy ./
 USER node
 CMD ["node", "dist/main.js"]
 
+FROM runtime AS remote-worker
+
+CMD ["node", "dist/remote-worker.main.js"]
+
 FROM runtime AS nats-provisioner
 
 COPY --chown=node:node infrastructure/nats/topology.mjs /app/nats/topology.mjs

@@ -650,8 +650,16 @@ FROM unnest(CASE current_database()
     'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)',
     'public.list_integration_credential_key_versions()',
     'public.register_integration_credential_kek_canary(integer,bytea,bytea,bytea,bytea,bytea,bytea)',
-    'public.read_rank_runtime_diagnostics_entries(uuid,uuid,uuid,integer)'
-  ]
+    'public.read_rank_runtime_diagnostics_entries(uuid,uuid,uuid,integer)',
+    'public.list_remote_worker_rank_assignments(integer)'
+  ] || CASE WHEN :'worker_gateway_enabled' = 'true' THEN ARRAY[
+    'public.claim_rank_connector_poll(text,integer,text)',
+    'public.list_rank_connector_poll_candidates(text,integer,uuid[])',
+    'public.claim_rank_connector_poll_targeted(text,integer,text,uuid)',
+    'public.read_rank_connector_billing_settlement(uuid,uuid,text,uuid,integer,integer)',
+    'public.defer_rank_connector_poll_capacity(uuid,uuid,text,uuid,integer,integer,integer)',
+    'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text,jsonb,bytea)'
+  ] ELSE ARRAY[]::TEXT[] END
   ELSE ARRAY[]::TEXT[]
 END) AS required_routine(routine_signature)
 ORDER BY routine_signature
@@ -669,7 +677,9 @@ FROM unnest(ARRAY[
   'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)',
   'public.claim_rank_staged_result(text,integer)',
   'public.claim_rank_staged_results(text,integer,integer)',
-  'public.complete_rank_staged_result(uuid,uuid,text,uuid,integer,integer,boolean)'
+  'public.available_remote_rank_slots(integer)',
+  'public.complete_rank_staged_result(uuid,uuid,text,uuid,integer,integer,boolean)',
+  'public.complete_rank_staged_results_batch(uuid,uuid,jsonb,boolean)'
 ]) AS rank_required_routine(routine_signature)
 WHERE current_database() = 'jobs_db'
 ORDER BY routine_signature

@@ -127,6 +127,12 @@ export interface RankConnectorPollClaim extends RankConnectorClaim {
   readonly providerProgressInvalid?: true;
 }
 
+export type RankConnectorPollLease = Pick<
+  RankConnectorClaim,
+  "workspaceId" | "executionId" | "leaseOwner" | "leaseToken" |
+  "leaseGeneration" | "executionVersion"
+>;
+
 export interface RankConnectorSubmitPermit {
   readonly executionId: string;
   readonly workspaceId: string;
@@ -559,9 +565,9 @@ export class RankConnectorRuntimeBrokerService {
   }
 
   public completePoll(
-    claimValue: RankConnectorPollClaim,
+    claimValue: RankConnectorPollLease,
     input:
-      | { readonly outcome: "PENDING" }
+      | { readonly outcome: "PENDING"; readonly retryAfterSeconds?: number }
       | {
           readonly outcome: "CHECKPOINTED";
           readonly progress: XmlStockRankPageProgress;

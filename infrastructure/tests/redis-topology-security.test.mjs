@@ -181,9 +181,12 @@ test("Redis instances are pinned, bounded, internal-only and secret-safe", async
       "redis-jobs",
       {
         command: '["/bin/sh", "/redis/start-redis.sh", "jobs"]',
-        credentials: [...redisCredentials.keys()].filter((name) =>
-          name.startsWith("REDIS_JOBS_")
-        ),
+        credentials: [
+          ...[...redisCredentials.keys()].filter((name) =>
+            name.startsWith("REDIS_JOBS_")
+          ),
+          "WORKER_GATEWAY_ENABLED"
+        ],
         network: "jobs-redis"
       }
     ],

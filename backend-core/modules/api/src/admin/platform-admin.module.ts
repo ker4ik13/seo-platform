@@ -26,6 +26,8 @@ import {
   PlatformAdminProjectController
 } from "./platform-admin-read.controller.js";
 import { PlatformAdminReadService } from "./platform-admin-read.service.js";
+import { PlatformAdminWorkerNodeController } from "./platform-admin-worker-nodes.controller.js";
+import { PlatformAdminWorkerNodeService } from "./platform-admin-worker-nodes.service.js";
 
 @Module({
   imports: [AuditModule, BillingModule, IdentityModule, JobsModule, SeoDataModule],
@@ -40,13 +42,15 @@ import { PlatformAdminReadService } from "./platform-admin-read.service.js";
     PlatformAdminWorkspaceController,
     PlatformAdminBillingPlanController,
     PlatformAdminProjectController,
-    PlatformAdminOperationController
+    PlatformAdminOperationController,
+    PlatformAdminWorkerNodeController
   ],
   providers: [
     PlatformOverviewService,
     PlatformAdminService,
     PlatformAdminWorkspaceService,
     PlatformAdminReadService,
+    PlatformAdminWorkerNodeService,
     PlatformRoleGuard
   ]
 })

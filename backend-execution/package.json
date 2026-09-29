@@ -24,6 +24,7 @@
     "start:worker:rank": "node dist/rank-worker.main.js",
     "start:worker:crawl": "node dist/crawl-worker.main.js",
     "start:worker:auth-email": "node dist/auth-email-worker.main.js",
+    "start:worker:remote": "node dist/remote-worker.main.js",
     "typecheck": "pnpm --filter @seo-platform/process-supervisor --filter @seo-platform/operational-alerts build && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "prisma:generate": "prisma generate",

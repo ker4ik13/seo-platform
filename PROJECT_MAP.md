@@ -1693,6 +1693,33 @@ specialized indexes, bounded claim/broker functions) остаются парам
 SQL в repository/permission boundaries; обычный CRUD выполняется через Prisma.
 Unsafe Prisma raw APIs запрещены статическим тестом.
 
+`backend-execution/src/worker-nodes` владеет реестром доверенных удалённых
+узлов в `jobs_db`: у каждого узла отдельный hashed bearer token, admin
+enable/drain и пределы HTTP/CPU; public worker heartbeat не раскрывает
+credential и не даёт доступ к PostgreSQL. Admin mutation проходит через
+Core Platform role/MFA boundary. Опциональный `BOTH` HTTP role и Caddy
+`/worker/v1/*` дают узлу узкий rank poll claim/complete: одноразовый
+подписанный lease-ticket, JIT BYOK material только в HTTPS response,
+центральный billing/Redis permit и DB-fenced receipt. Без явного включения
+Gateway и `WORKER_RANK_SLOTS` удалённый агент сообщает только heartbeat;
+прочие capabilities пока исполняются локально.
+Один агент делает не более одного rank-claim HTTP-запроса раз в пять секунд
+на весь сервер: сообщает число свободных слотов, получает до 32 задач одной
+пачкой и распределяет их в памяти по своим асинхронным слотам. Пустая очередь
+поэтому не умножает SQL-опросы на число настроенных потоков.
+Callback возвращает secret-free request snapshot: центр сверяет его hash с
+подписанным ticket и не делает повторный SQL read intent перед сохранением
+страницы; tenant/lease fencing остаётся в DB completion function.
+XMLStock Redis limiter сохраняет общий bucket `physical key + product`, но
+потолок HTTP-in-flight теперь имеет отдельный namespace для каждого node ID:
+отсутствие node ID означает прежний локальный Compose с его 64 HTTP slots.
+Rank coordinator добавляет к локальным lanes не более 256 объявленных
+онлайн-узлами rank slots; функция Jobs DB учитывает только enabled,
+не-draining узлы с protocol v1 и heartbeat моложе 30 секунд. Если таких
+узлов нет, grant budget снова равен локальным lanes без ручного переключения.
+Порядок пробного подключения и безопасные переменные узла описаны в
+`infrastructure/REMOTE_WORKER_RUNBOOK.md`.
+
 ## 6. Ключевые потоки
 
 ### Ручной съём позиций и Top-100
@@ -1707,6 +1734,8 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
    `UNLIMITED`. Для `PLATFORM_PAID` trusted price book сначала создаёт
    double-entry резерв included/prepaid токенов с stable economic reference
    на Job item; новый execution attempt не списывает его повторно.
+   Для новых grant-решений Jobs записывает решение и создаёт scoped execution
+   в одной post-issuer транзакции; legacy pending-grant replay сохраняется.
 5. Connector role выполняет fenced provider submit через DB broker. Для
    синхронного XMLStock перед первым HTTP request он читает только `grantId`
    и credential mode через закрытую `SECURITY DEFINER` функцию и получает у
@@ -1726,6 +1755,19 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
    Raw provider response не сохраняется: Core SEO пакетно создаёт дочерние
    immutable строки rank snapshot, а frontend читает только tenant-scoped
    проекцию.
+   При подготовке очередного bounded окна XMLStock rank role заранее читает
+   sealed manifest chunks одним Core SEO batch-запросом и переиспользует
+   точные chunks при прежней per-item locked revalidation; при отказе batch
+   чтения остаётся прежний одиночный recovery path. При сохранении
+   XMLStock-пачки rank role читает до 16 sealed manifest
+   chunks одним внутренним Core SEO запросом, затем передаёт normalized
+   результаты одним ingest. Jobs DB подтверждает lease/version для всей
+   пачки одной fenced функцией и увеличивает `jobs.progress_current` один раз;
+   одиночный Arsenkin/legacy путь остаётся совместимым.
+   При terminal failure все `job_items` завершаются одним set-based UPDATE
+   с latest execution per item вместо отдельного SQL UPDATE для
+   каждого из тысяч ключей; count и непрерывность sequence проверяются до
+   изменения.
 
 Тот же pipeline обслуживает отдельный `COMPETITOR_SERP`: Arsenkin вызывает
 официальный `check-top` с выбранной глубиной Топ-10/20/30/50/100 и

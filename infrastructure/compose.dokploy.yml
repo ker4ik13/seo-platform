@@ -336,6 +336,7 @@ services:
     <<: *redis-defaults
     command: ["/bin/sh", "/redis/start-redis.sh", "jobs"]
     environment:
+      WORKER_GATEWAY_ENABLED: ${WORKER_GATEWAY_ENABLED:-false}
       REDIS_JOBS_API_PASSWORD: ${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}
       REDIS_JOBS_SYSTEM_PASSWORD: ${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}
       REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
@@ -558,6 +559,7 @@ services:
       PGDATABASE: jobs_db
       PGUSER: jobs_owner
       PGPASSWORD: ${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}
+      WORKER_GATEWAY_ENABLED: ${WORKER_GATEWAY_ENABLED:-false}
     depends_on:
       execution-migrate:
         condition: service_completed_successfully
@@ -844,6 +846,8 @@ services:
     environment:
       <<: [*common-backend-env, *jobs-s3-env, *jobs-upload-command-env, *jobs-inspection-env, *jobs-import-env, *jobs-seo-data-env, *auth-email-runtime-env]
       BIND_ADDRESS: 0.0.0.0
+      JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE: ${JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE:-MANAGEMENT}
+      WORKER_GATEWAY_ENABLED: ${WORKER_GATEWAY_ENABLED:-false}
       PORT: 4002
       NATS_URL: nats://nats:4222
       EXECUTION_HTTP_DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db

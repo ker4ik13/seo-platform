@@ -116,6 +116,34 @@ test("reads a bounded chunk with job and tenant scope", async () => {
   );
 });
 
+test("reads a bounded chunk batch with exact trusted scope", async () => {
+  let observed: unknown;
+  const chunks = [chunkResult()];
+  const controller = new RankManifestController({
+    getChunks: async (input: unknown) => {
+      observed = input;
+      return chunks;
+    }
+  } as unknown as RankManifestService);
+  const body = {
+    workspaceId, projectId, actorId, jobId, manifestId,
+    chunkIndices: [0]
+  };
+  assert.deepEqual(
+    await controller.getChunks(projectId, manifestId, body, headers, request),
+    { data: chunks, meta: { requestId: "request-1" } }
+  );
+  assert.deepEqual(observed, body);
+  await assert.rejects(
+    () => controller.getChunks(projectId, manifestId, { ...body, actorId: jobId }, headers, request),
+    BadRequestException
+  );
+  await assert.rejects(
+    () => controller.getChunks(projectId, jobId, body, headers, request),
+    BadRequestException
+  );
+});
+
 function command() {
   return {
     workspaceId,

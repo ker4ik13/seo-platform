@@ -737,6 +737,7 @@ model RankConnectorExecution {
   providerWireRequestHash              Bytes?                       @map("provider_wire_request_hash")
   providerSubmittedAt                  DateTime?                    @map("provider_submitted_at") @db.Timestamptz(6)
   pollAttemptCount                     Int                          @default(0) @map("poll_attempt_count")
+  remoteUnknownRetries                 Int                          @default(0) @map("remote_unknown_retries")
   nextActionAt                         DateTime?                    @map("next_action_at") @db.Timestamptz(6)
   providerProgressSnapshot             Json?                        @map("provider_progress_snapshot")
   providerProgressHash                 Bytes?                       @map("provider_progress_hash")
@@ -1254,4 +1255,27 @@ model OutboxEvent {
 
   @@index([status, availableAt])
   @@map("outbox_events")
+}
+
+model ExecutionWorkerNode {
+  id                     String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name                   String    @db.VarChar(100)
+  tokenHash              Bytes     @unique @map("token_hash")
+  enabled                Boolean   @default(false)
+  draining               Boolean   @default(false)
+  capabilities           String[]  @default([])
+  maxHttpSlots           Int       @default(16) @map("max_http_slots")
+  maxCpuSlots            Int       @default(2) @map("max_cpu_slots")
+  reportedHttpSlots      Int       @default(0) @map("reported_http_slots")
+  reportedRankSlots      Int       @default(0) @map("reported_rank_slots")
+  reportedCpuSlots       Int       @default(0) @map("reported_cpu_slots")
+  reportedMemoryBytes    BigInt    @default(0) @map("reported_memory_bytes")
+  activeWorkItems        Int       @default(0) @map("active_work_items")
+  lastHeartbeatAt        DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+  lastProtocolVersion    Int?      @map("last_protocol_version")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([enabled, draining, lastHeartbeatAt])
+  @@map("execution_worker_nodes")
 }

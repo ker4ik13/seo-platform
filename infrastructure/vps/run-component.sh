@@ -140,6 +140,7 @@ case "$component" in
       PATH="/usr/bin:/bin" \
       SEO_PLATFORM_PUBLIC_URL="$SEO_PLATFORM_PUBLIC_URL" \
       API_PUBLIC_URL="${API_PUBLIC_URL:-}" \
+      WORKER_GATEWAY_ENABLED="${WORKER_GATEWAY_ENABLED:-false}" \
       "$script_dir/public-api-proxy.sh" \
       watch
     ;;
@@ -277,6 +278,12 @@ case "$component" in
       "$node_bin" "$project_root/backend-core/dist/core.main.js"
     ;;
   backend-execution)
+    gateway_settlement_env=()
+    if [ "${JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE:-MANAGEMENT}" = BOTH ]; then
+      gateway_settlement_env=(
+        "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN=$JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
+      )
+    fi
     exec env \
       -i \
       PATH="$node_path" \
@@ -297,7 +304,9 @@ case "$component" in
       SEO_DATA_URL=http://127.0.0.1:4001 \
       PLATFORM_API_URL=http://127.0.0.1:4000 \
       JOBS_TO_PLATFORM_AUTOMATION_TOKEN="$JOBS_TO_PLATFORM_AUTOMATION_TOKEN" \
-      INTEGRATION_CREDENTIAL_ROLE=MANAGEMENT \
+      "${gateway_settlement_env[@]}" \
+      INTEGRATION_CREDENTIAL_ROLE="${JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE:-MANAGEMENT}" \
+      WORKER_GATEWAY_ENABLED="${WORKER_GATEWAY_ENABLED:-false}" \
       INTEGRATION_CREDENTIAL_KEYS="1:${INTEGRATION_CREDENTIAL_KEY}" \
       INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION=1 \
       INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS="1:${INTEGRATION_CREDENTIAL_FINGERPRINT_KEY}" \

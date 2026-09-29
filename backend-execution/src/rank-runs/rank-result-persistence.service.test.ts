@@ -145,18 +145,21 @@ test("persists several XMLStock chunks through one bounded transaction request",
       jobItemId: "01900000-0000-7000-8000-00000000000e"
     }
   };
-  const completions: Array<{ id: string; persisted: boolean }> = [];
+  const completions: Array<{ ids: string[]; persisted: boolean }> = [];
   const broker = {
     async claimBatch(_owner: string, _leaseSeconds: number, maxItems: number) {
       assert.equal(maxItems, 16);
       return [first, second];
     },
-    async complete(value: RankResultPersistenceClaim, persisted: boolean) {
-      completions.push({ id: value.executionId, persisted });
-      return "PERSISTED";
+    async completeBatch(values: readonly RankResultPersistenceClaim[], persisted: boolean) {
+      completions.push({ ids: values.map((value) => value.executionId), persisted });
     }
   } as unknown as RankResultPersistenceBrokerService;
   const manifests = {
+    async getChunks(input: { readonly chunkIndices: readonly number[] }) {
+      assert.deepEqual(input.chunkIndices, [0, 1]);
+      return [sealedChunk(), secondChunk];
+    },
     async getChunk(input: { chunkIndex: number }) {
       return input.chunkIndex === 1 ? secondChunk : sealedChunk();
     }
@@ -172,10 +175,10 @@ test("persists several XMLStock chunks through one bounded transaction request",
 
   assert.equal(await service(broker, manifests, results).processBatch("rank-result-worker"), 2);
   assert.equal(batchCount, 1);
-  assert.deepEqual(completions, [
-    { id: first.executionId, persisted: true },
-    { id: second.executionId, persisted: true }
-  ]);
+  assert.deepEqual(completions, [{
+    ids: [first.executionId, second.executionId],
+    persisted: true
+  }]);
 });
 
 function service(

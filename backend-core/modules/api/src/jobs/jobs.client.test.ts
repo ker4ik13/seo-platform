@@ -413,6 +413,47 @@ test("loads one safe platform operation for an admin deep link", async () => {
   }
 });
 
+test("worker-node admin client validates the one-time secret and scoped mutations", async () => {
+  const originalFetch = globalThis.fetch;
+  const id = "01900000-0000-7000-8000-000000000099";
+  const token = `wn_${"a".repeat(43)}`;
+  const node = {
+    id, name: "office-one", enabled: false, draining: false,
+    capabilities: ["RANK"], maxHttpSlots: 16, maxCpuSlots: 2,
+    reportedHttpSlots: 0, reportedRankSlots: 0, reportedCpuSlots: 0,
+    reportedMemoryBytes: "0", activeWorkItems: 0,
+    online: false, lastHeartbeatAt: null, protocolVersion: null
+  };
+  const captured: Array<{ method: string; path: string; body?: unknown }> = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    captured.push({
+      method: init?.method ?? "GET",
+      path: new URL(input instanceof Request ? input.url : input.toString()).pathname,
+      ...(init?.body ? { body: JSON.parse(String(init.body)) as unknown } : {})
+    });
+    return dataResponse(captured.length === 1 ? [node] :
+      captured.length === 2 ? { node, token } : { ...node, enabled: true });
+  }) as typeof fetch;
+  try {
+    const jobs = client();
+    assert.equal((await jobs.listWorkerNodes(actorId, "list-workers"))[0]?.id, id);
+    assert.equal((await jobs.createWorkerNode(actorId, "create-worker", {
+      name: "office-one", capabilities: ["RANK"], maxHttpSlots: 16, maxCpuSlots: 2
+    })).token, token);
+    assert.equal((await jobs.updateWorkerNode(
+      actorId, "enable-worker", id, "enabled", { enabled: true }
+    )).enabled, true);
+    assert.deepEqual(captured.map(({ method, path }) => [method, path]), [
+      ["GET", "/internal/v1/platform-admin/worker-nodes"],
+      ["POST", "/internal/v1/platform-admin/worker-nodes"],
+      ["PATCH", `/internal/v1/platform-admin/worker-nodes/${id}/enabled`]
+    ]);
+    assert.deepEqual(captured[2]?.body, { enabled: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards only the trusted storage entitlement with an upload command", async () => {
   const originalFetch = globalThis.fetch;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;

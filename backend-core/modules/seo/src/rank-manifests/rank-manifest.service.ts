@@ -11,6 +11,7 @@ import {
   rankManifestSingleTaskChunkSize,
   xmlStockRankManifestChunkSize,
   type InternalGetRankManifestChunkInput,
+  type InternalGetRankManifestChunksInput,
   type InternalRankExecutionParameters,
   type InternalRankManifestChunk,
   type InternalRankManifestEntry,
@@ -441,6 +442,30 @@ export class RankManifestService {
       throw new NotFoundException("Rank manifest chunk not found");
     }
     return storedManifestChunk(chunk, input);
+  }
+
+  public async getChunks(
+    input: InternalGetRankManifestChunksInput
+  ): Promise<readonly InternalRankManifestChunk[]> {
+    const rows = await this.prisma.rankExecutionManifestChunk.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        manifestId: input.manifestId,
+        chunkIndex: { in: [...input.chunkIndices] },
+        manifest: { jobId: input.jobId, status: "SEALED" }
+      },
+      select: CHUNK_SELECT
+    });
+    if (rows.length !== input.chunkIndices.length) {
+      throw new NotFoundException("Rank manifest chunk not found");
+    }
+    const byIndex = new Map(rows.map((row) => [row.chunkIndex, row]));
+    return input.chunkIndices.map((chunkIndex) => {
+      const row = byIndex.get(chunkIndex);
+      if (!row) throw new NotFoundException("Rank manifest chunk not found");
+      return storedManifestChunk(row, { ...input, chunkIndex });
+    });
   }
 }
 

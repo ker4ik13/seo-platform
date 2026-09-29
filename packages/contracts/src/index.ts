@@ -39,6 +39,8 @@ export * from "./api/tenants.js";
 export * from "./api/tracking-contexts.js";
 export * from "./api/uploads.js";
 export * from "./api/web-push.js";
+export * from "./api/worker-nodes.js";
+export * from "./api/worker-rank.js";
 export * from "./events/catalog.js";
 export * from "./events/envelope.js";
 export * from "./events/identity.js";

@@ -1040,6 +1040,16 @@ export interface InternalGetRankManifestChunkInput {
   readonly chunkIndex: number;
 }
 
+export interface InternalGetRankManifestChunksInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly jobId: string;
+  readonly manifestId: string;
+  /** Unique chunk indices, bounded to one execution/result batch. */
+  readonly chunkIndices: readonly number[];
+}
+
 /**
  * Secret-bearing internal row. keywordText and project domain must never be
  * copied to a queue payload, public DTO, log, metric, event or error.

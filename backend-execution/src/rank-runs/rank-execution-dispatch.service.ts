@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type {
   RankCheckFinalStatus,
-  RankJobFailureCode
+  RankJobFailureCode,
+  InternalRankManifestChunk
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -135,66 +136,76 @@ export class RankExecutionDispatchService {
     }
     if (dispatchable.itemIds.length === 0) return "RETRY_PENDING";
 
-    for (const itemId of dispatchable.itemIds) {
+    for (let offset = 0; offset < dispatchable.itemIds.length; offset += 64) {
+      const batch = dispatchable.itemIds.slice(offset, offset + 64);
+      let prefetched: ReadonlyMap<string, InternalRankManifestChunk> = new Map();
       try {
-        const result = await this.grants.issueForItem(
-          itemId,
-          `rank-grant-${itemId}`
-        );
-        if (result.status === "CONSUMED") continue;
-        if (
-          result.status === "DENIED" ||
-          result.status === "REJECTED_LOCAL"
-        ) {
+        prefetched = await this.grants.prefetchForItems(batch);
+      } catch (error) {
+        this.logger.warn(`Rank manifest batch read unavailable: ${safeErrorSummary(error)}`);
+      }
+      for (const itemId of batch) {
+        try {
+          const result = await this.grants.issueForItem(
+            itemId,
+            `rank-grant-${itemId}`,
+            prefetched.get(itemId)
+          );
+          if (result.status === "CONSUMED") continue;
+          if (
+            result.status === "DENIED" ||
+            result.status === "REJECTED_LOCAL"
+          ) {
+            await this.finishFailure(
+              dispatchable.jobId,
+              "EXECUTION_GRANT_DENIED"
+            );
+            return "FAILED";
+          }
+          return "RETRY_PENDING";
+        } catch (error) {
+          if (error instanceof RankExecutionGrantAttemptError) {
+            const payload = JSON.stringify({
+              event: "rank_execution_grant_failed",
+              jobId: dispatchable.jobId,
+              itemId,
+              code: error.code,
+              retryable: error.retryable,
+              detail: error.detail ?? "unspecified"
+            });
+            if (error.retryable) {
+              this.logger.warn(payload);
+            } else {
+              this.logger.error(payload);
+            }
+          } else {
+            this.logger.error(
+              JSON.stringify({
+                event: "rank_execution_dispatch_failed",
+                jobId: dispatchable.jobId,
+                itemId,
+                error: safeErrorSummary(error)
+              })
+            );
+          }
+          if (
+            error instanceof RankExecutionGrantAttemptError &&
+            error.code === "SUBMIT_DISABLED"
+          ) {
+            return "DISABLED";
+          }
+          if (
+            error instanceof RankExecutionGrantAttemptError &&
+            error.retryable
+          ) {
+            return "RETRY_PENDING";
+          }
           await this.finishFailure(
             dispatchable.jobId,
-            "EXECUTION_GRANT_DENIED"
+            dispatchFailureCode(error)
           );
           return "FAILED";
         }
-        return "RETRY_PENDING";
-      } catch (error) {
-        if (error instanceof RankExecutionGrantAttemptError) {
-          const payload = JSON.stringify({
-            event: "rank_execution_grant_failed",
-            jobId: dispatchable.jobId,
-            itemId,
-            code: error.code,
-            retryable: error.retryable,
-            detail: error.detail ?? "unspecified"
-          });
-          if (error.retryable) {
-            this.logger.warn(payload);
-          } else {
-            this.logger.error(payload);
-          }
-        } else {
-          this.logger.error(
-            JSON.stringify({
-              event: "rank_execution_dispatch_failed",
-              jobId: dispatchable.jobId,
-              itemId,
-              error: safeErrorSummary(error)
-            })
-          );
-        }
-        if (
-          error instanceof RankExecutionGrantAttemptError &&
-          error.code === "SUBMIT_DISABLED"
-        ) {
-          return "DISABLED";
-        }
-        if (
-          error instanceof RankExecutionGrantAttemptError &&
-          error.retryable
-        ) {
-          return "RETRY_PENDING";
-        }
-        await this.finishFailure(
-          dispatchable.jobId,
-          dispatchFailureCode(error)
-        );
-        return "FAILED";
       }
     }
     return "READY_TO_SUBMIT";
@@ -285,10 +296,17 @@ export class RankExecutionDispatchService {
           run.manifestCommandHash,
           commandBinding(job)
         );
-        const connectorLaneCount = connectorRuntimeLaneCount(
+        const localConnectorLaneCount = connectorRuntimeLaneCount(
           this.config.connectorRuntime.rankConcurrency,
           this.config.connectorRuntime.shardCount
         );
+        const remoteSlots = provider === "XMLSTOCK"
+          ? await transaction.$queryRaw<readonly { readonly slots: number }[]>`
+              SELECT public.available_remote_rank_slots(256) AS slots
+            `
+          : [];
+        const connectorLaneCount = localConnectorLaneCount +
+          Math.max(0, Number(remoteSlots[0]?.slots ?? 0));
         const capacity = await rankExecutionDispatchCapacity(
           transaction,
           provider,
@@ -505,70 +523,76 @@ export class RankExecutionDispatchService {
             "Rank failure finalization receipt does not match progress"
           );
         }
-        const items = await transaction.jobItem.findMany({
-          where: {
-            workspaceId: current.workspaceId,
-            projectId: receipt.projectId,
-            jobId
-          },
-          orderBy: { sequence: "asc" }
-        });
-        const executions = latestConnectorExecutions(
-          await transaction.rankConnectorExecution.findMany({
-            where: {
-              workspaceId: current.workspaceId,
-              projectId: receipt.projectId,
-              jobId
-            },
-            orderBy: [
-              { jobItemId: "asc" },
-              { executionAttempt: "desc" },
-              { id: "desc" }
-            ]
-          })
-        );
-        const executionByItem = new Map(
-          executions.map((execution) => [execution.jobItemId, execution])
-        );
+        const itemGraph = await transaction.$queryRaw<readonly [{
+          readonly count: bigint;
+          readonly minimumSequence: number | null;
+          readonly maximumSequence: number | null;
+        }]>(Prisma.sql`
+          SELECT COUNT(*)::bigint AS "count",
+            MIN(item."sequence")::integer AS "minimumSequence",
+            MAX(item."sequence")::integer AS "maximumSequence"
+          FROM "job_items" item
+          WHERE item."workspace_id" = ${current.workspaceId}::uuid
+            AND item."project_id" = ${receipt.projectId}::uuid
+            AND item."job_id" = ${jobId}::uuid
+        `);
+        const itemCount = Number(itemGraph[0]?.count ?? -1n);
         if (
-          items.length !== current.rankRun.manifestChunkCount ||
-          items.some((item, index) => item.sequence !== index)
+          itemCount !== current.rankRun.manifestChunkCount ||
+          itemGraph[0]?.minimumSequence !== 0 ||
+          itemGraph[0]?.maximumSequence !== itemCount - 1
         ) {
           throw new Error("Rank failure JobItem graph is invalid");
         }
-        for (const item of items) {
-          const execution = executionByItem.get(item.id);
-          const persisted = execution?.status === "PERSISTED";
-          const changed = await transaction.jobItem.updateMany({
-            where: {
-              id: item.id,
-              workspaceId: current.workspaceId,
-              projectId: receipt.projectId,
-              jobId,
-              sequence: item.sequence,
-              status: "QUEUED"
-            },
-            data: {
-              status: persisted ? "COMPLETED" : "FAILED_FINAL",
-              providerRequestId: execution?.providerTaskId ?? null,
-              outputReference: persisted
-                ? {
-                    schemaVersion: "rank-job-item-output@1",
-                    manifestId: receipt.manifestId,
-                    chunkIndex: item.sequence
-                  }
-                : Prisma.DbNull,
-              actualCostMicro: 0n,
-              error: persisted
-                ? Prisma.DbNull
-                : rankJobFailureJson(failureCode),
-              attempt: execution?.executionAttempt ?? 1,
-              retryAt: null
-            }
-          });
-          if (changed.count !== 1) {
-            throw new Error("Rank failure JobItem finalization race");
-          }
+        const changedItems = await transaction.$executeRaw(Prisma.sql`
+          UPDATE "job_items" item
+          SET "status" = CASE WHEN latest."status" = 'PERSISTED'
+                THEN 'COMPLETED'::"JobItemStatus"
+                ELSE 'FAILED_FINAL'::"JobItemStatus" END,
+              "provider_request_id" = latest."providerTaskId",
+              "output_reference" = CASE WHEN latest."status" = 'PERSISTED'
+                THEN jsonb_build_object(
+                  'schemaVersion', 'rank-job-item-output@1',
+                  'manifestId', ${receipt.manifestId}::text,
+                  'chunkIndex', item."sequence"
+                ) ELSE NULL END,
+              "actual_cost_micro" = 0,
+              "error" = CASE WHEN latest."status" = 'PERSISTED'
+                THEN NULL
+                ELSE ${JSON.stringify(rankJobFailureJson(failureCode))}::jsonb
+              END,
+              "attempt" = COALESCE(latest."executionAttempt", 1),
+              "retry_at" = NULL,
+              "updated_at" = clock_timestamp()
+          FROM (
+            SELECT target."id", execution."status",
+                   execution."provider_task_id" AS "providerTaskId",
+                   execution."execution_attempt" AS "executionAttempt"
+            FROM "job_items" target
+            LEFT JOIN LATERAL (
+              SELECT candidate."status", candidate."provider_task_id",
+                     candidate."execution_attempt"
+              FROM "rank_connector_executions" candidate
+              WHERE candidate."workspace_id" = target."workspace_id"
+                AND candidate."project_id" = target."project_id"
+                AND candidate."job_id" = target."job_id"
+                AND candidate."job_item_id" = target."id"
+              ORDER BY candidate."execution_attempt" DESC,
+                       candidate."id" DESC
+              LIMIT 1
+            ) execution ON TRUE
+            WHERE target."workspace_id" = ${current.workspaceId}::uuid
+              AND target."project_id" = ${receipt.projectId}::uuid
+              AND target."job_id" = ${jobId}::uuid
+          ) latest
+          WHERE item."id" = latest."id"
+            AND item."workspace_id" = ${current.workspaceId}::uuid
+            AND item."project_id" = ${receipt.projectId}::uuid
+            AND item."job_id" = ${jobId}::uuid
+            AND item."status" = 'QUEUED'
+        `);
+        if (changedItems !== itemCount) {
+          throw new Error("Rank failure JobItem finalization race");
         }
         const runChanged = await transaction.rankJobRun.updateMany({
           where: {

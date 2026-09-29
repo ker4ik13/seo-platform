@@ -53,6 +53,35 @@ const providerPolicyVersion = "manual-arsenkin-positions@1.0.0";
 const executionConnectorVersion = "arsenkin-positions@2.0.0";
 const manifestHash = hash("d");
 
+test("prefetches bounded sealed chunks for a Job in one Core SEO request", async () => {
+  let calls = 0;
+  const prisma = {
+    jobItem: {
+      async findMany() {
+        return [{
+          ...jobItem(),
+          job: {
+            actorId: ids.actorId,
+            rankRun: { manifestId: ids.manifestId }
+          }
+        }];
+      }
+    }
+  } as unknown as PrismaService;
+  const manifests = {
+    async getChunks(input: { readonly chunkIndices: readonly number[] }) {
+      calls += 1;
+      assert.deepEqual(input.chunkIndices, [0]);
+      return [manifestChunk()];
+    }
+  } as unknown as RankManifestClient;
+  const prefetched = await new RankProviderRequestIntentService(
+    prisma, manifests
+  ).prefetchForItems([ids.jobItemId]);
+  assert.equal(calls, 1);
+  assert.equal(prefetched.get(ids.jobItemId)?.chunkIndex, 0);
+});
+
 test("validates one exact stored provider request intent replay", () => {
   const intent = requestIntent();
   const row = storedRow(intent);
@@ -114,6 +143,17 @@ test("locks, fetches, revalidates and creates in the required order", async () =
     storedRankProviderRequestIntent(created, binding()),
     requestIntent()
   );
+});
+
+test("a preloaded sealed chunk needs one locked transaction and no second Core read", async () => {
+  const fixture = serviceFixture();
+  const created = await fixture.service.ensureForItem(
+    ids.jobItemId, manifestChunk()
+  );
+  assert.equal(created.id, ids.intentId);
+  assert.deepEqual(fixture.events, ["first-locked-snapshot", "create"]);
+  assert.equal(fixture.state.transactionCount, 1);
+  assert.equal(fixture.state.manifestCalls, 0);
 });
 
 test("rejects a graph change discovered by the second locked revalidation", async () => {

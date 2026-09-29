@@ -72,6 +72,23 @@ h1, h2, p { margin: 0; }
 .metric-grid small { color: var(--green); font-size: 11px; }
 .grid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .8fr); margin-bottom: 12px; }
 .panel { padding: 18px; }
+.worker-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 16px; }
+.worker-card { display: grid; gap: 12px; min-width: 0; }
+.worker-card header strong { color: var(--green); font-size: 12px; }
+.worker-card p { color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.worker-fields { display: grid; gap: 12px; grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(100px, 1fr)); margin: 15px 0; }
+.worker-fields label { color: var(--muted); display: grid; font-size: 12px; gap: 6px; }
+.worker-fields input { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; color: #fff; min-height: 40px; padding: 8px 10px; width: 100%; }
+.worker-capabilities { border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 15px; padding: 12px; }
+.worker-capabilities legend { color: var(--muted); font-size: 12px; padding: 0 5px; }
+.worker-capabilities label { align-items: center; display: flex; font-size: 12px; gap: 6px; }
+.worker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.worker-assignment-list { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; display: grid; font-size: 12px; gap: 6px; padding: 10px; }
+.worker-assignment-list span { color: var(--muted); overflow-wrap: anywhere; }
+.worker-secret { display: grid; gap: 10px; margin-bottom: 16px; }
+.worker-secret code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; display: block; overflow-wrap: anywhere; padding: 12px; user-select: all; }
+.worker-secret button { justify-self: start; }
+@media (max-width: 650px) { .worker-fields { grid-template-columns: 1fr; } }
 .panel-header { align-items: center; display: flex; justify-content: space-between; }
 .panel header { align-items: flex-start; display: flex; justify-content: space-between; }
 .panel h2 { font-size: 13px; }

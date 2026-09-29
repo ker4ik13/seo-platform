@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
   internalRankExecutionGrantDecision,
+  type InternalRankManifestChunk,
   type InternalIssueRankExecutionGrantInputV1,
   type InternalRankExecutionGrantDecisionV1
 } from "@seo-platform/contracts";
@@ -139,13 +140,14 @@ export class RankExecutionGrantAttemptService {
 
   /**
    * Persists the exact authorization intent before crossing the network.
-   * A positive decision is consumed only with a secret-free scoped connector
-   * execution in a second local transaction. No provider action is exposed by
-   * this service.
+   * A positive decision is consumed with its secret-free connector execution
+   * in the same post-issuer transaction. Legacy pending decisions still have
+   * an idempotent recovery path. No provider action happens here.
    */
   public async issueForItem(
     jobItemId: string,
-    requestId: string
+    requestId: string,
+    preloadedChunk?: InternalRankManifestChunk
   ): Promise<RankExecutionGrantAttemptResult> {
     if (
       !this.config.rankPreparation.enabled ||
@@ -161,7 +163,7 @@ export class RankExecutionGrantAttemptService {
     }
 
     try {
-      await this.requestIntents.ensureForItem(jobItemId);
+      await this.requestIntents.ensureForItem(jobItemId, preloadedChunk);
     } catch (error) {
       if (error instanceof RankProviderRequestIntentError) {
         throw failure(error.code, error.retryable, error.detail);
@@ -205,6 +207,12 @@ export class RankExecutionGrantAttemptService {
     return recorded.status === "GRANTED_PENDING_CONSUME"
       ? this.consumePending(prepared.attempt)
       : recorded;
+  }
+
+  public prefetchForItems(
+    jobItemIds: readonly string[]
+  ): Promise<ReadonlyMap<string, InternalRankManifestChunk>> {
+    return this.requestIntents.prefetchForItems(jobItemIds);
   }
 
   private async prepare(
@@ -473,18 +481,19 @@ export class RankExecutionGrantAttemptService {
           );
         }
 
-        return attemptResult(
-          await transaction.rankExecutionGrantAttempt.update({
-            where: { id: current.id },
-            data: {
-              status: "GRANTED_PENDING_CONSUME",
-              decisionSnapshot: rankExecutionGrantDecisionJson(
-                transition.decision
-              ),
-              decidedAt: new Date(transition.decision.decidedAt),
-              expiresAt: transition.expiresAt
-            }
-          })
+        const pending = await transaction.rankExecutionGrantAttempt.update({
+          where: { id: current.id },
+          data: {
+            status: "GRANTED_PENDING_CONSUME",
+            decisionSnapshot: rankExecutionGrantDecisionJson(
+              transition.decision
+            ),
+            decidedAt: new Date(transition.decision.decidedAt),
+            expiresAt: transition.expiresAt
+          }
+        });
+        return consumeGrantedAttempt(
+          transaction, locked, pending, clock, this.config
         );
       },
       { isolationLevel: "ReadCommitted" }
@@ -566,137 +575,114 @@ export class RankExecutionGrantAttemptService {
         if (current.status !== "GRANTED_PENDING_CONSUME") {
           return attemptResult(current);
         }
-        if (
-          current.decisionSnapshot === null ||
-          current.expiresAt === null
-        ) {
-          throw failure("LOCAL_STATE_INVALID", false);
-        }
-
         const clock = await databaseClock(transaction);
-        if (clock.getTime() >= current.expiresAt.getTime()) {
-          return attemptResult(
-            await transaction.rankExecutionGrantAttempt.update({
-              where: { id: current.id },
-              data: {
-                status: "EXPIRED",
-                terminalAt: clock
-              }
-            })
-          );
-        }
-
-        let rebuilt: BuiltRankExecutionGrantRequest;
-        try {
-          rebuilt = requestForLockedGraph(
-            { ...locked, databaseNow: clock },
-            current.executionAttempt,
-            this.config
-          );
-          assertExactAttempt(current, rebuilt);
-          const transition = rankExecutionGrantDecisionTransition(
-            rebuilt.request,
-            current.decisionSnapshot,
-            clock
-          );
-          if (
-            transition.status !== "GRANTED_PENDING_CONSUME" ||
-            transition.expiresAt.getTime() !==
-              current.expiresAt.getTime()
-          ) {
-            throw failure("LOCAL_STATE_INVALID", false);
-          }
-        } catch {
-          return attemptResult(
-            await rejectLocal(
-              transaction,
-              current,
-              clock,
-              internalRankExecutionGrantDecision(
-                current.decisionSnapshot
-              ) as Extract<
-                InternalRankExecutionGrantDecisionV1,
-                { readonly status: "GRANTED" }
-              >,
-              current.expiresAt
-            )
-          );
-        }
-
-        const evidence = rebuilt.evidence;
-        await transaction.rankConnectorExecution.create({
-          data: {
-            workspaceId: current.workspaceId,
-            projectId: current.projectId,
-            jobId: current.jobId,
-            jobItemId: current.jobItemId,
-            grantAttemptId: current.id,
-            executionAttempt: current.executionAttempt,
-            jobVersion: current.jobVersion,
-            provider: rebuilt.request.provider,
-            estimateId: evidence.estimateId,
-            manifestId: evidence.manifest.id,
-            manifestHash: Buffer.from(
-              evidence.manifest.hash.value,
-              "hex"
-            ),
-            manifestChunkIndex: evidence.manifest.chunkIndex,
-            providerRequestIntentId:
-              evidence.providerRequestIntent.id,
-            providerRequestIntentHash: Buffer.from(
-              evidence.providerRequestIntent.requestHash.value,
-              "hex"
-            ),
-            providerRequestIntentChunkHash: Buffer.from(
-              evidence.providerRequestIntent.manifestChunkHash.value,
-              "hex"
-            ),
-            bindingId: evidence.binding.id,
-            bindingVersion: evidence.binding.version,
-            routeId: evidence.route.id,
-            credentialId: evidence.credential.id,
-            credentialVersion: evidence.credential.version,
-            credentialMaterialVersion:
-              evidence.credential.materialVersion,
-            credentialValidationId:
-              evidence.credential.validationId,
-            credentialValidationVersion:
-              evidence.credential.validationVersion,
-            credentialValidationConnectorVersion:
-              evidence.credential.validationConnectorVersion,
-            credentialVerifiedAt: new Date(
-              evidence.credential.verifiedAt
-            ),
-            estimateExecutionHash: Buffer.from(
-              evidence.estimateExecutionHash.value,
-              "hex"
-            ),
-            executionEvidenceHash: Buffer.from(
-              rebuilt.evidenceHash.value,
-              "hex"
-            ),
-            executionConnectorVersion:
-              evidence.executionConnectorVersion,
-            providerPolicyVersion: evidence.providerPolicyVersion,
-            killSwitchVersion: evidence.killSwitch.version,
-            authorizationExpiresAt: current.expiresAt,
-            createdAt: clock,
-            updatedAt: clock
-          }
-        });
-        return attemptResult(
-          await transaction.rankExecutionGrantAttempt.update({
-            where: { id: current.id },
-            data: {
-              status: "CONSUMED",
-              terminalAt: clock
-            }
-          })
+        return consumeGrantedAttempt(
+          transaction, locked, current, clock, this.config
         );
       },
       { isolationLevel: "ReadCommitted" }
     );
   }
+}
+
+async function consumeGrantedAttempt(
+  transaction: Prisma.TransactionClient,
+  locked: LockedRankExecutionGraph,
+  current: RankExecutionGrantAttempt,
+  clock: Date,
+  config: AppConfig
+): Promise<RankExecutionGrantAttemptResult> {
+  if (current.decisionSnapshot === null || current.expiresAt === null) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  if (clock.getTime() >= current.expiresAt.getTime()) {
+    return attemptResult(await transaction.rankExecutionGrantAttempt.update({
+      where: { id: current.id },
+      data: { status: "EXPIRED", terminalAt: clock }
+    }));
+  }
+
+  let rebuilt: BuiltRankExecutionGrantRequest;
+  try {
+    rebuilt = requestForLockedGraph(
+      { ...locked, databaseNow: clock },
+      current.executionAttempt,
+      config
+    );
+    assertExactAttempt(current, rebuilt);
+    const transition = rankExecutionGrantDecisionTransition(
+      rebuilt.request,
+      current.decisionSnapshot,
+      clock
+    );
+    if (
+      transition.status !== "GRANTED_PENDING_CONSUME" ||
+      transition.expiresAt.getTime() !== current.expiresAt.getTime()
+    ) {
+      throw failure("LOCAL_STATE_INVALID", false);
+    }
+  } catch {
+    return attemptResult(await rejectLocal(
+      transaction,
+      current,
+      clock,
+      internalRankExecutionGrantDecision(current.decisionSnapshot) as Extract<
+        InternalRankExecutionGrantDecisionV1,
+        { readonly status: "GRANTED" }
+      >,
+      current.expiresAt
+    ));
+  }
+
+  const evidence = rebuilt.evidence;
+  await transaction.rankConnectorExecution.create({
+    data: {
+      workspaceId: current.workspaceId,
+      projectId: current.projectId,
+      jobId: current.jobId,
+      jobItemId: current.jobItemId,
+      grantAttemptId: current.id,
+      executionAttempt: current.executionAttempt,
+      jobVersion: current.jobVersion,
+      provider: rebuilt.request.provider,
+      estimateId: evidence.estimateId,
+      manifestId: evidence.manifest.id,
+      manifestHash: Buffer.from(evidence.manifest.hash.value, "hex"),
+      manifestChunkIndex: evidence.manifest.chunkIndex,
+      providerRequestIntentId: evidence.providerRequestIntent.id,
+      providerRequestIntentHash: Buffer.from(
+        evidence.providerRequestIntent.requestHash.value, "hex"
+      ),
+      providerRequestIntentChunkHash: Buffer.from(
+        evidence.providerRequestIntent.manifestChunkHash.value, "hex"
+      ),
+      bindingId: evidence.binding.id,
+      bindingVersion: evidence.binding.version,
+      routeId: evidence.route.id,
+      credentialId: evidence.credential.id,
+      credentialVersion: evidence.credential.version,
+      credentialMaterialVersion: evidence.credential.materialVersion,
+      credentialValidationId: evidence.credential.validationId,
+      credentialValidationVersion: evidence.credential.validationVersion,
+      credentialValidationConnectorVersion:
+        evidence.credential.validationConnectorVersion,
+      credentialVerifiedAt: new Date(evidence.credential.verifiedAt),
+      estimateExecutionHash: Buffer.from(
+        evidence.estimateExecutionHash.value, "hex"
+      ),
+      executionEvidenceHash: Buffer.from(rebuilt.evidenceHash.value, "hex"),
+      executionConnectorVersion: evidence.executionConnectorVersion,
+      providerPolicyVersion: evidence.providerPolicyVersion,
+      killSwitchVersion: evidence.killSwitch.version,
+      authorizationExpiresAt: current.expiresAt,
+      createdAt: clock,
+      updatedAt: clock
+    }
+  });
+  return attemptResult(await transaction.rankExecutionGrantAttempt.update({
+    where: { id: current.id },
+    data: { status: "CONSUMED", terminalAt: clock }
+  }));
 }
 
 export function isExpiredUnusedAuthorization(

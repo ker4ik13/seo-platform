@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -21,6 +22,7 @@ import {
 } from "../internal/internal-command-context.js";
 import {
   internalGetRankManifestChunkInput,
+  internalGetRankManifestChunksInput,
   internalRankManifestChunkQuery,
   internalSealRankManifestInput
 } from "./rank-manifest-input.js";
@@ -69,6 +71,23 @@ export class RankManifestController {
       chunkIndex
     });
     return response(request, await this.rankManifests.getChunk(input));
+  }
+
+  @Post(":manifestId/chunks/batch")
+  public async getChunks(
+    @Param("projectId") projectId: string,
+    @Param("manifestId") manifestId: string,
+    @Body() body: unknown,
+    @Headers() headers: RankManifestInternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly InternalRankManifestChunk[]>> {
+    const context = rankManifestRouteContext(projectId, headers);
+    const input = internalGetRankManifestChunksInput(body);
+    assertInternalContext(input, context);
+    if (input.manifestId !== manifestId) {
+      throw new BadRequestException("Rank manifest mismatch");
+    }
+    return response(request, await this.rankManifests.getChunks(input));
   }
 }
 

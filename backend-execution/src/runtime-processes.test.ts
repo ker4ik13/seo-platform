@@ -154,6 +154,24 @@ test("rank and connector process counts scale without adding services", () => {
   }
 });
 
+test("opt-in HTTP gateway alone receives execution settlement authority", () => {
+  const definitions = executionProcessDefinitions({
+    ...baseEnvironment,
+    JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE: "BOTH"
+  });
+  const http = definitions.find(({ name }) => name === "http")?.environment;
+  assert.equal(http?.INTEGRATION_CREDENTIAL_ROLE, "BOTH");
+  assert.equal(
+    http?.JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN,
+    "billing-settlement-secret"
+  );
+  assert.equal(
+    definitions.find(({ name }) => name === "rank-worker")?.environment
+      .JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN,
+    undefined
+  );
+});
+
 test("optional inspection and email roles are explicit", () => {
   const definitions = executionProcessDefinitions({
     ...baseEnvironment,

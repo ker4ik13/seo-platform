@@ -688,6 +688,33 @@ test("requires both caller/audience tokens for the production HTTP process", () 
   );
 });
 
+test("worker gateway is explicit and accepts the combined HTTP credential role only with settlement authority", () => {
+  const keys = `1:${Buffer.alloc(32, 3).toString("base64url")}`;
+  const fingerprints = `1:${Buffer.alloc(32, 4).toString("base64url")}`;
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    INTEGRATION_CREDENTIAL_ROLE: "BOTH",
+    INTEGRATION_CREDENTIAL_KEYS: keys,
+    INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
+    INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: fingerprints,
+    INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "1",
+    PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
+  };
+  assert.throws(() => loadAppConfig(base), /BOTH credential role requires/u);
+  assert.throws(() => loadAppConfig({
+    ...base, WORKER_GATEWAY_ENABLED: "true"
+  }), /Worker Gateway requires/u);
+  const config = loadAppConfig({
+    ...base,
+    WORKER_GATEWAY_ENABLED: "true",
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN: "b".repeat(32)
+  });
+  assert.equal(config.processRole, "HTTP");
+  assert.equal(config.integrationCredentials.role, "BOTH");
+  assert.equal(config.workerGatewayEnabled, true);
+});
+
 test("rejects a conflicting execution legacy flag", () => {
   const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
   assert.throws(

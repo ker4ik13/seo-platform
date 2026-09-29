@@ -2,7 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import type {
   InternalIngestRankChunkInput,
   InternalIngestRankBatchInput,
-  InternalRankChunkIngestCommand
+  InternalRankChunkIngestCommand,
+  InternalRankManifestChunk
 } from "@seo-platform/contracts";
 import { rankResultBatchMaxItems } from "@seo-platform/contracts";
 import { rankChunkIngestHash } from "@seo-platform/contracts/rank-results-canonical";
@@ -82,8 +83,21 @@ export class RankResultPersistenceService {
       }
       let committed = false;
       try {
-        const items = await Promise.all(group.map((claim) => this.command(claim)));
         const first = group[0]!;
+        const chunks = await this.manifests.getChunks({
+          workspaceId: first.workspaceId,
+          projectId: first.projectId,
+          actorId: first.request.actorId,
+          jobId: first.jobId,
+          manifestId: first.manifestId,
+          chunkIndices: [...new Set(group.map((claim) => claim.manifestChunkIndex))]
+        });
+        const chunksByIndex = new Map(chunks.map((chunk) => [chunk.chunkIndex, chunk]));
+        const items = await Promise.all(group.map((claim) => {
+          const chunk = chunksByIndex.get(claim.manifestChunkIndex);
+          if (!chunk) throw new RankManifestClientError("UNAVAILABLE", true);
+          return this.command(claim, chunk);
+        }));
         const input: InternalIngestRankBatchInput = {
           schemaVersion: "rank-ingest-batch@1",
           workspaceId: first.workspaceId,
@@ -104,12 +118,10 @@ export class RankResultPersistenceService {
             }
           }
         } else {
-          for (const claim of group) {
-            try {
-              await this.broker.complete(claim, false);
-            } catch (completionError) {
-              firstError ??= completionError;
-            }
+          try {
+            await this.broker.completeBatch(group, false);
+          } catch (completionError) {
+            firstError ??= completionError;
           }
           if (!(error instanceof RankResultClientError && error.retryable)) {
             firstError ??= error;
@@ -117,12 +129,10 @@ export class RankResultPersistenceService {
         }
       }
       if (committed) {
-        for (const claim of group) {
-          try {
-            await this.broker.complete(claim, true);
-          } catch (error) {
-            firstError ??= error;
-          }
+        try {
+          await this.broker.completeBatch(group, true);
+        } catch (error) {
+          firstError ??= error;
         }
       }
     }));
@@ -153,9 +163,10 @@ export class RankResultPersistenceService {
   }
 
   private async command(
-    claim: RankResultPersistenceClaim
+    claim: RankResultPersistenceClaim,
+    preloadedChunk?: InternalRankManifestChunk
   ): Promise<InternalIngestRankChunkInput> {
-    const chunk = await this.manifests.getChunk(
+    const chunk = preloadedChunk ?? await this.manifests.getChunk(
       {
         workspaceId: claim.workspaceId,
         projectId: claim.projectId,

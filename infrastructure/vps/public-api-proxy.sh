@@ -45,10 +45,20 @@ build_proxy_config() {
   jq --compact-output --null-input \
     --arg host "$public_host" \
     --arg listen "$api_listen" \
+    --argjson worker_gateway_enabled "$(if [ "${WORKER_GATEWAY_ENABLED:-false}" = true ]; then printf true; else printf false; fi)" \
     '{
       automatic_https: {disable_redirects: true},
       listen: [$listen],
-      routes: [{
+      routes: ([
+        if $worker_gateway_enabled then {
+          match: [{host: [$host], path: ["/worker/v1", "/worker/v1/*"]}],
+          handle: [{
+            handler: "reverse_proxy",
+            upstreams: [{dial: "127.0.0.1:4002"}]
+          }],
+          terminal: true
+        } else empty end
+      ] + [{
         match: [{host: [$host], path: ["/api/v1", "/api/v1/*"]}],
         handle: [{
           handler: "reverse_proxy",
@@ -59,7 +69,7 @@ build_proxy_config() {
         match: [{host: [$host]}],
         handle: [{handler: "static_response", status_code: 404, body: "Not found"}],
         terminal: true
-      }],
+      }]),
       tls_connection_policies: [{}]
     }'
 }

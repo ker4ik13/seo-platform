@@ -23,6 +23,7 @@ import {
   adminApiCollection
 } from "../../lib/admin-browser-api";
 import { OperationAdministration } from "./operation-administration";
+import { WorkerAdministration } from "./worker-administration";
 import { ProjectAdministration } from "./project-administration";
 import { WorkspaceAdministration } from "./workspace-administration";
 import { RefundAdministration } from "./refund-administration";
@@ -32,13 +33,14 @@ import { UsageReview } from "./usage-review";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
 
-type Screen = "overview" | "workspaces" | "projects" | "operations" | "receipts" | "staff" | "refunds" | "providers" | "usage";
+type Screen = "overview" | "workspaces" | "projects" | "operations" | "workers" | "receipts" | "staff" | "refunds" | "providers" | "usage";
 
 const adminScreens: readonly Screen[] = [
   "overview",
   "workspaces",
   "projects",
   "operations",
+  "workers",
   "receipts",
   "staff",
   "refunds",
@@ -171,6 +173,7 @@ export function AdminApp() {
   const canViewReceipts = canManageBilling;
   const canViewRefunds = canManageBilling || profile.roles.includes("SUPPORT");
   const canViewProviders = canManageBilling || profile.roles.includes("OPERATIONS");
+  const canManageWorkers = profile.roles.includes("SUPER_ADMIN") || profile.roles.includes("OPERATIONS");
   const hasVisibleScreen =
     canViewWorkspaces || canViewPlatformDirectory || canViewReceipts || canManageStaff;
   return (
@@ -206,6 +209,7 @@ export function AdminApp() {
             >
               <i>03</i> <UiText text="Операции" before=" " /></button>
           )}
+          {canManageWorkers && <button className={screen === "workers" ? "active" : undefined} onClick={() => navigateScreen("workers")} type="button"><i>04</i> <UiText text="Воркеры" before=" " /></button>}
           {canViewReceipts && (
             <button
               className={screen === "receipts" ? "active" : undefined}
@@ -251,6 +255,7 @@ export function AdminApp() {
                 {canViewWorkspaces && <option value="workspaces"><UiText text="Рабочие области" /></option>}
                 {canViewPlatformDirectory && <option value="projects"><UiText text="Проекты" /></option>}
                 {canViewPlatformDirectory && <option value="operations"><UiText text="Операции" /></option>}
+                {canManageWorkers && <option value="workers"><UiText text="Воркеры" /></option>}
                 {canViewReceipts && <option value="receipts"><UiText text="Чеки НПД" /></option>}
                 {canViewRefunds && <option value="refunds"><UiText text="Возвраты" /></option>}
                 {canManageStaff && <option value="staff">Platform roles</option>}
@@ -280,6 +285,8 @@ export function AdminApp() {
           <ProjectAdministration />
         ) : screen === "operations" && canViewPlatformDirectory ? (
           <OperationAdministration />
+        ) : screen === "workers" && canManageWorkers ? (
+          <WorkerAdministration />
         ) : screen === "receipts" && canViewReceipts ? (
           <Receipts />
         ) : screen === "staff" && canManageStaff ? (

@@ -376,8 +376,10 @@ binding для совместимости и аудита, но не участ�
 client сохраняет durable `REQUESTED`
 до HTTP, делает exact replay и по часам `jobs_db` фиксирует
 `DENIED`/`EXPIRED`/`GRANTED_PENDING_CONSUME`/`REJECTED_LOCAL`; валидное
-положительное решение под повторной проверкой graph атомарно создаёт
-secret-free scoped execution и становится `CONSUMED`. Dispatcher вызывает
+положительное решение под повторной проверкой graph в той же post-issuer
+транзакции атомарно создаёт secret-free scoped execution и становится
+`CONSUMED`. Старые `GRANTED_PENDING_CONSUME` восстанавливаются отдельным
+идемпотентным проходом. Dispatcher вызывает
 service по одному sealed chunk. Использованные kill-switch versions immutable
 и не переиспользуются; runtime activation выдаётся только новой generation
 `arsenkin-positions@4`. Connector permission allowlist содержит только exact

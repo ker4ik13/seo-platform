@@ -316,6 +316,31 @@ test("lets an execution worker decrypt but not create credential material", () =
   );
 });
 
+test("opt-in HTTP Gateway keeps management canary checks and may decrypt only in BOTH mode", () => {
+  const encryptionKey = Buffer.alloc(32, 7).toString("base64url");
+  const crypto = new IntegrationCredentialCryptoService(loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    INTEGRATION_CREDENTIAL_ROLE: "BOTH",
+    WORKER_GATEWAY_ENABLED: "true",
+    INTEGRATION_CREDENTIAL_KEYS: `3:${encryptionKey}`,
+    INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "3",
+    INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `8:${fingerprintKey}`,
+    INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "8",
+    PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: credentialApiToken,
+    JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN: "b".repeat(32)
+  }));
+  const canary = crypto.createKekCanary(3);
+  crypto.verifyKekCanary(canary);
+  const encrypted = crypto.encrypt(workspaceId, "XMLSTOCK", credentialId, {
+    apiKey: "secret-api-key", accountIdentifier: "12345"
+  });
+  assert.equal(
+    crypto.decrypt(workspaceId, "XMLSTOCK", credentialId, encrypted).apiKey,
+    "secret-api-key"
+  );
+});
+
 function managementCrypto(
   keyring: string,
   activeKeyVersion: number

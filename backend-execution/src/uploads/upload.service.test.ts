@@ -334,6 +334,7 @@ function config(): AppConfig {
     databaseUrl: "postgresql://unused",
     databasePoolMax: 1,
     redisUrl: "redis://unused",
+    workerGatewayEnabled: false,
     internalCommandTimeoutMs: 60_000,
     platformApiCommandTimeoutMs: 5_000,
     services: {

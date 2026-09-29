@@ -342,7 +342,10 @@ export class IntegrationCredentialCryptoService {
     readonly key: Buffer;
     readonly version: number;
   } {
-    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
+    if (
+      this.config.integrationCredentials.role !== "MANAGEMENT" &&
+      this.config.integrationCredentials.role !== "BOTH"
+    ) {
       throw encryptionUnavailable();
     }
     const version =
@@ -359,7 +362,10 @@ export class IntegrationCredentialCryptoService {
     readonly key: Buffer;
     readonly version: number;
   } {
-    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
+    if (
+      this.config.integrationCredentials.role !== "MANAGEMENT" &&
+      this.config.integrationCredentials.role !== "BOTH"
+    ) {
       throw encryptionUnavailable();
     }
     const oldestVersion = [
@@ -384,13 +390,19 @@ export class IntegrationCredentialCryptoService {
   }
 
   private assertManagementRole(): void {
-    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
+    if (
+      this.config.integrationCredentials.role !== "MANAGEMENT" &&
+      this.config.integrationCredentials.role !== "BOTH"
+    ) {
       throw encryptionUnavailable();
     }
   }
 
   private assertExecutionRole(): void {
-    if (this.config.integrationCredentials.role !== "EXECUTION") {
+    if (
+      this.config.integrationCredentials.role !== "EXECUTION" &&
+      this.config.integrationCredentials.role !== "BOTH"
+    ) {
       throw encryptionUnavailable();
     }
   }
@@ -398,7 +410,8 @@ export class IntegrationCredentialCryptoService {
   private assertCanaryRole(): void {
     if (
       this.config.integrationCredentials.role !== "MANAGEMENT" &&
-      this.config.integrationCredentials.role !== "EXECUTION"
+      this.config.integrationCredentials.role !== "EXECUTION" &&
+      this.config.integrationCredentials.role !== "BOTH"
     ) {
       throw encryptionUnavailable();
     }

@@ -43,6 +43,7 @@ export type XmlStockHttpQuotaPermit =
       readonly workspaceId: string;
       readonly product: XmlStockHttpProduct;
       readonly member: string;
+      readonly nodeId?: string;
     }
   | {
       readonly allowed: false;
@@ -57,6 +58,9 @@ export interface XmlStockHttpQuotaGate {
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
+    /** Omit for the main Compose; remote nodes receive independent HTTP caps. */
+    readonly nodeId?: string;
+    readonly nodeConcurrency?: number;
   }): Promise<XmlStockHttpQuotaPermit>;
   release(
     permit: Extract<XmlStockHttpQuotaPermit, { readonly allowed: true }>
@@ -270,13 +274,15 @@ export class XmlStockHttpQuotaLimiter
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
+    readonly nodeId?: string;
+    readonly nodeConcurrency?: number;
   }): Promise<XmlStockHttpQuotaPermit> {
     try {
       const startedAt = Date.now();
       while (true) {
         const permit = await acquireXmlStockHttpQuotaPermit(
           this.connection,
-          { ...input, member: randomUUID(), globalConcurrency: this.globalConcurrency }
+          { ...input, member: randomUUID(), globalConcurrency: input.nodeConcurrency ?? this.globalConcurrency }
         );
         if (permit.allowed) return permit;
         if (
@@ -348,6 +354,7 @@ export async function acquireXmlStockHttpQuotaPermit(
     readonly leaseMs: number;
     readonly member: string;
     readonly globalConcurrency?: number;
+    readonly nodeId?: string;
   }
 ): Promise<XmlStockHttpQuotaPermit> {
   const scope = quotaScope(input.credentialId, input.product);
@@ -361,6 +368,7 @@ export async function acquireXmlStockHttpQuotaPermit(
     input.leaseMs > 120_000 ||
     !UUID_PATTERN.test(input.member) ||
     !UUID_PATTERN.test(input.workspaceId)
+    || (input.nodeId !== undefined && !UUID_PATTERN.test(input.nodeId))
     || (input.globalConcurrency !== undefined &&
       (!Number.isSafeInteger(input.globalConcurrency) ||
         input.globalConcurrency < 1 || input.globalConcurrency > 512))
@@ -368,6 +376,9 @@ export async function acquireXmlStockHttpQuotaPermit(
     throw new TypeError("Invalid XMLStock quota acquisition");
   }
   const policy = XMLSTOCK_HTTP_QUOTA_POLICIES[input.product];
+  const nodeNamespace = input.nodeId
+    ? `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:node:${input.nodeId.toLowerCase()}`
+    : `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global`;
   const response = await commandWithTimeout(
     redis.eval(
       ACQUIRE_SCRIPT,
@@ -378,8 +389,8 @@ export async function acquireXmlStockHttpQuotaPermit(
       `${scope}:penalty`,
       `${scope}:success`,
       `${scope}:smoothing`,
-      `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,
-      `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:waiters`,
+      `${nodeNamespace}:inflight`,
+      `${nodeNamespace}:waiters`,
       `${scope}:workspace-waiters`,
       String(policy.concurrency),
       String(policy.requestsPerSecond),
@@ -405,7 +416,8 @@ export async function acquireXmlStockHttpQuotaPermit(
       credentialId: input.credentialId.toLowerCase(),
       workspaceId: input.workspaceId.toLowerCase(),
       product: input.product,
-      member: input.member.toLowerCase()
+      member: input.member.toLowerCase(),
+      ...(input.nodeId ? { nodeId: input.nodeId.toLowerCase() } : {})
     };
   }
   return {
@@ -420,7 +432,8 @@ export async function releaseXmlStockHttpQuotaPermit(
   permit: Extract<XmlStockHttpQuotaPermit, { readonly allowed: true }>
 ): Promise<void> {
   const scope = quotaScope(permit.credentialId, permit.product);
-  if (!UUID_PATTERN.test(permit.member) || !UUID_PATTERN.test(permit.workspaceId)) {
+  if (!UUID_PATTERN.test(permit.member) || !UUID_PATTERN.test(permit.workspaceId) ||
+    (permit.nodeId !== undefined && !UUID_PATTERN.test(permit.nodeId))) {
     throw new TypeError("Invalid XMLStock quota permit");
   }
   const response = await commandWithTimeout(
@@ -428,7 +441,9 @@ export async function releaseXmlStockHttpQuotaPermit(
       RELEASE_SCRIPT,
       2,
       `${scope}:inflight`,
-      `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,
+      `${permit.nodeId
+        ? `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:node:${permit.nodeId.toLowerCase()}`
+        : `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global`}:inflight`,
       permit.member,
       permit.credentialId.toLowerCase(),
       permit.workspaceId.toLowerCase()

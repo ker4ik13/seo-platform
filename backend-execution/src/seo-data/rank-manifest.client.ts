@@ -9,6 +9,7 @@ import {
   rankManifestChunkHashPreimage,
   type InternalFinalizeRankCheckInput,
   type InternalGetRankManifestChunkInput,
+  type InternalGetRankManifestChunksInput,
   type InternalRankCheckFinalizationReceipt,
   type InternalRankExecutionParameters,
   type InternalRankManifestChunk,
@@ -98,6 +99,57 @@ export class RankManifestClient {
       throw new RankManifestClientError("UNAVAILABLE", true);
     }
     return chunk;
+  }
+
+  public async getChunks(
+    input: InternalGetRankManifestChunksInput
+  ): Promise<readonly InternalRankManifestChunk[]> {
+    const command = exactRecord(input, [
+      "workspaceId", "projectId", "actorId", "jobId", "manifestId", "chunkIndices"
+    ]);
+    if (
+      !command ||
+      !uuidV7(command.workspaceId) ||
+      !uuidV7(command.projectId) ||
+      !uuidV7(command.actorId) ||
+      !uuidV7(command.jobId) ||
+      !uuidV7(command.manifestId) ||
+      !Array.isArray(command.chunkIndices) ||
+      command.chunkIndices.length < 1 ||
+      command.chunkIndices.length > 64 ||
+      command.chunkIndices.some((index) => !chunkIndex(index)) ||
+      new Set(command.chunkIndices).size !== command.chunkIndices.length
+    ) {
+      throw new RankManifestClientError("INVALID_COMMAND", false);
+    }
+    const response = await this.send(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(input.projectId)}/rank-manifests/${encodeURIComponent(input.manifestId)}/chunks/batch`,
+        this.config.services.seoData
+      ),
+      {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        actorId: input.actorId
+      },
+      CHUNK_RESPONSE_MAX_BYTES,
+      input
+    );
+    if (!Array.isArray(response) || response.length !== input.chunkIndices.length) {
+      throw new RankManifestClientError("UNAVAILABLE", true);
+    }
+    return response.map((value, offset) => {
+      const parsed = rankManifestChunk(value, {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        manifestId: input.manifestId,
+        chunkIndex: input.chunkIndices[offset]!
+      });
+      if (!parsed) throw new RankManifestClientError("UNAVAILABLE", true);
+      return parsed;
+    });
   }
 
   public async finalize(

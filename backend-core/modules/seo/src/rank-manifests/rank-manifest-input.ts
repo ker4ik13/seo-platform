@@ -2,6 +2,7 @@ import { rankCommandKeywordLimit, rankExecutionPolicyShape } from "@seo-platform
 import { BadRequestException } from "@nestjs/common";
 import type {
   InternalGetRankManifestChunkInput,
+  InternalGetRankManifestChunksInput,
   InternalRankExecutionParameters,
   InternalRankManifestEstimateSeal,
   InternalRankRunProjectSnapshot,
@@ -110,6 +111,29 @@ export function internalGetRankManifestChunkInput(
     jobId: uuid(input.jobId, "jobId"),
     manifestId: uuid(input.manifestId, "manifestId"),
     chunkIndex: chunkIndex(input.chunkIndex)
+  };
+}
+
+export function internalGetRankManifestChunksInput(
+  value: unknown
+): InternalGetRankManifestChunksInput {
+  const input = strictRecord(value, [
+    "workspaceId", "projectId", "actorId", "jobId", "manifestId", "chunkIndices"
+  ]);
+  if (
+    !Array.isArray(input.chunkIndices) ||
+    input.chunkIndices.length < 1 ||
+    input.chunkIndices.length > 64
+  ) invalid("chunkIndices");
+  const indices = (input.chunkIndices as readonly unknown[]).map(chunkIndex);
+  if (new Set(indices).size !== indices.length) invalid("chunkIndices");
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId"),
+    jobId: uuid(input.jobId, "jobId"),
+    manifestId: uuid(input.manifestId, "manifestId"),
+    chunkIndices: indices
   };
 }
 

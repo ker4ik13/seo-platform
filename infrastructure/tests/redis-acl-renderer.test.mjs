@@ -149,6 +149,17 @@ test("renderer isolates Realtime channels and TTL presence keys", async () => {
 
 });
 
+test("opt-in Worker Gateway may coordinate provider permits without changing default API ACL", async () => {
+  await withRenderedAcl("jobs", {
+    ...validRedisEnvironment(),
+    WORKER_GATEWAY_ENABLED: "true"
+  }, async ({ acl }) => {
+    const api = userLine(acl.trimEnd().split("\n"), "seo_jobs_api");
+    assert.match(api, /~seo-platform:jobs:v1:provider-rate-limit:\*/u);
+    assert.match(api, /\s\+time(?:\s|$)/u);
+  });
+});
+
 test("renderer fails closed without exposing invalid or reused secrets", async () => {
   const cases = [
     {

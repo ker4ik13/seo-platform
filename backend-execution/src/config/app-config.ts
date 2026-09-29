@@ -39,7 +39,8 @@ export interface MalwareScannerConfig {
 export type IntegrationCredentialRole =
   | "DISABLED"
   | "MANAGEMENT"
-  | "EXECUTION";
+  | "EXECUTION"
+  | "BOTH";
 
 export type JobsProcessRole =
   | "HTTP"
@@ -105,6 +106,7 @@ export interface AppConfig {
   readonly integrationCredentials: IntegrationCredentialEncryptionConfig;
   readonly platformProviderCredentials: PlatformProviderCredentialsConfig;
   readonly xmlStockSoftId?: string;
+  readonly workerGatewayEnabled: boolean;
   readonly integrationCredentialValidation: {
     readonly timeoutMs: number;
     readonly leaseSeconds: number;
@@ -281,6 +283,7 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "PLATFORM_XMLSTOCK_ACCOUNT_ID",
   "PLATFORM_XMLSTOCK_ACCOUNT_IDS",
   "PLATFORM_XMLSTOCK_SOFT_ID",
+  "WORKER_GATEWAY_ENABLED",
   "PLATFORM_ARSENKIN_ENABLED",
   "PLATFORM_ARSENKIN_API_KEY",
   "PLATFORM_ARSENKIN_API_KEYS",
@@ -331,10 +334,10 @@ function integrationCredentialRole(
   const configured = env.INTEGRATION_CREDENTIAL_ROLE?.trim().toUpperCase();
   if (
     configured !== undefined &&
-    !["DISABLED", "MANAGEMENT", "EXECUTION"].includes(configured)
+    !["DISABLED", "MANAGEMENT", "EXECUTION", "BOTH"].includes(configured)
   ) {
     throw new Error(
-      "INTEGRATION_CREDENTIAL_ROLE must be DISABLED, MANAGEMENT or EXECUTION"
+      "INTEGRATION_CREDENTIAL_ROLE must be DISABLED, MANAGEMENT, EXECUTION or BOTH"
     );
   }
   const legacyEnabled =
@@ -881,8 +884,10 @@ export function loadAppConfig(
   );
   const credentialRole = integrationCredentialRole(env);
   const integrationCredentialsEnabled = credentialRole !== "DISABLED";
-  const credentialManagementEnabled = credentialRole === "MANAGEMENT";
+  const credentialManagementEnabled =
+    credentialRole === "MANAGEMENT" || credentialRole === "BOTH";
   const credentialExecutionEnabled = credentialRole === "EXECUTION";
+  const workerGatewayEnabled = bool(env.WORKER_GATEWAY_ENABLED);
   const processRole =
     requestedProcessRole ??
     (rankPreparationEnabled
@@ -890,6 +895,9 @@ export function loadAppConfig(
       : credentialExecutionEnabled
         ? "CONNECTOR_WORKER"
         : "HTTP");
+  if (credentialRole === "BOTH" && !workerGatewayEnabled) {
+    throw new Error("BOTH credential role requires WORKER_GATEWAY_ENABLED=true");
+  }
   const platformXmlstockEnabled = bool(
     env.PLATFORM_XMLSTOCK_ENABLED
   );
@@ -1009,10 +1017,12 @@ export function loadAppConfig(
   }
   if (
     rankBillingSettlementApiToken &&
-    processRole !== "CONNECTOR_WORKER"
+    processRole !== "CONNECTOR_WORKER" &&
+    !(workerGatewayEnabled && processRole === "HTTP" &&
+      credentialRole === "BOTH")
   ) {
     throw new Error(
-      "Only the connector worker may receive JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
+      "Only the connector worker or enabled Worker Gateway may receive JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN"
     );
   }
   if (
@@ -1649,6 +1659,13 @@ export function loadAppConfig(
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: authEmailApiToken
   });
 
+  if (workerGatewayEnabled && (
+    processRole !== "HTTP" || credentialRole !== "BOTH" ||
+    !rankBillingSettlementApiToken
+  )) {
+    throw new Error("Worker Gateway requires HTTP/BOTH role and a settlement token");
+  }
+
   return {
     processRole,
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -1661,6 +1678,7 @@ export function loadAppConfig(
     databaseUrl: required(env, "DATABASE_URL"),
     databasePoolMax,
     redisUrl: env.REDIS_URL?.trim() || "redis://127.0.0.1:6379",
+    workerGatewayEnabled,
     ...(xmlStockSoftId ? { xmlStockSoftId } : {}),
     ...(platformApiToken ? { platformApiToken } : {}),
     ...(seoDataApiToken ? { seoDataApiToken } : {}),

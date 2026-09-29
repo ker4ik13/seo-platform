@@ -4,6 +4,7 @@ import { Injectable } from "@nestjs/common";
 import {
   type InternalGetRankManifestChunkInput,
   type InternalRankExecutionParameters,
+  type InternalRankManifestChunk,
   type RankManifestHash
 } from "@seo-platform/contracts";
 import { canonicalizeJson } from "@seo-platform/contracts/canonical-json";
@@ -107,7 +108,8 @@ export class RankProviderRequestIntentService {
   ) {}
 
   public async ensureForItem(
-    jobItemId: string
+    jobItemId: string,
+    preloadedChunk?: InternalRankManifestChunk
   ): Promise<RankProviderRequestIntent> {
     if (!UUID_V7_PATTERN.test(jobItemId)) {
       throw intentFailure("ITEM_NOT_FOUND", false, "invalid_item_id");
@@ -120,6 +122,14 @@ export class RankProviderRequestIntentService {
       });
       if (!pointer) throw intentFailure("ITEM_NOT_FOUND", false, "item_not_found");
 
+      if (preloadedChunk) {
+        return await this.prisma.$transaction(
+          (transaction) => persistIntent(
+            transaction, pointer.jobId, jobItemId, preloadedChunk
+          ),
+          { isolationLevel: "ReadCommitted" }
+        );
+      }
       const source = await this.lockedSource(pointer.jobId, jobItemId);
       const chunk = await this.manifests.getChunk(
         source.chunkInput,
@@ -136,60 +146,9 @@ export class RankProviderRequestIntentService {
       });
 
       return await this.prisma.$transaction(
-        async (transaction) => {
-          const current = await lockedIntentSource(
-            transaction,
-            pointer.jobId,
-            jobItemId
-          );
-          if (current.existing) {
-            const replay = storedRankProviderRequestIntent(
-              current.existing,
-              current.binding
-            );
-            assertSameIntent(replay, candidate);
-            return current.existing;
-          }
-
-          const rebuilt = buildRankProviderRequestIntent({
-            command: current.command,
-            chunk,
-            jobItemId,
-            manifestHash: current.manifestHash,
-            executionConnectorVersion:
-              current.binding.executionConnectorVersion,
-            providerPolicyVersion:
-              current.binding.providerPolicyVersion
-          });
-          assertSameIntent(rebuilt, candidate);
-          const requestHash = rankProviderRequestIntentHash(candidate);
-          const created =
-            await transaction.rankProviderRequestIntent.create({
-              data: {
-                workspaceId: current.binding.workspaceId,
-                projectId: current.binding.projectId,
-                jobId: current.binding.jobId,
-                jobItemId: current.binding.jobItemId,
-                manifestId: current.binding.manifestId,
-                manifestHash: Buffer.from(
-                  current.binding.manifestHash
-                ),
-                manifestChunkIndex:
-                  current.binding.manifestChunkIndex,
-                manifestChunkHash: Buffer.from(
-                  candidate.manifestChunk.chunkHash.value,
-                  "hex"
-                ),
-                schemaVersion: RANK_PROVIDER_REQUEST_INTENT_SCHEMA,
-                requestSnapshot: JSON.parse(
-                  rankProviderRequestIntentCanonicalJson(candidate)
-                ) as Prisma.InputJsonValue,
-                requestHash: Buffer.from(requestHash.value, "hex")
-              }
-            });
-          storedRankProviderRequestIntent(created, current.binding);
-          return created;
-        },
+        (transaction) => persistIntent(
+          transaction, pointer.jobId, jobItemId, chunk, candidate
+        ),
         { isolationLevel: "ReadCommitted" }
       );
     } catch (error) {
@@ -206,6 +165,65 @@ export class RankProviderRequestIntentService {
     }
   }
 
+  public async prefetchForItems(
+    jobItemIds: readonly string[]
+  ): Promise<ReadonlyMap<string, InternalRankManifestChunk>> {
+    if (jobItemIds.length < 1 || jobItemIds.length > 64 ||
+      new Set(jobItemIds).size !== jobItemIds.length ||
+      jobItemIds.some((id) => !UUID_V7_PATTERN.test(id))) {
+      throw intentFailure("ITEM_NOT_FOUND", false, "prefetch_ids_invalid");
+    }
+    const items = await this.prisma.jobItem.findMany({
+      where: { id: { in: [...jobItemIds] } },
+      select: {
+        id: true,
+        jobId: true,
+        workspaceId: true,
+        projectId: true,
+        inputReference: true,
+        job: {
+          select: {
+            actorId: true,
+            rankRun: { select: { manifestId: true } }
+          }
+        }
+      }
+    });
+    const first = items[0];
+    if (!first || items.length !== jobItemIds.length ||
+      !first.projectId || !first.job.actorId || !first.job.rankRun?.manifestId ||
+      items.some((item) =>
+        item.jobId !== first.jobId ||
+        item.workspaceId !== first.workspaceId ||
+        item.projectId !== first.projectId ||
+        item.job.actorId !== first.job.actorId ||
+        item.job.rankRun?.manifestId !== first.job.rankRun?.manifestId
+      )) {
+      throw intentFailure("ITEM_NOT_FOUND", false, "prefetch_scope_mismatch");
+    }
+    const references = items.map((item) => rankJobItemReference(item.inputReference));
+    if (references.some((reference) =>
+      reference.manifestId !== first.job.rankRun?.manifestId
+    )) {
+      throw intentFailure("LOCAL_STATE_INVALID", false, "prefetch_manifest_mismatch");
+    }
+    const indices = references.map((reference) => reference.chunkIndex);
+    const chunks = await this.manifests.getChunks({
+      workspaceId: first.workspaceId,
+      projectId: first.projectId,
+      actorId: first.job.actorId,
+      jobId: first.jobId,
+      manifestId: first.job.rankRun.manifestId,
+      chunkIndices: [...new Set(indices)]
+    });
+    const byIndex = new Map(chunks.map((chunk) => [chunk.chunkIndex, chunk]));
+    return new Map(items.map((item, offset) => {
+      const chunk = byIndex.get(indices[offset]!);
+      if (!chunk) throw intentFailure("DEPENDENCY_UNAVAILABLE", true, "prefetch_chunk_missing");
+      return [item.id, chunk];
+    }));
+  }
+
   private async lockedSource(
     jobId: string,
     jobItemId: string
@@ -216,6 +234,61 @@ export class RankProviderRequestIntentService {
       { isolationLevel: "ReadCommitted" }
     );
   }
+}
+
+async function persistIntent(
+  transaction: Prisma.TransactionClient,
+  jobId: string,
+  jobItemId: string,
+  chunk: InternalRankManifestChunk,
+  expected?: RankProviderRequestIntentV1
+): Promise<RankProviderRequestIntent> {
+  const current = await lockedIntentSource(transaction, jobId, jobItemId);
+  if (
+    chunk.workspaceId !== current.chunkInput.workspaceId ||
+    chunk.projectId !== current.chunkInput.projectId ||
+    chunk.jobId !== current.chunkInput.jobId ||
+    chunk.manifestId !== current.chunkInput.manifestId ||
+    chunk.chunkIndex !== current.chunkInput.chunkIndex
+  ) {
+    throw intentFailure("LOCAL_STATE_INVALID", false, "prefetched_chunk_scope_mismatch");
+  }
+  const candidate = buildRankProviderRequestIntent({
+    command: current.command,
+    chunk,
+    jobItemId,
+    manifestHash: current.manifestHash,
+    executionConnectorVersion: current.binding.executionConnectorVersion,
+    providerPolicyVersion: current.binding.providerPolicyVersion
+  });
+  if (expected) assertSameIntent(candidate, expected);
+  if (current.existing) {
+    const replay = storedRankProviderRequestIntent(
+      current.existing, current.binding
+    );
+    assertSameIntent(replay, candidate);
+    return current.existing;
+  }
+  const requestHash = rankProviderRequestIntentHash(candidate);
+  const created = await transaction.rankProviderRequestIntent.create({
+    data: {
+      workspaceId: current.binding.workspaceId,
+      projectId: current.binding.projectId,
+      jobId: current.binding.jobId,
+      jobItemId: current.binding.jobItemId,
+      manifestId: current.binding.manifestId,
+      manifestHash: Buffer.from(current.binding.manifestHash),
+      manifestChunkIndex: current.binding.manifestChunkIndex,
+      manifestChunkHash: Buffer.from(candidate.manifestChunk.chunkHash.value, "hex"),
+      schemaVersion: RANK_PROVIDER_REQUEST_INTENT_SCHEMA,
+      requestSnapshot: JSON.parse(
+        rankProviderRequestIntentCanonicalJson(candidate)
+      ) as Prisma.InputJsonValue,
+      requestHash: Buffer.from(requestHash.value, "hex")
+    }
+  });
+  storedRankProviderRequestIntent(created, current.binding);
+  return created;
 }
 
 export function storedRankProviderRequestIntent(

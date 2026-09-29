@@ -1,5 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { InternalPaidUsageReview, PaidUsageReviewTicket, ResolvePaidUsageInput } from "@seo-platform/contracts";
+import {
+  parseCreatedWorkerNode,
+  parseWorkerNodeView,
+  type CreatedWorkerNode,
+  type WorkerNodeConfiguration,
+  type WorkerNodeView
+} from "@seo-platform/contracts";
 import type { InternalWorkspaceExecutionUsage, InternalRankEstimatePricingScope } from "@seo-platform/contracts";
 import type { PrepareSystemConnectorsResult } from "@seo-platform/contracts";
 import type { PlatformProviderAccountSnapshot } from "@seo-platform/contracts";
@@ -487,6 +494,71 @@ export class JobsClient {
       requestId
     );
     return adminOperationSummary(value);
+  }
+
+  public async listWorkerNodes(
+    actorId: string,
+    requestId: string
+  ): Promise<readonly WorkerNodeView[]> {
+    const value = await this.requestAdmin<unknown>(
+      "/internal/v1/platform-admin/worker-nodes", actorId, requestId
+    );
+    if (!Array.isArray(value) || value.length > 200) throw invalidJobsResponse();
+    try {
+      return value.map(parseWorkerNodeView);
+    } catch {
+      throw invalidJobsResponse();
+    }
+  }
+
+  public async createWorkerNode(
+    actorId: string,
+    requestId: string,
+    input: WorkerNodeConfiguration
+  ): Promise<CreatedWorkerNode> {
+    const value = await this.requestAdmin<unknown>(
+      "/internal/v1/platform-admin/worker-nodes", actorId, requestId,
+      "POST", input
+    );
+    try {
+      return parseCreatedWorkerNode(value);
+    } catch {
+      throw invalidJobsResponse();
+    }
+  }
+
+  public async rotateWorkerNode(
+    actorId: string,
+    requestId: string,
+    id: string
+  ): Promise<CreatedWorkerNode> {
+    const value = await this.requestAdmin<unknown>(
+      `/internal/v1/platform-admin/worker-nodes/${encodeURIComponent(id)}/rotate`,
+      actorId, requestId, "POST"
+    );
+    try {
+      return parseCreatedWorkerNode(value);
+    } catch {
+      throw invalidJobsResponse();
+    }
+  }
+
+  public async updateWorkerNode(
+    actorId: string,
+    requestId: string,
+    id: string,
+    action: "configuration" | "enabled" | "draining",
+    input: WorkerNodeConfiguration | { readonly enabled: boolean } | { readonly draining: boolean }
+  ): Promise<WorkerNodeView> {
+    const value = await this.requestAdmin<unknown>(
+      `/internal/v1/platform-admin/worker-nodes/${encodeURIComponent(id)}/${action}`,
+      actorId, requestId, "PATCH", input
+    );
+    try {
+      return parseWorkerNodeView(value);
+    } catch {
+      throw invalidJobsResponse();
+    }
   }
 
   public async createFrequencyCollection(
@@ -2227,7 +2299,7 @@ export class JobsClient {
     path: string,
     actorId: string,
     requestId: string,
-    method: "GET" | "POST" = "GET",
+    method: "GET" | "POST" | "PATCH" = "GET",
     body?: unknown
   ): Promise<Data> {
     const token = this.config.jobsApiToken;

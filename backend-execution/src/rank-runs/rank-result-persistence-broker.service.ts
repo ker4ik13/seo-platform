@@ -174,6 +174,61 @@ export class RankResultPersistenceBrokerService {
     }
     return row.status as "STAGED" | "PERSISTED";
   }
+
+  public async completeBatch(
+    claims: readonly RankResultPersistenceClaim[],
+    persisted: boolean
+  ): Promise<void> {
+    if (claims.length < 1 || claims.length > rankResultBatchMaxItems) {
+      throw new TypeError("Invalid rank result completion batch size");
+    }
+    const first = claims[0]!;
+    if (
+      claims.some((claim) =>
+        claim.workspaceId !== first.workspaceId ||
+        claim.projectId !== first.projectId ||
+        claim.jobId !== first.jobId
+      ) ||
+      new Set(claims.map((claim) => claim.executionId)).size !== claims.length
+    ) {
+      throw new TypeError("Rank result completion batch must have one Job and unique executions");
+    }
+    const payload = claims.map((claim) => ({
+      executionId: claim.executionId,
+      leaseOwner: claim.leaseOwner,
+      leaseToken: claim.leaseToken,
+      leaseGeneration: claim.leaseGeneration,
+      executionVersion: claim.executionVersion
+    }));
+    const rows = await this.prisma.$queryRaw<readonly PersistenceCompletionRow[]>(
+      Prisma.sql`
+        SELECT * FROM public.complete_rank_staged_results_batch(
+          ${first.workspaceId}::uuid,
+          ${first.jobId}::uuid,
+          ${JSON.stringify(payload)}::jsonb,
+          ${persisted}::boolean
+        )
+      `
+    );
+    if (rows.length !== claims.length) {
+      throw new RankResultPersistenceLeaseLostError();
+    }
+    const expected = new Map(claims.map((claim) => [claim.executionId, claim]));
+    for (const row of rows) {
+      const executionId = uuid(row.executionId, "completion execution id");
+      const claim = expected.get(executionId);
+      if (
+        !claim ||
+        row.status !== (persisted ? "PERSISTED" : "STAGED") ||
+        !Number.isSafeInteger(row.executionVersion) ||
+        row.executionVersion !== claim.executionVersion + 1
+      ) {
+        invalid("batch completion");
+      }
+      expected.delete(executionId);
+    }
+    if (expected.size !== 0) invalid("batch completion cardinality");
+  }
 }
 
 function validateClaimInput(leaseOwner: string, leaseSeconds: number): void {

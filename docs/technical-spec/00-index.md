@@ -106,6 +106,7 @@
 15. [`15-security-quality-and-operations.md`](./15-security-quality-and-operations.md) — безопасность, качество и эксплуатация.
 16. [`16-roadmap-and-acceptance.md`](./16-roadmap-and-acceptance.md) — этапы и критерии приёмки.
 17. [`17-glossary-and-references.md`](./17-glossary-and-references.md) — термины и официальные источники.
+18. [`18-xmlstock-per-key-capacity.md`](./18-xmlstock-per-key-capacity.md) — эластичная производительность XMLStock на каждый физический ключ.
 
 ## 5. Иерархия требований
 

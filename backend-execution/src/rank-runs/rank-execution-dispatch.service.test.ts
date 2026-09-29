@@ -227,6 +227,7 @@ function service(
 } {
   const events: string[] = [];
   const grants = {
+    prefetchForItems: async () => new Map(),
     issueForItem: async (
       itemId: string,
       requestId: string
@@ -237,7 +238,7 @@ function service(
       if (!stored) throw new Error("Missing grant fixture");
       return stored;
     }
-  } as RankExecutionGrantAttemptService;
+  } as unknown as RankExecutionGrantAttemptService;
   const instance = new RankExecutionDispatchService(
     {} as PrismaService,
     grants,

@@ -105,6 +105,37 @@ test("returns a bounded retry without issuing a permit when a bucket is full", a
   });
 });
 
+test("remote node has its own HTTP ceiling while keeping the physical key bucket", async () => {
+  const calls: unknown[][] = [];
+  const permit = await acquireXmlStockHttpQuotaPermit(
+    { eval: async (...args: unknown[]) => {
+      calls.push(args);
+      return [1, 0, 10, 10];
+    } } as never,
+    {
+      credentialId: firstCredential,
+      workspaceId: firstWorkspace,
+      product: "YANDEX_LIVE",
+      leaseMs: 13_000,
+      member: firstMember,
+      nodeId: secondCredential,
+      globalConcurrency: 24
+    }
+  );
+  assert.equal(calls[0]?.[2], `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:inflight`);
+  assert.equal(calls[0]?.[8], `seo-platform:jobs:v1:provider-rate-limit:xmlstock:node:${secondCredential}:inflight`);
+  assert.equal(calls[0]?.[16], "24");
+  assert.equal(permit.allowed, true);
+  if (!permit.allowed) return;
+  assert.equal(permit.nodeId, secondCredential);
+  const releaseCalls: unknown[][] = [];
+  await releaseXmlStockHttpQuotaPermit({ eval: async (...args: unknown[]) => {
+    releaseCalls.push(args);
+    return 1;
+  } } as never, permit);
+  assert.equal(releaseCalls[0]?.[3], `seo-platform:jobs:v1:provider-rate-limit:xmlstock:node:${secondCredential}:inflight`);
+});
+
 test("release, penalty and recovery mutate only the same bucket", async () => {
   const calls: unknown[][] = [];
   const redis = {

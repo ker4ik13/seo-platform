@@ -113,6 +113,36 @@ test("gets an exact bounded manifest chunk through the dedicated boundary", asyn
   }
 });
 
+test("reads a bounded manifest batch in one scoped request", async () => {
+  const originalFetch = globalThis.fetch;
+  const expected = chunkReceipt();
+  const batchCommand = {
+    workspaceId: ids.workspaceId,
+    projectId: ids.projectId,
+    actorId: ids.actorId,
+    jobId: ids.jobId,
+    manifestId: ids.manifestId,
+    chunkIndices: [0]
+  };
+  let calls = 0;
+  globalThis.fetch = (async (request, init) => {
+    calls += 1;
+    assert.equal(String(request),
+      `http://seo-data:4001/internal/v1/projects/${ids.projectId}/rank-manifests/${ids.manifestId}/chunks/batch`
+    );
+    assert.equal(init?.method, "POST");
+    assert.equal(new Headers(init?.headers).get("X-Actor-Id"), ids.actorId);
+    assert.deepEqual(JSON.parse(String(init?.body)), batchCommand);
+    return Response.json({ data: [expected], meta: { requestId: "batch-1" } });
+  }) as typeof fetch;
+  try {
+    assert.deepEqual(await new RankManifestClient(config).getChunks(batchCommand), [expected]);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("accepts a later XMLStock one-key manifest chunk", async () => {
   const input = { ...chunkCommand(), chunkIndex: 100 };
   const unsigned: InternalRankManifestChunk = {

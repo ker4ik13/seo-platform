@@ -43,6 +43,6 @@ import { WorkspaceCredentialRouteProvisioningService } from "./workspace-credent
     WorkspaceCredentialRouteProvisioningService,
     WorkspaceConnectorRoutingService
   ],
-  exports: [IntegrationCredentialApiGuard, WorkspaceConnectorRoutingService]
+  exports: [IntegrationCredentialApiGuard, IntegrationCredentialCryptoService, WorkspaceConnectorRoutingService]
 })
 export class IntegrationModule {}
