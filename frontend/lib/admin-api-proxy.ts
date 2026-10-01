@@ -6,7 +6,8 @@ import {
   webPublicOrigin
 } from "./server-runtime-origin.ts";
 
-const ALLOWED_METHODS = new Set(["GET", "POST", "PATCH"]);
+const ALLOWED_METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
+const MUTATION_METHODS = new Set(["POST", "PATCH", "DELETE"]);
 const AUTH_PATHS = new Set([
   "auth/login",
   "auth/logout",
@@ -34,7 +35,8 @@ export async function proxyAdminApi(
   path: readonly string[]
 ): Promise<Response> {
   const upstreamPath = adminUpstreamPath(path);
-  if (!ALLOWED_METHODS.has(request.method) || !upstreamPath) {
+  if (!ALLOWED_METHODS.has(request.method) || !upstreamPath ||
+    (request.method === "DELETE" && !(path.length === 2 && path[0] === "worker-nodes" && UUID_PATTERN.test(path[1] ?? "")))) {
     return errorResponse(404, "NOT_FOUND", "API route not found");
   }
   const origin = request.headers.get("origin");
@@ -62,7 +64,7 @@ export async function proxyAdminApi(
     return errorResponse(413, "FILE_TOO_LARGE", "Request body is too large");
   }
   let body: ArrayBuffer | undefined;
-  if (["POST", "PATCH"].includes(request.method) && request.body) {
+  if (MUTATION_METHODS.has(request.method) && request.body) {
     const bounded = await readBoundedRequestBody(request, MAX_BODY_BYTES, 10_000);
     if (!bounded.ok) return bounded.response;
     body = bounded.body;
@@ -84,7 +86,7 @@ export async function proxyAdminApi(
   }
   if (origin) headers.set("origin", origin);
   if (clientIp) headers.set("x-forwarded-for", clientIp);
-  if (["POST", "PATCH"].includes(request.method) && !headers.has("x-csrf-token")) {
+  if (MUTATION_METHODS.has(request.method) && !headers.has("x-csrf-token")) {
     const csrf = request.cookies.get(
       process.env.AUTH_CSRF_COOKIE_NAME ?? "seo_csrf"
     )?.value;

@@ -252,6 +252,9 @@ test("admin dark presentation uses shared selects without granting staff access"
   const browser = await chromium.launch({ headless: true });
   try {
     assert.equal((await api.get("/admin/api/me")).status(), 403, "fixture must not gain a platform role");
+    const unauthorizedDeletion = await api.delete(`/admin/api/worker-nodes/${randomUUID()}`, { headers: { Origin: base }, data: { confirmed: true } });
+    assert.equal(unauthorizedDeletion.status(), 403, "DELETE must reach the role guard, not fail in the BFF method allowlist");
+    assert.notEqual((await unauthorizedDeletion.json()).error?.message, "API route not found");
     const context = await browser.newContext({ storageState: await api.storageState() });
     const errors = [];
     const page = await context.newPage(); page.on("pageerror", (error) => errors.push(error.message));
