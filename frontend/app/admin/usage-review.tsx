@@ -3,25 +3,37 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminPaidUsageReview, PaidUsageReviewTicket, PaidUsageResolution } from "@seo-platform/contracts";
 import { adminApi } from "../../lib/admin-browser-api";
 import { useUiLocale } from "../../components/ui-locale";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
+import { AdminOverlay } from "../../components/admin-overlay";
+import { Icon } from "../../components/icon";
 
 export function UsageReview() {
   const { locale } = useUiLocale(), en = locale === "en";
-  const [rows, setRows] = useState<readonly AdminPaidUsageReview[]>(), [error, setError] = useState(false), [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState<readonly AdminPaidUsageReview[]>(), [error, setError] = useState(false);
+  const [selectedId, setSelectedId] = useState<string>();
   const load = useCallback(async () => {
-    setLoading(true);
     const result = await adminApi<readonly AdminPaidUsageReview[]>("/api/usage-reviews");
-    setLoading(false); setError(!result.ok); if (result.ok) setRows(result.data);
+    setError(!result.ok); if (result.ok) setRows(result.data);
   }, []);
-  useEffect(() => { void load(); const timer = setInterval(() => void load(), 30_000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  useAdminAutoRefresh(load);
   const money = (minor: number) => new Intl.NumberFormat(locale, { style: "currency", currency: "RUB" }).format(minor / 100);
-  return <div className="content admin-usage-review"><section className="page-heading"><div><p className="eyebrow">{en ? "Finance" : "Финансы"}</p><h1>{en ? "Uncertain provider charges" : "Расходы на проверке"}</h1><p>{en ? "Reconcile an uncertain submission before charging the customer or releasing their reservation." : "Проверьте неопределённую отправку перед списанием или освобождением резерва клиента."}</p></div><button className="ghost" disabled={loading} type="button" onClick={() => void load()}>{loading ? en ? "Refreshing…" : "Обновляем…" : en ? "Refresh" : "Обновить"}</button></section>
+  const selected = rows?.find((row) => row.quoteId === selectedId);
+  return <div className="content admin-usage-review">
     {error && <p role="alert" className="error">{en ? "Could not load reviews. Refresh to try again." : "Не удалось загрузить проверки. Обновите страницу для повтора."}</p>}
-    {!rows ? <section className="panel"><p>{en ? "Loading reviews…" : "Загружаем проверки…"}</p></section> : rows.length === 0 ? <section className="panel"><h2>{en ? "No charges awaiting review" : "Спорных списаний нет"}</h2><p>{en ? "Uncertain submissions will appear here. They are never retried automatically." : "Неопределённые отправки появятся здесь. Автоматически они не повторяются."}</p></section> : rows.map(row => <section className="panel admin-usage-operation" key={row.quoteId}><header><div><h2>{row.workspaceName}</h2><p>{row.provider} · {row.kind.replaceAll("_", " ")} · {new Date(row.createdAt).toLocaleString(locale)}</p><small>{en ? "Operation" : "Операция"}: {row.jobId}</small></div><div className="admin-usage-totals"><span>{en ? "Reserved" : "В резерве"}<strong>{money(row.reservedMinor)}</strong></span><span>{en ? "Already charged" : "Уже списано"}<strong>{money(row.capturedMinor)}</strong></span></div></header>
+    {!rows ? <section className="panel"><p>Загружаем проверки…</p></section> : rows.length === 0 ? <section className="panel"><p>Спорных списаний нет</p></section> : <div className="admin-entity-grid">{rows.map(row => <button className="panel admin-entity-card" key={row.quoteId} onClick={() => setSelectedId(row.quoteId)} type="button"><header><Icon name="history" /><strong>{row.workspaceName}</strong><Icon name="chevronRight" /></header><small>{row.provider} · {row.kind.replaceAll("_", " ")}</small><div className="admin-usage-totals"><span>В резерве<strong>{money(row.reservedMinor)}</strong></span><span>Списано<strong>{money(row.capturedMinor)}</strong></span></div><small>{row.tickets.length} отправок · {new Date(row.createdAt).toLocaleDateString("ru")}</small></button>)}</div>}
+    {selected && <AdminOverlay drawer title={selected.workspaceName} onClose={() => setSelectedId(undefined)}><UsageOperationDetail row={selected} onResolved={load} /></AdminOverlay>}
+  </div>;
+}
+
+function UsageOperationDetail({ row, onResolved }: Readonly<{ row: AdminPaidUsageReview; onResolved: () => Promise<void> }>) {
+  const locale = "ru", en = false;
+  const money = (minor: number) => new Intl.NumberFormat(locale, { style: "currency", currency: "RUB" }).format(minor / 100);
+  return <section className="admin-usage-operation"><header><div><p>{row.provider} · {row.kind.replaceAll("_", " ")} · {new Date(row.createdAt).toLocaleString(locale)}</p><small>Операция: {row.jobId}</small></div><div className="admin-usage-totals"><span>В резерве<strong>{money(row.reservedMinor)}</strong></span><span>Уже списано<strong>{money(row.capturedMinor)}</strong></span></div></header>
       <p className="notice">{en ? "A review settles money only. It does not fabricate a missing result or repeat the provider request. Release the reservation if the charge cannot be substantiated." : "Решение касается только денег: оно не создаёт отсутствующий результат и не повторяет запрос провайдеру. Если расход не подтверждается, освободите резерв."}</p>
       {row.tickets.length >= 100 && <p>{en ? "Showing the first 100 tickets. Remaining tickets appear as these are resolved." : "Показаны первые 100 отправок. Остальные появятся по мере разбора."}</p>}
-      {row.tickets.map(ticket => <TicketReview key={ticket.id} ticket={ticket} quoteId={row.quoteId} terminal={row.terminal} onResolved={load} provider={row.provider} rank={row.kind === "RANK"} />)}
-    </section>)}
-  </div>;
+      {row.tickets.map(ticket => <TicketReview key={ticket.id} ticket={ticket} quoteId={row.quoteId} terminal={row.terminal} onResolved={onResolved} provider={row.provider} rank={row.kind === "RANK"} />)}
+    </section>;
 }
 function TicketReview({ ticket, quoteId, terminal, provider, rank, onResolved }: { ticket: PaidUsageReviewTicket; quoteId: string; terminal: boolean; provider: string; rank: boolean; onResolved: () => Promise<void> }) {
   const { locale } = useUiLocale(), en = locale === "en";

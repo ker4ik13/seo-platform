@@ -131,6 +131,8 @@ export function projectPositionTopValue(
   if (threshold === 5) return point.top5KeywordCount;
   if (threshold === 10) return point.top10KeywordCount;
   if (threshold === 30) return point.top30KeywordCount;
+  if (threshold === 100) return point.top100KeywordCount ?? point.top50KeywordCount;
+  if (threshold === 200) return point.top200KeywordCount ?? point.top100KeywordCount ?? point.top50KeywordCount;
   return point.top50KeywordCount;
 }
 

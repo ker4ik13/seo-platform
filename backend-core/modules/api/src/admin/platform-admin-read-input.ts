@@ -1,7 +1,9 @@
 import type {
+  AdminDirectorySort,
   AdminOperationStatusGroup,
   AdminProjectStatus
 } from "@seo-platform/contracts";
+import { adminDirectorySorts } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 import { adminWorkspaceSearchQuery } from "./platform-admin-workspace-input.js";
 
@@ -24,6 +26,7 @@ const UUID_PATTERN =
 const PAGE_LIMITS = new Set([20, 50, 100]);
 
 export interface AdminProjectQuery {
+  readonly sort?: AdminDirectorySort;
   readonly search: string;
   readonly status?: AdminProjectStatus;
 }
@@ -44,6 +47,7 @@ export function adminOperationId(value: unknown): string {
 }
 
 export function adminProjectQuery(input: {
+  readonly sort?: unknown;
   readonly q?: unknown;
   readonly status?: unknown;
 }): AdminProjectQuery {
@@ -54,10 +58,17 @@ export function adminProjectQuery(input: {
   }
   return {
     search,
+    ...(input.sort === undefined ? {} : { sort: adminDirectorySort(input.sort) }),
     ...(status && status !== "ALL"
       ? { status: status as AdminProjectStatus }
       : {})
   };
+}
+
+export function adminDirectorySort(value: unknown): AdminDirectorySort {
+  if (value === undefined || value === "") return "CREATED_DESC";
+  if (typeof value !== "string" || !adminDirectorySorts.includes(value as AdminDirectorySort)) throw invalid("sort");
+  return value as AdminDirectorySort;
 }
 
 export function adminOperationQuery(input: {

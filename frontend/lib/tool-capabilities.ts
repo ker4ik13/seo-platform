@@ -34,7 +34,7 @@ export const toolCapabilities: readonly ToolCapability[] = [
   {
     code: "serp.comparison.v1",
     slug: "serp",
-    title: "Выдача из поиска",
+    title: "Поисковая выдача",
     description:
       "Сравнение сохранённой выдачи по городам, поисковикам и устройствам с подсветкой доменов.",
     category: "research",

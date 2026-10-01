@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable,Logger,Optional } from "@nestjs/common";
+import { RemoteWorkClientService,RemoteWorkFailedError } from "../worker-nodes/remote-work-client.service.js";
 import type {
   ApiCollectionResponse,
   InternalCreateSemanticExportInput,
@@ -60,10 +61,12 @@ export interface SemanticExportWorkerResult {
 
 @Injectable()
 export class SemanticExportWorkerService {
+  private readonly logger=new Logger(SemanticExportWorkerService.name);
   public constructor(
     private readonly prisma: PrismaService,
     private readonly seoData: SeoDataClient,
-    @Inject(OBJECT_STORAGE) private readonly storage: ObjectStoragePort
+    @Inject(OBJECT_STORAGE) private readonly storage: ObjectStoragePort,
+    @Optional() private readonly remote?:RemoteWorkClientService
   ) {}
 
   public workerId(): string {
@@ -82,6 +85,7 @@ export class SemanticExportWorkerService {
 
     let objectKey: string | undefined;
     let artifactStored = false;
+    let remoteInputKey:string|undefined;
     try {
       if (!this.storage.isEnabled()) {
         throw new ExportFailure("STORAGE_UNAVAILABLE", true);
@@ -94,7 +98,9 @@ export class SemanticExportWorkerService {
       }
       const context = exportContext(input);
       const counter = { value: 0 };
+      const generatedAt=new Date();
       let file: SemanticExportFile;
+      let remotePlan:{kind:"ROWS"|"HISTORY"|"FOLDER_MAP";plan?:unknown;names:Readonly<Record<string,string>>;records:()=>AsyncIterable<Readonly<Record<string,unknown>>>};
       if (input.positionHistory) {
         const catalog = await this.seoData.listExportRankDimensions(context);
         if (catalog.truncated) throw new ExportFailure("EXPORT_DIMENSIONS_UNAVAILABLE", false);
@@ -129,8 +135,10 @@ export class SemanticExportWorkerService {
             counter
           ),
           input,
-          plan
+          plan,
+          generatedAt
         );
+        remotePlan={kind:"HISTORY",plan,names:{},records:()=>exportRecords(this.exportPositionHistoryRows(claimed,input,leaseOwner,true))};
       } else if (input.folderMap) {
         const groups = await this.seoData.listExportKeywordGroups(context);
         const plan = folderMapPlan(groups, input.folderMap);
@@ -157,24 +165,38 @@ export class SemanticExportWorkerService {
           ),
           input,
           plan,
-          customColumnNames
+          customColumnNames,
+          generatedAt
         );
+        remotePlan={kind:"FOLDER_MAP",plan,names:customColumnNames,records:()=>exportFolderRecords(plan.groups,groupId=>this.exportFolderMapRows(claimed,input,leaseOwner,groupId,counter))};
       } else {
         const customColumns = await this.seoData.listExportCustomColumns(context);
         const customColumnNames = { ...customColumnNameMap(customColumns), ...await this.rankColumnNames(input) };
         file = semanticExportFile(
           counted(this.exportRows(claimed, input, leaseOwner), counter),
           input,
-          customColumnNames
+          customColumnNames,
+          generatedAt
         );
+        remotePlan={kind:"ROWS",names:customColumnNames,records:()=>exportRecords(this.exportRows(claimed,input,leaseOwner))};
       }
       objectKey = artifactObjectKey(claimed, file.filename);
-      const sizeBytes = await writeArtifact(
-        this.storage,
-        objectKey,
-        file.contentType,
-        file.bytes
-      );
+      let remoteSize:bigint|undefined;
+      if(this.remote && await this.remote.available("EXPORT")) {
+        remoteInputKey=`remote-inputs/${claimed.workspaceId}/${claimed.id}/${randomUUID()}.jsonl`;
+        const inputSize=await writeArtifact(this.storage,remoteInputKey,"application/x-ndjson",encodeExportRecords(remotePlan.records(),counter));
+        const expectedKey=objectKey,expectedRows=counter.value;
+        remoteSize=await this.remote.execute({origin:"JOB",workspaceId:claimed.workspaceId,projectId:claimed.projectId!,operationId:claimed.id,jobId:claimed.id,leaseOwner},
+          "EXPORT","EXPORT_FILE",{kind:remotePlan.kind,input,customColumnNames:remotePlan.names,...(remotePlan.plan ? {plan:remotePlan.plan} : {}),
+            inputObjectKey:remoteInputKey,inputSizeBytes:inputSize.toString(),rowCount:expectedRows,generatedAt:generatedAt.toISOString()},
+          {resource:"CPU",timeoutMs:1_800_000,onWait:()=>this.assertLease(claimed.id,leaseOwner,counter.value)},result=>{
+            const artifact=result.artifact && typeof result.artifact==="object" ? result.artifact as Record<string,unknown> : undefined;
+            if(result.format!=="EXPORT_FILE" || result.artifactObjectKey!==expectedKey || result.filename!==file.filename || result.contentType!==file.contentType || result.rowCount!==expectedRows ||
+              !artifact || typeof artifact.sizeBytes!=="string" || !/^[0-9]{1,13}$/u.test(artifact.sizeBytes)) throw new RemoteWorkFailedError("INVALID_EXPORT_ARTIFACT");
+            return BigInt(artifact.sizeBytes);
+          },async()=>{counter.value=0;return undefined;});
+      }
+      const sizeBytes = remoteSize ?? await writeArtifact(this.storage,objectKey,file.contentType,file.bytes);
       artifactStored = true;
       await this.assertLease(claimed.id, leaseOwner, counter.value);
       const storedObject = await this.storage.headObject("artifacts", objectKey);
@@ -222,6 +244,8 @@ export class SemanticExportWorkerService {
         await this.storage.deleteObject("artifacts", objectKey).catch(() => undefined);
       }
       return this.settleFailure(claimed, leaseOwner, error);
+    } finally {
+      if(remoteInputKey) await this.storage.deleteObject("artifacts",remoteInputKey).catch(()=>{this.logger.warn("Temporary remote export input cleanup deferred");});
     }
   }
 
@@ -779,6 +803,16 @@ async function* counted<Row>(
     counter.value += 1;
     yield row;
   }
+}
+
+async function* exportRecords<Row>(rows:AsyncIterable<Row>):AsyncGenerator<Readonly<Record<string,unknown>>> {
+  for await(const row of rows) yield {kind:"row",row};
+}
+async function* exportFolderRecords(groups:readonly {id:string;keywordCount:number}[],rowsForGroup:(id:string)=>AsyncIterable<SemanticExportKeywordRow>):AsyncGenerator<Readonly<Record<string,unknown>>> {
+  for(const group of groups){if(group.keywordCount===0)continue;yield {kind:"group",id:group.id};for await(const row of rowsForGroup(group.id)) yield {kind:"row",row};}
+}
+async function* encodeExportRecords(rows:AsyncIterable<Readonly<Record<string,unknown>>>,counter:{value:number}):AsyncGenerator<Uint8Array> {
+  const encoder=new TextEncoder();for await(const record of rows) {if(record.kind==="row") counter.value++;yield encoder.encode(`${JSON.stringify(record)}\n`);}
 }
 
 function cancelledExportData(): Prisma.JobUpdateManyMutationInput {

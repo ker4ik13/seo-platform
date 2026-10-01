@@ -350,7 +350,7 @@ export class BillingEntitlementService {
     });
   }
 
-  private async snapshotInTransaction(
+  public async snapshotInTransaction(
     transaction: Prisma.TransactionClient,
     workspaceId: string
   ): Promise<BillingEntitlementSnapshot | undefined> {

@@ -7,6 +7,7 @@ import {
   type ClusteringSearchEngine
 } from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
+import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
 import { arsenkinTaskLifecycle } from "../integrations/arsenkin-task-status.js";
@@ -110,6 +111,7 @@ export class ArsenkinClusteringConnector {
         ? { status: "ACCEPTED", taskId }
         : { status: "REJECTED", code: "PROVIDER_INVALID_RESPONSE" };
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {status:"RETRYABLE_FAILURE",code:"PROVIDER_CONCURRENCY_LIMITED",retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return { status: "OUTCOME_UNKNOWN", code: "PROVIDER_TRANSPORT_AMBIGUOUS" };
       }
@@ -157,6 +159,7 @@ export class ArsenkinClusteringConnector {
         ? { status: "READY", result }
         : { status: "REJECTED", code: "PROVIDER_INVALID_RESPONSE" };
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {status:"RETRYABLE_FAILURE",code:"PROVIDER_CONCURRENCY_LIMITED",retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return { status: "RETRYABLE_FAILURE", code: "PROVIDER_UNAVAILABLE" };
       }

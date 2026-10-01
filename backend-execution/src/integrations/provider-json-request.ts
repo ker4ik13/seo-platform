@@ -1,7 +1,9 @@
 import type { ProviderFetch } from "./integration-credential-validation.connector.js";
+import { ProviderExecutionReviewRequiredError,ProviderCapacityUnavailableError } from "./provider-execution-review.js";
 
 const MAX_PROVIDER_RESPONSE_BYTES = 1_048_576;
 const MAX_PROVIDER_RETRY_AFTER_SECONDS = 3_600;
+export interface ProviderRequestInit extends RequestInit { readonly providerBudget?: { readonly timeoutMs:number;readonly maximumResponseBytes:number }; }
 
 export interface ProviderJsonResponse {
   readonly status: number;
@@ -32,12 +34,15 @@ export async function providerTextRequest(
   }
   let response: Response;
   try {
-    response = await fetcher(url, {
+    const request:ProviderRequestInit = {
       ...init,
       redirect: "error",
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-  } catch {
+      signal: AbortSignal.timeout(timeoutMs),
+      providerBudget:{timeoutMs,maximumResponseBytes}
+    };
+    response = await fetcher(url,request);
+  } catch(error) {
+    if(error instanceof ProviderExecutionReviewRequiredError || error instanceof ProviderCapacityUnavailableError) throw error;
     throw new ProviderTransportError();
   }
   const declaredLength = Number(response.headers.get("content-length"));
@@ -79,12 +84,15 @@ export async function providerJsonRequest(
   }
   let response: Response;
   try {
-    response = await fetcher(url, {
+    const request:ProviderRequestInit = {
       ...init,
       redirect: "error",
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-  } catch {
+      signal: AbortSignal.timeout(timeoutMs),
+      providerBudget:{timeoutMs,maximumResponseBytes}
+    };
+    response = await fetcher(url,request);
+  } catch(error) {
+    if(error instanceof ProviderExecutionReviewRequiredError || error instanceof ProviderCapacityUnavailableError) throw error;
     throw new ProviderTransportError();
   }
 

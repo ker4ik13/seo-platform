@@ -4,10 +4,13 @@ import type {
   CreatedWorkerNode,
   WorkerCapability,
   WorkerNodeConfiguration,
-  WorkerNodeView
+  WorkerNodeView,
+  RemovedWorkerNode
 } from "@seo-platform/contracts";
+import { workerEffectiveCapabilitySlots } from "@seo-platform/contracts";
 import type { ExecutionWorkerNode } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import type { RemoteWorkAssignment } from "./remote-work-assignments.js";
 import {
   type WorkerNodeHeartbeat
 } from "./worker-node-input.js";
@@ -22,13 +25,16 @@ const VIEW_SELECT = {
   capabilities: true,
   maxHttpSlots: true,
   maxCpuSlots: true,
+  capabilityLimits: true,
   reportedHttpSlots: true,
   reportedRankSlots: true,
+  reportedCapabilitySlots: true,
   reportedCpuSlots: true,
   reportedMemoryBytes: true,
   activeWorkItems: true,
   lastHeartbeatAt: true,
-  lastProtocolVersion: true
+  lastProtocolVersion: true,
+  deletedAt: true
 } as const;
 
 @Injectable()
@@ -44,6 +50,7 @@ export class WorkerNodeService {
         capabilities: [...input.capabilities],
         maxHttpSlots: input.maxHttpSlots,
         maxCpuSlots: input.maxCpuSlots,
+        capabilityLimits:{...input.capabilityLimits},
         enabled: false
       }
     });
@@ -53,16 +60,27 @@ export class WorkerNodeService {
   public async rotate(id: string): Promise<CreatedWorkerNode> {
     const token = newNodeToken();
     const changed = await this.prisma.executionWorkerNode.updateMany({
-      where: { id },
+      where: { id, deletedAt: null },
       data: { tokenHash: tokenHash(token), draining: true }
     });
     if (changed.count !== 1) throw new NotFoundException("Worker node not found");
     return { node: await this.get(id), token };
   }
 
+  public async remove(id: string): Promise<RemovedWorkerNode> {
+    await this.prisma.executionWorkerNode.updateMany({
+      where: { id, deletedAt: null },
+      data: { deletedAt: new Date(), enabled: false, draining: true, tokenHash: Uint8Array.from(randomBytes(32)) }
+    });
+    const row = await this.prisma.executionWorkerNode.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
+    if (!row?.deletedAt) throw new NotFoundException("Worker node not found");
+    return { id: row.id, deletedAt: row.deletedAt.toISOString() };
+  }
+
   public async list(): Promise<readonly WorkerNodeView[]> {
-    const [rows, assignments] = await Promise.all([
+    const [rows, assignments,remoteAssignments] = await Promise.all([
       this.prisma.executionWorkerNode.findMany({
+        where: { deletedAt: null },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 200,
         select: VIEW_SELECT
@@ -74,14 +92,17 @@ export class WorkerNodeService {
         readonly activeTasks: bigint;
       }[]>`
         SELECT * FROM public.list_remote_worker_rank_assignments(1000)
-      `
+      `,
+      this.prisma.$queryRaw<readonly RemoteWorkAssignment[]>`SELECT * FROM public.list_remote_work_assignments(1000,NULL::uuid[])`
     ]);
     const byNode = new Map<string, NonNullable<WorkerNodeView["activeAssignments"]>[number][]>();
-    for (const assignment of assignments) {
+    for (const assignment of [...assignments.map(row=>({...row,capability:"RANK" as const})),...remoteAssignments]) {
       const values = byNode.get(assignment.nodeId) ?? [];
+      const existing=values.findIndex(item=>item.jobId===assignment.jobId && item.capability===assignment.capability && item.searchEngine===assignment.searchEngine);
+      if(existing>=0){values[existing]={...values[existing]!,activeTasks:values[existing]!.activeTasks+Number(assignment.activeTasks)};continue;}
       values.push({
         jobId: assignment.jobId,
-        capability: "RANK",
+        capability: assignment.capability,
         searchEngine: assignment.searchEngine === "YANDEX" || assignment.searchEngine === "GOOGLE"
           ? assignment.searchEngine
           : null,
@@ -97,7 +118,7 @@ export class WorkerNodeService {
 
   public async setEnabled(id: string, enabled: boolean): Promise<WorkerNodeView> {
     const changed = await this.prisma.executionWorkerNode.updateMany({
-      where: { id }, data: { enabled, draining: !enabled }
+      where: { id, deletedAt: null }, data: { enabled, draining: !enabled }
     });
     if (changed.count !== 1) throw new NotFoundException("Worker node not found");
     return this.get(id);
@@ -105,7 +126,7 @@ export class WorkerNodeService {
 
   public async setDraining(id: string, draining: boolean): Promise<WorkerNodeView> {
     const changed = await this.prisma.executionWorkerNode.updateMany({
-      where: { id }, data: { draining }
+      where: { id, deletedAt: null }, data: { draining }
     });
     if (changed.count !== 1) throw new NotFoundException("Worker node not found");
     return this.get(id);
@@ -113,12 +134,13 @@ export class WorkerNodeService {
 
   public async configure(id: string, input: WorkerNodeConfiguration): Promise<WorkerNodeView> {
     const changed = await this.prisma.executionWorkerNode.updateMany({
-      where: { id },
+      where: { id, deletedAt: null },
       data: {
         name: input.name,
         capabilities: [...input.capabilities],
         maxHttpSlots: input.maxHttpSlots,
         maxCpuSlots: input.maxCpuSlots
+        ,capabilityLimits:{...input.capabilityLimits}
       }
     });
     if (changed.count !== 1) throw new NotFoundException("Worker node not found");
@@ -128,10 +150,11 @@ export class WorkerNodeService {
   public async heartbeat(id: string, token: string, input: WorkerNodeHeartbeat): Promise<WorkerNodeView> {
     const row = await this.authenticate(id, token);
     const changed = await this.prisma.executionWorkerNode.updateMany({
-      where: { id, tokenHash: Uint8Array.from(row.tokenHash) },
+      where: { id, deletedAt: null, tokenHash: Uint8Array.from(row.tokenHash) },
       data: {
         reportedHttpSlots: input.httpSlots,
         reportedRankSlots: input.rankSlots,
+        reportedCapabilitySlots: { ...(input.capabilitySlots ?? {RANK:input.rankSlots}) },
         reportedCpuSlots: input.cpuSlots,
         reportedMemoryBytes: input.memoryBytes,
         activeWorkItems: input.activeWorkItems,
@@ -160,7 +183,7 @@ export class WorkerNodeService {
     const httpSlots = Math.min(
       row.maxHttpSlots,
       row.reportedHttpSlots,
-      capability === "RANK" ? row.reportedRankSlots : row.reportedHttpSlots
+      workerEffectiveCapabilitySlots(view(row),capability)
     );
     const cpuSlots = Math.min(row.maxCpuSlots, row.reportedCpuSlots);
     if (httpSlots < 1 && cpuSlots < 1) {
@@ -173,11 +196,19 @@ export class WorkerNodeService {
     await this.authenticate(id, token);
   }
 
+  public async authorizeCombinedWork(id:string,token:string):Promise<WorkerNodeView> {
+    const row=await this.authenticate(id,token);
+    if(!row.enabled || row.draining || !row.lastHeartbeatAt || row.lastHeartbeatAt.getTime()<Date.now()-HEARTBEAT_TIMEOUT_MS) {
+      throw new ForbiddenException("Worker node is unavailable");
+    }
+    return view(row);
+  }
+
   private async authenticate(id: string, token: string): Promise<ExecutionWorkerNode> {
     if (!TOKEN_PATTERN.test(token)) throw new UnauthorizedException("Invalid worker node");
     const row = await this.prisma.executionWorkerNode.findUnique({ where: { id } });
     const actual = tokenHash(token);
-    if (!row || row.tokenHash.length !== actual.length ||
+    if (!row || row.deletedAt || row.tokenHash.length !== actual.length ||
       !timingSafeEqual(row.tokenHash, actual)) {
       throw new UnauthorizedException("Invalid worker node");
     }
@@ -188,7 +219,7 @@ export class WorkerNodeService {
     const row = await this.prisma.executionWorkerNode.findUnique({
       where: { id }, select: VIEW_SELECT
     });
-    if (!row) throw new NotFoundException("Worker node not found");
+    if (!row || row.deletedAt) throw new NotFoundException("Worker node not found");
     return view(row);
   }
 }
@@ -209,6 +240,7 @@ function view(row: {
   readonly capabilities: readonly string[];
   readonly maxHttpSlots: number;
   readonly maxCpuSlots: number;
+  readonly capabilityLimits?:unknown;
   readonly reportedHttpSlots: number;
   readonly reportedRankSlots: number;
   readonly reportedCpuSlots: number;
@@ -216,6 +248,7 @@ function view(row: {
   readonly activeWorkItems: number;
   readonly lastHeartbeatAt: Date | null;
   readonly lastProtocolVersion: number | null;
+  readonly reportedCapabilitySlots?: unknown;
 }): WorkerNodeView {
   return {
     id: row.id,
@@ -225,6 +258,7 @@ function view(row: {
     capabilities: row.capabilities as WorkerCapability[],
     maxHttpSlots: row.maxHttpSlots,
     maxCpuSlots: row.maxCpuSlots,
+    capabilityLimits:(row.capabilityLimits ?? {}) as NonNullable<WorkerNodeView["capabilityLimits"]>,
     reportedHttpSlots: row.reportedHttpSlots,
     reportedRankSlots: row.reportedRankSlots,
     reportedCpuSlots: row.reportedCpuSlots,
@@ -232,6 +266,7 @@ function view(row: {
     activeWorkItems: row.activeWorkItems,
     online: row.lastHeartbeatAt !== null && Date.now() - row.lastHeartbeatAt.getTime() < HEARTBEAT_TIMEOUT_MS,
     lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,
-    protocolVersion: row.lastProtocolVersion
+    protocolVersion: row.lastProtocolVersion,
+    reportedCapabilitySlots: (row.reportedCapabilitySlots ?? { RANK: row.reportedRankSlots }) as NonNullable<WorkerNodeView["reportedCapabilitySlots"]>
   };
 }

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeHtmlPage } from "./html-analysis.js";
+import { analyzeHtmlPage, analyzeCrawlResource, parseCrawlPageAnalysis } from "./html-analysis.js";
+
+test("a non-HTML error response has a bounded, consumer-valid snapshot", () => {
+  const body = Buffer.from("Not found");
+  const analysis = analyzeCrawlResource({ requestedUrl: "https://example.com/missing", finalUrl: "https://example.com/missing", statusCode: 404, body, sizeBytes: body.length, responseTimeMs: 10, redirectChain: [], contentType: "text/plain" }, "https://example.com/missing");
+  assert.deepEqual(parseCrawlPageAnalysis(analysis), analysis);
+  assert.equal(analysis.indexability, "ERROR");
+  assert.equal(analysis.issues[0]?.code, "NON_HTML_RESOURCE");
+  assert.equal(analysis.title, undefined);
+});
 
 test("extracts normalized SEO evidence without retaining raw HTML", () => {
   const result = analyzeHtmlPage({

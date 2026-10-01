@@ -5,6 +5,7 @@ import type {
 } from "@seo-platform/contracts";
 import { frequencySeasonalitySeriesPointLimit } from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
+import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import { xmlStockAuthenticatedUrl } from "../integrations/xmlstock-request-url.js";
 import {
@@ -104,6 +105,7 @@ export class XmlStockWordstatConnector {
         ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
         : result;
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {ok:false,code:"PROVIDER_CONCURRENCY_LIMITED",retryable:true,retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return failure("PROVIDER_UNAVAILABLE", true);
       }
@@ -147,6 +149,7 @@ export class XmlStockWordstatConnector {
         ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
         : result;
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {ok:false,code:"PROVIDER_CONCURRENCY_LIMITED",retryable:true,retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return failure("PROVIDER_UNAVAILABLE", true);
       }
@@ -202,6 +205,7 @@ export class XmlStockWordstatConnector {
         ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
         : result;
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {ok:false,code:"PROVIDER_CONCURRENCY_LIMITED",retryable:true,retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return failure("PROVIDER_UNAVAILABLE", true);
       }

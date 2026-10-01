@@ -7,6 +7,7 @@ import { ClusteringRunService } from "./clustering-run.service.js";
 @Module({
   imports: [InternalModule, IntegrationModule],
   controllers: [ClusteringRunController],
-  providers: [ClusteringRunService]
+  providers: [ClusteringRunService],
+  exports: [ClusteringRunService]
 })
 export class ClusteringRunModule {}

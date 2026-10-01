@@ -13,6 +13,7 @@ import type { IntegrationCredentialSecret } from "../integrations/integration-cr
 import { xmlStockAuthenticatedUrl } from "../integrations/xmlstock-request-url.js";
 import type { XmlStockHttpProduct } from "../integrations/xmlstock-http-quota-limiter.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
+import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import {
   providerTextRequest,
   ProviderTransportError
@@ -64,7 +65,7 @@ export type XmlStockRankSubmitResult =
     }
   | {
       readonly status: "RETRYABLE_FAILURE";
-      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE";
+      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_CONCURRENCY_LIMITED" | "PROVIDER_UNAVAILABLE";
       readonly retryAfterSeconds?: number;
     }
   | {
@@ -89,7 +90,7 @@ export type XmlStockRankFetchResult =
   | { readonly status: "PENDING"; readonly retryAfterSeconds: number }
   | {
       readonly status: "RETRYABLE_FAILURE";
-      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE";
+      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_CONCURRENCY_LIMITED" | "PROVIDER_UNAVAILABLE";
       readonly retryAfterSeconds?: number;
     }
   | {
@@ -202,6 +203,7 @@ export class XmlStockRankConnector {
       }
       return { status: "ACCEPTED", taskId: parsed.requestId, request };
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {status:"RETRYABLE_FAILURE",code:"PROVIDER_CONCURRENCY_LIMITED",retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return {
           status: "OUTCOME_UNKNOWN",
@@ -237,6 +239,7 @@ export class XmlStockRankConnector {
             progressValue
           );
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {status:"RETRYABLE_FAILURE",code:"PROVIDER_CONCURRENCY_LIMITED",retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return {
           status: "RETRYABLE_FAILURE",

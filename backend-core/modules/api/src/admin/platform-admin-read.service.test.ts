@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import type { PrismaService } from "../database/prisma.service.js";
+import type { AuditService } from "../audit/audit.service.js";
 import type { JobsClient } from "../jobs/jobs.client.js";
 import type { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { PlatformAdminReadService } from "./platform-admin-read.service.js";
@@ -21,7 +22,8 @@ test("combines project identities with SEO-owned semantic counts", async () => {
         { projectId, keywordCount: 1640, folderCount: 84 }
       ]
     } as unknown as SeoDataClient,
-    {} as JobsClient
+    {} as JobsClient,
+    { record: async () => undefined } as unknown as AuditService
   );
 
   const result = await service.projects(
@@ -76,7 +78,8 @@ test("keeps the project directory available when SEO counters are degraded", asy
         });
       }
     } as unknown as SeoDataClient,
-    {} as JobsClient
+    {} as JobsClient,
+    { record: async () => undefined } as unknown as AuditService
   );
 
   const result = await service.projects(
@@ -126,7 +129,8 @@ test("enriches execution-owned operations without changing the safe summary", as
   const service = new PlatformAdminReadService(
     prisma,
     {} as SeoDataClient,
-    jobs
+    jobs,
+    { record: async () => undefined } as unknown as AuditService
   );
 
   const result = await service.operations(
@@ -182,7 +186,8 @@ test("loads one operation by id for an admin deep link", async () => {
   const service = new PlatformAdminReadService(
     prisma,
     {} as SeoDataClient,
-    jobs
+    jobs,
+    { record: async () => undefined } as unknown as AuditService
   );
 
   const result = await service.operation(operationId, ownerId, "req-detail");

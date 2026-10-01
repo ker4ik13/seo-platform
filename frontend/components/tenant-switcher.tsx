@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type {
   AppProject,
   AppWorkspace,
@@ -9,10 +10,13 @@ import type {
 } from "../lib/app-types";
 import {
   readLastWorkspaceProjectId,
+  projectSwitchHref,
   shouldShowWorkspaceCreationAction,
   writeLastWorkspaceProjectId
 } from "../lib/app-navigation";
 import { CustomSelect } from "./custom-select";
+import { browserApiRequest } from "../lib/browser-api";
+import { parseSearchProjects } from "../lib/global-search";
 import { Icon } from "./icon";
 import { ProjectSelect } from "./project-select";
 import { WorkspaceAvatar } from "./workspace-avatar";
@@ -35,6 +39,9 @@ export function TenantSwitcher({
   projectCapabilities: ProtectedAppContext["projectCapabilities"];
 }>) {
   const { t: uiText } = useUiLocale();
+  const pathname = usePathname();
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState("");
   const workspaceId = workspace?.id;
   const projectId = project?.id;
   const projectWorkspaceId = project?.workspaceId;
@@ -61,17 +68,18 @@ export function TenantSwitcher({
     );
   }, [currentUserId, projectId, projectWorkspaceId, workspaceId]);
 
-  function selectWorkspace(workspaceId: string): void {
-    writePreference("seo_workspace", workspaceId);
-    writePreference(
-      "seo_project",
-      readLastWorkspaceProjectId(
-        window.localStorage,
-        currentUserId,
-        workspaceId
-      ) ?? ""
-    );
-    window.location.assign("/app");
+  async function selectWorkspace(workspaceId: string): Promise<void> {
+    setSwitching(true); setSwitchError("");
+    try {
+      const catalog = parseSearchProjects(await browserApiRequest<unknown>(`/app/api/workspaces/${workspaceId}/projects`), workspaceId);
+      const preferred = readLastWorkspaceProjectId(window.localStorage, currentUserId, workspaceId);
+      const nextProjectId = catalog.find(({ id }) => id === preferred)?.id ?? catalog[0]?.id;
+      writePreference("seo_workspace", workspaceId);
+      writePreference("seo_project", nextProjectId ?? "");
+      window.location.assign(projectSwitchHref(pathname, nextProjectId));
+    } catch {
+      setSwitchError("Не удалось открыть рабочую область. Попробуйте ещё раз."); setSwitching(false);
+    }
   }
 
   function selectProject(projectId: string): void {
@@ -83,7 +91,7 @@ export function TenantSwitcher({
       workspaceId,
       projectId
     );
-    window.location.assign("/app");
+    window.location.assign(projectSwitchHref(pathname, projectId));
   }
 
   const creation = projectCapabilities?.creation;
@@ -121,12 +129,14 @@ export function TenantSwitcher({
 
   return (
     <div className="tenant-switcher">
+      {switchError && <small role="alert">{switchError}</small>}
       <label>
         <span><UiText text="Рабочая область" /></span>
         <CustomSelect
           aria-label={uiText("Рабочая область")}
+          disabled={switching}
           className="tenant-workspace-select"
-          onChange={(event) => selectWorkspace(event.target.value)}
+          onChange={(event) => { void selectWorkspace(event.target.value); }}
           popoverFooter={showWorkspaceCreation ? (
             <Link
               className="tenant-create-workspace-action"

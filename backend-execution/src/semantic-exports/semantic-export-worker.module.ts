@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
+import { RemoteWorkClientModule } from "../worker-nodes/remote-work-client.module.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { StorageModule } from "../storage/storage.module.js";
 import { SemanticExportWorkerService } from "./semantic-export-worker.service.js";
 
 @Module({
-  imports: [SeoDataModule, StorageModule],
+  imports: [SeoDataModule, StorageModule,RemoteWorkClientModule],
   providers: [SemanticExportWorkerService],
   exports: [SemanticExportWorkerService]
 })

@@ -86,8 +86,9 @@ export function RankingsWorkspace({
   const [search, setSearch] = useState("");
   const [dateRange, setDateRange] = useState(initialDateRange);
   const [sort, setSort] = useState<
-    "QUERY_ASC" | "POSITION_ASC" | "POSITION_DESC" | "CHANGE_ASC" | "CHANGE_DESC"
-  >("QUERY_ASC");
+    "OBSERVED_DESC" | "QUERY_ASC" | "POSITION_ASC" | "POSITION_DESC" | "CHANGE_ASC" | "CHANGE_DESC"
+  >("POSITION_ASC");
+  const [includeUntracked, setIncludeUntracked] = useState(false);
   const [state, setState] = useState<ReportState>({ loading: true, loadingMore: false });
   const [revision, setRevision] = useState(0);
   const [catalogRevision, setCatalogRevision] = useState(0);
@@ -107,6 +108,7 @@ export function RankingsWorkspace({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  const reportGenerationRef = useRef(0);
   const availableDateRange = useMemo(() => ({
     from: addCalendarDays(today(), -3 * 366 + 1),
     to: today()
@@ -133,7 +135,8 @@ export function RankingsWorkspace({
         groupId: "",
         dateFrom: initial.from,
         dateThrough: initial.through,
-        sort: "QUERY_ASC",
+      sort: "POSITION_ASC",
+      includeUntracked: false,
         queryColumnWidth: rankingsQueryColumnDefaultWidth,
         hiddenDates: []
       },
@@ -152,6 +155,7 @@ export function RankingsWorkspace({
         : preferences.dateThrough
     });
     setSort(preferences.sort);
+    setIncludeUntracked(preferences.includeUntracked ?? false);
     setQueryColumnWidth(preferences.queryColumnWidth);
     setHiddenDates(new Set(preferences.hiddenDates));
     setPreferencesReady(true);
@@ -166,11 +170,12 @@ export function RankingsWorkspace({
       groupId,
       dateFrom: dateRange.from,
       dateThrough: dateRange.through,
-      sort,
+        sort,
+        includeUntracked,
       queryColumnWidth,
       hiddenDates: [...hiddenDates]
     }, window.localStorage);
-  }, [aiDimensionKey, currentUserId, dateRange, groupId, hiddenDates, mode, preferencesReady, projectId, queryColumnWidth, seoDimensionKey, sort]);
+  }, [aiDimensionKey, currentUserId, dateRange, groupId, hiddenDates, includeUntracked, mode, preferencesReady, projectId, queryColumnWidth, seoDimensionKey, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -221,11 +226,14 @@ export function RankingsWorkspace({
       ...(search ? { search } : {}),
       limit: 100 as const,
       sort,
+      includeUntracked,
       mode: effectiveMode
     };
-  }, [dateRange, dimensionKey, effectiveMode, groupId, search, sort]);
+  }, [dateRange, dimensionKey, effectiveMode, groupId, includeUntracked, search, sort]);
 
   useEffect(() => {
+    reportGenerationRef.current += 1;
+    loadingMoreRef.current = false;
     if (!requestInput) {
       setState({ loading: false, loadingMore: false });
       return;
@@ -260,11 +268,13 @@ export function RankingsWorkspace({
       loading: current.loading,
       loadingMore: true
     }));
+    const generation = reportGenerationRef.current;
     try {
       const next = await requestReport(projectId, {
         ...requestInput,
         cursor: report.page.nextCursor
       });
+      if (generation !== reportGenerationRef.current) return;
       setState({
         report: {
           ...next,
@@ -274,13 +284,14 @@ export function RankingsWorkspace({
         loadingMore: false
       });
     } catch {
+      if (generation !== reportGenerationRef.current) return;
       setState((current) => ({
         ...current,
         loadingMore: false,
         error: t("Не удалось загрузить следующую страницу.")
       }));
     } finally {
-      loadingMoreRef.current = false;
+      if (generation === reportGenerationRef.current) loadingMoreRef.current = false;
     }
   }, [projectId, requestInput, state.report, t]);
 
@@ -452,11 +463,12 @@ export function RankingsWorkspace({
         <label>
           <span><UiText text="Сортировка" /></span>
           <CustomSelect value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
-            <option value="QUERY_ASC"><UiText text="По запросу" /></option>
-            <option value="POSITION_ASC"><UiText text="Позиция: выше сначала" /></option>
-            <option value="POSITION_DESC"><UiText text="Позиция: ниже сначала" /></option>
-            <option value="CHANGE_DESC"><UiText text="Сначала рост" /></option>
-            <option value="CHANGE_ASC"><UiText text="Сначала падение" /></option>
+            <option value="POSITION_ASC"><span className="rankings-sort-option"><Icon name="arrowUp" /><UiText text="Позиция: выше сначала" /></span></option>
+            <option value="POSITION_DESC"><span className="rankings-sort-option"><Icon name="arrowDown" /><UiText text="Позиция: ниже сначала" /></span></option>
+            <option value="QUERY_ASC"><span className="rankings-sort-option"><Icon name="list" /><UiText text="По запросу" /></span></option>
+            <option value="OBSERVED_DESC"><span className="rankings-sort-option"><Icon name="history" /> Свежие замеры сначала</span></option>
+            <option value="CHANGE_DESC"><span className="rankings-sort-option"><Icon name="arrowUp" /><UiText text="Сначала рост" /></span></option>
+            <option value="CHANGE_ASC"><span className="rankings-sort-option"><Icon name="arrowDown" /><UiText text="Сначала падение" /></span></option>
           </CustomSelect>
         </label>
         </div>
@@ -511,14 +523,16 @@ export function RankingsWorkspace({
         <div className="rankings-summary-row">
           <RankingSummary report={report} locale={locale} />
           <div className="rankings-summary-disclosures">
+            <button aria-pressed={includeUntracked} className={`rankings-statistics-toggle${includeUntracked ? " is-active" : ""}`} onClick={() => setIncludeUntracked((value) => !value)} type="button"><Icon name={includeUntracked ? "eyeOff" : "eye"} /><UiText text={includeUntracked ? "Скрыть неотслеживаемые" : "Показать неотслеживаемые"} /></button>
             <button
+              aria-label={t("Статистика")}
               aria-expanded={showStatistics}
-              className="rankings-statistics-toggle"
+              className="rankings-statistics-toggle rankings-statistics-icon"
               onClick={() => setShowStatistics((value) => !value)}
+              title={t("Статистика")}
               type="button"
             >
               <Icon name="trend" />
-              <UiText text="Статистика" />
             </button>
           </div>
         </div>
@@ -588,7 +602,7 @@ export function RankingsWorkspace({
                   return (
                     <tr key={row.keywordId}>
                       <th scope="row">
-                        <strong title={row.query}>{row.query}</strong>
+                        <strong title={row.query}>{row.isTracked === false && <span className="rankings-untracked-icon" role="img" aria-label="Не отслеживается" title="Не отслеживается"><Icon name="eyeOff" /></span>}{row.query}</strong>
                         <div className="rankings-query-meta">
                           {row.frequencies.length > 0 && (
                             <div className="rankings-frequency-badges">
@@ -756,8 +770,11 @@ function RankingSummary({ report, locale }: { report: RankPositionReport; locale
     ["Запросов", report.summary.keywordCount, "neutral"],
     ["Найдено", report.summary.foundCount, "good"],
     ["Не найдено", report.summary.notFoundCount, "warn"],
+    ["Без замера", report.summary.keywordCount - report.summary.measuredCount, "neutral"],
     ["Выросло", report.summary.improvedCount, "good"],
     ["Упало", report.summary.declinedCount, "bad"],
+    ["Новые", report.summary.newCount, "brand"],
+    ["Выпали", report.summary.lostCount, "bad"],
     ["Средняя позиция", report.summary.averagePosition ?? "—", "brand"]
   ] as const;
   return <section className="rankings-summary">{values.map(([label, value, tone]) => <div className={`tone-${tone}`} key={label}><span><UiText text={label} /></span><strong>{typeof value === "number" ? value.toLocaleString(locale) : value}</strong></div>)}</section>;
@@ -770,9 +787,18 @@ function RankingCharts({ report }: { report: RankPositionReport }) {
     y: 4 + (point.averagePosition - 1) / Math.max(1, maximumPosition - 1) * 32,
     value: point.averagePosition
   }]);
+  const tops: readonly (readonly [string, number])[] = [
+    ["Топ-1", report.summary.top1Count],
+    ["Топ-3", report.summary.top3Count],
+    ["Топ-5", report.summary.top5Count],
+    ["Топ-10", report.summary.top10Count],
+    ...(report.summary.top30Count > report.summary.top10Count ? [["Топ-30", report.summary.top30Count] as const] : []),
+    ...(report.summary.top50Count > report.summary.top30Count ? [["Топ-50", report.summary.top50Count] as const] : []),
+    ...(report.summary.top100Count > report.summary.top50Count ? [["Топ-100", report.summary.top100Count] as const] : [])
+  ];
   return <section className="rankings-charts">
     <article><header><div><span><UiText text="Средняя позиция" /></span><strong>{report.summary.averagePosition?.toLocaleString() ?? "—"}</strong></div><Icon name="trend" /></header>{points.length > 0 ? <svg aria-label="График средней позиции" role="img" viewBox="0 0 100 40"><path d={points.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ")} /></svg> : <div className="rankings-chart-empty"><UiText text="В последнем срезе нет найденных позиций" /></div>}</article>
-    <article className="rankings-distribution"><header><span><UiText text="Распределение по ТОПам" /></span><strong>{report.summary.measuredCount}</strong></header>{[["Топ-3", report.summary.top3Count], ["Топ-10", report.summary.top10Count], ["Топ-30", report.summary.top30Count]].map(([label, value]) => <div key={String(label)}><span>{label}</span><div><i style={{ width: `${Math.min(100, Number(value) / Math.max(1, report.summary.measuredCount) * 100)}%` }} /></div><strong>{value}</strong></div>)}</article>
+    <article className="rankings-distribution"><header><span><UiText text="Распределение по ТОПам" /></span><strong>{report.summary.measuredCount}</strong></header><div className="rankings-distribution-items">{tops.map(([label, value]) => <div key={label}><span><UiText text={label} /></span><div><i style={{ width: `${Math.min(100, value / Math.max(1, report.summary.measuredCount) * 100)}%` }} /></div><strong>{value}</strong></div>)}</div></article>
     <article className="rankings-movement"><header><span><UiText text="Изменения" /></span><Icon name="positions" /></header><div><span className="up"><Icon name="arrowUp" />{report.summary.improvedCount}<small><UiText text="рост" /></small></span><span className="down"><Icon name="arrowDown" />{report.summary.declinedCount}<small><UiText text="падение" /></small></span><span>{report.summary.unchangedCount}<small><UiText text="без изменений" /></small></span></div></article>
   </section>;
 }

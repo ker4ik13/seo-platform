@@ -155,7 +155,7 @@ export interface RankConnectorCompletion {
 @Injectable()
 export class RankConnectorRuntimeBrokerService {
   private readonly submitCandidates = new RankCandidateWindow();
-  private readonly pollCandidates = new RankCandidateWindow();
+  private readonly pollCandidates = new Map<string, RankCandidateWindow>();
   private readonly submitJobClaims = new Map<string, Promise<void>>();
   private readonly emptyClaimUntil = new Map<string, number>();
   private readonly claimProbes = new Map<string, Promise<boolean>>();
@@ -460,8 +460,15 @@ export class RankConnectorRuntimeBrokerService {
     validateClaimInput(leaseOwner, leaseSeconds, connectorVersion);
     if (connectorVersion === XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION) {
       for (let attempt = 0; attempt < SUBMIT_CANDIDATE_MAX_ATTEMPTS; attempt++) {
-        const candidate = await this.pollCandidates.next(
-          (excluded) => this.loadPollCandidates(connectorVersion, excluded)
+        const key = leaseOwner.startsWith("remote:") ? leaseOwner.split(":")[1]! : "main";
+        let window = this.pollCandidates.get(key);
+        if (!window) {
+          if (this.pollCandidates.size >= 1_001) this.pollCandidates.delete(this.pollCandidates.keys().next().value!);
+          window = new RankCandidateWindow();
+          this.pollCandidates.set(key, window);
+        }
+        const candidate = await window.next(
+          (excluded) => this.loadPollCandidates(connectorVersion, excluded, leaseOwner)
         );
         if (!candidate) return undefined;
         const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(
@@ -498,14 +505,16 @@ export class RankConnectorRuntimeBrokerService {
 
   private async loadPollCandidates(
     connectorVersion: string,
-    excluded: readonly string[]
+    excluded: readonly string[],
+    leaseOwner: string
   ): Promise<readonly RankCandidate[]> {
     const rows = await this.prisma.$queryRaw<readonly RankCandidateRow[]>(
       Prisma.sql`
-        SELECT * FROM public.list_rank_connector_poll_candidates(
+        SELECT * FROM public.list_rank_connector_poll_candidates_for_worker(
           ${connectorVersion}::text,
           ${SUBMIT_CANDIDATE_BATCH_SIZE}::integer,
-          ${excludedCandidateIds(excluded)}
+          ${excludedCandidateIds(excluded)},
+          ${leaseOwner}::text
         )
       `
     );

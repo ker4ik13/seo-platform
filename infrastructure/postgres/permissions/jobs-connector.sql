@@ -384,6 +384,9 @@ SELECT format(
 )
 \gexec
 
+SELECT format('GRANT EXECUTE ON FUNCTION public.list_rank_connector_poll_candidates_for_worker(TEXT, INTEGER, UUID[], TEXT) TO %I', :'connector_user')
+\gexec
+
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
     public.claim_rank_connector_poll_targeted(TEXT, INTEGER, TEXT, UUID)
@@ -701,6 +704,10 @@ SELECT format('GRANT EXECUTE ON FUNCTION public.start_provider_usage_ticket(uuid
 SELECT format('GRANT EXECUTE ON FUNCTION public.finish_provider_usage_ticket(uuid,uuid,text,jsonb) TO %I', :'connector_user') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION public.read_provider_operation_mode(uuid,uuid,uuid,text,integer) TO %I', :'connector_user') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION public.list_enabled_platform_provider_account_ids(text,uuid[]) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.enqueue_remote_work(jsonb,text,text,text,jsonb,text,integer) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.abandon_remote_work(uuid,uuid) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.remote_work_available(text) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.enqueue_remote_work_batch(jsonb) TO %I', :'connector_user') \gexec
 
 -- reject an existing role if any direct ACL dependency remains outside the
 -- exact jobs_db allowlist. pg_shdepend exposes ACL dependencies in every
@@ -752,6 +759,11 @@ BEGIN
     'public.complete_rank_connector_submit(uuid,uuid,text,uuid,integer,integer,text,text,jsonb,bytea,text)'::regprocedure::oid,
     'public.claim_rank_connector_poll(text,integer,text)'::regprocedure::oid,
     'public.list_rank_connector_poll_candidates(text,integer,uuid[])'::regprocedure::oid,
+    'public.list_rank_connector_poll_candidates_for_worker(text,integer,uuid[],text)'::regprocedure::oid,
+    'public.enqueue_remote_work(jsonb,text,text,text,jsonb,text,integer)'::regprocedure::oid,
+    'public.abandon_remote_work(uuid,uuid)'::regprocedure::oid,
+    'public.remote_work_available(text)'::regprocedure::oid,
+    'public.enqueue_remote_work_batch(jsonb)'::regprocedure::oid,
     'public.claim_rank_connector_poll_targeted(text,integer,text,uuid)'::regprocedure::oid,
     'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text,jsonb,bytea)'::regprocedure::oid,
     'public.defer_rank_connector_poll_capacity(uuid,uuid,text,uuid,integer,integer,integer)'::regprocedure::oid

@@ -21,9 +21,9 @@ import {
   Prisma,
   type JobStatus
 } from "../generated/prisma/client.js";
-import { INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE } from "../integrations/integration-credential-validation-job.js";
 import { RankOperationProvenanceService } from "../rank-runs/rank-operation-provenance.service.js";
 import type { PlatformAdminOperationQuery } from "./platform-admin-operation-input.js";
+import type { RemoteWorkAssignment } from "../worker-nodes/remote-work-assignments.js";
 
 import { ACTIVE_JOB_STATUSES, ACTIVE_IMPORT_STATUSES } from "../jobs/job-capacity.js";
 import { STORAGE_RESERVING_UPLOAD_STATUSES } from "../uploads/storage-capacity.js";
@@ -209,9 +209,10 @@ export class OperationActivityService {
   public async adminList(
     query: PlatformAdminOperationQuery
   ): Promise<InternalAdminOperationSearchResult> {
-    const baseWhere: Prisma.JobWhereInput = query.type
-      ? { type: query.type }
-      : {};
+    const visibleTypes = query.type
+      ? visibleOperationTypes.filter((type) => type === query.type)
+      : visibleOperationTypes;
+    const baseWhere: Prisma.JobWhereInput = { type: { in: [...visibleTypes] } };
     const statusWhere = statusGroupWhere(query.statusGroup);
     const filteredWhere: Prisma.JobWhereInput = statusWhere
       ? { AND: [baseWhere, statusWhere] }
@@ -255,6 +256,7 @@ export class OperationActivityService {
         }),
         this.prisma.job.groupBy({
           by: ["type"],
+          where: baseWhere,
           _count: { _all: true }
         })
       ]);
@@ -284,7 +286,9 @@ export class OperationActivityService {
       where: { id: operationId },
       select: ADMIN_JOB_SELECT
     });
-    if (!job) throw new NotFoundException("Operation not found");
+    if (!job || !visibleOperationTypes.some((type) => type === job.type)) {
+      throw new NotFoundException("Operation not found");
+    }
     const presentation = await this.adminRankPresentation([job]);
     return adminOperationSummary(
       job,
@@ -309,7 +313,7 @@ export class OperationActivityService {
       (job.provider === "XMLSTOCK" || job.provider === "ARSENKIN")
     );
     const rankJobs = providerJobs.filter((job) => job.type === "MANUAL_RANK_CHECK");
-    const [connections, assignments] = await Promise.all([
+    const [connections, assignments,genericAssignments] = await Promise.all([
       this.provenance.selectedForJobs(providerJobs.map((job) => ({
         id: job.id,
         workspaceId: job.workspaceId,
@@ -326,10 +330,13 @@ export class OperationActivityService {
         readonly jobId: string;
         readonly activeTasks: bigint;
       }[]>`SELECT "nodeId", "jobId", "activeTasks"
-          FROM public.list_remote_worker_rank_assignments(1000)`
+          FROM public.list_remote_worker_rank_assignments(1000)`,
+      jobs.length===0 ? Promise.resolve([]) : this.prisma.$queryRaw<readonly RemoteWorkAssignment[]>`SELECT * FROM public.list_remote_work_assignments(1000,${jobs.map(job=>job.id)}::uuid[])`
     ]);
-    const relevantIds = new Set(rankJobs.map((job) => job.id));
-    const nodeIds = [...new Set(assignments.flatMap((item) =>
+    const relevantIds = new Set(jobs.map((job) => job.id));
+    const rankIds=new Set(rankJobs.map(job=>job.id));
+    const allAssignments=[...assignments.filter(row=>rankIds.has(row.jobId)),...genericAssignments];
+    const nodeIds = [...new Set(allAssignments.flatMap((item) =>
       item.nodeId === "main" || !relevantIds.has(item.jobId)
         ? [] : [item.nodeId]
     ))];
@@ -342,7 +349,7 @@ export class OperationActivityService {
       name: string;
       activeTasks: number;
     }>>();
-    for (const assignment of assignments) {
+    for (const assignment of allAssignments) {
       if (!relevantIds.has(assignment.jobId)) continue;
       const name = assignment.nodeId === "main"
         ? "Основной сервер"
@@ -365,7 +372,7 @@ export class OperationActivityService {
         .map(([, value]) => value)] as const
     ));
     for (const job of jobs) {
-      if (job.type !== "MANUAL_RANK_CHECK" && job.status === "RUNNING") {
+      if (job.type !== "MANUAL_RANK_CHECK" && job.status === "RUNNING" && !workers.has(job.id)) {
         workers.set(job.id, [{ name: "Основной сервер", activeTasks: 1 }]);
       }
     }
@@ -375,12 +382,12 @@ export class OperationActivityService {
   public async overview(): Promise<InternalExecutionOverview> {
     const now = Date.now();
     const [active, queued, attention, failed24h, completed30d, groups] = await Promise.all([
-      this.prisma.job.count({ where: { status: { in: [...ACTIVE_JOB_STATUSES] } } }),
-      this.prisma.job.count({ where: { status: "QUEUED" } }),
-      this.prisma.job.count({ where: { status: "ACTION_REQUIRED" } }),
-      this.prisma.job.count({ where: { status: "FAILED_FINAL", updatedAt: { gte: new Date(now - 86_400_000) } } }),
-      this.prisma.job.count({ where: { status: { in: ["COMPLETED", "PARTIALLY_COMPLETED"] }, finishedAt: { gte: new Date(now - 30 * 86_400_000) } } }),
-      this.prisma.job.groupBy({ by: ["type"], where: { createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } })
+      this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: { in: [...ACTIVE_JOB_STATUSES] } } }),
+      this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: "QUEUED" } }),
+      this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: "ACTION_REQUIRED" } }),
+      this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: "FAILED_FINAL", updatedAt: { gte: new Date(now - 86_400_000) } } }),
+      this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: { in: ["COMPLETED", "PARTIALLY_COMPLETED"] }, finishedAt: { gte: new Date(now - 30 * 86_400_000) } } }),
+      this.prisma.job.groupBy({ by: ["type"], where: { type: { in: [...visibleOperationTypes] }, createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } })
     ]);
     return { active, queued, attention, failed24h, completed30d, byType30d: groups.map(row => ({ type: row.type, count: row._count._all })).sort((a, b) => b.count - a.count).slice(0, 50) };
   }
@@ -401,24 +408,13 @@ function adminActiveWhere(): Prisma.JobWhereInput {
   return {
     OR: [
       { status: { in: [...adminActiveStatuses] } },
-      {
-        status: "FAILED_RETRYABLE",
-        type: { not: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE }
-      }
+      { status: "FAILED_RETRYABLE" }
     ]
   };
 }
 
 function adminAttentionWhere(): Prisma.JobWhereInput {
-  return {
-    OR: [
-      { status: { in: [...adminAttentionStatuses] } },
-      {
-        status: "FAILED_RETRYABLE",
-        type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE
-      }
-    ]
-  };
+  return { status: { in: [...adminAttentionStatuses] } };
 }
 
 function adminOperationSummary(

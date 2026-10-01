@@ -1,6 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   parseWorkerNodeConfiguration,
+  parseWorkerCapabilitySlots,
+  type WorkerCapability,
   type WorkerNodeConfiguration
 } from "@seo-platform/contracts";
 
@@ -13,6 +15,7 @@ export interface WorkerNodeHeartbeat {
   readonly cpuSlots: number;
   readonly memoryBytes: bigint;
   readonly activeWorkItems: number;
+  readonly capabilitySlots?: Readonly<Partial<Record<WorkerCapability, number>>>;
 }
 
 export function workerNodeId(value: unknown): string {
@@ -30,7 +33,8 @@ export function workerNodeConfiguration(value: unknown): WorkerNodeConfiguration
 
 export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
   const input = exact(value, [
-    "protocolVersion", "httpSlots", "rankSlots", "cpuSlots", "memoryBytes", "activeWorkItems"
+    "protocolVersion", "httpSlots", "rankSlots", "cpuSlots", "memoryBytes", "activeWorkItems",
+    ...(value && typeof value === "object" && Object.hasOwn(value,"capabilitySlots") ? ["capabilitySlots"] : [])
   ]);
   if (
     input.protocolVersion !== 1 ||
@@ -48,7 +52,8 @@ export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
     rankSlots: input.rankSlots,
     cpuSlots: input.cpuSlots,
     memoryBytes: BigInt(input.memoryBytes),
-    activeWorkItems: input.activeWorkItems
+    activeWorkItems: input.activeWorkItems,
+    capabilitySlots: input.capabilitySlots === undefined ? { RANK: input.rankSlots } : parseWorkerCapabilitySlots(input.capabilitySlots)
   };
 }
 

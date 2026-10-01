@@ -71,7 +71,9 @@ test("PostgreSQL imports dated manual history idempotently and updates only the 
           top5KeywordCount: 0,
           top10KeywordCount: 1,
           top30KeywordCount: 1,
-          top50KeywordCount: 1
+          top50KeywordCount: 1,
+          top100KeywordCount: 1,
+          top200KeywordCount: 1
         },
         {
           id: "day:2026-08-08",
@@ -84,7 +86,9 @@ test("PostgreSQL imports dated manual history idempotently and updates only the 
           top5KeywordCount: 1,
           top10KeywordCount: 1,
           top30KeywordCount: 1,
-          top50KeywordCount: 1
+          top50KeywordCount: 1,
+          top100KeywordCount: 1,
+          top200KeywordCount: 1
         }
       ],
       truncated: false

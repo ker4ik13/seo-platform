@@ -10,6 +10,7 @@ export interface WorkerNodeConfiguration {
   readonly capabilities: readonly WorkerCapability[];
   readonly maxHttpSlots: number;
   readonly maxCpuSlots: number;
+  readonly capabilityLimits?:Readonly<Partial<Record<WorkerCapability,number>>>;
 }
 
 export interface WorkerNodeHeartbeat {
@@ -19,6 +20,7 @@ export interface WorkerNodeHeartbeat {
   readonly cpuSlots: number;
   readonly memoryBytes: string;
   readonly activeWorkItems: number;
+  readonly capabilitySlots?: Readonly<Partial<Record<WorkerCapability, number>>>;
 }
 
 export interface WorkerNodeView {
@@ -29,6 +31,7 @@ export interface WorkerNodeView {
   readonly capabilities: readonly WorkerCapability[];
   readonly maxHttpSlots: number;
   readonly maxCpuSlots: number;
+  readonly capabilityLimits?:Readonly<Partial<Record<WorkerCapability,number>>>;
   readonly reportedHttpSlots: number;
   readonly reportedRankSlots: number;
   readonly reportedCpuSlots: number;
@@ -37,9 +40,10 @@ export interface WorkerNodeView {
   readonly online: boolean;
   readonly lastHeartbeatAt: string | null;
   readonly protocolVersion: number | null;
+  readonly reportedCapabilitySlots?: Readonly<Partial<Record<WorkerCapability, number>>>;
   readonly activeAssignments?: readonly {
     readonly jobId: string;
-    readonly capability: "RANK";
+    readonly capability: WorkerCapability;
     readonly searchEngine: "YANDEX" | "GOOGLE" | null;
     readonly activeTasks: number;
   }[];
@@ -51,8 +55,23 @@ export interface CreatedWorkerNode {
   readonly token: string;
 }
 
+export interface WorkerNodeRemovalInput { readonly confirmed: true; }
+export interface RemovedWorkerNode { readonly id: string; readonly deletedAt: string; }
+
+export function parseWorkerNodeRemovalInput(value: unknown): WorkerNodeRemovalInput {
+  const input = exact(value, ["confirmed"]);
+  if (input.confirmed !== true) invalid();
+  return { confirmed: true };
+}
+
+export function parseRemovedWorkerNode(value: unknown): RemovedWorkerNode {
+  const input = exact(value, ["id", "deletedAt"]);
+  if (typeof input.id !== "string" || !UUID_PATTERN.test(input.id) || typeof input.deletedAt !== "string" || !Number.isFinite(Date.parse(input.deletedAt))) invalid();
+  return { id: input.id, deletedAt: input.deletedAt };
+}
+
 export function parseWorkerNodeConfiguration(value: unknown): WorkerNodeConfiguration {
-  const input = exact(value, ["name", "capabilities", "maxHttpSlots", "maxCpuSlots"]);
+  const input = exact(value, ["name", "capabilities", "maxHttpSlots", "maxCpuSlots",...(typeof value==="object" && value!==null && Object.hasOwn(value,"capabilityLimits") ? ["capabilityLimits"] : [])]);
   if (
     typeof input.name !== "string" ||
     input.name.trim().length < 1 ||
@@ -65,11 +84,13 @@ export function parseWorkerNodeConfiguration(value: unknown): WorkerNodeConfigur
     !bounded(input.maxHttpSlots, 1, 512) ||
     !bounded(input.maxCpuSlots, 1, 128)
   ) invalid();
+  if(input.capabilityLimits!==undefined) validateCapabilityLimits(input.capabilityLimits);
   return {
     name: input.name.trim(),
     capabilities: input.capabilities as WorkerCapability[],
     maxHttpSlots: input.maxHttpSlots,
-    maxCpuSlots: input.maxCpuSlots
+    maxCpuSlots: input.maxCpuSlots,
+    ...(input.capabilityLimits===undefined ? {} : {capabilityLimits:input.capabilityLimits as NonNullable<WorkerNodeConfiguration["capabilityLimits"]>})
   };
 }
 
@@ -84,6 +105,8 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
     "reportedRankSlots",
     "reportedMemoryBytes", "activeWorkItems", "online", "lastHeartbeatAt",
     "protocolVersion",
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "capabilityLimits") ? ["capabilityLimits"] : []),
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "reportedCapabilitySlots") ? ["reportedCapabilitySlots"] : []),
     ...(typeof value === "object" && value !== null &&
       Object.hasOwn(value, "activeAssignments") ? ["activeAssignments"] : [])
   ]);
@@ -113,12 +136,27 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
     for (const assignment of input.activeAssignments) {
       const row = exact(assignment, ["jobId", "capability", "searchEngine", "activeTasks"]);
       if (typeof row.jobId !== "string" || !UUID_PATTERN.test(row.jobId) ||
-        row.capability !== "RANK" ||
+        typeof row.capability !== "string" || !capabilitySet.has(row.capability) ||
         (row.searchEngine !== null && row.searchEngine !== "YANDEX" && row.searchEngine !== "GOOGLE") ||
-        !bounded(row.activeTasks, 1, 512)) invalid();
+        !bounded(row.activeTasks, 0, 512)) invalid();
     }
   }
+  if (input.reportedCapabilitySlots !== undefined) {
+    if (!input.reportedCapabilitySlots || typeof input.reportedCapabilitySlots !== "object" || Array.isArray(input.reportedCapabilitySlots)) invalid();
+    if (Object.entries(input.reportedCapabilitySlots).some(([key,value]) => !capabilitySet.has(key) || !bounded(value,0,512))) invalid();
+  }
+  if(input.capabilityLimits!==undefined) validateCapabilityLimits(input.capabilityLimits);
   return input as unknown as WorkerNodeView;
+}
+
+export function workerEffectiveCapabilitySlots(node:WorkerNodeView,capability:WorkerCapability):number {
+  if(!node.enabled || node.draining || !node.online || !node.capabilities.includes(capability)) return 0;
+  const reported=node.reportedCapabilitySlots?.[capability] ?? (capability==="RANK" ? node.reportedRankSlots : 0);
+  const parent=["IMPORT","EXPORT","INSPECTION"].includes(capability) ? Math.min(node.maxCpuSlots,node.reportedCpuSlots) : Math.min(node.maxHttpSlots,node.reportedHttpSlots);
+  return Math.min(reported,parent,node.capabilityLimits?.[capability] ?? parent);
+}
+function validateCapabilityLimits(value:unknown):void {
+  if(!value || typeof value!=="object" || Array.isArray(value) || Object.entries(value).some(([key,slot])=>!capabilitySet.has(key) || !bounded(slot,0,512))) invalid();
 }
 
 export function parseCreatedWorkerNode(value: unknown): CreatedWorkerNode {

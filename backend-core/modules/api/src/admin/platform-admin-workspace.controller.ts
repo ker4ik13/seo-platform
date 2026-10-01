@@ -37,7 +37,8 @@ import {
   grantAdminWorkspaceSubscriptionInput
 } from "./platform-admin-workspace-input.js";
 import { PlatformAdminWorkspaceService } from "./platform-admin-workspace.service.js";
-import { RequirePlatformRole } from "./platform-role.js";
+import { adminDirectorySort } from "./platform-admin-read-input.js";
+import { RequirePlatformRole, RequireRecentPlatformAuthentication } from "./platform-role.js";
 import {
   PlatformRoleGuard,
   type PlatformAdminRequest
@@ -54,17 +55,19 @@ export class PlatformAdminWorkspaceController {
   @Get()
   public async search(
     @Query("q") query: unknown,
+    @Query("sort") sort: unknown,
     @Req() request: PlatformAdminRequest
   ): Promise<ApiResponse<AdminWorkspaceSearchResult>> {
     return apiResponse(
       request,
       await this.workspaces.searchWorkspaces(
-        adminWorkspaceSearchQuery(query)
+        adminWorkspaceSearchQuery(query), adminDirectorySort(sort)
       )
     );
   }
 
   @Post(":workspaceId/subscription-grants")
+  @RequireRecentPlatformAuthentication()
   @RequirePlatformRole("FINANCE")
   @UseGuards(CsrfSessionGuard, PlatformRoleGuard)
   public async grantSubscription(

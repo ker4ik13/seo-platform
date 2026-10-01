@@ -7,13 +7,17 @@ import { RankConnectorRuntimeBrokerService } from "../rank-runs/rank-connector-r
 import { WorkerGatewayController, WorkerNodeAdminController } from "./worker-node.controller.js";
 import { WorkerNodeService } from "./worker-node.service.js";
 import { WorkerRankGatewayService } from "./worker-rank-gateway.service.js";
+import { RemoteWorkGatewayService } from "./remote-work-gateway.service.js";
+import { RemoteWorkController,RemoteWorkReceiptController } from "./remote-work.controller.js";
+import { StorageModule } from "../storage/storage.module.js";
 
 @Module({
-  imports: [IntegrationModule, PlatformApiModule],
-  controllers: [WorkerGatewayController, WorkerNodeAdminController],
+  imports: [IntegrationModule, PlatformApiModule,StorageModule],
+  controllers: [WorkerGatewayController, WorkerNodeAdminController,RemoteWorkController,RemoteWorkReceiptController],
   providers: [
     WorkerNodeService,
     WorkerRankGatewayService,
+    RemoteWorkGatewayService,
     RankConnectorRuntimeBrokerService,
     PlatformCredentialPoolSelectionService,
     XmlStockHttpQuotaLimiter

@@ -23,6 +23,8 @@ import { operationStatusLabel } from "../lib/operation-status-presentation";
 import {
   preferredProjectRankDimensionKey,
   readPreferredSeoDimensionKey,
+  readIncludeUntracked,
+  writeIncludeUntracked,
   writePreferredSeoDimensionKey
 } from "../lib/rankings-preferences";
 import {
@@ -151,11 +153,11 @@ export function ProjectDashboard({
       const [positionSummary, positionHistory] = initialDimensionKey
         ? await Promise.all([
             browserApiRequest<ProjectPositionSummary>(
-              dashboardPositionScopeUrl(base, "position-summary", false, initialDimensionKey),
+              dashboardPositionScopeUrl(base, "position-summary", readIncludeUntracked(projectId, currentUserId, window.localStorage), initialDimensionKey),
               signal ? { signal } : {}
             ),
             browserApiRequest<ProjectPositionHistory>(
-              dashboardPositionScopeUrl(base, "position-history", false, initialDimensionKey),
+              dashboardPositionScopeUrl(base, "position-history", readIncludeUntracked(projectId, currentUserId, window.localStorage), initialDimensionKey),
               signal ? { signal } : {}
             )
           ])
@@ -173,7 +175,7 @@ export function ProjectDashboard({
         positionHistory,
         rankDimensions
       });
-      setIncludeUntrackedHistory(false);
+      setIncludeUntrackedHistory(readIncludeUntracked(projectId, currentUserId, window.localStorage));
       setPositionHistoryDimensionKey(initialDimensionKey);
       if (initialDimensionKey) {
         writePreferredSeoDimensionKey(projectId, currentUserId, initialDimensionKey, window.localStorage);
@@ -225,6 +227,7 @@ export function ProjectDashboard({
       setScopedPositionHistory(history);
       setData((current) => current ? { ...current, positionSummary: summary } : current);
       setIncludeUntrackedHistory(includeUntracked);
+      writeIncludeUntracked(projectId, currentUserId, includeUntracked, window.localStorage);
       setPositionHistoryDimensionKey(rankDimensionKey);
       writePreferredSeoDimensionKey(projectId, currentUserId, rankDimensionKey, window.localStorage);
     } catch (requestError) {
@@ -305,12 +308,13 @@ export function ProjectDashboard({
           <header className="panel-header">
             <div>
               <h2><UiText text="Позиции по ТОПам" /></h2>
-              <p><UiText text="Динамика запросов в Топ-3, 5, 10, 30 и 50 — до 30 срезов" /></p>
+              <p><UiText text="История позиций выбранного среза — до 30 дат" /></p>
             </div>
             <a className="text-button" href="/app/semantics"><UiText text="Открыть семантику" /></a>
           </header>
           {data ? (
             <ProjectPositionHistoryChart
+              preferenceKey={`seonorita:dashboard-tops:v1:${currentUserId}:${projectId}`}
               dimensions={data.rankDimensions.dimensions}
               history={scopedPositionHistory ?? data.positionHistory}
               includeUntracked={includeUntrackedHistory}

@@ -3651,7 +3651,7 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
     "top30KeywordCount",
     "top50KeywordCount"
   ] as const;
-  const allowedKeys: readonly string[] = [...countKeys, "averagePosition"];
+  const allowedKeys: readonly string[] = [...countKeys, "averagePosition", "top100KeywordCount", "top200KeywordCount"];
   if (
     countKeys.some((key) => !keys.includes(key)) ||
     keys.some((key) => !allowedKeys.includes(key)) ||
@@ -3671,7 +3671,7 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
       (typeof input.averagePosition !== "number" ||
         !Number.isFinite(input.averagePosition) ||
         input.averagePosition < 1 ||
-        input.averagePosition > 100)) ||
+        input.averagePosition > 100_000)) ||
     (Number(input.positionedKeywordCount) === 0) !==
       (input.averagePosition === undefined)
   ) {
@@ -3685,6 +3685,7 @@ function projectPositionSummary(value: unknown): ProjectPositionSummary {
     top10KeywordCount: Number(input.top10KeywordCount),
     top30KeywordCount: Number(input.top30KeywordCount),
     top50KeywordCount: Number(input.top50KeywordCount),
+    ...extendedPositionTopCounts(input),
     ...(typeof input.averagePosition === "number"
       ? { averagePosition: input.averagePosition }
       : {})
@@ -3723,9 +3724,10 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
       "top30KeywordCount",
       "top50KeywordCount"
     ] as const;
+    const allowed = new Set<string>([...required, "top100KeywordCount", "top200KeywordCount"]);
     if (
       !point ||
-      Object.keys(point).length !== required.length ||
+      Object.keys(point).some((key) => !allowed.has(key)) ||
       required.some((key) => !Object.hasOwn(point, key)) ||
       !requiredString(point.id) ||
       ids.has(point.id) ||
@@ -3764,10 +3766,24 @@ export function projectPositionHistory(value: unknown): ProjectPositionHistory {
       top5KeywordCount: Number(point.top5KeywordCount),
       top10KeywordCount: Number(point.top10KeywordCount),
       top30KeywordCount: Number(point.top30KeywordCount),
-      top50KeywordCount: Number(point.top50KeywordCount)
+      top50KeywordCount: Number(point.top50KeywordCount),
+      ...extendedPositionTopCounts(point)
     };
   });
   return { points, truncated: input.truncated };
+}
+
+function extendedPositionTopCounts(input: Readonly<Record<string, unknown>>): Pick<ProjectPositionSummary, "top100KeywordCount" | "top200KeywordCount"> {
+  let previous = Number(input.top50KeywordCount);
+  const result: { top100KeywordCount?: number; top200KeywordCount?: number } = {};
+  for (const key of ["top100KeywordCount", "top200KeywordCount"] as const) {
+    if (input[key] === undefined) continue;
+    const value = Number(input[key]);
+    if (!Number.isSafeInteger(input[key]) || value < previous || value > Number(input.positionedKeywordCount)) throw invalidResponse();
+    result[key] = value;
+    previous = value;
+  }
+  return result;
 }
 
 function validUtcDateKey(value: unknown): value is string {

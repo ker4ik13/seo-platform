@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -11,6 +12,8 @@ import {
 } from "@nestjs/common";
 import {
   parseWorkerNodeConfiguration,
+  parseWorkerNodeRemovalInput,
+  type RemovedWorkerNode,
   type ApiResponse,
   type CreatedWorkerNode,
   type WorkerNodeView
@@ -48,6 +51,12 @@ export class PlatformAdminWorkerNodeController {
     return apiResponse(request, await this.nodes.create(
       configuration(body), principal.userId, request.id
     ));
+  }
+
+  @Delete(":id")
+  public async remove(@Param("id") id: string, @Body() body: unknown, @Req() request: PlatformAdminRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiResponse<RemovedWorkerNode>> {
+    try { parseWorkerNodeRemovalInput(body); } catch { throw new BadRequestException("Подтвердите удаление воркера"); }
+    return apiResponse(request, await this.nodes.remove(nodeId(id), principal.userId, request.id));
   }
 
   @Patch(":id/configuration")

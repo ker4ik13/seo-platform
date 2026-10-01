@@ -1,5 +1,10 @@
 "use client";
 
+import { CustomSelect } from "../../components/custom-select";
+import { Icon } from "../../components/icon";
+import { AdminHeaderActions, AdminOverlay } from "../../components/admin-overlay";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
+
 import {
   useCallback,
   useEffect,
@@ -34,6 +39,11 @@ import { UiText, useUiLocale } from "../../components/ui-locale";
 
 
 type Screen = "overview" | "workspaces" | "projects" | "operations" | "workers" | "receipts" | "staff" | "refunds" | "providers" | "usage";
+const screenTitles: Readonly<Record<Screen, string>> = {
+  overview: "Обзор", workspaces: "Рабочие области", projects: "Проекты", operations: "Операции",
+  workers: "Воркеры", receipts: "Чеки НПД", staff: "Роли платформы", refunds: "Возвраты",
+  providers: "Провайдеры", usage: "Расходы на проверке"
+};
 
 const adminScreens: readonly Screen[] = [
   "overview",
@@ -153,9 +163,9 @@ export function AdminApp() {
         }
         text={
           error ??
-          "Нужны активная platform role, подтверждённый email и вход с MFA."
+          "Нужны активная роль платформы, подтверждённая почта и вход с MFA."
         }
-        title={uiText("Доступ в operations закрыт")}
+        title={uiText("Доступ в админку закрыт")}
       />
     );
   }
@@ -182,17 +192,17 @@ export function AdminApp() {
       <aside className="sidebar">
         <a className="brand" href="/">
           <img alt="" aria-hidden="true" height={31} src="/brand/seonorita-mark.svg" width={31} />
-          <div><strong><UiText text="SEOньорита" /></strong><small>Operations</small></div>
+          <div><strong><UiText text="SEOньорита" /></strong><small>Администрирование</small></div>
         </a>
         <nav aria-label={uiText("Разделы администрирования")}>
-          {canViewWorkspaces && <button className={screen === "overview" ? "active" : undefined} onClick={() => navigateScreen("overview")} type="button"><i>00</i> <UiText text="Обзор" before=" " /></button>}
+          {canViewWorkspaces && <button className={screen === "overview" ? "active" : undefined} onClick={() => navigateScreen("overview")} type="button"><Icon name="dashboard" /> <UiText text="Обзор" before=" " /></button>}
           {canViewWorkspaces && (
             <button
               className={screen === "workspaces" ? "active" : undefined}
               onClick={() => navigateScreen("workspaces")}
               type="button"
             >
-              <i>01</i> <UiText text="Рабочие области" before=" " /></button>
+              <Icon name="projects" /> <UiText text="Рабочие области" before=" " /></button>
           )}
           {canViewPlatformDirectory && (
             <button
@@ -200,7 +210,7 @@ export function AdminApp() {
               onClick={() => navigateScreen("projects")}
               type="button"
             >
-              <i>02</i> <UiText text="Проекты" before=" " /></button>
+              <Icon name="pages" /> <UiText text="Проекты" before=" " /></button>
           )}
           {canViewPlatformDirectory && (
             <button
@@ -208,35 +218,35 @@ export function AdminApp() {
               onClick={() => navigateScreen("operations")}
               type="button"
             >
-              <i>03</i> <UiText text="Операции" before=" " /></button>
+              <Icon name="tasks" /> <UiText text="Операции" before=" " /></button>
           )}
-          {canManageWorkers && <button className={screen === "workers" ? "active" : undefined} onClick={() => navigateScreen("workers")} type="button"><i>04</i> <UiText text="Воркеры" before=" " /></button>}
+          {canManageWorkers && <button className={screen === "workers" ? "active" : undefined} onClick={() => navigateScreen("workers")} type="button"><Icon name="http" /> <UiText text="Воркеры" before=" " /></button>}
           {canViewReceipts && (
             <button
               className={screen === "receipts" ? "active" : undefined}
               onClick={() => navigateScreen("receipts")}
               type="button"
             >
-              <i>04</i> <UiText text="Чеки НПД" before=" " /></button>
+              <Icon name="http" /> <UiText text="Чеки НПД" before=" " /></button>
           )}
-          {canViewRefunds && <button className={screen === "refunds" ? "active" : undefined} onClick={() => navigateScreen("refunds")} type="button"><i>05</i> <UiText text="Возвраты" before=" " /></button>}
+          {canViewRefunds && <button className={screen === "refunds" ? "active" : undefined} onClick={() => navigateScreen("refunds")} type="button"><Icon name="history" /> <UiText text="Возвраты" before=" " /></button>}
           {canManageStaff && (
             <button
               className={screen === "staff" ? "active" : undefined}
               onClick={() => navigateScreen("staff")}
               type="button"
             >
-              <i>05</i> Platform roles
+              <Icon name="competitors" /> Роли платформы
             </button>
           )}
-          {canManageBilling && <button className={screen === "usage" ? "active" : undefined} onClick={() => navigateScreen("usage")} type="button"><i>07</i> <UiText text="Расходы на проверке" /></button>}
-          {canViewProviders && <button className={screen === "providers" ? "active" : undefined} onClick={() => navigateScreen("providers")} type="button"><i>06</i> <UiText text="Провайдеры" before=" " /></button>}
+          {canManageBilling && <button className={screen === "usage" ? "active" : undefined} onClick={() => navigateScreen("usage")} type="button"><Icon name="history" /> <UiText text="Расходы на проверке" /></button>}
+          {canViewProviders && <button className={screen === "providers" ? "active" : undefined} onClick={() => navigateScreen("providers")} type="button"><Icon name="settings" /> <UiText text="Провайдеры" before=" " /></button>}
         </nav>
         <div className="operator">
           <span>{initials(profile.displayName)}</span>
           <div>
             <strong>{profile.displayName}</strong>
-            <small>{profile.roles.join(", ")}</small>
+            <small>{profile.roles.map(statusLabel).join(", ")}</small>
           </div>
         </div>
       </aside>
@@ -244,9 +254,9 @@ export function AdminApp() {
         <header className="topbar">
           <div>
             <img alt="" aria-hidden="true" className="mobile-mark" height={28} src="/brand/seonorita-mark.svg" width={28} />
-            <strong>Operations</strong>
+            <h1>{screenTitles[screen]}</h1>
             {hasVisibleScreen && (
-              <select
+              <CustomSelect
                 aria-label={uiText("Раздел администрирования")}
                 className="mobile-navigation"
                 onChange={(event) => navigateScreen(event.target.value as Screen)}
@@ -259,21 +269,22 @@ export function AdminApp() {
                 {canManageWorkers && <option value="workers"><UiText text="Воркеры" /></option>}
                 {canViewReceipts && <option value="receipts"><UiText text="Чеки НПД" /></option>}
                 {canViewRefunds && <option value="refunds"><UiText text="Возвраты" /></option>}
-                {canManageStaff && <option value="staff">Platform roles</option>}
+                {canManageStaff && <option value="staff">Роли платформы</option>}
                 {canManageBilling && <option value="usage"><UiText text="Расходы на проверке" /></option>}
                 {canViewProviders && <option value="providers"><UiText text="Провайдеры" /></option>}
-              </select>
+              </CustomSelect>
             )}
           </div>
           <div className="topbar-actions">
-            <span className="system-state"><i /> MFA · cookie session</span>
+            <div className="admin-page-actions" id="admin-page-actions" />
+            <span className="system-state" title="Данные обновляются автоматически каждые 5 секунд"><i /> 5 сек.</span>
             <button className="ghost" onClick={() => void logout()} type="button">
               <UiText text="Выйти" /></button>
           </div>
         </header>
         {!hasVisibleScreen ? (
           <StatePage
-            text="Для этого аккаунта пока нет доступных operations-разделов. Нужна подходящая platform role."
+            text="Для этого аккаунта пока нет доступных административных разделов. Нужна подходящая роль платформы."
             title={uiText("Нет доступных разделов")}
           />
         ) : screen === "overview" && canViewWorkspaces ? (
@@ -281,11 +292,11 @@ export function AdminApp() {
         ) : screen === "usage" && canManageBilling ? (
           <UsageReview />
         ) : screen === "workspaces" && canViewWorkspaces ? (
-          <WorkspaceAdministration canManageBilling={canManageBilling} />
+          <WorkspaceAdministration canManageBilling={canManageBilling} canControl={canManageWorkers} />
         ) : screen === "projects" && canViewPlatformDirectory ? (
-          <ProjectAdministration />
+          <ProjectAdministration canControl={canManageWorkers} />
         ) : screen === "operations" && canViewPlatformDirectory ? (
-          <OperationAdministration />
+          <OperationAdministration canControl={canManageWorkers} />
         ) : screen === "workers" && canManageWorkers ? (
           <WorkerAdministration />
         ) : screen === "receipts" && canViewReceipts ? (
@@ -339,7 +350,7 @@ function Login({
       return;
     }
     setMessage(
-      "Для operations-панели у аккаунта должен быть включён MFA."
+      "Для административной панели у аккаунта должен быть включён MFA."
     );
     onReady();
   }
@@ -348,7 +359,7 @@ function Login({
       <section className="auth-card">
         <div className="auth-logo">SW</div>
         <p className="eyebrow"><UiText text="Внутренняя панель" /></p>
-        <h1><UiText text="Вход в Operations" /></h1>
+        <h1><UiText text="Вход в админку" /></h1>
         <p><UiText text="Доступ только для platform staff. Второй фактор обязателен." /></p>
         <form onSubmit={submit}>
           {message && <div className="form-alert" role="alert">{<UiText text={message ?? ""} />}</div>}
@@ -421,8 +432,8 @@ function Receipts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(undefined);
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
     const response = await adminApi<AdminNpdReceiptListPage>(
@@ -435,6 +446,7 @@ function Receipts() {
   useEffect(() => {
     void load();
   }, [load]);
+  useAdminAutoRefresh(() => load(true));
 
   const counts = useMemo(() => {
     const receipts = page?.data ?? [];
@@ -466,15 +478,10 @@ function Receipts() {
 
   return (
     <div className="content">
-      <section className="heading">
-        <div><p>Billing operations</p><h1><UiText text="Чеки НПД" /></h1></div>
+      <AdminHeaderActions>
         <a className="external" href="https://lknpd.nalog.ru/" rel="noreferrer" target="_blank">
           <UiText text="Открыть «Мой налог» ↗" /></a>
-      </section>
-      <aside className="warning">
-        <strong><UiText text="Ручной официальный workflow." /></strong>
-        <span><UiText text="Сверьте сумму и покупателя с snapshot, создайте чек в «Мой налог», затем сохраните официальный ID и print URL." /></span>
-      </aside>
+      </AdminHeaderActions>
       <section className="metric-grid">
         <Metric label={uiText("Ждут регистрации")} value={counts.waiting} />
         <Metric label={uiText("Ждут доставки")} value={counts.delivery} />
@@ -483,13 +490,11 @@ function Receipts() {
       </section>
       <section className="panel">
         <header className="panel-header">
-          <div><h2><UiText text="Обязательства" /></h2><p><UiText text="Не более 100 последних записей, новые сверху" /></p></div>
           <div className="filters">
-            <select onChange={(event) => setStatus(event.target.value)} value={status}>
+            <CustomSelect onChange={(event) => setStatus(event.target.value)} value={status}>
               <option value=""><UiText text="Все статусы" /></option>
               {receiptStatuses.map((item) => <option key={item} value={item}>{<UiText text={statusLabel(item) ?? ""} />}</option>)}
-            </select>
-            <button className="ghost" onClick={() => void load()} type="button"><UiText text="Обновить" /></button>
+            </CustomSelect>
           </div>
         </header>
         {error && <div className="form-alert" role="alert">{<UiText text={error ?? ""} />}</div>}
@@ -653,8 +658,10 @@ function StaffRoles() {
   const [roles, setRoles] = useState<readonly PlatformStaffRoleAssignmentSummary[]>([]);
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     const response = await adminApiCollection<PlatformStaffRoleAssignmentSummary>(
       "/api/staff/roles"
     );
@@ -663,10 +670,12 @@ function StaffRoles() {
     else setError(response.message);
   }, []);
   useEffect(() => void load(), [load]);
+  useAdminAutoRefresh(() => load(true), !busy);
   async function assign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    setBusy(true);
     const response = await adminApi("/api/staff/roles", {
       method: "POST",
       body: JSON.stringify({
@@ -675,9 +684,11 @@ function StaffRoles() {
         reason: String(data.get("reason") ?? "").trim()
       })
     });
+    setBusy(false);
     if (!response.ok) setError(response.message);
     else {
       form.reset();
+      setCreating(false);
       void load();
     }
   }
@@ -696,25 +707,23 @@ function StaffRoles() {
   }
   return (
     <div className="content">
-      <section className="heading"><div><p>Security</p><h1>Platform roles</h1></div></section>
-      <aside className="warning"><strong><UiText text="Высокорисковое действие." /></strong><span><UiText text="Назначайте минимальную роль; аккаунт обязан иметь подтверждённый email и активный MFA." /></span></aside>
-      <section className="grid roles-grid">
+      <AdminHeaderActions><button className="primary" onClick={() => { setError(undefined); setCreating(true); }} type="button"><Icon name="plus" />Назначить роль</button></AdminHeaderActions>
+      <section className="roles-grid">
         <article className="panel">
-          <header><div><h2><UiText text="Назначения" /></h2><p><UiText text="Активные и отозванные записи сохраняются для аудита" /></p></div></header>
           {error && <div className="form-alert">{<UiText text={error ?? ""} />}</div>}
           {loading ? <div className="empty"><UiText text="Загрузка…" /></div> : roles.length === 0 ? <div className="empty"><UiText text="Назначений нет." /></div> : (
             <div className="role-list">{roles.map((role) => <div className="role-row" key={role.id}><div><strong>{role.displayName}</strong><small>{role.email}</small></div><Status value={role.revokedAt ? "REVOKED" : role.roleCode} /><small>{formatDate(role.assignedAt, uiLocale)}</small>{!role.revokedAt && <button className="danger-button" onClick={() => void revoke(role)} type="button"><UiText text="Отозвать" /></button>}</div>)}</div>
           )}
         </article>
-        <article className="panel">
-          <header><div><h2><UiText text="Назначить роль" /></h2><p><UiText text="Изменение требует недавнего MFA-входа и попадает в audit" /></p></div></header>
+        {creating && <AdminOverlay title="Назначить роль" onClose={() => setCreating(false)} busy={busy}>
           <form className="operation-form" onSubmit={assign}>
-            <label><span>User UUID</span><input name="userId" required /></label>
-            <label><span><UiText text="Роль" /></span><select name="roleCode">{platformRoles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+            <label><span>ID пользователя</span><input name="userId" required /></label>
+            <label><span><UiText text="Роль" /></span><CustomSelect name="roleCode">{platformRoles.map((role) => <option key={role} value={role}>{statusLabel(role)}</option>)}</CustomSelect></label>
             <label><span><UiText text="Обоснование" /></span><textarea minLength={8} name="reason" required rows={3} /></label>
-            <button className="primary" type="submit"><UiText text="Назначить" /></button>
+            {error && <div className="form-alert" role="alert">{error}</div>}
+            <button className="primary" disabled={busy} type="submit">{busy ? "Сохраняем…" : "Назначить"}</button>
           </form>
-        </article>
+        </AdminOverlay>}
       </section>
     </div>
   );
@@ -729,7 +738,7 @@ function Status({ value }: Readonly<{ value: string }>) {
 function Snapshot({ label, value }: Readonly<{ label: string; value: string }>) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
-function StatePage({ action, text, title = "Operations" }: Readonly<{ action?: ReactNode; text: string; title?: string }>) {
+function StatePage({ action, text, title = "Администрирование" }: Readonly<{ action?: ReactNode; text: string; title?: string }>) {
   return <main className="state-page"><div className="auth-logo">SW</div><h1><UiText text={title} /></h1><p><UiText text={text} /></p>{action}</main>;
 }
 
@@ -746,7 +755,7 @@ function adminAccessMessage(message: string): string {
     message ===
     "Platform administration requires an active verified account and MFA-authenticated session"
   ) {
-    return "Для operations нужен активный подтверждённый аккаунт и новый вход с MFA.";
+    return "Для админки нужен активный подтверждённый аккаунт и новый вход с MFA.";
   }
   return message;
 }
@@ -763,6 +772,7 @@ const platformRoles: readonly PlatformRoleCode[] = [
 
 function statusLabel(value: string): string {
   return ({
+    SUPER_ADMIN: "Главный администратор", OPERATIONS: "Операции", SUPPORT: "Поддержка", FINANCE: "Финансы", CONTENT: "Контент", SECURITY_AUDITOR: "Аудитор безопасности", ANALYST: "Аналитик",
     PENDING: "Ожидает", AWAITING_MANUAL_REGISTRATION: "Создать чек",
     REGISTERING: "Регистрируется", REGISTERED: "Зарегистрирован",
     DELIVERY_PENDING: "Доставка", DELIVERED: "Доставлен",

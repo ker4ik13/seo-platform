@@ -27,3 +27,12 @@ test("worker creation audits safe configuration without storing its one-time tok
   assert.equal(events.length, 1);
   assert.equal(JSON.stringify(events).includes(token), false);
 });
+
+test("worker removal goes through Jobs and records a safe audit event", async () => {
+  const id = "01900000-0000-7000-8000-000000000001", removed = { id, deletedAt: new Date().toISOString() };
+  const events: unknown[] = [];
+  const jobs = { removeWorkerNode: async (_actor: string, _request: string, target: string) => { assert.equal(target, id); return removed; } } as unknown as JobsClient;
+  const service = new PlatformAdminWorkerNodeService(jobs, { record: async (event: unknown) => { events.push(event); } } as AuditService);
+  assert.deepEqual(await service.remove(id, "actor", "request"), removed);
+  assert.equal((events[0] as { action: string }).action, "platform_admin.worker_node.deleted");
+});

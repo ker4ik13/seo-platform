@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { AdminProviderAccount } from "@seo-platform/contracts";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 import { adminApi } from "../../lib/admin-browser-api";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
+import { AdminHeaderActions, AdminOverlay } from "../../components/admin-overlay";
 
 const money = (minor: number, locale: string) =>
   new Intl.NumberFormat(locale, {
@@ -16,6 +18,7 @@ export function ProviderAdministration() {
   const [accounts, setAccounts] = useState<readonly AdminProviderAccount[]>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string>();
 
   const load = useCallback(async () => {
     const result = await adminApi<readonly AdminProviderAccount[]>(
@@ -31,9 +34,8 @@ export function ProviderAdministration() {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 30_000);
-    return () => window.clearInterval(timer);
   }, [load]);
+  useAdminAutoRefresh(load, !busy);
 
   async function refresh(): Promise<void> {
     if (busy) return;
@@ -82,18 +84,14 @@ export function ProviderAdministration() {
     setBusy(undefined);
   }
 
+  const selected = accounts?.find((account) => account.id === selectedId);
   return (
     <div className="content">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow"><UiText text="Данные и расходы" /></p>
-          <h1><UiText text="Аккаунты SEO-сервисов" /></h1>
-          <p><UiText text="Аккаунты из переменных окружения проверяются независимо от проектов. Отключённый аккаунт не участвует в новых операциях и фоновой проверке." /></p>
-        </div>
+      <AdminHeaderActions>
         <button className="ghost" disabled={Boolean(busy)} type="button" onClick={() => void refresh()}>
           {busy === "refresh" ? <UiText text="Проверяем…" /> : <UiText text="Проверить сейчас" />}
         </button>
-      </section>
+      </AdminHeaderActions>
       {error && <p className="error" role="alert"><UiText text={error} /></p>}
       {!accounts ? (
         <section className="panel"><UiText text="Загружаем состояние провайдеров…" /></section>
@@ -111,10 +109,12 @@ export function ProviderAdministration() {
               key={account.id}
               locale={uiLocale}
               onToggle={() => void toggle(account)}
+              onDetails={() => setSelectedId(account.id)}
             />
           ))}
         </div>
       )}
+      {selected && <AdminOverlay drawer title={`${selected.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} #${selected.slot}`} onClose={() => setSelectedId(undefined)}><dl className="admin-detail-fields"><div><dt>ID</dt><dd><code>{selected.id}</code></dd></div><div><dt>Состояние</dt><dd>{providerStatus(selected).label}</dd></div><div><dt>Остаток</dt><dd>{selected.remaining ?? "—"} {selected.unit === "RUB" ? "₽" : "лимитов"}</dd></div><div><dt>Денежная оценка</dt><dd>{selected.estimatedBalanceMinor === null ? "—" : money(selected.estimatedBalanceMinor, uiLocale)}</dd></div><div><dt>Проверено</dt><dd>{selected.checkedAt ? new Date(selected.checkedAt).toLocaleString("ru") : "—"}</dd></div><div><dt>Код ошибки</dt><dd>{selected.errorCode ?? "—"}</dd></div></dl><p className="form-description">{providerExplanation(selected)}</p><a className="ghost" href={selected.provider === "XMLSTOCK" ? "https://xmlstock.com/" : "https://arsenkin.ru/tools/tariffs/all/"} target="_blank" rel="noopener noreferrer">Открыть кабинет провайдера ↗</a></AdminOverlay>}
     </div>
   );
 }
@@ -123,12 +123,14 @@ function ProviderAccountCard({
   account,
   busy,
   locale,
-  onToggle
+  onToggle,
+  onDetails
 }: Readonly<{
   account: AdminProviderAccount;
   busy: boolean;
   locale: string;
   onToggle: () => void;
+  onDetails: () => void;
 }>) {
   const status = providerStatus(account);
   return (
@@ -157,15 +159,12 @@ function ProviderAccountCard({
       {account.provider === "ARSENKIN" && account.remaining !== null && (
         <p><UiText text="{0} лимитов · денежная оценка по стоимости Standard" values={[new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(Number(account.remaining))]} /></p>
       )}
-      <p>{providerExplanation(account)}</p>
       <small>
         {account.checkedAt
           ? <><UiText text="Последняя проверка:" after=" " />{new Date(account.checkedAt).toLocaleString(locale)}</>
           : <UiText text="Проверка ещё не выполнялась" />}
       </small>
-      <a className="ghost" href={account.provider === "XMLSTOCK" ? "https://xmlstock.com/" : "https://arsenkin.ru/tools/tariffs/all/"} target="_blank" rel="noopener noreferrer">
-        <UiText text="Открыть кабинет провайдера ↗" />
-      </a>
+      <button className="ghost" onClick={onDetails} type="button">Подробнее</button>
     </article>
   );
 }

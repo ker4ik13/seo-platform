@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { RemoteWorkRetentionService } from "../worker-nodes/remote-work-retention.service.js";
 import type { Upload } from "../generated/prisma/client.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -38,7 +39,8 @@ export class FileRetentionService {
   public constructor(
     private readonly prisma: PrismaService,
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStoragePort,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional() private readonly remoteWork?: RemoteWorkRetentionService
   ) {}
 
   public async sweep(now = new Date()): Promise<void> {
@@ -51,6 +53,7 @@ export class FileRetentionService {
     );
     await this.sweepUploads(uploadCutoff);
     await this.sweepExports(exportCutoff);
+    await this.remoteWork?.sweep(now);
   }
 
   private async sweepUploads(cutoff: Date): Promise<void> {

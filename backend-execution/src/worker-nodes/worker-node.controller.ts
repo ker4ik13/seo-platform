@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Headers,
@@ -16,9 +17,10 @@ import type {
   CreatedWorkerNode,
   RemoteRankClaimV1,
   RemoteRankPollTaskV1,
-  WorkerNodeView
+  WorkerNodeView,
+  RemovedWorkerNode
 } from "@seo-platform/contracts";
-import { parseRemoteRankClaim } from "@seo-platform/contracts";
+import { parseRemoteRankClaim, parseWorkerNodeRemovalInput } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -31,6 +33,7 @@ import {
 } from "./worker-node-input.js";
 import { WorkerNodeService } from "./worker-node.service.js";
 import { WorkerRankGatewayService } from "./worker-rank-gateway.service.js";
+import { workerIdentity as nodeIdentity,exactWorkerInput as exact } from "./worker-wire-input.js";
 
 type HeadersRecord = Readonly<Record<string, string | string[] | undefined>>;
 
@@ -57,6 +60,13 @@ export class WorkerNodeAdminController {
   ): Promise<ApiResponse<CreatedWorkerNode>> {
     actor(headers);
     return response(request, await this.nodes.create(workerNodeConfiguration(body)));
+  }
+
+  @Delete(":id")
+  public async remove(@Param("id") id: string, @Body() body: unknown, @Headers() headers: HeadersRecord, @Req() request: FastifyRequest): Promise<ApiResponse<RemovedWorkerNode>> {
+    actor(headers);
+    try { parseWorkerNodeRemovalInput(body); } catch { throw new BadRequestException("Worker deletion requires confirmation"); }
+    return response(request, await this.nodes.remove(workerNodeId(id)));
   }
 
   @Patch(":id/configuration")
@@ -120,6 +130,7 @@ export class WorkerGatewayController {
     @Headers() headers: HeadersRecord,
     @Req() request: FastifyRequest
   ): Promise<ApiResponse<WorkerNodeView>> {
+    this.ranks.assertEnabled();
     const { id, token } = nodeIdentity(headers);
     return response(request, await this.nodes.heartbeat(
       id,
@@ -158,28 +169,6 @@ export class WorkerGatewayController {
       id, token, input.ticket, input.requestSnapshot, input.outcome
     ));
   }
-}
-
-function nodeIdentity(headers: HeadersRecord): { readonly id: string; readonly token: string } {
-  const id = workerNodeId(headers["x-worker-id"]);
-  const authorization = headers.authorization;
-  if (typeof authorization !== "string" ||
-    !/^Bearer wn_[A-Za-z0-9_-]{43}$/u.test(authorization)) {
-    throw new BadRequestException("Invalid worker authentication");
-  }
-  return { id, token: authorization.slice("Bearer ".length) };
-}
-
-function exact(value: unknown, fields: readonly string[]): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new BadRequestException("Invalid worker request");
-  }
-  const input = value as Record<string, unknown>;
-  if (Object.keys(input).length !== fields.length ||
-    fields.some((field) => !Object.hasOwn(input, field))) {
-    throw new BadRequestException("Invalid worker request");
-  }
-  return input;
 }
 
 function actor(headers: HeadersRecord): string {

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException,Optional } from "@nestjs/common";
+import { RemoteWorkClientService,RemoteWorkFailedError } from "../worker-nodes/remote-work-client.service.js";
 import {
   domainEventTypes,
   type SupportedImportMediaType
@@ -33,7 +34,8 @@ export class UploadInspectionService {
     private readonly prisma: PrismaService,
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStoragePort,
     @Inject(MALWARE_SCANNER) private readonly malware: MalwareScannerPort,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional() private readonly remote?:RemoteWorkClientService
   ) {}
 
   public async pendingUploadIds(limit = 100): Promise<readonly string[]> {
@@ -113,6 +115,24 @@ export class UploadInspectionService {
     if (!upload) throw new NotFoundException("Upload not found");
 
     try {
+      const local=()=>this.inspectClaimed(upload,claimedAt);
+      if(!this.remote) return await local();
+      return await this.remote.execute({origin:"UPLOAD",workspaceId:upload.workspaceId,...(upload.projectId ? {projectId:upload.projectId} : {}),operationId:upload.id,claimedAt:claimedAt.toISOString()},
+        "INSPECTION","UPLOAD_INSPECTION",{}, {resource:"CPU",timeoutMs:Math.min(3_600_000,this.config.malwareScanner.scanTimeoutMs+60_000),onWait:()=>this.heartbeat(upload.id,claimedAt)},async result=>{
+          const verdict=result.verdict && typeof result.verdict==="object" ? result.verdict as Record<string,unknown> : undefined;
+          if(result.format!=="UPLOAD_INSPECTION" || !verdict || !["CLEAN","INFECTED"].includes(String(verdict.status)) || verdict.engine!=="clamd" ||
+            typeof result.sampleBase64!=="string" || result.sampleBase64.length>90_000 || typeof result.sizeBytes!=="string" || !/^[0-9]{1,13}$/u.test(result.sizeBytes) ||
+            typeof result.checksumSha256!=="string" || !/^[a-f0-9]{64}$/u.test(result.checksumSha256) || (verdict.signature!==undefined && (typeof verdict.signature!=="string" || verdict.signature.length>256))) throw new RemoteWorkFailedError("INVALID_INSPECTION_RESULT");
+          const sample=Buffer.from(result.sampleBase64,"base64");if(sample.length>64*1024) throw new RemoteWorkFailedError("INVALID_INSPECTION_RESULT");
+          return this.finishInspection(upload,claimedAt,verdict as unknown as MalwareScanResult,{sample,sizeBytes:BigInt(result.sizeBytes),checksumSha256:result.checksumSha256});
+        },local);
+    } catch (error) {
+      await this.releaseForRetry(upload.id, claimedAt);
+      throw error;
+    }
+  }
+
+  private async inspectClaimed(upload:Upload,claimedAt:Date):Promise<UploadInspectionOutcome> {
       if (!this.storage.isEnabled()) {
         throw new Error("Object storage is disabled");
       }
@@ -130,6 +150,10 @@ export class UploadInspectionService {
       );
       const malwareResult = await this.malware.scan(observed.stream);
       const streamResult = observed.result();
+      return this.finishInspection(upload,claimedAt,malwareResult,streamResult);
+  }
+
+  private async finishInspection(upload:Upload,claimedAt:Date,malwareResult:MalwareScanResult,streamResult:ObservedStreamResult):Promise<UploadInspectionOutcome> {
       if (malwareResult.status === "INFECTED") {
         return await this.reject(
           upload,
@@ -182,10 +206,6 @@ export class UploadInspectionService {
         streamResult,
         media.detectedMediaType
       );
-    } catch (error) {
-      await this.releaseForRetry(upload.id, claimedAt);
-      throw error;
-    }
   }
 
   private async ready(

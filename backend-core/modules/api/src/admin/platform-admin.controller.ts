@@ -42,7 +42,7 @@ import {
   revokePlatformStaffRoleInput
 } from "./platform-admin-input.js";
 import { PlatformAdminService } from "./platform-admin.service.js";
-import { RequirePlatformRole } from "./platform-role.js";
+import { RequirePlatformRole, RequireRecentPlatformAuthentication } from "./platform-role.js";
 import {
   PlatformRoleGuard,
   type PlatformAdminRequest
@@ -67,6 +67,7 @@ export class PlatformAdminProfileController {
 
 @Controller("admin-api/v1/billing/npd-receipts")
 @RequirePlatformRole("FINANCE")
+@RequireRecentPlatformAuthentication()
 export class PlatformAdminNpdController {
   public constructor(private readonly admin: PlatformAdminService) {}
 
@@ -166,6 +167,7 @@ export class PlatformAdminNpdController {
 
 @Controller("admin-api/v1/staff/roles")
 @RequirePlatformRole("SUPER_ADMIN")
+@RequireRecentPlatformAuthentication()
 export class PlatformAdminStaffRoleController {
   public constructor(private readonly admin: PlatformAdminService) {}
 

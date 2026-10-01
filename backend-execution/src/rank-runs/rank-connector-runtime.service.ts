@@ -1,4 +1,6 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import { RemoteProviderTransportService } from "../worker-nodes/remote-provider-transport.service.js";
+import { remoteCredentialFingerprint } from "../worker-nodes/remote-work-scope.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { RankBillingSettlementClient } from "../platform-api/rank-billing-settlement.client.js";
@@ -72,7 +74,8 @@ export class RankConnectorRuntimeService {
     private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
     private readonly settlements: RankBillingSettlementClient,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService,
+    @Optional() private readonly remote?: RemoteProviderTransportService
   ) {
     this.claimCapacity = new RankClaimCapacity(
       config.connectorRuntime.rankClaimConcurrency
@@ -116,6 +119,13 @@ export class RankConnectorRuntimeService {
     claim: RankConnectorSubmitClaim
   ): Promise<RankConnectorRuntimeOutcome> {
     const requestIntent = await this.broker.readSubmitRequest(claim);
+    const run=()=>this.submitRequest(claim,requestIntent);
+    return this.remote ? this.remote.run({origin:"RANK",workspaceId:claim.workspaceId,projectId:requestIntent.projectId,
+      operationId:requestIntent.jobId,jobId:requestIntent.jobId,executionId:claim.executionId,credentialId:claim.credentialId,
+      provider:claim.provider,leaseOwner:claim.leaseOwner,leaseToken:claim.leaseToken,credentialFingerprint:remoteCredentialFingerprint(claim.encryptedCredential)},"RANK",run) : run();
+  }
+
+  private async submitRequest(claim:RankConnectorSubmitClaim,requestIntent:RankProviderRequestIntentV1):Promise<RankConnectorRuntimeOutcome> {
     const settlement = await this.broker.readBillingSettlement(claim);
     const decryptedSecret = this.crypto.decrypt(
         claim.workspaceId,
@@ -136,6 +146,7 @@ export class RankConnectorRuntimeService {
           claim.credentialId
         );
     const providerCredentialScopeId = secret.rateLimitScopeId!;
+    this.remote?.useSecret(secret);
     const built = claim.provider === "XMLSTOCK"
       ? (() => {
           const request = buildXmlStockRankWireRequest(requestIntent);
@@ -172,11 +183,12 @@ export class RankConnectorRuntimeService {
       if (request.delayed) {
         quotaProduct = xmlStockRankHttpProduct(request);
         const acquired = await this.xmlStockQuota.tryAcquire({
+          ...(this.config.remoteWorkEnabled ? {physicalOnly:true} : {}),
           credentialId: providerCredentialScopeId,
           workspaceId: claim.workspaceId,
           product: quotaProduct,
           leaseMs:
-            this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
+            this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS + (this.config.remoteWorkEnabled ? 6_000 : 0)
         });
         if (!acquired.allowed) return "PROVIDER_CAPACITY_DELAYED";
         quotaPermit = acquired;
@@ -243,6 +255,13 @@ export class RankConnectorRuntimeService {
   private async poll(
     claim: RankConnectorPollClaim
   ): Promise<RankConnectorRuntimeOutcome> {
+    const run=()=>this.pollRequest(claim);
+    return this.remote ? this.remote.run({origin:"RANK",workspaceId:claim.workspaceId,projectId:claim.request.projectId,
+      operationId:claim.request.jobId,jobId:claim.request.jobId,executionId:claim.executionId,credentialId:claim.credentialId,
+      provider:claim.provider,leaseOwner:claim.leaseOwner,leaseToken:claim.leaseToken,credentialFingerprint:remoteCredentialFingerprint(claim.encryptedCredential)},"RANK",run) : run();
+  }
+
+  private async pollRequest(claim:RankConnectorPollClaim):Promise<RankConnectorRuntimeOutcome> {
     if (claim.provider === "XMLSTOCK" && claim.providerProgressInvalid) {
       await this.broker.completePoll(claim, {
         outcome: "REJECTED",
@@ -286,6 +305,7 @@ export class RankConnectorRuntimeService {
           claim.credentialId
         );
     const providerCredentialScopeId = secret.rateLimitScopeId!;
+    this.remote?.useSecret(secret);
     let outcome:
       | Awaited<ReturnType<XmlStockRankConnector["fetchResult"]>>
       | Awaited<ReturnType<ArsenkinRankConnector["fetchResult"]>>;
@@ -293,11 +313,12 @@ export class RankConnectorRuntimeService {
       const request = xmlStockRequest!;
       const product = xmlStockRankHttpProduct(request);
       const acquired = await this.xmlStockQuota.tryAcquire({
+        ...(this.config.remoteWorkEnabled ? {physicalOnly:true} : {}),
         credentialId: providerCredentialScopeId,
         workspaceId: claim.workspaceId,
         product,
         leaseMs:
-          this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
+          this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS + (this.config.remoteWorkEnabled ? 6_000 : 0)
       });
       if (!acquired.allowed) {
         await this.broker.deferPollForProviderCapacity(
@@ -362,6 +383,9 @@ export class RankConnectorRuntimeService {
         });
         return "POLL_PENDING";
       case "RETRYABLE_FAILURE":
+        if(claim.provider==="XMLSTOCK" && outcome.code==="PROVIDER_CONCURRENCY_LIMITED") {
+          await this.broker.deferPollForProviderCapacity(claim,Math.max(1,outcome.retryAfterSeconds ?? 1));return "PROVIDER_CAPACITY_DELAYED";
+        }
         await this.broker.completePoll(claim, {
           outcome: "RETRYABLE_FAILURE",
           errorCode: outcome.code,
@@ -453,6 +477,7 @@ export class RankConnectorRuntimeService {
   }
 
   private submitLeaseSeconds(): number {
+    if(this.config.remoteWorkEnabled) return RANK_CONNECTOR_SUBMIT_LEASE_MAX_SECONDS;
     // The authoritative execution grant is intentionally short lived. Submit
     // performs one provider request, so reserving the much longer Google
     // pagination lease here can make an otherwise valid grant unclaimable.
@@ -475,6 +500,7 @@ export class RankConnectorRuntimeService {
     // status request followed by one result request.
     const worstCasePollMs =
       this.providerRequestTimeoutMs() * 2 +
+      (this.config.remoteWorkEnabled ? 30_000 : 0) +
       RANK_CONNECTOR_LEASE_MARGIN_MS +
       this.settlementTimeoutMs() * 2;
     return Math.min(

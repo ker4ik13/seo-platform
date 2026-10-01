@@ -7,6 +7,7 @@ import type { PrismaService } from "../database/prisma.service.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import type { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 import { PlatformRoleGuard } from "./platform-role.guard.js";
+import { PLATFORM_RECENT_AUTH_METADATA } from "./platform-role.js";
 
 const principal: AuthenticatedPrincipal = {
   userId: "01900000-0000-7000-8000-000000000001",
@@ -44,7 +45,7 @@ test("requires active MFA confirmed before the current admin session", async () 
   );
 });
 
-test("keeps cookie-backed admin reads alive while retaining recent auth for mutations", async () => {
+test("ordinary admin reads and mutations do not require recent login", async () => {
   let recentChecks = 0;
   const guard = makeGuard(user("FINANCE"), () => {
     recentChecks += 1;
@@ -58,6 +59,9 @@ test("keeps cookie-backed admin reads alive while retaining recent auth for muta
     await guard.canActivate(context({ principal }, "POST")),
     true
   );
+  assert.equal(recentChecks, 0);
+  const highRisk = makeGuard(user("FINANCE"), () => { recentChecks += 1; }, true);
+  assert.equal(await highRisk.canActivate(context({ principal }, "POST")), true);
   assert.equal(recentChecks, 1);
 });
 
@@ -79,11 +83,12 @@ test("super admin satisfies role requirements while unrelated staff does not", a
 
 function makeGuard(
   userResult: unknown,
-  assertRecent: () => void = () => undefined
+  assertRecent: () => void = () => undefined,
+  recent = false
 ): PlatformRoleGuard {
   return new PlatformRoleGuard(
     {
-      getAllAndOverride: () => ["FINANCE"]
+      getAllAndOverride: (key: string) => key === PLATFORM_RECENT_AUTH_METADATA ? recent : ["FINANCE"]
     } as unknown as Reflector,
     {
       user: {

@@ -12,9 +12,10 @@ export interface RankingsPreferences {
   readonly groupId: string;
   readonly dateFrom: string;
   readonly dateThrough: string;
-  readonly sort: "QUERY_ASC" | "POSITION_ASC" | "POSITION_DESC" | "CHANGE_ASC" | "CHANGE_DESC";
+  readonly sort: "OBSERVED_DESC" | "QUERY_ASC" | "POSITION_ASC" | "POSITION_DESC" | "CHANGE_ASC" | "CHANGE_DESC";
   readonly queryColumnWidth: number;
   readonly hiddenDates: readonly string[];
+  readonly includeUntracked?: boolean;
 }
 
 interface StorageLike {
@@ -23,7 +24,7 @@ interface StorageLike {
 }
 
 const SORTS = new Set<RankingsPreferences["sort"]>([
-  "QUERY_ASC", "POSITION_ASC", "POSITION_DESC", "CHANGE_ASC", "CHANGE_DESC"
+  "OBSERVED_DESC", "QUERY_ASC", "POSITION_ASC", "POSITION_DESC", "CHANGE_ASC", "CHANGE_DESC"
 ]);
 
 export function readRankingsPreferences(
@@ -50,6 +51,7 @@ export function readRankingsPreferences(
         boundedString(value.aiDimensionKey, 1_000) ??
         fallback.aiDimensionKey,
       groupId: boundedString(value.groupId, 100) ?? fallback.groupId,
+      includeUntracked: typeof value.includeUntracked === "boolean" ? value.includeUntracked : fallback.includeUntracked ?? false,
       dateFrom: validRange ? dateFrom : fallback.dateFrom,
       dateThrough: validRange ? dateThrough : fallback.dateThrough,
       sort: typeof value.sort === "string" && SORTS.has(value.sort as RankingsPreferences["sort"])
@@ -95,6 +97,19 @@ export function readPreferredSeoDimensionKey(
   } catch {
     return "";
   }
+}
+
+export function readIncludeUntracked(projectId: string, userId: string, storage: StorageLike): boolean {
+  try { return (JSON.parse(storage.getItem(storageKey(projectId, userId)) ?? "null") as RankingsPreferences | null)?.includeUntracked === true; }
+  catch { return false; }
+}
+
+export function writeIncludeUntracked(projectId: string, userId: string, value: boolean, storage: StorageLike): void {
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(storageKey(projectId, userId)) ?? "null");
+    const current = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    storage.setItem(storageKey(projectId, userId), JSON.stringify({ ...current, includeUntracked: value }));
+  } catch { /* The screen remains usable without storage. */ }
 }
 
 export function writePreferredSeoDimensionKey(

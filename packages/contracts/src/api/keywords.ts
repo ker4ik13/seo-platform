@@ -283,7 +283,7 @@ export interface SemanticKeywordListSiteResult {
   readonly snippet?: string;
 }
 
-export const projectPositionTopThresholds = [1, 3, 5, 10, 30, 50] as const;
+export const projectPositionTopThresholds = [1, 3, 5, 10, 30, 50, 100, 200] as const;
 export type ProjectPositionTopThreshold =
   (typeof projectPositionTopThresholds)[number];
 
@@ -297,6 +297,8 @@ export interface ProjectPositionTopCounts {
   readonly top10KeywordCount: number;
   readonly top30KeywordCount: number;
   readonly top50KeywordCount: number;
+  readonly top100KeywordCount?: number;
+  readonly top200KeywordCount?: number;
 }
 
 export interface ProjectPositionSummary extends ProjectPositionTopCounts {

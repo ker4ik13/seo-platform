@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminOverview } from "@seo-platform/contracts";
 import { adminApi } from "../../lib/admin-browser-api";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
 
@@ -13,15 +14,13 @@ export function Overview({ onNavigate }: { onNavigate: (screen: Destination) => 
   const { t: uiText } = useUiLocale();
   const [data, setData] = useState<AdminOverview>();
   const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(false);
   const [metric, setMetric] = useState<"amountMinor" | "payments">("amountMinor");
   const load = useCallback(async () => {
-    setLoading(true);
     const result = await adminApi<AdminOverview>("/api/overview");
-    setLoading(false);
     if (result.ok) { setData(result.data); setError(undefined); } else setError(result.message);
   }, []);
-  useEffect(() => { void load(); const timer = setInterval(() => void load(), 60_000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  useAdminAutoRefresh(load);
   const series = useMemo(() => {
     if (!data?.finance) return [];
     const byDay = new Map(data.finance.daily.map(row => [row.date, row]));
@@ -29,7 +28,7 @@ export function Overview({ onNavigate }: { onNavigate: (screen: Destination) => 
     return Array.from({ length: 30 }, (_, index) => { const date = new Date(today.getTime() - (29 - index) * 86_400_000).toISOString().slice(0, 10); return byDay.get(date) ?? { date, amountMinor: 0, payments: 0 }; });
   }, [data]);
   const maximum = Math.max(1, ...series.map(row => row[metric]));
-  if (!data) return <div className="content"><section className="panel"><h1><UiText text="Обзор платформы" /></h1><p>{error ?? <UiText text="Собираем показатели…" />}</p><button type="button" className="ghost" onClick={() => void load()}><UiText text="Обновить" /></button></section></div>;
+  if (!data) return <div className="content"><section className="panel"><p role={error ? "alert" : "status"}>{error ?? <UiText text="Собираем показатели…" />}</p></section></div>;
   const finance = data.finance;
   const kpis = [
     { label: "Активны за 7 дней", value: integer(data.users.active7d, uiLocale), hint: `${integer(data.users.total, uiLocale)} пользователей всего`, to: "workspaces" as const },
@@ -38,7 +37,7 @@ export function Overview({ onNavigate }: { onNavigate: (screen: Destination) => 
     { label: "Ключевые запросы", value: data.seo ? integer(data.seo.activeKeywords, uiLocale) : "—", hint: data.seo ? `${integer(data.seo.activatedWorkspaces, uiLocale)} областей начали работу` : "SEO-данные временно недоступны", to: "projects" as const },
     ...(finance ? [{ label: "Поступления за 30 дней", value: money(finance.received30dMinor, uiLocale), hint: `${money(finance.refunded30dMinor, uiLocale)} возвращено`, to: "refunds" as const }, { label: "Месячная стоимость подписок", value: money(finance.monthlyPlanValueMinor, uiLocale), hint: "Активные платные планы, с учётом годовой скидки", to: "workspaces" as const }] : [])
   ];
-  return <div className="content admin-overview"><section className="admin-overview-heading"><div><p className="eyebrow"><UiText text="SEOньорита · управление" /></p><h1><UiText text="Обзор платформы" /></h1><p><UiText text="Пользователи, деньги и работа сервиса в одном месте." /></p></div><div><small><UiText text="Обновлено" after=" " />{new Date(data.generatedAt).toLocaleTimeString(uiLocale, { hour: "2-digit", minute: "2-digit" })}</small><button type="button" className="ghost" disabled={loading} onClick={() => void load()}>{loading ? <UiText text="Обновляем…" /> : <UiText text="Обновить" />}</button></div></section>
+  return <div className="content admin-overview">
     {error && <p className="error" role="alert">{<UiText text={error ?? ""} />}</p>}{data.degraded.length > 0 && <p className="notice"><UiText text="Часть данных временно недоступна:" after=" " />{data.degraded.map(source => uiText(source === "SEO" ? "семантика" : "выполнение операций")).join(", ")}<UiText text=". Остальные показатели актуальны." /></p>}
     <div className="admin-kpi-grid">{kpis.map(kpi => <button className="panel admin-kpi" type="button" key={kpi.label} onClick={() => onNavigate(kpi.to)}><span><UiText text={kpi.label} /></span><strong>{kpi.value}</strong><small><UiText text={kpi.hint} /></small></button>)}</div>
     <div className="admin-overview-columns"><section className="panel admin-attention"><header><h2><UiText text="Требует внимания" /></h2><span><UiText text="Операционный контроль" /></span></header>

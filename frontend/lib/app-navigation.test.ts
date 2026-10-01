@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   appNavigationSection,
   appProjectIdFromPath,
+  projectSwitchHref,
   readLastWorkspaceProjectId,
   resolveWorkspaceProjectPreference,
   shouldShowWorkspaceCreationAction,
@@ -26,8 +27,17 @@ test("derives the persistent shell section from protected routes", () => {
   );
   assert.equal(
     appNavigationSection(`/app/projects/${projectId}/tools/http-status-checker`),
-    "tools"
+    "crawl"
   );
+});
+
+test("changing project preserves the screen and replaces its explicit scope", () => {
+  assert.equal(projectSwitchHref(`/app/projects/${projectId}/tools/serp`, "new-project"), "/app/projects/new-project/tools/serp");
+  assert.equal(projectSwitchHref("/app/rankings", projectId), "/app/rankings");
+  assert.equal(projectSwitchHref("/app/settings/integrations", projectId), "/app/settings/integrations");
+  assert.equal(projectSwitchHref("/app/tasks/rank/old-operation", projectId), "/app/tasks");
+  assert.equal(projectSwitchHref("/app/projects/old/notes/old-note", projectId), `/app/projects/${projectId}/notes`);
+  assert.equal(projectSwitchHref("/app/projects/old/notes", undefined), "/app");
 });
 
 test("extracts only a canonical project UUID from an explicit project route", () => {

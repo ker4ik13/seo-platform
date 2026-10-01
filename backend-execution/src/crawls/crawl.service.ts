@@ -432,6 +432,13 @@ export class CrawlService {
     });
   }
 
+  public async renewLease(crawlId:string,leaseOwner:string,leaseSeconds:number):Promise<void> {
+    assertLease(leaseOwner,leaseSeconds);const now=new Date();
+    const updated=await this.prisma.job.updateMany({where:{type:"TECHNICAL_CRAWL",status:"RUNNING",technicalCrawl:{is:{id:crawlId}},leaseOwner,leaseExpiresAt:{gt:now}},
+      data:{leaseExpiresAt:new Date(now.getTime()+leaseSeconds*1_000),version:{increment:1}}});
+    if(updated.count!==1) throw new Error("Technical crawl lease was lost");
+  }
+
   public async finish(
     crawlId: string,
     leaseOwner: string,

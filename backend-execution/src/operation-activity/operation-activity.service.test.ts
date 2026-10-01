@@ -11,7 +11,7 @@ const actorId = "01900000-0000-7000-8000-000000000004";
 const jobId = "01900000-0000-7000-8000-000000000005";
 
 function activityService(prisma: PrismaService): OperationActivityService {
-  return new OperationActivityService(prisma, {
+  return new OperationActivityService(Object.assign({ $queryRaw: async () => [] }, prisma) as PrismaService, {
     selectedForJobs: async () => new Map()
   } as unknown as RankOperationProvenanceService);
 }
@@ -230,54 +230,20 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
   });
   assert.equal(result.data[0]?.errorCode, "PROVIDER_DELAYED");
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
-  assert.deepEqual(countQueries[1], {
-    where: {
-      AND: [
-        {},
-        {
-          OR: [
-            {
-              status: {
-                in: [
-                  "ESTIMATING",
-                  "AWAITING_APPROVAL",
-                  "RESERVING_BALANCE",
-                  "PREPARING",
-                  "QUEUED",
-                  "WAITING_RATE_LIMIT",
-                  "RUNNING",
-                  "PAUSE_REQUESTED",
-                  "PAUSED",
-                  "CANCEL_REQUESTED",
-                  "RETRY_SCHEDULED"
-                ]
-              }
-            },
-            {
-              status: "FAILED_RETRYABLE",
-              type: { not: "INTEGRATION_CREDENTIAL_VALIDATE" }
-            }
-          ]
-        }
-      ]
-    }
+  const filteredTypes = (countQueries[1] as { where: { AND: unknown[] } }).where.AND[0];
+  assert.deepEqual(filteredTypes, { type: { in: [
+    "FREQUENCY_COLLECTION", "MANUAL_RANK_CHECK", "AI_ANSWER_COLLECTION",
+    "CLUSTERING_RUN", "TECHNICAL_CRAWL", "KEYWORD_RESEARCH", "SEMANTIC_EXPORT"
+  ] } });
+  assert.deepEqual((countQueries[1] as { where: { AND: unknown[] } }).where.AND[1], {
+    OR: [
+      { status: { in: ["ESTIMATING", "AWAITING_APPROVAL", "RESERVING_BALANCE", "PREPARING", "QUEUED", "WAITING_RATE_LIMIT", "RUNNING", "PAUSE_REQUESTED", "PAUSED", "CANCEL_REQUESTED", "RETRY_SCHEDULED"] } },
+      { status: "FAILED_RETRYABLE" }
+    ]
   });
-  assert.deepEqual(countQueries[3], {
-    where: {
-      AND: [
-        {},
-        {
-          OR: [
-            { status: { in: ["FAILED_FINAL", "ACTION_REQUIRED"] } },
-            {
-              status: "FAILED_RETRYABLE",
-              type: "INTEGRATION_CREDENTIAL_VALIDATE"
-            }
-          ]
-        }
-      ]
-    }
-  });
+  assert.deepEqual((countQueries[3] as { where: { AND: unknown[] } }).where.AND, [
+    filteredTypes, { status: { in: ["FAILED_FINAL", "ACTION_REQUIRED"] } }
+  ]);
 });
 
 test("admin operation row includes search engine, exact connection and active workers", async () => {
@@ -301,7 +267,7 @@ test("admin operation row includes search engine, exact connection and active wo
       count: async () => 1,
       groupBy: async () => []
     },
-    $queryRaw: async () => [
+    $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("list_remote_work_assignments") ? [] : [
       { nodeId: "main", jobId: rankJobId, activeTasks: 1n },
       { nodeId, jobId: rankJobId, activeTasks: 3n }
     ],
@@ -340,7 +306,10 @@ test("running Wordstat shows its own key and main server without rank scans", as
         finishedAt: null, updatedAt: createdAt
       })
     },
-    $queryRaw: async () => { throw new Error("not a rank Job"); }
+    $queryRaw: async (query: TemplateStringsArray) => {
+      assert.ok(query.join("").includes("list_remote_work_assignments"));
+      return [];
+    }
   } as unknown as PrismaService;
   const service = new OperationActivityService(prisma, {
     selectedForJobs: async (jobs: readonly { readonly credentialId?: string }[]) => {
@@ -393,7 +362,7 @@ test("loads one safe platform operation summary for a deep link", async () => {
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
 });
 
-test("classifies exhausted credential validation as attention", async () => {
+test("excludes credential validation from the admin journal, including explicit type filters", async () => {
   let findManyQuery: unknown;
   const service = activityService({
     job: {
@@ -406,50 +375,24 @@ test("classifies exhausted credential validation as attention", async () => {
     }
   } as unknown as PrismaService);
 
-  await service.adminList({ statusGroup: "ATTENTION", limit: 50 });
+  await service.adminList({ statusGroup: "ATTENTION", type: "INTEGRATION_CREDENTIAL_VALIDATE", limit: 50 });
+  assert.deepEqual((findManyQuery as { where: { AND: unknown[] } }).where.AND, [
+    { type: { in: [] } }, { status: { in: ["FAILED_FINAL", "ACTION_REQUIRED"] } }
+  ]);
+});
 
-  assert.deepEqual(findManyQuery, {
-    where: {
-      AND: [
-        {},
-        {
-          OR: [
-            { status: { in: ["FAILED_FINAL", "ACTION_REQUIRED"] } },
-            {
-              status: "FAILED_RETRYABLE",
-              type: "INTEGRATION_CREDENTIAL_VALIDATE"
-            }
-          ]
-        }
-      ]
-    },
-    select: {
-      id: true,
-      workspaceId: true,
-      projectId: true,
-      actorId: true,
-      type: true,
-      status: true,
-      stage: true,
-      provider: true,
-      credentialMode: true,
-      scopeSnapshot: true,
-      progressCurrent: true,
-      progressTotal: true,
-      progressUnit: true,
-      actualCostMicro: true,
-      currency: true,
-      attempt: true,
-      maxAttempts: true,
-      errorSummary: true,
-      resultSummary: true,
-      createdAt: true,
-      queuedAt: true,
-      startedAt: true,
-      finishedAt: true,
-      updatedAt: true
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: 51
-  });
+test("admin overview aggregates only user-visible operation types", async () => {
+  const countQueries: unknown[] = [];
+  let groupedWhere: unknown;
+  const service = activityService({ job: {
+    count: async (query: unknown) => { countQueries.push(query); return 0; },
+    groupBy: async ({ where }: { where: unknown }) => { groupedWhere = where; return []; }
+  } } as unknown as PrismaService);
+  await service.overview();
+  assert.equal(countQueries.length, 5);
+  for (const query of [...countQueries, { where: groupedWhere }]) {
+    const types = (query as { where: { type: { in: readonly string[] } } }).where.type.in;
+    assert.ok(types.includes("MANUAL_RANK_CHECK"));
+    assert.ok(!types.includes("INTEGRATION_CREDENTIAL_VALIDATE"));
+  }
 });

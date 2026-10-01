@@ -91,6 +91,8 @@ test("maps every supported TOP threshold to its exact cumulative count", () => {
     ),
     [1, 2, 3, 4, 5]
   );
+  const extended = { ...value, top100KeywordCount: 8, top200KeywordCount: 10 };
+  assert.deepEqual(([50, 100, 200] as const).map((top) => projectPositionTopValue(extended, top)), [5, 8, 10]);
 });
 
 function point(index: number): ProjectPositionHistoryPoint {

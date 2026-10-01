@@ -115,6 +115,8 @@ interface ProjectPositionHistoryDayRow {
   readonly top10KeywordCount: bigint;
   readonly top30KeywordCount: bigint;
   readonly top50KeywordCount: bigint;
+  readonly top100KeywordCount?: bigint;
+  readonly top200KeywordCount?: bigint;
 }
 
 const KEYWORD_INCLUDE = {
@@ -173,7 +175,7 @@ type KeywordMutationAggregate = Prisma.KeywordGetPayload<{
 
 const KEYWORD_AGGREGATE_HYDRATION_BATCH_SIZE = 250;
 const POSITION_HISTORY_PROJECTION_SCHEMA_VERSION =
-  "project-position-history@2";
+  "project-position-history@3";
 const POSITION_HISTORY_REBUILD_ATTEMPTS = 2;
 
 type RankSearchEngine = SemanticKeywordListPosition["searchEngine"];
@@ -554,7 +556,15 @@ export class KeywordService {
           SUM(
             CASE WHEN found = TRUE AND position BETWEEN 1 AND 50 THEN 1 ELSE 0 END -
             CASE WHEN "previousFound" = TRUE AND "previousPosition" BETWEEN 1 AND 50 THEN 1 ELSE 0 END
-          )::bigint AS "top50KeywordDelta"
+          )::bigint AS "top50KeywordDelta",
+          SUM(
+            CASE WHEN found AND position BETWEEN 1 AND 100 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" AND "previousPosition" BETWEEN 1 AND 100 THEN 1 ELSE 0 END
+          )::bigint AS "top100KeywordDelta",
+          SUM(
+            CASE WHEN found AND position BETWEEN 1 AND 200 THEN 1 ELSE 0 END -
+            CASE WHEN "previousFound" AND "previousPosition" BETWEEN 1 AND 200 THEN 1 ELSE 0 END
+          )::bigint AS "top200KeywordDelta"
         FROM keyword_day_states
         GROUP BY "dayKey"
       ),
@@ -569,7 +579,9 @@ export class KeywordService {
           (SUM("top5KeywordDelta") OVER cumulative_history)::bigint AS "top5KeywordCount",
           (SUM("top10KeywordDelta") OVER cumulative_history)::bigint AS "top10KeywordCount",
           (SUM("top30KeywordDelta") OVER cumulative_history)::bigint AS "top30KeywordCount",
-          (SUM("top50KeywordDelta") OVER cumulative_history)::bigint AS "top50KeywordCount"
+          (SUM("top50KeywordDelta") OVER cumulative_history)::bigint AS "top50KeywordCount",
+          (SUM("top100KeywordDelta") OVER cumulative_history)::bigint AS "top100KeywordCount",
+          (SUM("top200KeywordDelta") OVER cumulative_history)::bigint AS "top200KeywordCount"
         FROM daily_deltas
         WINDOW cumulative_history AS (
           ORDER BY "dayKey" ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
@@ -599,7 +611,9 @@ export class KeywordService {
       top5KeywordCount: safeHistoryCount(row.top5KeywordCount),
       top10KeywordCount: safeHistoryCount(row.top10KeywordCount),
       top30KeywordCount: safeHistoryCount(row.top30KeywordCount),
-      top50KeywordCount: safeHistoryCount(row.top50KeywordCount)
+      top50KeywordCount: safeHistoryCount(row.top50KeywordCount),
+      top100KeywordCount: safeHistoryCount(row.top100KeywordCount ?? row.top50KeywordCount),
+      top200KeywordCount: safeHistoryCount(row.top200KeywordCount ?? row.top50KeywordCount)
     }));
     return {
       points,
@@ -5725,6 +5739,8 @@ function storedPositionHistoryProjection(
       point.top10KeywordCount,
       point.top30KeywordCount,
       point.top50KeywordCount,
+      point.top100KeywordCount ?? point.top50KeywordCount,
+      point.top200KeywordCount ?? point.top100KeywordCount ?? point.top50KeywordCount,
       point.positionedKeywordCount,
       point.measuredKeywordCount
     ];
@@ -5749,6 +5765,8 @@ function storedPositionHistoryProjection(
       top10KeywordCount: Number(point.top10KeywordCount),
       top30KeywordCount: Number(point.top30KeywordCount),
       top50KeywordCount: Number(point.top50KeywordCount),
+      ...(point.top100KeywordCount === undefined ? {} : { top100KeywordCount: Number(point.top100KeywordCount) }),
+      ...(point.top200KeywordCount === undefined ? {} : { top200KeywordCount: Number(point.top200KeywordCount) }),
       positionedKeywordCount: Number(point.positionedKeywordCount),
       measuredKeywordCount: Number(point.measuredKeywordCount)
     });
@@ -5764,7 +5782,9 @@ function emptyPositionTopCounts(): ProjectPositionTopCounts {
     top5KeywordCount: 0,
     top10KeywordCount: 0,
     top30KeywordCount: 0,
-    top50KeywordCount: 0
+    top50KeywordCount: 0,
+    top100KeywordCount: 0,
+    top200KeywordCount: 0
   };
 }
 
@@ -5782,7 +5802,9 @@ function addPositionTopCount(
     top30KeywordCount:
       counts.top30KeywordCount + (position <= 30 ? amount : 0),
     top50KeywordCount:
-      counts.top50KeywordCount + (position <= 50 ? amount : 0)
+      counts.top50KeywordCount + (position <= 50 ? amount : 0),
+    top100KeywordCount: (counts.top100KeywordCount ?? 0) + (position <= 100 ? amount : 0),
+    top200KeywordCount: (counts.top200KeywordCount ?? 0) + (position <= 200 ? amount : 0)
   };
 }
 

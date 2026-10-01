@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { RemoteWorkClientModule } from "./worker-nodes/remote-work-client.module.js";
+import { RemoteProviderTransportService } from "./worker-nodes/remote-provider-transport.service.js";
 import type { AppConfig } from "./config/app-config.js";
 import { PaidOperationRuntimeService } from "./paid-operations/paid-operation-runtime.service.js";
 import { APP_CONFIG, ConfigModule } from "./config/config.module.js";
@@ -47,8 +49,10 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     DatabaseModule,
     SeoDataModule,
     PlatformApiModule
+    ,RemoteWorkClientModule
   ],
   providers: [
+    RemoteProviderTransportService,
     PaidOperationRuntimeService,
     ArsenkinHttpRateLimiter,
     XmlStockHttpQuotaLimiter,
@@ -71,49 +75,50 @@ import { PlatformApiModule } from "./platform-api/platform-api.module.js";
     ClusteringRuntimeService,
     {
       provide: XmlStockWordstatConnector,
-      inject: [APP_CONFIG],
-      useFactory: (config: AppConfig) =>
-        new XmlStockWordstatConnector(fetch, config.xmlStockSoftId)
+      inject: [APP_CONFIG,RemoteProviderTransportService],
+      useFactory: (config: AppConfig,remote:RemoteProviderTransportService) =>
+        new XmlStockWordstatConnector(remote.fetcher, config.xmlStockSoftId)
     },
     {
       provide: ArsenkinWordstatConnector,
-      inject: [ArsenkinHttpRateLimiter],
-      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
-        new ArsenkinWordstatConnector(rateLimiter)
+      inject: [ArsenkinHttpRateLimiter,RemoteProviderTransportService],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter,remote:RemoteProviderTransportService) =>
+        new ArsenkinWordstatConnector(rateLimiter,remote.fetcher)
     },
     {
       provide: ArsenkinAiAnswerConnector,
-      inject: [ArsenkinHttpRateLimiter],
-      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
-        new ArsenkinAiAnswerConnector(rateLimiter)
+      inject: [ArsenkinHttpRateLimiter,RemoteProviderTransportService],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter,remote:RemoteProviderTransportService) =>
+        new ArsenkinAiAnswerConnector(rateLimiter,remote.fetcher)
     },
     {
       provide: ArsenkinClusteringConnector,
-      inject: [ArsenkinHttpRateLimiter],
-      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
-        new ArsenkinClusteringConnector(rateLimiter)
+      inject: [ArsenkinHttpRateLimiter,RemoteProviderTransportService],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter,remote:RemoteProviderTransportService) =>
+        new ArsenkinClusteringConnector(rateLimiter,remote.fetcher)
     },
     {
       provide: KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,
-      useFactory: () => new KeysSoKeywordResearchConnector()
+      inject:[RemoteProviderTransportService],
+      useFactory: (remote:RemoteProviderTransportService) => new KeysSoKeywordResearchConnector(remote.fetcher)
     },
     {
       provide: ARSENKIN_WORDSTAT_EXPANSION_CONNECTOR,
-      inject: [ArsenkinHttpRateLimiter],
-      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
-        new ArsenkinWordstatExpansionConnector(rateLimiter)
+      inject: [ArsenkinHttpRateLimiter,RemoteProviderTransportService],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter,remote:RemoteProviderTransportService) =>
+        new ArsenkinWordstatExpansionConnector(rateLimiter,remote.fetcher)
     },
     {
       provide: ARSENKIN_RANK_CONNECTOR,
-      inject: [ArsenkinHttpRateLimiter],
-      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
-        new ArsenkinRankConnector(rateLimiter)
+      inject: [ArsenkinHttpRateLimiter,RemoteProviderTransportService],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter,remote:RemoteProviderTransportService) =>
+        new ArsenkinRankConnector(rateLimiter,remote.fetcher)
     },
     {
       provide: XMLSTOCK_RANK_CONNECTOR,
-      inject: [APP_CONFIG],
-      useFactory: (config: AppConfig) =>
-        new XmlStockRankConnector(fetch, config.xmlStockSoftId)
+      inject: [APP_CONFIG,RemoteProviderTransportService],
+      useFactory: (config: AppConfig,remote:RemoteProviderTransportService) =>
+        new XmlStockRankConnector(remote.fetcher, config.xmlStockSoftId)
     }
   ]
 })

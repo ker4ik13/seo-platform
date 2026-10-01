@@ -8,10 +8,11 @@ import { CurrentPrincipal } from "../identity/current-principal.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { requestContext } from "../identity/request-context.js";
 import { CsrfSessionGuard, SessionAuthGuard, headerValue } from "../identity/session-auth.guard.js";
-import { RequirePlatformRole } from "./platform-role.js";
+import { RequirePlatformRole, RequireRecentPlatformAuthentication } from "./platform-role.js";
 import { PlatformRoleGuard, type PlatformAdminRequest } from "./platform-role.guard.js";
 
 @Controller("admin-api/v1/refund-requests")
+@RequireRecentPlatformAuthentication()
 export class PlatformRefundController {
   public constructor(private readonly refunds: RefundRequestService) {}
   @Get() @RequirePlatformRole("SUPPORT", "FINANCE") @UseGuards(SessionAuthGuard, PlatformRoleGuard)

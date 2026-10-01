@@ -7,6 +7,7 @@ import { SeoDataModule } from "./seo-data/seo-data.module.js";
 import { SemanticExportWorkerModule } from "./semantic-exports/semantic-export-worker.module.js";
 import { FileRetentionService } from "./file-retention/file-retention.service.js";
 import { StorageModule } from "./storage/storage.module.js";
+import { RemoteWorkRetentionService } from "./worker-nodes/remote-work-retention.service.js";
 
 @Module({
   imports: [
@@ -17,6 +18,6 @@ import { StorageModule } from "./storage/storage.module.js";
     SemanticExportWorkerModule,
     StorageModule
   ],
-  providers: [KeywordResearchImportService, FileRetentionService]
+  providers: [KeywordResearchImportService, FileRetentionService, RemoteWorkRetentionService]
 })
 export class ImportWorkerModule {}

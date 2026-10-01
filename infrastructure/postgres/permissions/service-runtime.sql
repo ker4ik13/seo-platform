@@ -652,9 +652,18 @@ FROM unnest(CASE current_database()
     'public.register_integration_credential_kek_canary(integer,bytea,bytea,bytea,bytea,bytea,bytea)',
     'public.read_rank_runtime_diagnostics_entries(uuid,uuid,uuid,integer)',
     'public.list_remote_worker_rank_assignments(integer)'
+    ,'public.list_remote_work_assignments(integer,uuid[])'
+    ,'public.enqueue_remote_work(jsonb,text,text,text,jsonb,text,integer)'
+    ,'public.abandon_remote_work(uuid,uuid)'
+    ,'public.remote_work_available(text)'
+    ,'public.enqueue_remote_work_batch(jsonb)'
   ] || CASE WHEN :'worker_gateway_enabled' = 'true' THEN ARRAY[
+    'public.claim_remote_work(uuid,integer,integer,jsonb)',
+    'public.read_remote_work_receipts(jsonb)',
+    'public.cancel_remote_work_for_node(uuid)',
     'public.claim_rank_connector_poll(text,integer,text)',
     'public.list_rank_connector_poll_candidates(text,integer,uuid[])',
+    'public.list_rank_connector_poll_candidates_for_worker(text,integer,uuid[],text)',
     'public.claim_rank_connector_poll_targeted(text,integer,text,uuid)',
     'public.read_rank_connector_billing_settlement(uuid,uuid,text,uuid,integer,integer)',
     'public.defer_rank_connector_poll_capacity(uuid,uuid,text,uuid,integer,integer,integer)',

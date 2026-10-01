@@ -110,6 +110,7 @@ export type AdminWorkspaceOwnerStatus =
   | "DELETED";
 
 export interface AdminWorkspaceOwnerSummary {
+  readonly version?: number;
   readonly userId: string;
   readonly email: string;
   readonly displayName: string;

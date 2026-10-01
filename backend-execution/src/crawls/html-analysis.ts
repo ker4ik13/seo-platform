@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Parser } from "htmlparser2";
+import type { PublicFetchResult } from "./public-http.js";
 
 export interface CrawlHeading {
   readonly level: number;
@@ -51,11 +52,45 @@ export interface CrawlPageAnalysis {
   readonly issues: readonly CrawlDetectedIssue[];
 }
 
+/** Keep an HTTP snapshot for non-HTML resources without interpreting binary data as markup. */
+export function analyzeCrawlResource(response: PublicFetchResult, finalUrl: string): CrawlPageAnalysis {
+  if (response.contentType === "text/html" || response.contentType === "application/xhtml+xml") {
+    return analyzeHtmlPage({ html: response.body.toString("utf8"), finalUrl, statusCode: response.statusCode, responseTimeMs: response.responseTimeMs, sizeBytes: response.sizeBytes });
+  }
+  return {
+    h1Count: 0, headings: [], hreflang: [], internalLinks: [], externalLinks: [],
+    imageCount: 0, imagesMissingAlt: 0, structuredDataTypes: [], metaTags: [], wordCount: 0,
+    contentHash: createHash("sha256").update(response.body).digest("hex"),
+    indexability: response.statusCode >= 400 ? "ERROR" : response.redirectChain.length > 0 ? "REDIRECTED" : "UNKNOWN",
+    issues: [{ code: "NON_HTML_RESOURCE", severity: "INFO", title: "Ресурс не в формате HTML", details: { contentType: response.contentType ?? "application/octet-stream" } }]
+  };
+}
+
 const MAX_LINKS = 5_000;
 const MAX_HEADINGS = 500;
 const MAX_HREFLANG = 100;
 const MAX_META_TAGS = 200;
 const MAX_TEXT_FIELD = 4_000;
+
+/** A remote node returns the same bounded analysis as the local parser. */
+export function parseCrawlPageAnalysis(value:unknown):CrawlPageAnalysis {
+  const row=analysisRecord(value),allowed=new Set(["title","description","h1","h1Count","canonicalUrl","robots","language","headings","hreflang","internalLinks","externalLinks","imageCount","imagesMissingAlt","structuredDataTypes","metaTags","wordCount","contentHash","indexability","issues"]);
+  if(Object.keys(row).some(key=>!allowed.has(key)) || typeof row.contentHash!=="string" || !/^[a-f0-9]{64}$/u.test(row.contentHash) || !["INDEXABLE","NOINDEX","CANONICALIZED","REDIRECTED","ERROR","UNKNOWN"].includes(String(row.indexability))) analysisInvalid();
+  const optional:Partial<Record<"title"|"description"|"h1"|"canonicalUrl"|"robots"|"language",string>>={};
+  for(const key of ["title","description","h1","canonicalUrl","robots","language"] as const) if(row[key]!==undefined) optional[key]=analysisText(row[key],MAX_TEXT_FIELD);
+  const links=(value:unknown)=>analysisArray(value,MAX_LINKS).map(item=>analysisText(item,MAX_TEXT_FIELD));
+  return {...optional,h1Count:analysisCount(row.h1Count),imageCount:analysisCount(row.imageCount),imagesMissingAlt:analysisCount(row.imagesMissingAlt),wordCount:analysisCount(row.wordCount),contentHash:row.contentHash,indexability:row.indexability as CrawlPageAnalysis["indexability"],
+    headings:analysisArray(row.headings,MAX_HEADINGS).map(value=>{const item=analysisRecord(value);const level=analysisCount(item.level);if(Object.keys(item).length!==2 || level<1 || level>6) analysisInvalid();return {level,text:analysisText(item.text,MAX_TEXT_FIELD)};}),
+    hreflang:analysisArray(row.hreflang,MAX_HREFLANG).map(value=>{const item=analysisRecord(value);if(Object.keys(item).length!==2) analysisInvalid();return {language:analysisText(item.language,64),url:analysisText(item.url,MAX_TEXT_FIELD)};}),
+    internalLinks:links(row.internalLinks),externalLinks:links(row.externalLinks),structuredDataTypes:analysisArray(row.structuredDataTypes,100).map(value=>analysisText(value,MAX_TEXT_FIELD)),
+    metaTags:analysisArray(row.metaTags,MAX_META_TAGS).map(value=>{const item=analysisRecord(value);if(Object.keys(item).some(key=>!["name","property","httpEquiv","content"].includes(key))) analysisInvalid();return {content:analysisText(item.content,MAX_TEXT_FIELD),...(item.name===undefined ? {} : {name:analysisText(item.name,MAX_TEXT_FIELD)}),...(item.property===undefined ? {} : {property:analysisText(item.property,MAX_TEXT_FIELD)}),...(item.httpEquiv===undefined ? {} : {httpEquiv:analysisText(item.httpEquiv,MAX_TEXT_FIELD)})};}),
+    issues:analysisArray(row.issues,500).map(value=>{const item=analysisRecord(value),details=analysisRecord(item.details);if(Object.keys(item).length!==4 || typeof item.code!=="string" || !/^[A-Z][A-Z0-9_]{0,79}$/u.test(item.code) || !["INFO","WARNING","ERROR","CRITICAL"].includes(String(item.severity)) || Object.keys(details).length>50 || Object.entries(details).some(([key,value])=>key.length>100 || !(typeof value==="boolean" || typeof value==="number" && Number.isFinite(value) || typeof value==="string" && value.length<=MAX_TEXT_FIELD))) analysisInvalid();return {code:item.code,severity:item.severity as CrawlDetectedIssue["severity"],title:analysisText(item.title,MAX_TEXT_FIELD),details:details as Record<string,string|number|boolean>};})};
+}
+function analysisRecord(value:unknown):Record<string,unknown>{if(!value || typeof value!=="object" || Array.isArray(value)) analysisInvalid();return value as Record<string,unknown>;}
+function analysisArray(value:unknown,maximum:number):unknown[]{if(!Array.isArray(value) || value.length>maximum) analysisInvalid();return value;}
+function analysisText(value:unknown,maximum:number):string{if(typeof value!=="string" || value.length>maximum) analysisInvalid();return value;}
+function analysisCount(value:unknown):number{if(typeof value!=="number" || !Number.isSafeInteger(value) || value<0 || value>1_000_000_000) analysisInvalid();return value;}
+function analysisInvalid():never{throw new TypeError("Invalid remote crawl analysis");}
 
 export function analyzeHtmlPage(input: {
   readonly html: string;

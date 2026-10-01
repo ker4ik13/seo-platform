@@ -15,6 +15,7 @@ const AUTH_PATHS = new Set([
 ]);
 const ADMIN_ROOTS = new Set([
   "me",
+  "users",
   "billing",
   "staff",
   "workspaces",
@@ -185,9 +186,16 @@ export function adminUpstreamPath(
     return undefined;
   }
   if (
+    segments[0] === "users" &&
+    !(segments.length === 3 && UUID_PATTERN.test(segments[1] ?? "") && segments[2] === "state")
+  ) {
+    return undefined;
+  }
+  if (
     segments[0] === "workspaces" &&
     !(
       segments.length === 1 ||
+      (segments.length === 3 && UUID_PATTERN.test(segments[1] ?? "") && segments[2] === "state") ||
       (segments.length === 3 && segments[2] === "subscription-grants")
     )
   ) {
@@ -203,7 +211,8 @@ export function adminUpstreamPath(
     segments[0] === "operations" &&
     !(
       segments.length === 1 ||
-      (segments.length === 2 && UUID_PATTERN.test(segments[1] ?? ""))
+      (segments.length === 2 && UUID_PATTERN.test(segments[1] ?? "")) ||
+      (segments.length === 3 && UUID_PATTERN.test(segments[1] ?? "") && segments[2] === "cancel")
     )
   ) {
     return undefined;
@@ -212,6 +221,7 @@ export function adminUpstreamPath(
     segments[0] === "worker-nodes" &&
     !(
       segments.length === 1 ||
+      (segments.length === 2 && UUID_PATTERN.test(segments[1] ?? "")) ||
       (segments.length === 3 &&
         UUID_PATTERN.test(segments[1] ?? "") && segments[2] === "rotate") ||
       (segments.length === 3 &&

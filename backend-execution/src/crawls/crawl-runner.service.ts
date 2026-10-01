@@ -1,5 +1,8 @@
-import { createHash } from "node:crypto";
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { Inject, Injectable, Logger,Optional } from "@nestjs/common";
+import type { TechnicalCrawl } from "../generated/prisma/client.js";
+import { RemoteWorkClientService,RemoteWorkFailedError,type RemoteWorkScope } from "../worker-nodes/remote-work-client.service.js";
+import { remoteJson } from "../worker-nodes/remote-artifact.js";
 import type {
   InternalPersistCrawlPageInput,
   InternalPersistCrawlPageReceipt,
@@ -9,7 +12,8 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { CrawlSnapshotClient } from "../seo-data/crawl-snapshot.client.js";
 import {
-  analyzeHtmlPage,
+  analyzeCrawlResource,
+  parseCrawlPageAnalysis,
   type CrawlPageAnalysis
 } from "./html-analysis.js";
 import {
@@ -21,6 +25,7 @@ import {
   fetchPublicResource,
   PublicFetchError,
   type PublicFetchResult
+  ,type PublicFetchOptions
 } from "./public-http.js";
 import { robotsAllows } from "./robots.js";
 import {
@@ -42,12 +47,14 @@ interface PendingUrl {
 @Injectable()
 export class CrawlRunnerService {
   private readonly logger = new Logger(CrawlRunnerService.name);
+  private readonly remoteContext=new AsyncLocalStorage<{scope:RemoteWorkScope;requestsPerMinute:number;queryPolicy:TechnicalCrawlConfig["queryPolicy"];heartbeat:()=>Promise<void>}>();
 
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly crawls: CrawlService,
     private readonly snapshots: CrawlSnapshotClient,
-    private readonly hostStates: CrawlHostStateService
+    private readonly hostStates: CrawlHostStateService,
+    @Optional() private readonly remote?:RemoteWorkClientService
   ) {}
 
   public async process(
@@ -58,6 +65,13 @@ export class CrawlRunnerService {
     const leaseSeconds = this.config.crawl.leaseSeconds;
     const crawl = await this.crawls.claim(crawlId, leaseOwner, leaseSeconds);
     if (!crawl) return;
+    const config=this.crawls.config(crawl);
+    return this.remoteContext.run({scope:{origin:"JOB",workspaceId:crawl.workspaceId,projectId:crawl.projectId,operationId:crawl.id,jobId:crawl.jobId,leaseOwner},requestsPerMinute:config.requestsPerMinute,queryPolicy:config.queryPolicy,
+      heartbeat:()=>this.crawls.renewLease(crawl.id,leaseOwner,leaseSeconds)},()=>this.processClaim(crawl,leaseOwner,finalAttempt));
+  }
+
+  private async processClaim(crawl:TechnicalCrawl,leaseOwner:string,finalAttempt:boolean):Promise<void> {
+    const leaseSeconds=this.config.crawl.leaseSeconds;
     const crawlConfig = this.crawls.config(crawl);
     const deadline = new Date(
       (crawl.startedAt ?? new Date()).getTime() +
@@ -214,7 +228,7 @@ export class CrawlRunnerService {
       }
       failureCode = "CRAWL_EXECUTION_FAILED";
       while (pending.length > 0 && sequence < crawlConfig.maxUrls) {
-        if (await this.crawls.isCancellationRequested(crawlId)) {
+        if (await this.crawls.isCancellationRequested(crawl.id)) {
           await this.complete(
             crawl,
             crawlConfig,
@@ -264,7 +278,7 @@ export class CrawlRunnerService {
                 projectId: crawl.projectId,
                 url: next.url
               });
-          const response = await fetchPublicResource(next.url, {
+          const response = await this.resource(next.url, {
             timeoutMs: remainingRequestTimeout(
               deadline,
               this.config.crawl.requestTimeoutMs
@@ -273,9 +287,7 @@ export class CrawlRunnerService {
             maxRedirects: this.config.crawl.maxRedirects,
             accept: "text/html,application/xhtml+xml;q=0.9",
             allowedContentTypes: ["text/html", "application/xhtml+xml"],
-            ...(crawlConfig.purpose === "HTTP_STATUS_CHECK"
-              ? { acceptAnyContentType: true }
-              : {}),
+            acceptAnyContentType: true,
             userAgent: this.config.crawl.userAgent,
             beforeRequest: paceRequest,
             ...(validator
@@ -290,7 +302,7 @@ export class CrawlRunnerService {
                   }
                 }
               : {})
-          });
+          },true,crawlConfig.purpose==="HTTP_STATUS_CHECK");
           const normalizedFinalUrl = normalizedScopeUrl(
             response.finalUrl,
             crawlConfig.queryPolicy
@@ -334,11 +346,7 @@ export class CrawlRunnerService {
             });
             internalLinks = validator.internalLinks;
           } else {
-            const analysis = crawlPageAnalysis(
-              response,
-              normalizedFinalUrl,
-              crawlConfig.purpose === "HTTP_STATUS_CHECK"
-            );
+            const analysis = response.analysis ?? analyzeCrawlResource(response, normalizedFinalUrl);
             const payload: InternalPersistCrawlPageInput = {
               workspaceId: crawl.workspaceId,
               projectId: crawl.projectId,
@@ -356,9 +364,7 @@ export class CrawlRunnerService {
               sizeBytes: response.sizeBytes,
               contentType:
                 response.contentType ??
-                (crawlConfig.purpose === "HTTP_STATUS_CHECK"
-                  ? "application/octet-stream"
-                  : "text/html"),
+                "application/octet-stream",
               ...analysis,
               ...(crawlConfig.purpose === "HTTP_STATUS_CHECK"
                 ? { issues: [] }
@@ -548,7 +554,7 @@ export class CrawlRunnerService {
     paceRequest: () => Promise<void>,
     deadline: Date
   ): Promise<string> {
-    const response = await fetchPublicResource(`${origin}/robots.txt`, {
+    const response = await this.resource(`${origin}/robots.txt`, {
       timeoutMs: remainingRequestTimeout(
         deadline,
         this.config.crawl.requestTimeoutMs
@@ -579,7 +585,7 @@ export class CrawlRunnerService {
       this.config.crawl.maxResponseBytes,
       5_000_000
     );
-    const response = await fetchPublicResource(sitemapUrl, {
+    const response = await this.resource(sitemapUrl, {
       timeoutMs: remainingRequestTimeout(
         deadline,
         this.config.crawl.requestTimeoutMs
@@ -614,46 +620,32 @@ export class CrawlRunnerService {
       Math.max(config.maxUrls, 20)
     );
   }
-}
-
-function crawlPageAnalysis(
-  response: PublicFetchResult,
-  finalUrl: string,
-  httpStatusOnly: boolean
-): CrawlPageAnalysis {
-  if (
-    !httpStatusOnly ||
-    response.contentType === "text/html" ||
-    response.contentType === "application/xhtml+xml"
-  ) {
-    return analyzeHtmlPage({
-      html: response.body.toString("utf8"),
-      finalUrl,
-      statusCode: response.statusCode,
-      responseTimeMs: response.responseTimeMs,
-      sizeBytes: response.sizeBytes
-    });
+  private async resource(url:string,options:PublicFetchOptions,analyze=false,httpStatusOnly=false):Promise<PublicFetchResult & {analysis?:CrawlPageAnalysis}> {
+    const context=this.remoteContext.getStore();
+    if(!this.remote || !context || !await this.remote.available("CRAWL")) return fetchPublicResource(url,options);
+    await options.beforeRequest?.();
+    let first=true;
+    const local=()=>fetchPublicResource(url,{...options,beforeRequest:async()=>{if(first){first=false;return;}await options.beforeRequest?.();}});
+    const {beforeRequest:_pace,...serializable}=options;
+    try {
+      return await this.remote.execute(context.scope,"CRAWL","CRAWL_RESOURCE",{url,options:serializable,analyze,httpStatusOnly,queryPolicy:context.queryPolicy,redirectDelayMs:Math.ceil(60_000/context.requestsPerMinute)},
+        {resource:"HTTP",timeoutMs:Math.min(600_000,options.timeoutMs+15_000+options.maxRedirects*Math.ceil(60_000/context.requestsPerMinute)),onWait:context.heartbeat},async result=>{
+          const data=await remoteJson(result,options.maxBytes*4+4*1_048_576);
+          const value=data.response && typeof data.response==="object" ? data.response as Record<string,unknown> : undefined;
+          if(data.format!=="CRAWL_RESOURCE" || !value || value.requestedUrl!==url || typeof value.finalUrl!=="string" || !Number.isSafeInteger(value.statusCode) || Number(value.statusCode)<100 || Number(value.statusCode)>599 ||
+            typeof value.bodyBase64!=="string" || !Array.isArray(value.redirectChain) || value.redirectChain.length>options.maxRedirects || value.redirectChain.some(item=>typeof item!=="string" || item.length>16*1024) ||
+            !Number.isSafeInteger(value.sizeBytes) || Number(value.sizeBytes)<0 || Number(value.sizeBytes)>options.maxBytes || typeof value.responseTimeMs!=="number" || !Number.isFinite(value.responseTimeMs) || value.responseTimeMs<0) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
+          const body=Buffer.from(value.bodyBase64,"base64");if(body.length!==value.sizeBytes) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
+          for(const key of ["contentType","etag","lastModified"]) if(value[key]!==undefined && (typeof value[key]!=="string" || (value[key] as string).length>8_192)) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
+          return {requestedUrl:url,finalUrl:value.finalUrl,statusCode:Number(value.statusCode),body,sizeBytes:Number(value.sizeBytes),responseTimeMs:value.responseTimeMs,redirectChain:value.redirectChain as string[],
+            ...(value.contentType===undefined ? {} : {contentType:value.contentType as string}),...(value.etag===undefined ? {} : {etag:value.etag as string}),...(value.lastModified===undefined ? {} : {lastModified:value.lastModified as string}),
+            ...(typeof value.retryAfterMs==="number" && Number.isFinite(value.retryAfterMs) && value.retryAfterMs>=0 ? {retryAfterMs:value.retryAfterMs} : {}),...(data.analysis===undefined ? {} : {analysis:parseCrawlPageAnalysis(data.analysis)})};
+        },local);
+    } catch(error) {
+      if(error instanceof RemoteWorkFailedError && ["INVALID_URL","INVALID_REQUEST_HEADER","INVALID_NOT_MODIFIED","FORBIDDEN_ADDRESS","DNS_FAILED","TIMEOUT","RESPONSE_TOO_LARGE","REDIRECT_LIMIT","INVALID_REDIRECT","UNSUPPORTED_CONTENT_TYPE","UNSUPPORTED_CONTENT_ENCODING","NETWORK_ERROR"].includes(error.code)) throw new PublicFetchError(error.code as PublicFetchError["code"]);
+      throw error;
+    }
   }
-  return {
-    h1Count: 0,
-    headings: [],
-    hreflang: [],
-    internalLinks: [],
-    externalLinks: [],
-    imageCount: 0,
-    imagesMissingAlt: 0,
-    structuredDataTypes: [],
-    metaTags: [],
-    wordCount: 0,
-    contentHash: createHash("sha256").update(response.body).digest("hex"),
-    indexability:
-      response.statusCode >= 400
-        ? "ERROR"
-        : response.redirectChain.length > 0
-          ? "REDIRECTED"
-          : "UNKNOWN",
-    issues: []
-  };
 }
 
 function currentCheckpoint(

@@ -360,7 +360,9 @@ test("averages the latest found position once per active keyword", async () => {
     top5KeywordCount: 0,
     top10KeywordCount: 1,
     top30KeywordCount: 2,
-    top50KeywordCount: 2
+    top50KeywordCount: 2,
+    top100KeywordCount: 2,
+    top200KeywordCount: 2
   });
   assert.match(summaryQuery?.sql ?? "", /rank_dimension_history_deletions/u);
   assert.match(summaryQuery?.sql ?? "", /keyword\.is_tracked/u);
@@ -443,7 +445,9 @@ test("carries every keyword's latest known position through later capture days",
         top5KeywordCount: 1,
         top10KeywordCount: 3,
         top30KeywordCount: 3,
-        top50KeywordCount: 3
+        top50KeywordCount: 3,
+        top100KeywordCount: 3,
+        top200KeywordCount: 3
       },
       {
         id: "day:2026-09-02",
@@ -456,7 +460,9 @@ test("carries every keyword's latest known position through later capture days",
         top5KeywordCount: 2,
         top10KeywordCount: 2,
         top30KeywordCount: 3,
-        top50KeywordCount: 3
+        top50KeywordCount: 3,
+        top100KeywordCount: 3,
+        top200KeywordCount: 3
       }
     ],
     truncated: false

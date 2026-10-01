@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   parseCreatedWorkerNode,
   parseWorkerNodeView,
+  parseRemovedWorkerNode,
+  type RemovedWorkerNode,
   workerCapabilities,
   type CreatedWorkerNode,
   type WorkerCapability,
@@ -11,9 +13,14 @@ import {
   type WorkerNodeView
 } from "@seo-platform/contracts";
 import { adminApi } from "../../lib/admin-browser-api";
+import { AdminWorkerCard, AdminWorkerDetails, workerCapabilityLabel } from "../../components/admin-worker-card";
+import { AdminHeaderActions, AdminOverlay } from "../../components/admin-overlay";
+import { Icon } from "../../components/icon";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
 import { UiText } from "../../components/ui-locale";
 
-const DEFAULT_CAPABILITIES: readonly WorkerCapability[] = ["RANK"];
+const DEFAULT_CAPABILITIES: readonly WorkerCapability[] = workerCapabilities;
+type WorkerStopAction = Readonly<{ kind: "disable" | "drain" | "delete"; node: WorkerNodeView }>;
 
 export function WorkerAdministration() {
   const [nodes, setNodes] = useState<readonly WorkerNodeView[]>();
@@ -21,6 +28,10 @@ export function WorkerAdministration() {
   const [busy, setBusy] = useState<string>();
   const [issuedToken, setIssuedToken] = useState<CreatedWorkerNode>();
   const [editingNodeId, setEditingNodeId] = useState<string>();
+  const [detailsNodeId, setDetailsNodeId] = useState<string>();
+  const [creating, setCreating] = useState(false);
+  const [rotatingNode, setRotatingNode] = useState<WorkerNodeView>();
+  const [stopAction, setStopAction] = useState<WorkerStopAction>();
   const [editForm, setEditForm] = useState<WorkerNodeConfiguration>();
   const [form, setForm] = useState<WorkerNodeConfiguration>({
     name: "", capabilities: DEFAULT_CAPABILITIES,
@@ -44,9 +55,8 @@ export function WorkerAdministration() {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(timer);
   }, [load]);
+  useAdminAutoRefresh(load, !busy && !stopAction);
 
   async function create(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -66,6 +76,7 @@ export function WorkerAdministration() {
     catch { setError("Некорректный ответ создания воркера"); return; }
     setNodes((current) => [created.node, ...(current ?? [])]);
     setIssuedToken(created);
+    setCreating(false);
     setForm((current) => ({ ...current, name: "" }));
   }
 
@@ -73,8 +84,8 @@ export function WorkerAdministration() {
     node: WorkerNodeView,
     action: "enabled" | "draining",
     value: boolean
-  ): Promise<void> {
-    if (busy) return;
+  ): Promise<boolean> {
+    if (busy) return false;
     setBusy(node.id);
     setError(undefined);
     const result = await adminApi<WorkerNodeView>(
@@ -84,18 +95,38 @@ export function WorkerAdministration() {
     setBusy(undefined);
     if (!result.ok) {
       setError(result.message);
-      return;
+      return false;
     }
     let updated: WorkerNodeView;
     try { updated = parseWorkerNodeView(result.data); }
-    catch { setError("Некорректный ответ обновления воркера"); return; }
+    catch { setError("Некорректный ответ обновления воркера"); return false; }
     setNodes((current) => current?.map((item) =>
       item.id === updated.id ? updated : item
     ));
+    return true;
+  }
+
+  async function confirmStop(): Promise<void> {
+    if (!stopAction || busy) return;
+    const { node, kind } = stopAction;
+    if (kind !== "delete") {
+      if (await update(node, kind === "disable" ? "enabled" : "draining", kind === "drain")) setStopAction(undefined);
+      return;
+    }
+    setBusy(node.id); setError(undefined);
+    const result = await adminApi<RemovedWorkerNode>(`/api/worker-nodes/${encodeURIComponent(node.id)}`, { method: "DELETE", body: JSON.stringify({ confirmed: true }) });
+    setBusy(undefined);
+    if (!result.ok) { setError(result.message); return; }
+    try { if (parseRemovedWorkerNode(result.data).id !== node.id) throw new TypeError(); }
+    catch { setError("Некорректный ответ удаления воркера"); return; }
+    setNodes((current) => current?.filter((item) => item.id !== node.id));
+    if (detailsNodeId === node.id) setDetailsNodeId(undefined);
+    if (editingNodeId === node.id) setEditingNodeId(undefined);
+    setStopAction(undefined);
   }
 
   async function rotate(node: WorkerNodeView): Promise<void> {
-    if (busy || !window.confirm(`Перевыпустить ключ воркера «${node.name}»? Старый ключ перестанет работать сразу.`)) return;
+    if (busy) return;
     setBusy(node.id);
     setError(undefined);
     const result = await adminApi<CreatedWorkerNode>(
@@ -111,6 +142,7 @@ export function WorkerAdministration() {
     try { rotated = parseCreatedWorkerNode(result.data); }
     catch { setError("Некорректный ответ перевыпуска ключа"); return; }
     setIssuedToken(rotated);
+    setRotatingNode(undefined);
     setNodes((current) => current?.map((item) =>
       item.id === rotated.node.id ? rotated.node : item
     ));
@@ -140,54 +172,21 @@ export function WorkerAdministration() {
     setEditForm(undefined);
   }
 
+  const detailsNode = nodes?.find((node) => node.id === detailsNodeId);
   return (
     <div className="content worker-admin">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow"><UiText text="Execution fleet" /></p>
-          <h1><UiText text="Удалённые воркеры" /></h1>
-          <p><UiText text="У каждого узла собственный ключ доступа и предел мощности. Общие лимиты физических ключей провайдеров сохраняются на центральном сервере." /></p>
-        </div>
-        <button className="ghost" onClick={() => void load()} type="button"><UiText text="Обновить" /></button>
-      </section>
+      <AdminHeaderActions><button className="primary" disabled={Boolean(busy)} onClick={() => { setError(undefined); setCreating(true); }} type="button"><Icon name="plus" />Создать воркер</button></AdminHeaderActions>
       {error && <p className="form-alert" role="alert"><UiText text={error} /></p>}
       {issuedToken && (
-        <section className="panel worker-secret" role="alert">
-          <h2><UiText text="Ключ нового воркера — показывается только сейчас" /></h2>
-          <p><UiText text="Сохрани его в приватный файл на удалённом сервере (доступ только владельцу). Повторно прочитать ключ из базы нельзя." /></p>
+        <AdminOverlay title="Ключ доступа воркера" onClose={() => setIssuedToken(undefined)}>
+          <div className="worker-secret">
+          <p><UiText text="Сохрани ключ в WORKER_NODE_TOKEN в Environment удалённого воркера. Повторно прочитать его из базы нельзя." /></p>
           <code>{issuedToken.token}</code>
           <button className="ghost" onClick={() => setIssuedToken(undefined)} type="button"><UiText text="Я сохранил ключ" /></button>
-        </section>
+          </div>
+        </AdminOverlay>
       )}
-      <form className="panel worker-create" onSubmit={(event) => void create(event)}>
-        <h2><UiText text="Создать узел" /></h2>
-        <div className="worker-fields">
-          <label><UiText text="Название" />
-            <input maxLength={100} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required value={form.name} />
-          </label>
-          <label><UiText text="HTTP-слоты" />
-            <input max={512} min={1} onChange={(event) => setForm((current) => ({ ...current, maxHttpSlots: Number(event.target.value) }))} required type="number" value={form.maxHttpSlots} />
-          </label>
-          <label><UiText text="CPU-слоты" />
-            <input max={128} min={1} onChange={(event) => setForm((current) => ({ ...current, maxCpuSlots: Number(event.target.value) }))} required type="number" value={form.maxCpuSlots} />
-          </label>
-        </div>
-        <fieldset className="worker-capabilities">
-          <legend><UiText text="Разрешённые операции — пока удалённо работает только съём позиций" /></legend>
-          {workerCapabilities.map((capability) => (
-            <label key={capability}>
-              <input checked={form.capabilities.includes(capability)} disabled={capability !== "RANK"} onChange={(event) => setForm((current) => ({
-                ...current,
-                capabilities: event.target.checked
-                  ? [...current.capabilities, capability]
-                  : current.capabilities.filter((value) => value !== capability)
-              }))} type="checkbox" />
-              {capability}
-            </label>
-          ))}
-        </fieldset>
-        <button className="primary" disabled={Boolean(busy) || form.capabilities.length === 0} type="submit"><UiText text="Создать и показать ключ" /></button>
-      </form>
+      {creating && <AdminOverlay title="Создать воркер" onClose={() => setCreating(false)} busy={Boolean(busy)}><form className="worker-form" onSubmit={(event) => void create(event)}><WorkerFields value={form} onChange={setForm} />{error && <p className="form-alert" role="alert">{error}</p>}<footer><button className="ghost" disabled={Boolean(busy)} onClick={() => setCreating(false)} type="button">Отмена</button><button className="primary" disabled={Boolean(busy) || form.capabilities.length === 0} type="submit">{busy ? "Создаём…" : "Создать и показать ключ"}</button></footer></form></AdminOverlay>}
       {!nodes ? (
         <section className="panel"><UiText text="Загружаем воркеры…" /></section>
       ) : nodes.length === 0 ? (
@@ -195,68 +194,46 @@ export function WorkerAdministration() {
       ) : (
         <div className="worker-grid">
           {nodes.map((node) => (
-            <article className="panel worker-card" key={node.id}>
-              <header><div><h2>{node.name}</h2><p>{node.id}</p></div>
-                <strong>{!node.enabled ? "Выключен" : !node.online ? "Нет связи" : node.draining ? "Останавливается" : "На связи"}</strong>
-              </header>
-              <p>{node.capabilities.join(" · ")}</p>
-              <p><UiText text="Лимиты" />: HTTP {node.maxHttpSlots}, CPU {node.maxCpuSlots}. <UiText text="Сообщил" />: HTTP {node.reportedHttpSlots}, съём {node.reportedRankSlots}, CPU {node.reportedCpuSlots}.</p>
-              <p><UiText text="Активных единиц" />: {node.activeWorkItems}. <UiText text="Последняя связь" />: {node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toLocaleString() : "—"}</p>
-              {node.activeAssignments && node.activeAssignments.length > 0 && (
-                <div className="worker-assignment-list">
-                  <strong><UiText text="Назначенные операции" /></strong>
-                  {node.activeAssignments.map((assignment) => (
-                    <span key={`${assignment.jobId}:${assignment.searchEngine}`}>
-                      {assignment.searchEngine === "YANDEX" ? "Яндекс" : assignment.searchEngine === "GOOGLE" ? "Google" : "Поиск"} · {assignment.jobId.slice(0, 8)} · {assignment.activeTasks} <UiText text="назначенных страниц" />
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="worker-actions">
-                <button className="ghost" disabled={Boolean(busy)} onClick={() => void update(node, "enabled", !node.enabled)} type="button">
-                  <UiText text={node.enabled ? "Выключить" : "Включить"} />
-                </button>
-                {node.enabled && <button className="ghost" disabled={Boolean(busy)} onClick={() => void update(node, "draining", !node.draining)} type="button">
-                  <UiText text={node.draining ? "Возобновить" : "Остановить плавно"} />
-                </button>}
-                <button className="ghost" disabled={Boolean(busy)} onClick={() => void rotate(node)} type="button"><UiText text="Перевыпустить ключ" /></button>
-                <button className="ghost" disabled={Boolean(busy)} onClick={() => {
-                  if (editingNodeId === node.id) {
-                    setEditingNodeId(undefined);
-                    setEditForm(undefined);
-                  } else {
-                    setEditingNodeId(node.id);
-                    setEditForm({
-                      name: node.name,
-                      capabilities: [...node.capabilities],
-                      maxHttpSlots: node.maxHttpSlots,
-                      maxCpuSlots: node.maxCpuSlots
-                    });
-                  }
-                }} type="button"><UiText text={editingNodeId === node.id ? "Закрыть настройки" : "Настроить"} /></button>
-              </div>
-              {editingNodeId === node.id && editForm && (
-                <form className="worker-edit" onSubmit={(event) => void configure(event, node.id)}>
-                  <div className="worker-fields">
-                    <label><UiText text="Название" /><input maxLength={100} onChange={(event) => setEditForm((current) => current ? { ...current, name: event.target.value } : current)} required value={editForm.name} /></label>
-                    <label><UiText text="HTTP-слоты" /><input max={512} min={1} onChange={(event) => setEditForm((current) => current ? { ...current, maxHttpSlots: Number(event.target.value) } : current)} required type="number" value={editForm.maxHttpSlots} /></label>
-                    <label><UiText text="CPU-слоты" /><input max={128} min={1} onChange={(event) => setEditForm((current) => current ? { ...current, maxCpuSlots: Number(event.target.value) } : current)} required type="number" value={editForm.maxCpuSlots} /></label>
-                  </div>
-                  <fieldset className="worker-capabilities"><legend><UiText text="Разрешённые операции — пока удалённо работает только съём позиций" /></legend>
-                    {workerCapabilities.map((capability) => <label key={capability}><input checked={editForm.capabilities.includes(capability)} disabled={capability !== "RANK"} onChange={(event) => setEditForm((current) => current ? {
-                      ...current,
-                      capabilities: event.target.checked
-                        ? [...current.capabilities, capability]
-                        : current.capabilities.filter((value) => value !== capability)
-                    } : current)} type="checkbox" />{capability}</label>)}
-                  </fieldset>
-                  <button className="primary" disabled={Boolean(busy) || editForm.capabilities.length === 0} type="submit"><UiText text="Сохранить лимиты" /></button>
-                </form>
-              )}
-            </article>
+            <AdminWorkerCard key={node.id} node={node} busy={Boolean(busy)}
+              onEnabled={() => { setError(undefined); if (node.enabled) setStopAction({ kind: "disable", node }); else void update(node, "enabled", true); }}
+              onDraining={() => { setError(undefined); if (!node.draining) setStopAction({ kind: "drain", node }); else void update(node, "draining", false); }}
+              onDelete={() => { setError(undefined); setStopAction({ kind: "delete", node }); }}
+              onDetails={() => setDetailsNodeId(node.id)}
+              onConfigure={() => {
+                setError(undefined); setEditingNodeId(node.id); setEditForm({ name: node.name, capabilities: [...node.capabilities], maxHttpSlots: node.maxHttpSlots, maxCpuSlots: node.maxCpuSlots,...(node.capabilityLimits ? {capabilityLimits:node.capabilityLimits} : {}) });
+              }} />
           ))}
         </div>
       )}
+      {editingNodeId && editForm && <AdminOverlay title="Настройки воркера" onClose={() => setEditingNodeId(undefined)} busy={Boolean(busy)}><form className="worker-form" onSubmit={(event) => void configure(event, editingNodeId)}><WorkerFields value={editForm} onChange={setEditForm} />{error && <p className="form-alert" role="alert">{error}</p>}<footer><button className="ghost" disabled={Boolean(busy)} onClick={() => setEditingNodeId(undefined)} type="button">Отмена</button><button className="primary" disabled={Boolean(busy) || editForm.capabilities.length === 0} type="submit">{busy ? "Сохраняем…" : "Сохранить"}</button></footer></form></AdminOverlay>}
+      {detailsNode && <AdminOverlay drawer title={detailsNode.name} onClose={() => setDetailsNodeId(undefined)}><AdminWorkerDetails node={detailsNode} busy={Boolean(busy)} onRotate={() => setRotatingNode(detailsNode)} onDelete={() => { setError(undefined); setStopAction({ kind: "delete", node: detailsNode }); }} /></AdminOverlay>}
+      {rotatingNode && <AdminOverlay title="Перевыпустить ключ доступа?" onClose={() => setRotatingNode(undefined)} busy={Boolean(busy)}><p>Старый ключ воркера «{rotatingNode.name}» перестанет работать. Новый ключ нужно будет сохранить в Environment узла.</p><div className="admin-overlay-actions"><button className="ghost" disabled={Boolean(busy)} onClick={() => setRotatingNode(undefined)} type="button">Отмена</button><button className="primary" disabled={Boolean(busy)} onClick={() => void rotate(rotatingNode)} type="button">Перевыпустить</button></div></AdminOverlay>}
+      {stopAction && <AdminOverlay title={stopAction.kind === "delete" ? "Удалить воркер?" : stopAction.kind === "drain" ? "Остановить воркер плавно?" : "Выключить воркер?"} busy={Boolean(busy)} onClose={() => { setStopAction(undefined); setError(undefined); }}>
+        <p>Воркер «{stopAction.node.name}» {stopAction.kind === "delete" ? "будет удалён из списка, его ключ доступа перестанет работать. Незавершённые этапы возобновятся на другом воркере или основном сервере по правилам повторов." : "перестанет получать новые задания. Уже выданные этапы смогут завершиться; дальнейшую работу подхватит другой воркер или основной сервер."} Сохранённые результаты и история операций останутся.</p>
+        {error && <p className="form-alert" role="alert">{error}</p>}
+        <div className="admin-overlay-actions"><button className="ghost" disabled={Boolean(busy)} onClick={() => { setStopAction(undefined); setError(undefined); }} type="button">Отмена</button><button className="primary" disabled={Boolean(busy)} onClick={() => void confirmStop()} type="button">{busy ? "Выполняем…" : stopAction.kind === "delete" ? "Удалить" : stopAction.kind === "drain" ? "Остановить плавно" : "Выключить"}</button></div>
+      </AdminOverlay>}
     </div>
   );
+}
+
+function WorkerFields({ value, onChange }: Readonly<{ value: WorkerNodeConfiguration; onChange: (value: WorkerNodeConfiguration) => void }>) {
+  return <>
+    <div className="worker-fields">
+      <label>Название<input maxLength={100} required value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} /></label>
+      <label>HTTP-слоты<input min={1} max={512} required type="number" value={value.maxHttpSlots} onChange={(event) => onChange({ ...value, maxHttpSlots: Number(event.target.value) })} /></label>
+      <label>CPU-слоты<input min={1} max={128} required type="number" value={value.maxCpuSlots} onChange={(event) => onChange({ ...value, maxCpuSlots: Number(event.target.value) })} /></label>
+    </div>
+    <fieldset className="worker-capabilities"><legend>Операции · максимум слотов</legend>
+      {workerCapabilities.map((capability) => {
+        const enabled=value.capabilities.includes(capability),cpu=["IMPORT","EXPORT","INSPECTION"].includes(capability);
+        return <div className="worker-capability-control" key={capability}>
+          <label><input checked={enabled} onChange={(event) => onChange({ ...value, capabilities: event.target.checked ? [...value.capabilities, capability] : value.capabilities.filter((item) => item !== capability) })} type="checkbox" />{workerCapabilityLabel(capability)}</label>
+          <input aria-label={`${workerCapabilityLabel(capability)}: слоты`} min={0} max={cpu ? 128 : 512} disabled={!enabled} required type="number"
+            value={value.capabilityLimits?.[capability] ?? (cpu ? value.maxCpuSlots : value.maxHttpSlots)}
+            onChange={(event)=>onChange({...value,capabilityLimits:{...value.capabilityLimits,[capability]:Number(event.target.value)}})} />
+        </div>;
+      })}
+    </fieldset>
+  </>;
 }

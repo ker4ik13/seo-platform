@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException,Optional } from "@nestjs/common";
+import { RemoteWorkClientService,RemoteWorkFailedError } from "../worker-nodes/remote-work-client.service.js";
+import { jsonLines,remoteArtifact } from "../worker-nodes/remote-artifact.js";
 import {
   domainEventTypes,
   semanticImportTargets,
@@ -127,7 +129,8 @@ export class SemanticImportParserService {
   public constructor(
     private readonly prisma: PrismaService,
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStoragePort,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional() private readonly remote?:RemoteWorkClientService
   ) {}
 
   public async pendingImportIds(limit = 100): Promise<readonly string[]> {
@@ -245,15 +248,37 @@ export class SemanticImportParserService {
     await this.prisma.semanticImportStagingRow.deleteMany({
       where: { importId: semanticImport.id }
     });
-    const objectSource = await this.storage.getObjectStream(
-      "uploads",
-      upload.objectKey
-    );
-    const observed = observeBytes(objectSource);
+    let observed:ReturnType<typeof observeBytes>|undefined;
+    let remoteBytes:bigint|undefined;
+    const observedBytes=()=>remoteBytes ?? observed?.bytes() ?? 0n;
     let detectedEncoding: DetectedImportEncoding | undefined;
     let detectedDelimiter: DetectedImportDelimiter | undefined;
     let sourceMetadata: ParseResult["sourceMetadata"];
     let rowSource: AsyncIterable<readonly string[]>;
+    const remoteResult=this.remote ? await this.remote.execute({origin:"IMPORT",workspaceId:semanticImport.workspaceId,projectId:semanticImport.projectId,
+      operationId:semanticImport.id,claimedAt:claimedAt.toISOString()},"IMPORT","IMPORT_ROWS",{
+        sourceFormat:semanticImport.sourceFormat,requestedEncoding:requestedEncoding(semanticImport.requestedEncoding),requestedDelimiter:requestedDelimiter(semanticImport.requestedDelimiter)
+      },{resource:"CPU",timeoutMs:Math.min(3_600_000,this.config.imports.parseLeaseMinutes*120_000),onWait:()=>this.heartbeat(semanticImport.id,claimedAt,0n,0n)},result=>result,async()=>undefined) : undefined;
+    if(remoteResult) {
+      if(remoteResult.format!=="IMPORT_ROWS" || remoteResult.originalBytes!==semanticImport.totalBytes.toString()) throw new RemoteWorkFailedError("INVALID_IMPORT_ARTIFACT");
+      remoteBytes=semanticImport.totalBytes;
+      const result=remoteResult;
+      rowSource=(async function*(){
+        for await(const record of jsonLines(remoteArtifact(result,8n*1024n**3n))) {
+          if(record.kind==="metadata") {
+            if(Object.keys(record).some(key=>!["kind","encoding","delimiter","sourceMetadata"].includes(key))) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");
+            if(record.encoding!==undefined) {if(!["UTF_8","WINDOWS_1251"].includes(String(record.encoding))) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");detectedEncoding=record.encoding as DetectedImportEncoding;}
+            if(record.delimiter!==undefined) {if(!["COMMA","SEMICOLON","TAB"].includes(String(record.delimiter))) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");detectedDelimiter=record.delimiter as DetectedImportDelimiter;}
+            if(record.sourceMetadata!==undefined) sourceMetadata=remoteImportMetadata(record.sourceMetadata);
+          } else if(record.kind==="row" && Object.keys(record).length===2 && Array.isArray(record.values)) {
+            if(record.values.length>500) throw new DelimitedParseError("TOO_MANY_COLUMNS");
+            if(record.values.some(value=>typeof value!=="string" || value.length>1_000_000)) throw new DelimitedParseError("FIELD_TOO_LARGE");
+            const values=record.values as string[];if(values.reduce((sum,value)=>sum+value.length,0)>8_000_000) throw new DelimitedParseError("ROW_TOO_LARGE");yield values;
+          } else throw new RemoteWorkFailedError("INVALID_IMPORT_ROWS");
+        }
+      })();
+    } else {
+      observed=observeBytes(await this.storage.getObjectStream("uploads",upload.objectKey));
     if (semanticImport.sourceFormat === "XLSX") {
       rowSource = parseXlsxRows(
         observed.stream,
@@ -273,7 +298,7 @@ export class SemanticImportParserService {
           semanticImport.id,
           claimedAt,
           progress.stage,
-          progress.compressedBytes ?? observed.bytes()
+          progress.compressedBytes ?? observedBytes()
         )
       );
     } else {
@@ -293,6 +318,7 @@ export class SemanticImportParserService {
         prepared.text,
         delimiterCharacter(detectedDelimiter)
       );
+    }
     }
     const rows = rowSource[Symbol.asyncIterator]();
     const initialRows: (readonly string[])[] = [];
@@ -371,7 +397,7 @@ export class SemanticImportParserService {
           await this.heartbeat(
             semanticImport.id,
             claimedAt,
-            observed.bytes(),
+            observedBytes(),
             totalRows
           );
           lastHeartbeatAt = Date.now();
@@ -406,7 +432,7 @@ export class SemanticImportParserService {
         validRows,
         warningRows,
         errorRows,
-        progressBytes: observed.bytes(),
+        progressBytes: observedBytes(),
         ...(sourceMetadata ? { sourceMetadata } : {})
       }
     );
@@ -660,6 +686,20 @@ interface ParseResult {
   }>;
 }
 
+function remoteImportMetadata(value:unknown):NonNullable<ParseResult["sourceMetadata"]> {
+  if(!value || typeof value!=="object" || Array.isArray(value)) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");
+  const row=value as Record<string,unknown>;
+  if(Object.keys(row).length!==2 || !Array.isArray(row.groupPaths) || !Array.isArray(row.groups) || row.groupPaths.length>100_000 || row.groups.length>100_000) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");
+  const path=(input:unknown):readonly string[]=>{
+    if(!Array.isArray(input) || input.length>512 || input.some(part=>typeof part!=="string" || part.length>10_000)) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");return input as string[];
+  };
+  return {groupPaths:row.groupPaths.map(path),groups:row.groups.map(group=>{
+    if(!group || typeof group!=="object" || Array.isArray(group)) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");const value=group as Record<string,unknown>;
+    if(Object.keys(value).some(key=>!["path","color"].includes(key)) || (value.color!==undefined && (typeof value.color!=="string" || !/^#[0-9a-f]{6}$/iu.test(value.color)))) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");
+    return {path:path(value.path),...(value.color===undefined ? {} : {color:value.color as string})};
+  })};
+}
+
 function requestedEncoding(value: string): SemanticImportEncoding {
   return ["AUTO", "UTF_8", "WINDOWS_1251"].includes(value)
     ? (value as SemanticImportEncoding)
@@ -694,7 +734,7 @@ function observeBytes(source: AsyncIterable<Uint8Array>): {
 
 function terminalParseCode(error: unknown): string | undefined {
   if (
-    error instanceof DelimitedParseError &&
+    (error instanceof DelimitedParseError || error instanceof RemoteWorkFailedError) &&
     TERMINAL_PARSE_CODES.has(error.code)
   ) {
     return error.code;

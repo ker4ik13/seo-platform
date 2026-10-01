@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { AuditService } from "../audit/audit.service.js";
 import type {
   AdminOperationSearchResult,
   AdminOperationSummary,
@@ -24,7 +25,8 @@ export class PlatformAdminReadService {
   public constructor(
     private readonly prisma: PrismaService,
     private readonly seoData: SeoDataClient,
-    private readonly jobs: JobsClient
+    private readonly jobs: JobsClient,
+    private readonly audit: AuditService
   ) {}
 
   public async projects(
@@ -78,13 +80,14 @@ export class PlatformAdminReadService {
         status: true,
         createdBy: true,
         ownerUserId: true,
+        version: true,
         createdAt: true,
         updatedAt: true,
         workspace: {
           select: { id: true, name: true, slug: true, status: true }
         }
       },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: query.sort === "NAME_ASC" ? [{ name: "asc" }, { id: "asc" }] : query.sort === "NAME_DESC" ? [{ name: "desc" }, { id: "desc" }] : query.sort === "CREATED_ASC" ? [{ createdAt: "asc" }, { id: "asc" }] : [{ createdAt: "desc" }, { id: "desc" }],
       take: PROJECT_SEARCH_LIMIT + 1
     });
     const page = projects.slice(0, PROJECT_SEARCH_LIMIT);
@@ -103,6 +106,7 @@ export class PlatformAdminReadService {
         emailDisplay: true,
         displayName: true,
         status: true
+        , version: true
       }
     });
     const personById = new Map(people.map((person) => [person.id, person]));
@@ -186,6 +190,14 @@ export class PlatformAdminReadService {
     return enriched;
   }
 
+  public async cancelOperation(operationId: string, actorId: string, requestId: string, reason: string): Promise<AdminOperationSummary> {
+    const current = await this.operation(operationId, actorId, requestId);
+    await this.audit.record({ actorId, workspaceId: current.workspaceId, ...(current.projectId ? { projectId: current.projectId } : {}), action: "platform_admin.operation.cancel_requested", resourceType: "job", resourceId: operationId, reason, outcome: "REQUESTED", requestId });
+    await this.jobs.cancelAdminOperation(actorId, requestId, operationId);
+    await this.audit.record({ actorId, workspaceId: current.workspaceId, action: "platform_admin.operation.cancel_resolved", resourceType: "job", resourceId: operationId, reason, requestId });
+    return this.operation(operationId, actorId, requestId);
+  }
+
   private async enrichOperations(
     operations: readonly InternalAdminOperationSummary[]
   ): Promise<AdminOperationSummary[]> {
@@ -256,6 +268,7 @@ function personSummary(
         readonly emailDisplay: string;
         readonly displayName: string;
         readonly status: AdminWorkspaceOwnerSummary["status"];
+        readonly version?: number;
       }
     | undefined,
   userId: string
@@ -265,7 +278,8 @@ function personSummary(
         userId: person.id,
         email: person.emailDisplay,
         displayName: person.displayName,
-        status: person.status
+        status: person.status,
+        ...(person.version ? { version: person.version } : {})
       }
     : {
         userId,

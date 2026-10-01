@@ -202,6 +202,8 @@ function configFixture(): AppConfig {
     databasePoolMax: 1,
     redisUrl: "redis://unused",
     workerGatewayEnabled: false,
+    remoteWorkEnabled: false,
+    remoteWorkControlUrl: "http://127.0.0.1:4002",
     internalCommandTimeoutMs: 60_000,
     platformApiCommandTimeoutMs: 5_000,
     services: {

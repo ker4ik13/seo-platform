@@ -45,7 +45,7 @@ export async function adminApi<T = unknown>(
     return {
       ok: false,
       status: 503,
-      message: "Operations API недоступен"
+      message: "API администрирования недоступен"
     };
   }
 }

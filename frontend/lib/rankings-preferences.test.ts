@@ -24,7 +24,8 @@ const fallback: RankingsPreferences = {
   dateThrough: "2026-09-09",
   sort: "QUERY_ASC",
   queryColumnWidth: 300,
-  hiddenDates: []
+  hiddenDates: [],
+  includeUntracked: false
 };
 
 test("keeps all ranking screen controls isolated by user and project", () => {
@@ -37,6 +38,7 @@ test("keeps all ranking screen controls isolated by user and project", () => {
     dateFrom: "2026-08-01",
     dateThrough: "2026-09-09",
     sort: "POSITION_ASC",
+    includeUntracked: true,
     queryColumnWidth: 420,
     hiddenDates: ["2026-08-18", "2026-08-18", "2026-08-11"]
   };

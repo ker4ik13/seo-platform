@@ -5,7 +5,7 @@ import { requireProtectedProjectAppContext } from "../../../../../../../lib/prot
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Выдача из поиска",
+  title: "Поисковая выдача",
   robots: { index: false, follow: false }
 };
 

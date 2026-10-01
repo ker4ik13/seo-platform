@@ -32,7 +32,8 @@ test("worker registration and heartbeat accept only bounded exact inputs", () =>
     rankSlots: 8,
     cpuSlots: 2,
     memoryBytes: 68_719_476_736n,
-    activeWorkItems: 3
+    activeWorkItems: 3,
+    capabilitySlots: { RANK: 8 }
   });
   assert.throws(() => workerNodeConfiguration({
     name: "node", capabilities: ["RANK", "RANK"], maxHttpSlots: 1, maxCpuSlots: 1

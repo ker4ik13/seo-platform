@@ -15,6 +15,7 @@ import type { IntegrationCredentialSecret } from "../integrations/integration-cr
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
 import { arsenkinTaskLifecycle } from "../integrations/arsenkin-task-status.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
+import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -91,7 +92,7 @@ export type ArsenkinRankSubmitResult =
     }
   | {
       readonly status: "RETRYABLE_FAILURE";
-      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE";
+      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "PROVIDER_CONCURRENCY_LIMITED";
       readonly retryAfterSeconds?: number;
     }
   | {
@@ -116,7 +117,7 @@ export type ArsenkinRankFetchResult =
     }
   | {
       readonly status: "RETRYABLE_FAILURE";
-      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE";
+      readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "PROVIDER_CONCURRENCY_LIMITED";
       readonly retryAfterSeconds?: number;
     }
   | {
@@ -180,6 +181,7 @@ export class ArsenkinRankConnector {
       );
       return submitResult(response.status, response.value, request, response.retryAfterSeconds);
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {status:"RETRYABLE_FAILURE",code:"PROVIDER_CONCURRENCY_LIMITED",retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return {
           status: "OUTCOME_UNKNOWN",
@@ -237,6 +239,7 @@ export class ArsenkinRankConnector {
         resultResponse.retryAfterSeconds
       );
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {status:"RETRYABLE_FAILURE",code:"PROVIDER_CONCURRENCY_LIMITED",retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return {
           status: "RETRYABLE_FAILURE",

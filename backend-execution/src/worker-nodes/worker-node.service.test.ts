@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { UnauthorizedException } from "@nestjs/common";
+import { UnauthorizedException, NotFoundException } from "@nestjs/common";
 import type { PrismaService } from "../database/prisma.service.js";
 import { WorkerNodeService } from "./worker-node.service.js";
 
@@ -53,7 +53,8 @@ test("admin list shows only safe active Job assignments", async () => {
     executionWorkerNode: {
       async findMany() { return [row({ tokenHash: new Uint8Array(32) })]; }
     },
-    async $queryRaw() {
+    async $queryRaw(query: TemplateStringsArray) {
+      if (query.join("").includes("list_remote_work_assignments")) return [];
       return [{
         nodeId: id,
         jobId: "01900000-0000-7000-8000-000000000002",
@@ -88,3 +89,28 @@ function row(data: Record<string, unknown>) {
     updatedAt: new Date()
   };
 }
+
+test("deletion hides the node, revokes its token, replays safely and cannot be reversed by configuration", async () => {
+  let saved: Record<string, unknown> | undefined;
+  const prisma = {
+    executionWorkerNode: {
+      create: async ({data}: {data: Record<string,unknown>}) => { saved = { ...row(data), deletedAt: null }; return saved; },
+      findUnique: async () => saved,
+      findMany: async ({where}: {where: {deletedAt: null}}) => { assert.equal(where.deletedAt, null); return saved?.deletedAt ? [] : [saved]; },
+      updateMany: async ({where,data}: {where: {id: string;deletedAt?: null};data: Record<string,unknown>}) => {
+        if (!saved || (where.deletedAt === null && saved.deletedAt)) return { count: 0 };
+        Object.assign(saved, data); return { count: 1 };
+      }
+    },
+    $queryRaw: async () => []
+  } as unknown as PrismaService;
+  const service = new WorkerNodeService(prisma), configuration = { name: "fixture", capabilities: ["RANK" as const], maxHttpSlots: 16, maxCpuSlots: 2 };
+  const created = await service.create(configuration), removed = await service.remove(id);
+  assert.deepEqual(await service.remove(id), removed);
+  assert.equal(saved?.enabled, false); assert.equal(saved?.draining, true);
+  assert.deepEqual(await service.list(), []);
+  await assert.rejects(service.authenticateForCompletion(id, created.token), UnauthorizedException);
+  await assert.rejects(service.setEnabled(id, true), NotFoundException);
+  await assert.rejects(service.setDraining(id, false), NotFoundException);
+  await assert.rejects(service.configure(id, configuration), NotFoundException);
+});

@@ -90,6 +90,7 @@ import {
 import { ProviderLogo } from "./provider-logo";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { OperationIdentity } from "./operation-identity";
 import { KeywordResearchRunPreview } from "./keyword-research-workspace";
 import { SemanticGroupPicker } from "./semantic-group-picker";
 import { SemanticModal } from "./semantic-modal";
@@ -434,6 +435,7 @@ export function OperationResultWorkspace({
               {summary.provider && <ProviderLogo provider={summary.provider} />}
               <div>
                 <h1>{summary.title}</h1>
+                <OperationIdentity id={operationId} />
                 <p>{summary.description}</p>
               </div>
             </div>
@@ -498,6 +500,7 @@ export function OperationResultWorkspace({
           <div className={styles.fact} key={fact.label}>
             <span>{fact.label}</span>
             <strong>{fact.value}</strong>
+            {fact.note && <small>{fact.note}</small>}
           </div>
         ))}
       </div>
@@ -2552,7 +2555,7 @@ interface SummaryView {
   readonly tone: "Active" | "Success" | "Warning" | "Error" | "Neutral";
   readonly progress: string;
   readonly progressPercent: number;
-  readonly facts: readonly Readonly<{ label: string; value: string }>[];
+  readonly facts: readonly Readonly<{ label: string; value: string; note?: string }>[];
 }
 
 function RankRoutingDetails({ result, uiLocale }: Readonly<{
@@ -2709,7 +2712,7 @@ function operationSummary(data: OperationResultData, uiLocale: string = "ru-RU")
             ]),
         { label: "Ошибок", value: formatInteger(failed, uiLocale) },
         { label: "Регион", value: searchRegionDisplayName(value.execution.searchEngine, value.execution.regionCode) },
-        { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—" },
+        { label: "Глубина", value: rankCollectionDepthLabel(value.execution, value.execution.depth) ?? "—", ...(value.job.provider === "XMLSTOCK" ? { note: (value.job.xmlStockDepthMode ?? value.execution.xmlStockDepthMode) === "STOP_AFTER_FOUND" ? "До первой позиции" : "Строго" } : {}) },
         { label: "Подключение", value: rankSourceLabel(value.sources, uiLocale) },
         ...xmlStockUsageFacts(value.providerUsage, uiLocale),
         ...("failure" in value.job && value.job.failure

@@ -4,6 +4,7 @@ import type {
   KeysSoDomainOverview
 } from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
+import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -90,6 +91,7 @@ export class KeysSoKeywordResearchConnector {
       if (failed) return failed;
       return success(response.value);
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {ok:false,code:"PROVIDER_RATE_LIMITED",retryable:true,retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return failure("PROVIDER_UNAVAILABLE", true);
       }
@@ -121,6 +123,7 @@ export class KeysSoKeywordResearchConnector {
       const failed = responseFailure(response.status, response.retryAfterSeconds);
       return failed ?? inspection(response.value);
     } catch (error) {
+      if(error instanceof ProviderCapacityUnavailableError) return {ok:false,code:"PROVIDER_RATE_LIMITED",retryable:true,retryAfterSeconds:1};
       if (error instanceof ProviderTransportError) {
         return failure("PROVIDER_UNAVAILABLE", true);
       }

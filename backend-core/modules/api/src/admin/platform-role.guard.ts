@@ -11,7 +11,8 @@ import type { PlatformRoleCode } from "../generated/prisma/client.js";
 import type { AuthenticatedRequest } from "../identity/identity.types.js";
 import { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 import {
-  PLATFORM_ROLES_METADATA
+  PLATFORM_ROLES_METADATA,
+  PLATFORM_RECENT_AUTH_METADATA
 } from "./platform-role.js";
 
 export type PlatformAdminRequest = FastifyRequest & {
@@ -39,9 +40,9 @@ export class PlatformRoleGuard implements CanActivate {
         message: "Authentication required"
       });
     }
-    // Long-lived admin reads use the same rotating cookie session as the main
-    // application. Mutations still require the configured recent-auth window.
-    if (!["GET", "HEAD"].includes(request.method)) {
+    // Operational settings use the valid MFA-backed session. Only explicitly
+    // marked high-risk mutations require the short recent-auth window.
+    if (!["GET", "HEAD"].includes(request.method) && this.reflector.getAllAndOverride<boolean>(PLATFORM_RECENT_AUTH_METADATA, [context.getHandler(), context.getClass()]) === true) {
       this.recentAuthentication.assert(principal);
     }
 

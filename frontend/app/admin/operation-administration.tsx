@@ -1,5 +1,8 @@
 "use client";
 
+import { CustomSelect } from "../../components/custom-select";
+import { AdminOperationCancel } from "../../components/admin-operation-cancel";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
@@ -8,13 +11,10 @@ import type {
   AdminOperationSummary
 } from "@seo-platform/contracts";
 import { adminApi } from "../../lib/admin-browser-api";
-import {
-  adminOperationRefreshIntervals,
-  adminOperationRefreshSeconds
-} from "../../lib/admin-operation-refresh";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
-export function OperationAdministration() {
+export function OperationAdministration({ canControl = false }: Readonly<{ canControl?: boolean }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
   const router = useRouter();
@@ -28,9 +28,6 @@ export function OperationAdministration() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedLoading, setSelectedLoading] = useState(false);
-  const [refreshSeconds, setRefreshSeconds] = useState(() =>
-    adminOperationRefreshSeconds(searchParams.get("refresh"))
-  );
   const [error, setError] = useState<string>();
   const latestBaseRequest = useRef<AbortController | null>(null);
   const selectedOperationId = adminOperationId(searchParams.get("operation"));
@@ -39,7 +36,6 @@ export function OperationAdministration() {
     operation?: string | null;
     status?: AdminOperationStatusGroup;
     type?: string;
-    refresh?: number;
   }>) => {
     const next = new URLSearchParams(window.location.search);
     next.set("screen", "operations");
@@ -55,7 +51,7 @@ export function OperationAdministration() {
       if (changes.operation) next.set("operation", changes.operation);
       else next.delete("operation");
     }
-    if (changes.refresh !== undefined) next.set("refresh", String(changes.refresh));
+    next.set("refresh", "5");
     const href = `/admin?${next.toString()}`;
     if (changes.operation) router.push(href, { scroll: false });
     else router.replace(href, { scroll: false });
@@ -64,8 +60,8 @@ export function OperationAdministration() {
   useEffect(() => {
     setStatus(adminOperationStatus(searchParams.get("status")));
     setType(adminOperationType(searchParams.get("type")));
-    setRefreshSeconds(adminOperationRefreshSeconds(searchParams.get("refresh")));
-  }, [searchParams]);
+    if (searchParams.get("refresh") !== "5") updateUrl({});
+  }, [searchParams, updateUrl]);
 
   const load = useCallback(async (cursor?: string, silent = false) => {
     const controller = cursor ? undefined : new AbortController();
@@ -121,35 +117,11 @@ export function OperationAdministration() {
     });
     return () => controller.abort();
   }, [selected?.id, selectedOperationId]);
-  useEffect(() => {
-    const timer = window.setInterval(
-      () => void load(undefined, true),
-      refreshSeconds * 1_000
-    );
-    return () => window.clearInterval(timer);
-  }, [load, refreshSeconds]);
+  useAdminAutoRefresh(() => load(undefined, true));
 
   const visibleTypes = useMemo(() => result?.types ?? [], [result]);
   return (
     <div className="content operation-admin">
-      <section className="heading">
-        <div><p>Execution control plane</p><h1><UiText text="Операции" /></h1></div>
-        <label className="operation-refresh-control">
-          <span className="system-state"><i /> <UiText text="Автообновление" before=" " /></span>
-          <select aria-label={uiText("Интервал обновления")} onChange={(event) => {
-            const seconds = Number(event.target.value);
-            const valid = adminOperationRefreshIntervals.find((value) => value === seconds);
-            if (valid !== undefined) {
-              setRefreshSeconds(valid);
-              updateUrl({ refresh: valid });
-            }
-          }} value={refreshSeconds}>
-            {adminOperationRefreshIntervals.map((seconds) => (
-              <option key={seconds} value={seconds}>{seconds} <UiText text="сек." /></option>
-            ))}
-          </select>
-        </label>
-      </section>
       <section className="metric-grid workspace-metrics">
         <Metric label={uiText("Всего")} value={result?.totals.total} tone="neutral" />
         <Metric label={uiText("В процессе")} value={result?.totals.active} tone="active" />
@@ -158,9 +130,8 @@ export function OperationAdministration() {
       </section>
       <section className="panel operation-panel">
         <header className="operation-toolbar">
-          <div><h2><UiText text="Журнал выполнения" /></h2><p><UiText text="Без входных payload’ов, секретов и текстов запросов" /></p></div>
           <div className="filters">
-            <select aria-label={uiText("Состояние операций")} onChange={(event) => {
+            <CustomSelect aria-label={uiText("Состояние операций")} onChange={(event) => {
               const nextStatus = event.target.value as AdminOperationStatusGroup;
               setStatus(nextStatus);
               setSelected(undefined);
@@ -170,8 +141,8 @@ export function OperationAdministration() {
               <option value="ACTIVE"><UiText text="В процессе" /></option>
               <option value="COMPLETED"><UiText text="Завершённые" /></option>
               <option value="ATTENTION"><UiText text="Ошибки и внимание" /></option>
-            </select>
-            <select aria-label={uiText("Тип операции")} onChange={(event) => {
+            </CustomSelect>
+            <CustomSelect aria-label={uiText("Тип операции")} onChange={(event) => {
               const nextType = event.target.value;
               setType(nextType);
               setSelected(undefined);
@@ -179,7 +150,7 @@ export function OperationAdministration() {
             }} value={type}>
               <option value=""><UiText text="Все типы" /></option>
               {visibleTypes.map((item) => <option key={item.type} value={item.type}>{operationType(item.type)} · {formatNumber(item.count, uiLocale)}</option>)}
-            </select>
+            </CustomSelect>
           </div>
         </header>
         {error && <div className="form-alert workspace-message" role="alert">{<UiText text={error ?? ""} />}</div>}
@@ -195,7 +166,7 @@ export function OperationAdministration() {
             {result.data.map((operation) => <OperationRow key={operation.id} onOpen={() => {
               setSelected(operation);
               updateUrl({ operation: operation.id });
-            }} operation={operation} />)}
+            }} operation={operation} canControl={canControl} onUpdated={() => void load(undefined, true)} />)}
           </div>
         )}
         {result?.nextCursor && (
@@ -217,7 +188,7 @@ export function OperationAdministration() {
   );
 }
 
-function OperationRow({ onOpen, operation }: Readonly<{ onOpen: () => void; operation: AdminOperationSummary }>) {
+function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ onOpen: () => void; operation: AdminOperationSummary; canControl: boolean; onUpdated: () => void }>) {
   const { locale: uiLocale, t: uiText } = useUiLocale();
   const percent = progressPercent(operation);
   return (
@@ -241,17 +212,17 @@ function OperationRow({ onOpen, operation }: Readonly<{ onOpen: () => void; oper
         ].filter(Boolean).join(" · ") || "—"}</strong>
         <small>{operation.workers?.length
           ? operation.workers.map((worker) =>
-              `${worker.name === "Основной сервер" ? uiText("Основной сервер") : worker.name} (${worker.activeTasks})`
+              `${worker.name === "Основной сервер" ? uiText("Основной сервер") : worker.name} · ${worker.activeTasks > 0 ? `${worker.activeTasks} активных` : "назначен, ожидает"}`
             ).join(" · ")
           : <UiText text="Нет активных назначений" />}</small>
       </div>
-      <div data-label="Состояние"><OperationStatus status={operation.status} type={operation.type} />{operation.stage && <small className="operation-stage">{operationStage(operation)}</small>}</div>
+      <div data-label="Состояние"><OperationStatus status={operation.status} />{operation.stage && <small className="operation-stage">{operationStage(operation)}</small>}</div>
       <div className="operation-progress" data-label="Прогресс / результат">
         <div><strong>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</strong><small>{<UiText text={resultLabel(operation, uiLocale) ?? ""} />}</small></div>
         {percent !== undefined && <span><i style={{ width: `${percent}%` }} /></span>}
       </div>
       <time dateTime={operation.updatedAt}>{formatDate(operation.finishedAt ?? operation.updatedAt, uiLocale)}</time>
-      <button className="ghost workspace-open" onClick={onOpen} type="button"><UiText text="Детали" /></button>
+      <div className="admin-row-actions">{canControl && <AdminOperationCancel operation={operation} onUpdated={onUpdated} />}<button className="ghost workspace-open" onClick={onOpen} type="button"><UiText text="Детали" /></button></div>
     </article>
   );
 }
@@ -271,7 +242,7 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <div><p><UiText text="Операция" /></p><h2>{operationType(operation.type)}</h2></div>
           <button aria-label={uiText("Закрыть")} onClick={onClose} type="button">×</button>
         </header>
-        <div className="operation-detail-status"><OperationStatus status={operation.status} type={operation.type} /><span>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</span></div>
+        <div className="operation-detail-status"><OperationStatus status={operation.status} /><span>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</span></div>
         <div className="snapshot">
           <Snapshot label="Operation ID" value={operation.id} />
           <Snapshot label={uiText("Тип")} value={operation.type} />
@@ -302,20 +273,15 @@ function Metric({ label, tone, value }: Readonly<{ label: string; tone: string; 
   const uiLocale = useUiLocale().locale;
   return <article><span>{label}</span><strong>{value === undefined ? "—" : formatNumber(value, uiLocale)}</strong><small className={`metric-${tone}`}><UiText text="По всем операциям" /></small></article>;
 }
-function OperationStatus({ status, type }: Readonly<{ status: string; type: string }>) {
-  const exhaustedValidation = type === "INTEGRATION_CREDENTIAL_VALIDATE" && status === "FAILED_RETRYABLE";
-  const tone = exhaustedValidation ? "failed-final" : status.toLowerCase().replaceAll("_", "-");
-  return <b className={`status status-${tone}`}>{operationStatus(status, type)}</b>;
+function OperationStatus({ status }: Readonly<{ status: string }>) {
+  return <b className={`status status-${status.toLowerCase().replaceAll("_", "-")}`}>{operationStatus(status)}</b>;
 }
 function Snapshot({ label, value }: Readonly<{ label: string; value: string }>) { return <div><span>{label}</span><strong>{value}</strong></div>; }
 
 function operationType(value: string): string {
-  return ({ MANUAL_RANK_CHECK: "Проверка позиций", FREQUENCY_COLLECTION: "Сбор частотности", CLUSTERING_RUN: "Кластеризация запросов", TECHNICAL_CRAWL: "Обход сайта", KEYWORD_RESEARCH: "Исследование запросов", SEMANTIC_IMPORT: "Импорт семантики", SEMANTIC_EXPORT: "Экспорт семантики", INTEGRATION_CREDENTIAL_VALIDATE: "Проверка подключения" } as Record<string, string>)[value] ?? value.toLocaleLowerCase("ru-RU").replaceAll("_", " ");
+  return ({ MANUAL_RANK_CHECK: "Проверка позиций", FREQUENCY_COLLECTION: "Сбор частотности", CLUSTERING_RUN: "Кластеризация запросов", TECHNICAL_CRAWL: "Обход сайта", KEYWORD_RESEARCH: "Исследование запросов", SEMANTIC_IMPORT: "Импорт семантики", SEMANTIC_EXPORT: "Экспорт семантики" } as Record<string, string>)[value] ?? value.toLocaleLowerCase("ru-RU").replaceAll("_", " ");
 }
-function operationStatus(value: string, type: string): string {
-  if (value === "FAILED_RETRYABLE" && type === "INTEGRATION_CREDENTIAL_VALIDATE") {
-    return "Повторы исчерпаны";
-  }
+function operationStatus(value: string): string {
   return ({ DRAFT: "Черновик", ESTIMATING: "Оценка", AWAITING_APPROVAL: "Ожидает запуска", RESERVING_BALANCE: "Резерв", PREPARING: "Подготовка", QUEUED: "В очереди", WAITING_RATE_LIMIT: "Ожидает лимит", RUNNING: "Выполняется", PAUSE_REQUESTED: "Останавливается", PAUSED: "На паузе", CANCEL_REQUESTED: "Отменяется", CANCELLED: "Отменена", RETRY_SCHEDULED: "Повтор запланирован", PARTIALLY_COMPLETED: "Частично завершена", COMPLETED: "Завершена", FAILED_RETRYABLE: "Повтор после ошибки", FAILED_FINAL: "Ошибка", ACTION_REQUIRED: "Требует внимания", EXPIRED: "Истекла" } as Record<string, string>)[value] ?? value;
 }
 function typeMark(value: string): string { return ({ MANUAL_RANK_CHECK: "↗", FREQUENCY_COLLECTION: "ƒ", CLUSTERING_RUN: "◫", TECHNICAL_CRAWL: "⌁", KEYWORD_RESEARCH: "◎", SEMANTIC_IMPORT: "↓", SEMANTIC_EXPORT: "↑" } as Record<string, string>)[value] ?? "•"; }

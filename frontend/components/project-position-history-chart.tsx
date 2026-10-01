@@ -35,7 +35,9 @@ const SERIES: Readonly<Record<
   5: { color: "#2f6fed", label: "Топ-5" },
   10: { color: "#0b94aa", label: "Топ-10" },
   30: { color: "#d58214", label: "Топ-30" },
-  50: { color: "#c84d8d", label: "Топ-50" }
+  50: { color: "#c84d8d", label: "Топ-50" },
+  100: { color: "#25836b", label: "Топ-100" },
+  200: { color: "#68738e", label: "Топ-200" }
 };
 
 const DEFAULT_CHART_WIDTH = 1_000;
@@ -45,6 +47,7 @@ const PADDING = { top: 22, right: 24, bottom: 42, left: 54 } as const;
 type SelectedPeriod = ProjectPositionHistoryPeriod | "CUSTOM";
 
 export function ProjectPositionHistoryChart({
+  preferenceKey,
   dimensions,
   history,
   includeUntracked,
@@ -55,6 +58,7 @@ export function ProjectPositionHistoryChart({
   scopeLoading
 }: Readonly<{
   dimensions: readonly SemanticRankDimension[];
+  preferenceKey: string;
   history: ProjectPositionHistory;
   includeUntracked: boolean;
   onIncludeUntrackedChange: (includeUntracked: boolean) => void;
@@ -74,6 +78,13 @@ export function ProjectPositionHistoryChart({
     ReadonlySet<ProjectPositionTopThreshold>
   >(() => new Set(projectPositionTopThresholds));
   const [activePointId, setActivePointId] = useState<string>();
+  useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(window.localStorage.getItem(preferenceKey) ?? "null");
+      if (Array.isArray(saved)) setVisibleTops(new Set(projectPositionTopThresholds.filter((top) => saved.includes(top))));
+    } catch { /* Default series remain available without storage. */ }
+  }, [preferenceKey]);
+  const availableTops = projectPositionTopThresholds.filter((top) => top <= 50 || history.points.some((point) => projectPositionTopValue(point, top) > projectPositionTopValue(point, top === 100 ? 50 : 100)));
   const availableRange = useMemo(
     () => projectPositionHistoryAvailableRange(history.points),
     [history.points]
@@ -92,7 +103,7 @@ export function ProjectPositionHistoryChart({
           projectPositionHistoryDefaultSlices
         ),
   [customRange, history.points, period]);
-  const selectedSeries = projectPositionTopThresholds.filter((top) =>
+  const selectedSeries = availableTops.filter((top) =>
     visibleTops.has(top)
   );
   const activePoint = points.find(({ id }) => id === activePointId);
@@ -126,10 +137,10 @@ export function ProjectPositionHistoryChart({
 
   function toggleTop(top: ProjectPositionTopThreshold): void {
     setVisibleTops((current) => {
-      if (current.has(top) && current.size === 1) return current;
       const next = new Set(current);
       if (next.has(top)) next.delete(top);
       else next.add(top);
+      try { window.localStorage.setItem(preferenceKey, JSON.stringify([...next])); } catch { /* In-memory preferences still work. */ }
       return next;
     });
   }
@@ -208,7 +219,7 @@ export function ProjectPositionHistoryChart({
             )}
             <span>{scopeLoading ? <UiText text="Загружаем…" /> : <UiText text="Неотслеживаемые" />}</span>
           </button>
-          {projectPositionTopThresholds.map((top) => {
+          {availableTops.map((top) => {
             const selected = visibleTops.has(top);
             return (
               <button
@@ -240,6 +251,7 @@ export function ProjectPositionHistoryChart({
         </div>
       )}
 
+      {points.length > 0 && selectedSeries.length === 0 && <div className="dashboard-chart-period-empty" role="status">Выберите ТОПы для отображения на графике.</div>}
       {points.length === 0 ? (
         <div className="dashboard-chart-period-empty" role="status">
           <strong>{history.points.length === 0

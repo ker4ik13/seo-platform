@@ -42,6 +42,12 @@ for entry in 'platform:backend-core-api:PLATFORM' 'seo:backend-core-seo:SEO' 'jo
  DATABASE_URL="postgresql://${db}_owner:${!key}@127.0.0.1:${test_port}/${db}_db" pnpm --filter "@seo-platform/$package" prisma:migrate:deploy >> "${test_root}/race-migrations.log" 2>&1
 done
 export JOBS_NOTIFICATION_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/jobs_db"
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = remote-work ]; then
+  export JOBS_REMOTE_WORK_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
+  pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/worker-nodes/remote-work-postgres.integration.test.ts > "$test_root/remote-work-postgres.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (Gateway leases, receipts, fairness, worker loss and scoped caller)'
+  exit 0
+fi
 pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/job-notifications/job-notification-postgres.integration.test.ts > "${test_root}/notification-postgres.log" 2>&1
 export PLATFORM_API_SESSION_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/platform_db"
 export PLATFORM_API_RANK_GRANT_TEST_DATABASE_URL="$PLATFORM_API_SESSION_TEST_DATABASE_URL"

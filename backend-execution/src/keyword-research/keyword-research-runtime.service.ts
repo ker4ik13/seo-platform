@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { RemoteProviderTransportService } from "../worker-nodes/remote-provider-transport.service.js";
+import { remoteCredentialFingerprint } from "../worker-nodes/remote-work-scope.js";
+import { ProviderExecutionReviewRequiredError } from "../integrations/provider-execution-review.js";
 import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
 import { PaidOperationRuntimeService, PaidOperationReviewError, PaidOperationUnavailableError, type PaidOperationClaimScope } from "../paid-operations/paid-operation-runtime.service.js";
 import { Inject, Injectable, Optional } from "@nestjs/common";
@@ -55,13 +58,21 @@ export class KeywordResearchRuntimeService {
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
     @Optional() private readonly billing?: PaidOperationRuntimeService,
-    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService,
+    @Optional() private readonly remote?: RemoteProviderTransportService
   ) {}
 
   public async processOne(leaseOwner: string): Promise<string> {
     const leaseSeconds = 60;
     const claim = await this.broker.claim(leaseOwner, leaseSeconds);
     if (!claim) return "IDLE";
+    const run=()=>this.processClaim(claim,leaseSeconds);
+    return this.remote ? this.remote.run({origin:"RESEARCH",workspaceId:claim.workspaceId,projectId:claim.projectId,
+      operationId:claim.runId,jobId:claim.jobId,credentialId:claim.credentialId,provider:claim.provider,
+      leaseOwner:claim.leaseOwner,leaseToken:claim.leaseToken,credentialFingerprint:remoteCredentialFingerprint(claim.encryptedCredential)},"RESEARCH",run) : run();
+  }
+
+  private async processClaim(claim:KeywordResearchClaim,leaseSeconds:number):Promise<string> {
     try {
       if (
         Date.parse(claim.leaseExpiresAt) - Date.now() <
@@ -88,6 +99,7 @@ export class KeywordResearchRuntimeService {
             claim.jobId,
             claim.credentialId
           );
+      this.remote?.useSecret(secret);
       if (claim.source === "KEYS_SO") {
         return await this.processKeysSo(claim, secret);
       }
@@ -96,9 +108,9 @@ export class KeywordResearchRuntimeService {
       }
       return await this.processWordstat(claim, secret, leaseSeconds);
     } catch (error) {
-      if (error instanceof PaidOperationReviewError || error instanceof PaidOperationUnavailableError) {
-        const review = error instanceof PaidOperationReviewError;
-        const code = review ? "PAID_OPERATION_REQUIRES_REVIEW" : "PAID_OPERATION_UNAVAILABLE";
+      if (error instanceof PaidOperationReviewError || error instanceof PaidOperationUnavailableError || error instanceof ProviderExecutionReviewRequiredError) {
+        const review = error instanceof PaidOperationReviewError || error instanceof ProviderExecutionReviewRequiredError;
+        const code = error instanceof ProviderExecutionReviewRequiredError ? "PROVIDER_REQUIRES_REVIEW" : review ? "PAID_OPERATION_REQUIRES_REVIEW" : "PAID_OPERATION_UNAVAILABLE";
         if (claim.source === "ARSENKIN_WORDSTAT") await this.broker.transitionWordstat(claim, { action: "FAIL", code, ...(review ? {} : { retryAfterSeconds: 30 }) }).catch(() => {});
         else await this.broker.fail(claim, { code, retryable: !review, ...(review ? {} : { retryAfterSeconds: 30 }) }).catch(() => {});
         return review ? "ACTION_REQUIRED" : "RETRY_SCHEDULED";
@@ -236,10 +248,11 @@ export class KeywordResearchRuntimeService {
     let permit: Extract<XmlStockHttpQuotaPermit, { readonly allowed: true }> | undefined;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const acquired = await this.xmlStockQuota.tryAcquire({
+        ...(this.config.remoteWorkEnabled ? {physicalOnly:true} : {}),
         credentialId: physicalKey,
         workspaceId: claim.workspaceId,
         product: "WORDSTAT",
-        leaseMs: timeoutMs + 5_000
+        leaseMs: timeoutMs + 5_000 + (this.config.remoteWorkEnabled ? 6_000 : 0)
       });
       if (acquired.allowed) { permit = acquired; break; }
       await new Promise((resolve) => setTimeout(resolve,

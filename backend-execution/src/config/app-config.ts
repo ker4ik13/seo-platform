@@ -107,6 +107,8 @@ export interface AppConfig {
   readonly platformProviderCredentials: PlatformProviderCredentialsConfig;
   readonly xmlStockSoftId?: string;
   readonly workerGatewayEnabled: boolean;
+  readonly remoteWorkEnabled: boolean;
+  readonly remoteWorkControlUrl: string;
   readonly integrationCredentialValidation: {
     readonly timeoutMs: number;
     readonly leaseSeconds: number;
@@ -284,6 +286,8 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "PLATFORM_XMLSTOCK_ACCOUNT_IDS",
   "PLATFORM_XMLSTOCK_SOFT_ID",
   "WORKER_GATEWAY_ENABLED",
+  "REMOTE_WORK_ENABLED",
+  "REMOTE_WORK_CONTROL_URL",
   "PLATFORM_ARSENKIN_ENABLED",
   "PLATFORM_ARSENKIN_API_KEY",
   "PLATFORM_ARSENKIN_API_KEYS",
@@ -888,6 +892,15 @@ export function loadAppConfig(
     credentialRole === "MANAGEMENT" || credentialRole === "BOTH";
   const credentialExecutionEnabled = credentialRole === "EXECUTION";
   const workerGatewayEnabled = bool(env.WORKER_GATEWAY_ENABLED);
+  const remoteWorkEnabled = bool(env.REMOTE_WORK_ENABLED);
+  const remoteWorkControlUrl = optional(env,"REMOTE_WORK_CONTROL_URL") || "http://127.0.0.1:4002";
+  if (remoteWorkEnabled) {
+    const origin = new URL(remoteWorkControlUrl);
+    if (origin.username || origin.password || origin.search || origin.hash || origin.pathname !== "/" ||
+      !["http:","https:"].includes(origin.protocol) || (origin.protocol === "http:" && !["127.0.0.1","localhost","[::1]"].includes(origin.hostname))) {
+      throw new Error("REMOTE_WORK_CONTROL_URL must be a trusted internal origin");
+    }
+  }
   const processRole =
     requestedProcessRole ??
     (rankPreparationEnabled
@@ -898,6 +911,7 @@ export function loadAppConfig(
   if (credentialRole === "BOTH" && !workerGatewayEnabled) {
     throw new Error("BOTH credential role requires WORKER_GATEWAY_ENABLED=true");
   }
+  if(remoteWorkEnabled && processRole==="HTTP" && !workerGatewayEnabled) throw new Error("REMOTE_WORK_ENABLED requires Worker Gateway on HTTP role");
   const platformXmlstockEnabled = bool(
     env.PLATFORM_XMLSTOCK_ENABLED
   );
@@ -1679,6 +1693,8 @@ export function loadAppConfig(
     databasePoolMax,
     redisUrl: env.REDIS_URL?.trim() || "redis://127.0.0.1:6379",
     workerGatewayEnabled,
+    remoteWorkEnabled,
+    remoteWorkControlUrl,
     ...(xmlStockSoftId ? { xmlStockSoftId } : {}),
     ...(platformApiToken ? { platformApiToken } : {}),
     ...(seoDataApiToken ? { seoDataApiToken } : {}),

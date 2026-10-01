@@ -61,6 +61,8 @@ export interface XmlStockHttpQuotaGate {
     /** Omit for the main Compose; remote nodes receive independent HTTP caps. */
     readonly nodeId?: string;
     readonly nodeConcurrency?: number;
+    /** The Gateway already reserves the remote node; keep only shared physical-key limits here. */
+    readonly physicalOnly?: boolean;
   }): Promise<XmlStockHttpQuotaPermit>;
   release(
     permit: Extract<XmlStockHttpQuotaPermit, { readonly allowed: true }>
@@ -78,7 +80,45 @@ export interface XmlStockHttpQuotaGate {
 
 type RedisEvalPort = Pick<Redis, "eval">;
 
+const NODE_SLOT_LUA=`
+local function acquire_node_slot(inflight_key, waiters_key, ceiling, physical_key, member, lease_ms, now_ms)
+  redis.call('ZREMRANGEBYSCORE', inflight_key, '-inf', now_ms)
+  redis.call('ZREMRANGEBYSCORE', waiters_key, '-inf', now_ms)
+  redis.call('ZADD', waiters_key, now_ms + 2000, physical_key)
+  redis.call('PEXPIRE', waiters_key, 5000)
+  local active_keys = {}
+  local own = 0
+  local members = redis.call('ZRANGE', inflight_key, 0, -1)
+  for _, item in ipairs(members) do
+    local key = string.sub(item, 1, 36)
+    if string.sub(item, 37, 37) ~= ':' then key = 'legacy' end
+    active_keys[key] = true
+    if key == physical_key then own = own + 1 end
+  end
+  local other_waiting = false
+  for _, key in ipairs(redis.call('ZRANGE', waiters_key, 0, -1)) do
+    active_keys[key] = true
+    if key ~= physical_key then other_waiting = true end
+  end
+  local count = 0
+  for _ in pairs(active_keys) do count = count + 1 end
+  local share = math.max(1, math.ceil(ceiling / count))
+  if #members >= ceiling or (other_waiting and own >= share) then return 0, 250 end
+  redis.call('ZADD', inflight_key, now_ms + lease_ms, physical_key .. ':' .. member)
+  if own + 1 >= share then redis.call('ZREM', waiters_key, physical_key) end
+  redis.call('PEXPIRE', inflight_key, math.max(redis.call('PTTL', inflight_key), lease_ms + 5000))
+  return 1, 0
+end
+`;
+const NODE_ONLY_ACQUIRE_SCRIPT=`${NODE_SLOT_LUA}
+local parts=redis.call('TIME')
+local now_ms=tonumber(parts[1])*1000+math.floor(tonumber(parts[2])/1000)
+local allowed,retry=acquire_node_slot(KEYS[1],KEYS[2],tonumber(ARGV[1]),ARGV[2],ARGV[3],tonumber(ARGV[4]),now_ms)
+return {allowed,retry}
+`;
+
 const ACQUIRE_SCRIPT = `
+${NODE_SLOT_LUA}
 local now_parts = redis.call('TIME')
 local now_ms = (tonumber(now_parts[1]) * 1000) + math.floor(tonumber(now_parts[2]) / 1000)
 local base_concurrency = tonumber(ARGV[1])
@@ -89,6 +129,7 @@ local member = ARGV[5]
 local global_concurrency = tonumber(ARGV[6])
 local physical_key = ARGV[7]
 local workspace_id = ARGV[8]
+local enforce_node = ARGV[9] ~= '1'
 local smoothing_window_ms = 100
 local penalty = tonumber(redis.call('GET', KEYS[4]) or '0')
 local divisor = 2 ^ penalty
@@ -158,36 +199,12 @@ if smoothed_recent + request_cost > smoothing_limit then
   return {0, retry_ms, concurrency, rps}
 end
 
--- A waiting physical key reserves a fair share of the global ceiling. Keys
--- already above that share may keep borrowing idle slots only while nobody
--- else is waiting. A short expiry returns unused shares automatically.
-redis.call('ZADD', KEYS[8], now_ms + 2000, physical_key)
-redis.call('PEXPIRE', KEYS[8], 5000)
-local active_keys = {}
-local own_inflight = 0
-local global_members = redis.call('ZRANGE', KEYS[7], 0, -1)
-for _, global_member in ipairs(global_members) do
-  local key = string.sub(global_member, 1, 36)
-  if string.sub(global_member, 37, 37) ~= ':' then key = 'legacy' end
-  active_keys[key] = true
-  if key == physical_key then own_inflight = own_inflight + 1 end
-end
-local other_waiting = false
-for _, waiting_key in ipairs(redis.call('ZRANGE', KEYS[8], 0, -1)) do
-  active_keys[waiting_key] = true
-  if waiting_key ~= physical_key then other_waiting = true end
-end
-local active_count = 0
-for _ in pairs(active_keys) do active_count = active_count + 1 end
-local fair_share = math.max(1, math.ceil(global_concurrency / active_count))
-if #global_members >= global_concurrency or
-   (other_waiting and own_inflight >= fair_share) then
-  return {0, 250, concurrency, rps}
+if enforce_node then
+  local allowed, retry=acquire_node_slot(KEYS[7],KEYS[8],global_concurrency,physical_key,member,lease_ms,now_ms)
+  if allowed == 0 then return {0,retry,concurrency,rps} end
 end
 
 redis.call('ZADD', KEYS[1], now_ms + lease_ms, workspace_id .. ':' .. member)
-redis.call('ZADD', KEYS[7], now_ms + lease_ms, physical_key .. ':' .. member)
-if own_inflight + 1 >= fair_share then redis.call('ZREM', KEYS[8], physical_key) end
 if own_local_inflight + 1 >= local_fair_concurrency and
    own_recent + request_cost >= local_fair_rps then
   redis.call('ZREM', KEYS[9], workspace_id)
@@ -199,7 +216,6 @@ end
 redis.call('PEXPIRE', KEYS[1], lease_ms + 5000)
 redis.call('PEXPIRE', KEYS[2], 6000)
 redis.call('PEXPIRE', KEYS[6], 1000)
-redis.call('PEXPIRE', KEYS[7], math.max(redis.call('PTTL', KEYS[7]), lease_ms + 5000))
 return {1, 0, concurrency, rps}
 `;
 
@@ -276,6 +292,7 @@ export class XmlStockHttpQuotaLimiter
     readonly leaseMs: number;
     readonly nodeId?: string;
     readonly nodeConcurrency?: number;
+    readonly physicalOnly?: boolean;
   }): Promise<XmlStockHttpQuotaPermit> {
     try {
       const startedAt = Date.now();
@@ -312,6 +329,21 @@ export class XmlStockHttpQuotaLimiter
       // The in-flight member has a bounded lease and therefore self-recovers.
       this.logger.error("XMLStock quota limiter release failed");
     }
+  }
+
+  public async acquireLocalNodeSlot(physicalKey:string,leaseMs:number):Promise<{allowed:true;member:string;physicalKey:string}|{allowed:false}> {
+    if(!UUID_PATTERN.test(physicalKey) || !Number.isSafeInteger(leaseMs) || leaseMs<1000 || leaseMs>120_000) throw new TypeError("Invalid local HTTP reservation");
+    try {
+      const member=randomUUID();const value=await commandWithTimeout(this.connection.eval(NODE_ONLY_ACQUIRE_SCRIPT,2,
+        `${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,`${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:waiters`,String(this.globalConcurrency),physicalKey,member,String(leaseMs)));
+      if(!Array.isArray(value) || value.length!==2 || ![0,1].includes(Number(value[0]))) throw new Error("Invalid local HTTP permit");
+      return value[0]===1 ? {allowed:true,member,physicalKey} : {allowed:false};
+    } catch {this.logger.error("Local HTTP capacity reservation failed closed");return {allowed:false};}
+  }
+
+  public async releaseLocalNodeSlot(permit:{member:string;physicalKey:string}):Promise<void> {
+    try {await commandWithTimeout(this.connection.eval("return redis.call('ZREM',KEYS[1],ARGV[1])",1,`${XMLSTOCK_HTTP_QUOTA_NAMESPACE}:global:inflight`,`${permit.physicalKey}:${permit.member}`));}
+    catch {this.logger.warn("Local HTTP reservation will recover after its lease");}
   }
 
   public async penalize(input: {
@@ -355,6 +387,7 @@ export async function acquireXmlStockHttpQuotaPermit(
     readonly member: string;
     readonly globalConcurrency?: number;
     readonly nodeId?: string;
+    readonly physicalOnly?: boolean;
   }
 ): Promise<XmlStockHttpQuotaPermit> {
   const scope = quotaScope(input.credentialId, input.product);
@@ -399,7 +432,8 @@ export async function acquireXmlStockHttpQuotaPermit(
       input.member,
       String(input.globalConcurrency ?? XMLSTOCK_GLOBAL_HTTP_CONCURRENCY),
       input.credentialId.toLowerCase(),
-      input.workspaceId.toLowerCase()
+      input.workspaceId.toLowerCase(),
+      input.physicalOnly===true ? "1" : "0"
     )
   );
   if (

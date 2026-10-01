@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Delete,
   Get,
   Headers,
   Param,
+  Post,
   Query,
   Req,
   UseGuards
@@ -27,6 +29,7 @@ import {
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { OperationActivityService } from "./operation-activity.service.js";
 import { platformAdminOperationQuery } from "./platform-admin-operation-input.js";
+import { OperationCancellationService } from "./operation-cancellation.service.js";
 
 type HeadersRecord = Readonly<Record<string, string | string[] | undefined>>;
 
@@ -105,7 +108,16 @@ export class ProjectOperationController {
 @Controller("internal/v1/platform-admin/operations")
 @UseGuards(PlatformApiGuard)
 export class PlatformAdminOperationController {
-  public constructor(private readonly activity: OperationActivityService) {}
+  public constructor(private readonly activity: OperationActivityService, private readonly cancellation: OperationCancellationService) {}
+
+  @Post(":operationId/cancel")
+  public async cancel(@Param("operationId") id: string, @Headers() headers: HeadersRecord, @Body() body: unknown, @Req() req: FastifyRequest): Promise<ApiResponse<InternalAdminOperationSummary>> {
+    if (!body || typeof body !== "object" || Object.keys(body).length !== 0) throw new BadRequestException("Empty command expected");
+    const actor = internalUuid(String(headers["x-actor-id"]), "actorId");
+    const operationId = internalUuid(id, "operationId");
+    await this.cancellation.cancel(operationId, actor);
+    return { data: await this.activity.adminDetail(operationId), meta: { requestId: req.id } };
+  }
 
   @Get("overview")
   public async overview(@Headers() headers: HeadersRecord, @Req() request: FastifyRequest) {

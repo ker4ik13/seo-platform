@@ -2,7 +2,8 @@ import { Injectable } from "@nestjs/common";
 import type {
   CreatedWorkerNode,
   WorkerNodeConfiguration,
-  WorkerNodeView
+  WorkerNodeView,
+  RemovedWorkerNode
 } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { JobsClient } from "../jobs/jobs.client.js";
@@ -37,6 +38,12 @@ export class PlatformAdminWorkerNodeService {
       requestId
     });
     return created;
+  }
+
+  public async remove(id: string, actorId: string, requestId: string): Promise<RemovedWorkerNode> {
+    const removed = await this.jobs.removeWorkerNode(actorId, requestId, id);
+    await this.audit.record({ actorId, action: "platform_admin.worker_node.deleted", resourceType: "execution_worker_node", resourceId: id, requestId });
+    return removed;
   }
 
   public async configure(

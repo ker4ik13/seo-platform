@@ -102,6 +102,7 @@
 .progress i { background: #6758ef; display: block; height: 100%; }
 .fact span { color: #7b8191; font-size: 9px; }
 .fact strong { color: #252936; font-size: 11px; line-height: 1.35; margin-top: 4px; overflow-wrap: anywhere; white-space: normal; }
+.fact small { color: #6b617f; font-size: 10px; line-height: 1.4; margin-top: 3px; }
 .routingDisclosure { background: #f8f7ff; border-bottom: 1px solid #e5e1ff; color: #5045a8; font-size: 11px; padding: 8px 14px; }
 .routingDisclosure summary { cursor: pointer; font-weight: 750; }
 .routingDisclosure summary:focus-visible { border-radius: 4px; outline: 2px solid #6758ef; outline-offset: 3px; }

@@ -7,6 +7,7 @@ import { SemanticExportService } from "./semantic-export.service.js";
 @Module({
   imports: [InternalModule, StorageModule],
   controllers: [SemanticExportController],
-  providers: [SemanticExportService]
+  providers: [SemanticExportService],
+  exports: [SemanticExportService]
 })
 export class SemanticExportModule {}

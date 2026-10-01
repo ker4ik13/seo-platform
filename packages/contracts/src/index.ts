@@ -2,6 +2,8 @@ export * from "./api/auth-email-deliveries.js";
 export * from "./api/api-tokens.js";
 export * from "./api/ai-answer-collections.js";
 export * from "./api/admin.js";
+export * from "./api/admin-controls.js";
+export * from "./api/remote-work.js";
 export * from "./api/billing.js";
 export * from "./api/crawls.js";
 export * from "./api/clustering.js";

@@ -271,7 +271,10 @@ export function CustomDateRangePicker({
                 ["Сегодня", 1],
                 ["Неделя", 7],
                 ["Месяц", 30],
-                ["3 месяца", 90]
+                ["3 месяца", 90],
+                ["6 месяцев", 183],
+                ["1 год", 365],
+                ["2 года", 730]
               ] as const).map(([label, days]) => (
                 <button key={label} onClick={() => selectPreset(days)} type="button">
                   <UiText text={label} />

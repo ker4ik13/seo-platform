@@ -7,6 +7,7 @@ export const rankWorkbenchPageSizes = [50, 100, 200] as const;
 export type RankWorkbenchPageSize = (typeof rankWorkbenchPageSizes)[number];
 
 export const rankWorkbenchPositionSorts = [
+  "OBSERVED_DESC",
   "QUERY_ASC",
   "POSITION_ASC",
   "POSITION_DESC",
@@ -27,6 +28,7 @@ export interface RankWorkbenchKeywordScope {
 }
 
 export interface RankPositionReportInput extends RankWorkbenchKeywordScope {
+  readonly includeUntracked?: boolean;
   readonly mode: "SEO" | "AI";
   readonly dimensionKey: string;
   readonly observedFrom: string;
@@ -57,6 +59,7 @@ export interface RankPositionReportCell {
 }
 
 export interface RankPositionReportRow {
+  readonly isTracked?: boolean;
   readonly keywordId: string;
   readonly version: number;
   readonly query: string;
@@ -91,9 +94,13 @@ export interface RankPositionReportSummary {
   readonly unchangedCount: number;
   readonly newCount: number;
   readonly lostCount: number;
+  readonly top1Count: number;
   readonly top3Count: number;
+  readonly top5Count: number;
   readonly top10Count: number;
   readonly top30Count: number;
+  readonly top50Count: number;
+  readonly top100Count: number;
   readonly averagePosition?: number;
   readonly medianPosition?: number;
 }
@@ -214,7 +221,8 @@ export function parseRankPositionReportInput(
     "limit",
     "cursor",
     "sort",
-    "mode"
+    "mode",
+    "includeUntracked"
   ]);
   const dimensionKey = rankDimensionKey(input.dimensionKey);
   const observedFrom = instant(input.observedFrom);
@@ -226,9 +234,11 @@ export function parseRankPositionReportInput(
   const mode = input.mode === undefined
     ? "SEO"
     : member(input.mode, ["SEO", "AI"] as const);
+  if (input.includeUntracked !== undefined && typeof input.includeUntracked !== "boolean") invalid();
   return {
     ...keywordScope(input),
     mode,
+    ...(input.includeUntracked === undefined ? {} : { includeUntracked: input.includeUntracked as boolean }),
     dimensionKey,
     observedFrom,
     observedBefore,
@@ -323,7 +333,8 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
   const summaryValue = exactRecord(input.summary, [
     "keywordCount", "measuredCount", "foundCount", "notFoundCount",
     "improvedCount", "declinedCount", "unchangedCount", "newCount",
-    "lostCount", "top3Count", "top10Count", "top30Count",
+    "lostCount", "top1Count", "top3Count", "top5Count", "top10Count",
+    "top30Count", "top50Count", "top100Count",
     "averagePosition", "medianPosition"
   ]);
   const summary: RankPositionReportSummary = {
@@ -336,9 +347,13 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
     unchangedCount: integer(summaryValue.unchangedCount, 0, Number.MAX_SAFE_INTEGER),
     newCount: integer(summaryValue.newCount, 0, Number.MAX_SAFE_INTEGER),
     lostCount: integer(summaryValue.lostCount, 0, Number.MAX_SAFE_INTEGER),
+    top1Count: integer(summaryValue.top1Count, 0, Number.MAX_SAFE_INTEGER),
     top3Count: integer(summaryValue.top3Count, 0, Number.MAX_SAFE_INTEGER),
+    top5Count: integer(summaryValue.top5Count, 0, Number.MAX_SAFE_INTEGER),
     top10Count: integer(summaryValue.top10Count, 0, Number.MAX_SAFE_INTEGER),
     top30Count: integer(summaryValue.top30Count, 0, Number.MAX_SAFE_INTEGER),
+    top50Count: integer(summaryValue.top50Count, 0, Number.MAX_SAFE_INTEGER),
+    top100Count: integer(summaryValue.top100Count, 0, Number.MAX_SAFE_INTEGER),
     ...(summaryValue.averagePosition === undefined
       ? {}
       : { averagePosition: finiteNumber(summaryValue.averagePosition, 1, 100_000) }),
@@ -346,6 +361,9 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
       ? {}
       : { medianPosition: finiteNumber(summaryValue.medianPosition, 1, 100_000) })
   };
+  if ([summary.top1Count, summary.top3Count, summary.top5Count, summary.top10Count,
+    summary.top30Count, summary.top50Count, summary.top100Count, summary.foundCount]
+    .some((count, index, values) => index > 0 && count < values[index - 1]!)) invalid();
   if (!Array.isArray(input.trend) || input.trend.length > rankWorkbenchMaxDates) invalid();
   const trend = input.trend.map((value) => {
     const point = exactRecord(value, ["date", "measured", "found", "top3", "top10", "top30", "averagePosition"]);
@@ -368,12 +386,13 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
   const rows = input.rows.map((value) => {
     const row = exactRecord(value, [
       "keywordId", "version", "query", "language", "createdAt", "groupPath",
-      "targetUrl", "frequencies", "cells"
+      "targetUrl", "frequencies", "cells", "isTracked"
     ]);
     const keywordId = uuid(row.keywordId);
     if (keywordIds.has(keywordId) || !Array.isArray(row.cells) || row.cells.length > dates.length) invalid();
     keywordIds.add(keywordId);
     const cellDates = new Set<string>();
+    if (row.isTracked !== undefined && typeof row.isTracked !== "boolean") invalid();
     const cells = row.cells.map((value) => {
       const cell = exactRecord(value, [
         "date", "snapshotId", "observedAt", "found", "position",
@@ -426,6 +445,7 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
       ...(row.groupPath === undefined || row.groupPath === null
         ? {}
         : { groupPath: boundedText(row.groupPath, 4_096) }),
+      ...(row.isTracked === undefined ? {} : { isTracked: row.isTracked as boolean }),
       ...(row.targetUrl === undefined || row.targetUrl === null
         ? {}
         : { targetUrl: httpUrl(row.targetUrl) }),

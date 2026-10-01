@@ -4,6 +4,7 @@ import {
   parseCreatedWorkerNode,
   parseWorkerNodeConfiguration,
   parseWorkerNodeView
+  ,parseWorkerNodeRemovalInput, parseRemovedWorkerNode
 } from "./worker-nodes.js";
 
 const node = {
@@ -38,6 +39,7 @@ test("worker contracts accept exact safe views and reject secret extensions", ()
   assert.equal(parseCreatedWorkerNode({
     node, token: `wn_${"a".repeat(43)}`
   }).node.id, node.id);
+  assert.equal(parseWorkerNodeView({ ...node, activeAssignments: [{ jobId: node.id, capability: "RANK", searchEngine: null, activeTasks: 0 }] }).activeAssignments?.[0]?.activeTasks, 0);
   assert.throws(() => parseWorkerNodeView({ ...node, apiKey: "secret" }));
   assert.throws(() => parseWorkerNodeView({
     ...node, capabilities: ["EMAIL"]
@@ -49,4 +51,12 @@ test("worker contracts accept exact safe views and reject secret extensions", ()
     name: "office-one", capabilities: ["RANK"],
     maxHttpSlots: 16, maxCpuSlots: 2
   });
+});
+
+test("worker deletion requires explicit confirmation and a secret-free receipt", () => {
+  assert.deepEqual(parseWorkerNodeRemovalInput({ confirmed: true }), { confirmed: true });
+  for (const input of [{}, { confirmed: false }, { confirmed: true, token: "forbidden" }]) assert.throws(() => parseWorkerNodeRemovalInput(input));
+  const removed = { id: node.id, deletedAt: new Date().toISOString() };
+  assert.deepEqual(parseRemovedWorkerNode(removed), removed);
+  assert.throws(() => parseRemovedWorkerNode({ ...removed, token: "forbidden" }));
 });

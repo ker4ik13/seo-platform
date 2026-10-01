@@ -14,10 +14,24 @@ services:
       WORKER_HTTP_SLOTS: ${WORKER_HTTP_SLOTS:-16}
       WORKER_RANK_SLOTS: ${WORKER_RANK_SLOTS:-0}
       WORKER_CPU_SLOTS: ${WORKER_CPU_SLOTS:-2}
+      WORKER_WORDSTAT_SLOTS: ${WORKER_WORDSTAT_SLOTS:-}
+      WORKER_RESEARCH_SLOTS: ${WORKER_RESEARCH_SLOTS:-}
+      WORKER_AI_ANSWER_SLOTS: ${WORKER_AI_ANSWER_SLOTS:-}
+      WORKER_CLUSTERING_SLOTS: ${WORKER_CLUSTERING_SLOTS:-}
+      WORKER_CRAWL_SLOTS: ${WORKER_CRAWL_SLOTS:-}
+      WORKER_IMPORT_SLOTS: ${WORKER_IMPORT_SLOTS:-}
+      WORKER_EXPORT_SLOTS: ${WORKER_EXPORT_SLOTS:-}
+      WORKER_INSPECTION_SLOTS: ${WORKER_INSPECTION_SLOTS:-1}
+      WORKER_CPU_TASK_MEMORY_MB: ${WORKER_CPU_TASK_MEMORY_MB:-1024}
+      WORKER_MALWARE_SCANNER_HOST: clamav
+      WORKER_MALWARE_SCANNER_PORT: 3310
       WORKER_HEARTBEAT_MS: ${WORKER_HEARTBEAT_MS:-10000}
     read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - worker_tmp:/tmp
+    depends_on:
+      clamav:
+        condition: service_started
     cap_drop:
       - ALL
     security_opt:
@@ -27,3 +41,23 @@ services:
     mem_limit: ${WORKER_CONTAINER_MEMORY:-8g}
     restart: unless-stopped
     stop_grace_period: 45s
+  clamav:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/infra.Dockerfile
+      target: clamav-runtime
+    volumes:
+      - worker_clamav_data:/var/lib/clamav
+    cpus: ${WORKER_SCANNER_CPUS:-1.0}
+    mem_limit: ${WORKER_SCANNER_MEMORY:-2g}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
+
+volumes:
+  worker_tmp:
+  worker_clamav_data:

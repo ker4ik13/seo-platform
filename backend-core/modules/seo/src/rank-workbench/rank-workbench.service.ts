@@ -34,6 +34,7 @@ type ReadScope = Readonly<{ workspaceId: string; projectId: string }>;
 type WriteScope = ReadScope & Readonly<{ actorId: string }>;
 
 interface PositionKeywordRow {
+  readonly isTracked: boolean;
   readonly id: string;
   readonly version: number;
   readonly query: string;
@@ -58,9 +59,13 @@ interface PositionKeywordRow {
   readonly unchangedCount: bigint;
   readonly newCount: bigint;
   readonly lostCount: bigint;
+  readonly top1Count: bigint;
   readonly top3Count: bigint;
+  readonly top5Count: bigint;
   readonly top10Count: bigint;
   readonly top30Count: bigint;
+  readonly top50Count: bigint;
+  readonly top100Count: bigint;
   readonly averagePosition: number | null;
 }
 
@@ -139,9 +144,13 @@ const ZERO_SUMMARY: RankPositionReportSummary = {
   unchangedCount: 0,
   newCount: 0,
   lostCount: 0,
+  top1Count: 0,
   top3Count: 0,
+  top5Count: 0,
   top10Count: 0,
-  top30Count: 0
+  top30Count: 0,
+  top50Count: 0,
+  top100Count: 0
 };
 
 @Injectable()
@@ -246,6 +255,7 @@ export class RankWorkbenchService {
         query: row.query,
         language: row.language,
         createdAt: row.createdAt.toISOString(),
+        isTracked: row.isTracked,
         ...(row.groupPath === null ? {} : { groupPath: row.groupPath }),
         ...(row.targetUrl === null ? {} : { targetUrl: row.targetUrl }),
         frequencies: positionFrequencies(row),
@@ -567,7 +577,7 @@ export class RankWorkbenchService {
       ), scoped_keywords AS MATERIALIZED (
         SELECT keyword.id, keyword.version, keyword.text_original AS query,
           keyword.text_normalized, keyword.language,
-          keyword.created_at,
+          keyword.created_at, keyword.is_tracked,
           keyword.target_page_id
         FROM keywords keyword
         WHERE ${Prisma.join(filters, " AND ")}
@@ -583,6 +593,10 @@ export class RankWorkbenchService {
       ), projected AS (
         SELECT keyword.*, latest.id AS latest_snapshot_id,
           latest.found AS latest_found, latest.position AS latest_position,
+          latest.observed_at AS latest_observed_at,
+          CASE WHEN (latest.observed_at AT TIME ZONE 'UTC')::date =
+            (SELECT MAX((observed_at AT TIME ZONE 'UTC')::date) FROM daily_candidates)
+            THEN latest.position END AS latest_slice_position,
           previous.id AS previous_snapshot_id,
           previous.position AS previous_position
         FROM scoped_keywords keyword
@@ -601,9 +615,13 @@ export class RankWorkbenchService {
           count(*) FILTER (WHERE latest_position = previous_position) OVER ()::bigint AS unchanged_count,
           count(*) FILTER (WHERE latest_position IS NOT NULL AND previous_position IS NULL) OVER ()::bigint AS new_count,
           count(*) FILTER (WHERE latest_position IS NULL AND previous_position IS NOT NULL) OVER ()::bigint AS lost_count,
+          count(*) FILTER (WHERE latest_position <= 1) OVER ()::bigint AS top1_count,
           count(*) FILTER (WHERE latest_position <= 3) OVER ()::bigint AS top3_count,
+          count(*) FILTER (WHERE latest_position <= 5) OVER ()::bigint AS top5_count,
           count(*) FILTER (WHERE latest_position <= 10) OVER ()::bigint AS top10_count,
           count(*) FILTER (WHERE latest_position <= 30) OVER ()::bigint AS top30_count,
+          count(*) FILTER (WHERE latest_position <= 50) OVER ()::bigint AS top50_count,
+          count(*) FILTER (WHERE latest_position <= 100) OVER ()::bigint AS top100_count,
           avg(latest_position) FILTER (WHERE latest_position IS NOT NULL) OVER ()::float8 AS average_position
         FROM projected
         ORDER BY ${order}
@@ -652,6 +670,7 @@ export class RankWorkbenchService {
         ) frequency ON true
       )
       SELECT id, version, query, language, created_at AS "createdAt",
+        is_tracked AS "isTracked",
         group_path AS "groupPath", target_url AS "targetUrl",
         frequency_base AS "frequencyBase",
         frequency_exact AS "frequencyExact",
@@ -664,8 +683,10 @@ export class RankWorkbenchService {
         found_count AS "foundCount", not_found_count AS "notFoundCount",
         improved_count AS "improvedCount", declined_count AS "declinedCount",
         unchanged_count AS "unchangedCount", new_count AS "newCount",
-        lost_count AS "lostCount", top3_count AS "top3Count",
+        lost_count AS "lostCount", top1_count AS "top1Count",
+        top3_count AS "top3Count", top5_count AS "top5Count",
         top10_count AS "top10Count", top30_count AS "top30Count",
+        top50_count AS "top50Count", top100_count AS "top100Count",
         average_position AS "averagePosition"
       FROM enriched
       ORDER BY ${order}
@@ -1005,13 +1026,14 @@ export class RankWorkbenchService {
 
 function keywordFilters(
   scope: ReadScope,
-  input: Readonly<{ groupIds?: readonly string[]; search?: string }>
+  input: Readonly<{ groupIds?: readonly string[]; search?: string; includeUntracked?: boolean }>
 ): Prisma.Sql[] {
   const filters: Prisma.Sql[] = [
     Prisma.sql`keyword.workspace_id = ${scope.workspaceId}::uuid`,
     Prisma.sql`keyword.project_id = ${scope.projectId}::uuid`,
     Prisma.sql`keyword.status::text = 'ACTIVE'`
   ];
+  if (input.includeUntracked === false) filters.push(Prisma.sql`keyword.is_tracked = TRUE`);
   if (input.search) {
     filters.push(Prisma.sql`keyword.text_normalized ILIKE ${`%${input.search}%`}`);
   }
@@ -1049,10 +1071,12 @@ function visibleSnapshotPredicate(
 
 function positionOrder(sort: RankPositionReportInput["sort"]): Prisma.Sql {
   switch (sort) {
+    case "OBSERVED_DESC":
+      return Prisma.sql`latest_observed_at DESC NULLS LAST, created_at DESC, text_normalized ASC, id ASC`;
     case "POSITION_ASC":
-      return Prisma.sql`latest_position ASC NULLS LAST, text_normalized ASC, id ASC`;
+      return Prisma.sql`latest_slice_position ASC NULLS LAST, latest_observed_at DESC NULLS LAST, latest_position ASC NULLS LAST, text_normalized ASC, id ASC`;
     case "POSITION_DESC":
-      return Prisma.sql`latest_position DESC NULLS LAST, text_normalized ASC, id ASC`;
+      return Prisma.sql`latest_slice_position DESC NULLS LAST, latest_observed_at DESC NULLS LAST, latest_position DESC NULLS LAST, text_normalized ASC, id ASC`;
     case "CHANGE_ASC":
       return Prisma.sql`(previous_position - latest_position) ASC NULLS LAST, text_normalized ASC, id ASC`;
     case "CHANGE_DESC":
@@ -1073,9 +1097,13 @@ function positionSummary(row: PositionKeywordRow): RankPositionReportSummary {
     unchangedCount: safeCount(row.unchangedCount),
     newCount: safeCount(row.newCount),
     lostCount: safeCount(row.lostCount),
+    top1Count: safeCount(row.top1Count),
     top3Count: safeCount(row.top3Count),
+    top5Count: safeCount(row.top5Count),
     top10Count: safeCount(row.top10Count),
     top30Count: safeCount(row.top30Count),
+    top50Count: safeCount(row.top50Count),
+    top100Count: safeCount(row.top100Count),
     ...(row.averagePosition === null
       ? {}
       : { averagePosition: Number(row.averagePosition.toFixed(2)) })
@@ -1179,6 +1207,7 @@ function deletionResult(
 function positionFilterHash(input: RankPositionReportInput): string {
   return filterHash({
     mode: input.mode,
+    includeUntracked: input.includeUntracked ?? true,
     dimensionKey: input.dimensionKey,
     observedFrom: input.observedFrom,
     observedBefore: input.observedBefore,

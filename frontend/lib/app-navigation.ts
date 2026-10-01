@@ -1,5 +1,7 @@
 export type AppNavigationSection =
   | "competitors"
+  | "serp"
+  | "crawl"
   | "notifications"
   | "notes"
   | "overview"
@@ -13,6 +15,20 @@ export type AppNavigationSection =
 
 const PROJECT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+/** Keep the current screen, dropping filters bound to the previous project. */
+export function projectSwitchHref(pathname: string, projectId?: string): string {
+  if (!pathname.startsWith("/app/") || !projectId) return "/app";
+  // A result/note ID cannot be reused in another project's detail screen.
+  if (/^\/app\/tasks\/[^/]+\/[^/]+/u.test(pathname)) return "/app/tasks";
+  if (/^\/app\/projects\/[^/]+\/notes\/[^/]+/u.test(pathname)) {
+    return `/app/projects/${encodeURIComponent(projectId)}/notes`;
+  }
+  if (/^\/app\/projects\/[^/]+\//u.test(pathname)) {
+    return pathname.replace(/^\/app\/projects\/[^/]+/u, `/app/projects/${encodeURIComponent(projectId)}`);
+  }
+  return pathname;
+}
 
 interface NavigationStorage {
   getItem(key: string): string | null;
@@ -96,6 +112,8 @@ export function appNavigationSection(
   if (segments[1] !== "projects") return "overview";
   if (segments.length === 2) return "projects";
   if (segments[3] === "settings") return "settings";
+  if (segments[3] === "tools" && segments[4] === "serp") return "serp";
+  if (segments[3] === "tools" && segments[4] === "http-status-checker") return "crawl";
   if (segments[3] === "tools") return "tools";
   if (segments[3] === "pages") return "pages";
   if (segments[3] === "notes") return "notes";

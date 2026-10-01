@@ -94,3 +94,19 @@ function sqlText(value: unknown): string {
   assert.ok(strings);
   return strings.join(" ");
 }
+
+test("position order uses the latest project slice, not an older best position", async () => {
+  const queries: unknown[] = [];
+  const service = new RankWorkbenchService({
+    $queryRaw: async (query: unknown) => { queries.push(query); return []; },
+    rankDimensionMerge: { findMany: async () => [] }
+  } as unknown as PrismaService);
+  await service.positions({ workspaceId: "01900000-0000-7000-8000-000000000001", projectId: "01900000-0000-7000-8000-000000000002" }, {
+    mode: "SEO", dimensionKey: "YANDEX|RU|213|ru|DESKTOP", observedFrom: "2026-08-01T00:00:00.000Z", observedBefore: "2026-09-11T00:00:00.000Z", dateLimit: 31, limit: 100, sort: "POSITION_ASC", includeUntracked: false
+  });
+  const page = queries.map(sqlText).find((text) => text.includes("latest_slice_position"));
+  assert.ok(page);
+  assert.match(page, /MAX\(\(observed_at AT TIME ZONE 'UTC'\)::date\)/u);
+  assert.match(page, /ORDER BY latest_slice_position ASC NULLS LAST/u);
+  assert.match(page, /keyword\.is_tracked = TRUE/u);
+});

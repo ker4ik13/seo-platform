@@ -4,6 +4,7 @@ import {
 } from "@seo-platform/process-supervisor";
 
 const DATABASE_POOL = ["DATABASE_POOL_MAX"] as const;
+const REMOTE_WORK_KEYS = ["REMOTE_WORK_ENABLED","REMOTE_WORK_CONTROL_URL"] as const;
 const S3_KEYS = [
   "S3_ACCESS_KEY_ID",
   "S3_BUCKET_ARTIFACTS",
@@ -22,6 +23,7 @@ const SEO_KEYS = [
   "SEO_DATA_URL"
 ] as const;
 const HTTP_KEYS = [
+  ...REMOTE_WORK_KEYS,
   ...DATABASE_POOL,
   ...S3_KEYS,
   ...SEO_KEYS,
@@ -52,6 +54,7 @@ const HTTP_KEYS = [
   "UPLOAD_PART_SIZE_BYTES"
 ] as const;
 const IMPORT_KEYS = [
+  ...REMOTE_WORK_KEYS,
   ...DATABASE_POOL,
   ...S3_KEYS,
   ...SEO_KEYS,
@@ -66,6 +69,7 @@ const IMPORT_KEYS = [
   "IMPORT_STAGING_BATCH_ROWS"
 ] as const;
 const INSPECTION_KEYS = [
+  ...REMOTE_WORK_KEYS,
   ...DATABASE_POOL,
   ...S3_KEYS,
   "MALWARE_SCANNER_CONNECT_TIMEOUT_MS",
@@ -95,6 +99,7 @@ const RANK_KEYS = [
   "SEO_DATA_URL"
 ] as const;
 const CRAWL_KEYS = [
+  ...REMOTE_WORK_KEYS,
   ...DATABASE_POOL,
   ...SEO_KEYS,
   "CRAWL_CONCURRENCY",
@@ -106,6 +111,7 @@ const CRAWL_KEYS = [
   "CRAWL_REQUEST_TIMEOUT_MS"
 ] as const;
 const CONNECTOR_KEYS = [
+  ...REMOTE_WORK_KEYS,
   ...DATABASE_POOL,
   ...SEO_KEYS,
   "JOBS_TO_PLATFORM_BILLING_SETTLEMENT_TOKEN",

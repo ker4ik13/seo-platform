@@ -313,7 +313,7 @@ export class WorkerRankGatewayService {
     }
   }
 
-  private assertEnabled(): void {
+  public assertEnabled(): void {
     if (!this.config.workerGatewayEnabled ||
       this.config.integrationCredentials.role !== "BOTH") {
       throw new ServiceUnavailableException("Remote execution is disabled");

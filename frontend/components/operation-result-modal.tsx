@@ -11,6 +11,7 @@ import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
 import { useUiLocale, UiText } from "./ui-locale";
 import { Icon } from "./icon";
+import { OperationIdentity } from "./operation-identity";
 
 
 export function OperationResultModal({
@@ -64,6 +65,7 @@ export function OperationResultModal({
         className="operation-result-modal"
         headerActions={(
           <>
+            <OperationIdentity id={operationId} />
             {rankRuntimeLogState && (
               <button
                 aria-haspopup="dialog"

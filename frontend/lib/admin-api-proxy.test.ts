@@ -47,6 +47,12 @@ test("admin proxy exposes only explicit authentication and admin routes", () => 
     adminUpstreamPath(["projects"]),
     "/admin-api/v1/projects"
   );
+  for (const root of ["users", "workspaces"]) {
+    assert.equal(
+      adminUpstreamPath([root, "01900000-0000-7000-8000-000000000001", "state"]),
+      `/admin-api/v1/${root}/01900000-0000-7000-8000-000000000001/state`
+    );
+  }
   assert.equal(
     adminUpstreamPath(["operations"]),
     "/admin-api/v1/operations"
@@ -58,7 +64,13 @@ test("admin proxy exposes only explicit authentication and admin routes", () => 
     ]),
     "/admin-api/v1/operations/01900000-0000-7000-8000-000000000001"
   );
+  assert.equal(
+    adminUpstreamPath(["operations", "01900000-0000-7000-8000-000000000001", "cancel"]),
+    "/admin-api/v1/operations/01900000-0000-7000-8000-000000000001/cancel"
+  );
   assert.equal(adminUpstreamPath(["worker-nodes"]), "/admin-api/v1/worker-nodes");
+  assert.equal(adminUpstreamPath(["worker-nodes", "01900000-0000-7000-8000-000000000001"]), "/admin-api/v1/worker-nodes/01900000-0000-7000-8000-000000000001");
+  assert.equal(adminUpstreamPath(["worker-nodes", "invalid"]), undefined);
   assert.equal(adminUpstreamPath([
     "worker-nodes", "01900000-0000-7000-8000-000000000001", "enabled"
   ]), "/admin-api/v1/worker-nodes/01900000-0000-7000-8000-000000000001/enabled");
@@ -91,6 +103,7 @@ test("admin proxy exposes only explicit authentication and admin routes", () => 
     undefined
   );
   assert.equal(adminUpstreamPath(["operations", "retry"]), undefined);
+  assert.equal(adminUpstreamPath(["users", "01900000-0000-7000-8000-000000000001", "roles"]), undefined);
 });
 
 test("preserves every upstream Set-Cookie value", () => {

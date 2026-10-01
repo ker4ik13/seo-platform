@@ -1,5 +1,7 @@
 import { lstat, readFile } from "node:fs/promises";
 import { isIP } from "node:net";
+import type { WorkerCapability } from "@seo-platform/contracts";
+import type { MalwareScannerConfig } from "../config/app-config.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const TOKEN_PATTERN = /^wn_[A-Za-z0-9_-]{43}$/u;
@@ -12,6 +14,9 @@ export interface RemoteWorkerConfig {
   readonly cpuSlots: number;
   readonly rankSlots: number;
   readonly heartbeatMs: number;
+  readonly capabilitySlots:Readonly<Partial<Record<WorkerCapability,number>>>;
+  readonly cpuTaskMemoryMb:number;
+  readonly malware?:MalwareScannerConfig;
 }
 
 export async function loadRemoteWorkerConfig(
@@ -60,14 +65,30 @@ export async function loadRemoteWorkerConfig(
   }
   const httpSlots = bounded(env.WORKER_HTTP_SLOTS, 16, 1, 512);
   const rankSlots = bounded(env.WORKER_RANK_SLOTS, 0, 0, httpSlots);
+  const cpuSlots=bounded(env.WORKER_CPU_SLOTS,2,1,128);
+  const scannerHost=env.WORKER_MALWARE_SCANNER_HOST;
+  if(scannerHost && !/^[A-Za-z0-9.-]{1,253}$/u.test(scannerHost)) throw new Error("Invalid worker scanner host");
+  const capacity=(key:string,fallback:number,maximum:number)=>bounded(env[key] || undefined,fallback,0,maximum);
+  const capabilitySlots={RANK:rankSlots,
+    WORDSTAT:capacity("WORKER_WORDSTAT_SLOTS",Math.min(httpSlots,10),httpSlots),
+    RESEARCH:capacity("WORKER_RESEARCH_SLOTS",Math.min(httpSlots,10),httpSlots),
+    AI_ANSWER:capacity("WORKER_AI_ANSWER_SLOTS",Math.min(httpSlots,5),httpSlots),
+    CLUSTERING:capacity("WORKER_CLUSTERING_SLOTS",Math.min(httpSlots,2),httpSlots),
+    CRAWL:capacity("WORKER_CRAWL_SLOTS",httpSlots,httpSlots),
+    IMPORT:capacity("WORKER_IMPORT_SLOTS",cpuSlots,cpuSlots),
+    EXPORT:capacity("WORKER_EXPORT_SLOTS",cpuSlots,cpuSlots),
+    INSPECTION:capacity("WORKER_INSPECTION_SLOTS",scannerHost ? 1 : 0,cpuSlots)};
   return {
     controlUrl,
     nodeId: rawId.toLowerCase(),
     token,
     httpSlots,
-    cpuSlots: bounded(env.WORKER_CPU_SLOTS, 2, 1, 128),
+    cpuSlots,
     rankSlots,
-    heartbeatMs: bounded(env.WORKER_HEARTBEAT_MS, 10_000, 3_000, 30_000)
+    heartbeatMs: bounded(env.WORKER_HEARTBEAT_MS, 10_000, 3_000, 30_000),
+    capabilitySlots,
+    cpuTaskMemoryMb:bounded(env.WORKER_CPU_TASK_MEMORY_MB,1024,128,16_384),
+    ...(scannerHost ? {malware:{enabled:true,host:scannerHost,port:bounded(env.WORKER_MALWARE_SCANNER_PORT,3310,1,65535),connectTimeoutMs:3_000,scanTimeoutMs:900_000}} : {})
   };
 }
 

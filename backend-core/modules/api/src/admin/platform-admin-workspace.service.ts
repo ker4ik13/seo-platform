@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
   AdminBillingPlanSummary,
+  AdminDirectorySort,
   AdminWorkspaceSearchResult,
   AdminWorkspaceSubscriptionGrantSummary,
   AdminWorkspaceSummary,
@@ -44,7 +45,8 @@ export class PlatformAdminWorkspaceService {
   }
 
   public async searchWorkspaces(
-    query: string
+    query: string,
+    sort: AdminDirectorySort = "CREATED_DESC"
   ): Promise<AdminWorkspaceSearchResult> {
     const ownerIds = query
       ? await this.matchingOwnerIds(query)
@@ -67,7 +69,7 @@ export class PlatformAdminWorkspaceService {
         _count: { select: { members: true, projects: true } },
         billingSubscription: { include: SUBSCRIPTION_INCLUDE }
       },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: sort === "NAME_ASC" ? [{ name: "asc" }, { id: "asc" }] : sort === "NAME_DESC" ? [{ name: "desc" }, { id: "desc" }] : sort === "CREATED_ASC" ? [{ createdAt: "asc" }, { id: "asc" }] : [{ createdAt: "desc" }, { id: "desc" }],
       take: WORKSPACE_SEARCH_LIMIT + 1
     });
     const page = workspaces.slice(0, WORKSPACE_SEARCH_LIMIT);
@@ -78,6 +80,7 @@ export class PlatformAdminWorkspaceService {
         emailDisplay: true,
         displayName: true,
         status: true
+        , version: true
       }
     });
     const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
@@ -95,6 +98,7 @@ export class PlatformAdminWorkspaceService {
                 email: owner.emailDisplay,
                 displayName: owner.displayName,
                 status: owner.status
+                , version: owner.version
               }
             : {
                 userId: workspace.ownerUserId,

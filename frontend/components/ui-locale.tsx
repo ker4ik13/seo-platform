@@ -6,7 +6,7 @@ import { normalizedUiLocale, translateUi, uiLocaleCookie, type UiLocale, type Ui
 
 interface LocaleState { locale: UiLocale; t: (text: string, values?: readonly string[]) => string; change: (locale: UiLocale) => Promise<void>; saving: boolean; error?: string | undefined }
 const LocaleContext = createContext<LocaleState>({ locale: "ru", t: (text, values) => translateUi("ru", text, values), change: async () => {}, saving: false });
-export function UiLocaleProvider({ initialLocale, authenticated, children }: { initialLocale: string; authenticated?: boolean; children: ReactNode }) {
+export function UiLocaleProvider({ initialLocale, authenticated, persistLocale = true, children }: { initialLocale: string; authenticated?: boolean; persistLocale?: boolean; children: ReactNode }) {
   const [locale, setLocale] = useState<UiLocale>(() => normalizedUiLocale(initialLocale));
   const [saving, setSaving] = useState(false), [error, setError] = useState<string>();
   const router = useRouter();
@@ -14,8 +14,9 @@ export function UiLocaleProvider({ initialLocale, authenticated, children }: { i
   useEffect(() => { setLocale(normalizedUiLocale(initialLocale)); }, [initialLocale]);
   useEffect(() => {
     if (authenticated === false && !/^\/app\/(?:login|register|mfa|forgot-password|reset-password|verify-email|workspace-invites)(?:\/|$)/u.test(pathname)) return;
-    document.documentElement.lang = locale; document.cookie = `${uiLocaleCookie}=${locale}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`;
-  }, [locale, authenticated, pathname]);
+    document.documentElement.lang = locale;
+    if (persistLocale) document.cookie = `${uiLocaleCookie}=${locale}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`;
+  }, [locale, authenticated, pathname, persistLocale]);
   const t = useCallback((text: string, values: readonly string[] = []) => translateUi(locale, text, values), [locale]);
   const change = useCallback(async (next: UiLocale) => {
     setLocale(next); setError(undefined); setSaving(true);

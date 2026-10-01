@@ -261,7 +261,7 @@ export class FrequencyCollectionRuntimeBrokerService {
   ): Promise<void> {
     if (
       !Number.isSafeInteger(retryAfterSeconds) ||
-      retryAfterSeconds < 5 ||
+      retryAfterSeconds < 1 ||
       retryAfterSeconds > 3_600
     ) invalid();
     const rows = await this.prisma.$queryRaw<readonly CompletionRow[]>(Prisma.sql`

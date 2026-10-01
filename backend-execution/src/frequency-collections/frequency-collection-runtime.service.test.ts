@@ -3,6 +3,7 @@ import test from "node:test";
 import type { AppConfig } from "../config/app-config.js";
 import type { FrequencyCollectionClaim } from "./frequency-collection-runtime-broker.service.js";
 import { FrequencyCollectionRuntimeService } from "./frequency-collection-runtime.service.js";
+import type { WordstatCollectionResult, XmlStockSeasonalityResult } from "./xmlstock-wordstat.connector.js";
 
 test("runtime drains a bounded batch and stops when the broker is idle", async () => {
   const runtime = new RuntimeHarness([
@@ -455,6 +456,36 @@ test("an XMLStock credential quota miss is deferred without calling Wordstat", a
   assert.equal(releases[0]?.[1], 2);
 });
 
+test("remote XMLStock capacity waits do not exhaust attempts in either frequency mode", async () => {
+  for (const mode of ["FREQUENCY", "SEASONALITY"] as const) {
+    let releases = 0;
+    const unavailable = { ok: false as const, code: "PROVIDER_CONCURRENCY_LIMITED" as const, retryable: true, retryAfterSeconds: 5 };
+    const runtime = runtimeWith({
+      claims: [{ ...(mode === "SEASONALITY" ? seasonalityClaim(1) : frequencyClaim(1)), provider: "XMLSTOCK" }],
+      xmlStock: { collect: async () => unavailable, collectSeasonality: async () => unavailable },
+      fail: async () => { assert.fail("capacity must not spend a provider failure attempt"); },
+      release: async () => { releases++; }
+    });
+    assert.equal(await runtime.processOne("connector-123456"), "RETRY_SCHEDULED");
+    assert.equal(releases, 1);
+  }
+});
+
+test("a marked Arsenkin submit that provably did not start waits for capacity, not reconciliation", async () => {
+  let releases = 0;
+  const runtime = runtimeWith({
+    claims: [frequencyClaim(1)],
+    arsenkin: { submit: async (_input, _secret, _timeout, beforeRequest) => {
+      assert.equal(await beforeRequest?.(), true);
+      return { status: "RETRYABLE_FAILURE", code: "PROVIDER_CONCURRENCY_LIMITED", retryAfterSeconds: 5 };
+    } },
+    quarantine: async () => { assert.fail("no paid request was started"); },
+    release: async () => { releases++; }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "RETRY_SCHEDULED");
+  assert.equal(releases, 1);
+});
+
 class RuntimeHarness extends FrequencyCollectionRuntimeService {
   public constructor(private readonly results: string[]) {
     super(
@@ -497,9 +528,9 @@ function runtimeWith(input: {
   };
   readonly xmlStock?: {
     readonly collect?: (input: { readonly keyword: string; readonly type: string }) =>
-      Promise<{ readonly ok: true; readonly value: string }>;
+      Promise<WordstatCollectionResult>;
     readonly collectSeasonality?: (input: { readonly keyword: string; readonly type: string }) =>
-      Promise<{ readonly ok: true; readonly points: readonly { readonly periodStart: string; readonly value: string }[] }>;
+      Promise<XmlStockSeasonalityResult>;
   };
   readonly resolve?: (request: ResolveRequest) => Promise<void>;
   readonly persist?: (request: PersistRequest) => Promise<void>;

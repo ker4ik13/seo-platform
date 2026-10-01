@@ -1,9 +1,15 @@
 "use client";
 
+import { CustomSelect } from "../../components/custom-select";
+import { AdminDirectorySortControl } from "../../components/admin-directory-sort";
+import { AdminStateAction } from "../../components/admin-state-action";
+import { useAdminDirectorySort } from "../../lib/use-admin-directory-sort";
+
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent
 } from "react";
@@ -13,30 +19,40 @@ import type {
   AdminProjectSummary
 } from "@seo-platform/contracts";
 import { adminApi } from "../../lib/admin-browser-api";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
 
 type ProjectStatusFilter = AdminProjectStatus | "ALL";
 
-export function ProjectAdministration() {
+export function ProjectAdministration({ canControl = false }: Readonly<{ canControl?: boolean }>) {
+  const { sort, changeSort } = useAdminDirectorySort("project");
   const { t: uiText } = useUiLocale();
   const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [status, setStatus] = useState<ProjectStatusFilter>("ALL");
   const [result, setResult] = useState<AdminProjectSearchResult>();
   const [selected, setSelected] = useState<AdminProjectSummary>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const latestRequest = useRef<AbortController | null>(null);
 
-  const load = useCallback(async (search: string, projectStatus: ProjectStatusFilter) => {
-    setLoading(true);
+  const load = useCallback(async (search: string, projectStatus: ProjectStatusFilter, silent = false) => {
+    latestRequest.current?.abort();
+    const controller = new AbortController();
+    latestRequest.current = controller;
+    if (!silent) setLoading(true);
     setError(undefined);
     const params = new URLSearchParams({
       q: search.trim(),
       status: projectStatus
+      , sort
     });
     const response = await adminApi<AdminProjectSearchResult>(
-      `/api/projects?${params.toString()}`
+      `/api/projects?${params.toString()}`,
+      { signal: controller.signal }
     );
+    if (controller.signal.aborted) return;
     setLoading(false);
     if (!response.ok) {
       setError(response.message);
@@ -48,11 +64,13 @@ export function ProjectAdministration() {
         ? response.data.data.find((project) => project.id === current.id) ?? current
         : undefined
     );
-  }, []);
+  }, [sort]);
 
   useEffect(() => {
-    void load("", status);
-  }, [load, status]);
+    void load(appliedQuery, status);
+  }, [appliedQuery, load, status]);
+  useAdminAutoRefresh(() => load(appliedQuery, status, true));
+  useEffect(() => () => latestRequest.current?.abort(), []);
 
   const metrics = useMemo(() => {
     const projects = result?.data ?? [];
@@ -66,15 +84,12 @@ export function ProjectAdministration() {
 
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void load(query, status);
+    if (query.trim() === appliedQuery) void load(appliedQuery, status);
+    else setAppliedQuery(query.trim());
   }
 
   return (
     <div className="content project-admin">
-      <section className="heading">
-        <div><p>Platform directory</p><h1><UiText text="Проекты" /></h1></div>
-        <span className="external"><UiText text="Не более 50 проектов в выборке" /></span>
-      </section>
       <form className="workspace-search admin-search-with-filter" onSubmit={search}>
         <label>
           <span className="sr-only"><UiText text="Поиск проекта" /></span>
@@ -85,7 +100,7 @@ export function ProjectAdministration() {
             value={query}
           />
         </label>
-        <select
+        <CustomSelect
           aria-label={uiText("Статус проекта")}
           onChange={(event) => setStatus(event.target.value as ProjectStatusFilter)}
           value={status}
@@ -96,7 +111,8 @@ export function ProjectAdministration() {
           <option value="ARCHIVED"><UiText text="В архиве" /></option>
           <option value="DELETING"><UiText text="Удаляются" /></option>
           <option value="DELETED"><UiText text="Удалённые" /></option>
-        </select>
+        </CustomSelect>
+        <AdminDirectorySortControl value={sort} onChange={changeSort} />
         <button className="primary" disabled={loading} type="submit">
           {loading ? <UiText text="Ищем…" /> : <UiText text="Найти" />}
         </button>
@@ -115,12 +131,6 @@ export function ProjectAdministration() {
         <Metric label={uiText("Папок")} value={metrics.folders} />
       </section>
       <section className="panel workspace-panel">
-        <header>
-          <div>
-            <h2><UiText text="Проекты, авторы и использование" /></h2>
-            <p><UiText text="Системные папки и удалённые ключи в счётчики не входят" /></p>
-          </div>
-        </header>
         {result?.truncated && (
           <div className="workspace-hint"><UiText text="Найдено больше 50 проектов. Уточните запрос." /></div>
         )}
@@ -140,7 +150,7 @@ export function ProjectAdministration() {
           </div>
         )}
       </section>
-      {selected && <ProjectDrawer onClose={() => setSelected(undefined)} project={selected} />}
+      {selected && <ProjectDrawer canControl={canControl} onUpdated={() => void load(appliedQuery, status)} onClose={() => setSelected(undefined)} project={selected} />}
     </div>
   );
 }
@@ -180,9 +190,11 @@ function ProjectRow({
 }
 
 function ProjectDrawer({
+  canControl,
+  onUpdated,
   onClose,
   project
-}: Readonly<{ onClose: () => void; project: AdminProjectSummary }>) {
+}: Readonly<{ canControl: boolean; onUpdated: () => void; onClose: () => void; project: AdminProjectSummary }>) {
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
   useEffect(() => {
@@ -218,6 +230,7 @@ function ProjectDrawer({
           <Snapshot label={uiText("Обновлён")} value={formatDate(project.updatedAt, uiLocale)} />
         </div>
         <div className="workspace-readonly">
+          {canControl && <div className="admin-control-actions"><AdminStateAction kind="USER" id={project.owner.userId} name={project.owner.displayName} status={project.owner.status} {...(project.owner.version ? { version: project.owner.version } : {})} onUpdated={onUpdated} /></div>}
           <strong><UiText text="Режим просмотра" /></strong>
           <p className="form-description"><UiText text="Из этого экрана данные проекта не изменяются." /></p>
         </div>

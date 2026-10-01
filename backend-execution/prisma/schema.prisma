@@ -169,6 +169,9 @@ enum KeywordResearchStatus {
 }
 
 model Job {
+  remoteAssignments     RemoteOperationAssignment[]
+  remoteWorkTasks       RemoteWorkTask[]
+  workerAssignment       RankJobWorkerAssignment?
   billingQuoteId String? @map("billing_quote_id") @db.Uuid
   billingCommandHash Bytes? @map("billing_command_hash")
   billingMaximumUnitsMilli BigInt? @map("billing_maximum_units_milli")
@@ -1258,6 +1261,9 @@ model OutboxEvent {
 }
 
 model ExecutionWorkerNode {
+  remoteWorkTasks        RemoteWorkTask[]
+  remoteAssignments      RemoteOperationAssignment[]
+  rankJobAssignments     RankJobWorkerAssignment[]
   id                     String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name                   String    @db.VarChar(100)
   tokenHash              Bytes     @unique @map("token_hash")
@@ -1266,8 +1272,10 @@ model ExecutionWorkerNode {
   capabilities           String[]  @default([])
   maxHttpSlots           Int       @default(16) @map("max_http_slots")
   maxCpuSlots            Int       @default(2) @map("max_cpu_slots")
+  capabilityLimits       Json      @default("{}") @map("capability_limits")
   reportedHttpSlots      Int       @default(0) @map("reported_http_slots")
   reportedRankSlots      Int       @default(0) @map("reported_rank_slots")
+  reportedCapabilitySlots Json     @default("{}") @map("reported_capability_slots")
   reportedCpuSlots       Int       @default(0) @map("reported_cpu_slots")
   reportedMemoryBytes    BigInt    @default(0) @map("reported_memory_bytes")
   activeWorkItems        Int       @default(0) @map("active_work_items")
@@ -1275,7 +1283,72 @@ model ExecutionWorkerNode {
   lastProtocolVersion    Int?      @map("last_protocol_version")
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   @@index([enabled, draining, lastHeartbeatAt])
   @@map("execution_worker_nodes")
+}
+
+model RemoteOperationAssignment {
+  operationId String @map("operation_id") @db.Uuid
+  capability String @db.VarChar(24)
+  workspaceId String @map("workspace_id") @db.Uuid
+  projectId String? @map("project_id") @db.Uuid
+  jobId String? @map("job_id") @db.Uuid
+  nodeId String @map("node_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  node ExecutionWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  job Job? @relation(fields:[jobId],references:[id],onDelete:Cascade)
+
+  @@id([operationId, capability])
+  @@index([nodeId])
+  @@index([jobId])
+  @@map("remote_operation_assignments")
+}
+
+model RemoteWorkTask {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  projectId String? @map("project_id") @db.Uuid
+  operationId String @map("operation_id") @db.Uuid
+  jobId String? @map("job_id") @db.Uuid
+  nodeId String @map("node_id") @db.Uuid
+  capability String @db.VarChar(24)
+  command String @db.VarChar(32)
+  resource String @db.VarChar(8)
+  sourceScope Json @map("source_scope")
+  payload Json
+  payloadHash String @map("payload_hash") @db.Char(64)
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  state String @default("PENDING") @db.VarChar(16)
+  readTokenHash Bytes @map("read_token_hash")
+  leaseToken String @default(dbgenerated("gen_random_uuid()")) @map("lease_token") @db.Uuid
+  executionDeadline DateTime @map("execution_deadline") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  claimedAt DateTime? @map("claimed_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  result Json?
+  resultHash String? @map("result_hash") @db.Char(64)
+  errorCode String? @map("error_code") @db.VarChar(64)
+  resultObjectKey String? @map("result_object_key") @db.Text
+  resultMultipartId String? @map("result_multipart_id") @db.Text
+  job Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  node ExecutionWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+
+  @@index([nodeId, state, createdAt])
+  @@index([operationId, state])
+  @@index([state, executionDeadline])
+  @@map("remote_work_tasks")
+}
+
+model RankJobWorkerAssignment {
+  jobId       String   @id @map("job_id") @db.Uuid
+  nodeId      String   @map("node_id") @db.Uuid
+  assignedAt  DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  generation  Int      @default(1)
+  job         Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  node        ExecutionWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId], map: "rank_job_worker_assignments_node_idx")
+  @@map("rank_job_worker_assignments")
 }

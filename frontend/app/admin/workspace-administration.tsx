@@ -1,5 +1,11 @@
 "use client";
 
+import { CustomSelect } from "../../components/custom-select";
+import { AdminDirectorySortControl } from "../../components/admin-directory-sort";
+import { AdminStateAction } from "../../components/admin-state-action";
+import { useAdminDirectorySort } from "../../lib/use-admin-directory-sort";
+import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
+
 import { isPermanentFreeSubscription } from "../../lib/billing-subscription-period";
 import {
   useCallback,
@@ -28,24 +34,33 @@ interface StableAttempt {
 }
 
 export function WorkspaceAdministration({
+  canControl = false,
   canManageBilling
-}: Readonly<{ canManageBilling: boolean }>) {
+}: Readonly<{ canManageBilling: boolean; canControl?: boolean }>) {
+  const { sort, changeSort } = useAdminDirectorySort("workspace");
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
   const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [result, setResult] = useState<AdminWorkspaceSearchResult>();
   const [plans, setPlans] = useState<readonly AdminBillingPlanSummary[]>([]);
   const [selected, setSelected] = useState<AdminWorkspaceSummary>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const latestRequest = useRef<AbortController | null>(null);
 
-  const loadWorkspaces = useCallback(async (search: string) => {
-    setLoading(true);
+  const loadWorkspaces = useCallback(async (search: string, silent = false) => {
+    latestRequest.current?.abort();
+    const controller = new AbortController();
+    latestRequest.current = controller;
+    if (!silent) setLoading(true);
     setError(undefined);
     const response = await adminApi<AdminWorkspaceSearchResult>(
-      `/api/workspaces?q=${encodeURIComponent(search.trim())}`
+      `/api/workspaces?q=${encodeURIComponent(search.trim())}&sort=${sort}`,
+      { signal: controller.signal }
     );
+    if (controller.signal.aborted) return;
     setLoading(false);
     if (!response.ok) {
       setError(response.message);
@@ -58,7 +73,7 @@ export function WorkspaceAdministration({
           current
         : undefined
     );
-  }, []);
+  }, [sort]);
 
   const loadPlans = useCallback(async () => {
     if (!canManageBilling) return;
@@ -70,9 +85,13 @@ export function WorkspaceAdministration({
   }, [canManageBilling]);
 
   useEffect(() => {
-    void loadWorkspaces("");
+    void loadWorkspaces(appliedQuery);
+  }, [appliedQuery, loadWorkspaces]);
+  useEffect(() => {
     void loadPlans();
-  }, [loadPlans, loadWorkspaces]);
+  }, [loadPlans]);
+  useAdminAutoRefresh(() => loadWorkspaces(appliedQuery, true));
+  useEffect(() => () => latestRequest.current?.abort(), []);
 
   const metrics = useMemo(() => {
     const workspaces = result?.data ?? [];
@@ -94,23 +113,12 @@ export function WorkspaceAdministration({
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setNotice(undefined);
-    void loadWorkspaces(query);
+    if (query.trim() === appliedQuery) void loadWorkspaces(appliedQuery);
+    else setAppliedQuery(query.trim());
   }
 
   return (
     <div className="content workspace-admin">
-      <section className="heading">
-        <div>
-          <p>Tenant operations</p>
-          <h1><UiText text="Рабочие области" /></h1>
-        </div>
-        <span className="external"><UiText text="Не более 50 записей в выборке" /></span>
-      </section>
-      <aside className="warning">
-        <strong><UiText text="Изменения тарифа записываются в аудит." /></strong>
-        <span>
-          <UiText text="Ручная подписка не создаёт оплату или чек и отвязывает прежний автоплатёж рабочей области." /></span>
-      </aside>
       <form className="workspace-search" onSubmit={search}>
         <label>
           <span className="sr-only"><UiText text="Поиск рабочей области" /></span>
@@ -121,6 +129,7 @@ export function WorkspaceAdministration({
             value={query}
           />
         </label>
+        <AdminDirectorySortControl value={sort} onChange={changeSort} />
         <button className="primary" disabled={loading} type="submit">
           {loading ? <UiText text="Ищем…" /> : <UiText text="Найти" />}
         </button>
@@ -140,12 +149,6 @@ export function WorkspaceAdministration({
         <WorkspaceMetric label={uiText("Проектов")} value={metrics.projects} />
       </section>
       <section className="panel workspace-panel">
-        <header>
-          <div>
-            <h2><UiText text="Рабочие области и владельцы" /></h2>
-            <p><UiText text="Текущий тариф показывается из источника истины биллинга" /></p>
-          </div>
-        </header>
         {result?.truncated && (
           <div className="workspace-hint">
             <UiText text="Найдено больше 50 записей. Уточните поисковый запрос." /></div>
@@ -178,6 +181,8 @@ export function WorkspaceAdministration({
       </section>
       {selected && (
         <WorkspaceDrawer
+          canControl={canControl}
+          onControlUpdated={() => void loadWorkspaces(query)}
           canManageBilling={canManageBilling}
           onClose={() => setSelected(undefined)}
           onUpdated={(grant) => {
@@ -185,7 +190,7 @@ export function WorkspaceAdministration({
               `${grant.planName} выдан рабочей области до ${formatDate(grant.currentPeriodEnd, uiLocale)}.`
             );
             setSelected(undefined);
-            void loadWorkspaces(query);
+            void loadWorkspaces(appliedQuery);
           }}
           plans={plans}
           workspace={selected}
@@ -242,6 +247,8 @@ function WorkspaceRow({
 }
 
 function WorkspaceDrawer({
+  canControl,
+  onControlUpdated,
   canManageBilling,
   onClose,
   onUpdated,
@@ -249,6 +256,8 @@ function WorkspaceDrawer({
   workspace
 }: Readonly<{
   canManageBilling: boolean;
+  canControl: boolean;
+  onControlUpdated: () => void;
   onClose: () => void;
   onUpdated: (grant: AdminWorkspaceSubscriptionGrantSummary) => void;
   plans: readonly AdminBillingPlanSummary[];
@@ -385,6 +394,10 @@ function WorkspaceDrawer({
               : "—"}
           />
         </div>
+        {canControl && <section className="admin-control-panel"><h3>Управление доступом</h3><p>Изменения требуют подтверждения и записываются в аудит.</p><div className="admin-control-actions">
+          <AdminStateAction kind="WORKSPACE" id={workspace.id} name={workspace.name} version={workspace.version} status={workspace.status} onUpdated={onControlUpdated} />
+          <AdminStateAction kind="USER" id={workspace.owner.userId} name={workspace.owner.displayName} status={workspace.owner.status} {...(workspace.owner.version ? { version: workspace.owner.version } : {})} onUpdated={onControlUpdated} />
+        </div></section>}
         {!canManageBilling ? (
           <div className="empty workspace-readonly">
             <strong><UiText text="Режим просмотра" /></strong>
@@ -405,7 +418,7 @@ function WorkspaceDrawer({
             {error && <div className="form-alert" role="alert">{<UiText text={error ?? ""} />}</div>}
             <label>
               <span><UiText text="Тариф и версия" /></span>
-              <select
+              <CustomSelect
                 onChange={(event) => setPlanKey(event.target.value)}
                 required
                 value={planKey}
@@ -415,7 +428,7 @@ function WorkspaceDrawer({
                     {plan.name} · {plan.code} v{plan.version}
                   </option>
                 ))}
-              </select>
+              </CustomSelect>
             </label>
             {chosenPlan && (
               <div className="plan-preview">

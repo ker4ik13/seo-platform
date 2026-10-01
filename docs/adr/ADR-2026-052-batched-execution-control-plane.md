@@ -101,5 +101,8 @@ rank agent запрашивает до 32 poll-задач одним HTTP-выз
 
 Не реализованы и не должны считаться готовыми: run-level authorization и
 пакетный Platform billing вместо per-item grant, set-based rank grant claim,
-remote adapters Wordstat/AI/clustering/crawl/import/export/inspection,
-authoritative worker assignment UI и нагрузочное доказательство 10/20/100.
+нагрузочное доказательство 10/20/100. Remote adapters
+Wordstat/AI/clustering/crawl/import/export/inspection и назначения в UI
+добавлены по ADR-2026-054; бесплатный HTTPS smoke проверяет реальные
+inspection/import/export. Полный cutover per-item billing не объявляется
+завершённым только из-за наличия транспорта Gateway.

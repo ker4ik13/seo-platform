@@ -11,6 +11,7 @@ import type { ProtectedAppContext } from "../lib/app-types";
 import { appNavigationSection } from "../lib/app-navigation";
 import { projectPagesReturnTo } from "../lib/project-pages";
 import { AccountMenu } from "./account-menu";
+import { GlobalSearch } from "./global-search";
 import { Icon, type IconName } from "./icon";
 import { NotificationBell } from "./notification-bell";
 import { TenantSwitcher } from "./tenant-switcher";
@@ -54,10 +55,19 @@ const navigation: readonly {
     available: true
   },
   {
-    label: "Инструменты",
-    icon: "tools",
+    label: "Поисковая выдача",
+    icon: "search",
     href: "/app/tools",
-    section: "tools",
+    section: "serp",
+    projectScoped: true,
+    available: true
+  },
+  {
+    label: "Обход сайта",
+    icon: "http",
+    href: "/app/tools",
+    section: "crawl",
+    projectScoped: true,
     available: true
   },
   {
@@ -87,7 +97,8 @@ const navigation: readonly {
 
 const mobileNavigationSections = new Set([
   "overview",
-  "tools",
+  "serp",
+  "crawl",
   "semantics",
   "rankings",
   "tasks"
@@ -109,7 +120,7 @@ export function AppShell({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initiallyCollapsed);
   const hasProject = Boolean(context.project);
   const hasWorkspace = Boolean(context.workspace);
-  const usesWorkspaceLayout = ["notes", "pages", "semantics", "rankings", "tasks"].includes(
+  const usesWorkspaceLayout = ["notes", "pages", "semantics", "rankings", "tasks", "serp"].includes(
     activeSection
   );
   const isNavigationAvailable = (
@@ -124,7 +135,7 @@ export function AppShell({
     item.projectScoped && context.project
       ? item.section === "pages"
         ? projectPagesReturnTo(context.project.id)
-        : `/app/projects/${encodeURIComponent(context.project.id)}/${item.section}`
+        : `/app/projects/${encodeURIComponent(context.project.id)}/${item.section === "serp" ? "tools/serp" : item.section === "crawl" ? "tools/http-status-checker" : item.section}`
       : item.href;
   return (
     <WorkspaceUsageProvider workspace={context.workspace}>
@@ -246,16 +257,7 @@ export function AppShell({
             />
             <strong><UiText text="SEOньорита" /></strong>
           </div>
-          <label className="global-search">
-            <Icon name="search" />
-            <input
-              aria-label={uiText("Глобальный поиск")}
-              disabled
-              placeholder={uiText("Поиск будет доступен после индексации данных")}
-              type="search"
-            />
-            <kbd>⌘ K</kbd>
-          </label>
+          <GlobalSearch context={context} />
           <div className="topbar-actions">
             <ProjectPresenceAvatars />
             <NotificationBell {...(context.project ? { projectId: context.project.id } : {})} />

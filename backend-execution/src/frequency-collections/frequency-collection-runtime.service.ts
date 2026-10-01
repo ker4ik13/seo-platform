@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { RemoteProviderTransportService } from "../worker-nodes/remote-provider-transport.service.js";
+import { remoteCredentialFingerprint } from "../worker-nodes/remote-work-scope.js";
+import { ProviderExecutionReviewRequiredError } from "../integrations/provider-execution-review.js";
 import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
 import { PaidOperationRuntimeService, PaidOperationReviewError, PaidOperationUnavailableError } from "../paid-operations/paid-operation-runtime.service.js";
 import { Inject, Injectable, Optional } from "@nestjs/common";
@@ -55,7 +58,8 @@ export class FrequencyCollectionRuntimeService {
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
     @Optional() private readonly billing?: PaidOperationRuntimeService,
-    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService,
+    @Optional() private readonly remote?: RemoteProviderTransportService
   ) {}
 
   public async processBatch(
@@ -85,6 +89,13 @@ export class FrequencyCollectionRuntimeService {
       arsenkinWordstatKeywordLimit
     );
     if (!claimed) return "IDLE";
+    const run=()=>this.processClaim(claimed,timeoutMs,leaseSeconds);
+    return this.remote ? this.remote.run({origin:"JOB",workspaceId:claimed.workspaceId,projectId:claimed.projectId,
+      operationId:claimed.jobId,jobId:claimed.jobId,credentialId:claimed.credentialId,provider:claimed.provider,
+      leaseOwner:claimed.leaseOwner,credentialFingerprint:remoteCredentialFingerprint(claimed.encryptedCredential)},"WORDSTAT",run) : run();
+  }
+
+  private async processClaim(claimed:FrequencyCollectionClaim,timeoutMs:number,leaseSeconds:number):Promise<string> {
     let activeClaim: FrequencyCollectionClaim = claimed;
     try {
       if (activeClaim.items.some((item) => item.attempt > activeClaim.maxAttempts)) {
@@ -144,6 +155,7 @@ export class FrequencyCollectionRuntimeService {
             activeClaim.credentialId
           );
       const sourceMode = await this.billing?.mode(activeClaim) === "PLATFORM_PAID" ? "PLATFORM" as const : "BYOK" as const;
+      this.remote?.useSecret(secret);
       let keywords: readonly InternalFrequencyKeyword[] | undefined;
       const resolveKeywords = async (): Promise<readonly string[]> => {
         const resolved = await this.resolveKeywords(activeClaim, leaseSeconds);
@@ -213,7 +225,7 @@ export class FrequencyCollectionRuntimeService {
         if (
           isSubmitMarker(sharedProviderRequestId(activeClaim.items)) &&
           (outcome.status === "OUTCOME_UNKNOWN" ||
-            outcome.status === "RETRYABLE_FAILURE")
+            (outcome.status === "RETRYABLE_FAILURE" && outcome.code !== "PROVIDER_CONCURRENCY_LIMITED"))
         ) {
           await this.broker.quarantineAmbiguousSubmit(activeClaim);
           return "ACTION_REQUIRED";
@@ -318,7 +330,7 @@ export class FrequencyCollectionRuntimeService {
         if (
           isSubmitMarker(sharedProviderRequestId(activeClaim.items)) &&
           (outcome.status === "OUTCOME_UNKNOWN" ||
-            outcome.status === "RETRYABLE_FAILURE")
+            (outcome.status === "RETRYABLE_FAILURE" && outcome.code !== "PROVIDER_CONCURRENCY_LIMITED"))
         ) {
           await this.broker.quarantineAmbiguousSubmit(activeClaim);
           return "ACTION_REQUIRED";
@@ -368,13 +380,14 @@ export class FrequencyCollectionRuntimeService {
           throw new TypeError("Invalid XMLStock frequency claim");
         }
         const acquired = await this.xmlStockQuota.tryAcquire({
+          ...(this.config.remoteWorkEnabled ? {physicalOnly:true} : {}),
           credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
           workspaceId: activeClaim.workspaceId,
           product: "WORDSTAT",
           requestCost: activeClaim.types.length,
           leaseMs:
             timeoutMs * activeClaim.types.length +
-            FREQUENCY_PERSISTENCE_MARGIN_MS
+            FREQUENCY_PERSISTENCE_MARGIN_MS + (this.config.remoteWorkEnabled ? 6_000 * activeClaim.types.length : 0)
         });
         if (!acquired.allowed) {
           await this.broker.releaseForProviderCapacity(
@@ -401,6 +414,10 @@ export class FrequencyCollectionRuntimeService {
               timeoutMs
             ));
             if (!result.ok) {
+              if (result.code === "PROVIDER_CONCURRENCY_LIMITED") {
+                await this.broker.releaseForProviderCapacity(activeClaim, result.retryAfterSeconds ?? 5);
+                return "RETRY_SCHEDULED";
+              }
               if (result.code === "PROVIDER_RATE_LIMITED") {
                 await this.xmlStockQuota.penalize({
                   credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
@@ -443,8 +460,8 @@ export class FrequencyCollectionRuntimeService {
         ? "COMPLETED_ITEM"
         : "COMPLETED_BATCH";
     } catch (error) {
-      if (error instanceof PaidOperationReviewError) {
-        await this.broker.fail(activeClaim, { code: "PAID_OPERATION_REQUIRES_REVIEW", retryable: false }).catch(() => {});
+      if (error instanceof PaidOperationReviewError || error instanceof ProviderExecutionReviewRequiredError) {
+        await this.broker.fail(activeClaim, { code: error instanceof ProviderExecutionReviewRequiredError ? "PROVIDER_REQUIRES_REVIEW" : "PAID_OPERATION_REQUIRES_REVIEW", retryable: false }).catch(() => {});
         return "ACTION_REQUIRED";
       }
       if (error instanceof PaidOperationUnavailableError) {
@@ -510,11 +527,12 @@ export class FrequencyCollectionRuntimeService {
       throw new TypeError("Invalid XMLStock seasonality claim");
     }
     const acquired = await this.xmlStockQuota.tryAcquire({
+      ...(this.config.remoteWorkEnabled ? {physicalOnly:true} : {}),
       credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
       workspaceId: activeClaim.workspaceId,
       product: "WORDSTAT",
       requestCost: activeClaim.types.length,
-      leaseMs: timeoutMs * activeClaim.types.length + FREQUENCY_PERSISTENCE_MARGIN_MS
+      leaseMs: timeoutMs * activeClaim.types.length + FREQUENCY_PERSISTENCE_MARGIN_MS + (this.config.remoteWorkEnabled ? 6_000 * activeClaim.types.length : 0)
     });
     if (!acquired.allowed) {
       await this.broker.releaseForProviderCapacity(
@@ -546,6 +564,10 @@ export class FrequencyCollectionRuntimeService {
           )
         );
         if (!outcome.ok) {
+          if (outcome.code === "PROVIDER_CONCURRENCY_LIMITED") {
+            await this.broker.releaseForProviderCapacity(activeClaim, outcome.retryAfterSeconds ?? 5);
+            return "RETRY_SCHEDULED";
+          }
           if (outcome.code === "PROVIDER_RATE_LIMITED") {
             await this.xmlStockQuota.penalize({
               credentialId: secret.rateLimitScopeId ?? activeClaim.credentialId,
@@ -808,6 +830,7 @@ export class FrequencyCollectionRuntimeService {
       claim.provider === "ARSENKIN" ? 2 : claim.types.length;
     return (
       this.providerRequestTimeoutMs() * maximumRequestCount +
+      (this.config.remoteWorkEnabled ? 15_000 * maximumRequestCount : 0) +
       FREQUENCY_PERSISTENCE_MARGIN_MS
     );
   }

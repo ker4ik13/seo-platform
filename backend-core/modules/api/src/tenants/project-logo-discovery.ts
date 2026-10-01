@@ -7,7 +7,7 @@ import { fetchPublicLogoResource } from "./project-logo-public-http.js";
 
 const HTML_MAX_BYTES = 512 * 1_024;
 const MANIFEST_MAX_BYTES = 128 * 1_024;
-const MAX_CANDIDATES = 12;
+const MAX_CANDIDATES = 24;
 const CANDIDATE_BATCH_SIZE = 4;
 
 interface LogoCandidate {
@@ -26,7 +26,8 @@ export interface DiscoveredProjectLogo {
 export async function discoverProjectLogo(
   domain: string
 ): Promise<DiscoveredProjectLogo | undefined> {
-  const roots = [`https://${domain}/`, `http://${domain}/`];
+  const host = domain.replace(/^www\./iu, "");
+  const roots = [`https://${domain}/`, `http://${domain}/`, `https://www.${host}/`];
   const candidates: LogoCandidate[] = [];
   let homepageUrl: string | undefined;
   let homepageHtml: string | undefined;
@@ -57,9 +58,7 @@ export async function discoverProjectLogo(
     candidates.push(...standardIconCandidates(new URL(root).origin));
   }
 
-  const ranked = uniqueCandidates(candidates)
-    .sort((left, right) => estimatedScore(right) - estimatedScore(left))
-    .slice(0, MAX_CANDIDATES);
+  const ranked = rankedLogoCandidates(candidates);
   for (let index = 0; index < ranked.length; index += CANDIDATE_BATCH_SIZE) {
     const batch = ranked.slice(index, index + CANDIDATE_BATCH_SIZE);
     const results = await Promise.all(
@@ -118,6 +117,16 @@ export function htmlIconCandidates(
     });
   }
   return result;
+}
+
+/** Reserve root ICO fallbacks even when high-resolution guesses fill the limit. */
+export function rankedLogoCandidates(candidates: readonly LogoCandidate[]): readonly LogoCandidate[] {
+  const unique = uniqueCandidates(candidates);
+  const rootIcons = unique.filter(({ url }) => new URL(url).pathname === "/favicon.ico").slice(0, 3);
+  const primary = unique.filter((candidate) => !rootIcons.includes(candidate))
+    .sort((left, right) => estimatedScore(right) - estimatedScore(left))
+    .slice(0, MAX_CANDIDATES - rootIcons.length);
+  return [...primary.slice(0, 1), ...rootIcons, ...primary.slice(1)];
 }
 
 function htmlManifestUrls(html: string, baseUrl: string): readonly string[] {

@@ -140,9 +140,13 @@ test("validates every position report cell and its date scope", () => {
       unchangedCount: 0,
       newCount: 1,
       lostCount: 0,
+      top1Count: 0,
       top3Count: 1,
+      top5Count: 1,
       top10Count: 1,
       top30Count: 1,
+      top50Count: 1,
+      top100Count: 1,
       averagePosition: 2
     },
     trend: [{ date: "2026-08-31", measured: 1, found: 1, top3: 1, top10: 1, top30: 1, averagePosition: 2 }],

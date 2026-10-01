@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { htmlIconCandidates } from "./project-logo-discovery.js";
+import { htmlIconCandidates, rankedLogoCandidates } from "./project-logo-discovery.js";
 
 test("collects absolute icon candidates with declared quality hints", () => {
   const candidates = htmlIconCandidates(
@@ -35,4 +35,12 @@ test("ignores non-http and malformed icon references", () => {
     ),
     []
   );
+});
+
+test("never evicts root ICO when higher-resolution guesses exhaust the budget", () => {
+  const guessed = Array.from({ length: 40 }, (_, index) => ({ url: `https://example.org/icon-${index}.png`, declaredPixels: 262144, vectorHint: false, priority: 90 }));
+  const ico = { url: "https://example.org/favicon.ico", declaredPixels: 0, vectorHint: false, priority: 40 };
+  const ranked = rankedLogoCandidates([...guessed, ico]);
+  assert.equal(ranked.length, 24);
+  assert.equal(ranked[1]?.url, ico.url, "root ICO must be checked in the first batch");
 });

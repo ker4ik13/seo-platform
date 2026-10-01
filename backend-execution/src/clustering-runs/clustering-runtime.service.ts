@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { RemoteProviderTransportService } from "../worker-nodes/remote-provider-transport.service.js";
+import { remoteCredentialFingerprint } from "../worker-nodes/remote-work-scope.js";
+import { ProviderExecutionReviewRequiredError } from "../integrations/provider-execution-review.js";
 import { selectIntegrationCredentialSecret } from "../integrations/platform-credential-pool.js";
 import { PaidOperationRuntimeService, PaidOperationReviewError, PaidOperationUnavailableError } from "../paid-operations/paid-operation-runtime.service.js";
 import { Inject, Injectable, Optional } from "@nestjs/common";
@@ -42,7 +45,8 @@ export class ClusteringRuntimeService {
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService,
     @Optional() private readonly billing?: PaidOperationRuntimeService,
-    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService
+    @Optional() private readonly platformPool?: PlatformCredentialPoolSelectionService,
+    @Optional() private readonly remote?: RemoteProviderTransportService
   ) {}
 
   public async processBatch(
@@ -71,6 +75,12 @@ export class ClusteringRuntimeService {
     const leaseSeconds = 120;
     const claimed = await this.broker.claim(leaseOwner, leaseSeconds);
     if (!claimed) return "IDLE";
+    const run=()=>this.processClaim(claimed,timeoutMs,leaseSeconds);
+    return this.remote ? this.remote.run({origin:"JOB",workspaceId:claimed.workspaceId,projectId:claimed.projectId,
+      operationId:claimed.jobId,jobId:claimed.jobId,credentialId:claimed.credentialId,provider:"ARSENKIN",leaseOwner:claimed.leaseOwner,credentialFingerprint:remoteCredentialFingerprint(claimed.encryptedCredential)},"CLUSTERING",run) : run();
+  }
+
+  private async processClaim(claimed:ClusteringClaim,timeoutMs:number,leaseSeconds:number):Promise<string> {
     let activeClaim = claimed;
     try {
       this.assertLease(activeClaim, timeoutMs * 2 + PERSISTENCE_MARGIN_MS);
@@ -101,6 +111,7 @@ export class ClusteringRuntimeService {
             activeClaim.credentialId
           );
       let keywords: readonly InternalClusteringKeyword[] | undefined;
+      this.remote?.useSecret(secret);
       const resolve = async (): Promise<readonly string[]> => {
         const resolved = await this.resolveKeywords(activeClaim, leaseSeconds);
         activeClaim = resolved.claim;
@@ -144,7 +155,7 @@ export class ClusteringRuntimeService {
           ));
       if (
         sharedProviderRequestId(activeClaim.items)?.startsWith("submitting:") &&
-        (outcome.status === "OUTCOME_UNKNOWN" || outcome.status === "RETRYABLE_FAILURE")
+        (outcome.status === "OUTCOME_UNKNOWN" || (outcome.status === "RETRYABLE_FAILURE" && outcome.code !== "PROVIDER_CONCURRENCY_LIMITED"))
       ) {
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
@@ -205,7 +216,7 @@ export class ClusteringRuntimeService {
       });
       return "COMPLETED";
     } catch (error) {
-      if (error instanceof PaidOperationReviewError) { await this.broker.fail(activeClaim, { code: "PAID_OPERATION_REQUIRES_REVIEW", retryable: false }).catch(() => {}); return "ACTION_REQUIRED"; }
+      if (error instanceof PaidOperationReviewError || error instanceof ProviderExecutionReviewRequiredError) { await this.broker.fail(activeClaim, { code: error instanceof ProviderExecutionReviewRequiredError ? "PROVIDER_REQUIRES_REVIEW" : "PAID_OPERATION_REQUIRES_REVIEW", retryable: false }).catch(() => {}); return "ACTION_REQUIRED"; }
       if (error instanceof PaidOperationUnavailableError) { await this.broker.fail(activeClaim, { code: "PAID_OPERATION_UNAVAILABLE", retryable: true, retryAfterSeconds: 30 }).catch(() => {}); return "RETRY_SCHEDULED"; }
       if (error instanceof ClusteringLeaseLostError) return "LEASE_LOST";
       if (error instanceof SeoDataClientError && !error.retryable) {

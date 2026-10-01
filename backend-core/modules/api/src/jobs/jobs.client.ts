@@ -3,6 +3,8 @@ import type { InternalPaidUsageReview, PaidUsageReviewTicket, ResolvePaidUsageIn
 import {
   parseCreatedWorkerNode,
   parseWorkerNodeView,
+  parseRemovedWorkerNode,
+  type RemovedWorkerNode,
   type CreatedWorkerNode,
   type WorkerNodeConfiguration,
   type WorkerNodeView
@@ -500,6 +502,10 @@ export class JobsClient {
     return adminOperationSummary(value);
   }
 
+  public async cancelAdminOperation(actorId: string, requestId: string, operationId: string): Promise<InternalAdminOperationSummary> {
+    return adminOperationSummary(await this.requestAdmin<unknown>(`/internal/v1/platform-admin/operations/${encodeURIComponent(operationId)}/cancel`, actorId, requestId, "POST", {}));
+  }
+
   public async listWorkerNodes(
     actorId: string,
     requestId: string
@@ -545,6 +551,11 @@ export class JobsClient {
     } catch {
       throw invalidJobsResponse();
     }
+  }
+
+  public async removeWorkerNode(actorId: string, requestId: string, id: string): Promise<RemovedWorkerNode> {
+    const value = await this.requestAdmin<unknown>(`/internal/v1/platform-admin/worker-nodes/${encodeURIComponent(id)}`, actorId, requestId, "DELETE", { confirmed: true });
+    try { const removed = parseRemovedWorkerNode(value); if (removed.id !== id) throw invalidJobsResponse(); return removed; } catch { throw invalidJobsResponse(); }
   }
 
   public async updateWorkerNode(
@@ -2321,7 +2332,7 @@ export class JobsClient {
     path: string,
     actorId: string,
     requestId: string,
-    method: "GET" | "POST" | "PATCH" = "GET",
+    method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
     body?: unknown
   ): Promise<Data> {
     const token = this.config.jobsApiToken;
