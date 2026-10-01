@@ -280,12 +280,14 @@ test("admin operation row includes search engine, exact connection and active wo
       count: async () => 1,
       groupBy: async () => []
     },
-    $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("list_remote_work_assignments") ? [] : [
-      { nodeId: "main", jobId: rankJobId, activeTasks: 1n },
-      { nodeId, jobId: rankJobId, activeTasks: 3n }
-    ],
+    $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("list_remote_work_assignments") ? [] :
+      query.join("").includes("COUNT(DISTINCT assigned.job_id)") ? [{ nodeId, assignedOperations: 2n }] : [
+        { nodeId: "main", jobId: rankJobId, activeTasks: 1n },
+        { nodeId, jobId: rankJobId, activeTasks: 3n }
+      ],
     executionWorkerNode: {
-      findMany: async () => [{ id: nodeId, name: "Офисный воркер" }]
+      findMany: async () => [{ id: nodeId, name: "Офисный воркер", enabled: true,
+        draining: false, deletedAt: null, lastHeartbeatAt: new Date() }]
     }
   } as unknown as PrismaService;
   const service = new OperationActivityService(prisma, {
@@ -297,8 +299,8 @@ test("admin operation row includes search engine, exact connection and active wo
     { label: "Личный", displayHint: "••••b313" });
   assert.equal(page.data[0]?.searchEngine, "YANDEX");
   assert.deepEqual(page.data[0]?.workers, [
-    { name: "Основной сервер", activeTasks: 1 },
-    { name: "Офисный воркер", activeTasks: 3 }
+    { name: "Основной сервер", activeTasks: 1, status: "MAIN", assignedOperations: 1 },
+    { name: "Офисный воркер", nodeId, activeTasks: 3, status: "ONLINE", assignedOperations: 2 }
   ]);
   assert.doesNotMatch(JSON.stringify(page), /must-not-leak/u);
 });
@@ -335,7 +337,7 @@ test("running Wordstat shows its own key and main server without rank scans", as
   assert.equal(result.searchEngine, "YANDEX");
   assert.deepEqual(result.connection, { label: "Wordstat ключ" });
   assert.deepEqual(result.workers,
-    [{ name: "Основной сервер", activeTasks: 1 }]);
+    [{ name: "Основной сервер", activeTasks: 0, status: "MAIN", assignedOperations: 1 }]);
 });
 
 test("loads one safe platform operation summary for a deep link", async () => {

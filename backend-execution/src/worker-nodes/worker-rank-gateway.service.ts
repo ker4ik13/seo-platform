@@ -38,7 +38,10 @@ const REMOTE_POLL_LEASE_SECONDS = 90;
 const REMOTE_PROVIDER_TIMEOUT_MS = 10_000;
 const MAX_CLAIMS_PER_POLL = 32;
 const MAX_CANDIDATES_PER_POLL = 64;
-const CLAIM_BATCH_BUDGET_MS = 15_000;
+// The combined /worker/v1/claim endpoint may call this twice. Each pass must
+// leave time to serialize and return every leased task before the agent's
+// 30-second HTTP timeout, even when one physical key is saturated.
+const CLAIM_BATCH_BUDGET_MS = 5_000;
 
 @Injectable()
 export class WorkerRankGatewayService {
@@ -55,15 +58,19 @@ export class WorkerRankGatewayService {
   public async claimBatch(
     nodeId: string,
     nodeToken: string,
-    availableSlots: number
+    availableSlots: number,
+    budgetMs = CLAIM_BATCH_BUDGET_MS
   ): Promise<readonly RemoteRankPollTaskV1[]> {
     this.assertEnabled();
+    if (!Number.isSafeInteger(budgetMs) || budgetMs < 0 || budgetMs > CLAIM_BATCH_BUDGET_MS) {
+      throw new TypeError("Invalid rank claim time budget");
+    }
     const capacity = await this.nodes.authorizeForWork(nodeId, nodeToken, "RANK");
     const count = Math.min(availableSlots, capacity.httpSlots, MAX_CLAIMS_PER_POLL);
     const tasks: RemoteRankPollTaskV1[] = [];
-    const deadline = Date.now() + CLAIM_BATCH_BUDGET_MS;
+    const deadline = Date.now() + budgetMs;
     for (let index = 0; index < MAX_CANDIDATES_PER_POLL && tasks.length < count; index += 1) {
-      if (index > 0 && Date.now() >= deadline) break;
+      if (Date.now() >= deadline) break;
       let task: RemoteRankPollTaskV1 | "DEFERRED" | null;
       try {
         task = await this.claimOne(nodeId, capacity.httpSlots);

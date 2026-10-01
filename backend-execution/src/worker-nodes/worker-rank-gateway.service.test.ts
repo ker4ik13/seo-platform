@@ -231,6 +231,22 @@ test("full provider quotas use a bounded scan, not a retry loop without end", as
   assert.equal(claims, 64);
 });
 
+test("a saturated rank pass obeys the caller's short budget", async () => {
+  let probes = 0;
+  const gateway = new WorkerRankGatewayService(
+    { authorizeForWork: async () => ({ httpSlots: 128 }) } as unknown as WorkerNodeService,
+    { claimPoll: async () => { probes++; return { provider: "XMLSTOCK", providerProgressInvalid: true }; },
+      completePoll: async () => { await new Promise(resolve => setTimeout(resolve, 2)); return { status: "FAILED_FINAL" }; } } as unknown as RankConnectorRuntimeBrokerService,
+    {} as IntegrationCredentialCryptoService, {} as PlatformCredentialPoolSelectionService,
+    {} as XmlStockHttpQuotaLimiter, {} as RankBillingSettlementClient,
+    { workerGatewayEnabled: true, integrationCredentials: { role: "BOTH" } } as AppConfig
+  );
+  const startedAt = Date.now();
+  assert.deepEqual(await gateway.claimBatch(id.node, "token", 128, 20), []);
+  assert.ok(probes > 0 && probes < 64);
+  assert.ok(Date.now() - startedAt < 200);
+});
+
 function requestIntent(): RankProviderRequestIntentV1 {
   const hash = (value: string) => ({ algorithm: "SHA_256" as const, value: value.repeat(64) });
   return {

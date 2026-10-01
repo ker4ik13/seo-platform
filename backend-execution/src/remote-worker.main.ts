@@ -2,7 +2,7 @@ import "dotenv/config";
 import { totalmem } from "node:os";
 import { Worker as CpuWorker } from "node:worker_threads";
 import { parseWorkerNodeView,parseRemoteWorkTask,workerCapabilities,type RemoteRankPollTaskV1,type RemoteWorkTask,type WorkerCapability } from "@seo-platform/contracts";
-import { loadRemoteWorkerConfig,type RemoteWorkerConfig } from "./worker-nodes/remote-worker-config.js";
+import { loadRemoteWorkerConfig,RemoteWorkerConfigurationError,type RemoteWorkerConfig } from "./worker-nodes/remote-worker-config.js";
 import { WorkerHttpClient,WorkerAuthenticationError,WorkerPausedError } from "./worker-nodes/worker-http-client.js";
 import { executeRemoteWork,WorkExecutionError } from "./worker-nodes/remote-work-executor.js";
 import { parseWorkerRankTask } from "./worker-nodes/worker-rank-task.js";
@@ -126,4 +126,10 @@ async function runRank(task:RemoteRankPollTaskV1,client:WorkerHttpClient):Promis
 
 function wait(milliseconds:number,signal:AbortSignal):Promise<void>{return new Promise(resolve=>{if(signal.aborted)return resolve();const finished=()=>{clearTimeout(timer);signal.removeEventListener("abort",finished);resolve();};const timer=setTimeout(finished,milliseconds);signal.addEventListener("abort",finished,{once:true});});}
 
-void main().catch(()=>{process.stderr.write("remote worker failed to start\n");process.exitCode=1;});
+void main().catch(error=>{
+  const diagnostic=error instanceof RemoteWorkerConfigurationError
+    ? `remote worker configuration rejected: ${error.message}`
+    : "remote worker failed to start";
+  process.stderr.write(`${diagnostic}\n`);
+  process.exitCode=1;
+});

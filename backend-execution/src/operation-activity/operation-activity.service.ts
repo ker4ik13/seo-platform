@@ -307,6 +307,9 @@ export class OperationActivityService {
     readonly workers: ReadonlyMap<string, readonly {
       readonly name: string;
       readonly activeTasks: number;
+      readonly nodeId?: string;
+      readonly status?: "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN";
+      readonly assignedOperations?: number;
     }[]>;
   }> {
     const providerJobs = jobs.filter((job) =>
@@ -342,25 +345,46 @@ export class OperationActivityService {
       item.nodeId === "main" || !relevantIds.has(item.jobId)
         ? [] : [item.nodeId]
     ))];
-    const nodes = nodeIds.length === 0 ? [] : await this.prisma.executionWorkerNode.findMany({
-      where: { id: { in: nodeIds } },
-      select: { id: true, name: true }
-    });
-    const nameById = new Map(nodes.map((node) => [node.id, node.name]));
+    const [nodes,assignedCounts] = await Promise.all([
+      nodeIds.length === 0 ? Promise.resolve([]) : this.prisma.executionWorkerNode.findMany({
+        where: { id: { in: nodeIds } },
+        select: { id: true, name: true, enabled: true, draining: true, deletedAt: true, lastHeartbeatAt: true }
+      }),
+      nodeIds.length === 0 ? Promise.resolve([]) : this.prisma.$queryRaw<readonly {nodeId:string;assignedOperations:bigint}[]>`
+        SELECT assigned.node_id AS "nodeId",COUNT(DISTINCT assigned.job_id) AS "assignedOperations"
+        FROM (
+          SELECT assignment.node_id,assignment.job_id FROM public.rank_job_worker_assignments assignment
+          JOIN public.jobs job ON job.id=assignment.job_id AND job.status='RUNNING'
+          WHERE assignment.node_id=ANY(${nodeIds}::uuid[])
+          UNION ALL
+          SELECT assignment.node_id,assignment.job_id FROM public.remote_operation_assignments assignment
+          JOIN public.jobs job ON job.id=assignment.job_id AND job.status='RUNNING'
+          WHERE assignment.node_id=ANY(${nodeIds}::uuid[]) AND assignment.job_id IS NOT NULL
+        ) assigned GROUP BY assigned.node_id`
+    ]);
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const countById = new Map(assignedCounts.map((row) => [row.nodeId, Number(row.assignedOperations)]));
     const workersByJob = new Map<string, Map<string, {
       name: string;
       activeTasks: number;
+      nodeId?: string;
+      status: "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN";
+      assignedOperations: number;
     }>>();
     for (const assignment of allAssignments) {
       if (!relevantIds.has(assignment.jobId)) continue;
-      const name = assignment.nodeId === "main"
-        ? "Основной сервер"
-        : nameById.get(assignment.nodeId) ?? "Удалённый воркер";
+      const node = nodeById.get(assignment.nodeId);
+      const name = assignment.nodeId === "main" ? "Основной сервер" : node?.name ?? "Удалённый воркер";
+      const status = assignment.nodeId === "main" ? "MAIN" as const
+        : !node || node.deletedAt || !node.lastHeartbeatAt || Date.now()-node.lastHeartbeatAt.getTime()>30_000 ? "OFFLINE" as const
+        : !node.enabled ? "DISABLED" as const : node.draining ? "DRAINING" as const : "ONLINE" as const;
       const byNode = workersByJob.get(assignment.jobId) ?? new Map();
       const existing = byNode.get(assignment.nodeId);
       if (existing) existing.activeTasks += Number(assignment.activeTasks);
       else byNode.set(assignment.nodeId, {
-        name, activeTasks: Number(assignment.activeTasks)
+        name, activeTasks: Number(assignment.activeTasks),status,
+        ...(assignment.nodeId === "main" ? {} : {nodeId:assignment.nodeId}),
+        assignedOperations:assignment.nodeId === "main" ? 1 : countById.get(assignment.nodeId) ?? 1
       });
       workersByJob.set(assignment.jobId, byNode);
     }
@@ -375,7 +399,7 @@ export class OperationActivityService {
     ));
     for (const job of jobs) {
       if (job.type !== "MANUAL_RANK_CHECK" && job.status === "RUNNING" && !workers.has(job.id)) {
-        workers.set(job.id, [{ name: "Основной сервер", activeTasks: 1 }]);
+        workers.set(job.id, [{ name: "Основной сервер", activeTasks: 0, status: "MAIN", assignedOperations: 1 }]);
       }
     }
     return { connections, workers };
@@ -422,7 +446,9 @@ function adminAttentionWhere(): Prisma.JobWhereInput {
 function adminOperationSummary(
   job: AdminJob,
   connection?: { readonly label: string; readonly displayHint?: string },
-  workers?: readonly { readonly name: string; readonly activeTasks: number }[]
+  workers?: readonly { readonly name: string; readonly activeTasks: number;
+    readonly nodeId?: string; readonly status?: "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN";
+    readonly assignedOperations?: number }[]
 ): InternalAdminOperationSummary {
   const errorCode = safeErrorCode(job.errorSummary);
   const scope = record(job.scopeSnapshot);

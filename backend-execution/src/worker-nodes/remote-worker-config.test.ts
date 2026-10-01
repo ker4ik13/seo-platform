@@ -64,3 +64,30 @@ test("remote worker requires a private token file and verified HTTPS origin", as
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("capability limits above their HTTP or CPU parent are safely capped", async () => {
+  const config = await loadRemoteWorkerConfig({
+    WORKER_CONTROL_URL: "https://144.31.221.28:3000",
+    WORKER_NODE_ID: id,
+    WORKER_NODE_TOKEN: token,
+    WORKER_HTTP_SLOTS: "32",
+    WORKER_RANK_SLOTS: "128",
+    WORKER_CPU_SLOTS: "2",
+    WORKER_WORDSTAT_SLOTS: "128",
+    WORKER_IMPORT_SLOTS: "4",
+    WORKER_EXPORT_SLOTS: "8",
+    WORKER_INSPECTION_SLOTS: "2"
+  });
+  assert.equal(config.httpSlots, 32);
+  assert.equal(config.rankSlots, 32);
+  assert.equal(config.capabilitySlots.WORDSTAT, 32);
+  assert.equal(config.capabilitySlots.IMPORT, 2);
+  assert.equal(config.capabilitySlots.EXPORT, 2);
+  assert.equal(config.capabilitySlots.INSPECTION, 2);
+  await assert.rejects(() => loadRemoteWorkerConfig({
+    WORKER_CONTROL_URL: "https://144.31.221.28:3000",
+    WORKER_NODE_ID: id,
+    WORKER_NODE_TOKEN: token,
+    WORKER_HTTP_SLOTS: "invalid"
+  }), /WORKER_HTTP_SLOTS must be an integer/u);
+});

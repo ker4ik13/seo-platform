@@ -2,6 +2,7 @@
 
 import { CustomSelect } from "../../components/custom-select";
 import { AdminOperationCancel } from "../../components/admin-operation-cancel";
+import { Icon } from "../../components/icon";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -195,7 +196,7 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
 }
 
 function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ onOpen: () => void; operation: AdminOperationSummary; canControl: boolean; onUpdated: () => void }>) {
-  const { locale: uiLocale, t: uiText } = useUiLocale();
+  const { locale: uiLocale } = useUiLocale();
   const percent = progressPercent(operation);
   return (
     <article className="operation-row">
@@ -208,7 +209,7 @@ function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ o
         <small>{operation.workspace?.name ?? operation.workspaceId}</small>
       </div>
       <div className="operation-source" data-label="Источник / воркеры">
-        <strong>{[
+        <strong className="operation-source-connection">{[
           operation.searchEngine === "YANDEX" ? "Яндекс" :
             operation.searchEngine === "GOOGLE" ? "Google" : undefined,
           operation.connection
@@ -216,11 +217,7 @@ function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ o
               ? ` · ${operation.connection.displayHint}` : ""}`
             : undefined
         ].filter(Boolean).join(" · ") || "—"}</strong>
-        <small>{operation.workers?.length
-          ? operation.workers.map((worker) =>
-              `${worker.name === "Основной сервер" ? uiText("Основной сервер") : worker.name} · ${worker.activeTasks > 0 ? `${worker.activeTasks} активных` : "назначен, ожидает"}`
-            ).join(" · ")
-          : <UiText text="Нет активных назначений" />}</small>
+        <OperationWorkerCards workers={operation.workers} />
       </div>
       <div data-label="Состояние"><OperationStatus status={operation.status} />{operation.stage && <small className="operation-stage">{operationStage(operation)}</small>}</div>
       <div className="operation-progress" data-label="Прогресс / результат">
@@ -258,7 +255,6 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label={uiText("Провайдер")} value={operation.provider ?? "—"} />
           <Snapshot label={uiText("Поисковая система")} value={operation.searchEngine === "YANDEX" ? "Яндекс" : operation.searchEngine === "GOOGLE" ? "Google" : "—"} />
           <Snapshot label={uiText("Подключение")} value={operation.connection ? `${operation.connection.label}${operation.connection.displayHint ? ` · ${operation.connection.displayHint}` : ""}` : "—"} />
-          <Snapshot label={uiText("Воркеры")} value={operation.workers?.length ? operation.workers.map((worker) => `${worker.name === "Основной сервер" ? uiText("Основной сервер") : worker.name} (${worker.activeTasks})`).join(" · ") : uiText("Нет активных назначений")} />
           <Snapshot label={uiText("Этап")} value={operation.stage ? operationStage(operation) : "—"} />
           <Snapshot label={uiText("Попытка")} value={`${operation.attempt} из ${operation.maxAttempts}`} />
           <Snapshot label={uiText("Результат")} value={resultLabel(operation, uiLocale)} />
@@ -266,6 +262,7 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label={uiText("Создана")} value={formatDate(operation.createdAt, uiLocale)} />
           <Snapshot label={uiText("Завершена")} value={operation.finishedAt ? formatDate(operation.finishedAt, uiLocale) : "Ещё выполняется"} />
         </div>
+        <div className="operation-worker-details"><h3><UiText text="Воркеры" /></h3><OperationWorkerCards workers={operation.workers} /></div>
         <div className="workspace-readonly">
           <strong><UiText text="Безопасная сводка" /></strong>
           <p className="form-description"><UiText text="Исходные параметры, тексты ключей, ответы провайдера и секреты здесь намеренно не отображаются." /></p>
@@ -273,6 +270,26 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
       </aside>
     </div>
   );
+}
+
+function OperationWorkerCards({ workers }: Readonly<{ workers: AdminOperationSummary["workers"] }>) {
+  const { t: uiText } = useUiLocale();
+  if (!workers?.length) return <span className="operation-worker-empty"><UiText text="Нет активных назначений" /></span>;
+  const statusLabels = {
+    ONLINE: "На связи", OFFLINE: "Нет связи", DRAINING: "Завершает задачи",
+    DISABLED: "Выключен", MAIN: "Основной сервер"
+  } as const;
+  return <div className="operation-worker-list">{workers.map((worker, index) => {
+    const status=worker.status ?? (worker.name === "Основной сервер" ? "MAIN" : "OFFLINE");
+    const operations=worker.assignedOperations ?? 1;
+    const operationLabel=operations%10===1 && operations%100!==11 ? "операция"
+      : operations%10>=2 && operations%10<=4 && (operations%100<12 || operations%100>14) ? "операции" : "операций";
+    return <div className={`operation-worker-card operation-worker-${status.toLowerCase()}`} key={worker.nodeId ?? `${worker.name}:${index}`}>
+      <span aria-hidden="true" className="operation-worker-icon"><Icon name={status === "MAIN" ? "dashboard" : "http"} /></span>
+      <span className="operation-worker-copy"><strong>{status === "MAIN" ? uiText("Основной сервер") : worker.name}</strong><small>{operations} {operationLabel} · {worker.activeTasks > 0 ? `${worker.activeTasks} выдано запросов` : "ожидает задачи"}</small></span>
+      <span className="operation-worker-status"><i aria-hidden="true" />{statusLabels[status]}</span>
+    </div>;
+  })}</div>;
 }
 
 function Metric({ label, tone, value }: Readonly<{ label: string; tone: string; value: number | undefined }>) {

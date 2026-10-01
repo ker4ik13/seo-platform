@@ -7,6 +7,8 @@ import { WorkerNodeService } from "./worker-node.service.js";
 import { workerIdentity,exactWorkerInput } from "./worker-wire-input.js";
 
 type RequestHeaders=Readonly<Record<string,string|string[]|undefined>>;
+const COMBINED_CLAIM_BUDGET_MS=20_000;
+const RANK_CLAIM_PASS_BUDGET_MS=5_000;
 
 @Controller("worker/v1")
 export class RemoteWorkController {
@@ -17,13 +19,16 @@ export class RemoteWorkController {
   public async claim(@Body() value:unknown,@Headers() headers:RequestHeaders,@Req() request:FastifyRequest):Promise<ApiResponse<{work:readonly RemoteWorkTask[];ranks:readonly RemoteRankPollTaskV1[];cancelled:readonly string[]}>> {
     let input; try { input=parseRemoteWorkClaim(value); } catch { throw new BadRequestException("Invalid worker capacity"); }
     const {id,token}=workerIdentity(headers);
+    const deadline=Date.now()+COMBINED_CLAIM_BUDGET_MS;
     const node=await this.nodes.authorizeCombinedWork(id,token);
     const rankSlots=node.capabilities.includes("RANK") ? Math.min(input.capabilitySlots.RANK ?? 0,input.httpSlots) : 0;
     const initialRank=Math.min(rankSlots,Math.ceil(input.httpSlots/2));
-    const ranks=[...(initialRank>0 ? await this.ranks.claimBatch(id,token,initialRank) : [])];
+    const ranks=[...(initialRank>0 ? await this.ranks.claimBatch(id,token,initialRank,
+      Math.max(0,Math.min(RANK_CLAIM_PASS_BUDGET_MS,deadline-Date.now()))) : [])];
     const work=await this.work.claim(id,token,{...input,httpSlots:Math.max(0,input.httpSlots-ranks.length),capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-ranks.length)}});
     const remaining=Math.max(0,input.httpSlots-ranks.length-work.filter(task=>task.resource==="HTTP").length);
-    if(remaining>0 && rankSlots>ranks.length) ranks.push(...await this.ranks.claimBatch(id,token,Math.min(remaining,rankSlots-ranks.length)));
+    if(remaining>0 && rankSlots>ranks.length && Date.now()+1_000<deadline) ranks.push(...await this.ranks.claimBatch(id,token,
+      Math.min(remaining,rankSlots-ranks.length),Math.max(0,Math.min(RANK_CLAIM_PASS_BUDGET_MS,deadline-Date.now()-1_000))));
     return {data:{work,ranks,cancelled:await this.work.cancelled(id)},meta:{requestId:request.id}};
   }
 

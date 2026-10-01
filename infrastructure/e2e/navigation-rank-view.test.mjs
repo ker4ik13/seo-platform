@@ -268,7 +268,7 @@ test("admin dark presentation uses shared selects without granting staff access"
     const context = await browser.newContext({ storageState: await api.storageState() });
     const errors = [];
     const page = await context.newPage(); page.on("pageerror", (error) => errors.push(error.message));
-    const operation = { id: randomUUID(), workspaceId: randomUUID(), type: "MANUAL_RANK_CHECK", status: "RUNNING", stage: "WAITING_EXECUTION_GRANT", provider: "XMLSTOCK", searchEngine: "YANDEX", connection: { label: "Личный ключ", displayHint: "••••1234" }, workers: [{ name: "Офисный воркер", activeTasks: 4 }], progress: { current: "25", total: "100", unit: "KEYWORD" }, result: { found: 20, notFound: 5 }, attempt: 1, maxAttempts: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), workspace: { id: randomUUID(), name: "Рабочая область" }, project: { id: randomUUID(), name: "Тестовый проект", domain: "example.org" }, actor: null };
+    const operation = { id: randomUUID(), workspaceId: randomUUID(), type: "MANUAL_RANK_CHECK", status: "RUNNING", stage: "WAITING_EXECUTION_GRANT", provider: "XMLSTOCK", searchEngine: "YANDEX", connection: { label: "Личный ключ", displayHint: "••••1234" }, workers: [{ name: "Офисный воркер", activeTasks: 4, status: "ONLINE", assignedOperations: 2, nodeId: randomUUID() }], progress: { current: "25", total: "100", unit: "KEYWORD" }, result: { found: 20, notFound: 5 }, attempt: 1, maxAttempts: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), workspace: { id: randomUUID(), name: "Рабочая область" }, project: { id: randomUUID(), name: "Тестовый проект", domain: "example.org" }, actor: null };
     // Presentation-only fixture. No API/DB role is created or bypassed.
     let cancellations = 0;
     await page.route("**/admin/api/**", async (route) => {
@@ -286,7 +286,10 @@ test("admin dark presentation uses shared selects without granting staff access"
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data, meta: { requestId: randomUUID() } }) });
     });
     await page.goto(`${base}/admin?screen=operations&refresh=5`, { waitUntil: "networkidle" });
-    await page.getByText("Офисный воркер · 4 активных", { exact: true }).waitFor();
+    await page.getByText("Офисный воркер", { exact: true }).first().waitFor();
+    assert.equal(await page.locator(".operation-worker-card.operation-worker-online").first().getByText("2 операции · 4 выдано запросов").count(), 1);
+    const workerCopy = await page.locator(".operation-worker-card .operation-worker-copy").first().boundingBox();
+    assert.ok(workerCopy && workerCopy.width >= 100, "worker name and counts must fit without breaking each word");
     assert.equal(await page.getByText(/Яндекс · Личный ключ/u).count(), 1);
     assert.equal(await page.getByRole("combobox", { name: /Язык|Language/u }).count(), 0);
     assert.equal(await page.getByRole("combobox", { name: "Интервал обновления", exact: true }).count(), 0);

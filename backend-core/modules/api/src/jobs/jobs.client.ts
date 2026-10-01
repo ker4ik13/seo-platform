@@ -2614,11 +2614,18 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
   }
   const workers = input.workers === undefined ? undefined :
     (input.workers as unknown[]).map((value) => {
-      const worker = allowlistedRecord(value, ["name", "activeTasks"]);
+      const worker = allowlistedRecord(value, ["name", "activeTasks", "nodeId", "status", "assignedOperations"]);
       if (!shortSafeString(worker.name, 100)) throw invalidJobsResponse();
+      const nodeId = worker.nodeId === undefined ? undefined : uuidValue(worker.nodeId);
+      if (worker.status !== undefined && !["ONLINE", "OFFLINE", "DRAINING", "DISABLED", "MAIN"].includes(String(worker.status))) {
+        throw invalidJobsResponse();
+      }
       return {
         name: worker.name,
-        activeTasks: nonNegativeInteger(worker.activeTasks, 1000)
+        activeTasks: nonNegativeInteger(worker.activeTasks, 1000),
+        ...(nodeId ? { nodeId } : {}),
+        ...(worker.status ? { status: worker.status as "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN" } : {}),
+        ...(worker.assignedOperations === undefined ? {} : { assignedOperations: nonNegativeInteger(worker.assignedOperations, 1_000_000) })
       };
     });
   const queuedAt = optionalIsoDate(input.queuedAt);

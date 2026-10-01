@@ -263,6 +263,9 @@ export interface InternalAdminOperationSummary {
   readonly workers?: readonly {
     readonly name: string;
     readonly activeTasks: number;
+    readonly nodeId?: string;
+    readonly status?: "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN";
+    readonly assignedOperations?: number;
   }[];
   readonly progress: AdminOperationProgress;
   readonly result: AdminOperationResultMetrics;
