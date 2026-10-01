@@ -27,16 +27,17 @@ remove_proxy() {
 }
 
 web_worker_route() {
-  jq --compact-output --null-input --arg id "$web_worker_route_id" '{
+  local upstream=${1:-127.0.0.1:3000}
+  jq --compact-output --null-input --arg id "$web_worker_route_id" --arg upstream "$upstream" '{
     "@id": $id,
     match: [{path: ["/worker/v1", "/worker/v1/*"]}],
-    handle: [{handler: "reverse_proxy", upstreams: [{dial: "127.0.0.1:4002"}]}],
+    handle: [{handler: "reverse_proxy", upstreams: [{dial: $upstream}]}],
     terminal: true
   }'
 }
 
 remove_web_worker_route() {
-  local routes index actual expected
+  local routes index actual expected legacy
   routes=$(curl --fail --silent --max-time 3 "$web_routes_url" || true)
   [ -n "$routes" ] || return 0
   index=$(jq --raw-output --arg id "$web_worker_route_id" \
@@ -44,16 +45,20 @@ remove_web_worker_route() {
     <<< "$routes")
   [ -n "$index" ] || return 0
   expected=$(web_worker_route)
+  legacy=$(web_worker_route 127.0.0.1:4002)
   actual=$(jq --compact-output --argjson index "$index" '.[$index]' <<< "$routes")
-  [ "$(jq --sort-keys --compact-output . <<< "$actual")" = \
-    "$(jq --sort-keys --compact-output . <<< "$expected")" ] ||
+  if [ "$(jq --sort-keys --compact-output . <<< "$actual")" != \
+    "$(jq --sort-keys --compact-output . <<< "$expected")" ] &&
+    [ "$(jq --sort-keys --compact-output . <<< "$actual")" != \
+    "$(jq --sort-keys --compact-output . <<< "$legacy")" ]; then
     fail "existing web worker route differs from the managed route"
+  fi
   curl --fail --silent --show-error --request DELETE --max-time 5 \
     "$web_routes_url/$index"
 }
 
 apply_web_worker_route() {
-  local web_authority web_host current expected routes
+  local web_authority web_host current expected legacy routes
   if [ "${WORKER_GATEWAY_ENABLED:-false}" != true ]; then
     remove_web_worker_route
     return
@@ -84,8 +89,17 @@ apply_web_worker_route() {
   fi
   routes=$(jq --compact-output '.routes[0].handle[0].routes' <<< "$current")
   expected=$(web_worker_route)
+  legacy=$(web_worker_route 127.0.0.1:4002)
   if jq --exit-status --argjson expected "$expected" \
     'length == 2 and .[0] == $expected' <<< "$routes" >/dev/null; then
+    return
+  fi
+  if jq --exit-status --argjson legacy "$legacy" \
+    'length == 2 and .[0] == $legacy' <<< "$routes" >/dev/null; then
+    printf '%s' "$expected" |
+      curl --fail --silent --show-error --request PUT \
+        --header 'Content-Type: application/json' --data-binary @- --max-time 10 \
+        "$web_routes_url/0"
     return
   fi
   if ! jq --exit-status 'length == 1' <<< "$routes" >/dev/null; then

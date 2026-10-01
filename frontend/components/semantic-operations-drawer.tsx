@@ -23,7 +23,7 @@ import {
   connectorRoutingScopeLabel,
   hasConnectorFallback
 } from "../lib/connector-routing-presentation";
-import { operationStatusLabel } from "../lib/operation-status-presentation";
+import { compactOperationStatusLabel } from "../lib/operation-status-presentation";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
   isDismissibleOperationStatus,
@@ -602,9 +602,6 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
   const completedProviderRequests = providerRequestCount === undefined
     ? undefined
     : Math.min(providerRequestCount, done * value.types.length);
-  const remainingProviderSeconds = providerRequestCount === undefined || completedProviderRequests === undefined
-    ? undefined
-    : Math.ceil((providerRequestCount - completedProviderRequests) / 10);
   return {
     id: value.id,
     kind: "FREQUENCY",
@@ -614,9 +611,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     description: seasonality
       ? `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${frequencyCollectionParameters(value)}`
       : `${value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
-    statusLabel: value.provider === "XMLSTOCK" && value.stage === "waiting_provider_capacity"
-      ? "Выполняется по лимиту XMLStock · до 10 запросов/с"
-      : operationStatusLabel(value.status, value.stage),
+    statusLabel: compactOperationStatusLabel(value.status),
     progressLabel: `${done} из ${value.selectedKeywords}`,
     percent: value.selectedKeywords > 0 ? Math.round(done / value.selectedKeywords * 100) : 0,
     tab: operationTab(value.status),
@@ -645,19 +640,10 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
       : {}),
     ...(providerRequestCount !== undefined && completedProviderRequests !== undefined
       ? {
-          resultLabel: `API-запросов: ${completedProviderRequests} из ${providerRequestCount}${remainingProviderSeconds && remainingProviderSeconds > 0 ? ` · минимум ${providerWaitLabel(remainingProviderSeconds)}` : ""}`
+          resultLabel: `API-запросов: ${completedProviderRequests} из ${providerRequestCount}`
         }
       : {})
   };
-}
-
-function providerWaitLabel(seconds: number): string {
-  if (seconds < 60) return `${seconds} сек`;
-  const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) return `${minutes} мин`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return `${hours} ч${remainder > 0 ? ` ${remainder} мин` : ""}`;
 }
 
 function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Operation {
@@ -686,7 +672,7 @@ function rankOperation(value: RankJobSummary, uiLocale: string = "ru-RU"): Opera
     title: `${competitorCollection ? "Выдача конкурентов" : "Проверка позиций"} · ${description}`,
     resultTitle: rankCollectionTitle(value),
     description,
-    statusLabel: operationStatusLabel(value.status, value.stage),
+    statusLabel: compactOperationStatusLabel(value.status),
     progressLabel: `${current} из ${total}`,
     percent: total > 0 ? Math.round(current / total * 100) : 0,
     tab: operationTab(value.status),
@@ -748,7 +734,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     title: `${aiAnswerCollectionTitle(value)} · ${engine}`,
     resultTitle: aiAnswerCollectionTitle(value),
     description: `Arsenkin · ${engine} · ${searchRegionDisplayName(value.searchEngine, value.regionCode)} · ${device}`,
-    statusLabel: operationStatusLabel(value.status, value.stage),
+    statusLabel: compactOperationStatusLabel(value.status),
     progressLabel: `${done} из ${value.selectedKeywords}`,
     percent: value.selectedKeywords > 0
       ? Math.round(done / value.selectedKeywords * 100)
@@ -798,7 +784,7 @@ function clusteringOperation(value: ClusteringRunSummary): Operation {
     title: `Кластеризация запросов · ${engine}`,
     resultTitle: "Кластеризация запросов",
     description: `Arsenkin · ${engine} · ТОП-${value.depth} · ${value.method === "SOFT" ? "мягкая" : "жёсткая"}`,
-    statusLabel: operationStatusLabel(value.status, value.stage),
+    statusLabel: compactOperationStatusLabel(value.status),
     progressLabel: value.status === "COMPLETED" && value.clusterCount !== undefined
       ? `${value.clusterCount} кластеров`
       : `${done} из ${value.selectedKeywords}`,
@@ -856,7 +842,7 @@ function researchOperation(value: KeywordResearchRunSummary, uiLocale: string = 
     description: keysSo
       ? `${providerLabel} · ${value.domain ?? "—"}`
       : `${providerLabel} · ${value.seedCount ?? 0} исходных фраз · ${seoRegionDisplayName("WORDSTAT", value.regionCode ?? "225")}`,
-    statusLabel: operationStatusLabel(value.status),
+    statusLabel: compactOperationStatusLabel(value.status),
     progressLabel: value.status === "READY_TO_IMPORT"
       ? `Найдено ${formatInteger(value.collectedKeywords, uiLocale)}`
       : total > 0
@@ -900,7 +886,7 @@ function exportOperation(value: SemanticExportJobSummary): Operation {
     title: `Экспорт семантики · ${exportFormatLabel(value.format)}`,
     resultTitle: "Экспорт семантики",
     description: `${exportFormatLabel(value.format)} · ${exportScopeLabel(value.scope)}`,
-    statusLabel: exportStatusLabel(value.status),
+    statusLabel: compactOperationStatusLabel(value.status),
     progressLabel: complete
       ? `${value.rowCount ?? value.processedRows} строк`
       : total > 0
@@ -947,20 +933,6 @@ function exportScopeLabel(scope: SemanticExportJobSummary["scope"]): string {
     FOLDER_MAP: "карта сайта по папкам",
     FULL_CORE: "весь проект"
   }[scope];
-}
-
-function exportStatusLabel(status: SemanticExportJobSummary["status"]): string {
-  return {
-    QUEUED: "В очереди",
-    RUNNING: "Формируется",
-    CANCEL_REQUESTED: "Останавливается",
-    CANCELLED: "Остановлен",
-    RETRY_SCHEDULED: "Повтор запланирован",
-    COMPLETED: "Файл готов",
-    EXPIRED: "Файл удалён по сроку хранения",
-    FAILED_RETRYABLE: "Временная ошибка",
-    FAILED_FINAL: "Ошибка"
-  }[status];
 }
 
 function operationTab(status: string): OperationTab {

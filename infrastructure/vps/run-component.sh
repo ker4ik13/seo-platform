@@ -616,6 +616,8 @@ case "$component" in
       WEB_PUBLIC_URL="$SEO_PLATFORM_PUBLIC_URL" \
       API_PUBLIC_URL="$(public_api_endpoint)" \
       PLATFORM_API_INTERNAL_URL=http://127.0.0.1:4000 \
+      WORKER_GATEWAY_ENABLED="${WORKER_GATEWAY_ENABLED:-false}" \
+      WORKER_GATEWAY_INTERNAL_URL=http://127.0.0.1:4002 \
       REALTIME_INTERNAL_URL=http://127.0.0.1:4003 \
       AUTH_ACCESS_COOKIE_NAME=seo_access \
       AUTH_SESSION_COOKIE_NAME=seo_session \

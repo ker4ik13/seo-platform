@@ -66,6 +66,10 @@ provider capacity и поэтому само по себе не умножает
 Порты 4001 и 4004 — только internal SEO compatibility API и operational-alert
 receiver. `backend-execution:4002` тоже internal-only. Data services, receiver
 и NATS monitor наружу не публиковать.
+Удалённые воркеры обращаются к существующему Web origin по `/worker/v1/*`.
+Frontend принимает только разрешённые POST с токеном узла и пересылает их
+на внутренний `backend-execution:4002`; отдельный публичный порт Jobs не нужен.
+Маршрут выключен, пока `WORKER_GATEWAY_ENABLED=false`.
 
 Значения должны совпадать с routes:
 
@@ -130,6 +134,14 @@ pnpm infra:validate
   `YOOKASSA_ENABLED=true`.
 - Telegram: заполнить bot/chat destination, выполнить canary из runbook и
   только затем поставить `TELEGRAM_ALERTS_ENABLED=true`.
+- Worker Gateway: после Jobs migrations и бэкапа `jobs_db` включить вместе
+  `WORKER_GATEWAY_ENABLED=true`, `REMOTE_WORK_ENABLED=true` и
+  `JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE=BOTH`. Проверить, что анонимный POST
+  `/worker/v1/claim` получает `401`, неизвестный путь — `404`, а порт `4002`
+  по-прежнему не опубликован. Для Windows-узла выполнить
+  [`WINDOWS_WORKER.md`](./WINDOWS_WORKER.md). При аварийном rollback
+  `REMOTE_WORK_ENABLED=false` оставляет новые шаги основному серверу; уже
+  выданные результаты принимаются по действующим fenced receipts.
 - Platform XMLStock/Arsenkin: исходный секрет, account ID где требуется и
   per-keyword customer price, суточный и месячный hard spend cap заполняются
   как deploy secrets. Feature flag оставлять `false` до legal approval,

@@ -8,8 +8,9 @@ Wordstat, ИИ-ответы, кластеризацию, обход сайта, 
 удалённые узлы не передаются; локальная копия базы не требуется.
 
 Агенту не нужны входящий IP, PostgreSQL, Redis или копия базы. Он делает
-исходящие HTTPS-запросы к Caddy: heartbeat раз в 10 секунд и один пакетный
-опрос заданий раз в 5 секунд **на сервер**, независимо от числа слотов.
+исходящие HTTPS-запросы к центру: heartbeat раз в 10 секунд и один пакетный
+опрос заданий раз в 5 секунд при простое **на сервер**, независимо от числа
+слотов. После завершения работы следующая пачка запрашивается быстрее.
 Ответ содержит задания разных типов в пределах свободных HTTP/CPU-слотов.
 Разбор файлов и кодирование выполняются в отдельных worker threads, чтобы
 не блокировать heartbeat и другие операции.
@@ -19,7 +20,9 @@ Wordstat, ИИ-ответы, кластеризацию, обход сайта, 
 На тестовом VPS публичный worker-маршрут доступен через
 `https://144.31.221.28:3000/worker/v1/*`. Отдельный API listener `:4000`
 может быть недоступен с удалённого сервера; для воркера используйте `:3000`.
-Для другого стенда одновременно нужны:
+Production Web проксирует только разрешённые `/worker/v1/*` POST в Jobs;
+остальные пути, cookies и browser Origin туда не передаются. Для каждого
+центра одновременно нужны:
 
 ```dotenv
 WORKER_GATEWAY_ENABLED=true
@@ -27,6 +30,11 @@ JOBS_HTTP_INTEGRATION_CREDENTIAL_ROLE=BOTH
 REMOTE_WORK_ENABLED=true
 REMOTE_WORK_CONTROL_URL=http://127.0.0.1:4002
 ```
+
+Production Frontend дополнительно получает `WORKER_GATEWAY_ENABLED=true` и
+внутренний `WORKER_GATEWAY_INTERNAL_URL=http://backend-execution:4002` из
+Compose. В тестовом VPS это `http://127.0.0.1:4002`. Флаг по умолчанию
+выключен, пока Gateway не прошёл migration/readiness-проверку.
 
 Их включают только после миграций и настройки Caddy `/worker/v1/*`;
 при отсутствии флага HTTP-процесс не получает доступ к BYOK-ключам.
@@ -52,7 +60,8 @@ REMOTE_WORK_CONTROL_URL=http://127.0.0.1:4002
 `infrastructure/worker.compose.yml`: рядом запускается ClamAV без публичных
 портов. Если антивирус не нужен, допустим **Application** со stage
 `remote-worker`; задайте `WORKER_INSPECTION_SLOTS=0`. В Dokploy выберите Git-источник,
-`ker4ik13/seo-platform` и ветку `codex/worker-fleet-db-pilot`.
+`ker4ik13/seo-platform` и ветку `main` после production rollout; тестовый
+стенд пока использует `codex/worker-fleet-db-pilot`.
 Настройки сборки ([Build Type](https://docs.dokploy.com/docs/core/applications/build-type)):
 
 | Поле Dokploy | Значение |
@@ -84,12 +93,15 @@ WORKER_EXPORT_SLOTS=2
 WORKER_INSPECTION_SLOTS=0
 WORKER_CPU_TASK_MEMORY_MB=1024
 WORKER_HEARTBEAT_MS=10000
+WORKER_LOG_QUERIES=false
 ```
 
 Значение `WORKER_NODE_TOKEN` сохраните в Environment самого приложения
 Dokploy, а не в репозитории. [Dokploy записывает переменные Compose в `.env`](https://docs.dokploy.com/docs/core/docker-compose);
 доступ к ним и к Docker-инспекции равнозначен доступу к ключу воркера.
 Если ключ станет известен посторонним, перевыпустите его в админке.
+`WORKER_LOG_QUERIES=true` разрешает на доверенном узле кратко логировать
+поисковые фразы; по умолчанию тексты и любые API-секреты не пишутся.
 Слоты операций — верхние пределы: `WORKER_RANK_SLOTS` и остальные HTTP
 capabilities не могут использовать больше `WORKER_HTTP_SLOTS`, а импорт,
 экспорт и антивирус — больше `WORKER_CPU_SLOTS`. При большем значении агент
@@ -176,8 +188,9 @@ docker compose --env-file infrastructure/.env.worker \
   -f infrastructure/worker.compose.yml ps
 ```
 
-Для ручного Docker Compose берите ту же ветку
-`codex/worker-fleet-db-pilot`. Не копируйте на узел `.env` главного сервера,
+Для ручного Docker Compose берите ту же ветку, что развернута в центре.
+Пошаговая установка на чистом Windows-ПК описана в
+[`WINDOWS_WORKER.md`](./WINDOWS_WORKER.md). Не копируйте на узел `.env` главного сервера,
 дампы, пользовательские файлы или главный runtime-каталог.
 
 ## Проверка и аварийное отключение

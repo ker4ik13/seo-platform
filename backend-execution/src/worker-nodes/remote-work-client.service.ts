@@ -91,10 +91,12 @@ export class RemoteWorkClientService implements OnModuleDestroy {
       // is never repeated here; its owning workflow applies the retry policy.
       const rows=await this.prisma.$queryRaw<{state:string}[]>`SELECT public.abandon_remote_work(${id}::uuid,${readToken}::uuid) AS state`;
       if(command!=="PROVIDER_HTTP" && ["FAILED","ABANDONED"].includes(rows[0]?.state ?? "") && error instanceof RemoteWorkFailedError &&
-        ["WORKER_NOT_STARTED","WORKER_OUTCOME_UNKNOWN","WORKER_PROCESS_EXITED","WORKER_EXECUTION_FAILED","WORKER_RESULT_TIMEOUT","MALWARE_SCANNER_UNAVAILABLE","SOURCE_DOWNLOAD_FAILED","ARTIFACT_UPLOAD_FAILED","WORKER_MATERIAL_UNAVAILABLE"].includes(error.code)) {
+        (["WORKER_NOT_STARTED","WORKER_OUTCOME_UNKNOWN","WORKER_PROCESS_EXITED","WORKER_EXECUTION_FAILED","WORKER_RESULT_TIMEOUT","MALWARE_SCANNER_UNAVAILABLE","SOURCE_DOWNLOAD_FAILED","ARTIFACT_UPLOAD_FAILED","WORKER_MATERIAL_UNAVAILABLE"].includes(error.code) ||
+          (command==="IMPORT_ROWS" && error.code==="INVALID_XLSX"))) {
         // Non-paid work may safely continue locally, but only after the remote
         // receipt is fenced closed. An active CPU upload must not race a local
-        // export to the same canonical object key.
+        // export to the same canonical object key. A remote-only XLSX parser
+        // rejection is checked again by the owning parser before failing.
         return await local();
       }
       if(rows[0]?.state==="ABANDONED") throw new RemoteWorkFailedError("WORKER_NOT_STARTED");

@@ -23,6 +23,12 @@ export function platformApiInternalOrigin(
   return canonicalOrigin(required(env, "PLATFORM_API_INTERNAL_URL"));
 }
 
+export function workerGatewayInternalOrigin(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  return canonicalOrigin(required(env, "WORKER_GATEWAY_INTERNAL_URL"));
+}
+
 export function apiPublicOrigin(
   env: NodeJS.ProcessEnv = process.env
 ): string {

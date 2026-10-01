@@ -21,6 +21,7 @@ export interface RemoteWorkerConfig {
   readonly cpuSlots: number;
   readonly rankSlots: number;
   readonly heartbeatMs: number;
+  readonly logQueries: boolean;
   readonly capabilitySlots:Readonly<Partial<Record<WorkerCapability,number>>>;
   readonly cpuTaskMemoryMb:number;
   readonly malware?:MalwareScannerConfig;
@@ -97,6 +98,7 @@ export async function loadRemoteWorkerConfig(
     cpuSlots,
     rankSlots,
     heartbeatMs: bounded(env.WORKER_HEARTBEAT_MS, 10_000, 3_000, 30_000, "WORKER_HEARTBEAT_MS"),
+    logQueries: env.WORKER_LOG_QUERIES === "true",
     capabilitySlots,
     cpuTaskMemoryMb:bounded(env.WORKER_CPU_TASK_MEMORY_MB,1024,128,16_384,"WORKER_CPU_TASK_MEMORY_MB"),
     ...(scannerHost ? {malware:{enabled:true,host:scannerHost,port:bounded(env.WORKER_MALWARE_SCANNER_PORT,3310,1,65535,"WORKER_MALWARE_SCANNER_PORT"),connectTimeoutMs:3_000,scanTimeoutMs:900_000}} : {})

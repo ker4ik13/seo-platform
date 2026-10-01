@@ -1,7 +1,9 @@
 /**
  * Private Worker Gateway wire contract. The secret and keyword text exist
- * only in the HTTPS response for an assigned call. Neither may be logged,
- * persisted on a worker, put in a queue, or exposed to a browser.
+ * only in the HTTPS response for an assigned call. Neither may be persisted
+ * on a worker, put in a queue, or exposed to a browser. A trusted worker may
+ * log a bounded keyword excerpt only with explicit WORKER_LOG_QUERIES opt-in;
+ * the credential and provider task ID are never logged.
  */
 export interface RemoteRankClaimV1 {
   readonly availableSlots: number;

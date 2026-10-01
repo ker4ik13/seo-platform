@@ -26,6 +26,7 @@ services:
       WORKER_MALWARE_SCANNER_HOST: clamav
       WORKER_MALWARE_SCANNER_PORT: 3310
       WORKER_HEARTBEAT_MS: ${WORKER_HEARTBEAT_MS:-10000}
+      WORKER_LOG_QUERIES: ${WORKER_LOG_QUERIES:-false}
     read_only: true
     volumes:
       - worker_tmp:/tmp
@@ -40,7 +41,12 @@ services:
     cpus: ${WORKER_CONTAINER_CPUS:-4.0}
     mem_limit: ${WORKER_CONTAINER_MEMORY:-8g}
     restart: unless-stopped
-    stop_grace_period: 45s
+    stop_grace_period: 61m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
   clamav:
     build:
       context: ..
@@ -51,6 +57,11 @@ services:
     cpus: ${WORKER_SCANNER_CPUS:-1.0}
     mem_limit: ${WORKER_SCANNER_MEMORY:-2g}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "clamdscan", "--ping", "1"]
       interval: 30s

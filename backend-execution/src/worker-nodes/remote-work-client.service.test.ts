@@ -9,7 +9,8 @@ test("fenced non-paid work falls back locally after worker loss; paid HTTP does 
   const nativeFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = nativeFetch; });
   const id = randomUUID(), token = randomUUID();
-  globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id, state: "FAILED", errorCode: "WORKER_OUTCOME_UNKNOWN" }] }), { headers: { "content-type": "application/json" } });
+  let failureCode = "WORKER_OUTCOME_UNKNOWN";
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id, state: "FAILED", errorCode: failureCode }] }), { headers: { "content-type": "application/json" } });
   const prisma = { $queryRaw: async (query: TemplateStringsArray) => {
     const sql = query.join("");
     if (sql.includes("remote_work_available")) return [{ available: true }];
@@ -25,4 +26,7 @@ test("fenced non-paid work falls back locally after worker loss; paid HTTP does 
   assert.equal(localRuns, 1);
   await assert.rejects(client.execute(scope, "WORDSTAT", "PROVIDER_HTTP", {}, { resource: "HTTP", timeoutMs: 1000 }, () => "remote", async () => { localRuns++; return "paid"; }), (error: unknown) => error instanceof RemoteWorkFailedError && error.code === "WORKER_OUTCOME_UNKNOWN");
   assert.equal(localRuns, 1);
+  failureCode = "INVALID_XLSX";
+  assert.equal(await client.execute(scope, "IMPORT", "IMPORT_ROWS", {}, { resource: "CPU", timeoutMs: 1000 }, () => { assert.fail("remote parser rejected the XLSX"); }, async () => { localRuns++; return "parsed"; }), "parsed");
+  assert.equal(localRuns, 2);
 });

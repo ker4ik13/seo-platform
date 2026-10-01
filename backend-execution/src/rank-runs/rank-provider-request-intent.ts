@@ -39,7 +39,9 @@ export interface RankProviderRequestIntentKeywordV1 {
  * Private Jobs-owned command for one exact adapter request.
  *
  * It intentionally contains keyword text, so it must never cross a public
- * API, queue payload, event, log, metric or error. Credential identity and
+ * API, queue payload, event, metric or error. The only log exception is a
+ * bounded opt-in excerpt on the assigned trusted worker (ADR-2026-056).
+ * Credential identity and
  * material are deliberately unrepresentable and are joined only after an
  * execution grant has been consumed.
  */

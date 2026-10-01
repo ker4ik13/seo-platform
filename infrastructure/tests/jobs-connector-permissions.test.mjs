@@ -58,6 +58,7 @@ const expectedFunctions = [
   "public.fail_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)",
   "public.claim_frequency_collection_batch(TEXT, INTEGER, INTEGER)",
   "public.complete_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.settle_xmlstock_frequency_batch(UUID, UUID[], TEXT, INTEGER, INTEGER, JSONB, BOOLEAN)",
   "public.defer_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
   "public.fail_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
   "public.mark_frequency_collection_batch_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",

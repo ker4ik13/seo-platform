@@ -44,6 +44,19 @@ export function operationStatusLabel(
   return statusLabels[status] ?? status;
 }
 
+/** Compact labels for the narrow operation drawer; technical stages stay in details. */
+export function compactOperationStatusLabel(status: string): string {
+  if (status === "COMPLETED" || status === "READY_TO_IMPORT") return "Готово";
+  if (status === "PARTIALLY_COMPLETED") return "Частично";
+  if (status === "CANCELLED") return "Отменено";
+  if (status === "CANCEL_REQUESTED") return "Останавливается";
+  if (["FAILED", "FAILED_FINAL", "ACTION_REQUIRED", "EXPIRED"].includes(status)) return "Ошибка";
+  if (status === "QUEUED" || status === "IMPORT_QUEUED") return "В очереди";
+  if (["WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(status)) return "Ожидает";
+  if (["PREPARING", "RUNNING", "IMPORTING"].includes(status)) return "Выполняется";
+  return "Неизвестно";
+}
+
 export function operationStageLabel(
   stage: string | undefined,
   status: string

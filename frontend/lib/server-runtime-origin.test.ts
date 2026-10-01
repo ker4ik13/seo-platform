@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   apiPublicOrigin,
   platformApiInternalOrigin,
+  workerGatewayInternalOrigin,
   webPublicOrigin
 } from "./server-runtime-origin.ts";
 
@@ -20,6 +21,10 @@ test("returns explicit canonical runtime origins", () => {
       PLATFORM_API_INTERNAL_URL: "http://backend-core:4000"
     }),
     "http://backend-core:4000"
+  );
+  assert.equal(
+    workerGatewayInternalOrigin({ NODE_ENV: "test", WORKER_GATEWAY_INTERNAL_URL: "http://backend-execution:4002" }),
+    "http://backend-execution:4002"
   );
   assert.equal(
     apiPublicOrigin({

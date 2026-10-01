@@ -1005,6 +1005,8 @@ services:
       WEB_WWW_REDIRECT_HOST: ${WEB_WWW_REDIRECT_HOST:-www.seonorita.ru}
       API_PUBLIC_URL: ${API_PUBLIC_URL:?API_PUBLIC_URL is required}
       PLATFORM_API_INTERNAL_URL: http://backend-core:4000
+      WORKER_GATEWAY_ENABLED: ${WORKER_GATEWAY_ENABLED:-false}
+      WORKER_GATEWAY_INTERNAL_URL: http://backend-execution:4002
       REALTIME_INTERNAL_URL: http://backend-core:4003
       AUTH_ACCESS_COOKIE_NAME: ${AUTH_ACCESS_COOKIE_NAME:-seo_access}
       AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}

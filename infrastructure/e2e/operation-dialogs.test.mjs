@@ -136,6 +136,23 @@ test("operation dialogs and workspace routing through Caddy: locale, drag-and-dr
   assert.deepEqual(routeOrder, [personalId, arsenkinId, credentialId]);
   await page.reload({ waitUntil: "networkidle" });
   assert.equal(await routingRow.locator(".integration-route-item strong").first().textContent(), "Personal");
+  await context.route(`**/app/api/projects/${project.id}/frequency-collections`, route => route.fulfill({ json: { data: { collections: [{
+    id: randomUUID(), workspaceId: workspace.id, projectId: project.id, provider: "XMLSTOCK", mode: "FREQUENCY",
+    types: ["BASE", "EXACT", "FIXED"], selectedKeywords: 65, completedKeywords: 40, failedKeywords: 0,
+    status: "RUNNING", stage: "waiting_provider_capacity", version: 1,
+    createdAt: now, updatedAt: now, regionCode: "213", device: "DESKTOP"
+  }] } } }));
+  await command("PATCH", "me/preferences", { locale: "ru" });
+  await context.addCookies([{ name: "seo_ui_locale", value: "ru", url: base, secure: true, sameSite: "Lax" }]);
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.goto(`${base}/app/semantics`, { waitUntil: "networkidle" });
+  await page.locator('[data-presence-key="semantic-action:operations"]').click();
+  const frequencyCard = page.locator(".semantic-operation-card").filter({ hasText: "Частотность" }).first();
+  await frequencyCard.waitFor();
+  assert.equal(await frequencyCard.locator(".semantic-operation-status").innerText(), "Выполняется");
+  assert.equal(await frequencyCard.getByText("API-запросов: 120 из 195").count(), 1);
+  assert.ok((await frequencyCard.locator(".semantic-operation-status").boundingBox())?.width < 100);
+  await context.unroute(`**/app/api/projects/${project.id}/frequency-collections`);
   await writeFile(path.join(output, "operation-dialogs-report.json"), JSON.stringify({ report, errors, launches }, null, 2), { mode: 0o600 });
   assert.deepEqual(errors, []); assert.deepEqual(launches, []);
   const allowed = new Set(["Настройки", "сохранить настройки", "новый проект"]);

@@ -19,6 +19,8 @@ test("remote worker accepts one exact token from the environment", async () => {
   const config = await loadRemoteWorkerConfig(env);
   assert.equal(config.token, token);
   assert.equal(config.rankSlots, 8);
+  assert.equal(config.logQueries, false);
+  assert.equal((await loadRemoteWorkerConfig({ ...env, WORKER_LOG_QUERIES: "true" })).logQueries, true);
   await assert.rejects(() => loadRemoteWorkerConfig({
     ...env, WORKER_NODE_TOKEN: "REPLACE_WITH_TOKEN_FROM_ADMIN"
   }));

@@ -10,6 +10,7 @@ import { rankProviderRequestIntent } from "./rank-runs/rank-provider-request-int
 import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adapter.js";
 import { remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
+import { workerTaskFinishLog, workerTaskLogContext, workerTaskStartLog } from "./worker-nodes/remote-worker-task-log.js";
 
 const CLAIM_CADENCE_CHECK_MS=100;
 
@@ -49,21 +50,27 @@ async function main():Promise<void> {
         };
         authenticationRejected=false;
         const state=node.enabled ? node.draining ? "draining" : "online" : "disabled";
-        if(state!==previous) {process.stdout.write(`worker ${config.nodeId} ${state}\n`);previous=state;}
+        const stateLabel=state==="online" ? "на связи" : state==="draining" ? "завершает задачи" : "выключен";
+        if(state!==previous) {process.stdout.write(`Воркер ${config.nodeId}: ${stateLabel}\n`);previous=state;}
       } catch(error) {
         if(controller.signal.aborted) break;
         const state=error instanceof WorkerAuthenticationError ? "authentication rejected" : "control plane unavailable";
-        if(state!==previous){process.stderr.write(`worker ${config.nodeId} ${state}\n`);previous=state;}
+        if(state!==previous){process.stderr.write(`worker ${config.nodeId} ${state} · Воркер: ${error instanceof WorkerAuthenticationError ? "аутентификация отклонена" : "центр временно недоступен"}\n`);previous=state;}
         if(error instanceof WorkerAuthenticationError) suspendAuthentication();
       }
       await wait(authenticationRejected ? 30_000 : config.heartbeatMs,controller.signal);
     }
   }
 
-  function start(capability:WorkerCapability,resource:"HTTP"|"CPU",action:()=>Promise<void>):void {
+  function start(task:RemoteWorkTask|RemoteRankPollTaskV1,resource:"HTTP"|"CPU",action:()=>Promise<string|undefined>):void {
+    const capability=task.schemaVersion==="worker-rank-poll-task@1" ? "RANK" : task.capability;
+    const context=workerTaskLogContext(task,config.logQueries),startedAt=Date.now();
+    process.stdout.write(`${workerTaskStartLog(context)}\n`);
     active.set(capability,(active.get(capability) ?? 0)+1);if(resource==="HTTP")httpActive++;else cpuActive++;
-    const work=action().catch(error=>{if(error instanceof WorkerAuthenticationError){process.stderr.write(`worker ${config.nodeId} authentication rejected\n`);suspendAuthentication();}
-      else process.stderr.write(`worker ${config.nodeId} result acknowledgement unavailable\n`);
+    const work=action().then(errorCode=>{
+      process.stdout.write(`${workerTaskFinishLog(context,Date.now()-startedAt,errorCode)}\n`);
+    }).catch(error=>{if(error instanceof WorkerAuthenticationError){process.stderr.write(`worker ${config.nodeId} authentication rejected · Воркер: не удалось подтвердить ${context}\n`);suspendAuthentication();}
+      else process.stderr.write(`Воркер: центр не подтвердил ${context} · ${Date.now()-startedAt} мс\n`);
     }).finally(()=>{active.set(capability,Math.max(0,(active.get(capability) ?? 1)-1));if(resource==="HTTP")httpActive--;else cpuActive--;running.delete(work);completedWork++;});
     running.add(work);
   }
@@ -89,12 +96,13 @@ async function main():Promise<void> {
         for(const id of batch.cancelled)cancellations.get(id)?.();
         const tasks=batch.work.map(parseRemoteWorkTask),ranks=batch.ranks.map(parseWorkerRankTask);
         if(tasks.filter(task=>task.resource==="HTTP").length+ranks.length>httpSlots || tasks.filter(task=>task.resource==="CPU").length>cpuSlots) throw new Error("Worker capacity exceeded");
-        for(const task of tasks) start(task.capability,task.resource,()=>{
+        if(tasks.length+ranks.length>0)process.stdout.write(`Воркер: получена пачка · задания ${tasks.length} · страницы позиций ${ranks.length}\n`);
+        for(const task of tasks) start(task,task.resource,()=>{
           const done=()=>cancellations.delete(task.id);
           if(task.resource==="CPU") return runCpu(task,config,client,stop=>cancellations.set(task.id,stop)).finally(done);
           const abort=new AbortController();cancellations.set(task.id,()=>abort.abort());return runWork(task,config,client,abort.signal).finally(done);
         });
-        for(const task of ranks) start("RANK","HTTP",()=>runRank(task,client));
+        for(const task of ranks) start(task,"HTTP",()=>runRank(task,client));
       } catch(error) {
         if(controller.signal.aborted)break;
         if(error instanceof WorkerAuthenticationError){suspendAuthentication();await wait(5_000,controller.signal);}
@@ -106,37 +114,38 @@ async function main():Promise<void> {
   await Promise.all([heartbeat(),schedule()]);
 }
 
-async function runWork(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,signal:AbortSignal):Promise<void> {
+async function runWork(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,signal:AbortSignal):Promise<string|undefined> {
   let result;
   try {result=await executeRemoteWork(task,config,fetch,signal);}
-  catch(error){const code=error instanceof WorkExecutionError ? error.code : error && typeof error==="object" && "code" in error && typeof error.code==="string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(error.code) ? error.code : "WORKER_OUTCOME_UNKNOWN";await client.complete(task.ticket,undefined,undefined,code);return;}
+  catch(error){const code=error instanceof WorkExecutionError ? error.code : error && typeof error==="object" && "code" in error && typeof error.code==="string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(error.code) ? error.code : "WORKER_OUTCOME_UNKNOWN";await client.complete(task.ticket,undefined,undefined,code);return code;}
   await client.complete(task.ticket,result.result,result.parts);
+  return undefined;
 }
 
-async function runCpu(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,register:(stop:()=>void)=>void):Promise<void> {
-  await new Promise<void>((resolve,reject)=>{
+async function runCpu(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,register:(stop:()=>void)=>void):Promise<string|undefined> {
+  return new Promise<string|undefined>((resolve,reject)=>{
     const worker=new CpuWorker(new URL("./remote-work-thread.js",import.meta.url),{workerData:{task,config:{...config,controlUrl:config.controlUrl.toString()}},resourceLimits:{maxOldGenerationSizeMb:config.cpuTaskMemoryMb}});
     register(()=>{void worker.terminate();});
     let settled=false;
     const timer=setTimeout(()=>{void worker.terminate();},Math.max(1_000,Date.parse(task.deadline)-Date.now()+5_000));
-    worker.once("message",(message:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);void worker.terminate();const authentication=message && typeof message==="object" && "authenticationRejected" in message && message.authenticationRejected===true;if(authentication)reject(new WorkerAuthenticationError());else resolve();});
-    worker.once("error",()=>{if(settled)return;settled=true;clearTimeout(timer);void client.complete(task.ticket,undefined,undefined,"WORKER_PROCESS_EXITED").then(()=>resolve(),reject);});
-    worker.once("exit",()=>{if(settled)return;settled=true;clearTimeout(timer);void client.complete(task.ticket,undefined,undefined,"WORKER_PROCESS_EXITED").then(()=>resolve(),reject);});
+    worker.once("message",(message:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);void worker.terminate();const row=message && typeof message==="object" ? message as Record<string,unknown> : {};if(row.authenticationRejected===true)reject(new WorkerAuthenticationError());else resolve(row.ok===true ? undefined : typeof row.code==="string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(row.code) ? row.code : "WORKER_EXECUTION_FAILED");});
+    worker.once("error",()=>{if(settled)return;settled=true;clearTimeout(timer);void client.complete(task.ticket,undefined,undefined,"WORKER_PROCESS_EXITED").then(()=>resolve("WORKER_PROCESS_EXITED"),reject);});
+    worker.once("exit",()=>{if(settled)return;settled=true;clearTimeout(timer);void client.complete(task.ticket,undefined,undefined,"WORKER_PROCESS_EXITED").then(()=>resolve("WORKER_PROCESS_EXITED"),reject);});
   });
 }
 
-async function runRank(task:RemoteRankPollTaskV1,client:WorkerHttpClient):Promise<void> {
+async function runRank(task:RemoteRankPollTaskV1,client:WorkerHttpClient):Promise<string|undefined> {
   const outcome=await new XmlStockRankConnector(fetch,task.softId).fetchResult(task.providerTaskId,task.secret,task.timeoutMs,rankProviderRequestIntent(task.requestSnapshot),task.providerProgress);
   const body={schemaVersion:"worker-rank-poll-result@1",ticket:task.ticket,requestSnapshot:task.requestSnapshot,outcome};
-  for(let attempt=0;attempt<3;attempt++){try{await client.post("rank/complete",body,64*1024,10_000);return;}catch(error){if(error instanceof WorkerAuthenticationError || attempt===2)throw error;await wait(500*(attempt+1),new AbortController().signal);}}
+  for(let attempt=0;attempt<3;attempt++){try{await client.post("rank/complete",body,64*1024,10_000);return undefined;}catch(error){if(error instanceof WorkerAuthenticationError || attempt===2)throw error;await wait(500*(attempt+1),new AbortController().signal);}}
 }
 
 function wait(milliseconds:number,signal:AbortSignal):Promise<void>{return new Promise(resolve=>{if(signal.aborted)return resolve();const finished=()=>{clearTimeout(timer);signal.removeEventListener("abort",finished);resolve();};const timer=setTimeout(finished,milliseconds);signal.addEventListener("abort",finished,{once:true});});}
 
 void main().catch(error=>{
   const diagnostic=error instanceof RemoteWorkerConfigurationError
-    ? `remote worker configuration rejected: ${error.message}`
-    : "remote worker failed to start";
+    ? `Воркер: неверная конфигурация: ${error.message}`
+    : "Воркер: запуск не удался";
   process.stderr.write(`${diagnostic}\n`);
   process.exitCode=1;
 });
