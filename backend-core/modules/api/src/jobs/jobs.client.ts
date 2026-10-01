@@ -2541,6 +2541,9 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     "stage",
     "provider",
     "searchEngine",
+    "searchSource",
+    "yandexLiveMode",
+    "frequencyMode",
     "connection",
     "workers",
     "progress",
@@ -2565,6 +2568,11 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     (input.provider !== undefined && !shortSafeString(input.provider, 64)) ||
     (input.searchEngine !== undefined &&
       input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") ||
+    (input.searchSource !== undefined &&
+      input.searchSource !== "LIVE" && input.searchSource !== "SEARCH_API") ||
+    (input.yandexLiveMode !== undefined && input.yandexLiveMode !== "TURBO") ||
+    (input.frequencyMode !== undefined &&
+      input.frequencyMode !== "FREQUENCY" && input.frequencyMode !== "SEASONALITY") ||
     (input.errorCode !== undefined &&
       (typeof input.errorCode !== "string" ||
         !/^[A-Z][A-Z0-9_]{0,99}$/u.test(input.errorCode))) ||
@@ -2642,6 +2650,11 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     ...(typeof input.provider === "string" ? { provider: input.provider } : {}),
     ...(input.searchEngine === "YANDEX" || input.searchEngine === "GOOGLE"
       ? { searchEngine: input.searchEngine } : {}),
+    ...(input.searchSource === "LIVE" || input.searchSource === "SEARCH_API"
+      ? { searchSource: input.searchSource } : {}),
+    ...(input.yandexLiveMode === "TURBO" ? { yandexLiveMode: input.yandexLiveMode } : {}),
+    ...(input.frequencyMode === "FREQUENCY" || input.frequencyMode === "SEASONALITY"
+      ? { frequencyMode: input.frequencyMode } : {}),
     ...(connection ? {
       connection: {
         label: connection.label as string,

@@ -1,15 +1,18 @@
 # Удалённый воркер на чистом Windows-ПК
 
 Нужен Windows 10/11 x64 с включённой аппаратной виртуализацией, минимум 8 ГБ
-ОЗУ и исходящий HTTPS-доступ к центральному серверу. Входящий IP, открытые
-порты и локальная PostgreSQL не нужны. Для длительных операций отключите сон
-ПК и включите автозапуск Docker Desktop после входа в Windows.
+ОЗУ (предпочтительно 16 ГБ) и исходящий HTTPS-доступ к центральному серверу.
+Входящий IP, открытые порты и локальная PostgreSQL не нужны. Все команды ниже,
+включая Docker, выполняются в **Windows PowerShell**: отдельно устанавливать
+Ubuntu, открывать Linux-терминал и настраивать Linux не нужно. WSL 2 требуется
+Docker Desktop только как встроенная платформа для Linux-контейнера.
 
 ## 1. Windows, WSL и Docker
 
-1. Откройте PowerShell **от администратора**, выполните `wsl --install` и
-   перезагрузите ПК. Затем выполните `wsl --update`. Если виртуализация
-   выключена, включите её в BIOS/UEFI.
+1. Откройте PowerShell **от администратора**, выполните
+   `wsl --install --no-distribution` и перезагрузите ПК. Это включает WSL 2
+   **без Ubuntu**. Если WSL уже установлен, вместо установки достаточно
+   `wsl --update`. Если виртуализация выключена, включите её в BIOS/UEFI.
 2. Установите [Docker Desktop для Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
    Выберите backend **WSL 2** и режим Linux containers; запустите Docker
    Desktop и дождитесь состояния «Engine running».
@@ -27,11 +30,11 @@ New-Item -ItemType Directory -Path C:\seo-worker -Force
 Set-Location C:\seo-worker
 git clone https://github.com/ker4ik13/seo-platform.git
 Set-Location .\seo-platform
-git switch main
+git switch codex/worker-fleet-db-pilot
 ```
 
-Для предварительной проверки тестовой ветки вместо `git switch main`
-выполните `git switch codex/worker-fleet-db-pilot`.
+Пока релиз проверяется, используйте именно ветку
+`codex/worker-fleet-db-pilot`; `main` может содержать старую версию воркера.
 
 ## 3. Зарегистрировать узел и заполнить конфигурацию
 
@@ -45,17 +48,17 @@ Copy-Item .\infrastructure\.env.worker.example .\infrastructure\.env.worker
 notepad .\infrastructure\.env.worker
 ```
 
-Замените ID, токен и адрес центра. Для тестового стенда используйте
-`WORKER_CONTROL_URL=https://144.31.221.28:3000`; для продакшна —
+Замените только `WORKER_NODE_ID` и `WORKER_NODE_TOKEN`: в шаблоне уже указан
+тестовый адрес `WORKER_CONTROL_URL=https://144.31.221.28:3000` и включены
+позиции, Wordstat и остальные возможности. Для продакшна —
 `WORKER_CONTROL_URL=https://seonorita.ru` **после проверки**, что маршрут
 `/worker/v1/*` включён на продовом HTTPS-входе. Токен не копируйте в
 `.env` основного сервера и не добавляйте файл в Git.
 
-Для первого запуска рекомендуемые пределы на одном офисном ПК: HTTP 32,
-позиции 32, Wordstat 10, CPU 2, контейнеру 4 CPU и 8 ГБ памяти. Это
-верхние пределы, а не постоянное потребление; один физический Wordstat-ключ
+Начните с пределов шаблона: HTTP и позиции по 16, Wordstat 10, CPU 2.
+Это потолки, а не постоянное потребление. Один физический Wordstat-ключ
 всё равно ограничен десятью одновременными запросами XMLStock. После
-проверки ресурсы можно увеличить в `.env.worker` и админке.
+проверки пределы можно увеличить в `.env.worker` и админке.
 
 `WORKER_LOG_QUERIES=false` оставляет в логах только тип, ID, провайдера,
 длительность и безопасный код результата. На доверенном ПК можно поставить
@@ -79,6 +82,10 @@ docker compose --env-file .\infrastructure\.env.worker -f .\infrastructure\worke
 убедитесь, что heartbeat свежий и слоты соответствуют `.env.worker`, и
 включите узел. Проверьте небольшой заранее оценённой операцией; не публикуйте
 в чат токен и полные логи при `WORKER_LOG_QUERIES=true`.
+
+В Docker Desktop включите **Start Docker Desktop when you sign in**. Для
+долгих операций отключите переход ПК в сон: остановленный Docker Desktop
+делает воркер недоступным до следующего входа в Windows.
 
 ## 5. Обновить или плавно остановить
 

@@ -2,18 +2,24 @@
 
 import { useEffect, useRef } from "react";
 
-/** One non-overlapping refresh per visible screen; editing forms keeps its own state. */
+/** Refresh the mounted admin screen while its tab is open, including background tabs. */
 export function useAdminAutoRefresh(refresh: () => Promise<unknown>, enabled = true): void {
   const current = useRef(refresh);
   useEffect(() => { current.current = refresh; }, [refresh]);
   useEffect(() => {
     if (!enabled) return;
     let running = false;
-    const timer = window.setInterval(() => {
-      if (running || document.hidden) return;
+    const refreshNow = () => {
+      if (running) return;
       running = true;
       void current.current().finally(() => { running = false; });
-    }, 5_000);
-    return () => window.clearInterval(timer);
+    };
+    const onVisibilityChange = () => { if (!document.hidden) refreshNow(); };
+    const timer = window.setInterval(refreshNow, 1_000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [enabled]);
 }

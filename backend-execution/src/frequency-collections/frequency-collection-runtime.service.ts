@@ -59,6 +59,11 @@ interface XmlStockCollectedItem {
   readonly points?: readonly InternalFrequencySeasonalityPoint[];
   readonly error?: unknown;
 }
+type XmlStockCollectedPart =
+  | { readonly ok: true; readonly snapshots: readonly FrequencySnapshot[];
+      readonly points: readonly InternalFrequencySeasonalityPoint[] }
+  | { readonly ok: false; readonly code: string; readonly retryable: boolean;
+      readonly retryAfterSeconds?: number };
 const SUBMIT_MARKER_PATTERN =
   /^submitting:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
@@ -511,57 +516,91 @@ export class FrequencyCollectionRuntimeService {
     const snapshots: FrequencySnapshot[] = [];
     const points: InternalFrequencySeasonalityPoint[] = [];
     const credentialId = secret.rateLimitScopeId ?? claim.credentialId;
-    // Reserve every requested type before sending the first paid request.
-    // A later rate-window denial must not make an already-paid type repeat.
-    const acquired = await this.xmlStockQuota.tryAcquire({
-      ...(this.config.remoteWorkEnabled ? { physicalOnly: true } : {}),
-      credentialId, workspaceId: claim.workspaceId, product: "WORDSTAT",
-      requestCost: claim.types.length, maxWaitMs: 4_000,
-      leaseMs: timeoutMs * claim.types.length + FREQUENCY_PERSISTENCE_MARGIN_MS +
-        (this.config.remoteWorkEnabled ? 15_000 * claim.types.length : 0)
-    });
-    if (!acquired.allowed) {
-      return { outcome: { jobItemId, status: "CAPACITY", retryAfterSeconds: Math.max(1, acquired.retryAfterSeconds) } };
-    }
-    try {
-      for (const type of claim.types) {
-        this.assertLease(claim, timeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS + (this.config.remoteWorkEnabled ? 15_000 : 0));
-        const input = { keyword: keyword.text, type, regionCode: claim.regionCode, device: claim.device };
-        if (claim.mode === "SEASONALITY") {
-          const seasonality = claim.seasonality;
-          if (!seasonality) throw new TypeError("Seasonality collection is missing its range");
-          const result = await this.runPaid(claim, `SEASONALITY_${type}`,
-            () => this.xmlStock.collectSeasonality({ ...input, seasonality }, secret, timeoutMs));
-          if (!result.ok) return { outcome: await this.xmlStockFailureOutcome(jobItemId, credentialId, result) };
-          points.push(...result.points.map(point => ({
-            type, granularity: seasonality.granularity, periodStart: point.periodStart, value: point.value,
-            ...(point.share ? { share: point.share } : {}),
-            regionCode: claim.regionCode, device: claim.device, provider: "XMLSTOCK" as const, sourceMode
-          })));
-        } else {
-          const result = await this.runPaid(claim, type, () => this.xmlStock.collect(input, secret, timeoutMs));
-          if (!result.ok) return { outcome: await this.xmlStockFailureOutcome(jobItemId, credentialId, result) };
-          snapshots.push({ type, regionCode: claim.regionCode, device: claim.device,
-            period: "LAST_30_DAYS", value: result.value, provider: "XMLSTOCK", sourceMode, qualityFlags: [] });
+    const requestBudgetMs = timeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS +
+      (this.config.remoteWorkEnabled ? 15_000 : 0);
+    // Count the actual outbound HTTP calls, not all types of one phrase at
+    // once: those calls are sequential and an early reservation caused bursts.
+    for (const [index, type] of claim.types.entries()) {
+      while (true) {
+        if (Date.parse(claim.leaseExpiresAt) - Date.now() < requestBudgetMs + FREQUENCY_PERSISTENCE_MARGIN_MS) {
+          // A prior successful type has already been paid. Never silently
+          // restart the entire phrase after losing the remaining lease.
+          return { outcome: index === 0
+            ? { jobItemId, status: "CAPACITY", retryAfterSeconds: 5 }
+            : { jobItemId, status: "FAILED", code: "PROVIDER_REQUIRES_REVIEW", retryable: false, retryAfterSeconds: 30 } };
         }
+        const acquired = await this.xmlStockQuota.tryAcquire({
+          ...(this.config.remoteWorkEnabled ? { physicalOnly: true } : {}),
+          credentialId, workspaceId: claim.workspaceId, product: "WORDSTAT",
+          requestCost: 1, maxWaitMs: 4_000, leaseMs: requestBudgetMs
+        });
+        if (!acquired.allowed) {
+          if (index === 0) return { outcome: { jobItemId, status: "CAPACITY",
+            retryAfterSeconds: Math.max(1, acquired.retryAfterSeconds) } };
+          await new Promise<void>((resolve) => setTimeout(resolve,
+            Math.max(100, Math.min(1_000, acquired.retryAfterMilliseconds))));
+          continue;
+        }
+        let part: XmlStockCollectedPart;
+        try {
+          part = await this.collectXmlStockType(claim, keyword, type, secret, sourceMode, timeoutMs);
+        } finally {
+          await this.xmlStockQuota.release(acquired);
+        }
+        if (!part.ok) {
+          if (part.code === "PROVIDER_RATE_LIMITED" || part.code === "PROVIDER_CONCURRENCY_LIMITED") {
+            if (part.code === "PROVIDER_RATE_LIMITED") {
+              await this.xmlStockQuota.penalize({ credentialId, product: "WORDSTAT",
+                ...(part.retryAfterSeconds ? { retryAfterSeconds: part.retryAfterSeconds } : {}) });
+            }
+            if (index === 0) return { outcome: { jobItemId, status: "CAPACITY",
+              retryAfterSeconds: Math.max(1, part.retryAfterSeconds ?? 2) } };
+            continue;
+          }
+          return { outcome: this.xmlStockFailureOutcome(jobItemId, part) };
+        }
+        snapshots.push(...part.snapshots);
+        points.push(...part.points);
+        await this.xmlStockQuota.recordSuccess({ credentialId, product: "WORDSTAT" });
+        break;
       }
-      await this.xmlStockQuota.recordSuccess({ credentialId, product: "WORDSTAT" });
-      return { outcome: { jobItemId, status: "COMPLETED" }, snapshots, points };
-    } finally {
-      await this.xmlStockQuota.release(acquired);
     }
+    return { outcome: { jobItemId, status: "COMPLETED" }, snapshots, points };
   }
 
-  private async xmlStockFailureOutcome(
+  private async collectXmlStockType(
+    claim: FrequencyCollectionClaim,
+    keyword: InternalFrequencyKeyword,
+    type: FrequencyCollectionClaim["types"][number],
+    secret: IntegrationCredentialSecret,
+    sourceMode: "BYOK" | "PLATFORM",
+    timeoutMs: number
+  ): Promise<XmlStockCollectedPart> {
+    const input = { keyword: keyword.text, type, regionCode: claim.regionCode, device: claim.device };
+    if (claim.mode === "SEASONALITY") {
+      const seasonality = claim.seasonality;
+      if (!seasonality) throw new TypeError("Seasonality collection is missing its range");
+      const result = await this.runPaid(claim, `SEASONALITY_${type}`,
+        () => this.xmlStock.collectSeasonality({ ...input, seasonality }, secret, timeoutMs));
+      if (!result.ok) return result;
+      return { ok: true, snapshots: [], points: result.points.map(point => ({
+        type, granularity: seasonality.granularity, periodStart: point.periodStart, value: point.value,
+        ...(point.share ? { share: point.share } : {}),
+        regionCode: claim.regionCode, device: claim.device, provider: "XMLSTOCK", sourceMode
+      })) };
+    }
+    const result = await this.runPaid(claim, type, () => this.xmlStock.collect(input, secret, timeoutMs));
+    if (!result.ok) return result;
+    return { ok: true, snapshots: [{ type, regionCode: claim.regionCode, device: claim.device,
+      period: "LAST_30_DAYS", value: result.value, provider: "XMLSTOCK", sourceMode, qualityFlags: [] }], points: [] };
+  }
+
+  private xmlStockFailureOutcome(
     jobItemId: string,
-    credentialId: string,
     failure: { readonly code: string; readonly retryable: boolean; readonly retryAfterSeconds?: number }
-  ): Promise<XmlStockFrequencyItemOutcome> {
+  ): XmlStockFrequencyItemOutcome {
     if (failure.code === "PROVIDER_CONCURRENCY_LIMITED") {
       return { jobItemId, status: "CAPACITY", retryAfterSeconds: failure.retryAfterSeconds ?? 5 };
-    }
-    if (failure.code === "PROVIDER_RATE_LIMITED") {
-      await this.xmlStockQuota.penalize({ credentialId, product: "WORDSTAT" });
     }
     return { jobItemId, status: "FAILED", code: failure.code, retryable: failure.retryable,
       retryAfterSeconds: Math.min(3_600, Math.max(5, failure.retryAfterSeconds ?? 30)) };

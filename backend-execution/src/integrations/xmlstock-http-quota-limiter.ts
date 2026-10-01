@@ -229,12 +229,21 @@ return removed
 
 const PENALIZE_SCRIPT = `
 local requested_ms = tonumber(ARGV[1])
-local level = tonumber(redis.call('GET', KEYS[1]) or '0') + 1
+local level = tonumber(redis.call('GET', KEYS[1]) or '0')
+local existing_ms = redis.call('PTTL', KEYS[2])
+-- Several in-flight requests can report one provider overload at once. Treat
+-- the whole cooldown window as one signal, not one penalty per response.
+if existing_ms > 0 then
+  if requested_ms > existing_ms then
+    redis.call('SET', KEYS[2], '1', 'PX', requested_ms)
+    existing_ms = requested_ms
+  end
+  return {level, existing_ms}
+end
+level = level + 1
 if level > 4 then level = 4 end
 local adaptive_ms = math.min(300000, 1000 * (2 ^ (level - 1)))
 local cooldown_ms = math.max(requested_ms, adaptive_ms)
-local existing_ms = redis.call('PTTL', KEYS[2])
-if existing_ms > cooldown_ms then cooldown_ms = existing_ms end
 redis.call('SET', KEYS[1], tostring(level), 'PX', 600000)
 redis.call('SET', KEYS[2], '1', 'PX', cooldown_ms)
 redis.call('DEL', KEYS[3])

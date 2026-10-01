@@ -322,6 +322,7 @@ test("running Wordstat shows its own key and main server without rank scans", as
       })
     },
     $queryRaw: async (query: TemplateStringsArray) => {
+      if (query.join("").includes("input_snapshot->>'mode'")) return [{ jobId, mode: "SEASONALITY", failureCode: null }];
       assert.ok(query.join("").includes("list_remote_work_assignments"));
       return [];
     }
@@ -335,9 +336,36 @@ test("running Wordstat shows its own key and main server without rank scans", as
   } as unknown as RankOperationProvenanceService);
   const result = await service.adminDetail(jobId);
   assert.equal(result.searchEngine, "YANDEX");
+  assert.equal(result.frequencyMode, "SEASONALITY");
   assert.deepEqual(result.connection, { label: "Wordstat ключ" });
   assert.deepEqual(result.workers,
     [{ name: "Основной сервер", activeTasks: 0, status: "MAIN", assignedOperations: 1 }]);
+});
+
+test("admin Wordstat projects low balance from failed items without exposing the input snapshot", async () => {
+  const createdAt = new Date("2026-10-01T15:54:00.000Z");
+  const service = activityService({
+    job: {
+      findUnique: async () => ({
+        id: jobId, workspaceId, projectId: firstProjectId, actorId,
+        type: "FREQUENCY_COLLECTION", status: "CANCELLED", stage: "collecting",
+        provider: "XMLSTOCK", credentialMode: "BYOK_API_KEY",
+        scopeSnapshot: {}, progressCurrent: 8n, progressTotal: 65n,
+        progressUnit: "keywords", actualCostMicro: null, currency: "RUB",
+        attempt: 1, maxAttempts: 8,
+        errorSummary: { code: "ITEMS_FAILED" }, resultSummary: null,
+        createdAt, queuedAt: createdAt, startedAt: createdAt,
+        finishedAt: createdAt, updatedAt: createdAt
+      })
+    },
+    $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("input_snapshot->>'mode'")
+      ? [{ jobId, mode: "SEASONALITY", failureCode: "PROVIDER_LOW_BALANCE" }]
+      : []
+  } as unknown as PrismaService);
+  const detail = await service.adminDetail(jobId);
+  assert.equal(detail.frequencyMode, "SEASONALITY");
+  assert.equal(detail.errorCode, "PROVIDER_LOW_BALANCE");
+  assert.doesNotMatch(JSON.stringify(detail), /inputSnapshot|rawProviderResponse|secret/u);
 });
 
 test("loads one safe platform operation summary for a deep link", async () => {

@@ -277,7 +277,7 @@ export function AdminApp() {
           </div>
           <div className="topbar-actions">
             <div className="admin-page-actions" id="admin-page-actions" />
-            <span className="system-state" title="Данные обновляются автоматически каждые 5 секунд"><i /> 5 сек.</span>
+            <span className="system-state" title="Данные обновляются автоматически каждую секунду"><i /> 1 сек.</span>
             <button className="ghost" onClick={() => void logout()} type="button">
               <UiText text="Выйти" /></button>
           </div>

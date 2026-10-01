@@ -268,11 +268,15 @@ test("admin dark presentation uses shared selects without granting staff access"
     const context = await browser.newContext({ storageState: await api.storageState() });
     const errors = [];
     const page = await context.newPage(); page.on("pageerror", (error) => errors.push(error.message));
-    const operation = { id: randomUUID(), workspaceId: randomUUID(), type: "MANUAL_RANK_CHECK", status: "RUNNING", stage: "WAITING_EXECUTION_GRANT", provider: "XMLSTOCK", searchEngine: "YANDEX", connection: { label: "Личный ключ", displayHint: "••••1234" }, workers: [{ name: "Офисный воркер", activeTasks: 4, status: "ONLINE", assignedOperations: 2, nodeId: randomUUID() }], progress: { current: "25", total: "100", unit: "KEYWORD" }, result: { found: 20, notFound: 5 }, attempt: 1, maxAttempts: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), workspace: { id: randomUUID(), name: "Рабочая область" }, project: { id: randomUUID(), name: "Тестовый проект", domain: "example.org" }, actor: null };
+    const operation = { id: randomUUID(), workspaceId: randomUUID(), type: "MANUAL_RANK_CHECK", status: "RUNNING", stage: "WAITING_EXECUTION_GRANT", provider: "XMLSTOCK", searchEngine: "YANDEX", searchSource: "LIVE", connection: { label: "Личный ключ", displayHint: "••••1234" }, workers: [{ name: "Офисный воркер", activeTasks: 4, status: "ONLINE", assignedOperations: 2, nodeId: randomUUID() }], progress: { current: "25", total: "100", unit: "KEYWORD" }, result: { found: 20, notFound: 5 }, attempt: 1, maxAttempts: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), workspace: { id: randomUUID(), name: "Рабочая область" }, project: { id: randomUUID(), name: "Тестовый проект", domain: "example.org" }, actor: null };
+    const seasonality = { ...operation, id: randomUUID(), type: "FREQUENCY_COLLECTION", frequencyMode: "SEASONALITY", status: "CANCELLED", searchSource: undefined, progress: { current: "8", total: "65", unit: "keywords" }, result: { failed: 31 }, errorCode: "PROVIDER_LOW_BALANCE" };
+    const frequency = { ...seasonality, id: randomUUID(), frequencyMode: "FREQUENCY", progress: { current: "10", total: "65", unit: "keywords" } };
     // Presentation-only fixture. No API/DB role is created or bypassed.
     let cancellations = 0;
+    let operationReads = 0;
     await page.route("**/admin/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/operations")) operationReads++;
       if (path.endsWith(`/operations/${operation.id}/cancel`)) {
         assert.equal(route.request().method(), "POST");
         const command = parseAdminCancelOperationCommand(route.request().postDataJSON());
@@ -282,20 +286,30 @@ test("admin dark presentation uses shared selects without granting staff access"
         await route.fulfill({ json: { data: { id: operation.id, status: operation.status } } });
         return;
       }
-      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation], totals: { total: 3, active: 1, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 2 }] };
+      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation, seasonality, frequency], totals: { total: 3, active: 1, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 2 }] };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data, meta: { requestId: randomUUID() } }) });
     });
-    await page.goto(`${base}/admin?screen=operations&refresh=5`, { waitUntil: "networkidle" });
+    await page.goto(`${base}/admin?screen=operations`, { waitUntil: "domcontentloaded" });
     await page.getByText("Офисный воркер", { exact: true }).first().waitFor();
     assert.equal(await page.locator(".operation-worker-card.operation-worker-online").first().getByText("2 операции · 4 выдано запросов").count(), 1);
     const workerCopy = await page.locator(".operation-worker-card .operation-worker-copy").first().boundingBox();
     assert.ok(workerCopy && workerCopy.width >= 100, "worker name and counts must fit without breaking each word");
-    assert.equal(await page.getByText(/Яндекс · Личный ключ/u).count(), 1);
+    assert.equal(await page.getByText(/Яндекс Live · Личный ключ/u).count(), 1);
+    assert.equal(await page.getByText("Сезонность Wordstat", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Сбор частотности", { exact: true }).count(), 1);
+    assert.equal(await page.locator(".operation-kind .provider-logo.xmlstock").count(), 3);
+    assert.equal(await page.getByText("Недостаточно средств на балансе провайдера").count(), 2);
     assert.equal(await page.getByRole("combobox", { name: /Язык|Language/u }).count(), 0);
     assert.equal(await page.getByRole("combobox", { name: "Интервал обновления", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "Обновить", exact: true }).count(), 0);
     assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
-    await page.getByRole("button", { name: "Остановить", exact: true }).click();
+    const backgroundPage = await context.newPage();
+    await backgroundPage.goto(`${base}/ru`, { waitUntil: "domcontentloaded" });
+    const readsBeforeBackground = operationReads;
+    await page.waitForTimeout(2_300);
+    assert.ok(operationReads > readsBeforeBackground, "an inactive admin tab must keep refreshing");
+    await backgroundPage.close();
+    await page.locator(".operation-row").filter({ hasText: "Проверка позиций" }).getByRole("button", { name: "Остановить", exact: true }).click();
     const confirmation = page.locator("dialog[open].admin-action-dialog");
     assert.equal(await confirmation.getByRole("button", { name: "Подтвердить", exact: true }).isEnabled(), false);
     await confirmation.getByRole("checkbox", { name: "Подтверждаю действие", exact: true }).check();
@@ -303,25 +317,24 @@ test("admin dark presentation uses shared selects without granting staff access"
     await confirmation.getByRole("button", { name: "Подтвердить", exact: true }).click();
     await confirmation.waitFor({ state: "hidden" });
     assert.equal(cancellations, 1);
-    assert.equal(await page.getByRole("button", { name: "Остановить", exact: true }).count(), 0);
+    await page.locator(".operation-row").filter({ hasText: "Проверка позиций" })
+      .getByRole("button", { name: "Остановить", exact: true }).waitFor({ state: "hidden" });
     await page.addStyleTag({ content: ".operation-panel { min-height: 1800px }" });
     await page.evaluate(() => window.scrollTo(0, 100));
     const beforeDrawer = await page.evaluate(() => window.scrollY);
     assert.ok(beforeDrawer >= 90);
-    await page.getByRole("button", { name: "Детали", exact: true }).click();
+    await page.locator(".operation-row").filter({ hasText: "Проверка позиций" }).getByRole("button", { name: "Детали", exact: true }).click();
     await page.getByRole("dialog", { name: new RegExp(operation.id, "u") }).getByRole("button", { name: "Закрыть" }).click();
     assert.equal(await page.evaluate(() => window.scrollY), beforeDrawer, "closing details must keep the list scroll position");
     const typeSelect = page.getByRole("combobox", { name: "Тип операции" });
     await typeSelect.click();
-    await page.getByRole("option", { name: /Сбор частотности/u }).click();
+    await page.getByRole("option", { name: /Частотность и сезонность/u }).click();
     await typeSelect.click();
     assert.equal(await page.getByRole("option", { name: /Проверка позиций/u }).count(), 1);
-    assert.equal(await page.getByRole("option", { name: /Сбор частотности/u }).count(), 1);
+    assert.equal(await page.getByRole("option", { name: /Частотность и сезонность/u }).count(), 1);
     await page.keyboard.press("Escape");
-    await page.goto(`${base}/admin?screen=operations&refresh=3`, { waitUntil: "networkidle" });
-    await page.waitForURL(/refresh=5/u);
-    await page.reload({ waitUntil: "networkidle" });
-    await page.getByTitle("Данные обновляются автоматически каждые 5 секунд").waitFor();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTitle("Данные обновляются автоматически каждую секунду").waitFor();
     const color = await page.locator(".admin-root").evaluate((element) => getComputedStyle(element).backgroundColor);
     assert.equal(color, "rgb(32, 32, 32)");
     await page.screenshot({ path: `${process.env.SEO_PLATFORM_E2E_OUTPUT_DIR}/admin-operation-theme.png`, fullPage: true });

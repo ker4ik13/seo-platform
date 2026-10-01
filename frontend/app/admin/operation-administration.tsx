@@ -3,6 +3,8 @@
 import { CustomSelect } from "../../components/custom-select";
 import { AdminOperationCancel } from "../../components/admin-operation-cancel";
 import { Icon } from "../../components/icon";
+import { ProviderLogo } from "../../components/provider-logo";
+import { adminOperationName, adminSearchProductLabel, operationFailureLabel } from "../../lib/admin-operation-presentation";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -54,7 +56,6 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
       if (changes.operation) next.set("operation", changes.operation);
       else next.delete("operation");
     }
-    next.set("refresh", "5");
     const href = `/admin?${next.toString()}`;
     if (changes.operation !== undefined && changes.status === undefined && changes.type === undefined) {
       // Native history updates App Router's search params without reloading
@@ -67,8 +68,7 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
   useEffect(() => {
     setStatus(adminOperationStatus(searchParams.get("status")));
     setType(adminOperationType(searchParams.get("type")));
-    if (searchParams.get("refresh") !== "5") updateUrl({});
-  }, [searchParams, updateUrl]);
+  }, [searchParams]);
 
   const load = useCallback(async (cursor?: string, silent = false) => {
     const controller = cursor ? undefined : new AbortController();
@@ -156,7 +156,7 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
               updateUrl({ type: nextType, operation: null });
             }} value={type}>
               <option value=""><UiText text="Все типы" /></option>
-              {visibleTypes.map((item) => <option key={item.type} value={item.type}>{operationType(item.type)} · {formatNumber(item.count, uiLocale)}</option>)}
+              {visibleTypes.map((item) => <option key={item.type} value={item.type}>{adminOperationName({ type: item.type })} · {formatNumber(item.count, uiLocale)}</option>)}
             </CustomSelect>
           </div>
         </header>
@@ -201,8 +201,10 @@ function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ o
   return (
     <article className="operation-row">
       <div className="operation-primary">
-        <span className="operation-kind">{typeMark(operation.type)}</span>
-        <div><strong>{operationType(operation.type)}</strong><small>{operation.provider ?? <UiText text="Без провайдера" />} · {shortId(operation.id)}</small></div>
+        <span className="operation-kind">{operation.provider === "XMLSTOCK" || operation.provider === "ARSENKIN" || operation.provider === "KEYS_SO"
+          ? <ProviderLogo provider={operation.provider} size="compact" />
+          : <Icon name={operationIcon(operation.type)} />}</span>
+        <div><strong>{adminOperationName(operation)}</strong><small>{providerLabel(operation.provider)} · {shortId(operation.id)}</small></div>
       </div>
       <div className="operation-context" data-label="Контекст">
         <strong>{operation.project?.name ?? <UiText text="Без проекта" />}</strong>
@@ -210,8 +212,7 @@ function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ o
       </div>
       <div className="operation-source" data-label="Источник / воркеры">
         <strong className="operation-source-connection">{[
-          operation.searchEngine === "YANDEX" ? "Яндекс" :
-            operation.searchEngine === "GOOGLE" ? "Google" : undefined,
+          adminSearchProductLabel(operation),
           operation.connection
             ? `${operation.connection.label}${operation.connection.displayHint
               ? ` · ${operation.connection.displayHint}` : ""}`
@@ -242,7 +243,7 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
     <div className="drawer-backdrop" onMouseDown={onClose}>
       <aside aria-label={uiText("Операция {0}", [String(operation.id)])} aria-modal="true" className="drawer operation-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog">
         <header>
-          <div><p><UiText text="Операция" /></p><h2>{operationType(operation.type)}</h2></div>
+          <div><p><UiText text="Операция" /></p><h2>{adminOperationName(operation)}</h2></div>
           <button aria-label={uiText("Закрыть")} onClick={onClose} type="button">×</button>
         </header>
         <div className="operation-detail-status"><OperationStatus status={operation.status} /><span>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</span></div>
@@ -252,8 +253,8 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label="Workspace" value={operation.workspace?.name ?? operation.workspaceId} />
           <Snapshot label={uiText("Проект")} value={operation.project ? `${operation.project.name} · ${operation.project.domain}` : "Без проекта"} />
           <Snapshot label={uiText("Автор запуска")} value={operation.actor ? `${operation.actor.displayName} · ${operation.actor.email}` : "Системная операция"} />
-          <Snapshot label={uiText("Провайдер")} value={operation.provider ?? "—"} />
-          <Snapshot label={uiText("Поисковая система")} value={operation.searchEngine === "YANDEX" ? "Яндекс" : operation.searchEngine === "GOOGLE" ? "Google" : "—"} />
+          <Snapshot label={uiText("Провайдер")} value={providerLabel(operation.provider)} />
+          <Snapshot label={uiText("Поисковая система")} value={adminSearchProductLabel(operation) ?? "—"} />
           <Snapshot label={uiText("Подключение")} value={operation.connection ? `${operation.connection.label}${operation.connection.displayHint ? ` · ${operation.connection.displayHint}` : ""}` : "—"} />
           <Snapshot label={uiText("Этап")} value={operation.stage ? operationStage(operation) : "—"} />
           <Snapshot label={uiText("Попытка")} value={`${operation.attempt} из ${operation.maxAttempts}`} />
@@ -301,13 +302,15 @@ function OperationStatus({ status }: Readonly<{ status: string }>) {
 }
 function Snapshot({ label, value }: Readonly<{ label: string; value: string }>) { return <div><span>{label}</span><strong>{value}</strong></div>; }
 
-function operationType(value: string): string {
-  return ({ MANUAL_RANK_CHECK: "Проверка позиций", FREQUENCY_COLLECTION: "Сбор частотности", CLUSTERING_RUN: "Кластеризация запросов", TECHNICAL_CRAWL: "Обход сайта", KEYWORD_RESEARCH: "Исследование запросов", SEMANTIC_IMPORT: "Импорт семантики", SEMANTIC_EXPORT: "Экспорт семантики" } as Record<string, string>)[value] ?? value.toLocaleLowerCase("ru-RU").replaceAll("_", " ");
+function providerLabel(value: string | undefined): string {
+  return ({ XMLSTOCK: "XMLStock", ARSENKIN: "Arsenkin Tools", KEYS_SO: "Keys.so" } as Record<string, string>)[value ?? ""] ?? value ?? "Без провайдера";
 }
 function operationStatus(value: string): string {
-  return ({ DRAFT: "Черновик", ESTIMATING: "Оценка", AWAITING_APPROVAL: "Ожидает запуска", RESERVING_BALANCE: "Резерв", PREPARING: "Подготовка", QUEUED: "В очереди", WAITING_RATE_LIMIT: "Ожидает лимит", RUNNING: "Выполняется", PAUSE_REQUESTED: "Останавливается", PAUSED: "На паузе", CANCEL_REQUESTED: "Отменяется", CANCELLED: "Отменена", RETRY_SCHEDULED: "Повтор запланирован", PARTIALLY_COMPLETED: "Частично завершена", COMPLETED: "Завершена", FAILED_RETRYABLE: "Повтор после ошибки", FAILED_FINAL: "Ошибка", ACTION_REQUIRED: "Требует внимания", EXPIRED: "Истекла" } as Record<string, string>)[value] ?? value;
+  return ({ DRAFT: "Черновик", ESTIMATING: "Оценка", AWAITING_APPROVAL: "Ожидает запуска", RESERVING_BALANCE: "Резерв", PREPARING: "Подготовка", QUEUED: "В очереди", WAITING_RATE_LIMIT: "Ожидает лимит", RUNNING: "Выполняется", PAUSE_REQUESTED: "Останавливается", PAUSED: "На паузе", CANCEL_REQUESTED: "Отменяется", CANCELLED: "Отменена", RETRY_SCHEDULED: "Ожидает", PARTIALLY_COMPLETED: "Частично завершена", COMPLETED: "Завершена", FAILED_RETRYABLE: "Ожидает", FAILED_FINAL: "Ошибка", ACTION_REQUIRED: "Требует внимания", EXPIRED: "Истекла" } as Record<string, string>)[value] ?? value;
 }
-function typeMark(value: string): string { return ({ MANUAL_RANK_CHECK: "↗", FREQUENCY_COLLECTION: "ƒ", CLUSTERING_RUN: "◫", TECHNICAL_CRAWL: "⌁", KEYWORD_RESEARCH: "◎", SEMANTIC_IMPORT: "↓", SEMANTIC_EXPORT: "↑" } as Record<string, string>)[value] ?? "•"; }
+function operationIcon(value: string): "rankCheck" | "frequency" | "cluster" | "http" | "search" | "import" | "export" | "operations" {
+  return ({ MANUAL_RANK_CHECK: "rankCheck", FREQUENCY_COLLECTION: "frequency", CLUSTERING_RUN: "cluster", TECHNICAL_CRAWL: "http", KEYWORD_RESEARCH: "search", SEMANTIC_IMPORT: "import", SEMANTIC_EXPORT: "export" } as Record<string, ReturnType<typeof operationIcon>>)[value] ?? "operations";
+}
 function progressLabel(operation: AdminOperationSummary, uiLocale: string = "ru-RU"): string {
   const current = formatDecimal(operation.progress.current, uiLocale);
   return operation.progress.total ? `${current} из ${formatDecimal(operation.progress.total, uiLocale)}` : current;
@@ -319,8 +322,8 @@ function resultLabel(operation: AdminOperationSummary, uiLocale: string = "ru-RU
   if (operation.result.notFound !== undefined) parts.push(`не найдено ${formatNumber(operation.result.notFound, uiLocale)}`);
   if (operation.result.failed !== undefined) parts.push(`ошибок ${formatNumber(operation.result.failed, uiLocale)}`);
   if (operation.result.issues !== undefined) parts.push(`проблем ${formatNumber(operation.result.issues, uiLocale)}`);
+  if (operation.errorCode) parts.push(operationFailureLabel(operation.errorCode));
   if (parts.length > 0) return parts.join(" · ");
-  if (operation.errorCode) return `Код: ${operation.errorCode}`;
   if (
     operation.type === "MANUAL_RANK_CHECK" &&
     operation.status === "RUNNING" &&

@@ -263,12 +263,16 @@ export class OperationActivityService {
         })
       ]);
     const page = jobs.slice(0, query.limit);
-    const presentation = await this.adminRankPresentation(page);
+    const [presentation, frequency] = await Promise.all([
+      this.adminRankPresentation(page),
+      this.adminFrequencyPresentation(page)
+    ]);
     return {
       data: page.map((job) => adminOperationSummary(
         job,
         presentation.connections.get(job.id),
-        presentation.workers.get(job.id)
+        presentation.workers.get(job.id),
+        frequency.get(job.id)
       )),
       ...(jobs.length > query.limit && page.length > 0
         ? { nextCursor: page[page.length - 1]!.id }
@@ -291,12 +295,48 @@ export class OperationActivityService {
     if (!job || !visibleOperationTypes.some((type) => type === job.type)) {
       throw new NotFoundException("Operation not found");
     }
-    const presentation = await this.adminRankPresentation([job]);
+    const [presentation, frequency] = await Promise.all([
+      this.adminRankPresentation([job]),
+      this.adminFrequencyPresentation([job])
+    ]);
     return adminOperationSummary(
       job,
       presentation.connections.get(job.id),
-      presentation.workers.get(job.id)
+      presentation.workers.get(job.id),
+      frequency.get(job.id)
     );
+  }
+
+  private async adminFrequencyPresentation(jobs: readonly AdminJob[]): Promise<ReadonlyMap<string, {
+    readonly mode?: "FREQUENCY" | "SEASONALITY";
+    readonly failureCode?: "PROVIDER_LOW_BALANCE";
+  }>> {
+    const ids = jobs.filter((job) => job.type === "FREQUENCY_COLLECTION").map((job) => job.id);
+    if (ids.length === 0) return new Map();
+    // Project only the mode, not the potentially large keyword input snapshot.
+    // The item lookup runs only for jobs whose aggregate error hides a failure.
+    const rows = await this.prisma.$queryRaw<readonly {
+      readonly jobId: string;
+      readonly mode: string | null;
+      readonly failureCode: string | null;
+    }[]>`
+      SELECT job.id::text AS "jobId",
+             job.input_snapshot->>'mode' AS mode,
+             CASE WHEN job.error_summary->>'code' = 'ITEMS_FAILED' THEN (
+               SELECT item.error->>'code'
+               FROM public.job_items AS item
+               WHERE item.job_id = job.id
+                 AND item.status = 'FAILED_FINAL'
+                 AND item.error->>'code' = 'PROVIDER_LOW_BALANCE'
+               LIMIT 1
+             ) END AS "failureCode"
+      FROM public.jobs AS job
+      WHERE job.id = ANY(${ids}::uuid[])
+    `;
+    return new Map(rows.map((row) => [row.jobId, {
+      ...(row.mode === "FREQUENCY" || row.mode === "SEASONALITY" ? { mode: row.mode } : {}),
+      ...(row.failureCode === "PROVIDER_LOW_BALANCE" ? { failureCode: row.failureCode } : {})
+    }]));
   }
 
   private async adminRankPresentation(jobs: readonly AdminJob[]): Promise<{
@@ -448,10 +488,13 @@ function adminOperationSummary(
   connection?: { readonly label: string; readonly displayHint?: string },
   workers?: readonly { readonly name: string; readonly activeTasks: number;
     readonly nodeId?: string; readonly status?: "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN";
-    readonly assignedOperations?: number }[]
+    readonly assignedOperations?: number }[],
+  frequency?: { readonly mode?: "FREQUENCY" | "SEASONALITY"; readonly failureCode?: "PROVIDER_LOW_BALANCE" }
 ): InternalAdminOperationSummary {
-  const errorCode = safeErrorCode(job.errorSummary);
+  const errorCode = frequency?.failureCode ?? safeErrorCode(job.errorSummary);
   const scope = record(job.scopeSnapshot);
+  const searchSource = scope?.searchSource === "LIVE" || scope?.searchSource === "SEARCH_API"
+    ? scope.searchSource : undefined;
   const searchEngine = scope?.searchEngine === "YANDEX" ||
     scope?.searchEngine === "GOOGLE" ? scope.searchEngine :
     (job.type === "FREQUENCY_COLLECTION" || job.type === "KEYWORD_RESEARCH") &&
@@ -467,6 +510,9 @@ function adminOperationSummary(
     ...(job.stage ? { stage: job.stage } : {}),
     ...(job.provider ? { provider: job.provider } : {}),
     ...(searchEngine ? { searchEngine } : {}),
+    ...(searchSource ? { searchSource } : {}),
+    ...(scope?.yandexLiveMode === "TURBO" ? { yandexLiveMode: "TURBO" as const } : {}),
+    ...(frequency?.mode ? { frequencyMode: frequency.mode } : {}),
     ...(connection ? { connection } : {}),
     ...(workers?.length ? { workers } : {}),
     progress: {

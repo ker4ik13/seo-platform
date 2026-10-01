@@ -343,7 +343,10 @@ h1, h2, p { margin: 0; }
 .operation-toolbar select { min-width: 170px; }
 .operation-row { align-items: center; border-top: 1px solid var(--line); display: grid; gap: 8px; grid-template-columns: minmax(145px, 1.2fr) minmax(105px, .9fr) minmax(210px, 1.35fr) minmax(110px, .8fr) minmax(115px, .9fr) 76px 100px; min-height: 78px; padding: 11px 8px; }
 .operation-primary { align-items: center; display: flex; gap: 10px; min-width: 0; }
-.operation-kind { align-items: center; background: #292441; border: 1px solid #443b70; border-radius: 9px; color: #b9b0ff; display: flex; flex: 0 0 auto; font-size: 15px; font-weight: 800; height: 36px; justify-content: center; width: 36px; }
+.operation-kind { align-items: center; background: #292441; border: 1px solid #443b70; border-radius: 9px; color: #b9b0ff; display: flex; flex: 0 0 auto; height: 36px; justify-content: center; width: 36px; }
+.operation-kind > svg { height: 19px; width: 19px; }
+.operation-kind .provider-logo { align-items: center; background: #f7f7fa; border-radius: 7px; display: inline-flex; height: 31px; justify-content: center; overflow: hidden; width: 31px; }
+.operation-kind .provider-logo img { height: 76%; object-fit: contain; width: 76%; }
 .operation-primary > div, .operation-context, .operation-source, .operation-progress { min-width: 0; }
 .operation-source strong, .operation-source small { display: block; overflow-wrap: anywhere; }
 .operation-source strong { color: #d6dae1; font-size: 11px; line-height: 1.35; }

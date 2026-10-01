@@ -8,7 +8,10 @@ import test from "node:test";
 import { Redis } from "ioredis";
 import {
   acquireXmlStockHttpQuotaPermit,
+  penalizeXmlStockHttpQuota,
+  recordXmlStockHttpQuotaSuccess,
   releaseXmlStockHttpQuotaPermit,
+  xmlStockHttpQuotaKey,
   type XmlStockHttpProduct,
   type XmlStockHttpQuotaPermit
 } from "./xmlstock-http-quota-limiter.js";
@@ -112,6 +115,18 @@ test("XMLStock Redis quota shares a physical key and fairly lends global slots",
     const spareSlot = await take(fourthKey, "YANDEX_SEARCH_API", 4);
     assert.equal(spareSlot.allowed, true, "an idle fourth slot remains available to an active key");
     await Promise.all([...mixed, spareSlot].map(release));
+
+    // A single overloaded wave must not turn four simultaneous 503s into a
+    // four-step reduction from ten Wordstat slots to one.
+    await Promise.all(Array.from({ length: 4 }, () => penalizeXmlStockHttpQuota(redis!, {
+      credentialId: fifthKey, product: "WORDSTAT"
+    })));
+    const penaltyKey = `${xmlStockHttpQuotaKey(fifthKey, "WORDSTAT")}:penalty`;
+    assert.equal(await redis.get(penaltyKey), "1");
+    for (let index = 0; index < 20; index += 1) {
+      await recordXmlStockHttpQuotaSuccess(redis, { credentialId: fifthKey, product: "WORDSTAT" });
+    }
+    assert.equal(await redis.get(penaltyKey), null, "successful requests restore the full Wordstat limit");
   } finally {
     await redis?.quit().catch(() => undefined);
     server.kill("SIGTERM");

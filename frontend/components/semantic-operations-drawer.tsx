@@ -24,6 +24,7 @@ import {
   hasConnectorFallback
 } from "../lib/connector-routing-presentation";
 import { compactOperationStatusLabel } from "../lib/operation-status-presentation";
+import { operationFailureLabel } from "../lib/admin-operation-presentation";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
   isDismissibleOperationStatus,
@@ -410,7 +411,7 @@ export function SemanticOperationsDrawer({
                 {operation.durationLabel && <span><UiText text="Выполнено за" after=" " /><strong>{operation.durationLabel}</strong></span>}
               </div>
             )}
-            {operation.errorCode && <small><UiText text="Код:" after=" " />{operation.errorCode}</small>}
+            {operation.errorCode && <small>{operationFailureLabel(operation.errorCode)}</small>}
             <footer>
               {operation.retryable && (
                 <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">

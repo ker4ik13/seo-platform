@@ -256,6 +256,9 @@ export interface InternalAdminOperationSummary {
   readonly stage?: string;
   readonly provider?: string;
   readonly searchEngine?: "YANDEX" | "GOOGLE";
+  readonly searchSource?: "LIVE" | "SEARCH_API";
+  readonly yandexLiveMode?: "TURBO";
+  readonly frequencyMode?: "FREQUENCY" | "SEASONALITY";
   readonly connection?: {
     readonly label: string;
     readonly displayHint?: string;

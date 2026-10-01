@@ -336,6 +336,7 @@ test("loads a safe global operation page for platform administration", async () 
         stage: "COLLECTING",
         provider: "XMLSTOCK",
         searchEngine: "YANDEX",
+        searchSource: "LIVE",
         connection: { label: "Личный", displayHint: "••••b313" },
         workers: [{ name: "Офисный воркер", activeTasks: 4, nodeId: crawlJobId, status: "ONLINE", assignedOperations: 2 }],
         progress: { current: "17", total: "50", unit: "KEYWORDS" },
@@ -359,6 +360,7 @@ test("loads a safe global operation page for platform administration", async () 
     );
     assert.equal(result.data[0]?.result.found, 12);
     assert.equal(result.data[0]?.searchEngine, "YANDEX");
+    assert.equal(result.data[0]?.searchSource, "LIVE");
     assert.deepEqual(result.data[0]?.connection,
       { label: "Личный", displayHint: "••••b313" });
     assert.deepEqual(result.data[0]?.workers,

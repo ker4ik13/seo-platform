@@ -14,7 +14,7 @@ test("keeps narrow drawer statuses short regardless of provider stage", () => {
   assert.equal(compactOperationStatusLabel("private_internal_status"), "Неизвестно");
 });
 
-test("distinguishes normal provider polling from an error retry", () => {
+test("keeps retry waits understandable while explaining provider-specific stages", () => {
   assert.equal(
     operationStatusLabel("RETRY_SCHEDULED", "waiting_provider"),
     "Ожидает результат провайдера"
@@ -25,8 +25,9 @@ test("distinguishes normal provider polling from an error retry", () => {
   );
   assert.equal(
     operationStatusLabel("RETRY_SCHEDULED"),
-    "Повтор после ошибки"
+    "Ожидает"
   );
+  assert.equal(operationStatusLabel("RETRY_SCHEDULED", "retry_scheduled"), "Ожидает");
 });
 
 test("does not expose an unknown internal stage in task details", () => {

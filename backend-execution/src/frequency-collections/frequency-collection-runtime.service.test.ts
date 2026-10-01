@@ -254,21 +254,62 @@ test("a single XMLStock keyword still collects every requested type", async () =
   assert.deepEqual(keywords, ["query 1:BASE", "query 1:EXACT"]);
 });
 
-test("three paid frequency types reserve the RPS budget before the first XMLStock request", async () => {
+test("three paid frequency types acquire one shared RPS permit per actual HTTP request", async () => {
   let permits = 0, calls = 0;
   const runtime = runtimeWith({
     claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK", types: ["BASE", "EXACT", "FIXED"] }],
     quota: { tryAcquire: async (...args) => {
       permits++;
-      assert.equal((args[0] as {requestCost:number;maxWaitMs:number}).requestCost, 3);
+      assert.equal((args[0] as {requestCost:number;maxWaitMs:number}).requestCost, 1);
       assert.equal((args[0] as {maxWaitMs:number}).maxWaitMs, 4_000);
-      assert.equal(calls, 0);
+      assert.equal(calls, permits - 1);
       return { allowed: true };
     } },
     xmlStock: { collect: async () => { calls++; return { ok: true, value: "7" }; } }
   });
   assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_ITEM");
-  assert.equal(permits, 1); assert.equal(calls, 3);
+  assert.equal(permits, 3); assert.equal(calls, 3);
+});
+
+test("a transient XMLStock 503 retries only the unfinished type after a paid first type", async () => {
+  const types: string[] = [];
+  let penalties = 0, successes = 0;
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK", types: ["BASE", "EXACT"] }],
+    xmlStock: { collect: async input => {
+      types.push(input.type);
+      if (input.type === "EXACT" && types.filter(type => type === "EXACT").length === 1) {
+        return { ok: false, code: "PROVIDER_RATE_LIMITED", retryable: true };
+      }
+      return { ok: true, value: "7" };
+    } },
+    quota: {
+      penalize: async () => { penalties++; },
+      recordSuccess: async () => { successes++; }
+    }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_ITEM");
+  assert.deepEqual(types, ["BASE", "EXACT", "EXACT"]);
+  assert.equal(penalties, 1);
+  assert.equal(successes, 2);
+});
+
+test("a first-type XMLStock 503 waits for capacity without exhausting item attempts", async () => {
+  let providerCalls = 0, penalties = 0, released = 0;
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK", types: ["BASE"] }],
+    xmlStock: { collect: async () => {
+      providerCalls++;
+      return { ok: false, code: "PROVIDER_RATE_LIMITED", retryable: true };
+    } },
+    quota: { penalize: async () => { penalties++; } },
+    release: async () => { released++; },
+    fail: async () => { assert.fail("provider 503 must not consume a paid item attempt"); }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "RETRY_SCHEDULED");
+  assert.equal(providerCalls, 1);
+  assert.equal(penalties, 1);
+  assert.equal(released, 1);
 });
 
 test("one XMLStock operation starts ten phrases in parallel, resolves and persists one batch", { timeout: 5_000 }, async () => {

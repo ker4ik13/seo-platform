@@ -49,6 +49,24 @@ test("quota keys isolate credentials and XMLStock products", () => {
   );
 });
 
+test("simultaneous frequency and seasonality share the same physical Wordstat limit", async () => {
+  const calls: unknown[][] = [];
+  const redis = { eval: async (...args: unknown[]) => { calls.push(args); return [1, 0, 10, 10]; } } as never;
+  await Promise.all([firstMember, secondMember].map((member) =>
+    acquireXmlStockHttpQuotaPermit(redis, {
+      credentialId: firstCredential,
+      workspaceId: firstWorkspace,
+      product: "WORDSTAT",
+      requestCost: 3,
+      leaseMs: 30_000,
+      member
+    })));
+  assert.equal(calls.length, 2);
+  for (const keyIndex of [2, 3, 7, 10]) assert.equal(calls[0]?.[keyIndex], calls[1]?.[keyIndex]);
+  assert.equal(calls[0]?.[12], "10");
+  assert.equal(calls[0]?.[13], "3");
+});
+
 test("acquires from only the selected credential and product bucket", async () => {
   const calls: unknown[][] = [];
   const permit = await acquireXmlStockHttpQuotaPermit(
