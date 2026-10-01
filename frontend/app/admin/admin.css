@@ -97,6 +97,10 @@ h1, h2, p { margin: 0; }
 .worker-card-heading > div { flex: 1; min-width: 0; }
 .worker-card-heading h2 { font-size: 14px; line-height: 1.35; }
 .worker-card-heading code { color: var(--muted); display: block; font-size: 10px; margin-top: 4px; overflow-wrap: anywhere; }
+.worker-build { display: block; font-size: 10px; line-height: 1.35; margin-top: 5px; overflow-wrap: anywhere; }
+.worker-build-current { color: var(--green); }
+.worker-build-outdated { color: var(--amber); }
+.worker-build-unknown { color: var(--muted); }
 .worker-node-icon { align-items: center; background: var(--surface-2); border-radius: 9px; color: var(--brand); display: inline-flex; flex: none; height: 34px; justify-content: center; width: 34px; }
 .worker-node-icon svg { height: 19px; width: 19px; }
 .worker-connectivity { align-items: center; background: #23382e; border-radius: 999px; color: var(--green); display: inline-flex; flex: none; font-size: 11px; gap: 5px; padding: 7px 9px; }

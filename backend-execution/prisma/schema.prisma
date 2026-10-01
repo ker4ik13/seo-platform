@@ -1279,6 +1279,7 @@ model ExecutionWorkerNode {
   reportedCapabilitySlots Json     @default("{}") @map("reported_capability_slots")
   reportedCpuSlots       Int       @default(0) @map("reported_cpu_slots")
   reportedMemoryBytes    BigInt    @default(0) @map("reported_memory_bytes")
+  reportedBuildHash      String?   @map("reported_build_hash") @db.Char(64)
   activeWorkItems        Int       @default(0) @map("active_work_items")
   lastHeartbeatAt        DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
   lastProtocolVersion    Int?      @map("last_protocol_version")

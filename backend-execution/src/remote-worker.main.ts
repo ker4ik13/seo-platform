@@ -11,11 +11,13 @@ import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adapter.js";
 import { REMOTE_WORKER_WARM_POLLS, remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
 import { workerTaskFinishLog, workerTaskLogContext, workerTaskStartLog } from "./worker-nodes/remote-worker-task-log.js";
+import { workerBuildHash } from "./worker-nodes/worker-build-version.js";
 
 const CLAIM_CADENCE_CHECK_MS=100;
 
 async function main():Promise<void> {
-  const config=await loadRemoteWorkerConfig(),client=new WorkerHttpClient(config),controller=new AbortController();
+  const config=await loadRemoteWorkerConfig(),buildHash=await workerBuildHash(),client=new WorkerHttpClient(config),controller=new AbortController();
+  process.stdout.write(`Воркер: сборка ${buildHash.slice(0,12)}\n`);
   process.once("SIGINT",()=>controller.abort());process.once("SIGTERM",()=>controller.abort());
   const active=new Map<WorkerCapability,number>();let httpActive=0,cpuActive=0,inspectionReady=false,authenticationRejected=false;
   let effectiveCapacity = {
@@ -36,7 +38,7 @@ async function main():Promise<void> {
         if(config.malware) {try{await new ClamdMalwareScannerAdapter(config.malware).healthCheck();inspectionReady=true;}catch{inspectionReady=false;}}
         const node=parseWorkerNodeView(await client.post("heartbeat",{protocolVersion:1,httpSlots:config.httpSlots,rankSlots:config.rankSlots,cpuSlots:config.cpuSlots,
           memoryBytes:String(Math.min(totalmem(),process.constrainedMemory() || totalmem())),activeWorkItems:httpActive+cpuActive,
-          capabilitySlots:{...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0}},64*1024,5_000,controller.signal));
+          capabilitySlots:{...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0},buildHash},64*1024,5_000,controller.signal));
         if(node.id!==config.nodeId || node.protocolVersion!==1) throw new Error("Invalid worker identity");
         effectiveCapacity = {
           httpSlots: node.maxHttpSlots,

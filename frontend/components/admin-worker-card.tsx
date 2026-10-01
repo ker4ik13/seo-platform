@@ -13,14 +13,23 @@ function workerState(node: WorkerNodeView) {
   return { state, label: ({ waiting: "Ожидает связи", offline: "Нет связи", disabled: "Выключен", draining: "Завершает задачи", online: "На связи" } as const)[state] };
 }
 
+function workerBuildState(node: WorkerNodeView): { readonly label: string; readonly tone: string } {
+  if (!node.reportedBuildHash) return { label: "Версия неизвестна", tone: "unknown" };
+  if (node.expectedBuildHash && node.reportedBuildHash !== node.expectedBuildHash) {
+    return { label: `Сборка ${node.reportedBuildHash.slice(0, 12)} · обновить`, tone: "outdated" };
+  }
+  return { label: `Сборка ${node.reportedBuildHash.slice(0, 12)} · актуальна`, tone: "current" };
+}
+
 export function AdminWorkerCard({ node, busy, onEnabled, onDraining, onConfigure, onDetails, onDelete }: Readonly<{
   node: WorkerNodeView; busy: boolean; onEnabled: () => void; onDraining: () => void;
   onConfigure: () => void; onDetails: () => void; onDelete: () => void;
 }>) {
   const { state, label } = workerState(node);
+  const build = workerBuildState(node);
   const http = node.useEnvCapacity === false ? node.maxHttpSlots : Math.min(node.maxHttpSlots, node.reportedHttpSlots);
   return <article className={`panel worker-card worker-state-${state}`}>
-    <header className="worker-card-heading"><span className="worker-node-icon"><Icon name="http" /></span><div><h2>{node.name}</h2><code title={node.id}>{node.id.slice(0, 8)}</code></div><span className="worker-connectivity"><Icon name={state === "offline" || state === "waiting" ? "warning" : state === "online" ? "check" : "pause"} />{label}</span></header>
+    <header className="worker-card-heading"><span className="worker-node-icon"><Icon name="http" /></span><div><h2>{node.name}</h2><code title={node.id}>{node.id.slice(0, 8)}</code><span className={`worker-build worker-build-${build.tone}`} title={node.reportedBuildHash ?? "Версия ещё не сообщена"}>{build.label}</span></div><span className="worker-connectivity"><Icon name={state === "offline" || state === "waiting" ? "warning" : state === "online" ? "check" : "pause"} />{label}</span></header>
     <div className="worker-card-metrics"><div><span>Работают</span><strong>{node.activeWorkItems}</strong></div><div><span>Съём</span><strong>{workerEffectiveCapabilitySlots(node,"RANK")}</strong></div><div><span>HTTP</span><strong>{http}</strong></div><div><span>CPU</span><strong>{node.useEnvCapacity === false ? node.maxCpuSlots : Math.min(node.maxCpuSlots, node.reportedCpuSlots)}</strong></div></div>
     <div className="worker-capability-chips">{node.capabilities.map((value) => <span key={value}>{workerCapabilityLabel(value)}</span>)}</div>
     <div className="worker-last-seen"><Icon name="clock" />{node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toLocaleTimeString("ru") : "Связи ещё не было"}<span>{new Set(node.activeAssignments?.map(({ jobId }) => jobId)).size} операций</span></div>
@@ -41,10 +50,11 @@ export function AdminWorkerDetails({ node, busy, onRotate, onDelete }: Readonly<
     setTokenResult(prefix === node.tokenFingerprint ? "MATCH" : "MISMATCH");
   }
   const { label } = workerState(node);
+  const build = workerBuildState(node);
   const http = node.useEnvCapacity === false ? node.maxHttpSlots : Math.min(node.maxHttpSlots, node.reportedHttpSlots);
   const assigned = node.activeAssignments ?? [];
   return <div className="worker-detail">
-    <dl className="admin-detail-fields"><div><dt>ID</dt><dd><code>{node.id}</code></dd></div><div><dt>Состояние</dt><dd>{label}</dd></div><div><dt>Лимиты</dt><dd>{node.useEnvCapacity ? "Из .env воркера" : "Настроены в админке"}</dd></div><div><dt>Последняя связь</dt><dd>{node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toLocaleString("ru") : "—"}</dd></div><div><dt>Протокол</dt><dd>{node.protocolVersion ?? "—"}</dd></div><div><dt>ОЗУ узла</dt><dd>{node.reportedMemoryBytes === "0" ? "—" : `${(Number(node.reportedMemoryBytes) / 1024 ** 3).toLocaleString("ru", { maximumFractionDigits: 1 })} ГБ`}</dd></div><div><dt>Текущие задачи</dt><dd>{node.activeWorkItems}</dd></div></dl>
+    <dl className="admin-detail-fields"><div><dt>ID</dt><dd><code>{node.id}</code></dd></div><div><dt>Состояние</dt><dd>{label}</dd></div><div><dt>Сборка воркера</dt><dd className={`worker-build-${build.tone}`} title={node.reportedBuildHash ?? ""}>{build.label}</dd></div><div><dt>Сборка центра</dt><dd><code title={node.expectedBuildHash ?? ""}>{node.expectedBuildHash?.slice(0, 12) ?? "—"}</code></dd></div><div><dt>Лимиты</dt><dd>{node.useEnvCapacity ? "Из .env воркера" : "Настроены в админке"}</dd></div><div><dt>Последняя связь</dt><dd>{node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toLocaleString("ru") : "—"}</dd></div><div><dt>Протокол</dt><dd>{node.protocolVersion ?? "—"}</dd></div><div><dt>ОЗУ узла</dt><dd>{node.reportedMemoryBytes === "0" ? "—" : `${(Number(node.reportedMemoryBytes) / 1024 ** 3).toLocaleString("ru", { maximumFractionDigits: 1 })} ГБ`}</dd></div><div><dt>Текущие задачи</dt><dd>{node.activeWorkItems}</dd></div></dl>
     <h3>Ресурсы</h3><table className="worker-capacity-table"><thead><tr><th>Ресурс</th><th>Настройка</th><th>.env узла</th><th>Итог</th></tr></thead><tbody><tr><th>HTTP</th><td>{node.maxHttpSlots}</td><td>{node.reportedHttpSlots}</td><td>{http}</td></tr><tr><th>CPU</th><td>{node.maxCpuSlots}</td><td>{node.reportedCpuSlots}</td><td>{node.useEnvCapacity === false ? node.maxCpuSlots : Math.min(node.maxCpuSlots, node.reportedCpuSlots)}</td></tr>{node.capabilities.map(capability=><tr key={capability}><th>{workerCapabilityLabel(capability)}</th><td>{node.capabilityLimits?.[capability] ?? (["IMPORT","EXPORT","INSPECTION"].includes(capability) ? node.maxCpuSlots : node.maxHttpSlots)}</td><td>{node.reportedCapabilitySlots?.[capability] ?? (capability==="RANK" ? node.reportedRankSlots : 0)}</td><td>{workerEffectiveCapabilitySlots(node,capability)}</td></tr>)}</tbody></table>
     <h3>Операции</h3><div className="worker-capability-chips">{node.capabilities.map((value) => <span key={value}>{workerCapabilityLabel(value)}</span>)}</div>
     {node.tokenFingerprint && <div className="worker-token-check"><h3>Проверка подключения</h3><p>Сверьте WORKER_NODE_TOKEN из Environment Dokploy. Проверка проходит в браузере; ключ не отправляется на сервер.</p><div><input aria-label="Ключ воркера для проверки" autoComplete="off" type="password" value={candidate} onChange={event => { setCandidate(event.target.value); setTokenResult(undefined); }} /><button className="ghost" disabled={!candidate || busy} onClick={() => void verifyToken()} type="button">Сверить ключ</button></div>{tokenResult && <p role="status" className={tokenResult === "MATCH" ? "success" : "form-alert"}>{tokenResult === "MATCH" ? "Ключ совпадает с записью в центре. Если воркер получает 401, проверьте значение в запущенном контейнере и WORKER_NODE_ID." : tokenResult === "MISMATCH" ? "Ключ не совпадает с записью в центре. Скопируйте новый ключ после перевыпуска и пересоздайте контейнер воркера." : "Неверный формат ключа воркера."}</p>}</div>}

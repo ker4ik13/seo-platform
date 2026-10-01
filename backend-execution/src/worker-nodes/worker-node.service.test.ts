@@ -8,6 +8,7 @@ const id = "01900000-0000-7000-8000-000000000001";
 
 test("each worker gets a one-time secret and only its hash is persisted", async () => {
   let saved: Record<string, unknown> | undefined;
+  let heartbeatWrite: Record<string, unknown> | undefined;
   const prisma = {
     executionWorkerNode: {
       async create({ data }: { data: Record<string, unknown> }) {
@@ -15,7 +16,10 @@ test("each worker gets a one-time secret and only its hash is persisted", async 
         return row(data);
       },
       async findUnique() { return saved ? row(saved) : null; },
-      async updateMany() { return { count: 1 }; }
+      async updateMany({ data }: { data: Record<string, unknown> }) {
+        heartbeatWrite = data;
+        return { count: 1 };
+      }
     }
   } as unknown as PrismaService;
   const service = new WorkerNodeService(prisma);
@@ -35,9 +39,19 @@ test("each worker gets a one-time secret and only its hash is persisted", async 
     rankSlots: 4,
     cpuSlots: 1,
     memoryBytes: 16_000_000_000n,
-    activeWorkItems: 0
+    activeWorkItems: 0,
+    buildHash: "a".repeat(64)
   });
   assert.equal(heartbeat.id, id);
+  assert.equal(heartbeatWrite?.reportedBuildHash, "a".repeat(64));
+  assert.equal(heartbeat.reportedBuildHash, undefined,
+    "heartbeat replies must remain compatible with older strict agents");
+  await service.heartbeat(id, created.token, {
+    protocolVersion: 1, httpSlots: 8, rankSlots: 4, cpuSlots: 1,
+    memoryBytes: 16_000_000_000n, activeWorkItems: 0
+  });
+  assert.equal(heartbeatWrite?.reportedBuildHash, null,
+    "an older agent must not retain the previous container's build version");
   await assert.rejects(() => service.heartbeat(id, `wn_${"a".repeat(43)}`, {
     protocolVersion: 1,
     httpSlots: 1,
@@ -51,7 +65,7 @@ test("each worker gets a one-time secret and only its hash is persisted", async 
 test("admin list shows only safe active Job assignments", async () => {
   const prisma = {
     executionWorkerNode: {
-      async findMany() { return [row({ tokenHash: new Uint8Array(32) })]; }
+      async findMany() { return [row({ tokenHash: new Uint8Array(32), reportedBuildHash: "b".repeat(64) })]; }
     },
     async $queryRaw(query: TemplateStringsArray) {
       if (query.join("").includes("list_remote_work_assignments")) return [];
@@ -65,6 +79,8 @@ test("admin list shows only safe active Job assignments", async () => {
   } as unknown as PrismaService;
   const nodes = await new WorkerNodeService(prisma).list();
   assert.equal(nodes[0]?.activeAssignments?.[0]?.activeTasks, 2);
+  assert.equal(nodes[0]?.reportedBuildHash, "b".repeat(64));
+  assert.match(nodes[0]?.expectedBuildHash ?? "", /^[a-f0-9]{64}$/u);
   assert.equal(JSON.stringify(nodes).includes("tokenHash"), false);
 });
 
@@ -82,6 +98,7 @@ function row(data: Record<string, unknown>) {
     reportedRankSlots: 0,
     reportedCpuSlots: 0,
     reportedMemoryBytes: 0n,
+    reportedBuildHash: data.reportedBuildHash ?? null,
     activeWorkItems: 0,
     lastHeartbeatAt: null,
     lastProtocolVersion: null,

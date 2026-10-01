@@ -174,8 +174,8 @@ test("HTTPS compact worker cards, create/settings modals and live details drawer
     page.on("pageerror", (error) => errors.push(error.message));
     const capabilities = ["RANK", "WORDSTAT", "RESEARCH", "AI_ANSWER", "CLUSTERING", "CRAWL", "IMPORT", "EXPORT", "INSPECTION"];
     const knownToken = `wn_${"a".repeat(43)}`;
-    const online = { id: randomUUID(), name: "Офисный узел", enabled: true, draining: false, capabilities, maxHttpSlots: 32, maxCpuSlots: 2, useEnvCapacity: false, tokenFingerprint: createHash("sha256").update(knownToken).digest("hex").slice(0,16), reportedHttpSlots: 32, reportedRankSlots: 20, reportedCpuSlots: 2, reportedMemoryBytes: String(8 * 1024 ** 3), activeWorkItems: 4, online: true, lastHeartbeatAt: new Date().toISOString(), protocolVersion: 1, reportedCapabilitySlots: { RANK: 20, WORDSTAT: 10, RESEARCH: 10, AI_ANSWER: 5, CLUSTERING: 2, CRAWL: 8, IMPORT: 2, EXPORT: 2, INSPECTION: 1 }, activeAssignments: [{ jobId: randomUUID(), capability: "RANK", searchEngine: "YANDEX", activeTasks: 4 }] };
-    const offline = { ...online, id: randomUUID(), name: "Нет связи с узлом", online: false, activeWorkItems: 0, activeAssignments: [] };
+    const online = { id: randomUUID(), name: "Офисный узел", enabled: true, draining: false, capabilities, maxHttpSlots: 32, maxCpuSlots: 2, useEnvCapacity: false, tokenFingerprint: createHash("sha256").update(knownToken).digest("hex").slice(0,16), reportedHttpSlots: 32, reportedRankSlots: 20, reportedCpuSlots: 2, reportedMemoryBytes: String(8 * 1024 ** 3), reportedBuildHash: "a".repeat(64), expectedBuildHash: "a".repeat(64), activeWorkItems: 4, online: true, lastHeartbeatAt: new Date().toISOString(), protocolVersion: 1, reportedCapabilitySlots: { RANK: 20, WORDSTAT: 10, RESEARCH: 10, AI_ANSWER: 5, CLUSTERING: 2, CRAWL: 8, IMPORT: 2, EXPORT: 2, INSPECTION: 1 }, activeAssignments: [{ jobId: randomUUID(), capability: "RANK", searchEngine: "YANDEX", activeTasks: 4 }] };
+    const offline = { ...online, id: randomUUID(), name: "Нет связи с узлом", reportedBuildHash: "b".repeat(64), online: false, activeWorkItems: 0, activeAssignments: [] };
     let reads = 0, configured, deleted = false, deleteAttempts = 0;
     const mutations = [];
     await page.route("**/admin/api/**", async (route) => {
@@ -198,6 +198,8 @@ test("HTTPS compact worker cards, create/settings modals and live details drawer
     assert.equal(await page.getByRole("button", { name: "Обновить", exact: true }).count(), 0);
     assert.ok((await cards.first().boundingBox()).width < 600);
     assert.equal(await page.locator(".worker-state-offline .worker-connectivity").innerText(), "Нет связи");
+    assert.match(await cards.first().innerText(), /Сборка a{12} · актуальна/u);
+    assert.match(await cards.nth(1).innerText(), /Сборка b{12} · обновить/u);
     await page.getByRole("button", { name: "Создать воркер", exact: true }).click();
     const create = page.getByRole("dialog", { name: "Создать воркер", exact: true });
     await create.waitFor(); assert.equal(await create.getByRole("checkbox").count(), 10);
@@ -211,6 +213,7 @@ test("HTTPS compact worker cards, create/settings modals and live details drawer
     await settings.waitFor({ state: "hidden" }); assert.equal(configured.capabilityLimits.RANK, 20);
     await cards.first().getByRole("button", { name: "Подробнее", exact: true }).click();
     const detail = page.getByRole("dialog", { name: online.name, exact: true }); await detail.waitFor();
+    assert.match(await detail.innerText(), /Сборка воркера[\s\S]*Сборка центра/u);
     assert.match(await detail.innerText(), /Ресурсы[\s\S]*Частотности[\s\S]*Операции[\s\S]*Яндекс/u);
     await detail.getByRole("textbox", { name: "Ключ воркера для проверки" }).fill(knownToken);
     await detail.getByRole("button", { name: "Сверить ключ" }).click();

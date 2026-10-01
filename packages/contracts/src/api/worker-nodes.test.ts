@@ -40,6 +40,8 @@ test("worker contracts accept exact safe views and reject secret extensions", ()
     node, token: `wn_${"a".repeat(43)}`
   }).node.id, node.id);
   assert.equal(parseWorkerNodeView({ ...node, activeAssignments: [{ jobId: node.id, capability: "RANK", searchEngine: null, activeTasks: 0 }] }).activeAssignments?.[0]?.activeTasks, 0);
+  assert.equal(parseWorkerNodeView({ ...node, reportedBuildHash: "a".repeat(64), expectedBuildHash: "b".repeat(64) }).reportedBuildHash, "a".repeat(64));
+  assert.throws(() => parseWorkerNodeView({ ...node, reportedBuildHash: "unknown" }));
   assert.throws(() => parseWorkerNodeView({ ...node, apiKey: "secret" }));
   assert.throws(() => parseWorkerNodeView({
     ...node, capabilities: ["EMAIL"]

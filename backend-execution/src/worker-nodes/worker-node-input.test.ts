@@ -45,5 +45,13 @@ test("worker registration and heartbeat accept only bounded exact inputs", () =>
     protocolVersion: 1, httpSlots: 1, rankSlots: 1, cpuSlots: 1,
     memoryBytes: "1", activeWorkItems: 0, apiKey: "forbidden"
   }), BadRequestException);
+  assert.equal(workerNodeHeartbeat({
+    protocolVersion: 1, httpSlots: 1, rankSlots: 1, cpuSlots: 1,
+    memoryBytes: "1", activeWorkItems: 0, buildHash: "a".repeat(64)
+  }).buildHash, "a".repeat(64));
+  assert.throws(() => workerNodeHeartbeat({
+    protocolVersion: 1, httpSlots: 1, rankSlots: 1, cpuSlots: 1,
+    memoryBytes: "1", activeWorkItems: 0, buildHash: "unknown"
+  }), BadRequestException);
   assert.throws(() => workerNodeId("not-an-id"), BadRequestException);
 });

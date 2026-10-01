@@ -9,6 +9,7 @@ import { request } from "playwright";
 import { parseWorkerNodeView, workerEffectiveCapabilitySlots } from "../../packages/contracts/dist/index.js";
 import { PrismaService } from "../../backend-execution/dist/database/prisma.service.js";
 import { WorkerNodeService } from "../../backend-execution/dist/worker-nodes/worker-node.service.js";
+import { workerBuildHash } from "../../backend-execution/dist/worker-nodes/worker-build-version.js";
 
 test("Caddy authenticates a rotated worker token; env defaults and admin overrides apply", {
   skip: process.env.SEO_PLATFORM_E2E_CONFIRM !== "CREATE_TEST_DATA", timeout: 60_000
@@ -23,15 +24,21 @@ test("Caddy authenticates a rotated worker token; env defaults and admin overrid
     const created = await nodes.create({ name: "[E2E] Worker rotation", capabilities: ["RANK", "WORDSTAT"], maxHttpSlots: 16, maxCpuSlots: 2, useEnvCapacity: true });
     nodeId = created.node.id;
     await nodes.setEnabled(nodeId, true);
-    const ping = (token, httpSlots = 32, rankSlots = 20) => client.post("/worker/v1/heartbeat", {
+    const ping = (token, httpSlots = 32, rankSlots = 20, buildHash) => client.post("/worker/v1/heartbeat", {
       headers: { Authorization: `Bearer ${token}`, "X-Worker-Id": nodeId },
-      data: { protocolVersion: 1, httpSlots, rankSlots, cpuSlots: 2, memoryBytes: String(2 * 1024 ** 3), activeWorkItems: 0, capabilitySlots: { RANK: rankSlots, WORDSTAT: 10 } }
+      data: { protocolVersion: 1, httpSlots, rankSlots, cpuSlots: 2, memoryBytes: String(2 * 1024 ** 3), activeWorkItems: 0, capabilitySlots: { RANK: rankSlots, WORDSTAT: 10 }, ...(buildHash ? { buildHash } : {}) }
     });
-    const first = await ping(created.token);
+    const first = await ping(created.token, 32, 20, "a".repeat(64));
     assert.equal(first.status(), 201);
     const inherited = parseWorkerNodeView((await first.json()).data);
     assert.equal(inherited.maxHttpSlots, 32);
     assert.equal(inherited.reportedHttpSlots, 32);
+    assert.equal(inherited.reportedBuildHash, undefined, "heartbeat response remains compatible with old strict agents");
+    assert.equal((await nodes.list()).find(node => node.id === nodeId)?.reportedBuildHash, "a".repeat(64));
+    const currentBuildHash = await workerBuildHash();
+    await ping(created.token, 32, 20, currentBuildHash);
+    const currentNode = (await nodes.list()).find(node => node.id === nodeId);
+    assert.equal(currentNode?.reportedBuildHash, currentNode?.expectedBuildHash);
     assert.equal(inherited.useEnvCapacity, undefined, "heartbeat response must remain compatible with old agents");
     assert.equal((await nodes.list()).find(node => node.id === nodeId)?.useEnvCapacity, true);
     assert.equal((await nodes.list()).find(node => node.id === nodeId)?.tokenFingerprint,

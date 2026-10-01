@@ -22,6 +22,8 @@ export interface WorkerNodeHeartbeat {
   readonly memoryBytes: string;
   readonly activeWorkItems: number;
   readonly capabilitySlots?: Readonly<Partial<Record<WorkerCapability, number>>>;
+  /** SHA-256 of the executable worker build; absent for pre-version agents. */
+  readonly buildHash?: string;
 }
 
 export interface WorkerNodeView {
@@ -42,6 +44,9 @@ export interface WorkerNodeView {
   readonly lastHeartbeatAt: string | null;
   readonly protocolVersion: number | null;
   readonly reportedCapabilitySlots?: Readonly<Partial<Record<WorkerCapability, number>>>;
+  /** Admin-only build comparison; never contains secrets or environment values. */
+  readonly reportedBuildHash?: string;
+  readonly expectedBuildHash?: string;
   readonly activeAssignments?: readonly {
     readonly jobId: string;
     readonly capability: WorkerCapability;
@@ -113,6 +118,8 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
     "protocolVersion",
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "capabilityLimits") ? ["capabilityLimits"] : []),
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "reportedCapabilitySlots") ? ["reportedCapabilitySlots"] : []),
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "reportedBuildHash") ? ["reportedBuildHash"] : []),
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "expectedBuildHash") ? ["expectedBuildHash"] : []),
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "useEnvCapacity") ? ["useEnvCapacity"] : []),
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "tokenFingerprint") ? ["tokenFingerprint"] : []),
     ...(typeof value === "object" && value !== null &&
@@ -154,6 +161,8 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
     if (Object.entries(input.reportedCapabilitySlots).some(([key,value]) => !capabilitySet.has(key) || !bounded(value,0,512))) invalid();
   }
   if(input.capabilityLimits!==undefined) validateCapabilityLimits(input.capabilityLimits);
+  if(input.reportedBuildHash!==undefined && (typeof input.reportedBuildHash!=="string" || !/^[a-f0-9]{64}$/u.test(input.reportedBuildHash))) invalid();
+  if(input.expectedBuildHash!==undefined && (typeof input.expectedBuildHash!=="string" || !/^[a-f0-9]{64}$/u.test(input.expectedBuildHash))) invalid();
   if(input.useEnvCapacity!==undefined && typeof input.useEnvCapacity!=="boolean") invalid();
   if(input.tokenFingerprint!==undefined && (typeof input.tokenFingerprint!=="string" || !/^[a-f0-9]{16}$/u.test(input.tokenFingerprint))) invalid();
   return input as unknown as WorkerNodeView;

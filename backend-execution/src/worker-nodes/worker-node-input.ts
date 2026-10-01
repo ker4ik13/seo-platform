@@ -16,6 +16,7 @@ export interface WorkerNodeHeartbeat {
   readonly memoryBytes: bigint;
   readonly activeWorkItems: number;
   readonly capabilitySlots?: Readonly<Partial<Record<WorkerCapability, number>>>;
+  readonly buildHash?: string;
 }
 
 export function workerNodeId(value: unknown): string {
@@ -34,7 +35,8 @@ export function workerNodeConfiguration(value: unknown): WorkerNodeConfiguration
 export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
   const input = exact(value, [
     "protocolVersion", "httpSlots", "rankSlots", "cpuSlots", "memoryBytes", "activeWorkItems",
-    ...(value && typeof value === "object" && Object.hasOwn(value,"capabilitySlots") ? ["capabilitySlots"] : [])
+    ...(value && typeof value === "object" && Object.hasOwn(value,"capabilitySlots") ? ["capabilitySlots"] : []),
+    ...(value && typeof value === "object" && Object.hasOwn(value,"buildHash") ? ["buildHash"] : [])
   ]);
   if (
     input.protocolVersion !== 1 ||
@@ -44,7 +46,9 @@ export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
     !boundedInteger(input.cpuSlots, 0, 128) ||
     !boundedInteger(input.activeWorkItems, 0, 4096) ||
     typeof input.memoryBytes !== "string" ||
-    !/^(?:0|[1-9][0-9]{0,15})$/u.test(input.memoryBytes)
+    !/^(?:0|[1-9][0-9]{0,15})$/u.test(input.memoryBytes) ||
+    (input.buildHash !== undefined &&
+      (typeof input.buildHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.buildHash)))
   ) invalid();
   return {
     protocolVersion: 1,
@@ -53,7 +57,8 @@ export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
     cpuSlots: input.cpuSlots,
     memoryBytes: BigInt(input.memoryBytes),
     activeWorkItems: input.activeWorkItems,
-    capabilitySlots: input.capabilitySlots === undefined ? { RANK: input.rankSlots } : parseWorkerCapabilitySlots(input.capabilitySlots)
+    capabilitySlots: input.capabilitySlots === undefined ? { RANK: input.rankSlots } : parseWorkerCapabilitySlots(input.capabilitySlots),
+    ...(input.buildHash === undefined ? {} : { buildHash: input.buildHash as string })
   };
 }
 

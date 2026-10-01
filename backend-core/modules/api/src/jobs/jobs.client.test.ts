@@ -455,6 +455,7 @@ test("worker-node admin client validates the one-time secret and scoped mutation
     capabilities: ["RANK"], maxHttpSlots: 16, maxCpuSlots: 2,
     reportedHttpSlots: 0, reportedRankSlots: 0, reportedCpuSlots: 0,
     reportedMemoryBytes: "0", activeWorkItems: 0,
+    reportedBuildHash: "a".repeat(64), expectedBuildHash: "b".repeat(64),
     online: false, lastHeartbeatAt: null, protocolVersion: null
   };
   const captured: Array<{ method: string; path: string; body?: unknown }> = [];
@@ -469,7 +470,10 @@ test("worker-node admin client validates the one-time secret and scoped mutation
   }) as typeof fetch;
   try {
     const jobs = client();
-    assert.equal((await jobs.listWorkerNodes(actorId, "list-workers"))[0]?.id, id);
+    const listed = (await jobs.listWorkerNodes(actorId, "list-workers"))[0];
+    assert.equal(listed?.id, id);
+    assert.equal(listed?.reportedBuildHash, "a".repeat(64));
+    assert.equal(listed?.expectedBuildHash, "b".repeat(64));
     assert.equal((await jobs.createWorkerNode(actorId, "create-worker", {
       name: "office-one", capabilities: ["RANK"], maxHttpSlots: 16, maxCpuSlots: 2
     })).token, token);

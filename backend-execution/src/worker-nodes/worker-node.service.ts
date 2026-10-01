@@ -14,6 +14,7 @@ import type { RemoteWorkAssignment } from "./remote-work-assignments.js";
 import {
   type WorkerNodeHeartbeat
 } from "./worker-node-input.js";
+import { workerBuildHash } from "./worker-build-version.js";
 
 const TOKEN_PATTERN = /^wn_[A-Za-z0-9_-]{43}$/u;
 const HEARTBEAT_TIMEOUT_MS = 30_000;
@@ -31,6 +32,7 @@ const VIEW_SELECT = {
   reportedCapabilitySlots: true,
   reportedCpuSlots: true,
   reportedMemoryBytes: true,
+  reportedBuildHash: true,
   activeWorkItems: true,
   lastHeartbeatAt: true,
   lastProtocolVersion: true,
@@ -39,7 +41,12 @@ const VIEW_SELECT = {
 
 @Injectable()
 export class WorkerNodeService {
+  private buildHashPromise?: Promise<string>;
   public constructor(private readonly prisma: PrismaService) {}
+
+  private currentBuildHash(): Promise<string> {
+    return this.buildHashPromise ??= workerBuildHash();
+  }
 
   public async create(input: WorkerNodeConfiguration): Promise<CreatedWorkerNode> {
     const token = newNodeToken();
@@ -111,8 +118,10 @@ export class WorkerNodeService {
       });
       byNode.set(assignment.nodeId, values);
     }
+    const expectedBuildHash = rows.length > 0 ? await this.currentBuildHash() : undefined;
     return rows.map((row) => ({
       ...view(row, true),
+      ...(expectedBuildHash ? { expectedBuildHash } : {}),
       activeAssignments: byNode.get(row.id) ?? []
     }));
   }
@@ -164,6 +173,7 @@ export class WorkerNodeService {
           capabilityLimits: { ...(input.capabilitySlots ?? {RANK:input.rankSlots}) }
         } : {}),
         reportedMemoryBytes: input.memoryBytes,
+        reportedBuildHash: input.buildHash ?? null,
         activeWorkItems: input.activeWorkItems,
         lastHeartbeatAt: new Date(),
         lastProtocolVersion: input.protocolVersion
@@ -228,7 +238,9 @@ export class WorkerNodeService {
       where: { id }, select: { ...VIEW_SELECT, usesEnvCapacity: true, tokenHash: true }
     });
     if (!row || row.deletedAt) throw new NotFoundException("Worker node not found");
-    return view(row, includeMode);
+    return includeMode
+      ? { ...view(row, true), expectedBuildHash: await this.currentBuildHash() }
+      : view(row, false);
   }
 }
 
@@ -253,6 +265,7 @@ function view(row: {
   readonly reportedRankSlots: number;
   readonly reportedCpuSlots: number;
   readonly reportedMemoryBytes: bigint;
+  readonly reportedBuildHash?: string | null;
   readonly activeWorkItems: number;
   readonly lastHeartbeatAt: Date | null;
   readonly lastProtocolVersion: number | null;
@@ -273,6 +286,7 @@ function view(row: {
     reportedRankSlots: row.reportedRankSlots,
     reportedCpuSlots: row.reportedCpuSlots,
     reportedMemoryBytes: row.reportedMemoryBytes.toString(),
+    ...(includeMode && row.reportedBuildHash ? { reportedBuildHash: row.reportedBuildHash } : {}),
     activeWorkItems: row.activeWorkItems,
     online: row.lastHeartbeatAt !== null && Date.now() - row.lastHeartbeatAt.getTime() < HEARTBEAT_TIMEOUT_MS,
     lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,

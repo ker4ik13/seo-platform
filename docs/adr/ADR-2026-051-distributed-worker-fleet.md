@@ -284,6 +284,7 @@ revocation на каждом claim/permit/result. При утечке админ
 
 Новый экран `/admin` показывает по каждому узлу: имя/ID, место/регион,
 capabilities, protocol/image version, online/degraded/draining/offline,
+автоматический fingerprint исполняемой сборки и совпадение с центром,
 последний heartbeat, CPU/RAM/disk, настроенный и эффективный предел slots,
 активные work units/операции, HTTP in-flight, пропускную способность,
 ошибки, локальный spool (если появится) и возраст самой старой очереди.

@@ -14,3 +14,13 @@ test("worker registry stores only a hash and bounded reported capacity", async (
   assert.match(sql, /'INSPECTION'/u);
   assert.doesNotMatch(sql, /api_key|plaintext_token/u);
 });
+
+test("worker build fingerprint migration stores only a validated digest", async () => {
+  const sql = await readFile(new URL(
+    "../../prisma/migrations/20261001210000_worker_build_fingerprint/migration.sql",
+    import.meta.url
+  ), "utf8");
+  assert.match(sql, /ADD COLUMN reported_build_hash CHAR\(64\)/u);
+  assert.match(sql, /reported_build_hash ~ '\^\[a-f0-9\]\{64\}\$'/u);
+  assert.doesNotMatch(sql, /api_key|plaintext_token|credential/u);
+});
