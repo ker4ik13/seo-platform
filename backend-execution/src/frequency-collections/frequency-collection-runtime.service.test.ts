@@ -260,7 +260,8 @@ test("three paid frequency types reserve the RPS budget before the first XMLStoc
     claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK", types: ["BASE", "EXACT", "FIXED"] }],
     quota: { tryAcquire: async (...args) => {
       permits++;
-      assert.equal((args[0] as {requestCost:number}).requestCost, 3);
+      assert.equal((args[0] as {requestCost:number;maxWaitMs:number}).requestCost, 3);
+      assert.equal((args[0] as {maxWaitMs:number}).maxWaitMs, 4_000);
       assert.equal(calls, 0);
       return { allowed: true };
     } },

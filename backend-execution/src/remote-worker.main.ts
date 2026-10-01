@@ -11,7 +11,7 @@ import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adapter.js";
 import { remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
 
-const CLAIM_CADENCE_CHECK_MS=250;
+const CLAIM_CADENCE_CHECK_MS=100;
 
 async function main():Promise<void> {
   const config=await loadRemoteWorkerConfig(),client=new WorkerHttpClient(config),controller=new AbortController();

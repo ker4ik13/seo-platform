@@ -6,8 +6,16 @@ import {
   penalizeXmlStockHttpQuota,
   recordXmlStockHttpQuotaSuccess,
   releaseXmlStockHttpQuotaPermit,
-  xmlStockHttpQuotaKey
+  xmlStockHttpQuotaKey,
+  xmlStockQuotaShouldWait
 } from "./xmlstock-http-quota-limiter.js";
+
+test("an explicit Wordstat batch waits across rolling RPS windows without unbounded polling", () => {
+  assert.equal(xmlStockQuotaShouldWait(850,100,4_000,true),true);
+  assert.equal(xmlStockQuotaShouldWait(850,3_500,4_000,true),false);
+  assert.equal(xmlStockQuotaShouldWait(850,100,4_000,false),false);
+  assert.equal(xmlStockQuotaShouldWait(250,100,500,false),true);
+});
 
 const firstCredential = "01900000-0000-7000-8000-000000000001";
 const secondCredential = "01900000-0000-7000-8000-000000000002";

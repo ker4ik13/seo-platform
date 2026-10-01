@@ -516,7 +516,7 @@ export class FrequencyCollectionRuntimeService {
     const acquired = await this.xmlStockQuota.tryAcquire({
       ...(this.config.remoteWorkEnabled ? { physicalOnly: true } : {}),
       credentialId, workspaceId: claim.workspaceId, product: "WORDSTAT",
-      requestCost: claim.types.length, maxWaitMs: 1_200,
+      requestCost: claim.types.length, maxWaitMs: 4_000,
       leaseMs: timeoutMs * claim.types.length + FREQUENCY_PERSISTENCE_MARGIN_MS +
         (this.config.remoteWorkEnabled ? 15_000 * claim.types.length : 0)
     });

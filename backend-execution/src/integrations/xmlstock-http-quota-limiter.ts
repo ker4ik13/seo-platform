@@ -58,7 +58,7 @@ export interface XmlStockHttpQuotaGate {
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
-    /** Short bounded wait to fill a batch under the provider's rolling RPS window. */
+    /** Bounded wait to fill a pre-reserved batch under the provider's rolling RPS window. */
     readonly maxWaitMs?: number;
     /** Omit for the main Compose; remote nodes receive independent HTTP caps. */
     readonly nodeId?: string;
@@ -300,7 +300,7 @@ export class XmlStockHttpQuotaLimiter
     try {
       const startedAt = Date.now();
       const maxWaitMs = input.maxWaitMs ?? 500;
-      if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs < 0 || maxWaitMs > 1_200) {
+      if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs < 0 || maxWaitMs > 4_000) {
         throw new TypeError("Invalid XMLStock quota wait budget");
       }
       while (true) {
@@ -309,10 +309,9 @@ export class XmlStockHttpQuotaLimiter
           { ...input, member: randomUUID(), globalConcurrency: input.nodeConcurrency ?? this.globalConcurrency }
         );
         if (permit.allowed) return permit;
-        if (
-          permit.retryAfterMilliseconds > 250 ||
-          Date.now() - startedAt + permit.retryAfterMilliseconds > maxWaitMs
-        ) {
+        if (!xmlStockQuotaShouldWait(
+          permit.retryAfterMilliseconds,Date.now()-startedAt,maxWaitMs,input.maxWaitMs !== undefined
+        )) {
           return permit;
         }
         await wait(permit.retryAfterMilliseconds);
@@ -381,6 +380,10 @@ export class XmlStockHttpQuotaLimiter
       await this.connection.quit();
     }
   }
+}
+
+export function xmlStockQuotaShouldWait(retryMs:number,elapsedMs:number,budgetMs:number,explicitBudget:boolean):boolean {
+  return (explicitBudget || retryMs<=250) && elapsedMs+retryMs<=budgetMs;
 }
 
 export async function acquireXmlStockHttpQuotaPermit(
