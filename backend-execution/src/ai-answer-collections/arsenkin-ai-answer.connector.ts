@@ -9,7 +9,7 @@ import type { ProviderFetch } from "../integrations/integration-credential-valid
 import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
-import { arsenkinTaskLifecycle } from "../integrations/arsenkin-task-status.js";
+import { arsenkinTaskLifecycle,arsenkinPollTimeoutMs } from "../integrations/arsenkin-task-status.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -99,7 +99,7 @@ export class ArsenkinAiAnswerConnector {
       const check = await providerJsonRequest(
         CHECK_URL,
         requestInit(secret, { task_id: taskId }),
-        timeoutMs,
+        arsenkinPollTimeoutMs(timeoutMs),
         this.fetcher
       );
       const checkFailure = providerFailure(check.status, check.value, check.retryAfterSeconds);
@@ -115,7 +115,7 @@ export class ArsenkinAiAnswerConnector {
       const response = await providerJsonRequest(
         GET_URL,
         requestInit(secret, { task_id: taskId }),
-        timeoutMs,
+        arsenkinPollTimeoutMs(timeoutMs),
         this.fetcher,
         Date.now,
         RESULT_MAX_BYTES

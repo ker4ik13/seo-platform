@@ -9,8 +9,9 @@ import { parseWorkerRankTask } from "./worker-nodes/worker-rank-task.js";
 import { rankProviderRequestIntent } from "./rank-runs/rank-provider-request-intent.js";
 import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adapter.js";
+import { remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
 
-const CLAIM_INTERVAL_MS=5_000;
+const CLAIM_CADENCE_CHECK_MS=250;
 
 async function main():Promise<void> {
   const config=await loadRemoteWorkerConfig(),client=new WorkerHttpClient(config),controller=new AbortController();
@@ -21,7 +22,7 @@ async function main():Promise<void> {
     cpuSlots: config.cpuSlots,
     capabilitySlots: config.capabilitySlots
   };
-  const running=new Set<Promise<void>>();
+  const running=new Set<Promise<void>>();let completedWork=0;
   const cancellations=new Map<string,()=>void>();
   const suspendAuthentication=()=>{authenticationRejected=true;for(const stop of cancellations.values())stop();};
   const capacities=()=>({...effectiveCapacity.capabilitySlots,
@@ -63,17 +64,23 @@ async function main():Promise<void> {
     active.set(capability,(active.get(capability) ?? 0)+1);if(resource==="HTTP")httpActive++;else cpuActive++;
     const work=action().catch(error=>{if(error instanceof WorkerAuthenticationError){process.stderr.write(`worker ${config.nodeId} authentication rejected\n`);suspendAuthentication();}
       else process.stderr.write(`worker ${config.nodeId} result acknowledgement unavailable\n`);
-    }).finally(()=>{active.set(capability,Math.max(0,(active.get(capability) ?? 1)-1));if(resource==="HTTP")httpActive--;else cpuActive--;running.delete(work);});
+    }).finally(()=>{active.set(capability,Math.max(0,(active.get(capability) ?? 1)-1));if(resource==="HTTP")httpActive--;else cpuActive--;running.delete(work);completedWork++;});
     running.add(work);
   }
 
   async function schedule():Promise<void> {
-    let lastPoll=0;
+    let lastPoll=0,observedCompletions=0;
     while(!controller.signal.aborted) {
-      await wait(Math.max(0,lastPoll+CLAIM_INTERVAL_MS-Date.now()),controller.signal);if(controller.signal.aborted)break;
+      while(!controller.signal.aborted) {
+        const delay=remoteWorkerClaimDelayMs(lastPoll,observedCompletions,completedWork,Date.now());
+        if(delay===0)break;
+        await wait(Math.min(delay,CLAIM_CADENCE_CHECK_MS),controller.signal);
+      }
+      if(controller.signal.aborted)break;
+      observedCompletions=completedWork;
+      lastPoll=Date.now();
       if(authenticationRejected) continue;
       const httpSlots=Math.max(0,effectiveCapacity.httpSlots-httpActive),cpuSlots=Math.max(0,effectiveCapacity.cpuSlots-cpuActive);
-      lastPoll=Date.now();
       const slots=Object.fromEntries(workerCapabilities.map(capability=>[capability,Math.max(0,(capacities()[capability] ?? 0)-(active.get(capability) ?? 0))]));
       try {
         const value=await client.post("claim",{httpSlots,cpuSlots,capabilitySlots:slots},32*1_048_576,30_000,controller.signal);

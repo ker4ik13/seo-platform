@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { arsenkinTaskLifecycle } from "./arsenkin-task-status.js";
+import { arsenkinTaskLifecycle,arsenkinPollTimeoutMs } from "./arsenkin-task-status.js";
+
+test("Arsenkin task reads allow slow check/get without extending paid submit", () => {
+  assert.equal(arsenkinPollTimeoutMs(10_000),30_000);
+  assert.equal(arsenkinPollTimeoutMs(45_000),45_000);
+});
 
 test("keeps every bounded Arsenkin queue status pending", () => {
   for (const status of ["queue", "queued", "wait", "waiting", "pending"]) {

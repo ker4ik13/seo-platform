@@ -7,6 +7,11 @@ const PENDING_TASK_STATUSES = new Set([
   "waiting"
 ]);
 
+/** Reading an accepted task is safe to repeat and may take longer than submit. */
+export function arsenkinPollTimeoutMs(requestedTimeoutMs: number): number {
+  return Math.max(30_000, requestedTimeoutMs);
+}
+
 /**
  * Arsenkin may keep an accepted task in its queue while another tool uses the
  * account's execution slots. A queued task is still live and must keep being

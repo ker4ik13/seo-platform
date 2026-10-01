@@ -10,6 +10,7 @@ import { remoteProviderRequest, materializeRemoteProviderRequest,REMOTE_PROVIDER
 import type { RemoteWorkerConfig } from "./remote-worker-config.js";
 import { signRemoteWorkTicket, verifyRemoteWorkTicket } from "./remote-work-ticket.js";
 import { RemoteProviderTransportService } from "./remote-provider-transport.service.js";
+import { RemoteWorkFailedError } from "./remote-work-client.service.js";
 
 const secret = { apiKey: "fixture-api-key-never-requested", accountIdentifier: "123456" };
 const config = { controlUrl: new URL("https://control.example.test"), token: `wn_${"a".repeat(43)}`, nodeId: randomUUID() } as RemoteWorkerConfig;
@@ -73,6 +74,28 @@ test("a mixed claim can deliver a paid request before its admission window close
     });
     assert.equal(ownerTimeout,10_000+REMOTE_PROVIDER_ADMISSION_MS+15_000);
   }
+});
+
+test("a lost Arsenkin check acknowledgement falls back to a safe local read, never a second paid set", async t => {
+  const native=globalThis.fetch;
+  t.after(()=>{globalThis.fetch=native;});
+  let localReads=0;
+  globalThis.fetch=async()=>{localReads++;return new Response("{}",{status:200,headers:{"content-type":"application/json"}});};
+  const transport=new RemoteProviderTransportService({enabled:()=>true,execute:async()=>{
+    throw new RemoteWorkFailedError("WORKER_OUTCOME_UNKNOWN");
+  }} as never,{} as never);
+  const scope={origin:"JOB" as const,workspaceId:randomUUID(),operationId:randomUUID(),provider:"ARSENKIN" as const,credentialId:randomUUID()};
+  const call=(path:string,body:Record<string,unknown>)=>transport.run(scope,"CLUSTERING",async()=>{
+    transport.useSecret(secret);
+    return transport.fetcher(new URL(`https://arsenkin.ru/api/tools/${path}`),{
+      method:"POST",headers:{authorization:`Bearer ${secret.apiKey}`},body:JSON.stringify(body)
+    });
+  });
+  assert.equal((await call("check",{task_id:"fixture"})).status,200);
+  assert.equal(localReads,1);
+  await assert.rejects(call("set",{tools_name:"clustering",queries:["fixture"]}),
+    (error:unknown)=>error instanceof RemoteWorkFailedError && error.code==="WORKER_OUTCOME_UNKNOWN");
+  assert.equal(localReads,1);
 });
 
 test("a signed work ticket binds the node, immutable payload, lease and deadline", () => {

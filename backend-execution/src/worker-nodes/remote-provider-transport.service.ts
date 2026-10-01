@@ -54,6 +54,14 @@ export class RemoteProviderTransportService {
           return new Response(body,{status,headers});
         },()=>this.localFetch(url,init,context,budget.timeoutMs));
     } catch(error) {
+      // Arsenkin check/get only read an already accepted task. A lost worker
+      // acknowledgement on these calls can be retried safely; only tools/set
+      // is an ambiguous paid submit.
+      const target=new URL(url instanceof Request ? url.url : String(url));
+      if(target.hostname==="arsenkin.ru" && ["/api/tools/check","/api/tools/get"].includes(target.pathname) &&
+        error instanceof RemoteWorkFailedError && ["WORKER_OUTCOME_UNKNOWN","WORKER_RESULT_TIMEOUT"].includes(error.code)) {
+        return this.localFetch(url,init,context,budget.timeoutMs);
+      }
       if(error instanceof RemoteWorkFailedError && error.code==="WORKER_RETRY_LIMIT" && context.capability!=="RANK") throw new ProviderExecutionReviewRequiredError();
       if(error instanceof RemoteWorkFailedError && ["WORKER_NOT_STARTED","WORKER_MATERIAL_UNAVAILABLE","SOURCE_SCOPE_REVOKED"].includes(error.code)) {
         throw new ProviderCapacityUnavailableError();

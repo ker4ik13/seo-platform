@@ -13,7 +13,7 @@ import {
 } from "@seo-platform/contracts/canonical-json";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
-import { arsenkinTaskLifecycle } from "../integrations/arsenkin-task-status.js";
+import { arsenkinTaskLifecycle,arsenkinPollTimeoutMs } from "../integrations/arsenkin-task-status.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import {
@@ -208,7 +208,7 @@ export class ArsenkinRankConnector {
       const checkResponse = await providerJsonRequest(
         ARSENKIN_CHECK_URL,
         requestInit(secret, { task_id: taskId }),
-        timeoutMs,
+        arsenkinPollTimeoutMs(timeoutMs),
         this.fetcher
       );
       const checked = checkResult(
@@ -227,7 +227,7 @@ export class ArsenkinRankConnector {
       const resultResponse = await providerJsonRequest(
         ARSENKIN_GET_URL,
         requestInit(secret, { task_id: taskId }),
-        timeoutMs,
+        arsenkinPollTimeoutMs(timeoutMs),
         this.fetcher,
         Date.now,
         ARSENKIN_RANK_RESULT_MAX_BYTES
