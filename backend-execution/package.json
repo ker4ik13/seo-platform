@@ -15,7 +15,7 @@
     "dev:worker:rank": "tsx watch src/rank-worker.main.ts",
     "dev:worker:crawl": "tsx watch src/crawl-worker.main.ts",
     "dev:worker:auth-email": "tsx watch src/auth-email-worker.main.ts",
-    "build": "pnpm --filter @seo-platform/process-supervisor --filter @seo-platform/operational-alerts build && tsc -p tsconfig.build.json",
+    "build": "pnpm --filter @seo-platform/process-supervisor --filter @seo-platform/operational-alerts build && node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:worker:system": "node dist/worker.main.js",
     "start:worker:inspection": "node dist/inspection-worker.main.js",
