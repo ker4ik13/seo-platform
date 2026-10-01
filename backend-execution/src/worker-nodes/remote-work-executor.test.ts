@@ -6,7 +6,7 @@ import type { AppConfig } from "../config/app-config.js";
 import type { WorkerCapability, RemoteWorkTask } from "@seo-platform/contracts";
 import { parseRemoteWorkTask } from "@seo-platform/contracts";
 import { executeRemoteWork, WorkExecutionError } from "./remote-work-executor.js";
-import { remoteProviderRequest, materializeRemoteProviderRequest } from "./remote-provider-request.js";
+import { remoteProviderRequest, materializeRemoteProviderRequest,REMOTE_PROVIDER_ADMISSION_MS } from "./remote-provider-request.js";
 import type { RemoteWorkerConfig } from "./remote-worker-config.js";
 import { signRemoteWorkTicket, verifyRemoteWorkTicket } from "./remote-work-ticket.js";
 import { RemoteProviderTransportService } from "./remote-provider-transport.service.js";
@@ -49,6 +49,30 @@ test("late admission and a secret echo never issue a second provider request", a
   assert.equal(calls, 0);
   await assert.rejects(executeRemoteWork(task, config, async () => { calls++; return new Response(secret.apiKey); }), (error: unknown) => error instanceof WorkExecutionError && error.code === "PROVIDER_SECRET_ECHO");
   assert.equal(calls, 1);
+});
+
+test("a mixed claim can deliver a paid request before its admission window closes", async () => {
+  for(const sample of [
+    {provider:"XMLSTOCK" as const,capability:"WORDSTAT" as const,
+      url:new URL("https://xmlstock.com/wordstat/json/?user=123456&key=fixture-api-key-never-requested&query=fixture"),init:undefined},
+    {provider:"ARSENKIN" as const,capability:"CLUSTERING" as const,
+      url:new URL("https://arsenkin.ru/api/tools/set"),init:{method:"POST",headers:{authorization:`Bearer ${secret.apiKey}`},body:JSON.stringify({tools_name:"clustering",queries:["fixture"]})}}
+  ]) {
+    const before=Date.now();
+    const request=remoteProviderRequest(sample.url,sample.init,secret,sample.capability,10_000,1_048_576);
+    assert.ok(Date.parse(request.admitBefore)-before>=REMOTE_PROVIDER_ADMISSION_MS-100);
+    assert.ok(Date.parse(request.admitBefore)-before<=REMOTE_PROVIDER_ADMISSION_MS+100);
+    let ownerTimeout=0;
+    const transport=new RemoteProviderTransportService({enabled:()=>true,execute:async (...args:unknown[])=>{
+      ownerTimeout=(args[4] as {timeoutMs:number}).timeoutMs;
+      return new Response("{}");
+    }} as never,{} as never);
+    await transport.run({origin:"JOB",workspaceId:randomUUID(),operationId:randomUUID(),provider:sample.provider,credentialId:randomUUID()},sample.capability,async()=>{
+      transport.useSecret(secret);
+      return transport.fetcher(sample.url,sample.init);
+    });
+    assert.equal(ownerTimeout,10_000+REMOTE_PROVIDER_ADMISSION_MS+15_000);
+  }
 });
 
 test("a signed work ticket binds the node, immutable payload, lease and deadline", () => {

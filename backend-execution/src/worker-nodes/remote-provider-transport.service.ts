@@ -9,7 +9,7 @@ import type { ProviderFetch } from "../integrations/integration-credential-valid
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ProviderRequestInit } from "../integrations/provider-json-request.js";
 import { RemoteWorkClientService,RemoteWorkFailedError,type RemoteWorkScope } from "./remote-work-client.service.js";
-import { remoteProviderRequest } from "./remote-provider-request.js";
+import { remoteProviderRequest,REMOTE_PROVIDER_ADMISSION_MS } from "./remote-provider-request.js";
 import { remoteArtifact } from "./remote-artifact.js";
 
 interface Context { readonly scope:RemoteWorkScope;readonly capability:WorkerCapability;secret?:IntegrationCredentialSecret; }
@@ -37,7 +37,10 @@ export class RemoteProviderTransportService {
     const scope={...context.scope,physicalKeyScopeId};
     try {
       return await this.work.execute(scope,context.capability,"PROVIDER_HTTP",request as unknown as Readonly<Record<string,unknown>>,
-        {resource:"HTTP",timeoutMs:Math.min(120_000,budget.timeoutMs+15_000)},async result=>{
+        // The owner must remain alive long enough for admission, the provider
+        // timeout and result acknowledgement; otherwise a paid response could
+        // be misclassified as unknown while the remote worker is still active.
+        {resource:"HTTP",timeoutMs:Math.min(180_000,budget.timeoutMs+REMOTE_PROVIDER_ADMISSION_MS+15_000)},async result=>{
           if(result.format!=="HTTP" || !Number.isSafeInteger(result.status) || Number(result.status)<100 || Number(result.status)>599 || !result.headers || typeof result.headers!=="object" || Array.isArray(result.headers)) throw new RemoteWorkFailedError("INVALID_WORKER_HTTP_RESPONSE");
           const headers=new Headers();
           for(const [name,value] of Object.entries(result.headers)) {

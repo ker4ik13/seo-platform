@@ -3,6 +3,9 @@ import type { WorkerCapability } from "@seo-platform/contracts";
 
 const KEY = "__gateway_api_key__";
 const ACCOUNT = "__gateway_account_id__";
+// The control plane can spend up to 20 seconds collecting a mixed rank/work
+// batch. Keep the paid request fenced, but do not expire it before delivery.
+export const REMOTE_PROVIDER_ADMISSION_MS = 30_000;
 const allowedPaths: Readonly<Record<string, readonly string[]>> = {
   "xmlstock.com": ["/yandex/xml/","/yandexlive/xml/","/google/xml/","/wordstat/json/"],
   "arsenkin.ru": ["/api/tools/set","/api/tools/check","/api/tools/get"],
@@ -33,7 +36,7 @@ export function remoteProviderRequest(urlValue: string | URL | Request, init: Re
   }
   if (init?.body !== undefined && init.body !== null && typeof init.body !== "string") invalid();
   const input: RemoteProviderRequest = { url:url.toString(),method:(init?.method ?? "GET") as "GET"|"POST",headers,
-    ...(typeof init?.body === "string" ? { body:init.body } : {}),timeoutMs,maxBytes,admitBefore:new Date(Date.now()+6_000).toISOString() };
+    ...(typeof init?.body === "string" ? { body:init.body } : {}),timeoutMs,maxBytes,admitBefore:new Date(Date.now()+REMOTE_PROVIDER_ADMISSION_MS).toISOString() };
   if (JSON.stringify(input).includes(secret.apiKey)) invalid();
   return validateRemoteProviderRequest(input,capability);
 }

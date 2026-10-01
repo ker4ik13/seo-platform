@@ -7,7 +7,7 @@ import type { WorkerRankGatewayService } from "./worker-rank-gateway.service.js"
 import type { WorkerNodeService } from "./worker-node.service.js";
 
 const nodeId = "01900000-0000-7000-8000-000000000013";
-test("combined claim has two short rank passes and returns the complete batch", async () => {
+test("combined claim probes rank once before delivering all capability work", async () => {
   const budgets: number[] = [];
   const controller = new RemoteWorkController(
     { claim: async () => [], cancelled: async () => [] } as unknown as RemoteWorkGatewayService,
@@ -22,6 +22,6 @@ test("combined claim has two short rank passes and returns the complete batch", 
     { id: "request-1" } as FastifyRequest
   );
   assert.deepEqual(response.data, { work: [], ranks: [], cancelled: [] });
-  assert.equal(budgets.length, 2);
+  assert.equal(budgets.length, 1);
   assert.ok(budgets.every(budget => budget > 0 && budget <= 5_000));
 });
