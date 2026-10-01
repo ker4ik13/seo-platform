@@ -23,5 +23,5 @@ test("combined claim probes rank once before delivering all capability work", as
   );
   assert.deepEqual(response.data, { work: [], ranks: [], cancelled: [] });
   assert.equal(budgets.length, 1);
-  assert.ok(budgets.every(budget => budget > 0 && budget <= 5_000));
+  assert.deepEqual(budgets, [500], "rank scanning must not hold Wordstat work for five seconds");
 });

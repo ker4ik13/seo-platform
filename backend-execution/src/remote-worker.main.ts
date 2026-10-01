@@ -9,7 +9,7 @@ import { parseWorkerRankTask } from "./worker-nodes/worker-rank-task.js";
 import { rankProviderRequestIntent } from "./rank-runs/rank-provider-request-intent.js";
 import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adapter.js";
-import { remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
+import { REMOTE_WORKER_WARM_POLLS, remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
 import { workerTaskFinishLog, workerTaskLogContext, workerTaskStartLog } from "./worker-nodes/remote-worker-task-log.js";
 
 const CLAIM_CADENCE_CHECK_MS=100;
@@ -76,10 +76,11 @@ async function main():Promise<void> {
   }
 
   async function schedule():Promise<void> {
-    let lastPoll=0,observedCompletions=0;
+    let lastPoll=0,observedCompletions=0,warmPollsRemaining=0;
     while(!controller.signal.aborted) {
       while(!controller.signal.aborted) {
-        const delay=remoteWorkerClaimDelayMs(lastPoll,observedCompletions,completedWork,Date.now());
+        if(completedWork>observedCompletions)warmPollsRemaining=REMOTE_WORKER_WARM_POLLS;
+        const delay=remoteWorkerClaimDelayMs(lastPoll,observedCompletions,completedWork,Date.now(),warmPollsRemaining);
         if(delay===0)break;
         await wait(Math.min(delay,CLAIM_CADENCE_CHECK_MS),controller.signal);
       }
@@ -95,6 +96,7 @@ async function main():Promise<void> {
         const batch=value as {work?:unknown;ranks?:unknown;cancelled?:unknown};if(!Array.isArray(batch.work) || !Array.isArray(batch.ranks) || !Array.isArray(batch.cancelled) || batch.cancelled.length>256 || batch.cancelled.some(id=>typeof id!=="string") || batch.work.length+batch.ranks.length>640) throw new Error("Invalid claim batch");
         for(const id of batch.cancelled)cancellations.get(id)?.();
         const tasks=batch.work.map(parseRemoteWorkTask),ranks=batch.ranks.map(parseWorkerRankTask);
+        warmPollsRemaining=tasks.length+ranks.length>0 ? REMOTE_WORKER_WARM_POLLS : Math.max(0,warmPollsRemaining-1);
         if(tasks.filter(task=>task.resource==="HTTP").length+ranks.length>httpSlots || tasks.filter(task=>task.resource==="CPU").length>cpuSlots) throw new Error("Worker capacity exceeded");
         if(tasks.length+ranks.length>0)process.stdout.write(`Воркер: получена пачка · задания ${tasks.length} · страницы позиций ${ranks.length}\n`);
         for(const task of tasks) start(task,task.resource,()=>{

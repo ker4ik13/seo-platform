@@ -15,4 +15,5 @@ test("distinguishes frequency from seasonality and names the complete search pro
 test("renders provider balance failures as actionable text", () => {
   assert.match(operationFailureLabel("PROVIDER_LOW_BALANCE"), /Недостаточно средств/u);
   assert.match(operationFailureLabel("ITEMS_FAILED"), /подробности в логе/u);
+  assert.equal(operationFailureLabel("PROVIDER_CONCURRENCY_LIMITED"), "Ожидает свободный слот");
 });

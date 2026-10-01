@@ -33,7 +33,7 @@ export function operationFailureLabel(code: string): string {
   return ({
     PROVIDER_LOW_BALANCE: "Недостаточно средств на балансе провайдера",
     ITEMS_FAILED: "Часть запросов не собрана — подробности в логе",
-    PROVIDER_RATE_LIMITED: "Лимит запросов провайдера",
-    PROVIDER_CONCURRENCY_LIMITED: "Лимит одновременных запросов провайдера"
+    PROVIDER_RATE_LIMITED: "Ожидает лимит запросов провайдера",
+    PROVIDER_CONCURRENCY_LIMITED: "Ожидает свободный слот"
   } as Record<string, string>)[code] ?? `Код: ${code}`;
 }

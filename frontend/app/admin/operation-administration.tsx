@@ -259,7 +259,8 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label={uiText("Этап")} value={operation.stage ? operationStage(operation) : "—"} />
           <Snapshot label={uiText("Попытка")} value={`${operation.attempt} из ${operation.maxAttempts}`} />
           <Snapshot label={uiText("Результат")} value={resultLabel(operation, uiLocale)} />
-          <Snapshot label={uiText("Код ошибки")} value={operation.errorCode ?? "—"} />
+          <Snapshot label={uiText(operation.errorCode === "PROVIDER_CONCURRENCY_LIMITED" ? "Причина ожидания" : "Код ошибки")}
+            value={operation.errorCode === "PROVIDER_CONCURRENCY_LIMITED" ? operationFailureLabel(operation.errorCode) : operation.errorCode ?? "—"} />
           <Snapshot label={uiText("Создана")} value={formatDate(operation.createdAt, uiLocale)} />
           <Snapshot label={uiText("Завершена")} value={operation.finishedAt ? formatDate(operation.finishedAt, uiLocale) : "Ещё выполняется"} />
         </div>
@@ -352,6 +353,9 @@ function operationStage(operation: AdminOperationSummary): string {
     PERSISTING_RESULT: "Сохранение результата",
     FINALIZING: "Завершение операции",
     SUBMIT_OUTCOME_UNKNOWN: "Нужна сверка отправки",
+    waiting_provider_capacity: "Ожидает свободный слот",
+    retry_scheduled: "Ожидает",
+    collecting: "Сбор данных",
     FINISHED: "Завершено"
   } as Readonly<Record<string, string>>)[operation.stage ?? ""] ?? operation.stage ?? "—";
 }

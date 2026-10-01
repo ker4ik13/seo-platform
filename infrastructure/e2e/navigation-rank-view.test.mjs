@@ -271,6 +271,7 @@ test("admin dark presentation uses shared selects without granting staff access"
     const operation = { id: randomUUID(), workspaceId: randomUUID(), type: "MANUAL_RANK_CHECK", status: "RUNNING", stage: "WAITING_EXECUTION_GRANT", provider: "XMLSTOCK", searchEngine: "YANDEX", searchSource: "LIVE", connection: { label: "Личный ключ", displayHint: "••••1234" }, workers: [{ name: "Офисный воркер", activeTasks: 4, status: "ONLINE", assignedOperations: 2, nodeId: randomUUID() }], progress: { current: "25", total: "100", unit: "KEYWORD" }, result: { found: 20, notFound: 5 }, attempt: 1, maxAttempts: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), workspace: { id: randomUUID(), name: "Рабочая область" }, project: { id: randomUUID(), name: "Тестовый проект", domain: "example.org" }, actor: null };
     const seasonality = { ...operation, id: randomUUID(), type: "FREQUENCY_COLLECTION", frequencyMode: "SEASONALITY", status: "CANCELLED", searchSource: undefined, progress: { current: "8", total: "65", unit: "keywords" }, result: { failed: 31 }, errorCode: "PROVIDER_LOW_BALANCE" };
     const frequency = { ...seasonality, id: randomUUID(), frequencyMode: "FREQUENCY", progress: { current: "10", total: "65", unit: "keywords" } };
+    const waiting = { ...frequency, id: randomUUID(), status: "RETRY_SCHEDULED", stage: "waiting_provider_capacity", progress: { current: "52", total: "93", unit: "keywords" }, result: {}, errorCode: "PROVIDER_CONCURRENCY_LIMITED" };
     // Presentation-only fixture. No API/DB role is created or bypassed.
     let cancellations = 0;
     let operationReads = 0;
@@ -286,7 +287,7 @@ test("admin dark presentation uses shared selects without granting staff access"
         await route.fulfill({ json: { data: { id: operation.id, status: operation.status } } });
         return;
       }
-      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation, seasonality, frequency], totals: { total: 3, active: 1, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 2 }] };
+      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation, seasonality, frequency, waiting], totals: { total: 4, active: 2, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 3 }] };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data, meta: { requestId: randomUUID() } }) });
     });
     await page.goto(`${base}/admin?screen=operations`, { waitUntil: "domcontentloaded" });
@@ -296,9 +297,18 @@ test("admin dark presentation uses shared selects without granting staff access"
     assert.ok(workerCopy && workerCopy.width >= 100, "worker name and counts must fit without breaking each word");
     assert.equal(await page.getByText(/Яндекс Live · Личный ключ/u).count(), 1);
     assert.equal(await page.getByText("Сезонность Wordstat", { exact: true }).count(), 1);
-    assert.equal(await page.getByText("Сбор частотности", { exact: true }).count(), 1);
-    assert.equal(await page.locator(".operation-kind .provider-logo.xmlstock").count(), 3);
+    assert.equal(await page.getByText("Сбор частотности", { exact: true }).count(), 2);
+    assert.equal(await page.locator(".operation-kind .provider-logo.xmlstock").count(), 4);
     assert.equal(await page.getByText("Недостаточно средств на балансе провайдера").count(), 2);
+    const waitingRow = page.locator(".operation-row").filter({ hasText: "52 из 93" });
+    assert.equal(await waitingRow.getByText("Ожидает", { exact: true }).count(), 1);
+    assert.equal(await waitingRow.getByText("Ожидает свободный слот").count(), 2);
+    assert.equal(await waitingRow.getByText("PROVIDER_CONCURRENCY_LIMITED").count(), 0);
+    await waitingRow.getByRole("button", { name: "Детали", exact: true }).click();
+    const waitingDrawer = page.getByRole("dialog", { name: new RegExp(waiting.id, "u") });
+    await waitingDrawer.getByText("Причина ожидания").waitFor();
+    assert.equal(await waitingDrawer.getByText("PROVIDER_CONCURRENCY_LIMITED").count(), 0);
+    await waitingDrawer.getByRole("button", { name: "Закрыть" }).click();
     assert.equal(await page.getByRole("combobox", { name: /Язык|Language/u }).count(), 0);
     assert.equal(await page.getByRole("combobox", { name: "Интервал обновления", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "Обновить", exact: true }).count(), 0);

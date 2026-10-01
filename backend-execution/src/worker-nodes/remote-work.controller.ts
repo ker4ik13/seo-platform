@@ -7,7 +7,9 @@ import { WorkerNodeService } from "./worker-node.service.js";
 import { workerIdentity,exactWorkerInput } from "./worker-wire-input.js";
 
 type RequestHeaders=Readonly<Record<string,string|string[]|undefined>>;
-const RANK_CLAIM_PASS_BUDGET_MS=5_000;
+// A combined poll must not hold ready Wordstat/crawl work behind a long scan
+// of saturated rank products. Rank still gets a fair bounded pass each poll.
+const RANK_CLAIM_PASS_BUDGET_MS=500;
 
 @Controller("worker/v1")
 export class RemoteWorkController {
@@ -21,9 +23,8 @@ export class RemoteWorkController {
     const node=await this.nodes.authorizeCombinedWork(id,token);
     const rankSlots=node.capabilities.includes("RANK") ? Math.min(input.capabilitySlots.RANK ?? 0,input.httpSlots) : 0;
     const initialRank=Math.min(rankSlots,Math.ceil(input.httpSlots/2));
-    // One fair rank pass is enough for this poll. A second pass could spend
-    // another five seconds probing the same saturated physical keys, while
-    // already claimed Wordstat/Arsenkin tasks wait for the HTTP response.
+    // One short fair rank pass is enough. A long pass would delay already
+    // queued Wordstat/Arsenkin work in this same response.
     const ranks=initialRank>0 ? await this.ranks.claimBatch(id,token,initialRank,RANK_CLAIM_PASS_BUDGET_MS) : [];
     const work=await this.work.claim(id,token,{...input,httpSlots:Math.max(0,input.httpSlots-ranks.length),capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-ranks.length)}});
     return {data:{work,ranks,cancelled:await this.work.cancelled(id)},meta:{requestId:request.id}};

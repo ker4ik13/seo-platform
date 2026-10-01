@@ -5,7 +5,15 @@ import { remoteWorkerClaimDelayMs } from "./remote-worker-claim-cadence.js";
 test("one worker polls every five seconds idle and promptly after batch completion", () => {
   assert.equal(remoteWorkerClaimDelayMs(0,0,0,1_000),0);
   assert.equal(remoteWorkerClaimDelayMs(1_000,0,0,2_000),4_000);
-  assert.equal(remoteWorkerClaimDelayMs(1_000,0,3,1_050),50);
+  assert.equal(remoteWorkerClaimDelayMs(1_000,0,3,1_050),0);
   assert.equal(remoteWorkerClaimDelayMs(1_000,0,3,1_100),0);
   assert.equal(remoteWorkerClaimDelayMs(2_000,3,3,2_500),4_500);
+});
+
+test("a recent task keeps one server poll warm for bounded refill attempts", () => {
+  assert.equal(remoteWorkerClaimDelayMs(1_000,1,1,1_050,4),50);
+  assert.equal(remoteWorkerClaimDelayMs(2_000,1,1,2_100,3),150);
+  assert.equal(remoteWorkerClaimDelayMs(3_000,1,1,3_250,2),250);
+  assert.equal(remoteWorkerClaimDelayMs(4_000,1,1,4_500,1),500);
+  assert.equal(remoteWorkerClaimDelayMs(5_000,1,1,5_500,0),4_500);
 });
