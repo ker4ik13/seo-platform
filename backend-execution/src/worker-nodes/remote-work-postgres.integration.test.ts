@@ -26,7 +26,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
     ciphertext:Uint8Array.from(encrypted.ciphertext),nonce:Uint8Array.from(encrypted.nonce),authTag:Uint8Array.from(encrypted.authTag),encryptedDataKey:Uint8Array.from(encrypted.encryptedDataKey),dataKeyNonce:Uint8Array.from(encrypted.dataKeyNonce),dataKeyAuthTag:Uint8Array.from(encrypted.dataKeyAuthTag),keyVersion:1,
     capabilities:["WORDSTAT"],idempotencyKey:randomUUID(),requestFingerprint:randomBytes(32),fingerprintKeyVersion:1}});
   const physical=crypto.decrypt(workspaceId,"XMLSTOCK",credentialId,encrypted).rateLimitScopeId!;
-  const node=await nodes.create({name:"Gateway SQL fixture",capabilities:["WORDSTAT","EXPORT"],maxHttpSlots:8,maxCpuSlots:2,capabilityLimits:{WORDSTAT:2,EXPORT:1}});
+  const node=await nodes.create({name:"Gateway SQL fixture",capabilities:["WORDSTAT","EXPORT"],maxHttpSlots:8,maxCpuSlots:2,capabilityLimits:{WORDSTAT:2,EXPORT:1},useEnvCapacity:false});
   await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
   await nodes.setEnabled(node.node.id,true);
   t.after(async()=>{await prisma.executionWorkerNode.updateMany({where:{id:node.node.id,deletedAt:null},data:{enabled:false,draining:true}});await prisma.$disconnect();});

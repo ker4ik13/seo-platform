@@ -12,7 +12,7 @@ export function AdminOperationCancel({ operation, onUpdated }: Readonly<{ operat
   if (!TYPES.has(operation.type) || !STATES.has(operation.status)) return null;
   return <>
     <button className="danger-button" onClick={() => setOpen(true)} type="button"><Icon name="pause" />Остановить</button>
-    {open && <AdminActionDialog title="Остановить операцию?" description={`Операция ${operation.id}. Уже сохранённые результаты останутся. Отправленный провайдеру запрос может завершиться до остановки.`} onClose={() => setOpen(false)} onConfirm={async (reason) => {
+    {open && <AdminActionDialog title="Остановить операцию?" defaultReason="Ручная остановка из административной панели" description={`Операция ${operation.id}. Уже сохранённые результаты останутся. Отправленный провайдеру запрос может завершиться до остановки.`} onClose={() => setOpen(false)} onConfirm={async (reason) => {
       const result = await adminApi(`/api/operations/${operation.id}/cancel`, { method: "POST", body: JSON.stringify({ confirmId: operation.id, confirmed: true, reason }) });
       if (!result.ok) return result.message;
       onUpdated(); return undefined;

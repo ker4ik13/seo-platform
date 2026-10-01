@@ -31,6 +31,8 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
   const [error, setError] = useState<string>();
   const latestBaseRequest = useRef<AbortController | null>(null);
   const selectedOperationId = adminOperationId(searchParams.get("operation"));
+  const selectedOperationRef = useRef(selectedOperationId);
+  selectedOperationRef.current = selectedOperationId;
 
   const updateUrl = useCallback((changes: Readonly<{
     operation?: string | null;
@@ -53,8 +55,12 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
     }
     next.set("refresh", "5");
     const href = `/admin?${next.toString()}`;
-    if (changes.operation) router.push(href, { scroll: false });
-    else router.replace(href, { scroll: false });
+    if (changes.operation !== undefined && changes.status === undefined && changes.type === undefined) {
+      // Native history updates App Router's search params without reloading
+      // the RSC tree or replacing the list under the user's scroll position.
+      if (changes.operation) window.history.pushState(null, "", href);
+      else window.history.replaceState(null, "", href);
+    } else router.replace(href, { scroll: false });
   }, [router]);
 
   useEffect(() => {
@@ -92,12 +98,12 @@ export function OperationAdministration({ canControl = false }: Readonly<{ canCo
       ? { ...response.data, data: [...current.data, ...response.data.data] }
       : response.data
     );
-    const requested = selectedOperationId
-      ? response.data.data.find(({ id }) => id === selectedOperationId)
+    const requested = selectedOperationRef.current
+      ? response.data.data.find(({ id }) => id === selectedOperationRef.current)
       : undefined;
     if (requested) setSelected(requested);
-    else if (!selectedOperationId) setSelected(undefined);
-  }, [selectedOperationId, status, type]);
+    else if (!selectedOperationRef.current) setSelected(undefined);
+  }, [status, type]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => () => latestBaseRequest.current?.abort(), []);

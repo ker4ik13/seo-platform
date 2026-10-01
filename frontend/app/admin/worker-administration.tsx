@@ -35,7 +35,7 @@ export function WorkerAdministration() {
   const [editForm, setEditForm] = useState<WorkerNodeConfiguration>();
   const [form, setForm] = useState<WorkerNodeConfiguration>({
     name: "", capabilities: DEFAULT_CAPABILITIES,
-    maxHttpSlots: 16, maxCpuSlots: 2
+    maxHttpSlots: 16, maxCpuSlots: 2, useEnvCapacity: true
   });
 
   const load = useCallback(async () => {
@@ -200,7 +200,8 @@ export function WorkerAdministration() {
               onDelete={() => { setError(undefined); setStopAction({ kind: "delete", node }); }}
               onDetails={() => setDetailsNodeId(node.id)}
               onConfigure={() => {
-                setError(undefined); setEditingNodeId(node.id); setEditForm({ name: node.name, capabilities: [...node.capabilities], maxHttpSlots: node.maxHttpSlots, maxCpuSlots: node.maxCpuSlots,...(node.capabilityLimits ? {capabilityLimits:node.capabilityLimits} : {}) });
+                setError(undefined); setEditingNodeId(node.id); setEditForm({ name: node.name, capabilities: [...node.capabilities], maxHttpSlots: node.maxHttpSlots, maxCpuSlots: node.maxCpuSlots,
+                  useEnvCapacity: node.useEnvCapacity ?? false, ...(node.capabilityLimits ? {capabilityLimits:node.capabilityLimits} : {}) });
               }} />
           ))}
         </div>
@@ -219,17 +220,19 @@ export function WorkerAdministration() {
 
 function WorkerFields({ value, onChange }: Readonly<{ value: WorkerNodeConfiguration; onChange: (value: WorkerNodeConfiguration) => void }>) {
   return <>
+    <label className="worker-capacity-source"><input checked={value.useEnvCapacity === true} onChange={(event) => onChange({ ...value, useEnvCapacity: event.target.checked })} type="checkbox" />Брать слоты из .env воркера</label>
+    <p className="worker-capacity-hint">{value.useEnvCapacity ? "После подключения воркер сообщит свои значения. Изменения .env применяются после его перезапуска." : "Значения из админки применятся после следующего heartbeat воркера."}</p>
     <div className="worker-fields">
       <label>Название<input maxLength={100} required value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} /></label>
-      <label>HTTP-слоты<input min={1} max={512} required type="number" value={value.maxHttpSlots} onChange={(event) => onChange({ ...value, maxHttpSlots: Number(event.target.value) })} /></label>
-      <label>CPU-слоты<input min={1} max={128} required type="number" value={value.maxCpuSlots} onChange={(event) => onChange({ ...value, maxCpuSlots: Number(event.target.value) })} /></label>
+      <label>HTTP-слоты<input min={1} max={512} disabled={value.useEnvCapacity} required type="number" value={value.maxHttpSlots} onChange={(event) => onChange({ ...value, maxHttpSlots: Number(event.target.value) })} /></label>
+      <label>CPU-слоты<input min={1} max={128} disabled={value.useEnvCapacity} required type="number" value={value.maxCpuSlots} onChange={(event) => onChange({ ...value, maxCpuSlots: Number(event.target.value) })} /></label>
     </div>
     <fieldset className="worker-capabilities"><legend>Операции · максимум слотов</legend>
       {workerCapabilities.map((capability) => {
         const enabled=value.capabilities.includes(capability),cpu=["IMPORT","EXPORT","INSPECTION"].includes(capability);
         return <div className="worker-capability-control" key={capability}>
           <label><input checked={enabled} onChange={(event) => onChange({ ...value, capabilities: event.target.checked ? [...value.capabilities, capability] : value.capabilities.filter((item) => item !== capability) })} type="checkbox" />{workerCapabilityLabel(capability)}</label>
-          <input aria-label={`${workerCapabilityLabel(capability)}: слоты`} min={0} max={cpu ? 128 : 512} disabled={!enabled} required type="number"
+          <input aria-label={`${workerCapabilityLabel(capability)}: слоты`} min={0} max={cpu ? 128 : 512} disabled={!enabled || value.useEnvCapacity} required type="number"
             value={value.capabilityLimits?.[capability] ?? (cpu ? value.maxCpuSlots : value.maxHttpSlots)}
             onChange={(event)=>onChange({...value,capabilityLimits:{...value.capabilityLimits,[capability]:Number(event.target.value)}})} />
         </div>;

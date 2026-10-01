@@ -43,6 +43,12 @@ export interface FrequencyCollectionClaim {
   readonly encryptedCredential: EncryptedIntegrationCredential;
 }
 
+export type XmlStockFrequencyItemOutcome =
+  | { readonly jobItemId: string; readonly status: "COMPLETED" }
+  | { readonly jobItemId: string; readonly status: "CAPACITY"; readonly retryAfterSeconds: number }
+  | { readonly jobItemId: string; readonly status: "FAILED"; readonly code: string;
+      readonly retryable: boolean; readonly retryAfterSeconds: number };
+
 @Injectable()
 export class FrequencyCollectionRuntimeBrokerService {
   public constructor(private readonly prisma: PrismaService) {}
@@ -133,6 +139,31 @@ export class FrequencyCollectionRuntimeBrokerService {
       )
     `);
     requiredCompletion(rows);
+  }
+
+  public async settleXmlStockBatch(
+    claim: FrequencyCollectionClaim,
+    outcomes: readonly XmlStockFrequencyItemOutcome[],
+    finalize: boolean
+  ): Promise<number> {
+    const expected = new Set(claim.items.map(item => item.jobItemId));
+    if (claim.provider !== "XMLSTOCK" || expected.size < 1 || expected.size > 10 ||
+        outcomes.length !== expected.size || new Set(outcomes.map(item => item.jobItemId)).size !== expected.size) invalid();
+    for (const outcome of outcomes) {
+      if (!expected.has(outcome.jobItemId)) invalid();
+      if (outcome.status !== "COMPLETED" && (!Number.isSafeInteger(outcome.retryAfterSeconds) ||
+          outcome.retryAfterSeconds < 1 || outcome.retryAfterSeconds > 3_600)) invalid();
+      if (outcome.status === "FAILED" && !/^[A-Z][A-Z0-9_]{0,63}$/u.test(outcome.code)) invalid();
+    }
+    const rows = await this.prisma.$queryRaw<readonly CompletionRow[]>(Prisma.sql`
+      SELECT * FROM public.settle_xmlstock_frequency_batch(
+        ${claim.jobId}::uuid, ${jobItemIds(claim)}::uuid[], ${claim.leaseOwner}::text,
+        ${claim.jobVersion}::integer, ${claim.types.length}::integer,
+        ${JSON.stringify(outcomes)}::jsonb, ${finalize}::boolean
+      )
+    `);
+    requiredCompletion(rows);
+    return rows[0]!.jobVersion;
   }
 
   public async defer(
@@ -437,7 +468,7 @@ function validateBatchRows(
   if (
     itemIds.size !== rows.length ||
     requestIds.size !== 1 ||
-    (claim.provider === "XMLSTOCK" && rows.length !== 1)
+    (claim.provider === "XMLSTOCK" && rows.length > 50)
   ) invalid();
 }
 

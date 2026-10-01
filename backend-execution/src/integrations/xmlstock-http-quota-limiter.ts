@@ -58,6 +58,8 @@ export interface XmlStockHttpQuotaGate {
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
+    /** Short bounded wait to fill a batch under the provider's rolling RPS window. */
+    readonly maxWaitMs?: number;
     /** Omit for the main Compose; remote nodes receive independent HTTP caps. */
     readonly nodeId?: string;
     readonly nodeConcurrency?: number;
@@ -290,12 +292,17 @@ export class XmlStockHttpQuotaLimiter
     readonly product: XmlStockHttpProduct;
     readonly requestCost?: number;
     readonly leaseMs: number;
+    readonly maxWaitMs?: number;
     readonly nodeId?: string;
     readonly nodeConcurrency?: number;
     readonly physicalOnly?: boolean;
   }): Promise<XmlStockHttpQuotaPermit> {
     try {
       const startedAt = Date.now();
+      const maxWaitMs = input.maxWaitMs ?? 500;
+      if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs < 0 || maxWaitMs > 1_200) {
+        throw new TypeError("Invalid XMLStock quota wait budget");
+      }
       while (true) {
         const permit = await acquireXmlStockHttpQuotaPermit(
           this.connection,
@@ -304,7 +311,7 @@ export class XmlStockHttpQuotaLimiter
         if (permit.allowed) return permit;
         if (
           permit.retryAfterMilliseconds > 250 ||
-          Date.now() - startedAt + permit.retryAfterMilliseconds > 500
+          Date.now() - startedAt + permit.retryAfterMilliseconds > maxWaitMs
         ) {
           return permit;
         }

@@ -161,10 +161,14 @@ test("keeps completed operations visible and replays an existing dismissal", asy
 test("lists a bounded platform operation summary without raw job payloads", async () => {
   let countCall = 0;
   const countQueries: unknown[] = [];
+  const listQueries: unknown[] = [];
+  const typeQueries: unknown[] = [];
   const createdAt = new Date("2026-08-11T18:00:00.000Z");
   const service = activityService({
     job: {
-      findMany: async () => [
+      findMany: async (query: unknown) => {
+        listQueries.push(query);
+        return [
         {
           id: "01900000-0000-7000-8000-000000000010",
           workspaceId,
@@ -194,15 +198,19 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
           finishedAt: null,
           updatedAt: createdAt
         }
-      ],
+        ];
+      },
       count: async (value: unknown) => {
         countQueries.push(value);
         return [9, 2, 6, 1][countCall++] ?? 0;
       },
-      groupBy: async () => [
+      groupBy: async (query: unknown) => {
+        typeQueries.push(query);
+        return [
         { type: "MANUAL_RANK_CHECK", _count: { _all: 7 } },
         { type: "FREQUENCY_COLLECTION", _count: { _all: 2 } }
-      ]
+        ];
+      }
     }
   } as unknown as PrismaService);
 
@@ -218,6 +226,11 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
     { type: "MANUAL_RANK_CHECK", count: 7 },
     { type: "FREQUENCY_COLLECTION", count: 2 }
   ]);
+  const filtered = await service.adminList({ statusGroup: "COMPLETED", type: "FREQUENCY_COLLECTION", limit: 50 });
+  assert.deepEqual(filtered.types, result.types, "choosing one type cannot remove the others from the selector");
+  assert.deepEqual((typeQueries[1] as {where: {type: {in: string[]}}}).where.type.in,
+    (typeQueries[0] as {where: {type: {in: string[]}}}).where.type.in);
+  assert.equal((listQueries[1] as {where: {AND: Array<{type?: string}>}}).where.AND[0]?.type, "FREQUENCY_COLLECTION");
   assert.deepEqual(result.data[0]?.progress, {
     current: "17",
     total: "50",

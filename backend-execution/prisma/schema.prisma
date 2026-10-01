@@ -1273,6 +1273,7 @@ model ExecutionWorkerNode {
   maxHttpSlots           Int       @default(16) @map("max_http_slots")
   maxCpuSlots            Int       @default(2) @map("max_cpu_slots")
   capabilityLimits       Json      @default("{}") @map("capability_limits")
+  usesEnvCapacity        Boolean   @default(false) @map("uses_env_capacity")
   reportedHttpSlots      Int       @default(0) @map("reported_http_slots")
   reportedRankSlots      Int       @default(0) @map("reported_rank_slots")
   reportedCapabilitySlots Json     @default("{}") @map("reported_capability_slots")

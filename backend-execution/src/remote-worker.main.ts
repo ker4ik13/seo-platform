@@ -15,11 +15,17 @@ const CLAIM_INTERVAL_MS=5_000;
 async function main():Promise<void> {
   const config=await loadRemoteWorkerConfig(),client=new WorkerHttpClient(config),controller=new AbortController();
   process.once("SIGINT",()=>controller.abort());process.once("SIGTERM",()=>controller.abort());
-  const active=new Map<WorkerCapability,number>();let httpActive=0,cpuActive=0,inspectionReady=false;
+  const active=new Map<WorkerCapability,number>();let httpActive=0,cpuActive=0,inspectionReady=false,authenticationRejected=false;
+  let effectiveCapacity = {
+    httpSlots: config.httpSlots,
+    cpuSlots: config.cpuSlots,
+    capabilitySlots: config.capabilitySlots
+  };
   const running=new Set<Promise<void>>();
   const cancellations=new Map<string,()=>void>();
-  controller.signal.addEventListener("abort",()=>{if(controller.signal.reason instanceof WorkerAuthenticationError) for(const stop of cancellations.values())stop();});
-  const capacities=()=>({...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0});
+  const suspendAuthentication=()=>{authenticationRejected=true;for(const stop of cancellations.values())stop();};
+  const capacities=()=>({...effectiveCapacity.capabilitySlots,
+    INSPECTION:inspectionReady ? effectiveCapacity.capabilitySlots.INSPECTION ?? 0 : 0});
 
   async function heartbeat():Promise<void> {
     let previous="";
@@ -27,23 +33,35 @@ async function main():Promise<void> {
       try {
         if(config.malware) {try{await new ClamdMalwareScannerAdapter(config.malware).healthCheck();inspectionReady=true;}catch{inspectionReady=false;}}
         const node=parseWorkerNodeView(await client.post("heartbeat",{protocolVersion:1,httpSlots:config.httpSlots,rankSlots:config.rankSlots,cpuSlots:config.cpuSlots,
-          memoryBytes:String(Math.min(totalmem(),process.constrainedMemory() || totalmem())),activeWorkItems:httpActive+cpuActive,capabilitySlots:capacities()},64*1024,5_000,controller.signal));
+          memoryBytes:String(Math.min(totalmem(),process.constrainedMemory() || totalmem())),activeWorkItems:httpActive+cpuActive,
+          capabilitySlots:{...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0}},64*1024,5_000,controller.signal));
         if(node.id!==config.nodeId || node.protocolVersion!==1) throw new Error("Invalid worker identity");
+        effectiveCapacity = {
+          httpSlots: node.maxHttpSlots,
+          cpuSlots: node.maxCpuSlots,
+          capabilitySlots: Object.fromEntries(workerCapabilities.map(capability => {
+            const cpu = ["IMPORT", "EXPORT", "INSPECTION"].includes(capability);
+            const parent = cpu ? node.maxCpuSlots : node.maxHttpSlots;
+            const requested = node.capabilityLimits?.[capability] ?? config.capabilitySlots[capability] ?? 0;
+            return [capability, Math.min(parent, requested)];
+          })) as Readonly<Partial<Record<WorkerCapability, number>>>
+        };
+        authenticationRejected=false;
         const state=node.enabled ? node.draining ? "draining" : "online" : "disabled";
         if(state!==previous) {process.stdout.write(`worker ${config.nodeId} ${state}\n`);previous=state;}
       } catch(error) {
         if(controller.signal.aborted) break;
         const state=error instanceof WorkerAuthenticationError ? "authentication rejected" : "control plane unavailable";
         if(state!==previous){process.stderr.write(`worker ${config.nodeId} ${state}\n`);previous=state;}
-        if(error instanceof WorkerAuthenticationError) {controller.abort(error);break;}
+        if(error instanceof WorkerAuthenticationError) suspendAuthentication();
       }
-      await wait(config.heartbeatMs,controller.signal);
+      await wait(authenticationRejected ? 30_000 : config.heartbeatMs,controller.signal);
     }
   }
 
   function start(capability:WorkerCapability,resource:"HTTP"|"CPU",action:()=>Promise<void>):void {
     active.set(capability,(active.get(capability) ?? 0)+1);if(resource==="HTTP")httpActive++;else cpuActive++;
-    const work=action().catch(error=>{if(error instanceof WorkerAuthenticationError){process.stderr.write(`worker ${config.nodeId} authentication rejected\n`);controller.abort(error);}
+    const work=action().catch(error=>{if(error instanceof WorkerAuthenticationError){process.stderr.write(`worker ${config.nodeId} authentication rejected\n`);suspendAuthentication();}
       else process.stderr.write(`worker ${config.nodeId} result acknowledgement unavailable\n`);
     }).finally(()=>{active.set(capability,Math.max(0,(active.get(capability) ?? 1)-1));if(resource==="HTTP")httpActive--;else cpuActive--;running.delete(work);});
     running.add(work);
@@ -53,7 +71,8 @@ async function main():Promise<void> {
     let lastPoll=0;
     while(!controller.signal.aborted) {
       await wait(Math.max(0,lastPoll+CLAIM_INTERVAL_MS-Date.now()),controller.signal);if(controller.signal.aborted)break;
-      const httpSlots=Math.max(0,config.httpSlots-httpActive),cpuSlots=Math.max(0,config.cpuSlots-cpuActive);
+      if(authenticationRejected) continue;
+      const httpSlots=Math.max(0,effectiveCapacity.httpSlots-httpActive),cpuSlots=Math.max(0,effectiveCapacity.cpuSlots-cpuActive);
       lastPoll=Date.now();
       const slots=Object.fromEntries(workerCapabilities.map(capability=>[capability,Math.max(0,(capacities()[capability] ?? 0)-(active.get(capability) ?? 0))]));
       try {
@@ -71,7 +90,7 @@ async function main():Promise<void> {
         for(const task of ranks) start("RANK","HTTP",()=>runRank(task,client));
       } catch(error) {
         if(controller.signal.aborted)break;
-        if(error instanceof WorkerAuthenticationError){controller.abort(error);break;}
+        if(error instanceof WorkerAuthenticationError){suspendAuthentication();await wait(5_000,controller.signal);}
         if(error instanceof WorkerPausedError) await wait(5_000,controller.signal);
       }
     }

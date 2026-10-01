@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icon";
 
-export function AdminActionDialog({ title, description, onClose, onConfirm }: Readonly<{ title: string; description: string; onClose: () => void; onConfirm: (reason: string) => Promise<string | undefined> }>) {
+export function AdminActionDialog({ title, description, defaultReason, onClose, onConfirm }: Readonly<{ title: string; description: string; defaultReason?: string; onClose: () => void; onConfirm: (reason: string) => Promise<string | undefined> }>) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(defaultReason ?? "");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();

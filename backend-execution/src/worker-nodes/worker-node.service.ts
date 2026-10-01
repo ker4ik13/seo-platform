@@ -51,6 +51,7 @@ export class WorkerNodeService {
         maxHttpSlots: input.maxHttpSlots,
         maxCpuSlots: input.maxCpuSlots,
         capabilityLimits:{...input.capabilityLimits},
+        usesEnvCapacity: input.useEnvCapacity ?? true,
         enabled: false
       }
     });
@@ -83,7 +84,7 @@ export class WorkerNodeService {
         where: { deletedAt: null },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 200,
-        select: VIEW_SELECT
+        select: { ...VIEW_SELECT, usesEnvCapacity: true, tokenHash: true }
       }),
       this.prisma.$queryRaw<readonly {
         readonly nodeId: string;
@@ -111,7 +112,7 @@ export class WorkerNodeService {
       byNode.set(assignment.nodeId, values);
     }
     return rows.map((row) => ({
-      ...view(row),
+      ...view(row, true),
       activeAssignments: byNode.get(row.id) ?? []
     }));
   }
@@ -140,7 +141,8 @@ export class WorkerNodeService {
         capabilities: [...input.capabilities],
         maxHttpSlots: input.maxHttpSlots,
         maxCpuSlots: input.maxCpuSlots
-        ,capabilityLimits:{...input.capabilityLimits}
+        ,capabilityLimits:{...input.capabilityLimits},
+        usesEnvCapacity: input.useEnvCapacity ?? false
       }
     });
     if (changed.count !== 1) throw new NotFoundException("Worker node not found");
@@ -156,6 +158,11 @@ export class WorkerNodeService {
         reportedRankSlots: input.rankSlots,
         reportedCapabilitySlots: { ...(input.capabilitySlots ?? {RANK:input.rankSlots}) },
         reportedCpuSlots: input.cpuSlots,
+        ...(row.usesEnvCapacity ? {
+          maxHttpSlots: Math.max(1, input.httpSlots),
+          maxCpuSlots: Math.max(1, input.cpuSlots),
+          capabilityLimits: { ...(input.capabilitySlots ?? {RANK:input.rankSlots}) }
+        } : {}),
         reportedMemoryBytes: input.memoryBytes,
         activeWorkItems: input.activeWorkItems,
         lastHeartbeatAt: new Date(),
@@ -163,7 +170,9 @@ export class WorkerNodeService {
       }
     });
     if (changed.count !== 1) throw new UnauthorizedException("Invalid worker node");
-    return this.get(id);
+    // Older agents strictly parse heartbeat replies. Keep this response shape
+    // stable while admin/list responses expose the new capacity source.
+    return this.get(id, false);
   }
 
   public async authorizeForWork(
@@ -182,10 +191,9 @@ export class WorkerNodeService {
     }
     const httpSlots = Math.min(
       row.maxHttpSlots,
-      row.reportedHttpSlots,
-      workerEffectiveCapabilitySlots(view(row),capability)
+      workerEffectiveCapabilitySlots(view(row, true),capability)
     );
-    const cpuSlots = Math.min(row.maxCpuSlots, row.reportedCpuSlots);
+    const cpuSlots = row.usesEnvCapacity ? Math.min(row.maxCpuSlots, row.reportedCpuSlots) : row.maxCpuSlots;
     if (httpSlots < 1 && cpuSlots < 1) {
       throw new ForbiddenException("Worker node has no capacity");
     }
@@ -201,7 +209,7 @@ export class WorkerNodeService {
     if(!row.enabled || row.draining || !row.lastHeartbeatAt || row.lastHeartbeatAt.getTime()<Date.now()-HEARTBEAT_TIMEOUT_MS) {
       throw new ForbiddenException("Worker node is unavailable");
     }
-    return view(row);
+    return view(row, true);
   }
 
   private async authenticate(id: string, token: string): Promise<ExecutionWorkerNode> {
@@ -215,12 +223,12 @@ export class WorkerNodeService {
     return row;
   }
 
-  private async get(id: string): Promise<WorkerNodeView> {
+  private async get(id: string, includeMode = true): Promise<WorkerNodeView> {
     const row = await this.prisma.executionWorkerNode.findUnique({
-      where: { id }, select: VIEW_SELECT
+      where: { id }, select: { ...VIEW_SELECT, usesEnvCapacity: true, tokenHash: true }
     });
     if (!row || row.deletedAt) throw new NotFoundException("Worker node not found");
-    return view(row);
+    return view(row, includeMode);
   }
 }
 
@@ -249,7 +257,9 @@ function view(row: {
   readonly lastHeartbeatAt: Date | null;
   readonly lastProtocolVersion: number | null;
   readonly reportedCapabilitySlots?: unknown;
-}): WorkerNodeView {
+  readonly usesEnvCapacity?: boolean;
+  readonly tokenHash?: Uint8Array;
+}, includeMode = false): WorkerNodeView {
   return {
     id: row.id,
     name: row.name,
@@ -268,5 +278,7 @@ function view(row: {
     lastHeartbeatAt: row.lastHeartbeatAt?.toISOString() ?? null,
     protocolVersion: row.lastProtocolVersion,
     reportedCapabilitySlots: (row.reportedCapabilitySlots ?? { RANK: row.reportedRankSlots }) as NonNullable<WorkerNodeView["reportedCapabilitySlots"]>
+    ,...(includeMode && row.usesEnvCapacity !== undefined ? { useEnvCapacity: row.usesEnvCapacity } : {})
+    ,...(includeMode && row.tokenHash ? { tokenFingerprint: Buffer.from(row.tokenHash).toString("hex").slice(0,16) } : {})
   };
 }

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { chromium, request } from "playwright";
 import { semanticPositionHistoryExportFile } from "../../backend-execution/dist/semantic-exports/semantic-export-encoder.js";
 import { remoteWorkerFixture } from "./remote-worker-fixture.mjs";
+import { parseAdminCancelOperationCommand } from "../../packages/contracts/dist/index.js";
 
 test("HTTPS search, project switching, latest-slice ordering and persistent view controls", {
   skip: process.env.SEO_PLATFORM_E2E_CONFIRM !== "CREATE_TEST_DATA", timeout: 240000
@@ -172,7 +173,8 @@ test("HTTPS compact worker cards, create/settings modals and live details drawer
     const page = await context.newPage(), errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const capabilities = ["RANK", "WORDSTAT", "RESEARCH", "AI_ANSWER", "CLUSTERING", "CRAWL", "IMPORT", "EXPORT", "INSPECTION"];
-    const online = { id: randomUUID(), name: "Офисный узел", enabled: true, draining: false, capabilities, maxHttpSlots: 32, maxCpuSlots: 2, reportedHttpSlots: 32, reportedRankSlots: 20, reportedCpuSlots: 2, reportedMemoryBytes: String(8 * 1024 ** 3), activeWorkItems: 4, online: true, lastHeartbeatAt: new Date().toISOString(), protocolVersion: 1, reportedCapabilitySlots: { RANK: 20, WORDSTAT: 10, RESEARCH: 10, AI_ANSWER: 5, CLUSTERING: 2, CRAWL: 8, IMPORT: 2, EXPORT: 2, INSPECTION: 1 }, activeAssignments: [{ jobId: randomUUID(), capability: "RANK", searchEngine: "YANDEX", activeTasks: 4 }] };
+    const knownToken = `wn_${"a".repeat(43)}`;
+    const online = { id: randomUUID(), name: "Офисный узел", enabled: true, draining: false, capabilities, maxHttpSlots: 32, maxCpuSlots: 2, useEnvCapacity: false, tokenFingerprint: createHash("sha256").update(knownToken).digest("hex").slice(0,16), reportedHttpSlots: 32, reportedRankSlots: 20, reportedCpuSlots: 2, reportedMemoryBytes: String(8 * 1024 ** 3), activeWorkItems: 4, online: true, lastHeartbeatAt: new Date().toISOString(), protocolVersion: 1, reportedCapabilitySlots: { RANK: 20, WORDSTAT: 10, RESEARCH: 10, AI_ANSWER: 5, CLUSTERING: 2, CRAWL: 8, IMPORT: 2, EXPORT: 2, INSPECTION: 1 }, activeAssignments: [{ jobId: randomUUID(), capability: "RANK", searchEngine: "YANDEX", activeTasks: 4 }] };
     const offline = { ...online, id: randomUUID(), name: "Нет связи с узлом", online: false, activeWorkItems: 0, activeAssignments: [] };
     let reads = 0, configured, deleted = false, deleteAttempts = 0;
     const mutations = [];
@@ -198,7 +200,8 @@ test("HTTPS compact worker cards, create/settings modals and live details drawer
     assert.equal(await page.locator(".worker-state-offline .worker-connectivity").innerText(), "Нет связи");
     await page.getByRole("button", { name: "Создать воркер", exact: true }).click();
     const create = page.getByRole("dialog", { name: "Создать воркер", exact: true });
-    await create.waitFor(); assert.equal(await create.getByRole("checkbox").count(), 9);
+    await create.waitFor(); assert.equal(await create.getByRole("checkbox").count(), 10);
+    assert.equal(await create.getByRole("checkbox", { name: "Брать слоты из .env воркера" }).isChecked(), true);
     await create.getByLabel("Название", { exact: true }).fill("Новый узел");
     await page.keyboard.press("Escape"); await create.waitFor({ state: "hidden" });
     await cards.first().getByRole("button", { name: "Настройки", exact: true }).click();
@@ -209,6 +212,9 @@ test("HTTPS compact worker cards, create/settings modals and live details drawer
     await cards.first().getByRole("button", { name: "Подробнее", exact: true }).click();
     const detail = page.getByRole("dialog", { name: online.name, exact: true }); await detail.waitFor();
     assert.match(await detail.innerText(), /Ресурсы[\s\S]*Частотности[\s\S]*Операции[\s\S]*Яндекс/u);
+    await detail.getByRole("textbox", { name: "Ключ воркера для проверки" }).fill(knownToken);
+    await detail.getByRole("button", { name: "Сверить ключ" }).click();
+    await detail.getByRole("status").getByText(/Ключ совпадает/u).waitFor();
     const bounds = await detail.boundingBox(); assert.ok(Math.abs(bounds.x + bounds.width - 1440) < 2);
     await page.screenshot({ path: `${process.env.SEO_PLATFORM_E2E_OUTPUT_DIR}/admin-worker-details.png`, fullPage: true });
     await page.keyboard.press("Escape");
@@ -255,14 +261,28 @@ test("admin dark presentation uses shared selects without granting staff access"
     const unauthorizedDeletion = await api.delete(`/admin/api/worker-nodes/${randomUUID()}`, { headers: { Origin: base }, data: { confirmed: true } });
     assert.equal(unauthorizedDeletion.status(), 403, "DELETE must reach the role guard, not fail in the BFF method allowlist");
     assert.notEqual((await unauthorizedDeletion.json()).error?.message, "API route not found");
+    const csrf = (await api.storageState()).cookies.find(cookie => cookie.name === "seo_csrf")?.value;
+    const unauthorizedCancel = await api.post(`/admin/api/operations/${randomUUID()}/cancel`, { headers: { Origin: base, "X-CSRF-Token": csrf }, data: { confirmed: true, confirmId: randomUUID(), reason: "Ручная остановка из административной панели" } });
+    assert.equal(unauthorizedCancel.status(), 403, "operation cancellation must reach the role guard");
+    assert.notEqual((await unauthorizedCancel.json()).error?.message, "API route not found");
     const context = await browser.newContext({ storageState: await api.storageState() });
     const errors = [];
     const page = await context.newPage(); page.on("pageerror", (error) => errors.push(error.message));
     const operation = { id: randomUUID(), workspaceId: randomUUID(), type: "MANUAL_RANK_CHECK", status: "RUNNING", stage: "WAITING_EXECUTION_GRANT", provider: "XMLSTOCK", searchEngine: "YANDEX", connection: { label: "Личный ключ", displayHint: "••••1234" }, workers: [{ name: "Офисный воркер", activeTasks: 4 }], progress: { current: "25", total: "100", unit: "KEYWORD" }, result: { found: 20, notFound: 5 }, attempt: 1, maxAttempts: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), workspace: { id: randomUUID(), name: "Рабочая область" }, project: { id: randomUUID(), name: "Тестовый проект", domain: "example.org" }, actor: null };
     // Presentation-only fixture. No API/DB role is created or bypassed.
+    let cancellations = 0;
     await page.route("**/admin/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
-      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation], totals: { total: 1, active: 1, completed: 0, attention: 0 }, types: [{ type: operation.type, count: 1 }] };
+      if (path.endsWith(`/operations/${operation.id}/cancel`)) {
+        assert.equal(route.request().method(), "POST");
+        const command = parseAdminCancelOperationCommand(route.request().postDataJSON());
+        assert.equal(command.confirmId, operation.id);
+        assert.equal(command.reason, "Ручная остановка из административной панели");
+        operation.status = "CANCEL_REQUESTED"; cancellations++;
+        await route.fulfill({ json: { data: { id: operation.id, status: operation.status } } });
+        return;
+      }
+      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation], totals: { total: 3, active: 1, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 2 }] };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data, meta: { requestId: randomUUID() } }) });
     });
     await page.goto(`${base}/admin?screen=operations&refresh=5`, { waitUntil: "networkidle" });
@@ -272,6 +292,29 @@ test("admin dark presentation uses shared selects without granting staff access"
     assert.equal(await page.getByRole("combobox", { name: "Интервал обновления", exact: true }).count(), 0);
     assert.equal(await page.getByRole("button", { name: "Обновить", exact: true }).count(), 0);
     assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
+    await page.getByRole("button", { name: "Остановить", exact: true }).click();
+    const confirmation = page.locator("dialog[open].admin-action-dialog");
+    assert.equal(await confirmation.getByRole("button", { name: "Подтвердить", exact: true }).isEnabled(), false);
+    await confirmation.getByRole("checkbox", { name: "Подтверждаю действие", exact: true }).check();
+    assert.equal(await confirmation.getByRole("button", { name: "Подтвердить", exact: true }).isEnabled(), true);
+    await confirmation.getByRole("button", { name: "Подтвердить", exact: true }).click();
+    await confirmation.waitFor({ state: "hidden" });
+    assert.equal(cancellations, 1);
+    assert.equal(await page.getByRole("button", { name: "Остановить", exact: true }).count(), 0);
+    await page.addStyleTag({ content: ".operation-panel { min-height: 1800px }" });
+    await page.evaluate(() => window.scrollTo(0, 100));
+    const beforeDrawer = await page.evaluate(() => window.scrollY);
+    assert.ok(beforeDrawer >= 90);
+    await page.getByRole("button", { name: "Детали", exact: true }).click();
+    await page.getByRole("dialog", { name: new RegExp(operation.id, "u") }).getByRole("button", { name: "Закрыть" }).click();
+    assert.equal(await page.evaluate(() => window.scrollY), beforeDrawer, "closing details must keep the list scroll position");
+    const typeSelect = page.getByRole("combobox", { name: "Тип операции" });
+    await typeSelect.click();
+    await page.getByRole("option", { name: /Сбор частотности/u }).click();
+    await typeSelect.click();
+    assert.equal(await page.getByRole("option", { name: /Проверка позиций/u }).count(), 1);
+    assert.equal(await page.getByRole("option", { name: /Сбор частотности/u }).count(), 1);
+    await page.keyboard.press("Escape");
     await page.goto(`${base}/admin?screen=operations&refresh=3`, { waitUntil: "networkidle" });
     await page.waitForURL(/refresh=5/u);
     await page.reload({ waitUntil: "networkidle" });

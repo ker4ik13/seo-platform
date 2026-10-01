@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AppConfig } from "../config/app-config.js";
 import type { FrequencyCollectionClaim } from "./frequency-collection-runtime-broker.service.js";
+import type { XmlStockFrequencyItemOutcome } from "./frequency-collection-runtime-broker.service.js";
+import { WordstatQueryError } from "./xmlstock-wordstat.connector.js";
 import { FrequencyCollectionRuntimeService } from "./frequency-collection-runtime.service.js";
 import type { WordstatCollectionResult, XmlStockSeasonalityResult } from "./xmlstock-wordstat.connector.js";
 
@@ -236,7 +238,7 @@ test("polls a legacy per-keyword task without creating a replacement submit", as
   assert.equal(submissions, 0);
 });
 
-test("keeps XMLStock as one keyword claim while collecting every requested type", async () => {
+test("a single XMLStock keyword still collects every requested type", async () => {
   const keywords: string[] = [];
   const runtime = runtimeWith({
     claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK" }],
@@ -250,6 +252,119 @@ test("keeps XMLStock as one keyword claim while collecting every requested type"
 
   assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_ITEM");
   assert.deepEqual(keywords, ["query 1:BASE", "query 1:EXACT"]);
+});
+
+test("three paid frequency types reserve the RPS budget before the first XMLStock request", async () => {
+  let permits = 0, calls = 0;
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK", types: ["BASE", "EXACT", "FIXED"] }],
+    quota: { tryAcquire: async (...args) => {
+      permits++;
+      assert.equal((args[0] as {requestCost:number}).requestCost, 3);
+      assert.equal(calls, 0);
+      return { allowed: true };
+    } },
+    xmlStock: { collect: async () => { calls++; return { ok: true, value: "7" }; } }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_ITEM");
+  assert.equal(permits, 1); assert.equal(calls, 3);
+});
+
+test("one XMLStock operation starts ten phrases in parallel, resolves and persists one batch", { timeout: 5_000 }, async () => {
+  let startCount = 0, running = 0, peak = 0;
+  let release!: () => void;
+  const wave = new Promise<void>(resolve => { release = resolve; });
+  const persisted: number[] = [], resolved: number[] = [];
+  let settlements = 0;
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(10), provider: "XMLSTOCK", types: ["BASE"] }],
+    resolve: async request => { resolved.push(request.items.length); },
+    xmlStock: { collect: async () => {
+      running++; startCount++; peak = Math.max(peak, running);
+      if (startCount === 10) release();
+      await wave; running--;
+      return { ok: true, value: "42" };
+    } },
+    quota: { tryAcquire: async (...args) => {
+      assert.equal((args[0] as {requestCost:number}).requestCost, 1);
+      return { allowed: true };
+    } },
+    persist: async request => { persisted.push(request.items.length); },
+    settle: async (claim, outcomes) => {
+      assert.equal(claim.items.length, 10);
+      assert.equal(outcomes.length, 10);
+      assert.ok(outcomes.every(item => item.status === "COMPLETED"));
+      settlements++;
+      return claim.jobVersion + 1;
+    },
+    complete: async () => { assert.fail("not ten individual completions"); }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_BATCH");
+  assert.equal(peak, 10); assert.equal(settlements, 1);
+  assert.deepEqual(resolved, [10]); assert.deepEqual(persisted, [10]);
+});
+
+test("mixed XMLStock outcomes preserve successful neighbours and capacity does not become an error", async () => {
+  let acquired = 0;
+  const settlements: XmlStockFrequencyItemOutcome[][] = [];
+  let persisted = 0;
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(10), provider: "XMLSTOCK", types: ["BASE"] }],
+    quota: { tryAcquire: async () => ++acquired === 3 ? { allowed: false, retryAfterSeconds: 1 } : { allowed: true } },
+    xmlStock: { collect: async input => {
+      if (input.keyword === "query 1") throw new WordstatQueryError();
+      if (input.keyword === "query 2") return { ok: false, code: "PROVIDER_UNAVAILABLE", retryable: true };
+      return { ok: true, value: "42" };
+    } },
+    persist: async request => { persisted += request.items.length; },
+    settle: async (claim, outcomes) => { settlements.push([...outcomes]); return claim.jobVersion + 1; },
+    fail: async () => { assert.fail("one phrase must not fail the parent batch"); }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "RETRY_SCHEDULED");
+  assert.equal(persisted, 7); assert.equal(settlements.length, 1);
+  assert.deepEqual(settlements[0]?.map(item => item.status), ["FAILED", "FAILED", "CAPACITY", ...Array(7).fill("COMPLETED")]);
+});
+
+test("XMLStock seasonality uses the same parallel batch and preserves every type", async () => {
+  let running = 0, peak = 0, requests = 0, persisted = 0;
+  const runtime = runtimeWith({
+    claims: [{ ...seasonalityClaim(10), provider: "XMLSTOCK", types: ["BASE", "EXACT"] }],
+    xmlStock: { collectSeasonality: async () => {
+      running++; requests++; peak = Math.max(peak, running);
+      await new Promise<void>(resolve => setImmediate(resolve)); running--;
+      return { ok: true, points: [{ periodStart: "2026-01-01", value: "42" }] };
+    } },
+    persistSeasonality: async request => {
+      persisted += request.items.length;
+      assert.ok(request.items.every(item => (item as {points:unknown[]}).points.length === 2));
+    }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_BATCH");
+  assert.equal(requests, 20); assert.equal(peak, 10); assert.equal(persisted, 10);
+});
+
+test("50 XMLStock phrases settle in five visible waves without exceeding ten concurrent calls", async () => {
+  let running = 0, peak = 0, calls = 0;
+  const persisted: number[] = [], settled: Array<{ size: number; version: number; finalize: boolean }> = [];
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(50), provider: "XMLSTOCK", types: ["BASE"] }],
+    xmlStock: { collect: async () => {
+      running++; peak = Math.max(peak, running); calls++;
+      await new Promise<void>(resolve => setImmediate(resolve)); running--;
+      return { ok: true, value: "42" };
+    } },
+    persist: async request => { persisted.push(request.items.length); },
+    settle: async (claim, outcomes, finalize) => {
+      assert.equal(outcomes.length, 10);
+      settled.push({ size: claim.items.length, version: claim.jobVersion, finalize });
+      return claim.jobVersion + 1;
+    }
+  });
+  assert.equal(await runtime.processOne("connector-123456"), "COMPLETED_BATCH");
+  assert.equal(calls, 50); assert.equal(peak, 10);
+  assert.deepEqual(persisted, [10, 10, 10, 10, 10]);
+  assert.deepEqual(settled.map(wave => wave.version), [2, 3, 4, 5, 6]);
+  assert.deepEqual(settled.map(wave => wave.finalize), [false, false, false, false, true]);
 });
 
 test("Arsenkin seasonality persists every keyword in bounded batches", async () => {
@@ -538,6 +653,7 @@ function runtimeWith(input: {
   readonly defer?: (...args: unknown[]) => Promise<void>;
   readonly fail?: (...args: unknown[]) => Promise<void>;
   readonly complete?: (...args: unknown[]) => Promise<void>;
+  readonly settle?: (claim: FrequencyCollectionClaim, outcomes: readonly XmlStockFrequencyItemOutcome[], finalize: boolean) => Promise<number>;
   readonly renew?: (
     claim: FrequencyCollectionClaim,
     leaseSeconds: number
@@ -569,6 +685,7 @@ function runtimeWith(input: {
       defer: input.defer ?? (async () => undefined),
       fail: input.fail ?? (async () => undefined),
       complete: input.complete ?? (async () => undefined),
+      settleXmlStockBatch: input.settle ?? (async (claim: FrequencyCollectionClaim) => claim.jobVersion + 1),
       quarantineAmbiguousSubmit: input.quarantine ?? (async () => undefined),
       releaseForProviderCapacity: input.release ?? (async () => undefined)
     } as never,

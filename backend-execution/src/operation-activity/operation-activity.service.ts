@@ -209,14 +209,16 @@ export class OperationActivityService {
   public async adminList(
     query: PlatformAdminOperationQuery
   ): Promise<InternalAdminOperationSearchResult> {
-    const visibleTypes = query.type
-      ? visibleOperationTypes.filter((type) => type === query.type)
-      : visibleOperationTypes;
-    const baseWhere: Prisma.JobWhereInput = { type: { in: [...visibleTypes] } };
+    // The selector and overview counters describe the complete operation
+    // catalog; only the table rows obey the selected type/status filters.
+    const baseWhere: Prisma.JobWhereInput = { type: { in: [...visibleOperationTypes] } };
+    const listWhere: Prisma.JobWhereInput = query.type
+      ? { type: visibleOperationTypes.some(type => type === query.type) ? query.type : { in: [] } }
+      : baseWhere;
     const statusWhere = statusGroupWhere(query.statusGroup);
     const filteredWhere: Prisma.JobWhereInput = statusWhere
-      ? { AND: [baseWhere, statusWhere] }
-      : baseWhere;
+      ? { AND: [listWhere, statusWhere] }
+      : listWhere;
     const anchor = query.cursor
       ? await this.prisma.job.findUnique({
           where: { id: query.cursor },

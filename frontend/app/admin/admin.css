@@ -521,6 +521,10 @@ h1, h2, p { margin: 0; }
   .admin-overlay-drawer { border-bottom: 0; border-radius: 14px 0 0 14px; border-right: 0; border-top: 0; height: 100dvh; inset: 0 0 0 auto; margin: 0; max-height: 100dvh; max-width: 580px; width: min(580px, 100vw); }
   .admin-overlay-actions, .worker-form footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
   .worker-form { display: grid; gap: 16px; }
+  .worker-capacity-source { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; }
+  .worker-capacity-source input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .worker-capacity-hint { color: var(--muted); font-size: 12px; margin: -10px 0 0; }
+  .worker-form input:disabled { opacity: .55; cursor: not-allowed; }
   .worker-form .worker-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .worker-form .worker-fields > label:first-child { grid-column: 1 / -1; }
   .worker-form .worker-capabilities { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
@@ -541,6 +545,10 @@ h1, h2, p { margin: 0; }
   .worker-capacity-table { border-collapse: collapse; font-size: 11px; width: 100%; }
   .worker-capacity-table :where(th,td) { border-bottom: 1px solid var(--line); padding: 9px 5px; text-align: left; }
   .worker-capacity-table thead { color: var(--muted); }
+  .worker-token-check { display: grid; gap: 10px; margin: 14px 0; }
+  .worker-token-check p { color: var(--muted); font-size: 12px; margin: 0; }
+  .worker-token-check > div { display: flex; gap: 8px; }
+  .worker-token-check input { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; color: #fff; min-width: 0; padding: 8px; flex: 1; }
   .worker-secret { display: grid; gap: 16px; }
   .worker-secret p, .admin-overlay-body > p { color: var(--muted); font-size: 13px; line-height: 1.5; }
   .admin-entity-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }

@@ -11,6 +11,7 @@ export interface WorkerNodeConfiguration {
   readonly maxHttpSlots: number;
   readonly maxCpuSlots: number;
   readonly capabilityLimits?:Readonly<Partial<Record<WorkerCapability,number>>>;
+  readonly useEnvCapacity?: boolean;
 }
 
 export interface WorkerNodeHeartbeat {
@@ -47,6 +48,9 @@ export interface WorkerNodeView {
     readonly searchEngine: "YANDEX" | "GOOGLE" | null;
     readonly activeTasks: number;
   }[];
+  /** Admin list only; heartbeat replies keep the old wire shape for older agents. */
+  readonly useEnvCapacity?: boolean;
+  readonly tokenFingerprint?: string;
 }
 
 export interface CreatedWorkerNode {
@@ -71,7 +75,7 @@ export function parseRemovedWorkerNode(value: unknown): RemovedWorkerNode {
 }
 
 export function parseWorkerNodeConfiguration(value: unknown): WorkerNodeConfiguration {
-  const input = exact(value, ["name", "capabilities", "maxHttpSlots", "maxCpuSlots",...(typeof value==="object" && value!==null && Object.hasOwn(value,"capabilityLimits") ? ["capabilityLimits"] : [])]);
+  const input = exact(value, ["name", "capabilities", "maxHttpSlots", "maxCpuSlots",...(typeof value==="object" && value!==null && Object.hasOwn(value,"capabilityLimits") ? ["capabilityLimits"] : []),...(typeof value==="object" && value!==null && Object.hasOwn(value,"useEnvCapacity") ? ["useEnvCapacity"] : [])]);
   if (
     typeof input.name !== "string" ||
     input.name.trim().length < 1 ||
@@ -85,12 +89,14 @@ export function parseWorkerNodeConfiguration(value: unknown): WorkerNodeConfigur
     !bounded(input.maxCpuSlots, 1, 128)
   ) invalid();
   if(input.capabilityLimits!==undefined) validateCapabilityLimits(input.capabilityLimits);
+  if(input.useEnvCapacity!==undefined && typeof input.useEnvCapacity!=="boolean") invalid();
   return {
     name: input.name.trim(),
     capabilities: input.capabilities as WorkerCapability[],
     maxHttpSlots: input.maxHttpSlots,
     maxCpuSlots: input.maxCpuSlots,
-    ...(input.capabilityLimits===undefined ? {} : {capabilityLimits:input.capabilityLimits as NonNullable<WorkerNodeConfiguration["capabilityLimits"]>})
+    ...(input.capabilityLimits===undefined ? {} : {capabilityLimits:input.capabilityLimits as NonNullable<WorkerNodeConfiguration["capabilityLimits"]>}),
+    ...(input.useEnvCapacity===undefined ? {} : {useEnvCapacity:input.useEnvCapacity as boolean})
   };
 }
 
@@ -107,6 +113,8 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
     "protocolVersion",
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "capabilityLimits") ? ["capabilityLimits"] : []),
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "reportedCapabilitySlots") ? ["reportedCapabilitySlots"] : []),
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "useEnvCapacity") ? ["useEnvCapacity"] : []),
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "tokenFingerprint") ? ["tokenFingerprint"] : []),
     ...(typeof value === "object" && value !== null &&
       Object.hasOwn(value, "activeAssignments") ? ["activeAssignments"] : [])
   ]);
@@ -146,14 +154,19 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
     if (Object.entries(input.reportedCapabilitySlots).some(([key,value]) => !capabilitySet.has(key) || !bounded(value,0,512))) invalid();
   }
   if(input.capabilityLimits!==undefined) validateCapabilityLimits(input.capabilityLimits);
+  if(input.useEnvCapacity!==undefined && typeof input.useEnvCapacity!=="boolean") invalid();
+  if(input.tokenFingerprint!==undefined && (typeof input.tokenFingerprint!=="string" || !/^[a-f0-9]{16}$/u.test(input.tokenFingerprint))) invalid();
   return input as unknown as WorkerNodeView;
 }
 
 export function workerEffectiveCapabilitySlots(node:WorkerNodeView,capability:WorkerCapability):number {
   if(!node.enabled || node.draining || !node.online || !node.capabilities.includes(capability)) return 0;
   const reported=node.reportedCapabilitySlots?.[capability] ?? (capability==="RANK" ? node.reportedRankSlots : 0);
-  const parent=["IMPORT","EXPORT","INSPECTION"].includes(capability) ? Math.min(node.maxCpuSlots,node.reportedCpuSlots) : Math.min(node.maxHttpSlots,node.reportedHttpSlots);
-  return Math.min(reported,parent,node.capabilityLimits?.[capability] ?? parent);
+  const manual=node.useEnvCapacity===false;
+  const parent=["IMPORT","EXPORT","INSPECTION"].includes(capability)
+    ? manual ? node.maxCpuSlots : Math.min(node.maxCpuSlots,node.reportedCpuSlots)
+    : manual ? node.maxHttpSlots : Math.min(node.maxHttpSlots,node.reportedHttpSlots);
+  return Math.min(manual ? parent : reported,parent,node.capabilityLimits?.[capability] ?? reported);
 }
 function validateCapabilityLimits(value:unknown):void {
   if(!value || typeof value!=="object" || Array.isArray(value) || Object.entries(value).some(([key,slot])=>!capabilitySet.has(key) || !bounded(slot,0,512))) invalid();

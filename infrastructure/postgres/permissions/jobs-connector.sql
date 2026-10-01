@@ -555,6 +555,14 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
+    public.settle_xmlstock_frequency_batch(UUID, UUID[], TEXT, INTEGER, INTEGER, JSONB, BOOLEAN)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
     public.defer_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
   TO %I',
   :'connector_user'
@@ -783,6 +791,7 @@ BEGIN
     'public.fail_frequency_collection_item(uuid,uuid,text,integer,text,integer)'::regprocedure::oid,
     'public.claim_frequency_collection_batch(text,integer,integer)'::regprocedure::oid,
     'public.complete_frequency_collection_batch(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.settle_xmlstock_frequency_batch(uuid,uuid[],text,integer,integer,jsonb,boolean)'::regprocedure::oid,
     'public.defer_frequency_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
     'public.fail_frequency_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
     'public.mark_frequency_collection_batch_submitting(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,

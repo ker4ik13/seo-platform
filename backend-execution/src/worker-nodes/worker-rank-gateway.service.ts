@@ -37,6 +37,7 @@ import { signRankPollTicket, verifyRankPollTicket } from "./worker-task-ticket.j
 const REMOTE_POLL_LEASE_SECONDS = 90;
 const REMOTE_PROVIDER_TIMEOUT_MS = 10_000;
 const MAX_CLAIMS_PER_POLL = 32;
+const MAX_CANDIDATES_PER_POLL = 64;
 const CLAIM_BATCH_BUDGET_MS = 15_000;
 
 @Injectable()
@@ -61,9 +62,9 @@ export class WorkerRankGatewayService {
     const count = Math.min(availableSlots, capacity.httpSlots, MAX_CLAIMS_PER_POLL);
     const tasks: RemoteRankPollTaskV1[] = [];
     const deadline = Date.now() + CLAIM_BATCH_BUDGET_MS;
-    for (let index = 0; index < count; index += 1) {
+    for (let index = 0; index < MAX_CANDIDATES_PER_POLL && tasks.length < count; index += 1) {
       if (index > 0 && Date.now() >= deadline) break;
-      let task: RemoteRankPollTaskV1 | null;
+      let task: RemoteRankPollTaskV1 | "DEFERRED" | null;
       try {
         task = await this.claimOne(nodeId, capacity.httpSlots);
       } catch (error) {
@@ -71,6 +72,9 @@ export class WorkerRankGatewayService {
         break;
       }
       if (!task) break;
+      // A saturated key/product must not block other keys or search engines.
+      // The broker's bounded candidate window excludes the deferred execution.
+      if (task === "DEFERRED") continue;
       tasks.push(task);
     }
     return tasks;
@@ -79,7 +83,7 @@ export class WorkerRankGatewayService {
   private async claimOne(
     nodeId: string,
     httpSlots: number
-  ): Promise<RemoteRankPollTaskV1 | null> {
+  ): Promise<RemoteRankPollTaskV1 | "DEFERRED" | null> {
     const claim = await this.broker.claimPoll(
       `remote:${nodeId}:${randomUUID()}`,
       REMOTE_POLL_LEASE_SECONDS,
@@ -90,7 +94,7 @@ export class WorkerRankGatewayService {
       await this.broker.completePoll(claim, {
         outcome: "REJECTED", errorCode: "INVALID_PROVIDER_RESPONSE"
       });
-      return null;
+      return "DEFERRED";
     }
     let permit: Extract<XmlStockHttpQuotaPermit, { readonly allowed: true }> | undefined;
     try {
@@ -116,7 +120,7 @@ export class WorkerRankGatewayService {
         await this.broker.deferPollForProviderCapacity(
           claim, Math.max(1, acquired.retryAfterSeconds)
         );
-        return null;
+        return "DEFERRED";
       }
       permit = acquired;
       const settlement = claim.providerProgress === undefined

@@ -7,10 +7,11 @@ import type { PlatformCredentialPoolSelectionService } from "../integrations/pla
 import type { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
 import type { RankBillingSettlementClient } from "../platform-api/rank-billing-settlement.client.js";
 import type { RankConnectorRuntimeBrokerService } from "../rank-runs/rank-connector-runtime-broker.service.js";
-import type { RankProviderRequestIntentV1 } from "../rank-runs/rank-provider-request-intent.js";
+import { rankProviderRequestIntent, type RankProviderRequestIntentV1 } from "../rank-runs/rank-provider-request-intent.js";
 import { xmlStockRankPageProgressHash } from "../rank-runs/xmlstock-rank.connector.js";
 import { WorkerNodeService } from "./worker-node.service.js";
 import { WorkerRankGatewayService } from "./worker-rank-gateway.service.js";
+import { parseWorkerRankTask } from "./worker-rank-task.js";
 
 const id = {
   workspace: "01900000-0000-7000-8000-000000000001",
@@ -177,6 +178,57 @@ test("one empty batch poll authenticates once and never polls per free slot", as
   assert.deepEqual(await gateway.claimBatch(id.node, "node-token", 64), []);
   assert.equal(authorizations, 1);
   assert.equal(claims, 1);
+});
+
+test("a full Live key does not starve Google XML or Yandex XML in the same worker batch", async () => {
+  const google = requestIntent();
+  const googleIntent = { ...google, execution: { ...google.execution, searchEngine: "GOOGLE" as const, providerMappingVersion: "xmlstock-google-live@2" } };
+  const xmlIntent = { ...google, execution: { ...google.execution, providerMappingVersion: "xmlstock-yandex-search-api@2" } };
+  const requests = [requestIntent(), googleIntent, xmlIntent];
+  const deferred: unknown[] = [], products: string[] = [];
+  const config = { workerGatewayEnabled: true, integrationCredentials: {
+    role: "BOTH", activeKeyVersion: 1, keys: new Map([[1, Buffer.alloc(32, 9)]])
+  } } as unknown as AppConfig;
+  const gateway = new WorkerRankGatewayService(
+    { authorizeForWork: async () => ({ httpSlots: 32 }) } as unknown as WorkerNodeService,
+    {
+      claimPoll: async (owner: string) => {
+        const request = requests.shift();
+        return request ? { provider: "XMLSTOCK", workspaceId: id.workspace, credentialId: id.credential,
+          executionId: id.execution, request, encryptedCredential: { keyVersion: 1 },
+          providerTaskId: "task-123", leaseOwner: owner, leaseToken: id.lease, leaseGeneration: 1,
+          executionVersion: 1, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() } : null;
+      },
+      deferPollForProviderCapacity: async (...args: unknown[]) => { deferred.push(args); },
+      readBillingSettlement: async () => ({ required: false })
+    } as unknown as RankConnectorRuntimeBrokerService,
+    { decrypt: () => ({ apiKey: "test-secret", accountIdentifier: "test-account", rateLimitScopeId: id.credential }) } as unknown as IntegrationCredentialCryptoService,
+    { select: async (_provider: unknown, secret: unknown) => secret } as unknown as PlatformCredentialPoolSelectionService,
+    { tryAcquire: async (input: { product:string }) => {
+      products.push(input.product);
+      return input.product === "YANDEX_LIVE" ? { allowed: false, retryAfterSeconds: 1 } :
+        { allowed: true, credentialId: id.credential, workspaceId: id.workspace, product: input.product, member: id.quotaMember, nodeId: id.node };
+    } } as unknown as XmlStockHttpQuotaLimiter,
+    {} as RankBillingSettlementClient, config
+  );
+  const tasks = await gateway.claimBatch(id.node, "token", 2);
+  assert.equal(tasks.length, 2); assert.equal(deferred.length, 1);
+  assert.deepEqual(products, ["YANDEX_LIVE", "GOOGLE_LIVE", "YANDEX_SEARCH_API"]);
+  // The actual agent's strict parser must accept both tasks, not only Live.
+  assert.deepEqual(tasks.map(task => rankProviderRequestIntent(parseWorkerRankTask(task).requestSnapshot).execution.searchEngine), ["GOOGLE", "YANDEX"]);
+});
+
+test("full provider quotas use a bounded scan, not a retry loop without end", async () => {
+  let claims = 0;
+  const gateway = new WorkerRankGatewayService(
+    { authorizeForWork: async () => ({ httpSlots: 32 }) } as unknown as WorkerNodeService,
+    { claimPoll: async () => { claims++; return { provider: "XMLSTOCK", providerProgressInvalid: true }; }, completePoll: async () => ({ status: "FAILED_FINAL" }) } as unknown as RankConnectorRuntimeBrokerService,
+    {} as IntegrationCredentialCryptoService, {} as PlatformCredentialPoolSelectionService,
+    {} as XmlStockHttpQuotaLimiter, {} as RankBillingSettlementClient,
+    { workerGatewayEnabled: true, integrationCredentials: { role: "BOTH" } } as AppConfig
+  );
+  assert.deepEqual(await gateway.claimBatch(id.node, "token", 32), []);
+  assert.equal(claims, 64);
 });
 
 function requestIntent(): RankProviderRequestIntentV1 {
