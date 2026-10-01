@@ -1,6 +1,7 @@
 .DS_Store
 .env
 .env.*
+infrastructure.env.worker
 !.env.example
 !.env.worker.example
 node_modules/

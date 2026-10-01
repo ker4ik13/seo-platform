@@ -48,6 +48,10 @@ Copy-Item .\infrastructure\.env.worker.example .\infrastructure\.env.worker
 notepad .\infrastructure\.env.worker
 ```
 
+Если при предыдущем запуске был создан файл `infrastructure.env.worker`
+в корне репозитория, перенесите его в `infrastructure\.env.worker` **до**
+следующей Docker-сборки и используйте новый путь в `--env-file`.
+
 Замените только `WORKER_NODE_ID` и `WORKER_NODE_TOKEN`: в шаблоне уже указан
 тестовый адрес `WORKER_CONTROL_URL=https://144.31.221.28:3000` и включены
 позиции, Wordstat и остальные возможности. Для продакшна —
