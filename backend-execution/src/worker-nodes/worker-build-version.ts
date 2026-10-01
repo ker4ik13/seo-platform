@@ -26,7 +26,9 @@ export async function workerBuildHash(
   for (const file of selected.sort()) {
     digest.update(relative(root, file).split(sep).join("/"));
     digest.update("\0");
-    digest.update(await readFile(file));
+    // Git for Windows may check out source files with CRLF. TypeScript can
+    // preserve those endings in emitted JS even inside the same Docker image.
+    digest.update((await readFile(file, "utf8")).replaceAll("\r\n", "\n"));
     digest.update("\0");
   }
   return digest.digest("hex");
