@@ -18,7 +18,11 @@ test("rank dispatch selects only a bounded latest-attempt slice", async () => {
   assert.match(source, /seo-platform:rank-dispatch:global/u);
   assert.match(source, /LIMIT \$\{hardLimit\}/u);
   assert.match(source, /Math\.min\(dispatchLimit, connectorLaneCount\)/u);
+  assert.match(source, /const connectorLaneCount = localConnectorLaneCount/u);
+  assert.doesNotMatch(source, /SELECT public\.available_remote_rank_slots\(256\)/u);
+  assert.match(source, /XMLSTOCK_UNSUBMITTED_GRANT_WINDOW_PER_JOB/u);
   assert.match(source, /AND \$\{provider\}::text = 'ARSENKIN'/u);
+  assert.match(source, /execution\."status" = 'FETCHING'\s+AND \$\{provider\}::text = 'ARSENKIN'/u);
   assert.match(source, /job\."provider" = 'XMLSTOCK'/u);
   assert.match(source, /jobConnectorCount/u);
   assert.match(source, /rankDispatchHardLimit/u);

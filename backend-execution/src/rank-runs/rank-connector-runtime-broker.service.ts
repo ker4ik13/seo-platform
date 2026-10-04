@@ -128,6 +128,33 @@ function excludedCandidateIds(excluded: readonly string[]): Prisma.Sql {
     : Prisma.sql`ARRAY[]::uuid[]`;
 }
 
+/** The same parameterized SQL is used by the runtime and its PostgreSQL test. */
+export function xmlStockSubmitBatchSql(
+  executionIds: readonly string[], leaseOwner: string, leaseSeconds: number
+): Prisma.Sql {
+  return Prisma.sql`
+    SELECT claimed.* FROM unnest(${excludedCandidateIds(executionIds)}) AS candidate("executionId")
+    CROSS JOIN LATERAL public.claim_rank_connector_submit_targeted(
+      ${leaseOwner}::text, ${leaseSeconds}::integer,
+      ${XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION}::text,
+      candidate."executionId"
+    ) claimed
+  `;
+}
+
+export function xmlStockPollBatchSql(
+  executionIds: readonly string[], leaseOwner: string, leaseSeconds: number
+): Prisma.Sql {
+  return Prisma.sql`
+    SELECT claimed.* FROM unnest(${excludedCandidateIds(executionIds)}) AS candidate("executionId")
+    CROSS JOIN LATERAL public.claim_rank_connector_poll_targeted(
+      ${leaseOwner}::text, ${leaseSeconds}::integer,
+      ${XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION}::text,
+      candidate."executionId"
+    ) claimed
+  `;
+}
+
 export interface RankConnectorClaim {
   readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly executionId: string;
@@ -235,14 +262,9 @@ export class RankConnectorRuntimeBrokerService {
     }
     const candidates = this.submitCandidates.takeCached(limit);
     if (candidates.length === 0) return [];
-    const rows = await this.prisma.$queryRaw<readonly SubmitClaimRow[]>(Prisma.sql`
-      SELECT claimed.* FROM unnest(${excludedCandidateIds(candidates.map((item) => item.executionId))}) AS candidate("executionId")
-      CROSS JOIN LATERAL public.claim_rank_connector_submit_targeted(
-        ${leaseOwner}::text, ${leaseSeconds}::integer,
-        ${XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION}::text,
-        candidates."executionId"
-      ) claimed
-    `);
+    const rows = await this.prisma.$queryRaw<readonly SubmitClaimRow[]>(
+      xmlStockSubmitBatchSql(candidates.map((item) => item.executionId), leaseOwner, leaseSeconds)
+    );
     if (rows.length > limit) invalid("rank submit batch cardinality");
     return rows.map((row) => claim(row, leaseOwner));
   }
@@ -581,14 +603,9 @@ export class RankConnectorRuntimeBrokerService {
       )
     );
     if (candidates.length === 0) return { claims: [], examined: 0 };
-    const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(Prisma.sql`
-      SELECT claimed.* FROM unnest(${excludedCandidateIds(candidates.map((item) => item.executionId))}) AS candidate("executionId")
-      CROSS JOIN LATERAL public.claim_rank_connector_poll_targeted(
-        ${leaseOwner}::text, ${leaseSeconds}::integer,
-        ${XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION}::text,
-        candidates."executionId"
-      ) claimed
-    `);
+    const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(
+      xmlStockPollBatchSql(candidates.map((item) => item.executionId), leaseOwner, leaseSeconds)
+    );
     if (rows.length > limit) invalid("rank poll batch cardinality");
     return { claims: rows.map((row) => this.pollClaim(row, leaseOwner)), examined: candidates.length };
   }

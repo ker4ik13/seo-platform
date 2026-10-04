@@ -40,6 +40,9 @@ const RANK_PROVIDER_ACTIVE_TASK_LIMIT = 5;
 const RANK_GRANT_WINDOW_SECONDS = 30;
 const RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS = 60_000;
 const RANK_GRANT_BATCH_CONCURRENCY = 16;
+// A 30-second grant leaves only five seconds before a 25-second submit lease
+// becomes unclaimable. Never build a large expiring backlog for one Job.
+const XMLSTOCK_UNSUBMITTED_GRANT_WINDOW_PER_JOB = 8;
 
 export type RankExecutionDispatchOutcome =
   | "DISABLED"
@@ -300,13 +303,9 @@ export class RankExecutionDispatchService {
           this.config.connectorRuntime.rankConcurrency,
           this.config.connectorRuntime.shardCount
         );
-        const remoteSlots = provider === "XMLSTOCK"
-          ? await transaction.$queryRaw<readonly { readonly slots: number }[]>`
-              SELECT public.available_remote_rank_slots(256) AS slots
-            `
-          : [];
-        const connectorLaneCount = localConnectorLaneCount +
-          Math.max(0, Number(remoteSlots[0]?.slots ?? 0));
+        // Remote slots run POLL_WAIT provider HTTP; only central connector
+        // lanes can turn a short-lived grant into a durable POLL_WAIT task.
+        const connectorLaneCount = localConnectorLaneCount;
         const capacity = await rankExecutionDispatchCapacity(
           transaction,
           provider,
@@ -328,7 +327,12 @@ export class RankExecutionDispatchService {
         if (capacity === 0) {
           return { jobId, itemIds: [], invalid: false };
         }
-        const jobCapacity = Math.min(capacity, connectorLaneCount);
+        const jobCapacity = Math.min(
+          capacity,
+          provider === "XMLSTOCK"
+            ? XMLSTOCK_UNSUBMITTED_GRANT_WINDOW_PER_JOB
+            : connectorLaneCount
+        );
         const retryBefore = new Date(
           now.getTime() - RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS
         );
@@ -736,11 +740,9 @@ async function rankExecutionDispatchCapacity(
       )
     )
   `;
-  // XMLStock grants live for only 30 seconds and a submit claim needs most of
-  // that window for its fenced lease. Preparing 15 seconds of *all* connector
-  // lanes at once floods the short window with grants that expire before the
-  // connector can claim them. Poll-waiting pages have their own durable state
-  // and do not reserve a new submit slot.
+  // XMLStock grants live for 30 seconds and a submit claim needs 25 seconds.
+  // Poll-waiting pages have durable state; only unsubmitted grants occupy
+  // the short per-Job admission window below.
   const grantWindow = provider === "XMLSTOCK"
     ? Math.min(dispatchLimit, connectorLaneCount)
     : dispatchLimit;
@@ -842,6 +844,7 @@ async function rankExecutionDispatchCapacity(
           execution."job_version"
         FROM "rank_connector_executions" execution
         WHERE execution."status" = 'FETCHING'
+          AND ${provider}::text = 'ARSENKIN'
         LIMIT ${candidateLimit}
       )
     )
@@ -980,13 +983,17 @@ export function fairXmlStockRankDispatchCapacity(
     throw new TypeError("Invalid fair rank dispatch capacity");
   }
   const fairShare = Math.max(1, Math.floor(dispatchLimit / activeJobCount));
+  const jobWindow = Math.min(
+    connectorLaneCount,
+    XMLSTOCK_UNSUBMITTED_GRANT_WINDOW_PER_JOB
+  );
+  const jobHeadroom = Math.max(
+    0,
+    Math.min(jobWindow, fairShare) - jobConnectorCount
+  );
   const normalCapacity = Math.max(0, dispatchLimit - activeConnectorCount);
-  if (activeConnectorCount < dispatchLimit - connectorLaneCount) {
-    return Math.min(connectorLaneCount, normalCapacity);
-  }
-  const jobHeadroom = Math.max(0, fairShare - jobConnectorCount);
   if (normalCapacity > 0) {
-    return Math.min(connectorLaneCount, normalCapacity, jobHeadroom);
+    return Math.min(jobWindow, normalCapacity, jobHeadroom);
   }
   const recoveryTarget = dispatchLimit <= connectorLaneCount
     ? fairShare
@@ -995,8 +1002,7 @@ export function fairXmlStockRankDispatchCapacity(
         rankDispatchFairBootstrap(connectorLaneCount, activeJobCount)
       );
   const recoveryHeadroom = Math.max(
-    0,
-    recoveryTarget - jobConnectorCount
+    0, Math.min(jobWindow, recoveryTarget) - jobConnectorCount
   );
   return Math.min(
     jobHeadroom, recoveryHeadroom,

@@ -33,8 +33,8 @@ export class RemoteWorkController {
         capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-reservedRank)}})
     ]);
     if(rankPass.status==="rejected" && workPass.status==="rejected")throw rankPass.reason;
-    if(rankPass.status==="rejected")this.logger.warn("Remote rank batch admission failed; other work still returned");
-    if(workPass.status==="rejected")this.logger.warn("Remote work admission failed; rank batch still returned");
+    if(rankPass.status==="rejected")this.logger.warn(JSON.stringify({event:"remote_rank_batch_admission_failed",...admissionErrorCodes(rankPass.reason)}));
+    if(workPass.status==="rejected")this.logger.warn(JSON.stringify({event:"remote_work_admission_failed",...admissionErrorCodes(workPass.reason)}));
     const ranks=rankPass.status==="fulfilled" ? rankPass.value : [];
     const initialWork=workPass.status==="fulfilled" ? workPass.value : [];
     const initialWorkHttp=initialWork.filter(task=>task.resource==="HTTP").length;
@@ -46,7 +46,7 @@ export class RemoteWorkController {
       ? await this.work.claim(id,token,{...input,httpSlots:spareHttp,cpuSlots:0,
         capabilitySlots:Object.fromEntries(Object.entries(input.capabilitySlots).map(([capability,slots])=>[
           capability,Math.max(0,slots-initialWork.filter(task=>task.capability===capability).length-(capability==="RANK" ? ranks.length : 0))
-        ]))}).catch(()=>{this.logger.warn("Remote work top-up failed; claimed work still returned");return [];})
+        ]))}).catch((error:unknown)=>{this.logger.warn(JSON.stringify({event:"remote_work_topup_failed",...admissionErrorCodes(error)}));return [];})
       : [];
     const work=[...initialWork,...topUp];
     return {data:{work,ranks,cancelled:await this.work.cancelled(id)},meta:{requestId:request.id}};
@@ -73,6 +73,18 @@ export class RemoteWorkController {
     const input=exactWorkerInput(value,["ticket",...optional]),{id,token}=workerIdentity(headers);
     return {data:await this.work.complete(id,token,input.ticket,input.result,input.parts,input.errorCode),meta:{requestId:request.id}};
   }
+}
+
+/** Only stable codes reach logs; database/provider messages can contain inputs. */
+function admissionErrorCodes(error: unknown): { readonly code: string; readonly databaseCode?: string } {
+  const row = error && typeof error === "object" ? error as { readonly code?: unknown; readonly meta?: { readonly code?: unknown } } : {};
+  const code = typeof row.code === "string" && /^[A-Z0-9_]{1,32}$/u.test(row.code)
+    ? row.code : error instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(error.name)
+      ? error.name : "UNKNOWN";
+  const databaseCode = row.meta?.code;
+  return typeof databaseCode === "string" && /^[A-Z0-9_]{1,32}$/u.test(databaseCode)
+    ? { code, databaseCode }
+    : { code };
 }
 
 /** Receipt tokens are issued only after a SQL-verified owning workflow lease. */

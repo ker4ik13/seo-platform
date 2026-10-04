@@ -59,8 +59,9 @@ if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = rank-claim ]; then
   export JOBS_RANK_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
   pnpm --filter @seo-platform/backend-execution exec node --import tsx --test --test-concurrency=1 \
     src/rank-runs/rank-connector-claim-postgres.integration.test.ts \
-    src/rank-runs/rank-remote-capacity-postgres.integration.test.ts > "$test_root/rank-claim-postgres.log" 2>&1
-  printf '%s\n' 'postgres-tests result=passed (rank connector claim, lease fencing and node capacity)'
+    src/rank-runs/rank-remote-capacity-postgres.integration.test.ts \
+    src/rank-runs/rank-poll-batch-postgres.integration.test.ts > "$test_root/rank-claim-postgres.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (rank claim fencing, real batch SQL and node capacity)'
   exit 0
 fi
 pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/job-notifications/job-notification-postgres.integration.test.ts > "${test_root}/notification-postgres.log" 2>&1

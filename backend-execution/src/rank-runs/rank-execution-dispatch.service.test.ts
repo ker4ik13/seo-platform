@@ -144,18 +144,20 @@ test("caps the grant buffer by connector throughput without serializing XMLStock
   assert.throws(() => rankExecutionDispatchLimit(0, 15), TypeError);
 });
 
-test("fair XMLStock grants rescue starved Jobs without unbounded overcommit", () => {
-  // Only one short-lived connector window is admitted at a time. A due poll
-  // belongs to an already submitted execution, not a new submit grant.
-  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 0, 0), 16);
-  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 64, 0), 16);
+test("fair XMLStock grants keep only eight unsubmitted permits per Job", () => {
+  // The remote worker consumes POLL_WAIT, but only the central connector can
+  // spend a short-lived grant. Fresh permits must be replenished after submit.
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 0, 0), 8);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 8, 8), 0);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 0, 7), 1);
+  assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 64, 0), 8);
   assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 80, 0), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 4, 64, 16), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 20, 64, 0), 3);
   assert.equal(fairXmlStockRankDispatchCapacity(64, 64, 20, 64, 100), 0);
-  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 0, 0), 64);
-  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 990, 0), 32);
-  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1022, 0), 32);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 0, 0), 8);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 990, 0), 8);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1022, 0), 8);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1022, 32), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 990, 900), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 4, 1200, 0), 0);
@@ -164,7 +166,7 @@ test("fair XMLStock grants rescue starved Jobs without unbounded overcommit", ()
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 990, 7), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 1200, 0), 0);
   assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 950, 48), 0);
-  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 500, 48), 64);
+  assert.equal(fairXmlStockRankDispatchCapacity(960, 64, 20, 500, 48), 0);
   let occupied = 990;
   for (let job = 0; job < 20; job += 1) {
     const granted = fairXmlStockRankDispatchCapacity(
