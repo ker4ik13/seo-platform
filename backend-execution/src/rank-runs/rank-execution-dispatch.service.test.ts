@@ -7,6 +7,7 @@ import type { RankManifestClient } from "../seo-data/rank-manifest.client.js";
 import {
   availableRankExecutionDispatchCapacity,
   fairXmlStockRankDispatchCapacity,
+  isExpiredUnusedAuthorization,
   rankGrantFailureFinalStatus,
   rankExecutionDispatchLimit,
   rankProviderActiveTaskLimit,
@@ -119,6 +120,7 @@ test("keeps every XMLStock product outside the Arsenkin lifecycle window", () =>
 });
 
 test("caps the grant buffer by connector throughput without serializing XMLStock products", () => {
+  assert.equal(rankExecutionDispatchLimit(64, 1), 64);
   assert.equal(rankExecutionDispatchLimit(48, 15), 720);
   assert.equal(rankExecutionDispatchLimit(48, 60), 1_440);
   assert.equal(
@@ -142,6 +144,22 @@ test("caps the grant buffer by connector throughput without serializing XMLStock
     TypeError
   );
   assert.throws(() => rankExecutionDispatchLimit(0, 15), TypeError);
+});
+
+test("unused rank authorization is retried as soon as both grant and lease expire", () => {
+  const now = new Date("2026-10-05T00:00:00.000Z");
+  const unused = {
+    status: "CLAIMED",
+    authorizationExpiresAt: new Date(now.getTime() - 1),
+    leaseExpiresAt: new Date(now.getTime() - 1),
+    submitAttemptCount: 0,
+    submitBytesStartedAt: null,
+    providerTaskId: null
+  };
+  assert.equal(isExpiredUnusedAuthorization(unused, now), true);
+  assert.equal(isExpiredUnusedAuthorization({ ...unused, leaseExpiresAt: new Date(now.getTime() + 1) }, now), false);
+  assert.equal(isExpiredUnusedAuthorization({ ...unused, submitAttemptCount: 1 }, now), false);
+  assert.equal(isExpiredUnusedAuthorization({ ...unused, submitBytesStartedAt: now }, now), false);
 });
 
 test("fair XMLStock grants keep only eight unsubmitted permits per Job", () => {

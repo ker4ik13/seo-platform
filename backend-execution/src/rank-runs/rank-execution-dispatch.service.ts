@@ -38,7 +38,6 @@ import {
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const RANK_PROVIDER_ACTIVE_TASK_LIMIT = 5;
 const RANK_GRANT_WINDOW_SECONDS = 30;
-const RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS = 60_000;
 const RANK_GRANT_BATCH_CONCURRENCY = 16;
 // A 30-second grant leaves only five seconds before a 25-second submit lease
 // becomes unclaimable. Never build a large expiring backlog for one Job.
@@ -333,9 +332,6 @@ export class RankExecutionDispatchService {
             ? XMLSTOCK_UNSUBMITTED_GRANT_WINDOW_PER_JOB
             : connectorLaneCount
         );
-        const retryBefore = new Date(
-          now.getTime() - RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS
-        );
         const candidates = await transaction.$queryRaw<
           readonly { readonly id: string }[]
         >(Prisma.sql`
@@ -346,6 +342,7 @@ export class RankExecutionDispatchService {
               execution."id",
               execution."status",
               execution."authorization_expires_at",
+              execution."lease_expires_at",
               execution."submit_attempt_count",
               execution."submit_bytes_started_at",
               execution."provider_task_id"
@@ -365,8 +362,11 @@ export class RankExecutionDispatchService {
               latest_execution."id" IS NULL
               OR (
                 latest_execution."status" IN ('READY_TO_SUBMIT', 'CLAIMED')
-                AND latest_execution."authorization_expires_at" <=
-                  ${retryBefore}
+                AND latest_execution."authorization_expires_at" <= ${now}
+                AND (
+                  latest_execution."lease_expires_at" IS NULL
+                  OR latest_execution."lease_expires_at" <= ${now}
+                )
                 AND latest_execution."submit_attempt_count" = 0
                 AND latest_execution."submit_bytes_started_at" IS NULL
                 AND latest_execution."provider_task_id" IS NULL
@@ -691,9 +691,10 @@ export function rankGrantFailureFinalStatus(
       : "FAILED";
 }
 
-function isExpiredUnusedAuthorization(execution: {
+export function isExpiredUnusedAuthorization(execution: {
   readonly status: string;
   readonly authorizationExpiresAt: Date;
+  readonly leaseExpiresAt: Date | null;
   readonly submitAttemptCount: number;
   readonly submitBytesStartedAt: Date | null;
   readonly providerTaskId: string | null;
@@ -702,6 +703,8 @@ function isExpiredUnusedAuthorization(execution: {
     (execution.status === "READY_TO_SUBMIT" ||
       execution.status === "CLAIMED") &&
     execution.authorizationExpiresAt.getTime() <= now.getTime() &&
+    (execution.leaseExpiresAt === null ||
+      execution.leaseExpiresAt.getTime() <= now.getTime()) &&
     execution.submitAttemptCount === 0 &&
     execution.submitBytesStartedAt === null &&
     execution.providerTaskId === null

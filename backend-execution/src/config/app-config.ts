@@ -1846,9 +1846,9 @@ export function loadAppConfig(
       leaseSeconds: rankPreparationLeaseSeconds,
       dispatchSeconds: boundedInteger(
         env.RANK_PREPARATION_DISPATCH_SECONDS,
-        15,
+        1,
         "RANK_PREPARATION_DISPATCH_SECONDS",
-        5,
+        1,
         300
       ),
       resultPersistenceDispatchIntervalMs: boundedInteger(

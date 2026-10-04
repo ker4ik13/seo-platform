@@ -224,7 +224,7 @@ test("VPS uses one rank coordinator and multiple bounded connector processes", a
   const rankBlock = source.match(/  rank-worker\|rank-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
   const connectorBlock = source.match(/  connector-worker\|connector-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
 
-  assert.match(rankBlock, /RANK_PREPARATION_DISPATCH_SECONDS=5/u);
+  assert.match(rankBlock, /RANK_PREPARATION_DISPATCH_SECONDS=1/u);
   assert.match(
     rankBlock,
     /RANK_RESULT_PERSISTENCE_DISPATCH_INTERVAL_MS=1000/u

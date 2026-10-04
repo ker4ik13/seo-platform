@@ -254,7 +254,7 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.services.platformApi, "http://127.0.0.1:4000");
   assert.equal(config.platformApiCommandTimeoutMs, 5_000);
   assert.equal(config.rankPreparation.leaseSeconds, 120);
-  assert.equal(config.rankPreparation.dispatchSeconds, 15);
+  assert.equal(config.rankPreparation.dispatchSeconds, 1);
   assert.equal(
     config.rankPreparation.resultPersistenceDispatchIntervalMs,
     1_000

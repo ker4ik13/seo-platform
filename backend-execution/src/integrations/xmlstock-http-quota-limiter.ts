@@ -24,7 +24,7 @@ export interface XmlStockHttpQuotaPolicy {
 export const XMLSTOCK_HTTP_QUOTA_POLICIES: Readonly<
   Record<XmlStockHttpProduct, XmlStockHttpQuotaPolicy>
 > = {
-  YANDEX_LIVE: { concurrency: 10, requestsPerSecond: 10 },
+  YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 10 },
   YANDEX_TURBO: { concurrency: 50, requestsPerSecond: 50 },
   GOOGLE_LIVE: { concurrency: 15, requestsPerSecond: 30 },
   YANDEX_SEARCH_API: { concurrency: 50, requestsPerSecond: 50 },

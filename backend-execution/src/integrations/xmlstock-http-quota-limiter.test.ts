@@ -26,7 +26,7 @@ const secondMember = "01900000-0000-7000-8000-000000000004";
 
 test("uses the documented XMLStock product windows", () => {
   assert.deepEqual(XMLSTOCK_HTTP_QUOTA_POLICIES, {
-    YANDEX_LIVE: { concurrency: 10, requestsPerSecond: 10 },
+    YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 10 },
     YANDEX_TURBO: { concurrency: 50, requestsPerSecond: 50 },
     GOOGLE_LIVE: { concurrency: 15, requestsPerSecond: 30 },
     YANDEX_SEARCH_API: { concurrency: 50, requestsPerSecond: 50 },
@@ -106,6 +106,8 @@ test("acquires from only the selected credential and product bucket", async () =
   assert.equal(calls[0]?.[8], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:inflight");
   assert.equal(calls[0]?.[9], "seo-platform:jobs:v1:provider-rate-limit:xmlstock:global:waiters");
   assert.equal(calls[0]?.[10], `${xmlStockHttpQuotaKey(firstCredential, "YANDEX_LIVE")}:workspace-waiters`);
+  assert.equal(calls[0]?.[11], "20", "the Redis permit enforces 20 concurrent Live calls");
+  assert.equal(calls[0]?.[12], "10", "the provider's 10 RPS ceiling remains unchanged");
   assert.equal(calls[0]?.[16], "64");
   assert.equal(calls[0]?.[17], firstCredential);
   assert.equal(calls[0]?.[18], firstWorkspace);

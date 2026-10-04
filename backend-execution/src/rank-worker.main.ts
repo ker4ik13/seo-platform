@@ -63,10 +63,7 @@ async function bootstrap(): Promise<void> {
     }
   );
 
-  let dispatching = false;
-  async function dispatchPending(): Promise<void> {
-    if (dispatching) return;
-    dispatching = true;
+  async function dispatchPending(): Promise<boolean> {
     try {
       const ids = await preparation.pendingPreparationIds();
       await forEachConcurrent(ids, config.rankPreparation.concurrency, async (id) => {
@@ -109,10 +106,10 @@ async function bootstrap(): Promise<void> {
           }
         }
       );
-    } catch {
-      logger.error("Unable to dispatch pending rank preparations");
-    } finally {
-      dispatching = false;
+      return ids.length > 0 || executionIds.length > 0 || finalizationIds.length > 0;
+    } catch (error) {
+      logger.error(`Unable to dispatch pending rank preparations: ${safeErrorSummary(error)}`);
+      return false;
     }
   }
 
@@ -142,12 +139,18 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  await Promise.all([dispatchPending(), dispatchResults()]);
-  const dispatchTimer = setInterval(
-    () => void dispatchPending(),
-    config.rankPreparation.dispatchSeconds * 1_000
-  );
-  dispatchTimer.unref();
+  const [initialWork] = await Promise.all([dispatchPending(), dispatchResults()]);
+  let dispatchTimer: ReturnType<typeof setTimeout>;
+  let shuttingDown = false;
+  function scheduleDispatch(active: boolean): void {
+    const delayMs = Math.max(active ? 1 : 5, config.rankPreparation.dispatchSeconds) * 1_000;
+    dispatchTimer = setTimeout(async () => {
+      const work = await dispatchPending();
+      if (!shuttingDown) scheduleDispatch(work);
+    }, delayMs);
+    dispatchTimer.unref();
+  }
+  scheduleDispatch(initialWork);
   const resultDispatchTimer = setInterval(
     () => void dispatchResults(),
     config.rankPreparation.resultPersistenceDispatchIntervalMs
@@ -164,11 +167,10 @@ async function bootstrap(): Promise<void> {
     logger.error("Rank preparation queue error");
   });
 
-  let shuttingDown = false;
   async function shutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
-    clearInterval(dispatchTimer);
+    clearTimeout(dispatchTimer);
     clearInterval(resultDispatchTimer);
     await worker.close();
     await queue.close();

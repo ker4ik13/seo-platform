@@ -23,7 +23,8 @@ export class RemoteWorkController {
     const {id,token}=workerIdentity(headers);
     const node=await this.nodes.authorizeCombinedWork(id,token);
     const rankSlots=node.capabilities.includes("RANK") ? Math.min(input.capabilitySlots.RANK ?? 0,input.httpSlots) : 0;
-    const reservedRank=Math.min(rankSlots,Math.ceil(input.httpSlots/2));
+    const reservedRank=Math.min(rankSlots,node.capabilities.every(capability=>capability==="RANK")
+      ? input.httpSlots : Math.ceil(input.httpSlots/2));
     const initialWorkSlots=input.httpSlots-reservedRank;
     // The two independently fenced admission paths run in parallel. A slow
     // rank page must not hold queued Wordstat/Arsenkin/crawl behind it.
@@ -39,9 +40,17 @@ export class RemoteWorkController {
     const initialWork=workPass.status==="fulfilled" ? workPass.value : [];
     const initialWorkHttp=initialWork.filter(task=>task.resource==="HTTP").length;
     const spareHttp=Math.max(0,input.httpSlots-ranks.length-initialWorkHttp);
+    // When the non-rank half is idle, return it to a busy rank-only backlog.
+    // A second bounded claim is needed only if the first rank pass filled its
+    // reservation; the database lease prevents duplicate assignment.
+    const topUpRanks=spareHttp>0 && reservedRank>0 && ranks.length===reservedRank && rankSlots>ranks.length &&
+      initialWorkHttp<initialWorkSlots && rankPass.status==="fulfilled" && workPass.status==="fulfilled"
+      ? await this.ranks.claimBatch(id,token,Math.min(spareHttp,rankSlots-ranks.length),RANK_CLAIM_PASS_BUDGET_MS)
+        .catch((error:unknown)=>{this.logger.warn(JSON.stringify({event:"remote_rank_topup_failed",...admissionErrorCodes(error)}));return [];})
+      : [];
     // If the first work half filled, reuse rank capacity that was not needed.
     // Idle workers do not issue a second empty database claim.
-    const topUp=spareHttp>0 && initialWorkHttp===initialWorkSlots && workPass.status==="fulfilled" &&
+    const topUp=spareHttp>0 && topUpRanks.length===0 && initialWorkHttp===initialWorkSlots && workPass.status==="fulfilled" &&
       (initialWorkSlots>0 || (reservedRank>0 && ranks.length===0))
       ? await this.work.claim(id,token,{...input,httpSlots:spareHttp,cpuSlots:0,
         capabilitySlots:Object.fromEntries(Object.entries(input.capabilitySlots).map(([capability,slots])=>[
@@ -49,7 +58,7 @@ export class RemoteWorkController {
         ]))}).catch((error:unknown)=>{this.logger.warn(JSON.stringify({event:"remote_work_topup_failed",...admissionErrorCodes(error)}));return [];})
       : [];
     const work=[...initialWork,...topUp];
-    return {data:{work,ranks,cancelled:await this.work.cancelled(id)},meta:{requestId:request.id}};
+    return {data:{work,ranks:[...ranks,...topUpRanks],cancelled:await this.work.cancelled(id)},meta:{requestId:request.id}};
   }
 
   @Post("work/upload/init")

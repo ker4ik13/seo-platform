@@ -297,7 +297,14 @@ Manual rank job дополнительно разделяет process capabiliti
 и только выделенный `JOBS_TO_SEO_RANK_TOKEN`; generic HTTP, connector,
 import, inspection и system workers этот token не получают. BullMQ payload
 содержит только `jobId`, а PostgreSQL dispatcher восстанавливает потерянную
-постановку и просроченные lease. До live rank submit connector role должен
+постановку и просроченные lease. Пока есть активные rank Job, диспетчер
+пополняет короткое окно grant сразу после прохода с интервалом не более 1 с
+по умолчанию; в простое проверяет очередь раз в 5 с. Проходы не перекрываются,
+а старый grant после перезапуска восстанавливается из PostgreSQL. Это не
+частота HTTP-опроса удалённого воркера: он запрашивает новую пачку немедленно
+после завершения предыдущей. Неиспользованное разрешение повторяется сразу
+после истечения grant и lease, но только если платный submit не начинался.
+До live rank submit connector role должен
 получать scoped execution через SECURITY DEFINER operations, а не global read
 Job и credential tables.
 
@@ -334,7 +341,7 @@ Rate limiting настраивается по provider, credential и provider p
 время `POLL_WAIT` или внутренних операций. Throttling включает bounded
 adaptive cooldown, успешные ответы постепенно восстанавливают окно, а
 недоступный limiter блокирует внешний вызов fail-closed. Начальные окна на
-один физический ключ: Yandex Live — `10 concurrent / 10 RPS`, Turbo —
+один физический ключ: Yandex Live — `20 concurrent / 10 RPS`, Turbo —
 `50 / 50`, Google Live — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
 `10 / 10`; provider
 ответы `55`, `110`, `429` и `503` уменьшают только соответствующее окно.
