@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { gunzipSync } from "node:zlib";
-import { BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException,ConflictException,Inject,Injectable,Logger,NotFoundException,ServiceUnavailableException } from "@nestjs/common";
 import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
 import type { RemoteWorkClaim,RemoteWorkReceipt,RemoteWorkTask,WorkerCapability } from "@seo-platform/contracts";
-import { Prisma,type RemoteWorkTask as StoredTask } from "../generated/prisma/client.js";
+import { Prisma,type IntegrationCredential,type RemoteWorkTask as StoredTask } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { IntegrationCredentialCryptoService,type IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import { OBJECT_STORAGE,type ObjectStoragePort,type CompletedPart } from "../storage/object-storage.port.js";
@@ -26,6 +26,7 @@ const TASK_COLUMNS=Prisma.sql`id,workspace_id AS "workspaceId",project_id AS "pr
 
 @Injectable()
 export class RemoteWorkGatewayService {
+  private readonly logger=new Logger(RemoteWorkGatewayService.name);
   private readonly notifications = new EventEmitter();
   private readonly completions=new Map<string,{hash:string;work:Promise<{readonly status:string}>}>();
   public constructor(private readonly prisma:PrismaService,private readonly nodes:WorkerNodeService,
@@ -46,9 +47,22 @@ export class RemoteWorkGatewayService {
       SELECT ${TASK_COLUMNS} FROM public.claim_remote_work(${nodeId}::uuid,${input.httpSlots}::integer,${input.cpuSlots}::integer,${JSON.stringify(capacities)}::jsonb)
     `;
     const result:RemoteWorkTask[]=[];
+    const secrets=new Map<string,IntegrationCredentialSecret>();
+    const credentialIds=[...new Set(rows.filter(task=>task.command==="PROVIDER_HTTP")
+      .map(task=>(task.sourceScope as unknown as RemoteWorkScope).credentialId)
+      .filter((id):id is string=>typeof id==="string" && UUID.test(id)))];
+    let credentials:ReadonlyMap<string,IntegrationCredential>|undefined;
+    if(credentialIds.length>0){
+      try {
+        const found=await this.prisma.integrationCredential.findMany({where:{id:{in:credentialIds},status:"ACTIVE",deletedAt:null}});
+        credentials=new Map(found.map(row=>[row.id,row]));
+      } catch {
+        this.logger.warn("Worker credential batch read unavailable; using scoped per-item lookup");
+      }
+    }
     for(const task of rows) {
       try {
-        const payload=await this.executionPayload(task);
+        const payload=await this.executionPayload(task,secrets,credentials);
         result.push({ schemaVersion:"worker-work-task@1",id:task.id,capability:task.capability as WorkerCapability,
           command:task.command as RemoteWorkTask["command"],resource:task.resource as "HTTP"|"CPU",payload,
           deadline:task.executionDeadline.toISOString(),ticket:signRemoteWorkTicket(this.config,{
@@ -176,9 +190,15 @@ export class RemoteWorkGatewayService {
     return {status:"COMPLETED"};
   }
 
-  private async executionPayload(task:StoredTask):Promise<Readonly<Record<string,unknown>>> {
+  private async executionPayload(task:StoredTask,secrets:Map<string,IntegrationCredentialSecret>,credentials?:ReadonlyMap<string,IntegrationCredential>):Promise<Readonly<Record<string,unknown>>> {
     const payload=record(task.payload),scope=task.sourceScope as unknown as RemoteWorkScope;
-    if(task.command==="PROVIDER_HTTP") return materializeRemoteProviderRequest(validateRemoteProviderRequest(payload,task.capability as WorkerCapability),await this.credential(task,false));
+    if(task.command==="PROVIDER_HTTP") {
+      const request=validateRemoteProviderRequest(payload,task.capability as WorkerCapability);
+      const cacheKey=JSON.stringify([task.workspaceId,scope.provider,scope.credentialId,scope.physicalKeyScopeId,scope.credentialFingerprint]);
+      let secret=secrets.get(cacheKey);
+      if(!secret){secret=credentials ? this.credentialFromRow(task,credentials.get(scope.credentialId ?? ""),false) : await this.credential(task,false);secrets.set(cacheKey,secret);}
+      return materializeRemoteProviderRequest(request,secret);
+    }
     if(task.command==="IMPORT_ROWS" || task.command==="UPLOAD_INSPECTION") {
       const importRow=task.command==="IMPORT_ROWS" ? await this.prisma.semanticImport.findUnique({where:{id:task.operationId},select:{uploadId:true}}) : null;
       const upload=await this.prisma.upload.findFirst({where:{id:importRow?.uploadId ?? task.operationId,workspaceId:task.workspaceId,projectId:task.projectId},select:{objectKey:true,sizeBytes:true,mediaType:true,declaredChecksum:true} });
@@ -196,7 +216,14 @@ export class RemoteWorkGatewayService {
     const scope=task.sourceScope as unknown as RemoteWorkScope;
     if(!scope.credentialId || !UUID.test(scope.credentialId) || !scope.physicalKeyScopeId || !UUID.test(scope.physicalKeyScopeId) || !scope.provider) invalid();
     const row=await this.prisma.integrationCredential.findFirst({where:{id:scope.credentialId,workspaceId:task.workspaceId,...(!allowInactive ? {status:"ACTIVE",deletedAt:null} : {})} });
-    if(!row || row.provider!==scope.provider) throw new NotFoundException("Assigned credential is unavailable");
+    return this.credentialFromRow(task,row,allowInactive);
+  }
+
+  private credentialFromRow(task:StoredTask,row:IntegrationCredential|undefined|null,allowInactive:boolean):IntegrationCredentialSecret {
+    const scope=task.sourceScope as unknown as RemoteWorkScope;
+    if(!scope.credentialId || !UUID.test(scope.credentialId) || !scope.physicalKeyScopeId || !UUID.test(scope.physicalKeyScopeId) || !scope.provider) invalid();
+    if(!row || row.id!==scope.credentialId || row.workspaceId!==task.workspaceId || row.provider!==scope.provider ||
+      (!allowInactive && (row.status!=="ACTIVE" || row.deletedAt!==null))) throw new NotFoundException("Assigned credential is unavailable");
     const encrypted={keyVersion:row.keyVersion,ciphertext:Buffer.from(row.ciphertext),nonce:Buffer.from(row.nonce),authTag:Buffer.from(row.authTag),encryptedDataKey:Buffer.from(row.encryptedDataKey),dataKeyNonce:Buffer.from(row.dataKeyNonce),dataKeyAuthTag:Buffer.from(row.dataKeyAuthTag)};
     if(scope.credentialFingerprint && scope.credentialFingerprint!==remoteCredentialFingerprint(encrypted)) throw new ConflictException("Credential material changed");
     const decrypted=this.crypto.decrypt(task.workspaceId,scope.provider!,row.id,encrypted);

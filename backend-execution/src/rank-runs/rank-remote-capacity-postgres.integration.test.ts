@@ -19,11 +19,12 @@ test("rank worker reads only bounded healthy remote capacity, not node secrets",
       INSERT INTO execution_worker_nodes (
         name, token_hash, enabled, capabilities,
         max_http_slots, reported_http_slots, reported_rank_slots,
+        uses_env_capacity,
         max_cpu_slots, reported_cpu_slots,
         last_heartbeat_at, last_protocol_version
       ) VALUES (
         'rank-capacity-test', $1::bytea, true, ARRAY['RANK']::text[],
-        16, 12, 8, 2, 2, clock_timestamp(), 1
+        16, 12, 8, true, 2, 2, clock_timestamp(), 1
       ) RETURNING id::text
     `, [randomBytes(32)]);
     id = inserted.rows[0]?.id;

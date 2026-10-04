@@ -36,8 +36,8 @@ import { signRankPollTicket, verifyRankPollTicket } from "./worker-task-ticket.j
 
 const REMOTE_POLL_LEASE_SECONDS = 90;
 const REMOTE_PROVIDER_TIMEOUT_MS = 10_000;
-const MAX_CLAIMS_PER_POLL = 32;
-const MAX_CANDIDATES_PER_POLL = 64;
+const MAX_CLAIMS_PER_POLL = 64;
+const MAX_CANDIDATES_PER_POLL = 128;
 // The combined /worker/v1/claim endpoint may call this twice. Each pass must
 // leave time to serialize and return every leased task before the agent's
 // 30-second HTTP timeout, even when one physical key is saturated.
@@ -69,20 +69,32 @@ export class WorkerRankGatewayService {
     const count = Math.min(availableSlots, capacity.httpSlots, MAX_CLAIMS_PER_POLL);
     const tasks: RemoteRankPollTaskV1[] = [];
     const deadline = Date.now() + budgetMs;
-    for (let index = 0; index < MAX_CANDIDATES_PER_POLL && tasks.length < count; index += 1) {
-      if (Date.now() >= deadline) break;
-      let task: RemoteRankPollTaskV1 | "DEFERRED" | null;
-      try {
-        task = await this.claimOne(nodeId, capacity.httpSlots);
-      } catch (error) {
-        if (tasks.length === 0) throw error;
+    let candidates = 0;
+    let width = 1;
+    while (candidates < MAX_CANDIDATES_PER_POLL && tasks.length < count && Date.now() < deadline) {
+      const size = Math.min(width, count - tasks.length, MAX_CANDIDATES_PER_POLL - candidates);
+      const outcomes = await Promise.allSettled(Array.from({ length: size }, () =>
+        this.claimOne(nodeId, capacity.httpSlots)
+      ));
+      candidates += size;
+      let exhausted = false;
+      let failure: unknown;
+      let hasFailure = false;
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") {
+          failure ??= outcome.reason;
+          hasFailure = true;
+        } else if (outcome.value === null) exhausted = true;
+        else if (outcome.value !== "DEFERRED") tasks.push(outcome.value);
+      }
+      if (hasFailure) {
+        if (tasks.length === 0) throw failure ?? new Error("Unable to claim remote rank batch");
         break;
       }
-      if (!task) break;
-      // A saturated key/product must not block other keys or search engines.
-      // The broker's bounded candidate window excludes the deferred execution.
-      if (task === "DEFERRED") continue;
-      tasks.push(task);
+      if (exhausted) break;
+      // Probe once when idle, then grow only while work exists. This fills a
+      // busy node without issuing 64 empty SQL claims every five seconds.
+      width = Math.min(32, width * 2, MAX_CANDIDATES_PER_POLL - candidates);
     }
     return tasks;
   }

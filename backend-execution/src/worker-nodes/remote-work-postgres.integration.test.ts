@@ -141,4 +141,30 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
     assert.equal((await gateway.receipts([{id:historical.id,token:historical.leaseToken}],0))[0]?.state,"COMPLETED");
     assert.equal(await prisma.job.count(),jobsBefore);assert.equal(await prisma.remoteWorkTask.count(),tasksBefore);
   });
+
+  await t.test("one healthy node claims and receives 64 independent provider items",async()=>{
+    const batchNode=await nodes.create({name:"Gateway batch fixture",capabilities:["WORDSTAT"],
+      maxHttpSlots:64,maxCpuSlots:2,capabilityLimits:{WORDSTAT:64},useEnvCapacity:false});
+    await nodes.heartbeat(batchNode.node.id,batchNode.token,{protocolVersion:1,httpSlots:64,rankSlots:0,cpuSlots:2,
+      memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:64}});
+    await nodes.setEnabled(batchNode.node.id,true);
+    try {
+      const source=await job();
+      const entries=Array.from({length:64},(_,index)=>{
+        const request=payload(`batch ${index}`);
+        return {scope:source.scope,capability:"WORDSTAT",command:"PROVIDER_HTTP",resource:"HTTP",
+          payload:request,hash:canonicalJsonSha256("fixture",request),timeoutMs:25000};
+      });
+      const admitted=await prisma.$queryRaw<{id:string}[]>`SELECT * FROM public.enqueue_remote_work_batch(${JSON.stringify(entries)}::jsonb)`;
+      assert.equal(admitted.length,64);
+      const tasks=await gateway.claim(batchNode.node.id,batchNode.token,{httpSlots:64,cpuSlots:0,capabilitySlots:{WORDSTAT:64}});
+      assert.equal(tasks.length,64);
+      assert.equal(new Set(tasks.map(task=>task.id)).size,64);
+      assert.ok(tasks.every(task=>String(task.payload.url).includes(secret.apiKey)));
+      for(const task of tasks)await gateway.complete(batchNode.node.id,batchNode.token,task.ticket,undefined,undefined,"WORKER_NOT_STARTED");
+      await prisma.job.update({where:{id:source.id},data:{status:"CANCEL_REQUESTED",cancelRequestedAt:new Date(),version:{increment:1}}});
+    } finally {
+      await nodes.remove(batchNode.node.id);
+    }
+  });
 });

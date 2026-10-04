@@ -49,6 +49,20 @@ if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = remote-work ]; then
   printf '%s\n' 'postgres-tests result=passed (Gateway leases, receipts, fairness and XMLStock frequency waves)'
   exit 0
 fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = rank-large ]; then
+  export SEO_DATA_LARGE_RANK_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/seo_db"
+  pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/rank-manifests/large-rank-postgres.integration.test.ts > "$test_root/large-rank-postgres.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (large rank manifest seal and chunk read)'
+  exit 0
+fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = rank-claim ]; then
+  export JOBS_RANK_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
+  pnpm --filter @seo-platform/backend-execution exec node --import tsx --test --test-concurrency=1 \
+    src/rank-runs/rank-connector-claim-postgres.integration.test.ts \
+    src/rank-runs/rank-remote-capacity-postgres.integration.test.ts > "$test_root/rank-claim-postgres.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (rank connector claim, lease fencing and node capacity)'
+  exit 0
+fi
 pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/job-notifications/job-notification-postgres.integration.test.ts > "${test_root}/notification-postgres.log" 2>&1
 export PLATFORM_API_SESSION_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/platform_db"
 export PLATFORM_API_RANK_GRANT_TEST_DATABASE_URL="$PLATFORM_API_SESSION_TEST_DATABASE_URL"

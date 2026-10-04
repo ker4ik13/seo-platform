@@ -295,6 +295,11 @@ test("admin dark presentation uses shared selects without granting staff access"
     });
     await page.goto(`${base}/admin?screen=operations`, { waitUntil: "domcontentloaded" });
     await page.getByText("Офисный воркер", { exact: true }).first().waitFor();
+    const adminNavigation = page.getByRole("navigation", { name: "Разделы администрирования" });
+    assert.equal(await adminNavigation.getByRole("link", { name: "Операции" }).getAttribute("href"), "/admin?screen=operations");
+    assert.equal(await adminNavigation.getByRole("link", { name: "Воркеры" }).getAttribute("href"), "/admin?screen=workers");
+    assert.equal(await adminNavigation.getByRole("link", { name: "Операции" }).getAttribute("aria-current"), "page");
+    assert.equal(await adminNavigation.locator("button").count(), 0, "sidebar entries must be native links");
     assert.equal(await page.locator(".operation-worker-card.operation-worker-online").first().getByText("2 операции · 4 выдано запросов").count(), 1);
     const workerCopy = await page.locator(".operation-worker-card .operation-worker-copy").first().boundingBox();
     assert.ok(workerCopy && workerCopy.width >= 100, "worker name and counts must fit without breaking each word");

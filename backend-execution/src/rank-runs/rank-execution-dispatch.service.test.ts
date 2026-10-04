@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { RankManifestClient } from "../seo-data/rank-manifest.client.js";
@@ -46,6 +47,40 @@ test("issues every chunk grant with a stable request identity", async () => {
     `grant:${itemOne}:rank-grant-${itemOne}`,
     `grant:${itemTwo}:rank-grant-${itemTwo}`
   ]);
+});
+
+test("one pending page does not block independent pages in the same grant batch", async () => {
+  const fixture = service(true, {
+    [itemOne]: result(itemOne, "EXPIRED"),
+    [itemTwo]: result(itemTwo, "CONSUMED")
+  });
+  fixture.overrideStart([itemOne, itemTwo]);
+
+  assert.equal(await fixture.service.process(jobId), "RETRY_PENDING");
+  assert.deepEqual(fixture.events, [
+    `grant:${itemOne}:rank-grant-${itemOne}`,
+    `grant:${itemTwo}:rank-grant-${itemTwo}`
+  ]);
+});
+
+test("grants a large page window with bounded concurrency", async () => {
+  let active = 0;
+  let maximum = 0;
+  const ids = Array.from({ length: 64 }, (_, index) =>
+    `01900000-0000-7000-8000-${(index + 100).toString(16).padStart(12, "0")}`
+  );
+  const fixture = service(true, {}, undefined, async (itemId) => {
+    active++;
+    maximum = Math.max(maximum, active);
+    await delay(5);
+    active--;
+    return result(itemId, "CONSUMED");
+  });
+  fixture.overrideStart(ids);
+
+  assert.equal(await fixture.service.process(jobId), "READY_TO_SUBMIT");
+  assert.equal(fixture.events.length, ids.length);
+  assert.equal(maximum, 16);
 });
 
 test("waits without failing while the provider dispatch window is full", async () => {
@@ -154,8 +189,24 @@ test("finalizes an explicit grant denial before provider submit", async () => {
   assert.equal(await fixture.service.process(jobId), "FAILED");
   assert.deepEqual(fixture.events, [
     `grant:${itemOne}:rank-grant-${itemOne}`,
+    `grant:${itemTwo}:rank-grant-${itemTwo}`,
     "finish:EXECUTION_GRANT_DENIED"
   ]);
+});
+
+test("a denied grant stops before the next bounded window", async () => {
+  const ids = Array.from({ length: 40 }, (_, index) =>
+    `01900000-0000-7000-8000-${(index + 200).toString(16).padStart(12, "0")}`
+  );
+  const results = Object.fromEntries(ids.map((id, index) => [
+    id, result(id, index === 0 ? "DENIED" : "CONSUMED")
+  ]));
+  const fixture = service(true, results);
+  fixture.overrideStart(ids);
+
+  assert.equal(await fixture.service.process(jobId), "FAILED");
+  assert.equal(fixture.events.filter((event) => event.startsWith("grant:")).length, 16);
+  assert.equal(fixture.events.at(-1), "finish:EXECUTION_GRANT_DENIED");
 });
 
 test("leaves retryable issuer ambiguity for PostgreSQL recovery", async () => {
@@ -218,7 +269,8 @@ test("preserves collected progress when a later grant is rejected", () => {
 function service(
   submitEnabled: boolean,
   results: Readonly<Record<string, RankExecutionGrantAttemptResult>> = {},
-  grantError?: RankExecutionGrantAttemptError
+  grantError?: RankExecutionGrantAttemptError,
+  grantHandler?: (itemId: string, requestId: string) => Promise<RankExecutionGrantAttemptResult>
 ): {
   readonly service: RankExecutionDispatchService;
   readonly events: string[];
@@ -234,6 +286,7 @@ function service(
     ): Promise<RankExecutionGrantAttemptResult> => {
       events.push(`grant:${itemId}:${requestId}`);
       if (grantError) throw grantError;
+      if (grantHandler) return grantHandler(itemId, requestId);
       const stored = results[itemId];
       if (!stored) throw new Error("Missing grant fixture");
       return stored;

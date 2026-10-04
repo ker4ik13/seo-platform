@@ -39,6 +39,7 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const RANK_PROVIDER_ACTIVE_TASK_LIMIT = 5;
 const RANK_GRANT_WINDOW_SECONDS = 30;
 const RANK_UNUSED_AUTHORIZATION_RETRY_DELAY_MS = 60_000;
+const RANK_GRANT_BATCH_CONCURRENCY = 16;
 
 export type RankExecutionDispatchOutcome =
   | "DISABLED"
@@ -136,34 +137,37 @@ export class RankExecutionDispatchService {
     }
     if (dispatchable.itemIds.length === 0) return "RETRY_PENDING";
 
+    let pendingItems = false;
     for (let offset = 0; offset < dispatchable.itemIds.length; offset += 64) {
       const batch = dispatchable.itemIds.slice(offset, offset + 64);
+      const startedAt = Date.now();
+      let ready = 0;
       let prefetched: ReadonlyMap<string, InternalRankManifestChunk> = new Map();
       try {
         prefetched = await this.grants.prefetchForItems(batch);
       } catch (error) {
         this.logger.warn(`Rank manifest batch read unavailable: ${safeErrorSummary(error)}`);
       }
-      for (const itemId of batch) {
-        try {
-          const result = await this.grants.issueForItem(
-            itemId,
-            `rank-grant-${itemId}`,
-            prefetched.get(itemId)
-          );
-          if (result.status === "CONSUMED") continue;
-          if (
-            result.status === "DENIED" ||
-            result.status === "REJECTED_LOCAL"
-          ) {
-            await this.finishFailure(
-              dispatchable.jobId,
-              "EXECUTION_GRANT_DENIED"
-            );
-            return "FAILED";
+      // Grant requests are idempotent per item. Keep only a small window in
+      // flight so one slow issuer round trip does not serialize a whole Job.
+      for (let index = 0; index < batch.length; index += RANK_GRANT_BATCH_CONCURRENCY) {
+        const group = batch.slice(index, index + RANK_GRANT_BATCH_CONCURRENCY);
+        const outcomes = await Promise.allSettled(group.map((itemId) =>
+          this.grants.issueForItem(itemId, `rank-grant-${itemId}`, prefetched.get(itemId))
+        ));
+        let terminalFailure: RankJobFailureCode | undefined;
+        let retryableFailure = false;
+        let disabled = false;
+        for (const [position, outcome] of outcomes.entries()) {
+          const itemId = group[position]!;
+          if (outcome.status === "fulfilled") {
+            if (outcome.value.status === "CONSUMED") ready++;
+            else if (outcome.value.status === "DENIED" || outcome.value.status === "REJECTED_LOCAL") {
+              terminalFailure = "EXECUTION_GRANT_DENIED";
+            } else pendingItems = true;
+            continue;
           }
-          return "RETRY_PENDING";
-        } catch (error) {
+          const error: unknown = outcome.reason;
           if (error instanceof RankExecutionGrantAttemptError) {
             const payload = JSON.stringify({
               event: "rank_execution_grant_failed",
@@ -188,27 +192,23 @@ export class RankExecutionDispatchService {
               })
             );
           }
-          if (
-            error instanceof RankExecutionGrantAttemptError &&
-            error.code === "SUBMIT_DISABLED"
-          ) {
-            return "DISABLED";
-          }
-          if (
-            error instanceof RankExecutionGrantAttemptError &&
-            error.retryable
-          ) {
-            return "RETRY_PENDING";
-          }
-          await this.finishFailure(
-            dispatchable.jobId,
-            dispatchFailureCode(error)
-          );
+          if (error instanceof RankExecutionGrantAttemptError && error.code === "SUBMIT_DISABLED") disabled = true;
+          else if (error instanceof RankExecutionGrantAttemptError && error.retryable) retryableFailure = true;
+          else terminalFailure ??= dispatchFailureCode(error);
+        }
+        if (terminalFailure) {
+          await this.finishFailure(dispatchable.jobId, terminalFailure);
           return "FAILED";
         }
+        if (disabled) return "DISABLED";
+        if (retryableFailure) return "RETRY_PENDING";
       }
+      if (ready > 0) this.logger.log(JSON.stringify({
+        event: "rank_grant_batch_ready", jobId: dispatchable.jobId,
+        ready, attempted: batch.length, elapsedMs: Date.now() - startedAt
+      }));
     }
-    return "READY_TO_SUBMIT";
+    return pendingItems ? "RETRY_PENDING" : "READY_TO_SUBMIT";
   }
 
   private async start(

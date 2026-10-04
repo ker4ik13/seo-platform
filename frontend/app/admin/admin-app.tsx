@@ -14,6 +14,7 @@ import {
   type ReactNode
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import type {
   AdminNpdReceiptDetail,
   AdminNpdReceiptListPage,
@@ -60,6 +61,20 @@ const adminScreens: readonly Screen[] = [
 
 function adminScreen(value: string | null): Screen {
   return adminScreens.includes(value as Screen) ? value as Screen : "overview";
+}
+
+function AdminNavLink({ screen, active, children }: Readonly<{
+  screen: Screen;
+  active: boolean;
+  children: ReactNode;
+}>) {
+  return <Link
+    aria-current={active ? "page" : undefined}
+    className={active ? "active" : undefined}
+    href={screen === "overview" ? "/admin" : `/admin?screen=${screen}`}
+    prefetch={false}
+    scroll={false}
+  >{children}</Link>;
 }
 
 export function AdminApp() {
@@ -195,52 +210,32 @@ export function AdminApp() {
           <div><strong><UiText text="SEOньорита" /></strong><small>Администрирование</small></div>
         </a>
         <nav aria-label={uiText("Разделы администрирования")}>
-          {canViewWorkspaces && <button className={screen === "overview" ? "active" : undefined} onClick={() => navigateScreen("overview")} type="button"><Icon name="dashboard" /> <UiText text="Обзор" before=" " /></button>}
+          {canViewWorkspaces && <AdminNavLink screen="overview" active={screen === "overview"}><Icon name="dashboard" /> <UiText text="Обзор" before=" " /></AdminNavLink>}
           {canViewWorkspaces && (
-            <button
-              className={screen === "workspaces" ? "active" : undefined}
-              onClick={() => navigateScreen("workspaces")}
-              type="button"
-            >
-              <Icon name="projects" /> <UiText text="Рабочие области" before=" " /></button>
+            <AdminNavLink screen="workspaces" active={screen === "workspaces"}>
+              <Icon name="projects" /> <UiText text="Рабочие области" before=" " /></AdminNavLink>
           )}
           {canViewPlatformDirectory && (
-            <button
-              className={screen === "projects" ? "active" : undefined}
-              onClick={() => navigateScreen("projects")}
-              type="button"
-            >
-              <Icon name="pages" /> <UiText text="Проекты" before=" " /></button>
+            <AdminNavLink screen="projects" active={screen === "projects"}>
+              <Icon name="pages" /> <UiText text="Проекты" before=" " /></AdminNavLink>
           )}
           {canViewPlatformDirectory && (
-            <button
-              className={screen === "operations" ? "active" : undefined}
-              onClick={() => navigateScreen("operations")}
-              type="button"
-            >
-              <Icon name="tasks" /> <UiText text="Операции" before=" " /></button>
+            <AdminNavLink screen="operations" active={screen === "operations"}>
+              <Icon name="tasks" /> <UiText text="Операции" before=" " /></AdminNavLink>
           )}
-          {canManageWorkers && <button className={screen === "workers" ? "active" : undefined} onClick={() => navigateScreen("workers")} type="button"><Icon name="http" /> <UiText text="Воркеры" before=" " /></button>}
+          {canManageWorkers && <AdminNavLink screen="workers" active={screen === "workers"}><Icon name="http" /> <UiText text="Воркеры" before=" " /></AdminNavLink>}
           {canViewReceipts && (
-            <button
-              className={screen === "receipts" ? "active" : undefined}
-              onClick={() => navigateScreen("receipts")}
-              type="button"
-            >
-              <Icon name="http" /> <UiText text="Чеки НПД" before=" " /></button>
+            <AdminNavLink screen="receipts" active={screen === "receipts"}>
+              <Icon name="http" /> <UiText text="Чеки НПД" before=" " /></AdminNavLink>
           )}
-          {canViewRefunds && <button className={screen === "refunds" ? "active" : undefined} onClick={() => navigateScreen("refunds")} type="button"><Icon name="history" /> <UiText text="Возвраты" before=" " /></button>}
+          {canViewRefunds && <AdminNavLink screen="refunds" active={screen === "refunds"}><Icon name="history" /> <UiText text="Возвраты" before=" " /></AdminNavLink>}
           {canManageStaff && (
-            <button
-              className={screen === "staff" ? "active" : undefined}
-              onClick={() => navigateScreen("staff")}
-              type="button"
-            >
+            <AdminNavLink screen="staff" active={screen === "staff"}>
               <Icon name="competitors" /> Роли платформы
-            </button>
+            </AdminNavLink>
           )}
-          {canManageBilling && <button className={screen === "usage" ? "active" : undefined} onClick={() => navigateScreen("usage")} type="button"><Icon name="history" /> <UiText text="Расходы на проверке" /></button>}
-          {canViewProviders && <button className={screen === "providers" ? "active" : undefined} onClick={() => navigateScreen("providers")} type="button"><Icon name="settings" /> <UiText text="Провайдеры" before=" " /></button>}
+          {canManageBilling && <AdminNavLink screen="usage" active={screen === "usage"}><Icon name="history" /> <UiText text="Расходы на проверке" /></AdminNavLink>}
+          {canViewProviders && <AdminNavLink screen="providers" active={screen === "providers"}><Icon name="settings" /> <UiText text="Провайдеры" before=" " /></AdminNavLink>}
         </nav>
         <div className="operator">
           <span>{initials(profile.displayName)}</span>

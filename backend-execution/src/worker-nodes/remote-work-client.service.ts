@@ -44,6 +44,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
   private readonly availability = new Map<WorkerCapability,{until:number;value:boolean}>();
   private readonly admissions:{entry:Admission;resolve:(assignment:Assignment)=>void;reject:(error:unknown)=>void}[]=[];
   private admissionTimer:ReturnType<typeof setTimeout>|undefined;
+  private pollStartTimer:ReturnType<typeof setTimeout>|undefined;
   private admitting=false;
 
   public constructor(private readonly prisma: PrismaService, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
@@ -81,7 +82,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
       const receipt = await new Promise<RemoteWorkReceipt>((resolve,reject) => {
         this.pending.set(id,{ token: readToken,resolve,reject });
         timer = setTimeout(() => reject(new RemoteWorkFailedError("WORKER_RESULT_TIMEOUT")),options.timeoutMs+5_000);
-        void this.poll();
+        this.schedulePoll();
       });
       if (heartbeatFailure) throw heartbeatFailure;
       if (receipt.state !== "COMPLETED" || !receipt.result) throw new RemoteWorkFailedError(receipt.errorCode ?? "WORKER_EXECUTION_FAILED");
@@ -114,13 +115,19 @@ export class RemoteWorkClientService implements OnModuleDestroy {
   private async flushAdmissions():Promise<void> {
     if(this.admitting || this.stopped)return;this.admitting=true;
     const batch:typeof this.admissions=[];let bytes=0;
-    while(this.admissions.length && batch.length<32){const next=this.admissions[0]!,size=Buffer.byteLength(JSON.stringify(next.entry));if(batch.length && bytes+size>4*1_048_576)break;batch.push(this.admissions.shift()!);bytes+=size;}
+    while(this.admissions.length && batch.length<64){const next=this.admissions[0]!,size=Buffer.byteLength(JSON.stringify(next.entry));if(batch.length && bytes+size>4*1_048_576)break;batch.push(this.admissions.shift()!);bytes+=size;}
     try {
       const rows=await this.prisma.$queryRaw<readonly (Assignment & {ordinal:number})[]>`SELECT * FROM public.enqueue_remote_work_batch(${JSON.stringify(batch.map(row=>row.entry))}::jsonb)`;
       if(rows.length!==batch.length || new Set(rows.map(row=>row.ordinal)).size!==rows.length || rows.some(row=>!Number.isSafeInteger(row.ordinal) || row.ordinal<1 || row.ordinal>batch.length)) throw new RemoteWorkFailedError("INVALID_WORKER_ASSIGNMENT");
       for(const row of rows)batch[row.ordinal-1]!.resolve(row);
     } catch(error){for(const row of batch)row.reject(error);}
     finally{this.admitting=false;if(this.admissions.length && !this.stopped)void this.flushAdmissions();}
+  }
+
+  private schedulePoll():void {
+    if(this.polling || this.pollStartTimer || this.stopped)return;
+    // All callers in one SQL admission can join the same receipt request.
+    this.pollStartTimer=setTimeout(()=>{this.pollStartTimer=undefined;void this.poll();},0);
   }
 
   private async poll(): Promise<void> {
@@ -162,6 +169,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
     for (const waiter of this.pending.values()) waiter.reject(new RemoteWorkFailedError("RUNTIME_STOPPED"));
     this.pending.clear();
     if(this.admissionTimer)clearTimeout(this.admissionTimer);
+    if(this.pollStartTimer)clearTimeout(this.pollStartTimer);
     for(const row of this.admissions.splice(0))row.reject(new RemoteWorkFailedError("RUNTIME_STOPPED"));
   }
 }

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { utf8Sha256 } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import type { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
@@ -180,6 +182,44 @@ test("one empty batch poll authenticates once and never polls per free slot", as
   assert.equal(claims, 1);
 });
 
+test("one busy worker poll returns 64 fenced rank pages without unbounded claims", async () => {
+  let claimed = 0;
+  let active = 0;
+  let maximum = 0;
+  const request = requestIntent();
+  const gateway = new WorkerRankGatewayService(
+    { authorizeForWork: async () => ({ httpSlots: 100, cpuSlots: 2 }) } as unknown as WorkerNodeService,
+    {
+      claimPoll: async (owner: string) => {
+        if (claimed >= 64) return null;
+        claimed++;
+        active++;
+        maximum = Math.max(maximum, active);
+        await delay(2);
+        active--;
+        return { provider: "XMLSTOCK", workspaceId: id.workspace, credentialId: id.credential,
+          executionId: randomUUID(), request, encryptedCredential: { keyVersion: 1 },
+          providerTaskId: `task-${claimed}`, leaseOwner: owner, leaseToken: randomUUID(), leaseGeneration: 1,
+          executionVersion: 1, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() };
+      },
+      readBillingSettlement: async () => ({ required: false })
+    } as unknown as RankConnectorRuntimeBrokerService,
+    { decrypt: () => ({ apiKey: "test-secret", accountIdentifier: "test-account", rateLimitScopeId: id.credential }) } as unknown as IntegrationCredentialCryptoService,
+    { select: async (_provider: unknown, secret: unknown) => secret } as unknown as PlatformCredentialPoolSelectionService,
+    { tryAcquire: async () => ({ allowed: true, credentialId: id.credential, workspaceId: id.workspace,
+      product: "YANDEX_LIVE", member: randomUUID(), nodeId: id.node }) } as unknown as XmlStockHttpQuotaLimiter,
+    {} as RankBillingSettlementClient,
+    { workerGatewayEnabled: true, integrationCredentials: { role: "BOTH", activeKeyVersion: 1,
+      keys: new Map([[1, Buffer.alloc(32, 9)]]) } } as unknown as AppConfig
+  );
+
+  const tasks = await gateway.claimBatch(id.node, "token", 100, 500);
+  assert.equal(tasks.length, 64);
+  assert.equal(claimed, 64);
+  assert.ok(maximum > 1 && maximum <= 32);
+  assert.equal(new Set(tasks.map((task) => parseWorkerRankTask(task).ticket)).size, 64);
+});
+
 test("a full Live key does not starve Google XML or Yandex XML in the same worker batch", async () => {
   const google = requestIntent();
   const googleIntent = { ...google, execution: { ...google.execution, searchEngine: "GOOGLE" as const, providerMappingVersion: "xmlstock-google-live@2" } };
@@ -228,7 +268,7 @@ test("full provider quotas use a bounded scan, not a retry loop without end", as
     { workerGatewayEnabled: true, integrationCredentials: { role: "BOTH" } } as AppConfig
   );
   assert.deepEqual(await gateway.claimBatch(id.node, "token", 32), []);
-  assert.equal(claims, 64);
+  assert.equal(claims, 128);
 });
 
 test("a saturated rank pass obeys the caller's short budget", async () => {
@@ -243,7 +283,7 @@ test("a saturated rank pass obeys the caller's short budget", async () => {
   );
   const startedAt = Date.now();
   assert.deepEqual(await gateway.claimBatch(id.node, "token", 128, 20), []);
-  assert.ok(probes > 0 && probes < 64);
+  assert.ok(probes > 0 && probes < 128);
   assert.ok(Date.now() - startedAt < 200);
 });
 
