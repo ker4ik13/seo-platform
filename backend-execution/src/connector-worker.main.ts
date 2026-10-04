@@ -122,6 +122,7 @@ async function bootstrap(): Promise<void> {
   );
   let activeFrequencyDispatchUntil = 0;
   let activeKeywordResearchDispatchUntil = 0;
+  let reportedRankBurst = 0;
   const rankRuntimeLaneCount = connectorRuntimeLaneCount(
     config.connectorRuntime.rankConcurrency,
     config.connectorRuntime.shardCount
@@ -227,7 +228,12 @@ async function bootstrap(): Promise<void> {
       );
       const now = Date.now();
       const rankDispatchStride = config.connectorRuntime.rankConcurrency;
-      const rankBurst = rankDemand.nextBurst();
+      const pendingRankSubmit = rankRuntime.pendingSubmitCandidates();
+      const rankBurst = rankDemand.nextBurst(Math.ceil(pendingRankSubmit / 16));
+      if (pendingRankSubmit > 0 && rankBurst !== reportedRankBurst) {
+        logger.log(JSON.stringify({ event: "rank_connector_lanes", pendingSubmitHints: pendingRankSubmit, lanes: rankBurst }));
+      }
+      reportedRankBurst = rankBurst;
       for (let slot = 0; slot < rankBurst; slot += 1) {
         await enqueueRankConnectorRuntime(
           rankQueue,

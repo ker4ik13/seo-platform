@@ -278,6 +278,7 @@ test("defers synchronous XMLStock capture until its first paid poll", async () =
     async claimSubmit() {
       return submitClaim;
     },
+    pendingSubmitCandidates() { return 0; },
     async readSubmitRequest() {
       return intent;
     },

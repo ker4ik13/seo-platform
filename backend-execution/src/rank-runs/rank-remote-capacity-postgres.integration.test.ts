@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import test from "node:test";
 import { Client } from "pg";
+import { XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION } from "./rank-execution-evidence.js";
 
 const databaseUrl = process.env.JOBS_RANK_TEST_DATABASE_URL;
 
@@ -45,3 +46,32 @@ async function slots(client: Client, maximum: number): Promise<number> {
   );
   return result.rows[0]?.slots ?? -1;
 }
+
+test("one SQL statement applies individual XMLStock fences to a rank batch", {
+  skip: databaseUrl === undefined,
+  timeout: 15_000
+}, async () => {
+  assert.ok(databaseUrl);
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const ids = [randomUUID(), randomUUID()];
+    const owner = `remote:${randomUUID()}:${randomUUID()}`;
+    const poll = await client.query(`
+      SELECT claim.* FROM unnest(ARRAY[$1::uuid, $2::uuid]) AS candidate("executionId")
+      CROSS JOIN LATERAL public.claim_rank_connector_poll_targeted(
+        $3::text, 90::integer, $4::text, candidate."executionId"
+      ) claim
+    `, [...ids, owner, XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION]);
+    assert.equal(poll.rowCount, 0, "nonexistent IDs cannot escape the fenced claim");
+    const submit = await client.query(`
+      SELECT claim.* FROM unnest(ARRAY[$1::uuid, $2::uuid]) AS candidate("executionId")
+      CROSS JOIN LATERAL public.claim_rank_connector_submit_targeted(
+        $3::text, 25::integer, $4::text, candidate."executionId"
+      ) claim
+    `, [...ids, owner, XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION]);
+    assert.equal(submit.rowCount, 0);
+  } finally {
+    await client.end();
+  }
+});

@@ -64,3 +64,30 @@ test("worker ingress is unavailable when the Gateway flag is off", async () => {
     else process.env.WORKER_GATEWAY_ENABLED = original;
   }
 });
+
+test("worker ingress accepts only a bounded authenticated rank receipt batch", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousFlag = process.env.WORKER_GATEWAY_ENABLED;
+  const previousOrigin = process.env.WORKER_GATEWAY_INTERNAL_URL;
+  process.env.WORKER_GATEWAY_ENABLED = "true";
+  process.env.WORKER_GATEWAY_INTERNAL_URL = "http://backend-execution:4002";
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "http://backend-execution:4002/worker/v1/rank/complete-batch");
+    assert.equal(new Headers(init?.headers).get("authorization"), token);
+    return Response.json({ data: [true], meta: {} });
+  };
+  try {
+    const url = "https://seo.example.test/worker/v1/rank/complete-batch";
+    const headers = { Authorization: token, "X-Worker-Id": id, "Content-Type": "application/json" };
+    const request = new NextRequest(url, { method: "POST", body: "{}", headers });
+    assert.deepEqual((await (await proxyWorkerGateway(request, ["rank", "complete-batch"])).json()).data, [true]);
+    const oversized = new NextRequest(url, { method: "POST", body: "{}", headers: { ...headers, "Content-Length": String(1_048_577) } });
+    assert.equal((await proxyWorkerGateway(oversized, ["rank", "complete-batch"])).status, 413);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousFlag === undefined) delete process.env.WORKER_GATEWAY_ENABLED;
+    else process.env.WORKER_GATEWAY_ENABLED = previousFlag;
+    if (previousOrigin === undefined) delete process.env.WORKER_GATEWAY_INTERNAL_URL;
+    else process.env.WORKER_GATEWAY_INTERNAL_URL = previousOrigin;
+  }
+});

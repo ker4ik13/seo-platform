@@ -3,6 +3,7 @@ import type { RemoteWorkerConfig } from "./remote-worker-config.js";
 export class WorkerAuthenticationError extends Error { public constructor(){super("Worker authentication rejected");} }
 export class WorkerPausedError extends Error { public constructor(){super("Worker node is paused");} }
 export class WorkerTaskClosedError extends Error { public constructor(){super("Worker task is closed");} }
+export class WorkerRouteNotFoundError extends Error { public constructor(){super("Worker route is unavailable");} }
 
 export class WorkerHttpClient {
   public constructor(private readonly config:RemoteWorkerConfig) {}
@@ -14,6 +15,7 @@ export class WorkerHttpClient {
     if(response.status===401) {await response.body?.cancel();throw new WorkerAuthenticationError();}
     if(response.status===403 && route.includes("claim")) {await response.body?.cancel();throw new WorkerPausedError();}
     if(response.status===409 && route.endsWith("complete")) {await response.body?.cancel();throw new WorkerTaskClosedError();}
+    if(response.status===404 && route.endsWith("complete-batch")) {await response.body?.cancel();throw new WorkerRouteNotFoundError();}
     if(!response.ok || response.headers.get("content-type")?.split(";",1)[0]!=="application/json") {await response.body?.cancel();throw new Error("Worker control plane unavailable");}
     const bytes=await boundedBody(response,maximumBytes);
     const value:unknown=JSON.parse(Buffer.from(bytes).toString("utf8"));

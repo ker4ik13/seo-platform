@@ -43,3 +43,28 @@ export interface RemoteRankPollResultV1 {
   readonly requestSnapshot: unknown;
   readonly outcome: unknown;
 }
+
+/** Several independent fenced receipts in one worker-to-center HTTPS call. */
+export interface RemoteRankPollResultBatchV1 {
+  readonly schemaVersion: "worker-rank-poll-result-batch@1";
+  readonly entries: readonly RemoteRankPollResultV1[];
+}
+
+export function parseRemoteRankPollResultBatch(value: unknown): RemoteRankPollResultBatchV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid rank result batch");
+  const row = value as Record<string, unknown>;
+  if (Object.keys(row).length !== 2 || row.schemaVersion !== "worker-rank-poll-result-batch@1" ||
+    !Array.isArray(row.entries) || row.entries.length < 1 || row.entries.length > 8) {
+    throw new TypeError("Invalid rank result batch");
+  }
+  for (const entry of row.entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new TypeError("Invalid rank result entry");
+    const item = entry as Record<string, unknown>;
+    if (Object.keys(item).length !== 4 || item.schemaVersion !== "worker-rank-poll-result@1" ||
+      typeof item.ticket !== "string" || item.ticket.length < 1 || item.ticket.length > 4096 ||
+      !Object.hasOwn(item, "requestSnapshot") || !Object.hasOwn(item, "outcome")) {
+      throw new TypeError("Invalid rank result entry");
+    }
+  }
+  return row as unknown as RemoteRankPollResultBatchV1;
+}

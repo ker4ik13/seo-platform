@@ -1,4 +1,4 @@
-import { BadRequestException,Body,Controller,Header,Headers,Post,Req } from "@nestjs/common";
+import { BadRequestException,Body,Controller,Header,Headers,Logger,Post,Req } from "@nestjs/common";
 import { parseRemoteWorkClaim,type ApiResponse,type RemoteRankPollTaskV1,type RemoteWorkTask } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import { RemoteWorkGatewayService } from "./remote-work-gateway.service.js";
@@ -7,12 +7,13 @@ import { WorkerNodeService } from "./worker-node.service.js";
 import { workerIdentity,exactWorkerInput } from "./worker-wire-input.js";
 
 type RequestHeaders=Readonly<Record<string,string|string[]|undefined>>;
-// A combined poll must not hold ready Wordstat/crawl work behind a long scan
-// of saturated rank products. Rank still gets a fair bounded pass each poll.
-const RANK_CLAIM_PASS_BUDGET_MS=500;
+// Leave enough time for several bounded rank DB waves while keeping other
+// capabilities behind a strict short ceiling on the same combined poll.
+const RANK_CLAIM_PASS_BUDGET_MS=2_500;
 
 @Controller("worker/v1")
 export class RemoteWorkController {
+  private readonly logger=new Logger(RemoteWorkController.name);
   public constructor(private readonly work:RemoteWorkGatewayService,private readonly ranks:WorkerRankGatewayService,private readonly nodes:WorkerNodeService) {}
 
   @Post("claim")
@@ -22,11 +23,32 @@ export class RemoteWorkController {
     const {id,token}=workerIdentity(headers);
     const node=await this.nodes.authorizeCombinedWork(id,token);
     const rankSlots=node.capabilities.includes("RANK") ? Math.min(input.capabilitySlots.RANK ?? 0,input.httpSlots) : 0;
-    const initialRank=Math.min(rankSlots,Math.ceil(input.httpSlots/2));
-    // One short fair rank pass is enough. A long pass would delay already
-    // queued Wordstat/Arsenkin work in this same response.
-    const ranks=initialRank>0 ? await this.ranks.claimBatch(id,token,initialRank,RANK_CLAIM_PASS_BUDGET_MS) : [];
-    const work=await this.work.claim(id,token,{...input,httpSlots:Math.max(0,input.httpSlots-ranks.length),capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-ranks.length)}});
+    const reservedRank=Math.min(rankSlots,Math.ceil(input.httpSlots/2));
+    const initialWorkSlots=input.httpSlots-reservedRank;
+    // The two independently fenced admission paths run in parallel. A slow
+    // rank page must not hold queued Wordstat/Arsenkin/crawl behind it.
+    const [rankPass,workPass]=await Promise.allSettled([
+      reservedRank>0 ? this.ranks.claimBatch(id,token,reservedRank,RANK_CLAIM_PASS_BUDGET_MS) : Promise.resolve([]),
+      this.work.claim(id,token,{...input,httpSlots:initialWorkSlots,
+        capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-reservedRank)}})
+    ]);
+    if(rankPass.status==="rejected" && workPass.status==="rejected")throw rankPass.reason;
+    if(rankPass.status==="rejected")this.logger.warn("Remote rank batch admission failed; other work still returned");
+    if(workPass.status==="rejected")this.logger.warn("Remote work admission failed; rank batch still returned");
+    const ranks=rankPass.status==="fulfilled" ? rankPass.value : [];
+    const initialWork=workPass.status==="fulfilled" ? workPass.value : [];
+    const initialWorkHttp=initialWork.filter(task=>task.resource==="HTTP").length;
+    const spareHttp=Math.max(0,input.httpSlots-ranks.length-initialWorkHttp);
+    // If the first work half filled, reuse rank capacity that was not needed.
+    // Idle workers do not issue a second empty database claim.
+    const topUp=spareHttp>0 && initialWorkHttp===initialWorkSlots && workPass.status==="fulfilled" &&
+      (initialWorkSlots>0 || (reservedRank>0 && ranks.length===0))
+      ? await this.work.claim(id,token,{...input,httpSlots:spareHttp,cpuSlots:0,
+        capabilitySlots:Object.fromEntries(Object.entries(input.capabilitySlots).map(([capability,slots])=>[
+          capability,Math.max(0,slots-initialWork.filter(task=>task.capability===capability).length-(capability==="RANK" ? ranks.length : 0))
+        ]))}).catch(()=>{this.logger.warn("Remote work top-up failed; claimed work still returned");return [];})
+      : [];
+    const work=[...initialWork,...topUp];
     return {data:{work,ranks,cancelled:await this.work.cancelled(id)},meta:{requestId:request.id}};
   }
 

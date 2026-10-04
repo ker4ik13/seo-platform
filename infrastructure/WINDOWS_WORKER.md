@@ -30,11 +30,11 @@ New-Item -ItemType Directory -Path C:\seo-worker -Force
 Set-Location C:\seo-worker
 git clone https://github.com/ker4ik13/seo-platform.git
 Set-Location .\seo-platform
-git switch codex/worker-fleet-db-pilot
+git switch main
 ```
 
-Пока релиз проверяется, используйте именно ветку
-`codex/worker-fleet-db-pilot`; `main` может содержать старую версию воркера.
+Для продового центра используйте ветку `main`. Код воркера и центра должен
+быть одной версии; после `git pull` требуется пересборка контейнера.
 
 ## 3. Зарегистрировать узел и заполнить конфигурацию
 
@@ -52,11 +52,10 @@ notepad .\infrastructure\.env.worker
 в корне репозитория, перенесите его в `infrastructure\.env.worker` **до**
 следующей Docker-сборки и используйте новый путь в `--env-file`.
 
-Замените только `WORKER_NODE_ID` и `WORKER_NODE_TOKEN`: в шаблоне уже указан
-тестовый адрес `WORKER_CONTROL_URL=https://144.31.221.28:3000` и включены
-позиции, Wordstat и остальные возможности. Для продакшна —
-`WORKER_CONTROL_URL=https://seonorita.ru` **после проверки**, что маршрут
-`/worker/v1/*` включён на продовом HTTPS-входе. Токен не копируйте в
+Для продакшна укажите `WORKER_CONTROL_URL=https://seonorita.ru`, а также
+свои `WORKER_NODE_ID` и `WORKER_NODE_TOKEN`. Адрес сайта — исходящий адрес
+центра, домен и входящий порт самому воркеру не нужны. Для отдельного
+тестового стенда используйте только его HTTPS-адрес. Токен не копируйте в
 `.env` основного сервера и не добавляйте файл в Git.
 
 Начните с пределов шаблона: HTTP и позиции по 16, Wordstat 10, CPU 2.
@@ -81,6 +80,18 @@ docker compose --env-file .\infrastructure\.env.worker -f .\infrastructure\worke
 docker compose --env-file .\infrastructure\.env.worker -f .\infrastructure\worker.compose.yml logs --tail=100 -f execution-worker
 ```
 
+Если PowerShell пишет, что `docker` не найден, но Docker Desktop установлен,
+выполните в том же окне:
+
+```powershell
+$dockerExe = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
+& $dockerExe version
+& $dockerExe compose --env-file .\infrastructure\.env.worker -f .\infrastructure\worker.compose.yml up -d --build
+```
+
+Путь `--env-file` должен существовать: проверьте его через
+`Test-Path .\infrastructure\.env.worker`. Не выводите содержимое файла в чат.
+
 Первая сборка и обновление антивирусных сигнатур могут занять несколько
 минут. В логах должно появиться «Воркер … на связи». Затем в админке
 убедитесь, что heartbeat свежий и слоты соответствуют `.env.worker`, и
@@ -102,6 +113,13 @@ Docker-воркера отпечатки должны совпадать: цен
 git pull --ff-only
 docker compose --env-file .\infrastructure\.env.worker -f .\infrastructure\worker.compose.yml up -d --build
 ```
+
+Обновление следует выполнять из ветки `main` после выката центра.
+Compose ждёт завершения уже взятых задач до 61 минуты: при SIGTERM воркер
+останавливает новые claims, но продолжает heartbeat и подтверждает результаты.
+В Dokploy у Application-воркера отдельно задайте `Stop Grace Period` не меньше
+61 минуты: файл `worker.compose.yml` управляет только Compose-развёртыванием
+на Windows и не задаёт это поле для отдельного Dokploy Application.
 
 Перед ручной остановкой нажмите в админке «Остановить плавно» и дождитесь
 завершения активных задач. Один Docker Compose узел при обновлении не даёт

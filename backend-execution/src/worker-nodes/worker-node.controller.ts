@@ -15,12 +15,13 @@ import {
 import type {
   ApiResponse,
   CreatedWorkerNode,
+  RemoteRankPollResultBatchV1,
   RemoteRankClaimV1,
   RemoteRankPollTaskV1,
   WorkerNodeView,
   RemovedWorkerNode
 } from "@seo-platform/contracts";
-import { parseRemoteRankClaim, parseWorkerNodeRemovalInput } from "@seo-platform/contracts";
+import { parseRemoteRankClaim, parseRemoteRankPollResultBatch, parseWorkerNodeRemovalInput } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -168,6 +169,20 @@ export class WorkerGatewayController {
     return response(request, await this.ranks.complete(
       id, token, input.ticket, input.requestSnapshot, input.outcome
     ));
+  }
+
+  @Post("rank/complete-batch")
+  @Header("Cache-Control", "no-store")
+  public async completeRankBatch(
+    @Body() body: unknown,
+    @Headers() headers: HeadersRecord,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly boolean[]>> {
+    let input: RemoteRankPollResultBatchV1;
+    try { input = parseRemoteRankPollResultBatch(body); }
+    catch { throw new BadRequestException("Invalid worker rank result batch"); }
+    const { id, token } = nodeIdentity(headers);
+    return response(request, await this.ranks.completeBatch(id, token, input.entries));
   }
 }
 

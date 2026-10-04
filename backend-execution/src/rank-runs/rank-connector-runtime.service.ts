@@ -82,6 +82,10 @@ export class RankConnectorRuntimeService {
     );
   }
 
+  public pendingSubmitCandidates(): number {
+    return this.broker.pendingSubmitCandidates();
+  }
+
   /**
    * Performs one submit/status request, plus one result request only after a
    * finished status. The BullMQ queue shared with credential validation uses
@@ -96,7 +100,24 @@ export class RankConnectorRuntimeService {
           this.claimSubmit(leaseOwner)
         );
         if (submit) {
-          return await this.submit(submit);
+          if (submit.provider !== "XMLSTOCK") return await this.submit(submit);
+          const additional = this.broker.pendingSubmitCandidates() > 0
+            ? await this.claimCapacity.run(() =>
+              this.broker.claimXmlStockSubmitBatch(
+                leaseOwner,
+                this.submitLeaseSeconds(),
+                15
+              )
+            )
+            : [];
+          const results = await Promise.allSettled(
+            [submit, ...additional].map((item) => this.submit(item))
+          );
+          const failed = results.find((result) => result.status === "rejected");
+          if (failed?.status === "rejected") throw failed.reason;
+          return results.find((result) => result.status === "fulfilled" && result.value === "SUBMITTED")
+            ? "SUBMITTED"
+            : results[0]!.status === "fulfilled" ? results[0]!.value : "IDLE";
         }
       }
 

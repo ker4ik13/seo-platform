@@ -12,13 +12,16 @@ import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adap
 import { REMOTE_WORKER_WARM_POLLS, remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
 import { workerTaskFinishLog, workerTaskLogContext, workerTaskStartLog } from "./worker-nodes/remote-worker-task-log.js";
 import { workerBuildHash } from "./worker-nodes/worker-build-version.js";
+import { keepHeartbeatUntilDrained } from "./worker-nodes/remote-worker-lifecycle.js";
+import { WorkerRankResultBatcher } from "./worker-nodes/worker-rank-result-batcher.js";
 
 const CLAIM_CADENCE_CHECK_MS=100;
 
 async function main():Promise<void> {
-  const config=await loadRemoteWorkerConfig(),buildHash=await workerBuildHash(),client=new WorkerHttpClient(config),controller=new AbortController();
+  const config=await loadRemoteWorkerConfig(),buildHash=await workerBuildHash(),client=new WorkerHttpClient(config),claimController=new AbortController(),heartbeatController=new AbortController();
+  const rankResults=new WorkerRankResultBatcher(client);
   process.stdout.write(`Воркер: сборка ${buildHash.slice(0,12)}\n`);
-  process.once("SIGINT",()=>controller.abort());process.once("SIGTERM",()=>controller.abort());
+  process.once("SIGINT",()=>claimController.abort());process.once("SIGTERM",()=>claimController.abort());
   const active=new Map<WorkerCapability,number>();let httpActive=0,cpuActive=0,inspectionReady=false,authenticationRejected=false;
   let effectiveCapacity = {
     httpSlots: config.httpSlots,
@@ -33,12 +36,12 @@ async function main():Promise<void> {
 
   async function heartbeat():Promise<void> {
     let previous="";
-    while(!controller.signal.aborted) {
+    while(!heartbeatController.signal.aborted) {
       try {
         if(config.malware) {try{await new ClamdMalwareScannerAdapter(config.malware).healthCheck();inspectionReady=true;}catch{inspectionReady=false;}}
         const node=parseWorkerNodeView(await client.post("heartbeat",{protocolVersion:1,httpSlots:config.httpSlots,rankSlots:config.rankSlots,cpuSlots:config.cpuSlots,
           memoryBytes:String(Math.min(totalmem(),process.constrainedMemory() || totalmem())),activeWorkItems:httpActive+cpuActive,
-          capabilitySlots:{...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0},buildHash},64*1024,5_000,controller.signal));
+          capabilitySlots:{...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0},buildHash},64*1024,5_000,heartbeatController.signal));
         if(node.id!==config.nodeId || node.protocolVersion!==1) throw new Error("Invalid worker identity");
         effectiveCapacity = {
           httpSlots: node.maxHttpSlots,
@@ -55,12 +58,12 @@ async function main():Promise<void> {
         const stateLabel=state==="online" ? "на связи" : state==="draining" ? "завершает задачи" : "выключен";
         if(state!==previous) {process.stdout.write(`Воркер ${config.nodeId}: ${stateLabel}\n`);previous=state;}
       } catch(error) {
-        if(controller.signal.aborted) break;
+        if(heartbeatController.signal.aborted) break;
         const state=error instanceof WorkerAuthenticationError ? "authentication rejected" : "control plane unavailable";
         if(state!==previous){process.stderr.write(`worker ${config.nodeId} ${state} · Воркер: ${error instanceof WorkerAuthenticationError ? "аутентификация отклонена" : "центр временно недоступен"}\n`);previous=state;}
         if(error instanceof WorkerAuthenticationError) suspendAuthentication();
       }
-      await wait(authenticationRejected ? 30_000 : config.heartbeatMs,controller.signal);
+      await wait(authenticationRejected ? 30_000 : config.heartbeatMs,heartbeatController.signal);
     }
   }
 
@@ -79,21 +82,21 @@ async function main():Promise<void> {
 
   async function schedule():Promise<void> {
     let lastPoll=0,observedCompletions=0,warmPollsRemaining=0;
-    while(!controller.signal.aborted) {
-      while(!controller.signal.aborted) {
+    while(!claimController.signal.aborted) {
+      while(!claimController.signal.aborted) {
         if(completedWork>observedCompletions)warmPollsRemaining=REMOTE_WORKER_WARM_POLLS;
         const delay=remoteWorkerClaimDelayMs(lastPoll,observedCompletions,completedWork,Date.now(),warmPollsRemaining);
         if(delay===0)break;
-        await wait(Math.min(delay,CLAIM_CADENCE_CHECK_MS),controller.signal);
+        await wait(Math.min(delay,CLAIM_CADENCE_CHECK_MS),claimController.signal);
       }
-      if(controller.signal.aborted)break;
+      if(claimController.signal.aborted)break;
       observedCompletions=completedWork;
       lastPoll=Date.now();
       if(authenticationRejected) continue;
       const httpSlots=Math.max(0,effectiveCapacity.httpSlots-httpActive),cpuSlots=Math.max(0,effectiveCapacity.cpuSlots-cpuActive);
       const slots=Object.fromEntries(workerCapabilities.map(capability=>[capability,Math.max(0,(capacities()[capability] ?? 0)-(active.get(capability) ?? 0))]));
       try {
-        const value=await client.post("claim",{httpSlots,cpuSlots,capabilitySlots:slots},32*1_048_576,30_000,controller.signal);
+        const value=await client.post("claim",{httpSlots,cpuSlots,capabilitySlots:slots},32*1_048_576,30_000,claimController.signal);
         if(!value || typeof value!=="object" || Array.isArray(value) || Object.keys(value).length!==3) throw new Error("Invalid claim batch");
         const batch=value as {work?:unknown;ranks?:unknown;cancelled?:unknown};if(!Array.isArray(batch.work) || !Array.isArray(batch.ranks) || !Array.isArray(batch.cancelled) || batch.cancelled.length>256 || batch.cancelled.some(id=>typeof id!=="string") || batch.work.length+batch.ranks.length>640) throw new Error("Invalid claim batch");
         for(const id of batch.cancelled)cancellations.get(id)?.();
@@ -106,16 +109,16 @@ async function main():Promise<void> {
           if(task.resource==="CPU") return runCpu(task,config,client,stop=>cancellations.set(task.id,stop)).finally(done);
           const abort=new AbortController();cancellations.set(task.id,()=>abort.abort());return runWork(task,config,client,abort.signal).finally(done);
         });
-        for(const task of ranks) start(task,"HTTP",()=>runRank(task,client));
+        for(const task of ranks) start(task,"HTTP",()=>runRank(task,rankResults));
       } catch(error) {
-        if(controller.signal.aborted)break;
-        if(error instanceof WorkerAuthenticationError){suspendAuthentication();await wait(5_000,controller.signal);}
-        if(error instanceof WorkerPausedError) await wait(5_000,controller.signal);
+        if(claimController.signal.aborted)break;
+        if(error instanceof WorkerAuthenticationError){suspendAuthentication();await wait(5_000,claimController.signal);}
+        if(error instanceof WorkerPausedError) await wait(5_000,claimController.signal);
       }
     }
     await Promise.allSettled(running);
   }
-  await Promise.all([heartbeat(),schedule()]);
+  await keepHeartbeatUntilDrained(heartbeatController,heartbeat(),schedule);
 }
 
 async function runWork(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,signal:AbortSignal):Promise<string|undefined> {
@@ -138,10 +141,10 @@ async function runCpu(task:RemoteWorkTask,config:RemoteWorkerConfig,client:Worke
   });
 }
 
-async function runRank(task:RemoteRankPollTaskV1,client:WorkerHttpClient):Promise<string|undefined> {
+async function runRank(task:RemoteRankPollTaskV1,results:WorkerRankResultBatcher):Promise<string|undefined> {
   const outcome=await new XmlStockRankConnector(fetch,task.softId).fetchResult(task.providerTaskId,task.secret,task.timeoutMs,rankProviderRequestIntent(task.requestSnapshot),task.providerProgress);
-  const body={schemaVersion:"worker-rank-poll-result@1",ticket:task.ticket,requestSnapshot:task.requestSnapshot,outcome};
-  for(let attempt=0;attempt<3;attempt++){try{await client.post("rank/complete",body,64*1024,10_000);return undefined;}catch(error){if(error instanceof WorkerAuthenticationError || attempt===2)throw error;await wait(500*(attempt+1),new AbortController().signal);}}
+  await results.complete({schemaVersion:"worker-rank-poll-result@1",ticket:task.ticket,requestSnapshot:task.requestSnapshot,outcome});
+  return undefined;
 }
 
 function wait(milliseconds:number,signal:AbortSignal):Promise<void>{return new Promise(resolve=>{if(signal.aborted)return resolve();const finished=()=>{clearTimeout(timer);signal.removeEventListener("abort",finished);resolve();};const timer=setTimeout(finished,milliseconds);signal.addEventListener("abort",finished,{once:true});});}

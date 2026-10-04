@@ -155,7 +155,10 @@ export class AdaptiveRankLaneDemand {
     }
   }
 
-  public nextBurst(): number {
+  public nextBurst(pendingSubmitWaves = 0): number {
+    if (!Number.isSafeInteger(pendingSubmitWaves) || pendingSubmitWaves < 0 || pendingSubmitWaves > 100) {
+      throw new TypeError("Invalid pending rank submit wave count");
+    }
     const useful = this.running + this.completed;
     if (this.capacityDelayed > 0 || this.idle > 0) {
       this.target = Math.min(
@@ -177,6 +180,11 @@ export class AdaptiveRankLaneDemand {
     this.completed = 0;
     this.capacityDelayed = 0;
     this.idle = 0;
+    // Match lanes to 16-item submit waves. A cached window is a demand signal,
+    // not permission to multiply the entire batch by every available lane.
+    if (pendingSubmitWaves > 0) {
+      this.target = Math.min(this.maximum, Math.max(pendingSubmitWaves, this.running));
+    }
     return Math.min(this.maximum, Math.max(this.target, this.running + 1));
   }
 }

@@ -126,3 +126,17 @@ test("rank demand opens more probes while provider HTTP calls are pending", () =
   demand.finished("POLL_PENDING");
   assert.equal(demand.nextBurst(), 5);
 });
+
+test("a cached submit backlog opens only enough lanes for its 16-item waves", () => {
+  const demand = new AdaptiveRankLaneDemand(32);
+  assert.equal(demand.nextBurst(), 1);
+  demand.started();
+  demand.finished("SUBMITTED");
+  assert.equal(demand.nextBurst(Math.ceil(99 / 16)), 7);
+  for (let slot = 0; slot < 7; slot++) {
+    demand.started();
+    demand.finished("IDLE");
+  }
+  assert.equal(demand.nextBurst(), 1, "the pool must shrink again when the backlog disappears");
+  assert.throws(() => demand.nextBurst(101), TypeError);
+});

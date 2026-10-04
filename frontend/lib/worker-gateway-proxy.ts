@@ -3,7 +3,7 @@ import { readBoundedRequestBody } from "./platform-api-proxy.ts";
 import { workerGatewayInternalOrigin } from "./server-runtime-origin.ts";
 
 const ALLOWED_PATHS = new Set([
-  "heartbeat", "claim", "rank/claim", "rank/complete",
+  "heartbeat", "claim", "rank/claim", "rank/complete", "rank/complete-batch",
   "work/complete", "work/upload/init", "work/upload/parts"
 ]);
 const WORKER_TOKEN = /^Bearer wn_[A-Za-z0-9_-]{43}$/u;
@@ -23,7 +23,7 @@ export async function proxyWorkerGateway(request: NextRequest, path: readonly st
     request.headers.get("content-type")?.split(";", 1)[0] !== "application/json") {
     return failure(403, "FORBIDDEN");
   }
-  const maximum = route === "rank/complete" ? 16 * 1_048_576 : 8 * 1_048_576;
+  const maximum = route === "rank/complete-batch" ? 1_048_576 : route === "rank/complete" ? 16 * 1_048_576 : 8 * 1_048_576;
   const length = Number(request.headers.get("content-length") ?? "0");
   if (!Number.isSafeInteger(length) || length < 0 || length > maximum) return failure(413, "FILE_TOO_LARGE");
   const body = await readBoundedRequestBody(request, maximum, 30_000);

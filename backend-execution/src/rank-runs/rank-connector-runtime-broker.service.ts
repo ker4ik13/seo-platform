@@ -58,6 +58,12 @@ class RankCandidateWindow {
   private emptyUntil = 0;
   private readonly recent: Array<{ readonly id: string; readonly at: number }> = [];
 
+  public pendingCount(): number {
+    return Date.now() - this.fetchedAt <= SUBMIT_CANDIDATE_TTL_MS
+      ? this.candidates.length
+      : 0;
+  }
+
   public async next(
     load: (excluded: readonly string[]) => Promise<readonly RankCandidate[]>
   ): Promise<RankCandidate | undefined> {
@@ -73,9 +79,27 @@ class RankCandidateWindow {
       }
       await this.refill;
     }
-    const candidate = this.candidates.shift();
-    if (candidate) this.recent.push({ id: candidate.executionId, at: Date.now() });
-    return candidate;
+    return this.takeCached(1)[0];
+  }
+
+  public takeCached(limit: number): readonly RankCandidate[] {
+    if (Date.now() - this.fetchedAt > SUBMIT_CANDIDATE_TTL_MS) {
+      this.candidates = [];
+    }
+    const taken = this.candidates.splice(0, limit);
+    const now = Date.now();
+    for (const candidate of taken) {
+      this.recent.push({ id: candidate.executionId, at: now });
+    }
+    return taken;
+  }
+
+  public async take(
+    limit: number,
+    load: (excluded: readonly string[]) => Promise<readonly RankCandidate[]>
+  ): Promise<readonly RankCandidate[]> {
+    const first = await this.next(load);
+    return first ? [first, ...this.takeCached(limit - 1)] : [];
   }
 
   private async reload(
@@ -162,6 +186,11 @@ export class RankConnectorRuntimeBrokerService {
 
   public constructor(private readonly prisma: PrismaService) {}
 
+  /** A local, secret-free hint from the already fetched submit window. */
+  public pendingSubmitCandidates(): number {
+    return this.submitCandidates.pendingCount();
+  }
+
   public async claimSubmit(
     leaseOwner: string,
     leaseSeconds: number,
@@ -190,6 +219,32 @@ export class RankConnectorRuntimeBrokerService {
       if (rows.length !== 1 || !rows[0]) invalid("submit claim cardinality");
       return claim(rows[0], leaseOwner);
     });
+  }
+
+  /** One candidate scan and one PostgreSQL round-trip for a bounded wave.
+   * The existing targeted function still fences every individual execution.
+   */
+  public async claimXmlStockSubmitBatch(
+    leaseOwner: string,
+    leaseSeconds: number,
+    limit: number
+  ): Promise<readonly RankConnectorSubmitClaim[]> {
+    validateClaimInput(leaseOwner, leaseSeconds, XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 32) {
+      throw new TypeError("Invalid rank submit batch size");
+    }
+    const candidates = this.submitCandidates.takeCached(limit);
+    if (candidates.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<readonly SubmitClaimRow[]>(Prisma.sql`
+      SELECT claimed.* FROM unnest(${excludedCandidateIds(candidates.map((item) => item.executionId))}) AS candidate("executionId")
+      CROSS JOIN LATERAL public.claim_rank_connector_submit_targeted(
+        ${leaseOwner}::text, ${leaseSeconds}::integer,
+        ${XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION}::text,
+        candidates."executionId"
+      ) claimed
+    `);
+    if (rows.length > limit) invalid("rank submit batch cardinality");
+    return rows.map((row) => claim(row, leaseOwner));
   }
 
   private async claimWhenDue<T>(
@@ -461,12 +516,7 @@ export class RankConnectorRuntimeBrokerService {
     if (connectorVersion === XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION) {
       for (let attempt = 0; attempt < SUBMIT_CANDIDATE_MAX_ATTEMPTS; attempt++) {
         const key = leaseOwner.startsWith("remote:") ? leaseOwner.split(":")[1]! : "main";
-        let window = this.pollCandidates.get(key);
-        if (!window) {
-          if (this.pollCandidates.size >= 1_001) this.pollCandidates.delete(this.pollCandidates.keys().next().value!);
-          window = new RankCandidateWindow();
-          this.pollCandidates.set(key, window);
-        }
+        const window = this.pollWindow(key);
         const candidate = await window.next(
           (excluded) => this.loadPollCandidates(connectorVersion, excluded, leaseOwner)
         );
@@ -501,6 +551,46 @@ export class RankConnectorRuntimeBrokerService {
       if (rows.length !== 1 || !rows[0]) invalid("poll claim cardinality");
       return this.pollClaim(rows[0], leaseOwner);
     });
+  }
+
+  private pollWindow(key: string): RankCandidateWindow {
+    let window = this.pollCandidates.get(key);
+    if (!window) {
+      if (this.pollCandidates.size >= 1_001) this.pollCandidates.delete(this.pollCandidates.keys().next().value!);
+      window = new RankCandidateWindow();
+      this.pollCandidates.set(key, window);
+    }
+    return window;
+  }
+
+  /** Fetch and fence a remote rank wave in one DB call, not one call per page. */
+  public async claimXmlStockPollBatch(
+    leaseOwner: string,
+    leaseSeconds: number,
+    limit: number
+  ): Promise<{ readonly claims: readonly RankConnectorPollClaim[]; readonly examined: number }> {
+    validateClaimInput(leaseOwner, leaseSeconds, XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 32) {
+      throw new TypeError("Invalid rank poll batch size");
+    }
+    const key = leaseOwner.startsWith("remote:") ? leaseOwner.split(":")[1]! : "main";
+    const candidates = await this.pollWindow(key).take(
+      limit,
+      (excluded) => this.loadPollCandidates(
+        XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION, excluded, leaseOwner
+      )
+    );
+    if (candidates.length === 0) return { claims: [], examined: 0 };
+    const rows = await this.prisma.$queryRaw<readonly PollClaimRow[]>(Prisma.sql`
+      SELECT claimed.* FROM unnest(${excludedCandidateIds(candidates.map((item) => item.executionId))}) AS candidate("executionId")
+      CROSS JOIN LATERAL public.claim_rank_connector_poll_targeted(
+        ${leaseOwner}::text, ${leaseSeconds}::integer,
+        ${XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION}::text,
+        candidates."executionId"
+      ) claimed
+    `);
+    if (rows.length > limit) invalid("rank poll batch cardinality");
+    return { claims: rows.map((row) => this.pollClaim(row, leaseOwner)), examined: candidates.length };
   }
 
   private async loadPollCandidates(

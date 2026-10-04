@@ -59,7 +59,7 @@ test("remote rank poll uses node cap and shared physical key, then fences comple
     async authenticateForCompletion() { events.push("authenticated"); }
   } as unknown as WorkerNodeService;
   const broker = {
-    async claimPoll() { return claim; },
+    async claimXmlStockPollBatch() { return { claims: [claim], examined: 1 }; },
     async readBillingSettlement() { return { required: paid, grantId: id.lease }; },
     async completePoll(_claim: unknown, input: { readonly outcome: string }) {
       events.push(`completed:${input.outcome}`);
@@ -139,14 +139,14 @@ test("remote rank poll uses node cap and shared physical key, then fences comple
     nextPage: 1,
     documents: [{ position: 1, url: "https://example.com/" }]
   };
-  assert.deepEqual(await gateway.complete(
-    id.node, "node-token", paidTask.ticket, request,
-    {
-      status: "CHECKPOINTED",
-      progress,
-      hash: xmlStockRankPageProgressHash(progress)
-    }
-  ), { status: "POLL_WAIT" });
+  const authenticatedBeforeBatch = events.filter((event) => event === "authenticated").length;
+  assert.deepEqual(await gateway.completeBatch(id.node, "node-token", [
+    { schemaVersion: "worker-rank-poll-result@1", ticket: paidTask.ticket,
+      requestSnapshot: request, outcome: { status: "CHECKPOINTED", progress, hash: xmlStockRankPageProgressHash(progress) } },
+    { schemaVersion: "worker-rank-poll-result@1", ticket: "invalid",
+      requestSnapshot: request, outcome: { status: "PENDING", retryAfterSeconds: 1 } }
+  ]), [true, false]);
+  assert.equal(events.filter((event) => event === "authenticated").length, authenticatedBeforeBatch + 1);
   assert.deepEqual(events.slice(-4), [
     "quota-observed", "capture", "completed:CHECKPOINTED", "released"
   ]);
@@ -163,9 +163,9 @@ test("one empty batch poll authenticates once and never polls per free slot", as
       }
     } as unknown as WorkerNodeService,
     {
-      async claimPoll() {
+      async claimXmlStockPollBatch() {
         claims += 1;
-        return null;
+        return { claims: [], examined: 0 };
       }
     } as unknown as RankConnectorRuntimeBrokerService,
     {} as IntegrationCredentialCryptoService,
@@ -184,23 +184,22 @@ test("one empty batch poll authenticates once and never polls per free slot", as
 
 test("one busy worker poll returns 64 fenced rank pages without unbounded claims", async () => {
   let claimed = 0;
-  let active = 0;
-  let maximum = 0;
+  let databaseCalls = 0;
   const request = requestIntent();
   const gateway = new WorkerRankGatewayService(
     { authorizeForWork: async () => ({ httpSlots: 100, cpuSlots: 2 }) } as unknown as WorkerNodeService,
     {
-      claimPoll: async (owner: string) => {
-        if (claimed >= 64) return null;
-        claimed++;
-        active++;
-        maximum = Math.max(maximum, active);
+      claimXmlStockPollBatch: async (owner: string, _seconds: number, size: number) => {
+        databaseCalls++;
         await delay(2);
-        active--;
-        return { provider: "XMLSTOCK", workspaceId: id.workspace, credentialId: id.credential,
-          executionId: randomUUID(), request, encryptedCredential: { keyVersion: 1 },
-          providerTaskId: `task-${claimed}`, leaseOwner: owner, leaseToken: randomUUID(), leaseGeneration: 1,
-          executionVersion: 1, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() };
+        const claims = Array.from({ length: Math.min(size, 64 - claimed) }, () => {
+          claimed++;
+          return { provider: "XMLSTOCK", workspaceId: id.workspace, credentialId: id.credential,
+            executionId: randomUUID(), request, encryptedCredential: { keyVersion: 1 },
+            providerTaskId: `task-${claimed}`, leaseOwner: owner, leaseToken: randomUUID(), leaseGeneration: 1,
+            executionVersion: 1, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() };
+        });
+        return { claims, examined: claims.length };
       },
       readBillingSettlement: async () => ({ required: false })
     } as unknown as RankConnectorRuntimeBrokerService,
@@ -216,7 +215,7 @@ test("one busy worker poll returns 64 fenced rank pages without unbounded claims
   const tasks = await gateway.claimBatch(id.node, "token", 100, 500);
   assert.equal(tasks.length, 64);
   assert.equal(claimed, 64);
-  assert.ok(maximum > 1 && maximum <= 32);
+  assert.equal(databaseCalls, 4, "64 pages need four SQL round-trips, not 64");
   assert.equal(new Set(tasks.map((task) => parseWorkerRankTask(task).ticket)).size, 64);
 });
 
@@ -232,12 +231,12 @@ test("a full Live key does not starve Google XML or Yandex XML in the same worke
   const gateway = new WorkerRankGatewayService(
     { authorizeForWork: async () => ({ httpSlots: 32 }) } as unknown as WorkerNodeService,
     {
-      claimPoll: async (owner: string) => {
-        const request = requests.shift();
-        return request ? { provider: "XMLSTOCK", workspaceId: id.workspace, credentialId: id.credential,
+      claimXmlStockPollBatch: async (owner: string, _seconds: number, size: number) => {
+        const claims = Array.from({ length: size }, () => requests.shift()).filter((request): request is RankProviderRequestIntentV1 => request !== undefined).map(request => ({ provider: "XMLSTOCK", workspaceId: id.workspace, credentialId: id.credential,
           executionId: id.execution, request, encryptedCredential: { keyVersion: 1 },
           providerTaskId: "task-123", leaseOwner: owner, leaseToken: id.lease, leaseGeneration: 1,
-          executionVersion: 1, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() } : null;
+          executionVersion: 1, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() }));
+        return { claims, examined: claims.length };
       },
       deferPollForProviderCapacity: async (...args: unknown[]) => { deferred.push(args); },
       readBillingSettlement: async () => ({ required: false })
@@ -262,7 +261,7 @@ test("full provider quotas use a bounded scan, not a retry loop without end", as
   let claims = 0;
   const gateway = new WorkerRankGatewayService(
     { authorizeForWork: async () => ({ httpSlots: 32 }) } as unknown as WorkerNodeService,
-    { claimPoll: async () => { claims++; return { provider: "XMLSTOCK", providerProgressInvalid: true }; }, completePoll: async () => ({ status: "FAILED_FINAL" }) } as unknown as RankConnectorRuntimeBrokerService,
+    { claimXmlStockPollBatch: async (_owner: string, _seconds: number, size: number) => { claims += size; return { claims: Array.from({ length: size }, () => ({ provider: "XMLSTOCK", providerProgressInvalid: true })), examined: size }; }, completePoll: async () => ({ status: "FAILED_FINAL" }) } as unknown as RankConnectorRuntimeBrokerService,
     {} as IntegrationCredentialCryptoService, {} as PlatformCredentialPoolSelectionService,
     {} as XmlStockHttpQuotaLimiter, {} as RankBillingSettlementClient,
     { workerGatewayEnabled: true, integrationCredentials: { role: "BOTH" } } as AppConfig
@@ -275,7 +274,7 @@ test("a saturated rank pass obeys the caller's short budget", async () => {
   let probes = 0;
   const gateway = new WorkerRankGatewayService(
     { authorizeForWork: async () => ({ httpSlots: 128 }) } as unknown as WorkerNodeService,
-    { claimPoll: async () => { probes++; return { provider: "XMLSTOCK", providerProgressInvalid: true }; },
+    { claimXmlStockPollBatch: async (_owner: string, _seconds: number, size: number) => { probes += size; return { claims: Array.from({ length: size }, () => ({ provider: "XMLSTOCK", providerProgressInvalid: true })), examined: size }; },
       completePoll: async () => { await new Promise(resolve => setTimeout(resolve, 2)); return { status: "FAILED_FINAL" }; } } as unknown as RankConnectorRuntimeBrokerService,
     {} as IntegrationCredentialCryptoService, {} as PlatformCredentialPoolSelectionService,
     {} as XmlStockHttpQuotaLimiter, {} as RankBillingSettlementClient,
@@ -283,7 +282,7 @@ test("a saturated rank pass obeys the caller's short budget", async () => {
   );
   const startedAt = Date.now();
   assert.deepEqual(await gateway.claimBatch(id.node, "token", 128, 20), []);
-  assert.ok(probes > 0 && probes < 128);
+  assert.ok(probes > 0 && probes <= 128, "a saturated pass has a fixed candidate ceiling");
   assert.ok(Date.now() - startedAt < 200);
 });
 

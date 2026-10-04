@@ -5,6 +5,7 @@ import {
   ServiceUnavailableException
 } from "@nestjs/common";
 import type { RemoteRankPollTaskV1 } from "@seo-platform/contracts";
+import type { RemoteRankPollResultV1 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
@@ -16,9 +17,9 @@ import {
 import { RankBillingSettlementClient } from "../platform-api/rank-billing-settlement.client.js";
 import {
   RankConnectorRuntimeBrokerService,
+  type RankConnectorPollClaim,
   type RankConnectorPollLease
 } from "../rank-runs/rank-connector-runtime-broker.service.js";
-import { XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION } from "../rank-runs/rank-execution-evidence.js";
 import {
   rankProviderRequestIntent,
   rankProviderRequestIntentHash,
@@ -42,6 +43,7 @@ const MAX_CANDIDATES_PER_POLL = 128;
 // leave time to serialize and return every leased task before the agent's
 // 30-second HTTP timeout, even when one physical key is saturated.
 const CLAIM_BATCH_BUDGET_MS = 5_000;
+const CLAIM_DATABASE_WAVE_SIZE = 16;
 
 @Injectable()
 export class WorkerRankGatewayService {
@@ -70,45 +72,40 @@ export class WorkerRankGatewayService {
     const tasks: RemoteRankPollTaskV1[] = [];
     const deadline = Date.now() + budgetMs;
     let candidates = 0;
-    let width = 1;
     while (candidates < MAX_CANDIDATES_PER_POLL && tasks.length < count && Date.now() < deadline) {
-      const size = Math.min(width, count - tasks.length, MAX_CANDIDATES_PER_POLL - candidates);
-      const outcomes = await Promise.allSettled(Array.from({ length: size }, () =>
-        this.claimOne(nodeId, capacity.httpSlots)
+      const size = Math.min(CLAIM_DATABASE_WAVE_SIZE, count - tasks.length, MAX_CANDIDATES_PER_POLL - candidates);
+      const batch = await this.broker.claimXmlStockPollBatch(
+        `remote:${nodeId}:${randomUUID()}`,
+        REMOTE_POLL_LEASE_SECONDS,
+        size
+      );
+      if (batch.examined === 0) break;
+      candidates += batch.examined;
+      const outcomes = await Promise.allSettled(batch.claims.map((claim) =>
+        this.prepareClaim(claim, nodeId, capacity.httpSlots)
       ));
-      candidates += size;
-      let exhausted = false;
       let failure: unknown;
       let hasFailure = false;
       for (const outcome of outcomes) {
         if (outcome.status === "rejected") {
           failure ??= outcome.reason;
           hasFailure = true;
-        } else if (outcome.value === null) exhausted = true;
-        else if (outcome.value !== "DEFERRED") tasks.push(outcome.value);
+        } else if (outcome.value !== "DEFERRED") tasks.push(outcome.value);
       }
       if (hasFailure) {
         if (tasks.length === 0) throw failure ?? new Error("Unable to claim remote rank batch");
         break;
       }
-      if (exhausted) break;
-      // Probe once when idle, then grow only while work exists. This fills a
-      // busy node without issuing 64 empty SQL claims every five seconds.
-      width = Math.min(32, width * 2, MAX_CANDIDATES_PER_POLL - candidates);
+      if (batch.examined < size) break;
     }
     return tasks;
   }
 
-  private async claimOne(
+  private async prepareClaim(
+    claim: RankConnectorPollClaim,
     nodeId: string,
     httpSlots: number
-  ): Promise<RemoteRankPollTaskV1 | "DEFERRED" | null> {
-    const claim = await this.broker.claimPoll(
-      `remote:${nodeId}:${randomUUID()}`,
-      REMOTE_POLL_LEASE_SECONDS,
-      XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
-    );
-    if (!claim) return null;
+  ): Promise<RemoteRankPollTaskV1 | "DEFERRED"> {
     if (claim.provider !== "XMLSTOCK" || claim.providerProgressInvalid) {
       await this.broker.completePoll(claim, {
         outcome: "REJECTED", errorCode: "INVALID_PROVIDER_RESPONSE"
@@ -201,6 +198,35 @@ export class WorkerRankGatewayService {
   ): Promise<{ readonly status: string }> {
     this.assertEnabled();
     await this.nodes.authenticateForCompletion(nodeId, nodeToken);
+    return this.completeAuthenticated(nodeId, ticketValue, requestValue, outcomeValue);
+  }
+
+  public async completeBatch(
+    nodeId: string,
+    nodeToken: string,
+    entries: readonly RemoteRankPollResultV1[]
+  ): Promise<readonly boolean[]> {
+    this.assertEnabled();
+    if (entries.length < 1 || entries.length > 8) throw new TypeError("Invalid rank result batch size");
+    await this.nodes.authenticateForCompletion(nodeId, nodeToken);
+    return Promise.all(entries.map(async (entry) => {
+      try {
+        await this.completeAuthenticated(nodeId, entry.ticket, entry.requestSnapshot, entry.outcome);
+        return true;
+      } catch {
+        // One malformed/stale receipt must not discard the acknowledgements
+        // of its siblings. The worker retries only false entries.
+        return false;
+      }
+    }));
+  }
+
+  private async completeAuthenticated(
+    nodeId: string,
+    ticketValue: unknown,
+    requestValue: unknown,
+    outcomeValue: unknown
+  ): Promise<{ readonly status: string }> {
     const ticket = verifyRankPollTicket(this.config, ticketValue, nodeId);
     const lease: RankConnectorPollLease = {
       workspaceId: ticket.workspaceId,

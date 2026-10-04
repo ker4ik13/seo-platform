@@ -12,7 +12,8 @@ test("connector dispatcher probes cheaply and fills the rank pool after activity
     /const rankDispatchStride = config\.connectorRuntime\.rankConcurrency;/u
   );
   assert.match(source, /new AdaptiveRankLaneDemand\(/u);
-  assert.match(source, /const rankBurst = rankDemand\.nextBurst\(\)/u);
+  assert.match(source, /const pendingRankSubmit = rankRuntime\.pendingSubmitCandidates\(\)/u);
+  assert.match(source, /const rankBurst = rankDemand\.nextBurst\(Math\.ceil\(pendingRankSubmit \/ 16\)\)/u);
   assert.match(source, /rankDemand\.started\(\)/u);
   assert.match(source, /rankDemand\.finished\(outcome\)/u);
   assert.match(source, /activeFrequencyDispatchUntil/u);
