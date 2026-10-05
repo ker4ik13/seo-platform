@@ -413,7 +413,7 @@ capacity между всеми своими проектами и connector repl
 понижают окно и включают cooldown, а серия успешных ответов постепенно
 восстанавливает базовую ёмкость. Redis остаётся только transient capacity
 coordination и работает fail-closed; Job/lease/progress source of truth —
-PostgreSQL. Базовые окна одного физического ключа: Yandex Live — `10 concurrent /
+PostgreSQL. Базовые окна одного физического ключа: Yandex Live — `20 concurrent /
 10 RPS`, Turbo — `50 / 50`, Google XML — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —
 `10 / 10`. Сверху действует отдельный общий предел 64 внешних XMLStock HTTP-вызовов.
 Односекундный предел сглаживается общими для replicas окнами по
@@ -440,7 +440,12 @@ tenant/credential/route/grant/lease проверками и атомарным �
 `CLAIMED`. Кандидатный список не является резервом; после падения процесса
 другой worker может занять ещё не claimed executions. Claims одного Job
 локально сериализуются из-за canonical lock родительского Job, а число
-одновременных тяжёлых claims ограничено четырьмя на процесс. Отозванный
+одновременных тяжёлых claims ограничено четырьмя на процесс. Внутри targeted
+claim предварительно читается только один execution по primary key с проверкой
+срока grant и версии коннектора; после него Job блокируется отдельным точным
+tenant-scoped запросом. Все дочерние строки и актуальный Job затем повторно
+проверяются под блокировками в прежнем порядке. Так многотабличный JOIN не
+планируется на каждый ключ перед claim. Отозванный
 кандидат пропускается без HTTP; Redis не хранит API-ключи или состояние Job.
 
 XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос

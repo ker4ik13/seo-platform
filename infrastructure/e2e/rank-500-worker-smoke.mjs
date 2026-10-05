@@ -13,6 +13,7 @@ import { SessionService } from "../../backend-core/modules/api/dist/identity/ses
 import { AuditService } from "../../backend-core/modules/api/dist/audit/audit.service.js";
 import { OutboxService } from "../../backend-core/modules/api/dist/outbox/outbox.service.js";
 import { PrismaService as JobsPrisma } from "../../backend-execution/dist/database/prisma.service.js";
+import { XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION } from "../../backend-execution/dist/rank-runs/rank-execution-evidence.js";
 import { WorkerNodeService } from "../../backend-execution/dist/worker-nodes/worker-node.service.js";
 
 assert.equal(process.env.SEO_PLATFORM_RANK500_CONFIRM, "PAID_XMLSTOCK_UP_TO_20_RUB");
@@ -20,6 +21,8 @@ const keywordCount = Number(process.env.SEO_PLATFORM_RANK_TEST_KEYWORDS ?? "500"
 assert.ok(Number.isSafeInteger(keywordCount) && keywordCount >= 1 && keywordCount <= 500);
 const recoveryMode = process.env.SEO_PLATFORM_RANK_TEST_GRANT_RECOVERY === "true";
 if (recoveryMode) assert.equal(keywordCount, 1, "grant recovery smoke uses exactly one keyword");
+const diagnosticHoldMs = Number(process.env.SEO_PLATFORM_RANK_TEST_HOLD_MS ?? "0");
+assert.ok(Number.isSafeInteger(diagnosticHoldMs) && diagnosticHoldMs >= 0 && diagnosticHoldMs <= 300_000);
 const timeoutMs = Number(process.env.SEO_PLATFORM_RANK_TEST_TIMEOUT_MS ?? String(15 * 60_000));
 assert.ok(Number.isSafeInteger(timeoutMs) && timeoutMs >= 60_000 && timeoutMs <= 15 * 60_000);
 const workspaceId = process.env.SEO_PLATFORM_RANK500_WORKSPACE_ID;
@@ -39,6 +42,9 @@ const config = loadAppConfig({ ...runtime, NODE_ENV: "test", AUTH_ACCESS_TOKEN_T
   WEB_PUBLIC_URL: base, DATABASE_URL: `postgresql://platform_owner:${encodeURIComponent(runtime.PLATFORM_DATABASE_OWNER_PASSWORD)}@127.0.0.1:5432/platform_db` });
 const platform = new PlatformPrisma(config);
 const jobs = new JobsPrisma({ databaseUrl: `postgresql://jobs_owner:${encodeURIComponent(runtime.JOBS_DATABASE_OWNER_PASSWORD)}@127.0.0.1:5432/jobs_db`, databasePoolMax: 2, processRole: "HTTP" });
+const connector = recoveryMode
+  ? new JobsPrisma({ databaseUrl: `postgresql://jobs_connector:${encodeURIComponent(runtime.JOBS_CONNECTOR_DATABASE_PASSWORD)}@127.0.0.1:5432/jobs_db`, databasePoolMax: 1, processRole: "CONNECTOR_WORKER" })
+  : undefined;
 const nodes = new WorkerNodeService(jobs);
 let memberId, userId, nodeId, agent, client, operationId, projectId, command;
 let agentLog = "";
@@ -168,9 +174,14 @@ try {
   operationId = createdRun.id;
   operationStartedAt = Date.now();
   report("operation_started", { operationId, projectId });
+  if (recoveryMode && diagnosticHoldMs > 0) {
+    report("diagnostic_hold", { durationMs: diagnosticHoldMs });
+    await delay(diagnosticHoldMs);
+  }
   const deadline = Date.now() + timeoutMs;
   if (recoveryMode) {
     let recovered = false;
+    let claimVerified = false;
     while (Date.now() < deadline) {
       if (stopRequested) throw new Error("Rank recovery smoke interrupted");
       const attempts = await jobs.rankConnectorExecution.findMany({ where: { jobId: operationId },
@@ -180,7 +191,38 @@ try {
       assert.ok(attempts.every(attempt => attempt.submitAttemptCount === 0 &&
         attempt.submitBytesStartedAt === null && attempt.providerTaskId === null),
       "grant recovery smoke must not send a paid provider request");
-      if (attempts.length >= 2) {
+      if (!claimVerified && attempts.length > 0 && connector) {
+        const candidates = await connector.$queryRawUnsafe(
+          'SELECT "executionId"::text AS "executionId", "jobId"::text AS "jobId" FROM public.list_rank_connector_submit_candidates($1::text,25,30,ARRAY[]::uuid[])',
+          XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
+        );
+        const candidate = candidates.find(row => row.jobId === operationId);
+        if (candidate) {
+          const start = Date.now();
+          let claimed = 0;
+          let claimSqlMs = 0;
+          try {
+            await connector.$transaction(async tx => {
+              const claimStart = Date.now();
+              const rows = await tx.$queryRawUnsafe(
+                'SELECT count(*)::int AS n FROM public.claim_rank_connector_submit_targeted($1::text,25,$2::text,$3::uuid)',
+                `rank-e2e-${randomUUID()}`, XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION, candidate.executionId
+              );
+              claimSqlMs = Date.now() - claimStart;
+              claimed = rows[0]?.n ?? 0;
+              if (claimed === 1) throw new Error("RANK_E2E_ROLLBACK");
+            }, { timeout: 5_000 });
+          } catch (error) {
+            if (!(error instanceof Error) || error.message !== "RANK_E2E_ROLLBACK") throw error;
+          }
+          const elapsedMs = Date.now() - start;
+          report("submit_claim_verified", { claimed, claimSqlMs, elapsedMs });
+          assert.equal(claimed, 1, "one real XMLStock execution must pass the full fenced claim");
+          assert.ok(claimSqlMs < 1_000, "targeted SQL claim must not take seconds");
+          claimVerified = true;
+        }
+      }
+      if (attempts.length >= 2 && claimVerified) {
         const delayAfterExpiryMs = attempts[1].createdAt.getTime() - attempts[0].authorizationExpiresAt.getTime();
         report("recovery_verified", { attempts: attempts.length, delayAfterExpiryMs });
         assert.ok(delayAfterExpiryMs >= 0 && delayAfterExpiryMs <= 15_000,
@@ -239,7 +281,7 @@ try {
   if (memberId) await cleanup("suspend_member", () => platform.workspaceMember.update({ where: { id: memberId }, data: { status: "SUSPENDED" } }));
   if (userId) await cleanup("suspend_user", () => platform.user.update({ where: { id: userId }, data: { status: "SUSPENDED" } }));
   await client?.dispose();
-  await Promise.all([platform.$disconnect(), jobs.$disconnect()]);
+  await Promise.all([platform.$disconnect(), jobs.$disconnect(), connector?.$disconnect()]);
   report("cleanup", { operationId: operationId ?? null, projectId: projectId ?? null, failures: cleanupFailures });
   if (cleanupFailures.length > 0) process.exitCode = 1;
 }
