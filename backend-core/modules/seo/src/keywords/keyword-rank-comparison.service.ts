@@ -314,19 +314,41 @@ export class KeywordRankComparisonService {
       ), keyword_identities AS MATERIALIZED (
         SELECT keyword.id AS target_id, keyword.id AS source_id
         FROM selected_keywords keyword
-        UNION ALL
+        UNION
         SELECT keyword.id AS target_id, merge.source_keyword_id AS source_id
         FROM selected_keywords keyword
         JOIN keyword_merges merge
           ON merge.workspace_id = ${scope.workspaceId}::uuid
           AND merge.project_id = ${scope.projectId}::uuid
           AND merge.target_keyword_id = keyword.id
+      ), candidate_snapshots AS MATERIALIZED (
+        SELECT identity.target_id, snapshot.id, snapshot.tracking_context_id,
+          snapshot.configuration_version, snapshot.job_id, snapshot.manifest_id,
+          snapshot.observed_at, snapshot.found, snapshot.position,
+          snapshot.ranking_url, snapshot.provider, configuration.depth
+        FROM keyword_identities identity
+        JOIN rank_snapshots snapshot
+          ON snapshot.workspace_id = ${scope.workspaceId}::uuid
+         AND snapshot.project_id = ${scope.projectId}::uuid
+         AND snapshot.keyword_id = identity.source_id
+        JOIN configurations configuration
+          ON configuration.context_id = snapshot.tracking_context_id
+         AND configuration.configuration_version = snapshot.configuration_version
+        WHERE snapshot.position_tracking_enabled
+          ${visibleSnapshot(scope, dimension)}
+      ), ranked_snapshots AS MATERIALIZED (
+        SELECT candidate.*,
+          row_number() OVER (
+            PARTITION BY candidate.target_id
+            ORDER BY candidate.observed_at DESC, candidate.id DESC
+          ) AS snapshot_order
+        FROM candidate_snapshots candidate
       )
-      SELECT keyword.id AS "keywordId", latest.id AS "snapshotId", latest.tracking_context_id AS "trackingContextId",
+      SELECT latest.target_id AS "keywordId", latest.id AS "snapshotId", latest.tracking_context_id AS "trackingContextId",
         latest.configuration_version AS "configurationVersion", latest.job_id AS "jobId", latest.observed_at AS "observedAt",
         latest.found, latest.position,
         ${projection.includePreviousPosition
-          ? Prisma.sql`previous.position`
+          ? Prisma.sql`CASE WHEN previous.found THEN previous.position ELSE NULL END`
           : Prisma.sql`NULL::integer`} AS "previousPosition",
         latest.ranking_url AS "rankingUrl", latest.provider, latest.depth,
         ${projection.includeExecution
@@ -338,23 +360,7 @@ export class KeywordRankComparisonService {
               coalesce(site_results.result_count, 0)
             )::bigint`
           : Prisma.sql`NULL::bigint`} AS "siteResultCount"
-      FROM selected_keywords keyword
-      CROSS JOIN LATERAL (
-        SELECT candidate.*, configuration.depth
-        FROM configurations configuration
-        CROSS JOIN LATERAL (
-          SELECT snapshot.* FROM rank_snapshots snapshot
-          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
-            AND snapshot.keyword_id IN (
-              SELECT identity.source_id FROM keyword_identities identity
-              WHERE identity.target_id = keyword.id
-            ) AND snapshot.tracking_context_id = configuration.context_id
-            AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled
-            ${visibleSnapshot(scope, dimension)}
-          ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
-        ) candidate
-        ORDER BY candidate.observed_at DESC, candidate.id DESC LIMIT 1
-      ) latest
+      FROM ranked_snapshots latest
       ${projection.includeExecution || projection.includeSiteResultCount
         ? Prisma.sql`JOIN rank_execution_manifests manifest
           ON manifest.workspace_id = ${scope.workspaceId}::uuid
@@ -385,31 +391,10 @@ export class KeywordRankComparisonService {
             )
         ) site_results ON true
       ` : Prisma.empty}
-      ${projection.includePreviousPosition ? Prisma.sql`LEFT JOIN LATERAL (
-        SELECT candidate.position FROM configurations configuration
-        CROSS JOIN LATERAL (
-          SELECT
-            CASE
-              WHEN snapshot.found = TRUE AND snapshot.position IS NOT NULL
-                THEN snapshot.position
-              ELSE NULL
-            END AS position,
-            snapshot.observed_at,
-            snapshot.id
-          FROM rank_snapshots snapshot
-          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
-            AND snapshot.keyword_id IN (
-              SELECT identity.source_id FROM keyword_identities identity
-              WHERE identity.target_id = keyword.id
-            ) AND snapshot.tracking_context_id = configuration.context_id
-            AND snapshot.configuration_version = configuration.configuration_version AND snapshot.position_tracking_enabled
-            AND (snapshot.observed_at, snapshot.id) < (latest.observed_at, latest.id)
-            ${visibleSnapshot(scope, dimension)}
-          ORDER BY snapshot.observed_at DESC, snapshot.id DESC LIMIT 1
-        ) candidate
-        ORDER BY candidate.observed_at DESC, candidate.id DESC LIMIT 1
-      ) previous ON true` : Prisma.empty}
-      ORDER BY keyword.id
+      ${projection.includePreviousPosition ? Prisma.sql`LEFT JOIN ranked_snapshots previous
+        ON previous.target_id = latest.target_id AND previous.snapshot_order = 2` : Prisma.empty}
+      WHERE latest.snapshot_order = 1
+      ORDER BY latest.target_id
     `);
   }
 
