@@ -65,7 +65,7 @@ test("XMLStock Redis quota shares a physical key and fairly lends global slots",
       const permit = await take(firstKey, "YANDEX_LIVE", 20);
       assert.equal(permit.allowed, true);
       livePermits.push(permit);
-      await new Promise((resolve) => setTimeout(resolve, 105));
+      if (index < 9) await new Promise((resolve) => setTimeout(resolve, 105));
     }
     assert.equal((await take(firstKey, "YANDEX_LIVE", 20)).allowed, false);
     assert.equal((await take(firstKey, "YANDEX_LIVE", 20, secondWorkspace)).allowed, false);
@@ -127,6 +127,41 @@ test("XMLStock Redis quota shares a physical key and fairly lends global slots",
       await recordXmlStockHttpQuotaSuccess(redis, { credentialId: fifthKey, product: "WORDSTAT" });
     }
     assert.equal(await redis.get(penaltyKey), null, "successful requests restore the full Wordstat limit");
+
+    // Reproduce the production case: several separated provider 55/503
+    // responses put one physical Wordstat key at penalty level four. A real
+    // Redis evaluation must still report ten HTTP slots, but only one RPS.
+    await redis.set(penaltyKey, "4", "PX", 600_000);
+    await redis.del(`${xmlStockHttpQuotaKey(fifthKey, "WORDSTAT")}:cooldown`);
+    const responses: unknown[] = [];
+    const observedRedis = { eval: async (...args: unknown[]) => {
+      const response = await (redis as unknown as {
+        eval: (...input: unknown[]) => Promise<unknown>;
+      }).eval(...args);
+      responses.push(response);
+      return response;
+    } } as never;
+    const wordstat = await acquireXmlStockHttpQuotaPermit(observedRedis, {
+      credentialId: fifthKey,
+      workspaceId: firstWorkspace,
+      product: "WORDSTAT",
+      leaseMs: 10_000,
+      member: randomUUID()
+    });
+    assert.equal(wordstat.allowed, true);
+    assert.deepEqual((responses[0] as number[]).slice(2), [10, 1]);
+    assert.equal((await acquireXmlStockHttpQuotaPermit(observedRedis, {
+      credentialId: fifthKey,
+      workspaceId: firstWorkspace,
+      product: "WORDSTAT",
+      leaseMs: 10_000,
+      member: randomUUID()
+    })).allowed, false, "the reduced one-RPS window is still enforced");
+    await release(wordstat);
+    for (let index = 0; index < 80; index += 1) {
+      await recordXmlStockHttpQuotaSuccess(redis, { credentialId: fifthKey, product: "WORDSTAT" });
+    }
+    assert.equal(await redis.get(penaltyKey), null, "successes restore full RPS without a restart");
   } finally {
     await redis?.quit().catch(() => undefined);
     server.kill("SIGTERM");

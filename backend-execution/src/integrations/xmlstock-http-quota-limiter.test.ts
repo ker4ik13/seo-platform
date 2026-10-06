@@ -65,6 +65,7 @@ test("simultaneous frequency and seasonality share the same physical Wordstat li
   for (const keyIndex of [2, 3, 7, 10]) assert.equal(calls[0]?.[keyIndex], calls[1]?.[keyIndex]);
   assert.equal(calls[0]?.[12], "10");
   assert.equal(calls[0]?.[13], "3");
+  assert.equal(calls[0]?.[20], "1", "Wordstat backs off RPS without collapsing concurrency");
 });
 
 test("acquires from only the selected credential and product bucket", async () => {
@@ -111,6 +112,7 @@ test("acquires from only the selected credential and product bucket", async () =
   assert.equal(calls[0]?.[16], "64");
   assert.equal(calls[0]?.[17], firstCredential);
   assert.equal(calls[0]?.[18], firstWorkspace);
+  assert.equal(calls[0]?.[20], "0", "other products retain their existing concurrency backoff");
 });
 
 test("returns a bounded retry without issuing a permit when a bucket is full", async () => {

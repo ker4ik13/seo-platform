@@ -45,6 +45,37 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
     return rows[0]!;
   }
 
+  await t.test("new Wordstat work moves to an idle node only after existing tickets close",async()=>{
+    const source=await job();
+    const first=await enqueue(source.scope,payload("first fenced request") as unknown as Record<string,unknown>);
+    assert.equal(first.nodeId,node.node.id);
+    const idle=await nodes.create({name:"Idle Wordstat SQL fixture",capabilities:["WORDSTAT"],
+      maxHttpSlots:8,maxCpuSlots:2,capabilityLimits:{WORDSTAT:8},useEnvCapacity:false});
+    try {
+      await nodes.heartbeat(idle.node.id,idle.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,
+        memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8}});
+      await nodes.setEnabled(idle.node.id,true);
+      const pinned=await enqueue(source.scope,payload("second fenced request") as unknown as Record<string,unknown>);
+      assert.equal(pinned.nodeId,node.node.id,"unfinished work keeps one fenced owner");
+      const claimed=await gateway.claim(node.node.id,node.token,{httpSlots:8,cpuSlots:0,capabilitySlots:{WORDSTAT:8}});
+      assert.deepEqual(new Set(claimed.map(task=>task.id)),new Set([first.id,pinned.id]));
+      for(const task of claimed)await gateway.complete(node.node.id,node.token,task.ticket,undefined,undefined,"WORKER_NOT_STARTED");
+      await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,
+        memoryBytes:8n*1024n**3n,activeWorkItems:8,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
+      const switched=await enqueue(source.scope,payload("next batch on idle node") as unknown as Record<string,unknown>);
+      assert.equal(switched.nodeId,idle.node.id,"the next safe batch uses the less busy node");
+      const next=await gateway.claim(idle.node.id,idle.token,{httpSlots:8,cpuSlots:0,capabilitySlots:{WORDSTAT:8}});
+      assert.equal(next.length,1);
+      assert.equal(next[0]?.id,switched.id);
+      await gateway.complete(idle.node.id,idle.token,next[0]!.ticket,undefined,undefined,"WORKER_NOT_STARTED");
+    } finally {
+      await nodes.remove(idle.node.id);
+      await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,
+        memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
+      await prisma.job.update({where:{id:source.id},data:{status:"CANCEL_REQUESTED",cancelRequestedAt:new Date(),version:{increment:1}}});
+    }
+  });
+
   await t.test("stored envelopes are key-free; exact committed receipts survive a lost node",async()=>{
     const source=await job(),request=payload("confirmed query") as unknown as Record<string,unknown>,assignment=await enqueue(source.scope,request);
     const tasks=await gateway.claim(node.node.id,node.token,{httpSlots:8,cpuSlots:2,capabilitySlots:{WORDSTAT:8,EXPORT:2}});

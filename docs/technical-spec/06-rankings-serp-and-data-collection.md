@@ -411,7 +411,10 @@ capacity между всеми своими проектами и connector repl
 только реальный внешний HTTP-вызов; `POLL_WAIT`, локальный submit Live и
 внутренние DB/SEO Data операции его не удерживают. Коды provider throttling
 понижают окно и включают cooldown, а серия успешных ответов постепенно
-восстанавливает базовую ёмкость. Redis остаётся только transient capacity
+восстанавливает базовую ёмкость. Для Wordstat ошибки превышения RPS 55/503
+понижают только RPS: они не уменьшают число разрешённых одновременных HTTP
+до одного. Другие продукты сохраняют свою отдельную политику снижения
+параллельности. Redis остаётся только transient capacity
 coordination и работает fail-closed; Job/lease/progress source of truth —
 PostgreSQL. Базовые окна одного физического ключа: Yandex Live — `20 concurrent /
 10 RPS`, Turbo — `50 / 50`, Google XML — `15 / 30`, Yandex Search API — `50 / 50`, Wordstat —

@@ -132,10 +132,13 @@ local global_concurrency = tonumber(ARGV[6])
 local physical_key = ARGV[7]
 local workspace_id = ARGV[8]
 local enforce_node = ARGV[9] ~= '1'
+local rate_only_penalty = ARGV[10] == '1'
 local smoothing_window_ms = 100
 local penalty = tonumber(redis.call('GET', KEYS[4]) or '0')
 local divisor = 2 ^ penalty
-local concurrency = math.max(1, math.floor(base_concurrency / divisor))
+-- Wordstat 55/503 report an RPS limit, not a concurrent-connection limit.
+-- Preserve its ten in-flight slots while backing off the request cadence.
+local concurrency = rate_only_penalty and base_concurrency or math.max(1, math.floor(base_concurrency / divisor))
 local rps = math.max(request_cost, math.floor(base_rps / divisor))
 
 local cooldown_ms = redis.call('PTTL', KEYS[3])
@@ -452,7 +455,8 @@ export async function acquireXmlStockHttpQuotaPermit(
       String(input.globalConcurrency ?? XMLSTOCK_GLOBAL_HTTP_CONCURRENCY),
       input.credentialId.toLowerCase(),
       input.workspaceId.toLowerCase(),
-      input.physicalOnly===true ? "1" : "0"
+      input.physicalOnly===true ? "1" : "0",
+      input.product==="WORDSTAT" ? "1" : "0"
     )
   );
   if (
