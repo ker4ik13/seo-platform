@@ -454,6 +454,17 @@ function addExpansionRow(
   }
 }
 
+/** A confirmed, unbilled response must not be reused as a paid worker result. */
+export function xmlStockWordstatRetryableReceiptCode(
+  status: number,
+  value: unknown
+): "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | undefined {
+  const failure = providerRequestFailure(status, value);
+  return failure?.retryable &&
+    (failure.code === "PROVIDER_RATE_LIMITED" || failure.code === "PROVIDER_UNAVAILABLE")
+    ? failure.code : undefined;
+}
+
 function providerRequestFailure(
   status: number,
   value: unknown

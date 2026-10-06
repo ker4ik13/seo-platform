@@ -9,6 +9,7 @@ import { IntegrationCredentialCryptoService } from "../integrations/integration-
 import { WorkerNodeService } from "./worker-node.service.js";
 import { RemoteWorkGatewayService } from "./remote-work-gateway.service.js";
 import { remoteProviderRequest } from "./remote-provider-request.js";
+import { RemoteWorkClientService } from "./remote-work-client.service.js";
 import { remoteCredentialFingerprint } from "./remote-work-scope.js";
 import type { RemoteWorkScope } from "./remote-work-client.service.js";
 
@@ -74,6 +75,30 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
         memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
       await prisma.job.update({where:{id:source.id},data:{status:"CANCEL_REQUESTED",cancelRequestedAt:new Date(),version:{increment:1}}});
     }
+  });
+
+  await t.test("unbilled Wordstat rejection is excluded without losing a paid success receipt",async()=>{
+    const source=await job(),request=payload("retryable provider response") as unknown as Record<string,unknown>;
+    const first=await enqueue(source.scope,request);
+    const claimed=await gateway.claim(node.node.id,node.token,{httpSlots:8,cpuSlots:0,capabilitySlots:{WORDSTAT:8}});
+    const task=claimed.find(item=>item.id===first.id);assert.ok(task);
+    const rejected={format:"HTTP",status:200,headers:{"content-type":"application/json"},bodyEncoding:"GZIP",
+      bodyBase64:gzipSync(Buffer.from('{"error":{"code":55}}')).toString("base64")};
+    await gateway.complete(node.node.id,node.token,task.ticket,rejected,undefined,undefined);
+    assert.equal((await enqueue(source.scope,request)).id,first.id,"existing receipts are replayed until classified");
+    const caller=new RemoteWorkClientService(prisma,config);
+    await caller.excludeUnbilledProviderReceipt({id:first.id,readToken:first.readToken},"PROVIDER_RATE_LIMITED");
+    await caller.excludeUnbilledProviderReceipt({id:first.id,readToken:first.readToken},"PROVIDER_RATE_LIMITED");
+    await assert.rejects(caller.excludeUnbilledProviderReceipt({id:first.id,readToken:randomUUID()},"PROVIDER_RATE_LIMITED"));
+    const next=await enqueue(source.scope,request);
+    assert.notEqual(next.id,first.id,"the provider may be retried after a confirmed unbilled rejection");
+    const retry=await gateway.claim(node.node.id,node.token,{httpSlots:8,cpuSlots:0,capabilitySlots:{WORDSTAT:8}});
+    const retryTask=retry.find(item=>item.id===next.id);assert.ok(retryTask);
+    const accepted={...rejected,bodyBase64:gzipSync(Buffer.from('{"totalCount":37}')).toString("base64")};
+    await gateway.complete(node.node.id,node.token,retryTask.ticket,accepted,undefined,undefined);
+    assert.equal((await enqueue(source.scope,request)).id,next.id,"the confirmed paid result remains idempotent");
+    assert.equal(await prisma.remoteWorkReplayExclusion.count({where:{taskId:first.id}}),1);
+    await prisma.job.update({where:{id:source.id},data:{status:"CANCEL_REQUESTED",cancelRequestedAt:new Date(),version:{increment:1}}});
   });
 
   await t.test("stored envelopes are key-free; exact committed receipts survive a lost node",async()=>{

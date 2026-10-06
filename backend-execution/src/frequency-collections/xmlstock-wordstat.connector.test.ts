@@ -6,6 +6,7 @@ import {
   wordstatQuery,
   xmlStockSeasonalityResult,
   xmlStockWordstatExpansionResult,
+  xmlStockWordstatRetryableReceiptCode,
   xmlStockWordstatResult
 } from "./xmlstock-wordstat.connector.js";
 
@@ -335,6 +336,11 @@ test("rejects a malformed XMLStock expansion response", () => {
 });
 
 test("normalizes XMLStock low balance and rate-limit errors", () => {
+  assert.equal(xmlStockWordstatRetryableReceiptCode(200, { error: 55 }), "PROVIDER_RATE_LIMITED");
+  assert.equal(xmlStockWordstatRetryableReceiptCode(503, undefined), "PROVIDER_RATE_LIMITED");
+  assert.equal(xmlStockWordstatRetryableReceiptCode(200, { error: 20 }), "PROVIDER_UNAVAILABLE");
+  assert.equal(xmlStockWordstatRetryableReceiptCode(200, { totalCount: 10 }), undefined);
+  assert.equal(xmlStockWordstatRetryableReceiptCode(200, { error: 200 }), undefined);
   assert.deepEqual(xmlStockWordstatResult(200, { error: 200 }, "BASE"), {
     ok: false,
     code: "PROVIDER_LOW_BALANCE",

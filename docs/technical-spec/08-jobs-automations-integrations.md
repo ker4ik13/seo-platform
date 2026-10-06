@@ -309,6 +309,11 @@ import, inspection и system workers этот token не получают. BullM
 операции и capability уже закрыты. Начатый HTTP-запрос не переносится и не
 отправляется повторно при балансировке; его fenced receipt остаётся у
 первоначального узла.
+Подтверждённый удалённый HTTP-ответ сохраняется неизменяемым. Только
+проверенный неоплачиваемый повторяемый отказ XMLStock Wordstat (например,
+55/503) исключается из replay-кэша отдельной Jobs-owned записью по точному
+receipt token: новая попытка получает новый fenced task, а ранее оплаченный
+успех продолжает переиспользоваться без второго provider-вызова.
 До live rank submit connector role должен
 получать scoped execution через SECURITY DEFINER operations, а не global read
 Job и credential tables.

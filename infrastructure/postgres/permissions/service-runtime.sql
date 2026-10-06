@@ -657,6 +657,7 @@ FROM unnest(CASE current_database()
     ,'public.abandon_remote_work(uuid,uuid)'
     ,'public.remote_work_available(text)'
     ,'public.enqueue_remote_work_batch(jsonb)'
+    ,'public.exclude_remote_work_retryable_receipt(uuid,uuid,text)'
   ] || CASE WHEN :'worker_gateway_enabled' = 'true' THEN ARRAY[
     'public.claim_remote_work(uuid,integer,integer,jsonb)',
     'public.read_remote_work_receipts(jsonb)',

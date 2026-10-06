@@ -716,6 +716,7 @@ SELECT format('GRANT EXECUTE ON FUNCTION public.enqueue_remote_work(jsonb,text,t
 SELECT format('GRANT EXECUTE ON FUNCTION public.abandon_remote_work(uuid,uuid) TO %I', :'connector_user') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION public.remote_work_available(text) TO %I', :'connector_user') \gexec
 SELECT format('GRANT EXECUTE ON FUNCTION public.enqueue_remote_work_batch(jsonb) TO %I', :'connector_user') \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.exclude_remote_work_retryable_receipt(uuid,uuid,text) TO %I', :'connector_user') \gexec
 
 -- reject an existing role if any direct ACL dependency remains outside the
 -- exact jobs_db allowlist. pg_shdepend exposes ACL dependencies in every
@@ -772,6 +773,7 @@ BEGIN
     'public.abandon_remote_work(uuid,uuid)'::regprocedure::oid,
     'public.remote_work_available(text)'::regprocedure::oid,
     'public.enqueue_remote_work_batch(jsonb)'::regprocedure::oid,
+    'public.exclude_remote_work_retryable_receipt(uuid,uuid,text)'::regprocedure::oid,
     'public.claim_rank_connector_poll_targeted(text,integer,text,uuid)'::regprocedure::oid,
     'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text,jsonb,bytea)'::regprocedure::oid,
     'public.defer_rank_connector_poll_capacity(uuid,uuid,text,uuid,integer,integer,integer)'::regprocedure::oid

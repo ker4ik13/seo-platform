@@ -1,9 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Readable } from "node:stream";
 import { gunzipSync } from "node:zlib";
+import { xmlStockWordstatRetryableReceiptCode } from "../frequency-collections/xmlstock-wordstat.connector.js";
 import { ProviderExecutionReviewRequiredError,ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import type { WorkerCapability } from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
@@ -17,6 +18,7 @@ interface Context { readonly scope:RemoteWorkScope;readonly capability:WorkerCap
 @Injectable()
 export class RemoteProviderTransportService {
   private readonly context=new AsyncLocalStorage<Context>();
+  private readonly logger=new Logger(RemoteProviderTransportService.name);
   public constructor(private readonly work:RemoteWorkClientService,private readonly quota:XmlStockHttpQuotaLimiter) {}
 
   public run<T>(scope:RemoteWorkScope,capability:WorkerCapability,action:()=>Promise<T>):Promise<T> {return this.context.run({scope,capability},action);}
@@ -35,12 +37,14 @@ export class RemoteProviderTransportService {
     const physicalKeyScopeId=context.secret.rateLimitScopeId ?? context.scope.credentialId;
     if(!physicalKeyScopeId) throw new RemoteWorkFailedError("INVALID_CREDENTIAL_REFERENCE");
     const scope={...context.scope,physicalKeyScopeId};
+    const target=new URL(url instanceof Request ? url.url : String(url));
+    const wordstat=scope.provider==="XMLSTOCK" && target.hostname==="xmlstock.com" && target.pathname==="/wordstat/json/";
     try {
       return await this.work.execute(scope,context.capability,"PROVIDER_HTTP",request as unknown as Readonly<Record<string,unknown>>,
         // The owner must remain alive long enough for admission, the provider
         // timeout and result acknowledgement; otherwise a paid response could
         // be misclassified as unknown while the remote worker is still active.
-        {resource:"HTTP",timeoutMs:Math.min(180_000,budget.timeoutMs+REMOTE_PROVIDER_ADMISSION_MS+15_000)},async result=>{
+        {resource:"HTTP",timeoutMs:Math.min(180_000,budget.timeoutMs+REMOTE_PROVIDER_ADMISSION_MS+15_000)},async (result,receipt)=>{
           if(result.format!=="HTTP" || !Number.isSafeInteger(result.status) || Number(result.status)<100 || Number(result.status)>599 || !result.headers || typeof result.headers!=="object" || Array.isArray(result.headers)) throw new RemoteWorkFailedError("INVALID_WORKER_HTTP_RESPONSE");
           const headers=new Headers();
           for(const [name,value] of Object.entries(result.headers)) {
@@ -48,16 +52,24 @@ export class RemoteProviderTransportService {
           }
           const status=Number(result.status);
           let body:ConstructorParameters<typeof Response>[0];
+          let inlineBody:Buffer|undefined;
           if([204,205,304].includes(status)) body=null;
-          else if(typeof result.bodyBase64==="string") {let bytes=Buffer.from(result.bodyBase64,"base64");if(result.bodyEncoding==="GZIP") bytes=gunzipSync(bytes,{maxOutputLength:budget.maximumResponseBytes});else if(result.bodyEncoding!==undefined) throw new RemoteWorkFailedError("INVALID_WORKER_HTTP_RESPONSE");if(bytes.length>budget.maximumResponseBytes) throw new RemoteWorkFailedError("WORKER_RESPONSE_TOO_LARGE");body=bytes;}
+          else if(typeof result.bodyBase64==="string") {let bytes=Buffer.from(result.bodyBase64,"base64");if(result.bodyEncoding==="GZIP") bytes=gunzipSync(bytes,{maxOutputLength:budget.maximumResponseBytes});else if(result.bodyEncoding!==undefined) throw new RemoteWorkFailedError("INVALID_WORKER_HTTP_RESPONSE");if(bytes.length>budget.maximumResponseBytes) throw new RemoteWorkFailedError("WORKER_RESPONSE_TOO_LARGE");inlineBody=bytes;body=bytes;}
           else body=Readable.toWeb(Readable.from(remoteArtifact(result,BigInt(budget.maximumResponseBytes)))) as ReadableStream;
+          if(wordstat) {
+            let value:unknown;
+            if(status===200 && inlineBody) {try{value=JSON.parse(inlineBody.toString("utf8"));}catch{/* The owning connector validates malformed JSON. */}}
+            const reason=xmlStockWordstatRetryableReceiptCode(status,value);
+            if(reason)await this.work.excludeUnbilledProviderReceipt(receipt,reason).catch(()=>{
+              this.logger.warn(JSON.stringify({event:"remote_unbilled_receipt_exclusion_failed",operationId:scope.operationId,reason}));
+            });
+          }
           return new Response(body,{status,headers});
         },()=>this.localFetch(url,init,context,budget.timeoutMs));
     } catch(error) {
       // Arsenkin check/get only read an already accepted task. A lost worker
       // acknowledgement on these calls can be retried safely; only tools/set
       // is an ambiguous paid submit.
-      const target=new URL(url instanceof Request ? url.url : String(url));
       if(target.hostname==="arsenkin.ru" && ["/api/tools/check","/api/tools/get"].includes(target.pathname) &&
         error instanceof RemoteWorkFailedError && ["WORKER_OUTCOME_UNKNOWN","WORKER_RESULT_TIMEOUT"].includes(error.code)) {
         return this.localFetch(url,init,context,budget.timeoutMs);

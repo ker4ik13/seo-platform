@@ -29,6 +29,7 @@ interface Pending {
 }
 interface Admission {readonly scope:RemoteWorkScope;readonly capability:WorkerCapability;readonly command:RemoteWorkCommand;readonly resource:RemoteWorkResource;readonly payload:Readonly<Record<string,unknown>>;readonly hash:string;readonly timeoutMs:number;}
 interface Assignment {readonly id:string|null;readonly readToken:string|null;readonly nodeId:string|null;readonly blocked:boolean;readonly errorCode:string|null;}
+interface ReceiptIdentity { readonly id: string; readonly readToken: string; }
 
 export class RemoteWorkFailedError extends Error {
   public constructor(public readonly code: string) { super("Remote work did not complete"); this.name = "RemoteWorkFailedError"; }
@@ -59,7 +60,8 @@ export class RemoteWorkClientService implements OnModuleDestroy {
 
   public async execute<T>(scope: RemoteWorkScope, capability: WorkerCapability, command: RemoteWorkCommand,
     payload: Readonly<Record<string, unknown>>, options: Readonly<{ resource: RemoteWorkResource; timeoutMs: number; onWait?: () => Promise<void> }>,
-    decode: (result: Readonly<Record<string, unknown>>) => Promise<T> | T, local: () => Promise<T>): Promise<T> {
+    decode: (result: Readonly<Record<string, unknown>>, receipt: ReceiptIdentity) => Promise<T> | T,
+    local: () => Promise<T>): Promise<T> {
     if(!this.enabled()) return local();
     if(command!=="PROVIDER_HTTP" && !await this.available(capability)) return local();
     const hash = canonicalJsonSha256("remote-work-payload@1", { command, capability, payload });
@@ -86,7 +88,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
       });
       if (heartbeatFailure) throw heartbeatFailure;
       if (receipt.state !== "COMPLETED" || !receipt.result) throw new RemoteWorkFailedError(receipt.errorCode ?? "WORKER_EXECUTION_FAILED");
-      return await decode(receipt.result);
+      return await decode(receipt.result,{id,readToken});
     } catch (error) {
       // Only an unclaimed unit can be abandoned. A claimed provider request
       // is never repeated here; its owning workflow applies the retry policy.
@@ -107,6 +109,18 @@ export class RemoteWorkClientService implements OnModuleDestroy {
       if (timer) clearTimeout(timer);
       if (heartbeat) clearInterval(heartbeat);
     }
+  }
+
+  public async excludeUnbilledProviderReceipt(
+    receipt: ReceiptIdentity,
+    reason: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE"
+  ): Promise<void> {
+    const rows=await this.prisma.$queryRaw<{excluded:boolean}[]>`
+      SELECT public.exclude_remote_work_retryable_receipt(
+        ${receipt.id}::uuid,${receipt.readToken}::uuid,${reason}::text
+      ) AS excluded
+    `;
+    if(rows[0]?.excluded!==true)throw new RemoteWorkFailedError("INVALID_WORKER_ASSIGNMENT");
   }
 
   private admit(entry:Admission):Promise<Assignment> {

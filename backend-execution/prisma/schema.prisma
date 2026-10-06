@@ -1334,6 +1334,7 @@ model RemoteWorkTask {
   errorCode String? @map("error_code") @db.VarChar(64)
   resultObjectKey String? @map("result_object_key") @db.Text
   resultMultipartId String? @map("result_multipart_id") @db.Text
+  replayExclusion RemoteWorkReplayExclusion?
   job Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
   node ExecutionWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Restrict)
 
@@ -1341,6 +1342,15 @@ model RemoteWorkTask {
   @@index([operationId, state])
   @@index([state, executionDeadline])
   @@map("remote_work_tasks")
+}
+
+model RemoteWorkReplayExclusion {
+  taskId String @id @map("task_id") @db.Uuid
+  reason String @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  task RemoteWorkTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("remote_work_replay_exclusions")
 }
 
 model RankJobWorkerAssignment {
