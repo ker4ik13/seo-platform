@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  semanticMetricRefreshMinIntervalMs,
   semanticResearchImportSignature,
   shouldRefreshSemanticOperationMetrics,
   shouldRefreshSemanticResearchImport
@@ -8,7 +9,9 @@ import {
 
 test("refreshes keyword metrics when the first observed operation state is already terminal", () => {
   assert.equal(
-    shouldRefreshSemanticOperationMetrics("", "completed-ai-answer-job", false),
+    shouldRefreshSemanticOperationMetrics("", "completed-ai-answer-job", false, {
+      active: false, visible: true, now: 1_000, lastAttemptAt: 999
+    }),
     true
   );
 });
@@ -18,7 +21,8 @@ test("does not refresh the same operation state twice", () => {
     shouldRefreshSemanticOperationMetrics(
       "completed-ai-answer-job",
       "completed-ai-answer-job",
-      false
+      false,
+      { active: false, visible: true, now: 1_000, lastAttemptAt: 0 }
     ),
     false
   );
@@ -29,10 +33,28 @@ test("waits for an in-flight keyword metrics refresh", () => {
     shouldRefreshSemanticOperationMetrics(
       "running-ai-answer-job",
       "completed-ai-answer-job",
-      true
+      true,
+      { active: true, visible: true, now: 20_000, lastAttemptAt: 0 }
     ),
     false
   );
+});
+
+test("coalesces active progress into bounded metric reads and catches up on visibility", () => {
+  const running = {
+    active: true, visible: true, now: 20_000,
+    lastAttemptAt: 20_000 - semanticMetricRefreshMinIntervalMs + 1
+  };
+  assert.equal(shouldRefreshSemanticOperationMetrics("old", "new", false, running), false);
+  assert.equal(shouldRefreshSemanticOperationMetrics("old", "new", false, {
+    ...running, now: running.now + 1
+  }), true);
+  assert.equal(shouldRefreshSemanticOperationMetrics("old", "new", false, {
+    ...running, visible: false, now: running.now + semanticMetricRefreshMinIntervalMs
+  }), false);
+  assert.equal(shouldRefreshSemanticOperationMetrics("old", "terminal", false, {
+    ...running, active: false
+  }), true, "terminal results refresh without the active-operation interval");
 });
 
 test("detects a completed keyword research import independently of API order", () => {

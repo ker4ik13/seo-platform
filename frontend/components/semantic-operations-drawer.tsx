@@ -192,7 +192,9 @@ export function SemanticOperationsDrawer({
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
-    const timer = window.setInterval(() => void load(controller.signal), 2_000);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load(controller.signal);
+    }, 5_000);
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void load(controller.signal);
     };

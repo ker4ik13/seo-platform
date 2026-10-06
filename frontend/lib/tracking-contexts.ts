@@ -182,6 +182,14 @@ export function trackingContextDraftDirty(
   );
 }
 
+/** Running an existing profile may update its parameters, never its stored name. */
+export function trackingContextLaunchDraft(
+  context: TrackingContextSummary,
+  draft: TrackingContextDraft
+): TrackingContextDraft {
+  return { ...draft, name: context.name };
+}
+
 export function trackingContextMatchesDraft(
   context: TrackingContextSummary,
   draft: TrackingContextDraft

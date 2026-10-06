@@ -3,11 +3,10 @@
 import { CustomSelect } from "./custom-select";
 import { SemanticRankTargets } from "./semantic-rank-targets";
 import { clearRankTargetBatch, persistRankTargetBatch, readRankTargetBatch, readRankTargetPreference, writeRankTargetPreference } from "../lib/rank-target-storage";
-import { uniqueRankTargets, type RankTarget } from "../lib/rank-targets";
+import { generatedRankContextName, uniqueRankTargets, withRankContextName, type RankTarget } from "../lib/rank-targets";
 import { createRankTargetBatch, launchRankTargetBatch, prepareRankTargetBatch, rankTargetBatchCharge, rankTargetBatchReady, rankTargetBatchSignature, type RankTargetBatch, type RankTargetBatchInput } from "../lib/rank-target-batch";
 import { rankRetryContextDraft } from "../lib/rank-retry";
 import { searchRegionDisplayName } from "../lib/seo-regions";
-import { normalizedUiLocale, translateUi } from "../lib/ui-i18n";
 import type { RankOperationResult } from "@seo-platform/contracts";
 
 import {
@@ -56,6 +55,7 @@ import {
   trackingContextDisplayName,
   trackingContextDraft,
   trackingContextDraftDirty,
+  trackingContextLaunchDraft,
   trackingContextMatchesDraft,
   trackingContextPayloadSignature,
   trackingContextScopeResolutionKey,
@@ -151,7 +151,8 @@ export function SemanticPositionDialog({
     useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [selectedContextId, setSelectedContextId] = useState("");
-  const [createSavedContext, setCreateSavedContext] = useState(false);
+  const [createSavedContext, setCreateSavedContext] = useState(!competitorMode && !initialRun);
+  const manuallyNamedContextRef = useRef(false);
   const [lastUsedCredentialId, setLastUsedCredentialId] = useState<string>();
   const [assignedKeywordIds, setAssignedKeywordIds] = useState<
     ReadonlySet<string>
@@ -180,6 +181,17 @@ export function SemanticPositionDialog({
   >({ YANDEX: "DEFAULT", GOOGLE: "DEFAULT" });
   const [contextDraft, setContextDraft] = useState(() =>
     initialRun ? rankRetryContextDraft(initialRun) : defaultContextDraft(undefined, competitorMode, uiLocale)
+  );
+  const withLaunchName = useCallback(
+    (current: TrackingContextDraft, next: TrackingContextDraft) =>
+      withRankContextName(
+        current,
+        next,
+        Boolean(selectedContextId) || manuallyNamedContextRef.current,
+        competitorMode,
+        uiLocale
+      ),
+    [competitorMode, selectedContextId, uiLocale]
   );
   const yandexLiveTurbo = contextDraft.yandexLiveMode === "TURBO";
   const xmlStockDepthMode =
@@ -245,7 +257,9 @@ export function SemanticPositionDialog({
     xmlStockDepthMode,
     saveContexts: !competitorMode && (createSavedContext || Boolean(selectedContextId)),
     forceCreateContexts: createSavedContext,
-    ...(createSavedContext ? { contextName: contextDraft.name.trim() } : {}),
+    ...(createSavedContext && manuallyNamedContextRef.current
+      ? { contextName: contextDraft.name.trim() }
+      : {}),
     locale: uiLocale
   } : undefined, [projectId, workspaceId, contextDraft, targets, selections, selectedSource, competitorMode, saveProjectPosition, yandexLiveTurbo, xmlStockDepthMode, selectedContextId, createSavedContext, uiLocale]);
   const batchSignature = useMemo(() => batchInput ? rankTargetBatchSignature(batchInput) : undefined, [batchInput]);
@@ -260,8 +274,9 @@ export function SemanticPositionDialog({
     const preferred = readRankTargetPreference(window.localStorage, projectId, contextDraft.searchEngine, competitorMode);
     if (!preferred?.length) return;
     const [first, ...rest] = preferred;
-    setContextDraft(current => ({ ...current, ...first! })); setAdditionalTargets(rest);
-  }, [loading, initialRun, projectId, competitorMode, contextDraft.searchEngine]);
+    setContextDraft(current => withLaunchName(current, { ...current, ...first! }));
+    setAdditionalTargets(rest);
+  }, [loading, initialRun, projectId, competitorMode, contextDraft.searchEngine, withLaunchName]);
   const providerUsage = rankProviderUsageEstimate(
     selectedSource,
     displayedKeywordCount * targets.length,
@@ -337,6 +352,7 @@ export function SemanticPositionDialog({
   function selectContext(selection: string): void {
     const creating = selection === NEW_CONTEXT_VALUE;
     const contextId = creating ? "" : selection;
+    manuallyNamedContextRef.current = false;
     setAdditionalTargets([]);
     multiBatch.current = undefined;
     setSelectedContextId(contextId);
@@ -361,7 +377,6 @@ export function SemanticPositionDialog({
       setContextAssignmentError(undefined);
       setContextDraft({
         ...defaultContextDraft(preferredRegions.YANDEX, competitorMode, uiLocale),
-        ...(creating ? { name: "" } : {}),
         scopeMode:
           initialSelections.length > 0
             ? "KEYWORDS"
@@ -523,7 +538,13 @@ export function SemanticPositionDialog({
           }));
         }
         if (!initialRun && !competitorMode && preferredSource?.provider === "ARSENKIN") {
-          setContextDraft((current) => ({ ...current, depth: 30 }));
+          setContextDraft((current) => withRankContextName(
+            current,
+            { ...current, depth: 30 },
+            manuallyNamedContextRef.current,
+            competitorMode,
+            uiLocale
+          ));
         }
       })
       .catch((requestError) => {
@@ -644,7 +665,7 @@ export function SemanticPositionDialog({
       if (firstError) throw new Error(firstError);
       const contextName =
         contextDraft.name.trim() || technicalContextName(contextDraft, competitorMode, uiLocale);
-      const launchDraft = {
+      let launchDraft = {
         ...contextDraft,
         name: contextName
       };
@@ -662,6 +683,9 @@ export function SemanticPositionDialog({
         const authoritative = await browserApiRequest<TrackingContextSummary>(
           trackingContextApiPath(projectId, selectedContext.id)
         );
+        // Launch settings may change, but a saved profile is never renamed by
+        // an automatically generated title in the run wizard.
+        launchDraft = trackingContextLaunchDraft(authoritative, launchDraft);
         selectedContext = trackingContextDraftDirty(authoritative, launchDraft)
           ? await browserApiRequest<TrackingContextSummary>(
               trackingContextApiPath(projectId, authoritative.id),
@@ -1055,7 +1079,7 @@ export function SemanticPositionDialog({
     >
       <form className="semantic-position-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         {recoverableBatch && !recoveringBatch && <div className="inline-alert warning"><p><UiText text="Предыдущий запуск не завершён. Можно продолжить его с сохранёнными командами, не повторяя принятые задачи." /></p><button type="button" className="secondary-button" disabled={running} onClick={() => {
-          multiBatch.current = recoverableBatch; setRecoveringBatch(true); setCreateSavedContext(Boolean(recoverableBatch.input.forceCreateContexts)); setContextDraft(recoverableBatch.input.base); setAdditionalTargets(recoverableBatch.input.targets.slice(1)); setCredentialId(recoverableBatch.input.source.id); setBatchRevision(value => value + 1);
+          multiBatch.current = recoverableBatch; setRecoveringBatch(true); manuallyNamedContextRef.current = Boolean(recoverableBatch.input.contextName); setCreateSavedContext(Boolean(recoverableBatch.input.forceCreateContexts)); setContextDraft(recoverableBatch.input.base); setAdditionalTargets(recoverableBatch.input.targets.slice(1)); setCredentialId(recoverableBatch.input.source.id); setBatchRevision(value => value + 1);
         }}><UiText text="Восстановить запуск" /></button></div>}
         {loading ? (
           <div className="semantic-dialog-loading" role="status"><UiText text="Проверяем доступные подключения…" /></div>
@@ -1065,7 +1089,10 @@ export function SemanticPositionDialog({
               contexts={settings?.contexts ?? []}
               createSavedContext={createSavedContext}
               draft={contextDraft}
-              onDraftChange={setContextDraft}
+              onDraftChange={(next) => {
+                manuallyNamedContextRef.current = true;
+                setContextDraft(next);
+              }}
               onSelect={selectContext}
               projectId={projectId}
               selectedContextId={selectedContextId}
@@ -1078,22 +1105,18 @@ export function SemanticPositionDialog({
                 if (nextDraft.searchEngine !== contextDraft.searchEngine) {
                   setAdditionalTargets([]);
                 }
-                setContextDraft((current) => ({
+                setContextDraft((current) => withLaunchName(current, {
                   ...nextDraft,
                   yandexLiveMode: current.yandexLiveMode,
-                  xmlStockDepthMode: current.xmlStockDepthMode,
-                  ...(createSavedContext ? { name: current.name } : {})
+                  xmlStockDepthMode: current.xmlStockDepthMode
                 }));
               }}
               targets={targets}
               onTargetsChange={targets => {
                 const [first, ...others] = uniqueRankTargets(targets);
-                setContextDraft(current => ({
+                setContextDraft(current => withLaunchName(current, {
                   ...current,
-                  ...first!,
-                  name: createSavedContext
-                    ? current.name
-                    : contextDisplayName(current.searchEngine, first!.regionLabel, first!.device, competitorMode, uiLocale)
+                  ...first!
                 }));
                 setAdditionalTargets(others);
               }}
@@ -1106,7 +1129,7 @@ export function SemanticPositionDialog({
               onCredentialChange={(nextCredentialId) => {
                 const next = sources.find(({ id }) => id === nextCredentialId);
                 setCredentialId(nextCredentialId);
-                setContextDraft((current) => ({
+                setContextDraft((current) => withLaunchName(current, {
                   ...current,
                   ...(current.searchEngine === "GOOGLE"
                     ? { searchSource: "LIVE" as const }
@@ -1123,7 +1146,7 @@ export function SemanticPositionDialog({
                 runCommand.current = undefined;
               }}
               onSearchSourceChange={(source) => {
-                setContextDraft((current) => ({
+                setContextDraft((current) => withLaunchName(current, {
                   ...current,
                   searchSource: source,
                   ...(source === "SEARCH_API" && current.depth === 10
@@ -1387,7 +1410,7 @@ function PositionRunParameters({
   onSaveProjectPositionChange: (enabled: boolean) => void;
   scope: ReactNode;
 }>) {
-  const { t: uiText, locale: uiLocale } = useUiLocale();
+  const { t: uiText } = useUiLocale();
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const provider = selectedSource?.provider === "ARSENKIN"
     ? "ARSENKIN"
@@ -1419,14 +1442,7 @@ function PositionRunParameters({
       language: "ru",
       searchEngine,
       regionCode: region.code,
-      regionLabel: region.label,
-      name: contextDisplayName(
-        searchEngine,
-        region.label,
-        draft.device,
-        competitorMode,
-        uiLocale
-      )
+      regionLabel: region.label
     });
     onSearchSourceChange("LIVE");
   }
@@ -1745,18 +1761,12 @@ function contextDraftWithRegion(
   competitorMode = false,
   locale = "ru"
 ): TrackingContextDraft {
-  return {
+  const next = {
     ...draft,
-    name: contextDisplayName(
-      draft.searchEngine,
-      region.label,
-      draft.device,
-      competitorMode,
-      locale
-    ),
     regionCode: region.code,
     regionLabel: region.label
   };
+  return { ...next, name: generatedRankContextName(next, competitorMode, locale) };
 }
 
 function technicalContextName(
@@ -1764,37 +1774,7 @@ function technicalContextName(
   competitorMode = false,
   locale = "ru"
 ): string {
-  const currentLocale = normalizedUiLocale(locale);
-  const region = translateUi(
-    currentLocale,
-    searchRegionDisplayName(
-      draft.searchEngine,
-      draft.regionCode,
-      draft.regionLabel
-    )
-  );
-  const device = translateUi(currentLocale, draft.device === "MOBILE" ? "Мобильное" : "Десктоп");
-  const prefix = competitorMode
-    ? `${translateUi(currentLocale, "Конкуренты")} · `
-    : "";
-  return `${prefix}${region} · ${device}`.slice(0, 160);
-}
-
-function contextDisplayName(
-  searchEngine: TrackingContextDraft["searchEngine"],
-  regionLabel: string,
-  device: TrackingContextDraft["device"],
-  competitorMode: boolean,
-  locale = "ru"
-): string {
-  const currentLocale = normalizedUiLocale(locale);
-  const deviceLabel = translateUi(currentLocale, device === "MOBILE" ? "Мобильное" : "Десктоп");
-  const region = translateUi(
-    currentLocale,
-    searchRegionDisplayName(searchEngine, regionLabel, regionLabel)
-  );
-  const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
-  return `${prefix}${region} · ${deviceLabel}`;
+  return generatedRankContextName(draft, competitorMode, locale);
 }
 
 async function synchronizeContextAssignments(

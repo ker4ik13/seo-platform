@@ -286,7 +286,10 @@ export function SemanticKeywordInspector({
     setSavingTargetUrl(false);
     setTargetUrlError(undefined);
     setCloseConfirmOpen(false);
+    let inFlight = false;
     const load = () => {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
       void browserApiRequest<SemanticKeywordInsights>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
         { signal: controller.signal }
@@ -301,14 +304,22 @@ export function SemanticKeywordInspector({
           if (!controller.signal.aborted) setError(insightError(requestError));
         })
         .finally(() => {
+          inFlight = false;
           if (!controller.signal.aborted) setLoading(false);
         });
     };
     load();
-    const timer = window.setInterval(load, 5_000);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 10_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       controller.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [item.id, item.targetUrl, projectId]);
 

@@ -15,13 +15,26 @@ import type {
 import { Prisma } from "../generated/prisma/client.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { SemanticVersionService } from "../semantic-versions/semantic-version.service.js";
-import { KeywordService } from "./keyword.service.js";
+import { KeywordService, uniqueRankConfigurationReferences } from "./keyword.service.js";
 
 const sha256ForTest = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
+
+test("deduplicates rank configuration SQL predicates across many keyword rows", () => {
+  assert.deepEqual(uniqueRankConfigurationReferences([
+    { trackingContextId: "context-a", configurationVersion: 1 },
+    { trackingContextId: "context-a", configurationVersion: 1 },
+    { trackingContextId: "context-a", configurationVersion: 2 },
+    { trackingContextId: "context-b", configurationVersion: 1 }
+  ]), [
+    { contextId: "context-a", configurationVersion: 1 },
+    { contextId: "context-a", configurationVersion: 2 },
+    { contextId: "context-b", configurationVersion: 1 }
+  ]);
+});
 
 test("suggests the closest intact keyword without invoking extension functions", async () => {
   const brokenId = "01900000-0000-7000-8000-000000000006";
@@ -2288,20 +2301,20 @@ test("sorts engine positions in four stable capture-state buckets", async () => 
     assert.match(query.sql, /historical_position/u);
     assert.match(
       query.sql,
-      /WHEN candidate\.found = TRUE AND candidate\.position IS NOT NULL/u
+      /CASE WHEN previous\.found THEN previous\.position ELSE NULL END/u
     );
     assert.match(
       query.sql,
-      /WHEN cr\.found = TRUE AND cr\.position IS NOT NULL THEN NULL/u
+      /PARTITION BY latest\.keyword_id/u
     );
-    assert.match(query.sql, /FROM rank_snapshots snapshot/u);
+    assert.match(query.sql, /JOIN rank_snapshots snapshot/u);
     assert.match(
       query.sql,
       /\(snapshot\.observed_at, snapshot\.id\) </u
     );
     assert.match(
       query.sql,
-      /snapshot\.tracking_context_id = previous_tcv\.context_id/u
+      /previous_tcv\.context_id = snapshot\.tracking_context_id/u
     );
   }
   for (const query of historyQueries) {

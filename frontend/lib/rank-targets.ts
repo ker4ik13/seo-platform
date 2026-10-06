@@ -22,18 +22,41 @@ export function uniqueRankTargets(values: readonly RankTarget[]): readonly RankT
 }
 
 export function rankTargetDraft(base: TrackingContextDraft, target: RankTarget, competitorMode: boolean, locale = "ru"): TrackingContextDraft {
+  const draft = { ...base, ...target };
+  return { ...draft, name: generatedRankContextName(draft, competitorMode, locale) };
+}
+
+export function generatedRankContextName(
+  draft: Pick<TrackingContextDraft, "searchEngine" | "regionCode" | "regionLabel" | "device" | "depth">,
+  competitorMode: boolean,
+  locale = "ru"
+): string {
   const currentLocale = normalizedUiLocale(locale);
-  const device = translateUi(currentLocale, target.device === "DESKTOP" ? "Десктоп" : "Мобильное");
+  const device = translateUi(currentLocale, draft.device === "DESKTOP" ? "Десктоп" : "Мобильное");
   const region = translateUi(
     currentLocale,
     searchRegionDisplayName(
-      base.searchEngine,
-      target.regionCode,
-      target.regionLabel
+      draft.searchEngine,
+      draft.regionCode,
+      draft.regionLabel
     )
   );
   const prefix = competitorMode ? `${translateUi(currentLocale, "Конкуренты")} · ` : "";
-  return { ...base, ...target, name: `${prefix}${region} · ${device}`.slice(0, 160) };
+  const depth = competitorMode ? "" : ` · ${translateUi(currentLocale, `Топ-${draft.depth}`)}`;
+  return `${prefix}${region} · ${device}${depth}`.slice(0, 160);
+}
+
+export function withRankContextName(
+  current: TrackingContextDraft,
+  next: TrackingContextDraft,
+  preserveName: boolean,
+  competitorMode: boolean,
+  locale = "ru"
+): TrackingContextDraft {
+  return {
+    ...next,
+    name: preserveName ? current.name : generatedRankContextName(next, competitorMode, locale)
+  };
 }
 
 export function rankTargetGroups(targets: readonly RankTarget[]) {

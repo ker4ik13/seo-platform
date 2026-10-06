@@ -25,6 +25,18 @@ test("operation dialogs and workspace routing through Caddy: locale, drag-and-dr
   await command("POST", `workspaces/${workspace.id}/billing/trial`);
   const project = await command("POST", `workspaces/${workspace.id}/projects`, { name: "Настройки", domain: "example.com", locale: "ru", timezone: "Europe/Berlin" });
   await command("POST", `projects/${project.id}/keywords/bulk`, { items: ["сохранить настройки", "новый проект"].map(text => ({ text, language: "ru", priority: 0, isFavorite: false, isTracked: true, tagNames: [] })), duplicatePolicy: "SKIP_EXISTING" });
+  await command("POST", `projects/${project.id}/tracking-contexts`, {
+    name: "Контекст без переименования",
+    configuration: {
+      searchEngine: "YANDEX", countryCode: "RU", regionCode: "213",
+      regionLabel: "Москва", language: "ru", device: "DESKTOP", depth: 50,
+      domainMatchRule: { mode: "INCLUDE_WWW" }, safeSearch: false
+    },
+    launchProfile: {
+      searchSource: "LIVE", includeUntracked: false,
+      scope: { mode: "ALL", groupIds: [], descendantGroupIds: [] }
+    }
+  });
   const context = await browser.newContext({ storageState: await api.storageState() });
   await context.addCookies([{ name: "seo_workspace", value: workspace.id, url: base, secure: true, sameSite: "Lax" }, { name: "seo_project", value: project.id, url: base, secure: true, sameSite: "Lax" }]);
   const credentialId = randomUUID(), bindingId = randomUUID(), now = new Date().toISOString();
@@ -62,9 +74,16 @@ test("operation dialogs and workspace routing through Caddy: locale, drag-and-dr
           return dialog && !dialog.querySelector(".semantic-dialog-loading") && !/Loading keywords|Загружаем запросы|Считаем(?:…|\.\.\.)/u.test(dialog.querySelector(".semantic-modal-footer")?.textContent ?? "");
         }, undefined, { timeout: 20_000 });
         if (locale === "ru" && width === 1440 && entry.id === "positions") {
+          const contextSelect = modal.locator('.semantic-position-context-bar [role="combobox"]');
+          assert.match(await contextSelect.innerText(), /Новый контекст/u);
+          const contextName = modal.locator(".semantic-position-context-name input");
+          assert.match(await contextName.inputValue(), /Москва.+Десктоп.+Топ-50/u);
           const stopAfterFound = modal
             .locator(".semantic-xmlstock-depth-mode label")
             .filter({ hasText: "До первой позиции" });
+          const top30 = modal
+            .locator(".semantic-depth-field label")
+            .filter({ hasText: "Топ-30" });
           const top100 = modal
             .locator(".semantic-depth-field label")
             .filter({ hasText: "Топ-100" });
@@ -75,6 +94,21 @@ test("operation dialogs and workspace routing through Caddy: locale, drag-and-dr
             true,
             "a rapid depth click must not restore STRICT_DEPTH"
           );
+          assert.match(await contextName.inputValue(), /Топ-100/u);
+          await contextName.fill("Мой контекст");
+          await top30.click();
+          assert.equal(await contextName.inputValue(), "Мой контекст");
+          await contextSelect.click();
+          await page.getByRole("option", { name: "Без контекста" }).click();
+          assert.equal(await modal.locator(".semantic-position-context-name input").count(), 0);
+          await contextSelect.click();
+          await page.getByRole("option", { name: "Новый контекст" }).click();
+          assert.match(await modal.locator(".semantic-position-context-name input").inputValue(), /Топ-50/u);
+          await contextSelect.click();
+          await page.getByRole("option", { name: /Контекст без переименования/u }).click();
+          assert.match(await contextSelect.innerText(), /Контекст без переименования/u);
+          await top30.click();
+          assert.match(await contextSelect.innerText(), /Контекст без переименования/u);
         }
         const bounds = await modal.boundingBox();
         assert.ok(bounds && bounds.x >= -1 && bounds.x + bounds.width <= width + 1 && bounds.y >= -1 && bounds.y + bounds.height <= 951, `${entry.id}: modal escapes viewport ${width}`);

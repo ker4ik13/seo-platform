@@ -1,9 +1,19 @@
+export const semanticMetricRefreshMinIntervalMs = 10_000;
+export const semanticActiveOperationPollIntervalMs = 5_000;
+
 export function shouldRefreshSemanticOperationMetrics(
   previousSignature: string,
   currentSignature: string,
-  refreshInFlight: boolean
+  refreshInFlight: boolean,
+  state: Readonly<{
+    active: boolean;
+    visible: boolean;
+    now: number;
+    lastAttemptAt: number;
+  }>
 ): boolean {
-  return !refreshInFlight && previousSignature !== currentSignature;
+  return state.visible && !refreshInFlight && previousSignature !== currentSignature &&
+    (!state.active || state.now - state.lastAttemptAt >= semanticMetricRefreshMinIntervalMs);
 }
 
 export function semanticResearchImportSignature(

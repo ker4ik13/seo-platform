@@ -1017,10 +1017,7 @@ export class KeywordService {
           where: {
             workspaceId,
             projectId,
-            OR: currentRanks.map((rank) => ({
-              contextId: rank.trackingContextId,
-              configurationVersion: rank.configurationVersion
-            }))
+            OR: uniqueRankConfigurationReferences(currentRanks)
           },
           select: {
             contextId: true,
@@ -1033,6 +1030,12 @@ export class KeywordService {
             device: true
           }
         });
+    const configurationById = new Map(
+      rankConfigurations.map((configuration) => [
+        `${configuration.contextId}:${configuration.configurationVersion}`,
+        configuration
+      ])
+    );
     const indicatorDimensionMergeTargets = resolvedRankDimensionMergeTargets(
       currentRanks.length === 0 ||
         (!includeTargetUrlIndicator && !includeMultipleUrlIndicator)
@@ -1050,9 +1053,8 @@ export class KeywordService {
     );
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
     const visibleCurrentRanks = currentRanks.filter((rank) => {
-      const configuration = rankConfigurations.find((candidate) =>
-        candidate.contextId === rank.trackingContextId &&
-        candidate.configurationVersion === rank.configurationVersion
+      const configuration = configurationById.get(
+        `${rank.trackingContextId}:${rank.configurationVersion}`
       );
       return configuration && !rankIsExcluded(rank.observedAt, configuration, rankDeletions);
     });
@@ -1137,12 +1139,6 @@ export class KeywordService {
       else answers.push(answer);
       aiAnswersByKeywordId.set(targetKeywordId, answers);
     }
-    const configurationById = new Map(
-      rankConfigurations.map((configuration) => [
-        `${configuration.contextId}:${configuration.configurationVersion}`,
-        configuration
-      ])
-    );
     const latestRankByKeywordEngine = new Map<
       string,
       Readonly<{
@@ -1883,10 +1879,7 @@ export class KeywordService {
             where: {
               workspaceId,
               projectId,
-              OR: rankRows.map((rank) => ({
-                contextId: rank.trackingContextId,
-                configurationVersion: rank.configurationVersion
-              }))
+              OR: uniqueRankConfigurationReferences(rankRows)
             },
             select: {
               contextId: true,
@@ -4929,6 +4922,14 @@ async function metricSortedKeywordPage(
           THEN ${positionBucket * 2n}::bigint + latest_ai.historical_position::bigint
         ELSE ${positionBucket}::bigint
       END`;
+  const filters = keywordRawFilters(
+    workspaceId,
+    projectId,
+    query,
+    search,
+    tag,
+    keywordStatus
+  );
   const metricJoin = sort.startsWith("FREQUENCY_")
     ? Prisma.sql`
         LEFT JOIN LATERAL (
@@ -5003,80 +5004,31 @@ async function metricSortedKeywordPage(
         ) metric_source ON TRUE`
       : rankPositionSort
       ? Prisma.sql`
-        LEFT JOIN LATERAL (
-          SELECT ${positionMetric} AS metric
-          FROM (
-            SELECT
-              cr.found,
-              cr.position,
-              CASE
-                WHEN cr.found = TRUE AND cr.position IS NOT NULL THEN NULL
-                ELSE (
-                  SELECT CASE
-                    WHEN candidate.found = TRUE AND candidate.position IS NOT NULL
-                      THEN candidate.position
-                    ELSE NULL
-                  END
-                  FROM (
-                    SELECT
-                      previous.found,
-                      previous.position,
-                      previous.observed_at,
-                      previous.id
-                    FROM tracking_context_versions previous_tcv
-                    INNER JOIN LATERAL (
-                      SELECT
-                        snapshot.found,
-                        snapshot.position,
-                        snapshot.observed_at,
-                        snapshot.id
-                      FROM rank_snapshots snapshot
-                      WHERE snapshot.workspace_id = cr.workspace_id
-                        AND snapshot.project_id = cr.project_id
-                        AND snapshot.keyword_id = cr.keyword_id
-                        AND snapshot.tracking_context_id = previous_tcv.context_id
-                        AND snapshot.configuration_version = previous_tcv.configuration_version
-                        AND snapshot.position_tracking_enabled = TRUE
-                        AND (snapshot.observed_at, snapshot.id) <
-                            (cr.observed_at, cr.snapshot_id)
-                      ORDER BY snapshot.observed_at DESC, snapshot.id DESC
-                      LIMIT 1
-                    ) previous ON TRUE
-                    WHERE previous_tcv.workspace_id = cr.workspace_id
-                      AND previous_tcv.project_id = cr.project_id
-                      AND previous_tcv.search_engine::text = ${rankEngine}
-                      AND previous_tcv.country_code = tcv.country_code
-                      AND COALESCE(previous_tcv.region_code, previous_tcv.country_code) =
-                          COALESCE(tcv.region_code, tcv.country_code)
-                      AND previous_tcv.language = tcv.language
-                      AND previous_tcv.device = tcv.device
-                      ${previousRankDimensionFilter}
-                      AND NOT EXISTS (
-                        SELECT 1 FROM rank_dimension_history_deletions deletion
-                        WHERE deletion.workspace_id = cr.workspace_id
-                          AND deletion.project_id = cr.project_id
-                          AND deletion.search_engine = previous_tcv.search_engine::text
-                          AND deletion.country_code = previous_tcv.country_code
-                          AND deletion.region_code = COALESCE(previous_tcv.region_code, previous_tcv.country_code)
-                          AND deletion.language = previous_tcv.language
-                          AND deletion.device = previous_tcv.device::text
-                          AND previous.observed_at <= deletion.excluded_through
-                      )
-                    ORDER BY previous.observed_at DESC, previous.id DESC
-                    LIMIT 1
-                  ) candidate
-                )
-              END AS historical_position
-            FROM current_ranks cr
-            INNER JOIN tracking_context_versions tcv
+        LEFT JOIN (
+          WITH filtered_keywords AS MATERIALIZED (
+            SELECT k.id FROM keywords k
+            WHERE ${Prisma.join(filters, " AND ")}
+          ), current_candidates AS MATERIALIZED (
+            SELECT cr.keyword_id, cr.found, cr.position, cr.observed_at,
+              cr.snapshot_id, tcv.country_code,
+              COALESCE(tcv.region_code, tcv.country_code) AS region_code,
+              tcv.language, tcv.device,
+              row_number() OVER (
+                PARTITION BY cr.keyword_id
+                ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
+                  cr.tracking_context_id DESC
+              ) AS current_order
+            FROM filtered_keywords selected
+            JOIN current_ranks cr
+              ON cr.workspace_id = ${workspaceId}::uuid
+             AND cr.project_id = ${projectId}::uuid
+             AND cr.keyword_id = selected.id
+            JOIN tracking_context_versions tcv
               ON tcv.workspace_id = cr.workspace_id
              AND tcv.project_id = cr.project_id
              AND tcv.context_id = cr.tracking_context_id
              AND tcv.configuration_version = cr.configuration_version
-            WHERE cr.workspace_id = k.workspace_id
-              AND cr.project_id = k.project_id
-              AND cr.keyword_id = k.id
-              AND tcv.search_engine::text = ${rankEngine}
+            WHERE tcv.search_engine::text = ${rankEngine}
               ${currentRankDimensionFilter}
               AND NOT EXISTS (
                 SELECT 1 FROM rank_dimension_history_deletions deletion
@@ -5089,11 +5041,58 @@ async function metricSortedKeywordPage(
                   AND deletion.device = tcv.device::text
                   AND cr.observed_at <= deletion.excluded_through
               )
-            ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
-                     cr.tracking_context_id DESC
-            LIMIT 1
+          ), latest_current AS MATERIALIZED (
+            SELECT * FROM current_candidates WHERE current_order = 1
+          ), previous_candidates AS MATERIALIZED (
+            SELECT latest.keyword_id, snapshot.found, snapshot.position,
+              row_number() OVER (
+                PARTITION BY latest.keyword_id
+                ORDER BY snapshot.observed_at DESC, snapshot.id DESC
+              ) AS history_order
+            FROM latest_current latest
+            JOIN rank_snapshots snapshot
+              ON snapshot.workspace_id = ${workspaceId}::uuid
+             AND snapshot.project_id = ${projectId}::uuid
+             AND snapshot.keyword_id = latest.keyword_id
+            JOIN tracking_context_versions previous_tcv
+              ON previous_tcv.workspace_id = snapshot.workspace_id
+             AND previous_tcv.project_id = snapshot.project_id
+             AND previous_tcv.context_id = snapshot.tracking_context_id
+             AND previous_tcv.configuration_version = snapshot.configuration_version
+            WHERE (latest.found = FALSE OR latest.position IS NULL)
+              AND snapshot.position_tracking_enabled = TRUE
+              AND (snapshot.observed_at, snapshot.id) <
+                  (latest.observed_at, latest.snapshot_id)
+              AND previous_tcv.search_engine::text = ${rankEngine}
+              AND previous_tcv.country_code = latest.country_code
+              AND COALESCE(previous_tcv.region_code, previous_tcv.country_code) =
+                  latest.region_code
+              AND previous_tcv.language = latest.language
+              AND previous_tcv.device = latest.device
+              ${previousRankDimensionFilter}
+              AND NOT EXISTS (
+                SELECT 1 FROM rank_dimension_history_deletions deletion
+                WHERE deletion.workspace_id = snapshot.workspace_id
+                  AND deletion.project_id = snapshot.project_id
+                  AND deletion.search_engine = previous_tcv.search_engine::text
+                  AND deletion.country_code = previous_tcv.country_code
+                  AND deletion.region_code = COALESCE(previous_tcv.region_code, previous_tcv.country_code)
+                  AND deletion.language = previous_tcv.language
+                  AND deletion.device = previous_tcv.device::text
+                  AND snapshot.observed_at <= deletion.excluded_through
+              )
+          )
+          SELECT latest_rank.keyword_id, ${positionMetric} AS metric
+          FROM (
+            SELECT current.keyword_id, current.found, current.position,
+              CASE WHEN previous.found THEN previous.position ELSE NULL END
+                AS historical_position
+            FROM latest_current current
+            LEFT JOIN previous_candidates previous
+              ON previous.keyword_id = current.keyword_id
+             AND previous.history_order = 1
           ) latest_rank
-        ) metric_source ON TRUE`
+        ) metric_source ON metric_source.keyword_id = k.id`
       : Prisma.sql`
         LEFT JOIN LATERAL (
           SELECT floor(extract(epoch from cr.observed_at) * 1000)::bigint AS metric
@@ -5123,14 +5122,6 @@ async function metricSortedKeywordPage(
                    cr.tracking_context_id DESC
           LIMIT 1
         ) metric_source ON TRUE`;
-  const filters = keywordRawFilters(
-    workspaceId,
-    projectId,
-    query,
-    search,
-    tag,
-    keywordStatus
-  );
   const cursorValue = cursor
     ? requiredMetricCursorValue(cursor.sortValue)
     : undefined;
@@ -5527,6 +5518,25 @@ function rankDeletionExclusionWhere(
       }
     }
   };
+}
+
+export function uniqueRankConfigurationReferences(
+  ranks: readonly Readonly<{
+    trackingContextId: string;
+    configurationVersion: number;
+  }>[]
+): { contextId: string; configurationVersion: number }[] {
+  const unique = new Map<string, { contextId: string; configurationVersion: number }>();
+  for (const rank of ranks) {
+    const key = `${rank.trackingContextId}:${rank.configurationVersion}`;
+    if (!unique.has(key)) {
+      unique.set(key, {
+        contextId: rank.trackingContextId,
+        configurationVersion: rank.configurationVersion
+      });
+    }
+  }
+  return [...unique.values()];
 }
 
 function rankIsExcluded(

@@ -77,7 +77,7 @@ export function ProjectCrawlAudit({
   const [notice, setNotice] = useState<string>();
   const [activeView, setActiveView] = useState<AuditView>("ISSUES");
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (signal?: AbortSignal, summaryOnly = false) => {
     try {
       const options = signal ? { signal } : {};
       const nextCrawls = await browserApiRequest<TechnicalCrawlSettings>(
@@ -87,6 +87,10 @@ export function ProjectCrawlAudit({
       const auditCrawls = nextCrawls.crawls.filter(
         ({ config }) => config.purpose === "TECHNICAL_AUDIT"
       );
+      if (summaryOnly && auditCrawls.some(({ status }) => ACTIVE.has(status))) {
+        setCrawls({ ...nextCrawls, crawls: auditCrawls });
+        return;
+      }
       const latestAnalyzed = auditCrawls.find(({ status }) =>
         status === "COMPLETED" || status === "PARTIALLY_COMPLETED"
       );
@@ -168,8 +172,18 @@ export function ProjectCrawlAudit({
 
   useEffect(() => {
     if (!hasActive) return;
-    const timer = globalThis.setInterval(() => void load(), 5_000);
-    return () => globalThis.clearInterval(timer);
+    let pollInFlight = false;
+    const poll = async () => {
+      if (document.visibilityState !== "visible" || pollInFlight) return;
+      pollInFlight = true;
+      try { await load(undefined, true); } finally { pollInFlight = false; }
+    };
+    const timer = globalThis.setInterval(() => void poll(), 5_000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      globalThis.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
   }, [hasActive, load]);
 
   async function start(event: FormEvent<HTMLFormElement>): Promise<void> {

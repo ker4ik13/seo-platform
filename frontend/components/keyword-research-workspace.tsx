@@ -129,20 +129,26 @@ export function KeywordResearchWorkspace({
     ({ id }) => id === keysCredentialId
   );
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (signal?: AbortSignal, summaryOnly = false) => {
     try {
       const [next, nextGroups] = await Promise.all([
         browserApiRequest<KeywordResearchCollection>(
           path(projectId),
           signal ? { signal } : {}
         ),
-        browserApiRequest<readonly SemanticKeywordGroup[]>(
+        summaryOnly ? Promise.resolve(undefined) : browserApiRequest<readonly SemanticKeywordGroup[]>(
           `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`,
           signal ? { signal } : {}
-        ).catch(() => [] as readonly SemanticKeywordGroup[])
+        ).catch(() => undefined)
       ]);
+      const settledGroups = summaryOnly && !next.runs.some(({ status }) => ACTIVE.has(status))
+        ? await browserApiRequest<readonly SemanticKeywordGroup[]>(
+            `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`,
+            signal ? { signal } : {}
+          ).catch(() => undefined)
+        : nextGroups;
       setCollection(next);
-      setGroups(nextGroups);
+      if (settledGroups) setGroups(settledGroups);
       setError(undefined);
       setExpandedRunId((current) =>
         current ?? next.runs.find(({ status }) => status === "READY_TO_IMPORT")?.id ?? next.runs[0]?.id
@@ -202,8 +208,18 @@ export function KeywordResearchWorkspace({
   );
   useEffect(() => {
     if (!hasActive) return;
-    const timer = window.setInterval(() => void load(), 4_000);
-    return () => window.clearInterval(timer);
+    let pollInFlight = false;
+    const poll = async () => {
+      if (document.visibilityState !== "visible" || pollInFlight) return;
+      pollInFlight = true;
+      try { await load(undefined, true); } finally { pollInFlight = false; }
+    };
+    const timer = window.setInterval(() => void poll(), 5_000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
   }, [hasActive, load]);
 
   const expanded = collection?.runs.find(({ id }) => id === expandedRunId);

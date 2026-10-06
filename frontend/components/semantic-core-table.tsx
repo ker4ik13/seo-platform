@@ -131,6 +131,7 @@ import { semanticInitialCollectionGroupScope } from "../lib/semantic-operation-s
 import { resolvedFolderSelectionIds } from "../lib/semantic-operation-tree";
 import { normalizeSemanticGroupName } from "../lib/semantic-group-name-batch";
 import {
+  semanticActiveOperationPollIntervalMs,
   semanticResearchImportSignature,
   shouldRefreshSemanticOperationMetrics,
   shouldRefreshSemanticResearchImport
@@ -624,9 +625,10 @@ export function SemanticCoreTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const highlightAnchorIdRef = useRef<string | undefined>(undefined);
   const selectionScopeSignatureRef = useRef<string | undefined>(undefined);
-  const liveOperationSignatureRef = useRef("");
+  const liveOperationSignatureRef = useRef("[]");
   const liveResearchImportSignatureRef = useRef("[]");
   const liveMetricRefreshInFlightRef = useRef(false);
+  const liveMetricRefreshAttemptAtRef = useRef(0);
   const liveOperationActiveRef = useRef(false);
   const savedViewAutosaveBaselineRef = useRef("");
   const savedViewAutosaveInFlightRef = useRef<string | undefined>(undefined);
@@ -1247,9 +1249,10 @@ export function SemanticCoreTable({
   }, [keywordQueryConfig, pageSize, projectId, refreshVersion, retryVersion, tableViewReadyProjectId]);
 
   useEffect(() => {
-    liveOperationSignatureRef.current = "";
+    liveOperationSignatureRef.current = "[]";
     liveResearchImportSignatureRef.current = "[]";
     liveOperationActiveRef.current = false;
+    liveMetricRefreshAttemptAtRef.current = 0;
   }, [projectId]);
 
   useEffect(() => {
@@ -1285,6 +1288,10 @@ export function SemanticCoreTable({
         )
       ]);
       if (controller.signal.aborted) return liveOperationActiveRef.current;
+      if ([frequencyResult, rankResult, aiAnswerResult, clusteringResult, researchResult]
+        .every((result) => result.status === "rejected")) {
+        return liveOperationActiveRef.current;
+      }
       const frequencies = frequencyResult.status === "fulfilled"
         ? frequencyResult.value.collections
         : [];
@@ -1392,13 +1399,19 @@ export function SemanticCoreTable({
         ])
       ]);
       const previous = liveOperationSignatureRef.current;
-      liveOperationSignatureRef.current = signature;
       if (!shouldRefreshSemanticOperationMetrics(
         previous,
         signature,
-        liveMetricRefreshInFlightRef.current
+        liveMetricRefreshInFlightRef.current,
+        {
+          active,
+          visible: document.visibilityState === "visible",
+          now: Date.now(),
+          lastAttemptAt: liveMetricRefreshAttemptAtRef.current
+        }
       )) return active;
       liveMetricRefreshInFlightRef.current = true;
+      liveMetricRefreshAttemptAtRef.current = Date.now();
       try {
         const result = await loadKeywordPage(
           projectId,
@@ -1412,6 +1425,7 @@ export function SemanticCoreTable({
         );
         if (!controller.signal.aborted) {
           setItems((current) => mergeKeywordMetrics(current, result.data));
+          liveOperationSignatureRef.current = signature;
         }
       } finally {
         liveMetricRefreshInFlightRef.current = false;
@@ -1429,7 +1443,7 @@ export function SemanticCoreTable({
       if (controller.signal.aborted) return;
       timer = window.setTimeout(
         () => void poll(),
-        document.visibilityState === "visible" ? (active ? 2_000 : 15_000) : 30_000
+        document.visibilityState === "visible" ? (active ? semanticActiveOperationPollIntervalMs : 15_000) : 30_000
       );
     };
     const refreshWhenVisible = () => {

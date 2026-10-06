@@ -15,6 +15,7 @@ import {
   trackingContextDisplayName,
   trackingContextDraft,
   trackingContextDraftDirty,
+  trackingContextLaunchDraft,
   trackingContextMatchesDraft,
   trackingContextPayloadSignature,
   trackingContextScopeResolutionKey,
@@ -277,6 +278,22 @@ test("detects semantic draft changes after normalization", () => {
     }),
     true
   );
+});
+
+test("a run never renames an already saved context from its generated title", () => {
+  const original = trackingContextDraft(context);
+  const launch = trackingContextLaunchDraft(context, {
+    ...original,
+    name: "Москва · Десктоп · Топ-30",
+    depth: 30
+  });
+  assert.equal(launch.name, context.name);
+  assert.equal(launch.depth, 30);
+  assert.equal(trackingContextDraftDirty(context, launch), true);
+  assert.equal(trackingContextDraftDirty(context, trackingContextLaunchDraft(context, {
+    ...original,
+    name: "Любой автозаголовок"
+  })), false);
 });
 
 test("preserves legacy descendant scope while new drafts stay direct", () => {

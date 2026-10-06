@@ -170,8 +170,8 @@ test("a named multi-target profile creates distinct readable context names", () 
   assert.deepEqual(
     batch.entries.map(({ draft }) => draft.name),
     [
-      "Основной мониторинг · Москва · Десктоп",
-      "Основной мониторинг · Санкт-Петербург · Мобильное"
+      "Основной мониторинг · Москва · Десктоп · Топ-50",
+      "Основной мониторинг · Санкт-Петербург · Мобильное · Топ-50"
     ]
   );
 });
