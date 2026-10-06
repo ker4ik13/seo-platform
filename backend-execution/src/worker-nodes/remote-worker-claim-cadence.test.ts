@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { remoteWorkerClaimDelayMs } from "./remote-worker-claim-cadence.js";
+import { remoteWorkerClaimDelayMs,remoteWorkerFamilyHttpSlots } from "./remote-worker-claim-cadence.js";
+
+test("independent rank and non-rank polls share the free HTTP capacity",()=>{
+  assert.equal(remoteWorkerFamilyHttpSlots(128,128),64);
+  assert.equal(remoteWorkerFamilyHttpSlots(63,10),32);
+  assert.equal(remoteWorkerFamilyHttpSlots(1,10),1);
+  assert.equal(remoteWorkerFamilyHttpSlots(128,0),128);
+  assert.equal(remoteWorkerFamilyHttpSlots(0,10),0);
+  assert.throws(()=>remoteWorkerFamilyHttpSlots(-1,10),TypeError);
+});
 
 test("one worker polls every five seconds idle and promptly after batch completion", () => {
   assert.equal(remoteWorkerClaimDelayMs(0,0,0,1_000),0);

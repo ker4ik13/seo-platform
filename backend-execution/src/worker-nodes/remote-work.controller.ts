@@ -23,15 +23,19 @@ export class RemoteWorkController {
     const {id,token}=workerIdentity(headers);
     const node=await this.nodes.authorizeCombinedWork(id,token);
     const rankSlots=node.capabilities.includes("RANK") ? Math.min(input.capabilitySlots.RANK ?? 0,input.httpSlots) : 0;
-    const reservedRank=Math.min(rankSlots,node.capabilities.every(capability=>capability==="RANK")
+    const rankOnlyRequest=input.cpuSlots===0 && Object.entries(input.capabilitySlots)
+      .every(([capability,slots])=>capability==="RANK" || slots===0);
+    const reservedRank=Math.min(rankSlots,(rankOnlyRequest || node.capabilities.every(capability=>capability==="RANK"))
       ? input.httpSlots : Math.ceil(input.httpSlots/2));
     const initialWorkSlots=input.httpSlots-reservedRank;
     // The two independently fenced admission paths run in parallel. A slow
     // rank page must not hold queued Wordstat/Arsenkin/crawl behind it.
     const [rankPass,workPass]=await Promise.allSettled([
       reservedRank>0 ? this.ranks.claimBatch(id,token,reservedRank,RANK_CLAIM_PASS_BUDGET_MS) : Promise.resolve([]),
-      this.work.claim(id,token,{...input,httpSlots:initialWorkSlots,
-        capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-reservedRank)}})
+      initialWorkSlots>0 || input.cpuSlots>0
+        ? this.work.claim(id,token,{...input,httpSlots:initialWorkSlots,
+          capabilitySlots:{...input.capabilitySlots,RANK:Math.max(0,rankSlots-reservedRank)}})
+        : Promise.resolve([])
     ]);
     if(rankPass.status==="rejected" && workPass.status==="rejected")throw rankPass.reason;
     if(rankPass.status==="rejected")this.logger.warn(JSON.stringify({event:"remote_rank_batch_admission_failed",...admissionErrorCodes(rankPass.reason)}));
@@ -50,7 +54,7 @@ export class RemoteWorkController {
       : [];
     // If the first work half filled, reuse rank capacity that was not needed.
     // Idle workers do not issue a second empty database claim.
-    const topUp=spareHttp>0 && topUpRanks.length===0 && initialWorkHttp===initialWorkSlots && workPass.status==="fulfilled" &&
+    const topUp=!rankOnlyRequest && spareHttp>0 && topUpRanks.length===0 && initialWorkHttp===initialWorkSlots && workPass.status==="fulfilled" &&
       (initialWorkSlots>0 || (reservedRank>0 && ranks.length===0))
       ? await this.work.claim(id,token,{...input,httpSlots:spareHttp,cpuSlots:0,
         capabilitySlots:Object.fromEntries(Object.entries(input.capabilitySlots).map(([capability,slots])=>[

@@ -28,6 +28,40 @@ test("combined claim admits rank and other work independently", async () => {
   assert.deepEqual(rankSlots, [128], "rank-only nodes offer every free HTTP slot to ranks");
 });
 
+test("rank-only worker poll uses its full reserved HTTP budget on a mixed-capability node", async () => {
+  const rankSlots:number[]=[];
+  let workCalls=0;
+  const controller=new RemoteWorkController(
+    {claim:async()=>{workCalls++;return [];},cancelled:async()=>[]} as unknown as RemoteWorkGatewayService,
+    {claimBatch:async (_id:string,_token:string,slots:number)=>{rankSlots.push(slots);return [];}} as unknown as WorkerRankGatewayService,
+    {authorizeCombinedWork:async()=>({capabilities:["RANK","WORDSTAT"]})} as unknown as WorkerNodeService
+  );
+  await controller.claim(
+    {httpSlots:64,cpuSlots:0,capabilitySlots:{RANK:64,WORDSTAT:0}},
+    {"x-worker-id":nodeId,authorization:`Bearer wn_${"a".repeat(43)}`},
+    {id:"request-rank-only"} as FastifyRequest
+  );
+  assert.deepEqual(rankSlots,[64]);
+  assert.equal(workCalls,0);
+});
+
+test("non-rank poll returns its work without entering rank admission", async () => {
+  let rankCalls=0;
+  const work=[{resource:"HTTP",capability:"WORDSTAT"}];
+  const controller=new RemoteWorkController(
+    {claim:async()=>work,cancelled:async()=>[]} as unknown as RemoteWorkGatewayService,
+    {claimBatch:async()=>{rankCalls++;return [];}} as unknown as WorkerRankGatewayService,
+    {authorizeCombinedWork:async()=>({capabilities:["RANK","WORDSTAT"]})} as unknown as WorkerNodeService
+  );
+  const result=await controller.claim(
+    {httpSlots:64,cpuSlots:0,capabilitySlots:{RANK:0,WORDSTAT:10}},
+    {"x-worker-id":nodeId,authorization:`Bearer wn_${"a".repeat(43)}`},
+    {id:"request-wordstat-only"} as FastifyRequest
+  );
+  assert.equal(rankCalls,0);
+  assert.deepEqual(result.data.work,work);
+});
+
 test("idle non-rank slots are offered to a busy rank backlog", async () => {
   const rankSlots: number[] = [];
   const controller = new RemoteWorkController(

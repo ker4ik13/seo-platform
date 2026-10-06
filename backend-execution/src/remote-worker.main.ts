@@ -9,13 +9,17 @@ import { parseWorkerRankTask } from "./worker-nodes/worker-rank-task.js";
 import { rankProviderRequestIntent } from "./rank-runs/rank-provider-request-intent.js";
 import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { ClamdMalwareScannerAdapter } from "./malware/clamd-malware-scanner.adapter.js";
-import { REMOTE_WORKER_WARM_POLLS, remoteWorkerClaimDelayMs } from "./worker-nodes/remote-worker-claim-cadence.js";
+import { REMOTE_WORKER_WARM_POLLS, remoteWorkerClaimDelayMs, remoteWorkerFamilyHttpSlots } from "./worker-nodes/remote-worker-claim-cadence.js";
 import { workerTaskFinishLog, workerTaskLogContext, workerTaskStartLog } from "./worker-nodes/remote-worker-task-log.js";
 import { workerBuildHash } from "./worker-nodes/worker-build-version.js";
 import { keepHeartbeatUntilDrained } from "./worker-nodes/remote-worker-lifecycle.js";
 import { WorkerRankResultBatcher } from "./worker-nodes/worker-rank-result-batcher.js";
 
 const CLAIM_CADENCE_CHECK_MS=100;
+const HTTP_WORK_CAPABILITIES=workerCapabilities.filter(capability=>
+  capability!=="RANK" && !["IMPORT","EXPORT","INSPECTION"].includes(capability));
+const CPU_WORK_CAPABILITIES=workerCapabilities.filter(capability=>
+  ["IMPORT","EXPORT","INSPECTION"].includes(capability));
 
 async function main():Promise<void> {
   const config=await loadRemoteWorkerConfig(),buildHash=await workerBuildHash(),client=new WorkerHttpClient(config),claimController=new AbortController(),heartbeatController=new AbortController();
@@ -28,7 +32,9 @@ async function main():Promise<void> {
     cpuSlots: config.cpuSlots,
     capabilitySlots: config.capabilitySlots
   };
-  const running=new Set<Promise<void>>();let completedWork=0;
+  const running=new Set<Promise<void>>();
+  const completed={work:0,rank:0};
+  const reserved={work:0,rank:0};
   const cancellations=new Map<string,()=>void>();
   const suspendAuthentication=()=>{authenticationRejected=true;for(const stop of cancellations.values())stop();};
   const capacities=()=>({...effectiveCapacity.capabilitySlots,
@@ -76,26 +82,40 @@ async function main():Promise<void> {
       process.stdout.write(`${workerTaskFinishLog(context,Date.now()-startedAt,errorCode)}\n`);
     }).catch(error=>{if(error instanceof WorkerAuthenticationError){process.stderr.write(`worker ${config.nodeId} authentication rejected · Воркер: не удалось подтвердить ${context}\n`);suspendAuthentication();}
       else process.stderr.write(`Воркер: центр не подтвердил ${context} · ${Date.now()-startedAt} мс\n`);
-    }).finally(()=>{active.set(capability,Math.max(0,(active.get(capability) ?? 1)-1));if(resource==="HTTP")httpActive--;else cpuActive--;running.delete(work);completedWork++;});
+    }).finally(()=>{active.set(capability,Math.max(0,(active.get(capability) ?? 1)-1));if(resource==="HTTP")httpActive--;else cpuActive--;running.delete(work);completed[capability==="RANK" ? "rank" : "work"]++;});
     running.add(work);
   }
 
-  async function schedule():Promise<void> {
+  async function scheduleFamily(family:"work"|"rank"):Promise<void> {
     let lastPoll=0,observedCompletions=0,warmPollsRemaining=0;
     while(!claimController.signal.aborted) {
       while(!claimController.signal.aborted) {
-        if(completedWork>observedCompletions)warmPollsRemaining=REMOTE_WORKER_WARM_POLLS;
-        const delay=remoteWorkerClaimDelayMs(lastPoll,observedCompletions,completedWork,Date.now(),warmPollsRemaining);
+        if(completed[family]>observedCompletions)warmPollsRemaining=REMOTE_WORKER_WARM_POLLS;
+        const delay=remoteWorkerClaimDelayMs(lastPoll,observedCompletions,completed[family],Date.now(),warmPollsRemaining);
         if(delay===0)break;
         await wait(Math.min(delay,CLAIM_CADENCE_CHECK_MS),claimController.signal);
       }
       if(claimController.signal.aborted)break;
-      observedCompletions=completedWork;
+      observedCompletions=completed[family];
       lastPoll=Date.now();
       if(authenticationRejected) continue;
-      const httpSlots=Math.max(0,effectiveCapacity.httpSlots-httpActive),cpuSlots=Math.max(0,effectiveCapacity.cpuSlots-cpuActive);
-      const slots=Object.fromEntries(workerCapabilities.map(capability=>[capability,Math.max(0,(capacities()[capability] ?? 0)-(active.get(capability) ?? 0))]));
+      const currentCapacities=capacities();
+      const rankCapacity=Math.max(0,(currentCapacities.RANK ?? 0)-(active.get("RANK") ?? 0));
+      const workCapacity=Math.max(0,...HTTP_WORK_CAPABILITIES.map(capability=>
+        (currentCapacities[capability] ?? 0)-(active.get(capability) ?? 0)));
+      const cpuCapacity=Math.max(0,...CPU_WORK_CAPABILITIES.map(capability=>
+        (currentCapacities[capability] ?? 0)-(active.get(capability) ?? 0)));
+      const available=Math.max(0,effectiveCapacity.httpSlots-httpActive-reserved.work-reserved.rank);
+      const ownCapability=family==="rank" ? rankCapacity : workCapacity;
+      const otherCapability=family==="rank" ? workCapacity : rankCapacity;
+      const httpSlots=ownCapability>0 ? remoteWorkerFamilyHttpSlots(available,otherCapability) : 0;
+      const cpuSlots=family==="work" ? Math.min(cpuCapacity,Math.max(0,effectiveCapacity.cpuSlots-cpuActive)) : 0;
+      if(httpSlots===0 && cpuSlots===0){await wait(250,claimController.signal);continue;}
+      reserved[family]=httpSlots;
+      const slots=Object.fromEntries(workerCapabilities.map(capability=>[capability,
+        (family==="rank")===(capability==="RANK") ? Math.max(0,(currentCapacities[capability] ?? 0)-(active.get(capability) ?? 0)) : 0]));
       try {
+        const claimStartedAt=Date.now();
         const value=await client.post("claim",{httpSlots,cpuSlots,capabilitySlots:slots},32*1_048_576,30_000,claimController.signal);
         if(!value || typeof value!=="object" || Array.isArray(value) || Object.keys(value).length!==3) throw new Error("Invalid claim batch");
         const batch=value as {work?:unknown;ranks?:unknown;cancelled?:unknown};if(!Array.isArray(batch.work) || !Array.isArray(batch.ranks) || !Array.isArray(batch.cancelled) || batch.cancelled.length>256 || batch.cancelled.some(id=>typeof id!=="string") || batch.work.length+batch.ranks.length>640) throw new Error("Invalid claim batch");
@@ -103,7 +123,7 @@ async function main():Promise<void> {
         const tasks=batch.work.map(parseRemoteWorkTask),ranks=batch.ranks.map(parseWorkerRankTask);
         warmPollsRemaining=tasks.length+ranks.length>0 ? REMOTE_WORKER_WARM_POLLS : Math.max(0,warmPollsRemaining-1);
         if(tasks.filter(task=>task.resource==="HTTP").length+ranks.length>httpSlots || tasks.filter(task=>task.resource==="CPU").length>cpuSlots) throw new Error("Worker capacity exceeded");
-        if(tasks.length+ranks.length>0)process.stdout.write(`Воркер: получена пачка · задания ${tasks.length} · страницы позиций ${ranks.length}\n`);
+        if(tasks.length+ranks.length>0)process.stdout.write(`Воркер: получена пачка · задания ${tasks.length} · страницы позиций ${ranks.length} · выдача ${Date.now()-claimStartedAt} мс\n`);
         for(const task of tasks) start(task,task.resource,()=>{
           const done=()=>cancellations.delete(task.id);
           if(task.resource==="CPU") return runCpu(task,config,client,stop=>cancellations.set(task.id,stop)).finally(done);
@@ -114,11 +134,15 @@ async function main():Promise<void> {
         if(claimController.signal.aborted)break;
         if(error instanceof WorkerAuthenticationError){suspendAuthentication();await wait(5_000,claimController.signal);}
         if(error instanceof WorkerPausedError) await wait(5_000,claimController.signal);
+      } finally {
+        reserved[family]=0;
       }
     }
-    await Promise.allSettled(running);
   }
-  await keepHeartbeatUntilDrained(heartbeatController,heartbeat(),schedule);
+  await keepHeartbeatUntilDrained(heartbeatController,heartbeat(),async()=>{
+    await Promise.all([scheduleFamily("work"),scheduleFamily("rank")]);
+    await Promise.allSettled(running);
+  });
 }
 
 async function runWork(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,signal:AbortSignal):Promise<string|undefined> {
