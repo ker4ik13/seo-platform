@@ -25,13 +25,18 @@ test("PostgreSQL batch rank comparison preserves latest and previous positions a
     configuration_version: 1, depth: 30, search_engine: "YANDEX",
     country_code: "RU", region_code: "213", language: "ru", device: "DESKTOP"
   }));
+  const largeKeywords = Array.from({ length: 1_000 }, (_, index) => index + 10);
   const snapshots = [
     snapshot(1, 1, firstContext, true, 7, 1),
     snapshot(1, 2, secondContext, true, 5, 2),
     snapshot(1, 3, firstContext, true, 3, 3),
     snapshot(2, 4, firstContext, true, 8, 2),
     snapshot(2, 5, secondContext, false, null, 3),
-    snapshot(4, 6, secondContext, true, 9, 3)
+    snapshot(4, 6, secondContext, true, 9, 3),
+    ...largeKeywords.flatMap((keyword) => [
+      snapshot(keyword, 10_000 + keyword * 2, firstContext, true, 12, 2),
+      snapshot(keyword, 10_001 + keyword * 2, secondContext, true, 8, 3)
+    ])
   ];
   const fixture = Prisma.sql`
     WITH tracking_context_versions AS (
@@ -81,6 +86,21 @@ test("PostgreSQL batch rank comparison preserves latest and previous positions a
       { keywordId: id(2), found: false, position: null, previousPosition: 8 },
       { keywordId: id(3), found: true, position: 9, previousPosition: null }
     ]);
+    const largePage = await new KeywordRankComparisonService(prisma).compareTrusted(
+      { workspaceId, projectId },
+      {
+        keywordIds: [id(1), id(2), id(3), ...largeKeywords.map(id)],
+        dimensionKeys: [dimensionKey],
+        columnKeys: [`rank:${dimensionKey}:position`],
+        includeSiteResultCount: false
+      }
+    );
+    assert.equal(largePage.length, 1_003);
+    assert.deepEqual(largePage.at(-1) && {
+      keywordId: largePage.at(-1)!.keywordId,
+      position: largePage.at(-1)!.position,
+      previousPosition: largePage.at(-1)!.previousPosition
+    }, { keywordId: id(1_009), position: 8, previousPosition: 12 });
   } finally {
     await database.$disconnect();
   }

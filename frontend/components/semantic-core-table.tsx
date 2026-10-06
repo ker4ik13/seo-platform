@@ -127,6 +127,7 @@ import {
   type SemanticManualDuplicateMode
 } from "../lib/semantic-manual-add-preferences";
 import { semanticKeywordSearchPlaceholder } from "../lib/semantic-group-selection";
+import { semanticInitialCollectionGroupScope } from "../lib/semantic-operation-scope-query";
 import { resolvedFolderSelectionIds } from "../lib/semantic-operation-tree";
 import { normalizeSemanticGroupName } from "../lib/semantic-group-name-batch";
 import {
@@ -477,6 +478,9 @@ export function SemanticCoreTable({
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(
     new Set()
   );
+  const [checkedRows, setCheckedRows] = useState<ReadonlyMap<string, SemanticKeyword>>(
+    new Map()
+  );
   const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(
     new Set()
   );
@@ -636,6 +640,22 @@ export function SemanticCoreTable({
   });
   loadedKeywordsRef.current = items;
   loadedKeywordCountRef.current = items.length;
+  const visibleRowById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
+  );
+  const selectedRows = (ids: ReadonlySet<string>): readonly SemanticKeyword[] =>
+    [...ids].flatMap((id) => {
+      const item = visibleRowById.get(id) ?? checkedRows.get(id);
+      return item ? [item] : [];
+    });
+  const initialCollectionGroupScope = useMemo(
+    () => semanticInitialCollectionGroupScope(checkedIds.size, multiGroupIds),
+    [checkedIds.size, multiGroupIds]
+  );
+  useEffect(() => {
+    if (checkedIds.size === 0 && checkedRows.size > 0) setCheckedRows(new Map());
+  }, [checkedIds, checkedRows]);
   useEffect(() => {
     if (!mobileGroupTreeOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1158,6 +1178,7 @@ export function SemanticCoreTable({
     selectAllAbortRef.current = undefined;
     setSelectingAll(false);
     setCheckedIds(new Set());
+    setCheckedRows(new Map());
     setHighlightedIds(new Set());
     highlightAnchorIdRef.current = undefined;
   }, [selectionScopeSignature]);
@@ -2992,12 +3013,17 @@ export function SemanticCoreTable({
     }
   }
 
-  function toggleSelection(keywordId: string): void {
+  function toggleSelection(item: SemanticKeyword): void {
     setBulkNotice(undefined);
+    setCheckedRows((current) => {
+      const next = new Map(current);
+      next.set(item.id, item);
+      return next;
+    });
     setCheckedIds((current) => {
       const next = new Set(current);
-      if (next.has(keywordId)) next.delete(keywordId);
-      else next.add(keywordId);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
       return next;
     });
   }
@@ -3068,7 +3094,7 @@ export function SemanticCoreTable({
     item: SemanticKeyword,
     _event: MouseEvent<HTMLInputElement>
   ): void {
-    toggleSelection(item.id);
+    toggleSelection(item);
   }
 
   function toggleAllSelection(uiLocale: string = "ru-RU"): void {
@@ -3076,7 +3102,9 @@ export function SemanticCoreTable({
     setBulkNotice(undefined);
     const allLoadedSelected =
       items.length > 0 &&
-      !page.hasNext &&
+      (page.totalApprox === undefined
+        ? !page.hasNext
+        : checkedIds.size >= page.totalApprox) &&
       items.every(({ id }) => checkedIds.has(id));
     if (allLoadedSelected) {
       setCheckedIds(new Set());
@@ -3113,19 +3141,26 @@ export function SemanticCoreTable({
     setSelectingAll(true);
     setError(undefined);
     try {
+      const leanSelection = postAction !== "HIGHLIGHT";
+      const { rankSortDimensionKey: ignoredRankSort, ...selectionBase } = config;
+      void ignoredRankSort;
+      const requestConfig: SemanticKeywordLoadConfig = leanSelection
+        ? { ...selectionBase, sort: "CREATED_DESC", metricProjection: [], rankColumnKeys: [] }
+        : config;
       let cursor: string | undefined;
-      let loaded: readonly SemanticKeyword[] = [];
+      const loaded = new Map<string, SemanticKeyword>();
       let lastPage: BrowserCursorPage = { hasNext: false };
       const seenCursors = new Set<string>();
       do {
         const result = await loadKeywordPage(
           projectId,
-          config,
+          requestConfig,
           cursor,
           controller.signal,
-          500
+          500,
+          leanSelection
         );
-        loaded = mergeKeywords(loaded, result.data);
+        for (const item of result.data) loaded.set(item.id, item);
         lastPage = result.page;
         if (!result.page.hasNext) break;
         const nextCursor = result.page.nextCursor;
@@ -3136,10 +3171,11 @@ export function SemanticCoreTable({
         cursor = nextCursor;
       } while (!controller.signal.aborted);
       if (controller.signal.aborted) return;
-      setItems(loaded);
-      setPage(lastPage);
-      const loadedIds = loaded.map(({ id }) => id);
+      const loadedRows = [...loaded.values()];
+      const loadedIds = [...loaded.keys()];
       if (postAction === "HIGHLIGHT") {
+        setItems(loadedRows);
+        setPage(lastPage);
         const highlight = semanticHighlightAllRows(
           loadedIds,
           highlightAnchorIdRef.current
@@ -3151,13 +3187,14 @@ export function SemanticCoreTable({
         );
         return;
       }
+      setCheckedRows(loaded);
       setCheckedIds(new Set(loadedIds));
-      if (postAction === "MOVE" && loaded.length > 0) {
+      if (postAction === "MOVE" && loadedRows.length > 0) {
         setActionIds(new Set(loadedIds));
         setMoveKeywordTargetId("");
         setMoveKeywordDialog(true);
       }
-      setBulkNotice(`Выбраны все запросы: ${formatInteger(loaded.length, uiLocale)}`);
+      setBulkNotice(`Выбраны все запросы: ${formatInteger(loadedRows.length, uiLocale)}`);
     } catch (requestError) {
       if (!controller.signal.aborted) {
         setError(keywordErrorMessage(requestError));
@@ -3173,6 +3210,11 @@ export function SemanticCoreTable({
 
   function toggleHighlightedSelection(): void {
     setBulkNotice(undefined);
+    setCheckedRows((current) => {
+      const next = new Map(current);
+      for (const item of items) if (highlightedIds.has(item.id)) next.set(item.id, item);
+      return next;
+    });
     setCheckedIds((current) =>
       toggleSemanticHighlightedSelection(current, highlightedIds)
     );
@@ -3220,7 +3262,7 @@ export function SemanticCoreTable({
 
   async function downloadExport(uiLocale: string = "ru-RU"): Promise<void> {
     if (exporting) return;
-    const exportSelection = semanticExportSelection(checkedIds, items);
+    const exportSelection = semanticExportSelection(checkedIds, selectedRows(checkedIds));
     const selected = exportScope === "SELECTED"
       ? exportSelection.keywordIds
       : [];
@@ -3359,7 +3401,7 @@ export function SemanticCoreTable({
     if (saving || ids.size === 0) return;
     setSaving(true);
     setMutationError(undefined);
-    const selected = items.filter(({ id }) => ids.has(id));
+    const selected = selectedRows(ids);
     const permanent = groups.some(
       ({ id, systemKind }) =>
         id === viewConfig.filters.groupId && systemKind === "TRASH"
@@ -3640,12 +3682,18 @@ export function SemanticCoreTable({
     keywordIds: ReadonlySet<string>,
     kind: "выбранных" | "выделенных"
   ): void => {
-    const clipboardText = semanticClipboardText(items, keywordIds);
+    const rows = kind === "выбранных"
+      ? [...keywordIds].flatMap((id) => {
+          const item = visibleRowById.get(id) ?? checkedRows.get(id);
+          return item ? [item] : [];
+        })
+      : items;
+    const clipboardText = semanticClipboardText(rows, keywordIds);
     if (!clipboardText) {
       setMutationError(`Нет ${kind} запросов для копирования.`);
       return;
     }
-    const copiedCount = items.reduce(
+    const copiedCount = rows.reduce(
       (count, { id }) => count + (keywordIds.has(id) ? 1 : 0),
       0
     );
@@ -3661,7 +3709,7 @@ export function SemanticCoreTable({
           "Браузер не разрешил доступ к буферу обмена. Проверьте разрешение сайта."
         )
       );
-  }, [items, uiLocale]);
+  }, [checkedRows, items, uiLocale, visibleRowById]);
 
   function selectProject(nextProjectId: string): void {
     if (!nextProjectId || nextProjectId === projectId) return;
@@ -5578,8 +5626,7 @@ export function SemanticCoreTable({
             setRetryVersion((value) => value + 1);
           }}
           projectId={projectId}
-          selections={items
-            .filter(({ id }) => mutationIds.has(id))
+          selections={selectedRows(mutationIds)
             .map(({ id, version, textOriginal, language, priority, isFavorite, isTracked, intent, groupId, clusterId, targetUrl, tags }) => ({
               id,
               version,
@@ -6024,6 +6071,11 @@ export function SemanticCoreTable({
               result.updatedItems,
               visibleGroupIds
             );
+            const visibleGroups = new Set(visibleGroupIds);
+            const movedOutsideScope = visibleGroups.size === 0 ? 0 :
+              result.updatedItems.filter(({ groupId }) =>
+                !groupId || !visibleGroups.has(groupId)
+              ).length;
             setMoveKeywordDialog(false);
             setMoveKeywordTargetId("");
             setCheckedIds(new Set());
@@ -6039,14 +6091,14 @@ export function SemanticCoreTable({
               setRightSidebar(undefined);
             }
             setItems(reconciliation.items);
-            if (reconciliation.removedIds.length > 0) {
+            if (movedOutsideScope > 0) {
               setPage((current) => current.totalApprox === undefined
                 ? current
                 : {
                     ...current,
                     totalApprox: Math.max(
                       0,
-                      current.totalApprox - reconciliation.removedIds.length
+                      current.totalApprox - movedOutsideScope
                     )
                   });
             }
@@ -6058,8 +6110,7 @@ export function SemanticCoreTable({
             onGroupsChanged();
           }}
           projectId={projectId}
-          selections={items
-            .filter(({ id }) => mutationIds.has(id))
+          selections={selectedRows(mutationIds)
             .map(({ id, version, textOriginal, groupPath }) => ({
               id,
               version,
@@ -6131,8 +6182,8 @@ export function SemanticCoreTable({
             ? { activeGroupId: viewConfig.filters.groupId }
             : {})}
           groups={groups}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialScope={initialCollectionGroupScope}
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({
               id,
               version,
@@ -6150,8 +6201,8 @@ export function SemanticCoreTable({
         <SemanticPositionDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialScope={initialCollectionGroupScope}
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal, isTracked }) => ({
               id,
               version,
@@ -6175,8 +6226,8 @@ export function SemanticCoreTable({
         <SemanticPositionDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialScope={initialCollectionGroupScope}
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal, isTracked }) => ({
               id,
               version,
@@ -6202,8 +6253,8 @@ export function SemanticCoreTable({
         <SemanticAiAnswerDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialScope={initialCollectionGroupScope}
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
           onClose={() => setAiAnswerDialogOpen(false)}
           onStarted={() => {
@@ -6221,8 +6272,8 @@ export function SemanticCoreTable({
         <SemanticAiAnswerDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialScope={initialCollectionGroupScope}
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({
               id,
               version,
@@ -6247,6 +6298,7 @@ export function SemanticCoreTable({
         <SemanticFrequencyDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
+          initialScope={initialCollectionGroupScope}
           onClose={() => setFrequencyDialogOpen(false)}
           onStarted={(job) => {
             setFrequencyDialogOpen(false);
@@ -6257,8 +6309,7 @@ export function SemanticCoreTable({
           }}
           projectId={projectId}
           workspaceId={workspaceId}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
       )}
@@ -6266,6 +6317,7 @@ export function SemanticCoreTable({
         <SemanticFrequencyDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
+          initialScope={initialCollectionGroupScope}
           mode="SEASONALITY"
           onClose={() => setSeasonalityDialogOpen(false)}
           onStarted={(job) => {
@@ -6277,8 +6329,7 @@ export function SemanticCoreTable({
           }}
           projectId={projectId}
           workspaceId={workspaceId}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
       )}
@@ -6286,8 +6337,8 @@ export function SemanticCoreTable({
         <SemanticClusteringDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
-          initialSelections={items
-            .filter(({ id }) => checkedIds.has(id))
+          initialScope={initialCollectionGroupScope}
+          initialSelections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
           onClose={() => setClusteringDialogOpen(false)}
           onStarted={() => {
@@ -6313,8 +6364,7 @@ export function SemanticCoreTable({
             setRetryVersion((value) => value + 1);
           }}
           projectId={projectId}
-          selections={items
-            .filter(({ id }) => checkedIds.has(id))
+          selections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
       )}
@@ -6331,8 +6381,7 @@ export function SemanticCoreTable({
             setRetryVersion((value) => value + 1);
           }}
           projectId={projectId}
-          selections={items
-            .filter(({ id }) => checkedIds.has(id))
+          selections={selectedRows(checkedIds)
             .map(({ id, version, textOriginal }) => ({
               id,
               version,
@@ -6565,7 +6614,8 @@ async function loadKeywordPage(
   config: SemanticKeywordLoadConfig,
   cursor?: string,
   signal?: AbortSignal,
-  limit = 100
+  limit = 100,
+  forceBody = false
 ) {
   const query = new URLSearchParams({ limit: String(limit) });
   const filters = config.filters;
@@ -6597,6 +6647,7 @@ async function loadKeywordPage(
   }
   if (cursor) query.set("cursor", cursor);
   if (
+    forceBody ||
     config.multiSearch ||
     config.metricProjection.length > 0 ||
     config.rankColumnKeys.length > 0 ||

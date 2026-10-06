@@ -115,6 +115,7 @@ const NEW_CONTEXT_VALUE = "__new_context__";
 export function SemanticPositionDialog({
   activeGroupId,
   groups,
+  initialScope,
   initialSelections,
   initialRun,
   mode = "positions",
@@ -126,6 +127,7 @@ export function SemanticPositionDialog({
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
+  initialScope?: SemanticOperationScopeState | undefined;
   initialSelections: readonly SemanticOperationSelection[];
   initialRun?: RankOperationResult;
   mode?: "positions" | "competitors";
@@ -137,6 +139,12 @@ export function SemanticPositionDialog({
 }>) {
   const { t: uiText, locale: uiLocale } = useUiLocale();
   const competitorMode = mode === "competitors";
+  const initialGroupIds = useMemo(
+    () => initialScope?.mode === "GROUPS"
+      ? initialScope.groupIds
+      : activeGroupId ? [activeGroupId] : [],
+    [activeGroupId, initialScope]
+  );
   const formId = useId();
   const [settings, setSettings] = useState<TrackingContextSettings>();
   const [workspaceRouting, setWorkspaceRouting] =
@@ -357,10 +365,10 @@ export function SemanticPositionDialog({
         scopeMode:
           initialSelections.length > 0
             ? "KEYWORDS"
-            : activeGroupId
+            : initialGroupIds.length > 0
               ? "GROUPS"
               : "ALL",
-        groupIds: activeGroupId ? [activeGroupId] : []
+        groupIds: initialGroupIds
       });
     }
     if (!pendingRun.current) setEstimate(undefined);
@@ -508,10 +516,10 @@ export function SemanticPositionDialog({
             scopeMode:
               initialSelections.length > 0
                 ? "KEYWORDS"
-                : activeGroupId
+                : initialGroupIds.length > 0
                   ? "GROUPS"
                   : "ALL",
-            groupIds: activeGroupId ? [activeGroupId] : []
+            groupIds: initialGroupIds
           }));
         }
         if (!initialRun && !competitorMode && preferredSource?.provider === "ARSENKIN") {
@@ -525,7 +533,7 @@ export function SemanticPositionDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [activeGroupId, competitorMode, initialSelections.length, initialRun, projectId, projectSearchCity, uiLocale, workspaceId]);
+  }, [competitorMode, initialGroupIds, initialSelections.length, initialRun, projectId, projectSearchCity, uiLocale, workspaceId]);
 
   useEffect(() => {
     if (

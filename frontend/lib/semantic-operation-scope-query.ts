@@ -1,5 +1,14 @@
 import type { SemanticOperationScopePageInput } from "@seo-platform/contracts";
 
+/** A folder union is the launch scope only when no explicit keywords were checked. */
+export function semanticInitialCollectionGroupScope(
+  checkedKeywordCount: number,
+  groupIds: readonly string[]
+): Readonly<{ mode: "GROUPS"; groupIds: readonly string[] }> | undefined {
+  if (checkedKeywordCount > 0 || groupIds.length === 0) return undefined;
+  return { mode: "GROUPS", groupIds: [...new Set(groupIds)] };
+}
+
 export function semanticOperationScopeResolutionKey(input: {
   readonly mode: string;
   readonly selectedGroupIds: readonly string[];

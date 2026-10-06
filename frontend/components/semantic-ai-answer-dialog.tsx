@@ -29,7 +29,8 @@ import { SemanticModal } from "./semantic-modal";
 import {
   SemanticOperationScope,
   type SemanticOperationGroup,
-  type SemanticOperationSelection
+  type SemanticOperationSelection,
+  type SemanticOperationScopeState
 } from "./semantic-operation-scope";
 import { useUiLocale, UiText } from "./ui-locale";
 
@@ -37,6 +38,7 @@ import { useUiLocale, UiText } from "./ui-locale";
 export function SemanticAiAnswerDialog({
   activeGroupId,
   groups,
+  initialScope,
   initialSelections,
   mode = "positions",
   onClose,
@@ -47,6 +49,7 @@ export function SemanticAiAnswerDialog({
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
+  initialScope?: SemanticOperationScopeState | undefined;
   initialSelections: readonly SemanticOperationSelection[];
   mode?: "positions" | "competitors";
   onClose: () => void;
@@ -381,6 +384,7 @@ export function SemanticAiAnswerDialog({
             <SemanticOperationScope
               activeGroupId={activeGroupId}
               groups={groups}
+              initialScope={initialScope}
               initialSelections={initialSelections}
               maxItems={aiAnswerCollectionKeywordLimit}
               onChange={resolveScope}

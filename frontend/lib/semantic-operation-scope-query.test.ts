@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { semanticOperationScopePageInput, semanticOperationScopeResolutionKey } from "./semantic-operation-scope-query.ts";
+import { semanticInitialCollectionGroupScope, semanticOperationScopePageInput, semanticOperationScopeResolutionKey } from "./semantic-operation-scope-query.ts";
+
+test("uses the selected folder union for collection dialogs only without checked keywords", () => {
+  assert.deepEqual(semanticInitialCollectionGroupScope(0, ["folder-a", "folder-b", "folder-a"]), {
+    mode: "GROUPS", groupIds: ["folder-a", "folder-b"]
+  });
+  assert.equal(semanticInitialCollectionGroupScope(1, ["folder-a"]), undefined);
+  assert.equal(semanticInitialCollectionGroupScope(0, []), undefined);
+});
 
 test("builds one lightweight operation-scope page for multiple folders", () => {
   const input = semanticOperationScopePageInput(["folder-a", "folder-b"]);

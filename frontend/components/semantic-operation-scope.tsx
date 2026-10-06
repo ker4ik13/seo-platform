@@ -82,7 +82,7 @@ export function SemanticOperationScope({
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
-  initialScope?: SemanticOperationScopeState;
+  initialScope?: SemanticOperationScopeState | undefined;
   maxItems: number;
   onChange: (
     selections: readonly SemanticOperationSelection[],

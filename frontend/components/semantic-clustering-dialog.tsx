@@ -37,7 +37,8 @@ import { SemanticModal } from "./semantic-modal";
 import {
   SemanticOperationScope,
   type SemanticOperationGroup,
-  type SemanticOperationSelection
+  type SemanticOperationSelection,
+  type SemanticOperationScopeState
 } from "./semantic-operation-scope";
 import { useUiLocale, UiText } from "./ui-locale";
 
@@ -45,6 +46,7 @@ import { useUiLocale, UiText } from "./ui-locale";
 export function SemanticClusteringDialog({
   activeGroupId,
   groups,
+  initialScope,
   initialSelections,
   onClose,
   onStarted,
@@ -53,6 +55,7 @@ export function SemanticClusteringDialog({
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
+  initialScope?: SemanticOperationScopeState | undefined;
   initialSelections: readonly SemanticOperationSelection[];
   onClose: () => void;
   onStarted: (run: ClusteringRunSummary) => void;
@@ -373,6 +376,7 @@ export function SemanticClusteringDialog({
             <SemanticOperationScope
               activeGroupId={activeGroupId}
               groups={groups}
+              initialScope={initialScope}
               initialSelections={initialSelections}
               maxItems={arsenkinClusteringKeywordLimit}
               onChange={resolveScope}

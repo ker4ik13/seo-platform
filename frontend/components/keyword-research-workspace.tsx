@@ -48,7 +48,8 @@ import { SemanticGroupPickerField } from "./semantic-group-picker";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import {
   SemanticOperationScope,
-  type SemanticOperationSelection
+  type SemanticOperationSelection,
+  type SemanticOperationScopeState
 } from "./semantic-operation-scope";
 import { SemanticModal } from "./semantic-modal";
 import { UiText, useUiLocale } from "./ui-locale";
@@ -886,6 +887,7 @@ export function KeywordResearchRunPreview({
 export function WordstatExpansionDialog({
   activeGroupId,
   groups,
+  initialScope,
   initialSelections = [],
   initialText,
   projectId,
@@ -896,6 +898,7 @@ export function WordstatExpansionDialog({
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticGroupTreeItem[];
+  initialScope?: SemanticOperationScopeState | undefined;
   initialSelections?: readonly SemanticOperationSelection[];
   initialText: string;
   projectId: string;
@@ -913,7 +916,7 @@ export function WordstatExpansionDialog({
   const [loadingProviders, setLoadingProviders] = useState(true);
   const [providerError, setProviderError] = useState<string>();
   const [mode, setMode] = useState<"TEXT" | "PROJECT">(
-    initialText.trim() || (!activeGroupId && initialSelections.length === 0)
+    initialText.trim() || (!activeGroupId && !initialScope?.groupIds.length && initialSelections.length === 0)
       ? "TEXT"
       : "PROJECT"
   );
@@ -1172,7 +1175,7 @@ export function WordstatExpansionDialog({
                 <small>{ownQueries.length} <UiText text="из 500 уникальных фраз" before=" " /></small>
               </label>
             ) : (
-              <SemanticOperationScope activeGroupId={activeGroupId} groups={groups} initialSelections={initialSelections} maxItems={500} onChange={(next, resolving, nextError) => { setSelections(next); setScopeResolving(resolving); setScopeError(nextError); }} projectId={projectId} />
+              <SemanticOperationScope activeGroupId={activeGroupId} groups={groups} initialScope={initialScope} initialSelections={initialSelections} maxItems={500} onChange={(next, resolving, nextError) => { setSelections(next); setScopeResolving(resolving); setScopeError(nextError); }} projectId={projectId} />
             )}
           </section>
         </div>

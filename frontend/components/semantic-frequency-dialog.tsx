@@ -40,7 +40,8 @@ import { SemanticModal } from "./semantic-modal";
 import {
   SemanticOperationScope,
   type SemanticOperationGroup,
-  type SemanticOperationSelection
+  type SemanticOperationSelection,
+  type SemanticOperationScopeState
 } from "./semantic-operation-scope";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -51,6 +52,7 @@ export function SemanticFrequencyDialog({
   projectId,
   activeGroupId,
   groups,
+  initialScope,
   initialSelections,
   initialConfiguration,
   workspaceId,
@@ -63,6 +65,7 @@ export function SemanticFrequencyDialog({
   workspaceId: string;
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
+  initialScope?: SemanticOperationScopeState | undefined;
   initialSelections: readonly SemanticOperationSelection[];
   initialConfiguration?: Pick<FrequencyCollectionSummary, "mode" | "types" | "regionCode" | "device" | "provider" | "credentialMode" | "seasonality">;
 }>) {
@@ -476,6 +479,7 @@ export function SemanticFrequencyDialog({
             <SemanticOperationScope
               activeGroupId={activeGroupId}
               groups={groups}
+              initialScope={initialScope}
               initialSelections={initialSelections}
               maxItems={keywordLimit}
               onChange={resolveScope}

@@ -45,6 +45,9 @@ test("semantic scroll: 800 rows, 100-row pages, rich cells and two open tabs rem
       duplicatePolicy: "SKIP_EXISTING"
     });
   }
+  await command("POST", `projects/${project.id}/keyword-groups/bulk`, {
+    names: ["E2E выбранная группа A", "E2E выбранная группа B"]
+  });
   const context = await browser.newContext({ storageState: await api.storageState(), viewport: { width: 1440, height: 950 } });
   await context.addCookies([{ name: "seo_workspace", value: workspace.id, url: base }, { name: "seo_project", value: project.id, url: base }]);
   await context.addInitScript(() => {
@@ -177,6 +180,36 @@ test("semantic scroll: 800 rows, 100-row pages, rich cells and two open tabs rem
   assert.equal(personalView?.config.pageSize, 200, "default personal view must persist page size");
   await page.reload({ waitUntil: "networkidle" });
   assert.equal((await pageSizeSelect.innerText()).trim(), "200");
+  const loadedBeforeSelection = await page.locator(".semantic-table-footer > span").innerText();
+  const selectionRequestStart = requests.length;
+  await page.locator('.semantic-select-header input[type="checkbox"]').first().click();
+  await page.waitForFunction(() => /800/u.test(document.querySelector(".semantic-selection-chip strong")?.textContent ?? ""));
+  const selectionRequests = requests.slice(selectionRequestStart).filter(req => req.tab === "main");
+  assert.equal(selectionRequests.length, 2, "800 checked keywords use two bounded read pages");
+  assert.ok(selectionRequests.every(req => Array.isArray(req.metricProjection) && req.metricProjection.length === 0 &&
+    Array.isArray(req.rankColumnKeys) && req.rankColumnKeys.length === 0),
+  "bulk selection must not load rank and frequency projections");
+  assert.equal(await page.locator(".semantic-table-footer > span").innerText(), loadedBeforeSelection,
+    "checking all keywords must not replace the current presentation page");
+  await pageSizeSelect.click();
+  await page.getByRole("option", { name: "1000", exact: true }).click();
+  await page.waitForFunction(() => {
+    const text = document.querySelector(".semantic-table-footer > span")?.textContent ?? "";
+    return Number(text.match(/\d+/u)?.[0]) >= 800;
+  });
+  assert.equal((await pageSizeSelect.innerText()).trim(), "1000");
+  assert.equal(await page.locator(".semantic-table-alert").count(), 0);
+  await page.locator(".semantic-selection-chip button").click();
+  await page.locator(".semantic-group-tree .semantic-group-name").filter({ hasText: "E2E выбранная группа A" }).click();
+  await page.locator(".semantic-group-tree .semantic-group-name").filter({ hasText: "E2E выбранная группа B" }).click({ modifiers: ["Control"] });
+  await page.locator(".semantic-group-multi-open").click();
+  await page.locator('[data-presence-key="semantic-action:clustering"]').click();
+  const collectionScope = page.locator("dialog[open] .semantic-operation-scope");
+  await collectionScope.waitFor();
+  assert.equal(await collectionScope.locator('input[type="radio"]').nth(2).isChecked(), true);
+  for (const name of ["E2E выбранная группа A", "E2E выбранная группа B"]) {
+    assert.equal(await collectionScope.locator(".semantic-operation-folder-row").filter({ hasText: name }).locator('input[type="checkbox"]').isChecked(), true);
+  }
   assert.deepEqual(errors, []);
   await writeFile(path.join(output, "semantic-scroll-report.json"), JSON.stringify({ report, requests: requests.length, errors }, null, 2));
 });
