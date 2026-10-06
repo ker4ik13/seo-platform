@@ -20,7 +20,10 @@ import type {
   RankResultPersistenceBrokerService,
   RankResultPersistenceClaim
 } from "./rank-result-persistence-broker.service.js";
-import { RankResultPersistenceService } from "./rank-result-persistence.service.js";
+import {
+  RankResultPersistenceBatchError,
+  RankResultPersistenceService
+} from "./rank-result-persistence.service.js";
 
 const ids = {
   workspace: "01900000-0000-7000-8000-000000000001",
@@ -179,6 +182,32 @@ test("persists several XMLStock chunks through one bounded transaction request",
     ids: [first.executionId, second.executionId],
     persisted: true
   }]);
+});
+
+test("failed rank result batch retains only opaque workspace, project and job context", async () => {
+  const failure = Object.assign(new Error("private provider text"), { code: "P2010" });
+  const broker = {
+    async claimBatch() { return [claim()]; },
+    async complete() { return "STAGED"; }
+  } as unknown as RankResultPersistenceBrokerService;
+  const manifests = {
+    async getChunk() { return sealedChunk(); }
+  } as unknown as RankManifestClient;
+  const results = {
+    async ingest() { throw failure; }
+  } as unknown as RankResultClient;
+  await assert.rejects(
+    () => service(broker, manifests, results).processBatch("rank-result-worker"),
+    (error: unknown) => {
+      assert.ok(error instanceof RankResultPersistenceBatchError);
+      assert.equal(error.workspaceId, ids.workspace);
+      assert.equal(error.projectId, ids.project);
+      assert.equal(error.jobId, ids.job);
+      assert.equal(error.cause, failure);
+      assert.doesNotMatch(error.message, /private provider text/u);
+      return true;
+    }
+  );
 });
 
 function service(

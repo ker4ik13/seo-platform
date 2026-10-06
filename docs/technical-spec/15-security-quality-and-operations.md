@@ -1229,6 +1229,23 @@ outbound HTTPS к фиксированному `api.telegram.org`, не след
 из `infrastructure/runbooks/operational-alerts.md`; сообщение в Telegram не
 является источником истины и не заменяет logs/metrics/traces.
 
+Та же уже очищенная envelope перед подтверждением приёма записывается
+в `platform_db.operational_error_events` владельцем Platform Core. Запись
+содержит service/source/code/severity/fingerprint, environment/version,
+только allowlisted структурные коды/ID из context и, если переданы валидные UUID, индексируемые
+workspace/project/operation ID. Raw exception, query, URL, токены и тексты
+поисковых фраз туда не попадают; даже очищенный свободный `log` в БД не
+копируется. При отказе БД receiver возвращает `503`,
+но не задерживает Telegram-отправку; журнал не может гарантировать запись
+во время полной недоступности самой БД. Очистка по `occurred_at` запускается
+при старте и каждые 24 часа, удаляя записи старше 15 суток ограниченными
+пачками. Если Telegram выключен, но внутренние URL и token receiver заданы,
+журнал продолжает принимать ошибки. Ожидаемые пользовательские 4xx
+по-прежнему не являются инцидентами.
+Для rank result batch errors supervisor разбирает только три валидных UUID
+контекста и код `Pxxxx` из собственной структурированной строки worker-а;
+произвольный текст ошибки или provider payload не используется как поле поиска.
+
 ## 33. Capacity management
 
 Еженедельно/ежемесячно оцениваются:

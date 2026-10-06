@@ -140,6 +140,8 @@ export interface SemanticKeywordMultiSearch {
 export interface KeywordListQuery {
   readonly limit: number;
   readonly cursor?: string;
+  /** Body-only bounded ID projection for refreshing already visible rows. */
+  readonly keywordIds?: readonly string[];
   /** Expensive list enrichments explicitly requested by the current table layout. */
   readonly metricProjection?: readonly SemanticKeywordMetricProjection[];
   /** Exact dynamic city/device columns rendered by the current table layout. */

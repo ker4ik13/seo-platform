@@ -211,7 +211,7 @@ function observeStderr(
       code: "CHILD_ERROR_LOG",
       severity: "ERROR",
       fingerprint,
-      context: { log: supervisedErrorExcerpt(line) }
+      context: supervisedErrorContext(line)
     });
   };
   child.stderr.on("data", (chunk: Buffer | string) => {
@@ -254,6 +254,20 @@ export function supervisedErrorExcerpt(line: string): string {
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 128) || "error log line unavailable";
+}
+
+export function supervisedErrorContext(line: string): Readonly<Record<string, string>> {
+  const context: Record<string, string> = { log: supervisedErrorExcerpt(line) };
+  if (!line.includes("rank_result_persist_failed")) return context;
+  for (const key of ["workspaceId", "projectId", "jobId"] as const) {
+    const value = new RegExp(`\\b${key}=([0-9a-f-]{36})\\b`, "iu").exec(line)?.[1];
+    if (value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
+      context[key] = value;
+    }
+  }
+  const errorCode = /\berrorCode=(P\d{4})\b/u.exec(line)?.[1];
+  if (errorCode) context.errorCode = errorCode;
+  return context;
 }
 
 function captureAlert(

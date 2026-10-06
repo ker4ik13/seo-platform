@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   processEnvironment,
+  supervisedErrorContext,
   supervisedErrorExcerpt,
   supervisedErrorLineFingerprint
 } from "./index.js";
@@ -22,6 +23,23 @@ test("processEnvironment exposes only base, allowed and overridden values", () =
     DATABASE_URL: "postgresql://allowed",
     PORT: "4000"
   });
+});
+
+test("rank persistence diagnostic adds only validated opaque project IDs", () => {
+  const workspaceId = "01900000-0000-7000-8000-000000000001";
+  const projectId = "01900000-0000-7000-8000-000000000002";
+  const jobId = "01900000-0000-7000-8000-000000000003";
+  const context = supervisedErrorContext(
+    `ERROR rank_result_persist_failed workspaceId=${workspaceId} projectId=${projectId} jobId=${jobId} errorCode=P2010`
+  );
+  assert.equal(context.workspaceId, workspaceId);
+  assert.equal(context.projectId, projectId);
+  assert.equal(context.jobId, jobId);
+  assert.equal(context.errorCode, "P2010");
+  assert.deepEqual(
+    Object.keys(supervisedErrorContext("ERROR token=private rank result failed")),
+    ["log"]
+  );
 });
 
 test("error-line observation emits only an irreversible fingerprint", () => {

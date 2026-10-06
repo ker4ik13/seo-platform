@@ -21,7 +21,7 @@ import { validationError } from "../common/domain-error.js";
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 const BODY_QUERY_FIELDS = [
-  "limit", "cursor", "includeNotes", "metricProjection", "rankColumnKeys", "search", "tag", "intent", "groupId", "groupIds",
+  "limit", "cursor", "keywordIds", "includeNotes", "metricProjection", "rankColumnKeys", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort",
   "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
   "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
@@ -199,6 +199,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ? assertUuid(groupIdValue, "groupId")
     : undefined;
   const groupIds = optionalUuidList(query.groupIds, "groupIds");
+  const keywordIds = optionalKeywordIds(query.keywordIds);
   const clusterIdValue = optionalSingleString(query.clusterId, "clusterId");
   const clusterId = clusterIdValue
     ? assertUuid(clusterIdValue, "clusterId")
@@ -313,6 +314,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(groupIds.length > 0 ? { groupIds } : {}),
+    ...(keywordIds.length > 0 ? { keywordIds } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
@@ -346,6 +348,20 @@ function optionalUuidList(value: unknown, field: string): readonly string[] {
   return [...ids].sort();
 }
 
+function optionalKeywordIds(value: unknown): readonly string[] {
+  const parsed = optionalSingleString(value, "keywordIds");
+  if (parsed === undefined) return [];
+  const values = parsed.split(",");
+  if (values.length < 1 || values.length > semanticKeywordMaxPageSize) {
+    invalid("keywordIds", `Must contain 1–${semanticKeywordMaxPageSize} identifiers`);
+  }
+  const ids = values.map((value) => assertUuid(value, "keywordIds"));
+  if (new Set(ids).size !== ids.length) {
+    invalid("keywordIds", "Must contain unique identifiers");
+  }
+  return ids.sort();
+}
+
 function bodyQuery(value: unknown): Readonly<Record<string, string>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     invalid("query", "Must be an object");
@@ -357,7 +373,7 @@ function bodyQuery(value: unknown): Readonly<Record<string, string>> {
   const result: Record<string, string> = {};
   for (const [key, candidate] of Object.entries(query)) {
     if (candidate === undefined) continue;
-    if (key === "groupIds" || key === "metricProjection" || key === "rankColumnKeys") {
+    if (key === "groupIds" || key === "keywordIds" || key === "metricProjection" || key === "rankColumnKeys") {
       if (!Array.isArray(candidate) || !candidate.every((item) => typeof item === "string")) {
         invalid("query.groupIds", "Must be an array of identifiers");
       }

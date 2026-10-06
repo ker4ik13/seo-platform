@@ -102,6 +102,13 @@ test("parses bounded keyword list query", () => {
     search: "бренд"
   });
   assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
+  const keywordId = "01900000-0000-7000-8000-000000000010";
+  assert.deepEqual(
+    keywordBodyListInput({ query: { limit: 1, keywordIds: [keywordId] } }).keywordIds,
+    [keywordId]
+  );
+  assert.throws(() => keywordBodyListInput({ query: { keywordIds: [keywordId, keywordId] } }), BadRequestException);
+  assert.throws(() => keywordBodyListInput({ query: { keywordIds: Array.from({ length: 1_001 }, (_, index) => `01900000-0000-7000-8000-${index.toString().padStart(12, "0")}`) } }), BadRequestException);
   assert.deepEqual(
     keywordListQuery({
       groupIds:

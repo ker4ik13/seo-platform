@@ -381,7 +381,13 @@ export class OperationActivityService {
     const relevantIds = new Set(jobs.map((job) => job.id));
     const rankIds=new Set(rankJobs.map(job=>job.id));
     const allAssignments=[...assignments.filter(row=>rankIds.has(row.jobId)),...genericAssignments];
-    const nodeIds = [...new Set(allAssignments.flatMap((item) =>
+    const jobsWithActiveWork = new Set(allAssignments
+      .filter((assignment) => assignment.activeTasks > 0n)
+      .map((assignment) => assignment.jobId));
+    const visibleAssignments = allAssignments.filter((assignment) =>
+      assignment.activeTasks > 0n || !jobsWithActiveWork.has(assignment.jobId)
+    );
+    const nodeIds = [...new Set(visibleAssignments.flatMap((item) =>
       item.nodeId === "main" || !relevantIds.has(item.jobId)
         ? [] : [item.nodeId]
     ))];
@@ -411,7 +417,7 @@ export class OperationActivityService {
       status: "ONLINE" | "OFFLINE" | "DRAINING" | "DISABLED" | "MAIN";
       assignedOperations: number;
     }>>();
-    for (const assignment of allAssignments) {
+    for (const assignment of visibleAssignments) {
       if (!relevantIds.has(assignment.jobId)) continue;
       const node = nodeById.get(assignment.nodeId);
       const name = assignment.nodeId === "main" ? "Основной сервер" : node?.name ?? "Удалённый воркер";

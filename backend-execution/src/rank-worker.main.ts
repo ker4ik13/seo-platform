@@ -16,7 +16,10 @@ import {
 import { RankExecutionDispatchService } from "./rank-runs/rank-execution-dispatch.service.js";
 import { RankPreparationService } from "./rank-runs/rank-preparation.service.js";
 import { RankResultFinalizationService } from "./rank-runs/rank-result-finalization.service.js";
-import { RankResultPersistenceService } from "./rank-runs/rank-result-persistence.service.js";
+import {
+  RankResultPersistenceBatchError,
+  RankResultPersistenceService
+} from "./rank-runs/rank-result-persistence.service.js";
 import { RankWorkerModule } from "./rank-worker.module.js";
 import { safeErrorSummary } from "./runtime-safe-error.js";
 
@@ -127,9 +130,17 @@ async function bootstrap(): Promise<void> {
                 `rank-result-${randomUUID()}`
               );
             } catch (error) {
-              logger.error(
-                `Unable to persist rank result batch: ${safeErrorSummary(error)}`
-              );
+              if (error instanceof RankResultPersistenceBatchError) {
+                logger.error(
+                  `rank_result_persist_failed workspaceId=${error.workspaceId} ` +
+                  `projectId=${error.projectId} jobId=${error.jobId} ` +
+                  `errorCode=${safeDiagnosticCode(error.cause)}`
+                );
+              } else {
+                logger.error(
+                  `Unable to persist rank result batch: ${safeErrorSummary(error)}`
+                );
+              }
             }
           }
         )
@@ -182,6 +193,15 @@ async function bootstrap(): Promise<void> {
   process.once("SIGTERM", () => void shutdown());
   process.once("SIGINT", () => void shutdown());
   logger.log("Rank preparation worker started");
+}
+
+function safeDiagnosticCode(error: unknown): string {
+  const code = error instanceof Error
+    ? (error as Error & { readonly code?: unknown }).code
+    : undefined;
+  return typeof code === "string" && /^(?:P\d{4}|[A-Z][A-Z0-9_]{0,63})$/u.test(code)
+    ? code
+    : "UNKNOWN";
 }
 
 function redis(url: string): Redis {

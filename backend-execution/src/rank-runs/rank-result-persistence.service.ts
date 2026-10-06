@@ -29,6 +29,18 @@ export type RankResultPersistenceOutcome =
   | "RETRY_PENDING"
   | "LEASE_LOST";
 
+export class RankResultPersistenceBatchError extends Error {
+  public constructor(
+    public readonly workspaceId: string,
+    public readonly projectId: string,
+    public readonly jobId: string,
+    cause: unknown
+  ) {
+    super("Rank result persistence batch failed", { cause });
+    this.name = "RankResultPersistenceBatchError";
+  }
+}
+
 @Injectable()
 export class RankResultPersistenceService {
   public constructor(
@@ -71,13 +83,16 @@ export class RankResultPersistenceService {
       group.push(claim);
       groups.set(key, group);
     }
-    let firstError: unknown;
+    let firstFailure: Readonly<{ error: unknown; claim: RankResultPersistenceClaim }> | undefined;
+    const rememberFailure = (error: unknown, claim: RankResultPersistenceClaim): void => {
+      firstFailure ??= { error, claim };
+    };
     await Promise.all([...groups.values()].map(async (group) => {
       if (group.length === 1) {
         try {
           await this.persistOne(group[0]!);
         } catch (error) {
-          firstError ??= error;
+          rememberFailure(error, group[0]!);
         }
         return;
       }
@@ -114,17 +129,17 @@ export class RankResultPersistenceService {
             try {
               await this.persistOne(claim);
             } catch (singleError) {
-              firstError ??= singleError;
+              rememberFailure(singleError, claim);
             }
           }
         } else {
           try {
             await this.broker.completeBatch(group, false);
           } catch (completionError) {
-            firstError ??= completionError;
+            rememberFailure(completionError, group[0]!);
           }
           if (!(error instanceof RankResultClientError && error.retryable)) {
-            firstError ??= error;
+            rememberFailure(error, group[0]!);
           }
         }
       }
@@ -132,11 +147,18 @@ export class RankResultPersistenceService {
         try {
           await this.broker.completeBatch(group, true);
         } catch (error) {
-          firstError ??= error;
+          rememberFailure(error, group[0]!);
         }
       }
     }));
-    if (firstError) throw firstError;
+    if (firstFailure) {
+      throw new RankResultPersistenceBatchError(
+        firstFailure.claim.workspaceId,
+        firstFailure.claim.projectId,
+        firstFailure.claim.jobId,
+        firstFailure.error
+      );
+    }
     return claims.length;
   }
 

@@ -8,6 +8,25 @@ stack trace, URL, request body, tenant payload или произвольную m
 Telegram получает код события, severity, service/source, необратимый
 fingerprint, environment, версию и время.
 
+Receiver сохраняет структурную часть очищенного envelope в Platform DB в таблице
+`operational_error_events`: коды и валидные opaque ID, но не свободный текст
+`context.log`. Перед исправлением production-инцидента смотрите
+последние 15 дней только на чтение, например:
+
+```sql
+SELECT occurred_at, service, source, code, severity, fingerprint,
+       project_id, operation_id, context
+FROM operational_error_events
+WHERE occurred_at >= now() - interval '15 days'
+ORDER BY occurred_at DESC
+LIMIT 100;
+```
+
+Не публикуйте context вне закрытой диагностики. Receiver удаляет записи старше
+15 суток при запуске и ежедневно пачками; если Platform DB недоступна, приём
+возвращает `503` и Telegram может уже получить сообщение. Отсутствие строки
+в такой ситуации не является доказательством отсутствия ошибки.
+
 Секреты разделены:
 
 - `TELEGRAM_ALERT_BOT_TOKEN` и destination получает только child process

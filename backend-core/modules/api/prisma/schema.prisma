@@ -1315,6 +1315,28 @@ model AuditEvent {
   @@map("audit_events")
 }
 
+model OperationalErrorEvent {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  environment    String   @db.VarChar(64)
+  serviceVersion String   @map("service_version") @db.VarChar(64)
+  service        String   @db.VarChar(64)
+  source         String   @db.VarChar(64)
+  code           String   @db.VarChar(80)
+  severity       String   @db.VarChar(16)
+  fingerprint    String?  @db.VarChar(64)
+  workspaceId    String?  @map("workspace_id") @db.Uuid
+  projectId      String?  @map("project_id") @db.Uuid
+  operationId    String?  @map("operation_id") @db.Uuid
+  context        Json?
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([occurredAt, id], map: "operational_error_events_retention_idx")
+  @@index([projectId, occurredAt(sort: Desc)], map: "operational_error_events_project_idx")
+  @@index([operationId, occurredAt(sort: Desc)], map: "operational_error_events_operation_idx")
+  @@index([code, occurredAt(sort: Desc)], map: "operational_error_events_code_idx")
+  @@map("operational_error_events")
+}
+
 model OutboxEvent {
   id            String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
   eventType     String       @map("event_type") @db.VarChar(160)

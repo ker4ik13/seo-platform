@@ -374,6 +374,7 @@ export class SeoDataClient {
     const projectId = requiredProjectId(context.tenant);
     const { multiSearch, ...listQuery } = query;
     const bodyList = !multiSearch && (
+      (listQuery.keywordIds?.length ?? 0) > 0 ||
       (listQuery.groupIds?.length ?? 0) > 20 ||
       listQuery.metricProjection !== undefined ||
       (listQuery.rankColumnKeys?.length ?? 0) > 0

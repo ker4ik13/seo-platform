@@ -53,6 +53,68 @@ test("disabled alerts are a no-op and require no secrets", async () => {
   await reporter.flush();
 });
 
+test("journal delivery stays enabled when Telegram is disabled", async () => {
+  const requests: string[] = [];
+  const reporter = createOperationalAlertClient({
+    TELEGRAM_ALERTS_ENABLED: "false",
+    OPERATIONAL_ALERTS_INTERNAL_URL: "http://alerts.internal:4004",
+    OPERATIONAL_ALERT_TOKEN: operationalToken
+  }, "backend-core", {
+    fetch: async (input) => {
+      requests.push(String(input));
+      return new Response(null, { status: 202 });
+    }
+  });
+  assert.equal(reporter.capture({ source: "http", code: "CHILD_ERROR_LOG", severity: "ERROR" }), true);
+  await reporter.flush();
+  assert.deepEqual(requests, ["http://alerts.internal:4004/internal/alerts"]);
+});
+
+test("client retries a transient journal rejection without logging its envelope", async () => {
+  let attempts = 0;
+  const diagnostics: string[] = [];
+  const reporter = createOperationalAlertClient({
+    TELEGRAM_ALERTS_ENABLED: "false",
+    OPERATIONAL_ALERTS_INTERNAL_URL: "http://alerts.internal:4004",
+    OPERATIONAL_ALERT_TOKEN: operationalToken
+  }, "backend-core", {
+    fetch: async () => new Response(null, { status: ++attempts === 1 ? 503 : 202 }),
+    writeDiagnostic: (message) => diagnostics.push(message)
+  });
+  reporter.capture({ source: "http", code: "CHILD_ERROR_LOG", severity: "ERROR" });
+  await reporter.flush();
+  assert.equal(attempts, 2);
+  assert.deepEqual(diagnostics, []);
+});
+
+test("receiver records an alert before acknowledgement and reports journal failure", async (context) => {
+  const port = await freePort();
+  const saved: unknown[] = [];
+  let available = true;
+  const server = await startOperationalAlertServer({
+    BIND_ADDRESS: "127.0.0.1",
+    OPERATIONAL_ALERTS_PORT: String(port),
+    OPERATIONAL_ALERT_TOKEN: operationalToken,
+    TELEGRAM_ALERTS_ENABLED: "false"
+  }, {
+    recordAlert: async (envelope) => {
+      if (!available) throw new Error("database unavailable");
+      saved.push(envelope);
+    }
+  });
+  context.after(async () => new Promise<void>((resolve) => server.close(() => resolve())));
+  const send = async () => fetch(`http://127.0.0.1:${port}/internal/alerts`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${operationalToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ version: 1, service: "backend-core", source: "http", code: "CHILD_ERROR_LOG", severity: "ERROR", fingerprint: "0123456789abcdef" })
+  });
+  assert.equal((await send()).status, 202);
+  assert.equal(saved.length, 1);
+  available = false;
+  assert.equal((await send()).status, 503);
+  assert.equal(saved.length, 1);
+});
+
 test("client emits an exact redacted envelope and deduplicates it", async () => {
   const requests: Array<{ readonly url: string; readonly init?: RequestInit }> = [];
   const diagnostics: string[] = [];

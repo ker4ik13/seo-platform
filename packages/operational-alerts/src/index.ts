@@ -34,10 +34,12 @@ export interface OperationalAlertReporter {
   flush(): Promise<void>;
 }
 
-interface AlertEnvelope extends OperationalAlertInput {
+export interface OperationalAlertEnvelope extends OperationalAlertInput {
   readonly version: 1;
   readonly service: string;
 }
+
+type AlertEnvelope = OperationalAlertEnvelope;
 
 interface AlertEnvelopeReporter {
   capture(envelope: AlertEnvelope): boolean;
@@ -49,6 +51,8 @@ interface ReporterDependencies {
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
   readonly writeDiagnostic?: (message: string) => void;
+  /** The owning Core service persists the same pre-redacted envelope. */
+  readonly recordAlert?: (envelope: OperationalAlertEnvelope) => Promise<void>;
 }
 
 export function createOperationalAlertClient(
@@ -57,7 +61,9 @@ export function createOperationalAlertClient(
   dependencies: ReporterDependencies = {}
 ): OperationalAlertReporter {
   assertIdentifier(service, "operational alert service");
-  if (!enabled(env)) return NOOP_REPORTER;
+  if (!enabled(env) &&
+    !env.OPERATIONAL_ALERTS_INTERNAL_URL &&
+    !env.OPERATIONAL_ALERT_TOKEN) return NOOP_REPORTER;
   const origin = canonicalHttpOrigin(
     required(env, "OPERATIONAL_ALERTS_INTERNAL_URL")
   );
@@ -113,7 +119,7 @@ export async function startOperationalAlertServer(
     65_535
   );
   const server = createServer((request, response) => {
-    void handleRequest(request, response, token, reporter).catch((error: unknown) => {
+    void handleRequest(request, response, token, reporter, dependencies.recordAlert).catch((error: unknown) => {
       const status = error instanceof HttpInputError ? error.status : 500;
       if (!response.headersSent) empty(response, status);
       else response.end();
@@ -187,8 +193,23 @@ class QueuedReporter implements OperationalAlertReporter {
     this.prune(now);
     this.observed.set(dedupeKey, now);
     this.queue = this.queue
-      .then(() => this.deliver(envelope))
+      .then(async () => {
+        for (const delay of [0, 250, 1_000]) {
+          if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));
+          try {
+            await this.deliver(envelope);
+            return;
+          } catch {
+            // A transient receiver/DB failure must not immediately discard
+            // the only copy of this bounded operational event.
+          }
+        }
+        throw new Error("Operational alert delivery unavailable");
+      })
       .catch(() => {
+        if (this.observed.get(dedupeKey) === now) {
+          this.observed.delete(dedupeKey);
+        }
         (this.dependencies.writeDiagnostic ?? defaultDiagnostic)(
           "[operational-alerts] delivery unavailable\n"
         );
@@ -352,7 +373,8 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   token: string,
-  reporter: AlertEnvelopeReporter
+  reporter: AlertEnvelopeReporter,
+  recordAlert?: (envelope: OperationalAlertEnvelope) => Promise<void>
 ): Promise<void> {
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-content-type-options", "nosniff");
@@ -368,8 +390,21 @@ async function handleRequest(
   if (!authorized(request.headers.authorization, token)) return empty(response, 401);
   if (request.headers["content-type"] !== "application/json") return empty(response, 415);
   const envelope = parseEnvelope(await readBody(request));
-  if (request.url === "/internal/alerts/confirmed") return empty(response, await reporter.confirm?.(envelope) ? 200 : 503);
+  if (request.url === "/internal/alerts/confirmed") {
+    if (!await reporter.confirm?.(envelope)) return empty(response, 503);
+    try {
+      await recordAlert?.(envelope);
+    } catch {
+      return empty(response, 503);
+    }
+    return empty(response, 200);
+  }
   reporter.capture(envelope);
+  try {
+    await recordAlert?.(envelope);
+  } catch {
+    return empty(response, 503);
+  }
   return empty(response, 202);
 }
 

@@ -263,6 +263,7 @@ test("admin operation row includes search engine, exact connection and active wo
   const createdAt = new Date("2026-08-11T18:00:00.000Z");
   const rankJobId = "01900000-0000-7000-8000-000000000010";
   const nodeId = "01900000-0000-7000-8000-000000000012";
+  const idleNodeId = "01900000-0000-7000-8000-000000000013";
   const prisma = {
     job: {
       findMany: async () => [{
@@ -283,7 +284,8 @@ test("admin operation row includes search engine, exact connection and active wo
     $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("list_remote_work_assignments") ? [] :
       query.join("").includes("COUNT(DISTINCT assigned.job_id)") ? [{ nodeId, assignedOperations: 2n }] : [
         { nodeId: "main", jobId: rankJobId, activeTasks: 1n },
-        { nodeId, jobId: rankJobId, activeTasks: 3n }
+        { nodeId, jobId: rankJobId, activeTasks: 3n },
+        { nodeId: idleNodeId, jobId: rankJobId, activeTasks: 0n }
       ],
     executionWorkerNode: {
       findMany: async () => [{ id: nodeId, name: "Офисный воркер", enabled: true,

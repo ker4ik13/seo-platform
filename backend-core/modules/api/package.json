@@ -15,6 +15,10 @@
       "types": "./dist/admin/platform-admin-bootstrap.d.ts",
       "import": "./dist/admin/platform-admin-bootstrap.js"
     },
+    "./operational-error-journal": {
+      "types": "./dist/operational-error-journal.d.ts",
+      "import": "./dist/operational-error-journal.js"
+    },
     "./npd-worker": {
       "types": "./dist/npd/npd-worker.d.ts",
       "import": "./dist/npd/npd-worker.js"

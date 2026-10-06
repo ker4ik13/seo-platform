@@ -40,6 +40,7 @@ const expectedFunctions = [
   "public.abandon_remote_work(uuid,uuid)",
   "public.remote_work_available(text)",
   "public.enqueue_remote_work_batch(jsonb)",
+  "public.exclude_remote_work_retryable_receipt(uuid,uuid,text)",
   "public.claim_rank_connector_poll_targeted(TEXT, INTEGER, TEXT, UUID)",
   "public.complete_rank_connector_poll( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER, TIMESTAMPTZ, JSONB, BYTEA, TEXT, JSONB, BYTEA )",
   "public.defer_rank_connector_poll_capacity( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, INTEGER )",

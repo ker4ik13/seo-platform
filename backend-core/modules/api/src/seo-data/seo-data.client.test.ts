@@ -2083,6 +2083,21 @@ test("sends a large folder union through the body-only keyword route", async () 
       (capturedBody as { query: { groupIds: readonly string[] } }).query.groupIds,
       groupIds
     );
+    const keywordIds = [
+      "01900000-0000-7000-8000-000000000001",
+      "01900000-0000-7000-8000-000000000002"
+    ];
+    await client().listKeywords(internalContext(), {
+      limit: 2,
+      keywordIds,
+      sort: "CREATED_DESC"
+    });
+    assert.equal(capturedMethod, "POST");
+    assert.equal(capturedUrl?.pathname, `/internal/v1/projects/${projectId}/keywords/list`);
+    assert.deepEqual(
+      (capturedBody as { query: { keywordIds: readonly string[] } }).query.keywordIds,
+      keywordIds
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

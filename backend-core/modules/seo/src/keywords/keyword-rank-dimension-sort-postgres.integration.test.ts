@@ -80,8 +80,7 @@ test(
       NODE_ENV: "test",
       DATABASE_URL: databaseUrl!
     }));
-    const service = new KeywordService({
-      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) =>
+    const queryRaw = (strings: TemplateStringsArray, ...values: unknown[]) =>
         database.$queryRaw(Prisma.sql`
           WITH keywords AS (
             SELECT * FROM jsonb_to_recordset(${JSON.stringify(keywords)}::jsonb)
@@ -111,7 +110,11 @@ test(
               )
           )
           ${Prisma.sql(strings, ...values)}
-        `),
+        `);
+    const service = new KeywordService({
+      $queryRaw: queryRaw,
+      $transaction: async (work: (transaction: unknown) => Promise<unknown>) =>
+        work({ $executeRaw: async () => 0, $queryRaw: queryRaw }),
       keyword: {
         count: async () => keywords.length,
         findMany: async ({ where }: { where: { id: { in: string[] } } }) =>

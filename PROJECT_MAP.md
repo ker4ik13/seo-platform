@@ -138,6 +138,10 @@ proxy, а не только преобразование пути или бра�
 имя, состояние связи, число назначенных узлу операций и число выданных для
 данной операции запросов. Jobs собирает статус из heartbeat/enable/drain,
 а Core принимает только строгие безопасные поля без секретов.
+Если при смене владельца старый узел ещё обрабатывает выданные запросы, а
+новый назначен, но не получил задач, журнал показывает работающий узел;
+ожидающее назначение появляется после освобождения старого. Когда оба узла
+фактически выполняют запросы, показываются оба — история не скрывается.
 Административный журнал операций и его обзор исключают технические Jobs
 проверки подключений из списка, фильтра типов и всех агрегатов; сами проверки
 интеграций продолжают исполняться и отображаться в настройках подключений.
@@ -309,7 +313,7 @@ Arsenkin submit marker и ждать ресурса без расхода поп
 | `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency/clustering workers |
 | `packages/contracts` | общие versioned HTTP/event/error contracts без бизнес-логики |
 | `packages/process-supervisor` | запуск child roles, signal forwarding и env allowlists |
-| `packages/operational-alerts` | private exact-envelope receiver/client, Telegram delivery, dedupe и redacted fingerprints |
+| `packages/operational-alerts` | private exact-envelope receiver/client, Telegram delivery, dedupe, redacted fingerprints и передача очищенного события владельцу журнала |
 | `infrastructure` | Dokploy Compose, migrations, ACL/preflight, VPS runtime, monitoring/runbooks |
 | `docs/technical-spec` | нормативное продуктовое и техническое ТЗ |
 | `docs/adr` | принятые архитектурные решения и rollback paths |
@@ -858,9 +862,20 @@ tracking contexts, дереву групп, rank catalog и rank workbench. По
 последовательно гидратируется порциями по 250 без lookahead. Так relation
 includes не превышают PostgreSQL/Prisma parameter limit и не создают лишнюю
 нагрузку при малых страницах.
-Сортировка по позиции ищет предыдущее состояние через небольшой набор
-совместимых tracking contexts и `rank_snapshots_keyword_history_idx`, а для
-уже найденной текущей позиции вообще не выполняет historical lookup.
+Фоновое обновление метрик операций передаёт body-only список максимум 1000
+видимых keyword ID через `keywords/list`, сортирует его по `CREATED_DESC` и
+сливает результат по ID без повторной сортировки/фильтрации всего проекта.
+Сортировка по позиции использует `current_ranks`, а предыдущий совместимый
+замер берёт одним LATERAL-поиском по
+`rank_snapshots_keyword_global_history_idx` только для ключей без найденной
+текущей позиции. Полный оконный проход по историческим snapshots больше не
+выполняется на каждой cursor-странице. Отфильтрованный scope вычисляется
+один раз, отсутствующие позиции добавляются через `EXCEPT` вместо повторного
+join каждой строки со всей CTE проекцией, поэтому неверная оценка rows=1
+не превращается в квадратичное чтение при крупных проектах.
+Rank position read выполняется в короткой read-транзакции с PostgreSQL
+`statement_timeout=20s`; HTTP-граница 30/35s не оставляет после отказа
+долго работающий SQL, продолжающий жечь CPU без клиента.
 VPS-конфигурация ClamAV держит `StreamMaxLength`, `MaxScanSize` и
 `MaxFileSize` на том же пределе 5 GiB, который объявлен upload API; поэтому
 крупные `.kc4` проходят inspection вместо бесконечного retry после 100 MiB.
@@ -1778,6 +1793,24 @@ receiver через отдельный `OPERATIONAL_ALERT_TOKEN`; только C
 message/stack/request/tenant payload, одинаковые fingerprints дедуплицируются,
 а порт 4004 не публикуется. Split-process VPS supervisor хэширует error/fatal
 строку локально и передаёт только code/severity/fingerprint.
+Core alert child дополнительно получает только `PLATFORM_DATABASE_URL` и через
+owner-модуль `backend-core/modules/api/src/operational-error-journal.ts`
+записывает тот же очищенный envelope в новую таблицу Platform DB
+`operational_error_events`. Валидные workspace/project/operation UUID
+индексируются отдельно; произвольные payload и секреты не сохраняются.
+Свободный `context.log` остаётся только в существующем Telegram-канале, а
+журнал сохраняет лишь валидные структурные коды и идентификаторы; `Pxxxx`
+можно извлечь из очищенного excerpt, не сохраняя сам excerpt.
+Ошибка batch persistence позиций передаёт parent supervisor только opaque
+workspace/project/job UUID и безопасный код Prisma; исходный текст ошибки
+остаётся локальным и не попадает в envelope. Поэтому будущий `P2010` можно
+найти по проекту и операции в журнале без поиска по обрезанному Telegram-тексту.
+Receiver подтверждает приём после записи, а ежедневный bounded sweep удаляет
+строки старше 15 суток. Read-only расследование описано в
+`infrastructure/runbooks/operational-alerts.md`.
+Отключение Telegram не отключает отправку в журнал, если внутренний receiver
+URL/token остаются настроены; в локальном окружении без receiver клиент
+остаётся no-op.
 После успешной операторской SMTP-проверки тот же runtime опционально запускает
 отдельный `auth-email-worker` с единственными разрешёнными Jobs DB, NATS,
 Platform JIT и SMTP credentials; без `AUTH_EMAIL_ENABLED=true` процесс не

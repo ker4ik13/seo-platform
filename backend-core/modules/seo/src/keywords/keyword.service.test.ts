@@ -962,6 +962,45 @@ test("hydrates every selectable keyword page size in bounded Prisma batches", as
   }
 });
 
+test("refreshes only explicitly requested keyword IDs without ranking the project", async () => {
+  const first = keyword("01900000-0000-7000-8000-000000000101", "2026-10-01T00:00:00Z");
+  const second = keyword("01900000-0000-7000-8000-000000000102", "2026-10-01T00:00:00Z");
+  const requested = [second.id];
+  const observedWhere: unknown[] = [];
+  const service = new KeywordService({
+    keyword: {
+      findMany: async (input: { readonly where: { readonly id?: { readonly in?: readonly string[] } }; readonly select?: { readonly id?: boolean } }) => {
+        observedWhere.push(input.where);
+        const selected = [first, second].filter((row) => input.where.id?.in?.includes(row.id));
+        return input.select?.id ? selected.map(({ id }) => ({ id })) : selected;
+      },
+      count: async (input: { readonly where: unknown }) => {
+        observedWhere.push(input.where);
+        return 1;
+      }
+    },
+    keywordMerge: { findMany: async () => [] },
+    page: { findMany: async () => [] },
+    cluster: { findMany: async () => [] },
+    frequencySnapshot: { findMany: async () => [] },
+    currentRank: { findMany: async () => [] },
+    aiAnswerSnapshot: { findMany: async () => [] },
+    keywordGroupMembership: { findMany: async () => [] },
+    rankDimensionHistoryDeletion: { findMany: async () => [] }
+  } as unknown as PrismaService, semanticVersions());
+  const result = await service.list(workspaceId, projectId, {
+    limit: 1,
+    keywordIds: requested,
+    sort: "CREATED_DESC",
+    metricProjection: ["BASE"]
+  }, "request-visible-metrics");
+  assert.deepEqual(result.data.map(({ id }) => id), requested);
+  assert.equal(result.page.hasNext, false);
+  for (const where of observedWhere) {
+    assert.deepEqual((where as { readonly id?: { readonly in?: readonly string[] } }).id, { in: requested });
+  }
+});
+
 test("returns a lightweight ten-thousand-keyword operation scope page", async () => {
   const rows = Array.from({ length: 10_001 }, (_, index) => ({
     id: `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`,
@@ -2193,25 +2232,40 @@ test("sorts engine positions in four stable capture-state buckets", async () => 
   const latestSnapshotId = "01900000-0000-7000-8000-000000000074";
   const previousSnapshotId = "01900000-0000-7000-8000-000000000073";
   const rawQueries: Prisma.Sql[] = [];
+  const timeoutStatements: string[] = [];
   let observedRankOrderBy: unknown;
+  const queryRaw = async (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => {
+    const query = Prisma.sql(strings, ...values);
+    rawQueries.push(query);
+    if (query.sql.includes("jsonb_to_recordset")) {
+      return [{
+        keywordId,
+        searchEngine: "YANDEX",
+        observedAt: new Date("2026-08-05T10:00:00.000Z"),
+        snapshotId: latestSnapshotId,
+        previousPosition: 13
+      }];
+    }
+    return [{ id: keywordId, sort_value: 9_223_372_036_854_775_807n }];
+  };
   const service = new KeywordService(
     {
-      $queryRaw: async (
-        strings: TemplateStringsArray,
-        ...values: unknown[]
+      $queryRaw: queryRaw,
+      $transaction: async (
+        work: (transaction: unknown) => Promise<unknown>,
+        options: unknown
       ) => {
-        const query = Prisma.sql(strings, ...values);
-        rawQueries.push(query);
-        if (query.sql.includes("jsonb_to_recordset")) {
-          return [{
-            keywordId,
-            searchEngine: "YANDEX",
-            observedAt: new Date("2026-08-05T10:00:00.000Z"),
-            snapshotId: latestSnapshotId,
-            previousPosition: 13
-          }];
-        }
-        return [{ id: keywordId, sort_value: 9_223_372_036_854_775_807n }];
+        assert.deepEqual(options, { maxWait: 2_000, timeout: 25_000 });
+        return work({
+          $executeRaw: async (strings: TemplateStringsArray) => {
+            timeoutStatements.push(strings.join(""));
+            return 0;
+          },
+          $queryRaw: queryRaw
+        });
       },
       keyword: {
         findMany: async () => [
@@ -2295,6 +2349,10 @@ test("sorts engine positions in four stable capture-state buckets", async () => 
     (query) => query.sql.includes("jsonb_to_recordset")
   );
   assert.equal(metricQueries.length, 2);
+  assert.deepEqual(timeoutStatements, [
+    "SET LOCAL statement_timeout = '20s'",
+    "SET LOCAL statement_timeout = '20s'"
+  ]);
   assert.equal(historyQueries.length, 2);
   for (const query of metricQueries) {
     assert.match(query.sql, /latest_rank\.found/u);
@@ -2305,9 +2363,14 @@ test("sorts engine positions in four stable capture-state buckets", async () => 
     );
     assert.match(
       query.sql,
-      /PARTITION BY latest\.keyword_id/u
+      /LEFT JOIN LATERAL \(\s*SELECT snapshot\.found, snapshot\.position/u
     );
-    assert.match(query.sql, /JOIN rank_snapshots snapshot/u);
+    assert.match(query.sql, /FROM rank_snapshots snapshot/u);
+    assert.match(query.sql, /snapshot\.keyword_id = current\.keyword_id/u);
+    assert.match(query.sql, /ORDER BY snapshot\.observed_at DESC, snapshot\.id DESC\s*LIMIT 1/u);
+    assert.match(query.sql, /unranked AS MATERIALIZED/u);
+    assert.match(query.sql, /EXCEPT SELECT keyword_id AS id FROM rank_metrics/u);
+    assert.doesNotMatch(query.sql, /previous_candidates AS MATERIALIZED/u);
     assert.match(
       query.sql,
       /\(snapshot\.observed_at, snapshot\.id\) </u

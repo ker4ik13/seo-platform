@@ -1413,15 +1413,15 @@ export function SemanticCoreTable({
       liveMetricRefreshInFlightRef.current = true;
       liveMetricRefreshAttemptAtRef.current = Date.now();
       try {
-        const result = await loadKeywordPage(
+        const visibleIds = loadedKeywordsRef.current
+          .slice(0, 1_000)
+          .map(({ id }) => id);
+        if (visibleIds.length === 0) return active;
+        const result = await loadKeywordMetricsByIds(
           projectId,
+          visibleIds,
           keywordQueryConfig,
-          undefined,
-          controller.signal,
-          Math.min(
-            1_000,
-            Math.max(pageSize, loadedKeywordCountRef.current)
-          )
+          controller.signal
         );
         if (!controller.signal.aborted) {
           setItems((current) => mergeKeywordMetrics(current, result.data));
@@ -6702,6 +6702,30 @@ async function loadKeywordPage(
   return browserApiCollectionRequest<SemanticKeyword>(
     `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
     signal ? { signal } : {}
+  );
+}
+
+async function loadKeywordMetricsByIds(
+  projectId: string,
+  keywordIds: readonly string[],
+  config: SemanticKeywordLoadConfig,
+  signal: AbortSignal
+) {
+  return browserApiCollectionRequest<SemanticKeyword>(
+    `/app/api/projects/${encodeURIComponent(projectId)}/keywords/list`,
+    {
+      method: "POST",
+      body: {
+        query: {
+          limit: keywordIds.length,
+          keywordIds,
+          sort: "CREATED_DESC",
+          metricProjection: config.metricProjection,
+          rankColumnKeys: config.rankColumnKeys
+        }
+      },
+      signal
+    }
   );
 }
 
