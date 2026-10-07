@@ -89,6 +89,35 @@ test("rejects infected content before any parser can consume it", async () => {
   assert.equal(events.length, 1);
 });
 
+test("releases only an interrupted scanning lease before redispatch", async () => {
+  const startedAt = new Date("2026-10-07T09:00:00.000Z");
+  const recorded: { where?: unknown; data?: unknown } = {};
+  const prisma = {
+    upload: {
+      findMany: async () => [{ id: uploadRecord().id, inspectionStartedAt: startedAt }],
+      updateMany: async ({ where, data }: { where: unknown; data: unknown }) => {
+        recorded.where = where;
+        recorded.data = data;
+        return { count: 1 };
+      }
+    }
+  } as unknown as PrismaService;
+  const service = new UploadInspectionService(prisma, storageFixture(content), malwareFixture(true), configFixture());
+
+  const candidates = await service.interruptedUploadIds();
+  assert.deepEqual(candidates, [{ id: uploadRecord().id, inspectionStartedAt: startedAt }]);
+  assert.equal(await service.releaseInterrupted(candidates[0]!.id, startedAt), true);
+  assert.deepEqual(recorded.data, {
+    status: "UPLOADED",
+    inspectionStartedAt: null,
+    inspectionHeartbeatAt: null,
+    scanResult: { status: "RETRY_PENDING", code: "INSPECTION_DEPENDENCY_UNAVAILABLE" },
+    version: { increment: 1 }
+  });
+  assert.deepEqual((recorded.where as { id: string; status: string; inspectionStartedAt: Date }).inspectionStartedAt, startedAt);
+  assert.equal((recorded.where as { id: string; status: string }).status, "SCANNING");
+});
+
 function prismaFixture(
   updates: Array<Readonly<Record<string, unknown>>>,
   events: unknown[]

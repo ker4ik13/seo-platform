@@ -21,6 +21,7 @@ import {
 import { inspectImportMedia } from "./import-media-inspection.js";
 
 const SAMPLE_BYTES = 64 * 1_024;
+const INTERRUPTED_INSPECTION_GRACE_MS = 90_000;
 
 export interface UploadInspectionOutcome {
   readonly uploadId: string;
@@ -64,6 +65,61 @@ export class UploadInspectionService {
       select: { id: true }
     });
     return uploads.map(({ id }) => id);
+  }
+
+  /** A completed or missing queue job cannot still own a recent SCANNING lease. */
+  public async interruptedUploadIds(limit = 100): Promise<readonly {
+    id: string;
+    inspectionStartedAt: Date | null;
+  }[]> {
+    const olderThan = new Date(Date.now() - INTERRUPTED_INSPECTION_GRACE_MS);
+    return this.prisma.upload.findMany({
+      where: {
+        status: "SCANNING",
+        OR: [
+          { inspectionHeartbeatAt: { lt: olderThan } },
+          {
+            inspectionHeartbeatAt: null,
+            OR: [
+              { inspectionStartedAt: { lt: olderThan } },
+              { inspectionStartedAt: null }
+            ]
+          }
+        ]
+      },
+      orderBy: { uploadedAt: "asc" },
+      take: Math.min(Math.max(limit, 1), 500),
+      select: { id: true, inspectionStartedAt: true }
+    });
+  }
+
+  public async releaseInterrupted(uploadId: string, inspectionStartedAt: Date | null): Promise<boolean> {
+    const olderThan = new Date(Date.now() - INTERRUPTED_INSPECTION_GRACE_MS);
+    const changed = await this.prisma.upload.updateMany({
+      where: {
+        id: uploadId,
+        status: "SCANNING",
+        inspectionStartedAt,
+        OR: [
+          { inspectionHeartbeatAt: { lt: olderThan } },
+          {
+            inspectionHeartbeatAt: null,
+            OR: [
+              { inspectionStartedAt: { lt: olderThan } },
+              { inspectionStartedAt: null }
+            ]
+          }
+        ]
+      },
+      data: {
+        status: "UPLOADED",
+        inspectionStartedAt: null,
+        inspectionHeartbeatAt: null,
+        scanResult: { status: "RETRY_PENDING", code: "INSPECTION_DEPENDENCY_UNAVAILABLE" },
+        version: { increment: 1 }
+      }
+    });
+    return changed.count === 1;
   }
 
   public async inspect(uploadId: string): Promise<UploadInspectionOutcome> {

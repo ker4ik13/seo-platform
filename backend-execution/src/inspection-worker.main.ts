@@ -55,6 +55,11 @@ async function bootstrap(): Promise<void> {
     if (dispatching) return;
     dispatching = true;
     try {
+      for (const upload of await inspections.interruptedUploadIds()) {
+        const existing = await queue.getJob(`upload-${upload.id}`);
+        if (existing && (await existing.getState()) === "active") continue;
+        await inspections.releaseInterrupted(upload.id, upload.inspectionStartedAt);
+      }
       const uploadIds = await inspections.pendingUploadIds();
       for (const uploadId of uploadIds) {
         await enqueueUploadInspection(queue, uploadId);

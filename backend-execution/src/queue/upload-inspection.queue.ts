@@ -14,10 +14,17 @@ export async function enqueueUploadInspection(
   const jobId = `upload-${uploadId}`;
   const existing = await queue.getJob(jobId);
   if (existing) {
-    if ((await existing.getState()) === "failed") {
+    const state = await existing.getState();
+    if (state === "failed") {
       await existing.retry();
+    } else if (state === "completed") {
+      // The upload may have returned to UPLOADED after the old worker exited.
+      // A retained completed BullMQ receipt must not suppress a new scan.
+      await existing.remove();
+    } else {
+      return;
     }
-    return;
+    if (state === "failed") return;
   }
   await queue.add(
     UPLOAD_INSPECTION_JOB,

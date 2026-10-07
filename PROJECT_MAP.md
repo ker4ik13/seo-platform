@@ -890,6 +890,11 @@ Dokploy-образ ClamAV открывает TCP `3310` для inspection worker
 создаёт `LocalSocket /run/clamav/clamd.sock`: штатный entrypoint образа ждёт
 именно локальный сокет, иначе завершает контейнер через 30 минут даже при
 работающем TCP-порту и вызывает повторные ошибки импорта.
+Inspection dispatcher сверяет `SCANNING` с состоянием BullMQ: если heartbeat
+старше 90 секунд, а прежний Job больше не `active`, он атомарно освобождает
+lease. Сохранённый BullMQ `completed` receipt для такого upload удаляется перед
+повторной постановкой; работающий scan не дублируется. Это восстанавливает
+загрузки после пересборки до истечения обычного 30-минутного lease.
 Проектный экран `/app/projects/{projectId}/rankings/contexts` называется
 «Съём позиций» и рядом с профилями показывает связанные rank automations.
 Регулярные режимы `DAILY/WEEKLY` используют timezone-aware BullMQ Job
