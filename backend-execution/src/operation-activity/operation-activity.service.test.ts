@@ -307,6 +307,36 @@ test("admin operation row includes search engine, exact connection and active wo
   assert.doesNotMatch(JSON.stringify(page), /must-not-leak/u);
 });
 
+test("admin AI answer operation keeps Arsenkin progress separate from saved keywords", async () => {
+  const createdAt = new Date("2026-10-07T07:13:19.000Z");
+  const prisma = {
+    job: {
+      findMany: async () => [{
+        id: jobId, workspaceId, projectId: firstProjectId,
+        actorId, type: "AI_ANSWER_COLLECTION", status: "RETRY_SCHEDULED",
+        stage: "provider_poll", provider: "ARSENKIN",
+        credentialMode: "BYOK_API_KEY",
+        scopeSnapshot: { searchEngine: "YANDEX" },
+        progressCurrent: 0n, progressTotal: 110n, progressUnit: "KEYWORDS",
+        providerProgressPercent: 87,
+        actualCostMicro: null, currency: "RUB", attempt: 17,
+        maxAttempts: 720, errorSummary: null, resultSummary: null,
+        createdAt, queuedAt: createdAt, startedAt: createdAt,
+        finishedAt: null, updatedAt: createdAt
+      }],
+      count: async () => 1,
+      groupBy: async () => []
+    },
+    $queryRaw: async () => []
+  } as unknown as PrismaService;
+  const service = new OperationActivityService(prisma, {
+    selectedForJobs: async () => new Map()
+  } as unknown as RankOperationProvenanceService);
+  const operation = (await service.adminList({ statusGroup: "ACTIVE", limit: 50 })).data[0];
+  assert.deepEqual(operation?.progress, { current: "0", total: "110", unit: "KEYWORDS" });
+  assert.equal(operation?.providerProgressPercent, 87);
+});
+
 test("running Wordstat shows its own key and main server without rank scans", async () => {
   const createdAt = new Date("2026-08-11T18:00:00.000Z");
   const prisma = {

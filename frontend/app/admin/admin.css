@@ -378,6 +378,7 @@ h1, h2, p { margin: 0; }
 .operation-primary small, .operation-context small, .operation-progress small, .operation-stage { color: var(--muted); display: block; font-size: 10px; margin-top: 4px; }
 .operation-progress > span { background: #252a33; border-radius: 999px; display: block; height: 5px; margin-top: 8px; overflow: hidden; }
 .operation-progress > span i { background: var(--brand); display: block; height: 100%; min-width: 2px; }
+.operation-progress .operation-provider-progress { color: var(--brand); font-weight: 650; }
 .operation-more { display: block; margin: 14px auto 6px; min-height: 38px; min-width: 170px; }
 .operation-detail-status { align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: flex; gap: 10px; justify-content: space-between; margin-top: 20px; padding: 12px; }
 .operation-detail-status > span { color: var(--muted); font-size: 11px; }

@@ -49,6 +49,35 @@ test("preserves the exact AI competitor collection policy", () => {
   ));
 });
 
+test("accepts only a bounded Arsenkin task percentage on the active collection", () => {
+  const summary = {
+    id: jobId,
+    workspaceId,
+    projectId,
+    provider: "ARSENKIN",
+    status: "RETRY_SCHEDULED",
+    stage: "provider_poll",
+    selectedKeywords: 110,
+    completedKeywords: 0,
+    failedKeywords: 0,
+    providerProgressPercent: 87,
+    searchEngine: "YANDEX",
+    regionCode: "213",
+    device: "DESKTOP",
+    host: "example.com",
+    version: 3,
+    createdAt: "2026-10-07T07:13:19.000Z",
+    updatedAt: "2026-10-07T07:36:54.000Z"
+  } as const;
+  assert.equal(scopedAiAnswerCollection(summary, workspaceId, projectId).providerProgressPercent, 87);
+  assert.throws(() => scopedAiAnswerCollection(
+    { ...summary, providerProgressPercent: 101 }, workspaceId, projectId
+  ));
+  assert.throws(() => scopedAiAnswerCollection(
+    { ...summary, status: "COMPLETED" }, workspaceId, projectId
+  ));
+});
+
 test("validates the exact Jobs-owned AI answer log page", () => {
   const result = scopedAiAnswerOperationScope(
     {

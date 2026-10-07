@@ -14,6 +14,7 @@ import {
   type UploadInspectionJobData
 } from "./queue/upload-inspection.queue.js";
 import { UploadInspectionService } from "./uploads/upload-inspection.service.js";
+import { RemoteWorkFailedError } from "./worker-nodes/remote-work-client.service.js";
 
 const logger = new Logger("UploadInspectionWorker");
 const UUID_PATTERN =
@@ -72,8 +73,9 @@ async function bootstrap(): Promise<void> {
   );
   dispatchTimer.unref();
 
-  worker.on("failed", (job) => {
-    logger.error(`Upload inspection failed for job ${job?.id ?? "unknown"}`);
+  worker.on("failed", (job, error) => {
+    const code = error instanceof RemoteWorkFailedError ? error.code : error.name;
+    logger.error(`Upload inspection failed for job ${job?.id ?? "unknown"} · ${code}`);
   });
 
   let shuttingDown = false;

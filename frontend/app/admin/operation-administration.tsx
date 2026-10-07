@@ -5,6 +5,7 @@ import { AdminOperationCancel } from "../../components/admin-operation-cancel";
 import { Icon } from "../../components/icon";
 import { ProviderLogo } from "../../components/provider-logo";
 import { adminOperationName, adminSearchProductLabel, operationFailureLabel } from "../../lib/admin-operation-presentation";
+import { arsenkinProviderProgressLabel } from "../../lib/operation-status-presentation";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -222,7 +223,7 @@ function OperationRow({ onOpen, operation, canControl, onUpdated }: Readonly<{ o
       </div>
       <div data-label="Состояние"><OperationStatus status={operation.status} />{operation.stage && <small className="operation-stage">{operationStage(operation)}</small>}</div>
       <div className="operation-progress" data-label="Прогресс / результат">
-        <div><strong>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</strong><small>{<UiText text={resultLabel(operation, uiLocale) ?? ""} />}</small></div>
+        <div><strong>{<UiText text={progressLabel(operation, uiLocale) ?? ""} />}</strong><small className={operation.providerProgressPercent === undefined ? undefined : "operation-provider-progress"}>{<UiText text={arsenkinProviderProgressLabel(operation.providerProgressPercent, uiLocale) ?? resultLabel(operation, uiLocale) ?? ""} />}</small></div>
         {percent !== undefined && <span><i style={{ width: `${percent}%` }} /></span>}
       </div>
       <time dateTime={operation.updatedAt}>{formatDate(operation.finishedAt ?? operation.updatedAt, uiLocale)}</time>
@@ -257,6 +258,7 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <Snapshot label={uiText("Поисковая система")} value={adminSearchProductLabel(operation) ?? "—"} />
           <Snapshot label={uiText("Подключение")} value={operation.connection ? `${operation.connection.label}${operation.connection.displayHint ? ` · ${operation.connection.displayHint}` : ""}` : "—"} />
           <Snapshot label={uiText("Этап")} value={operation.stage ? operationStage(operation) : "—"} />
+          {operation.providerProgressPercent !== undefined && <Snapshot label="Обработка в Arsenkin" value={`${operation.providerProgressPercent}% · текущая задача`} />}
           <Snapshot label={uiText("Попытка")} value={`${operation.attempt} из ${operation.maxAttempts}`} />
           <Snapshot label={uiText("Результат")} value={resultLabel(operation, uiLocale)} />
           <Snapshot label={uiText(operation.errorCode === "PROVIDER_CONCURRENCY_LIMITED" ? "Причина ожидания" : "Код ошибки")}
@@ -356,6 +358,7 @@ function operationStage(operation: AdminOperationSummary): string {
     waiting_provider_capacity: "Ожидает свободный слот",
     retry_scheduled: "Ожидает",
     collecting: "Сбор данных",
+    provider_poll: "Arsenkin обрабатывает",
     FINISHED: "Завершено"
   } as Readonly<Record<string, string>>)[operation.stage ?? ""] ?? operation.stage ?? "—";
 }

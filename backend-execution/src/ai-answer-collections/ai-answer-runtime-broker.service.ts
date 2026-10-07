@@ -135,10 +135,18 @@ export class AiAnswerRuntimeBrokerService {
   public async defer(
     claim: AiAnswerClaim,
     taskId: string,
-    retryAfterSeconds: number
+    retryAfterSeconds: number,
+    providerProgressPercent: number | undefined,
+    resetProgress: boolean
   ): Promise<void> {
     const requestId = providerRequestId(taskId);
     validateRetry(retryAfterSeconds);
+    if (typeof resetProgress !== "boolean" ||
+      (providerProgressPercent !== undefined &&
+        (!Number.isInteger(providerProgressPercent) || providerProgressPercent < 0 || providerProgressPercent > 100)) ||
+      (resetProgress && providerProgressPercent !== 0)) {
+      throw new TypeError("Invalid Arsenkin provider progress");
+    }
     requiredCompletion(await this.prisma.$queryRaw<readonly CompletionRow[]>(Prisma.sql`
       SELECT * FROM public.defer_ai_answer_collection_batch(
         ${claim.jobId}::uuid,
@@ -146,7 +154,9 @@ export class AiAnswerRuntimeBrokerService {
         ${claim.leaseOwner}::text,
         ${claim.jobVersion}::integer,
         ${requestId}::text,
-        ${retryAfterSeconds}::integer
+        ${retryAfterSeconds}::integer,
+        ${providerProgressPercent ?? null}::integer,
+        ${resetProgress}::boolean
       )
     `));
   }

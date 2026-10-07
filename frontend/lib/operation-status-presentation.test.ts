@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  arsenkinProviderProgressLabel,
   compactOperationStatusLabel,
   operationStageLabel,
   operationStatusLabel
@@ -12,6 +13,13 @@ test("keeps narrow drawer statuses short regardless of provider stage", () => {
   assert.equal(compactOperationStatusLabel("COMPLETED"), "Готово");
   assert.equal(compactOperationStatusLabel("PARTIALLY_COMPLETED"), "Частично");
   assert.equal(compactOperationStatusLabel("private_internal_status"), "Неизвестно");
+});
+
+test("keeps provider processing separate from saved keyword progress", () => {
+  assert.equal(arsenkinProviderProgressLabel(87), "Arsenkin: 87% · текущая задача");
+  assert.equal(arsenkinProviderProgressLabel(87, "en-US"), "Arsenkin: 87% · current task");
+  assert.equal(arsenkinProviderProgressLabel(undefined), undefined);
+  assert.equal(arsenkinProviderProgressLabel(101), undefined);
 });
 
 test("keeps retry waits understandable while explaining provider-specific stages", () => {

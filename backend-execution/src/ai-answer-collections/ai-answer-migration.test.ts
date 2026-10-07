@@ -37,6 +37,13 @@ const claimReturnTypeFixMigration = readFileSync(
   ),
   "utf8"
 );
+const providerProgressMigration = readFileSync(
+  new URL(
+    "../../prisma/migrations/20261007074500_ai_answer_provider_progress/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 test("adds AI answers to the shared fenced Arsenkin provider capacity", () => {
   assert.match(migration, /capabilities \|\| '\["SERP_COLLECTION"\]'/u);
@@ -126,4 +133,13 @@ test("casts the AI answer provider request ID to the broker text contract", () =
     claimReturnTypeFixMigration,
     /REVOKE ALL ON FUNCTION[\s\S]*FROM PUBLIC/u
   );
+});
+
+test("records provider progress through the existing fenced defer with a bounded value", () => {
+  assert.match(providerProgressMigration, /ADD COLUMN provider_progress_percent SMALLINT/u);
+  assert.match(providerProgressMigration, /BETWEEN 0 AND 100/u);
+  assert.match(providerProgressMigration, /FROM public\.defer_ai_answer_collection_batch\(/u);
+  assert.match(providerProgressMigration, /job\.version = completed_version/u);
+  assert.match(providerProgressMigration, /job\.provider_progress_percent IS DISTINCT FROM/u);
+  assert.match(providerProgressMigration, /REVOKE ALL ON FUNCTION public\.defer_ai_answer_collection_batch/u);
 });

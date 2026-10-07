@@ -9,6 +9,7 @@ export function adminOperationName(operation: Pick<AdminOperationSummary, "type"
   }
   return ({
     MANUAL_RANK_CHECK: "Проверка позиций",
+    AI_ANSWER_COLLECTION: "Сбор ИИ-ответов",
     CLUSTERING_RUN: "Кластеризация запросов",
     TECHNICAL_CRAWL: "Обход сайта",
     KEYWORD_RESEARCH: "Исследование запросов",

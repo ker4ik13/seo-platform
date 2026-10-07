@@ -79,7 +79,10 @@ test("runtime configuration is baked into images and persistent data uses named 
 });
 
 test("ClamAV keeps its scanner private while retaining signature-update egress", async () => {
-  const compose = await readFile(composeUrl, "utf8");
+  const [compose, clamdConfig] = await Promise.all([
+    readFile(composeUrl, "utf8"),
+    readFile(new URL("../clamav/clamd.conf", import.meta.url), "utf8")
+  ]);
   const clamavBlock = compose.slice(
     compose.indexOf("  clamav:"),
     compose.indexOf("  core-api-migrate:")
@@ -90,4 +93,7 @@ test("ClamAV keeps its scanner private while retaining signature-update egress",
     /^    networks:\n      - internal\n      - outbound$/mu
   );
   assert.doesNotMatch(clamavBlock, /^    (?:ports|expose):/mu);
+  // The official image's entrypoint waits for this socket even when TCP is healthy.
+  assert.match(clamdConfig, /^LocalSocket \/run\/clamav\/clamd\.sock$/mu);
+  assert.match(clamdConfig, /^TCPSocket 3310$/mu);
 });

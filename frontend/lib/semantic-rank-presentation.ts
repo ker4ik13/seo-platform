@@ -1,6 +1,9 @@
-import type {
-  SemanticKeywordPositionHistoryProvider
+import {
+  parseSemanticRankDimensionKey,
+  type SemanticKeywordPositionHistoryPoint,
+  type SemanticKeywordPositionHistoryProvider
 } from "@seo-platform/contracts";
+import { russianSearchCities, searchRegionDisplayName } from "./seo-regions.ts";
 
 export type SemanticRankEngine = "YANDEX" | "GOOGLE";
 
@@ -30,6 +33,69 @@ export interface SemanticRankHistoryPoint extends SemanticRankContextPoint {
 }
 
 export const semanticRankHistoryPointLimit = 14 as const;
+
+export interface SemanticRankDateRow {
+  readonly date: string;
+  readonly observedAt: string;
+  readonly positions: ReadonlyMap<SemanticRankEngine, SemanticKeywordPositionHistoryPoint>;
+}
+
+const pairedRussianRegionKeys = new Map<string, string>();
+for (const city of russianSearchCities) {
+  const pair = `${city.yandexRegionCode}:${city.googleRegionCode}`;
+  pairedRussianRegionKeys.set(`YANDEX:${city.yandexRegionCode}`, pair);
+  pairedRussianRegionKeys.set(`GOOGLE:${city.googleRegionCode}`, pair);
+}
+
+/** A selected SEO slice shows both engines for the same city and device. */
+export function semanticRankHistoryDateRows(
+  points: readonly SemanticKeywordPositionHistoryPoint[],
+  selectedDimensionKey: string,
+  limit = 10
+): readonly SemanticRankDateRow[] {
+  const selected = parseSemanticRankDimensionKey(selectedDimensionKey);
+  if (!selected || limit <= 0) return [];
+  const selectedPlace = rankPlaceKey(selected.searchEngine, selected.countryCode, selected.regionCode);
+  const rows = new Map<string, {
+    observedAt: string;
+    positions: Map<SemanticRankEngine, SemanticKeywordPositionHistoryPoint>;
+  }>();
+  for (const point of [...points].sort((left, right) =>
+    timestamp(right.observedAt) - timestamp(left.observedAt) ||
+    right.snapshotId.localeCompare(left.snapshotId)
+  )) {
+    if (point.device !== selected.device ||
+      (point.countryCode ?? "RU") !== selected.countryCode ||
+      (point.language ?? "ru") !== selected.language ||
+      rankPlaceKey(point.searchEngine, point.countryCode ?? "RU", point.regionCode) !== selectedPlace) continue;
+    const date = rankCalendarDate(point.observedAt);
+    const row = rows.get(date) ?? { observedAt: point.observedAt, positions: new Map() };
+    if (!row.positions.has(point.searchEngine)) row.positions.set(point.searchEngine, point);
+    rows.set(date, row);
+  }
+  return [...rows.entries()]
+    .map(([date, row]) => ({ date, ...row }))
+    .sort((left, right) => timestamp(right.observedAt) - timestamp(left.observedAt))
+    .slice(0, limit);
+}
+
+function rankPlaceKey(searchEngine: SemanticRankEngine, countryCode: string, regionCode: string): string {
+  const pair = countryCode === "RU"
+    ? pairedRussianRegionKeys.get(`${searchEngine}:${regionCode}`)
+    : undefined;
+  if (pair) return JSON.stringify([countryCode, "pair", pair]);
+  const label = searchRegionDisplayName(searchEngine, regionCode);
+  return JSON.stringify([
+    countryCode,
+    label === "Другой регион" ? regionCode : label.normalize("NFKC").toLocaleLowerCase("ru")
+  ]);
+}
+
+function rankCalendarDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 export interface SemanticRankEngineHistorySeries<
   T extends SemanticRankHistoryPoint

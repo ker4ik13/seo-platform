@@ -9,7 +9,7 @@ import type { ProviderFetch } from "../integrations/integration-credential-valid
 import { ProviderCapacityUnavailableError } from "../integrations/provider-execution-review.js";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
-import { arsenkinTaskLifecycle,arsenkinPollTimeoutMs } from "../integrations/arsenkin-task-status.js";
+import { arsenkinTaskLifecycle, arsenkinTaskProgress, arsenkinPollTimeoutMs } from "../integrations/arsenkin-task-status.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -30,7 +30,7 @@ export type ArsenkinAiAnswerSubmitResult =
 
 export type ArsenkinAiAnswerFetchResult =
   | { readonly status: "READY"; readonly results: readonly ArsenkinAiAnswerQueryResult[] }
-  | { readonly status: "PENDING"; readonly retryAfterSeconds: number }
+  | { readonly status: "PENDING"; readonly retryAfterSeconds: number; readonly providerProgressPercent?: number }
   | { readonly status: "RETRYABLE_FAILURE"; readonly code: string; readonly retryAfterSeconds?: number }
   | { readonly status: "REJECTED"; readonly code: string };
 
@@ -105,7 +105,14 @@ export class ArsenkinAiAnswerConnector {
       const checkFailure = providerFailure(check.status, check.value, check.retryAfterSeconds);
       if (checkFailure) return checkFailure;
       const taskStatus = arsenkinTaskStatus(check.value, taskId);
-      if (taskStatus === "PENDING") return { status: "PENDING", retryAfterSeconds: 5 };
+      if (taskStatus === "PENDING") {
+        const providerProgressPercent = arsenkinTaskProgress(record(check.value)?.progress);
+        return {
+          status: "PENDING",
+          retryAfterSeconds: 5,
+          ...(providerProgressPercent === undefined ? {} : { providerProgressPercent })
+        };
+      }
       if (taskStatus !== "FINISHED") {
         return { status: "REJECTED", code: "PROVIDER_INVALID_RESPONSE" };
       }

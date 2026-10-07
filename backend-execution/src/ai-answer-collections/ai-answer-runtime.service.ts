@@ -84,7 +84,7 @@ export class AiAnswerRuntimeService {
       const currentRequestId = sharedProviderRequestId(activeClaim.items);
       if (currentRequestId?.startsWith("submitting:")) {
         const acceptedTaskId = await this.billing?.acceptedTaskId(activeClaim, activeClaim.items.map(item => item.jobItemId));
-        if (acceptedTaskId) { await this.broker.defer(activeClaim, acceptedTaskId, 5); return "RETRY_SCHEDULED"; }
+        if (acceptedTaskId) { await this.broker.defer(activeClaim, acceptedTaskId, 5, 0, true); return "RETRY_SCHEDULED"; }
         await this.broker.quarantineAmbiguousSubmit(activeClaim);
         return "ACTION_REQUIRED";
       }
@@ -271,7 +271,7 @@ export class AiAnswerRuntimeService {
     outcome: ArsenkinAiAnswerSubmitResult | ArsenkinAiAnswerFetchResult
   ): Promise<string | undefined> {
     if (outcome.status === "ACCEPTED") {
-      await this.broker.defer(claim, outcome.taskId, 5);
+      await this.broker.defer(claim, outcome.taskId, 5, 0, true);
       return "RETRY_SCHEDULED";
     }
     if (outcome.status === "PENDING") {
@@ -281,7 +281,7 @@ export class AiAnswerRuntimeService {
         await this.broker.fail(claim, { code: "PROVIDER_TIMEOUT", retryable: false });
         return "FAILED_BATCH";
       }
-      await this.broker.defer(claim, taskId, outcome.retryAfterSeconds);
+      await this.broker.defer(claim, taskId, outcome.retryAfterSeconds, outcome.providerProgressPercent, false);
       return "RETRY_SCHEDULED";
     }
     if (outcome.status === "RETRYABLE_FAILURE") {

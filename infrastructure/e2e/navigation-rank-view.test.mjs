@@ -275,6 +275,7 @@ test("admin dark presentation uses shared selects without granting staff access"
     const seasonality = { ...operation, id: randomUUID(), type: "FREQUENCY_COLLECTION", frequencyMode: "SEASONALITY", status: "CANCELLED", searchSource: undefined, progress: { current: "8", total: "65", unit: "keywords" }, result: { failed: 31 }, errorCode: "PROVIDER_LOW_BALANCE" };
     const frequency = { ...seasonality, id: randomUUID(), frequencyMode: "FREQUENCY", progress: { current: "10", total: "65", unit: "keywords" } };
     const waiting = { ...frequency, id: randomUUID(), status: "RETRY_SCHEDULED", stage: "waiting_provider_capacity", progress: { current: "52", total: "93", unit: "keywords" }, result: {}, errorCode: "PROVIDER_CONCURRENCY_LIMITED" };
+    const aiAnswer = { ...operation, id: randomUUID(), type: "AI_ANSWER_COLLECTION", status: "RETRY_SCHEDULED", stage: "provider_poll", provider: "ARSENKIN", searchSource: undefined, connection: { label: "Arsenkin", displayHint: "••••863c" }, progress: { current: "0", total: "110", unit: "KEYWORDS" }, providerProgressPercent: 87, result: {}, errorCode: undefined };
     // Presentation-only fixture. No API/DB role is created or bypassed.
     let cancellations = 0;
     let operationReads = 0;
@@ -290,7 +291,7 @@ test("admin dark presentation uses shared selects without granting staff access"
         await route.fulfill({ json: { data: { id: operation.id, status: operation.status } } });
         return;
       }
-      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation, seasonality, frequency, waiting], totals: { total: 4, active: 2, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 3 }] };
+      const data = path.endsWith("/me") ? { userId: fixtures[1].userId, email: fixtures[1].email, displayName: "Проверка интерфейса", roles: ["OPERATIONS"], mfaVerified: true, authenticatedAt: new Date().toISOString() } : { data: [operation, seasonality, frequency, waiting, aiAnswer], totals: { total: 5, active: 3, completed: 2, attention: 0 }, types: [{ type: "MANUAL_RANK_CHECK", count: 1 }, { type: "FREQUENCY_COLLECTION", count: 3 }, { type: "AI_ANSWER_COLLECTION", count: 1 }] };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ data, meta: { requestId: randomUUID() } }) });
     });
     await page.goto(`${base}/admin?screen=operations`, { waitUntil: "domcontentloaded" });
@@ -312,6 +313,14 @@ test("admin dark presentation uses shared selects without granting staff access"
     assert.equal(await waitingRow.getByText("Ожидает", { exact: true }).count(), 1);
     assert.equal(await waitingRow.getByText("Ожидает свободный слот").count(), 2);
     assert.equal(await waitingRow.getByText("PROVIDER_CONCURRENCY_LIMITED").count(), 0);
+    const aiRow = page.locator(".operation-row").filter({ hasText: "0 из 110" });
+    assert.equal(await aiRow.getByText("Сбор ИИ-ответов", { exact: true }).count(), 1);
+    assert.equal(await aiRow.getByText("Arsenkin: 87% · текущая задача", { exact: true }).count(), 1);
+    await aiRow.getByRole("button", { name: "Детали", exact: true }).click();
+    const aiDrawer = page.getByRole("dialog", { name: new RegExp(aiAnswer.id, "u") });
+    await aiDrawer.getByText("Обработка в Arsenkin").waitFor();
+    assert.equal(await aiDrawer.getByText("87% · текущая задача").count(), 1);
+    await aiDrawer.getByRole("button", { name: "Закрыть" }).click();
     await waitingRow.getByRole("button", { name: "Детали", exact: true }).click();
     const waitingDrawer = page.getByRole("dialog", { name: new RegExp(waiting.id, "u") });
     await waitingDrawer.getByText("Причина ожидания").waitFor();

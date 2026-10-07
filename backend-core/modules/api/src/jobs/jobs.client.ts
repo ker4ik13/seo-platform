@@ -2547,6 +2547,7 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     "connection",
     "workers",
     "progress",
+    "providerProgressPercent",
     "result",
     "errorCode",
     "actualCostMicro",
@@ -2579,7 +2580,9 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
     (input.actualCostMicro !== undefined &&
       !decimalString(input.actualCostMicro)) ||
     (input.currency !== undefined &&
-      (typeof input.currency !== "string" || !/^[A-Z]{3}$/u.test(input.currency)))
+      (typeof input.currency !== "string" || !/^[A-Z]{3}$/u.test(input.currency))) ||
+    (input.providerProgressPercent !== undefined &&
+      (input.type !== "AI_ANSWER_COLLECTION" || input.stage !== "provider_poll"))
   ) {
     throw invalidJobsResponse();
   }
@@ -2668,6 +2671,9 @@ function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
       ...(typeof progress.total === "string" ? { total: progress.total } : {}),
       ...(typeof progress.unit === "string" ? { unit: progress.unit } : {})
     },
+    ...(input.providerProgressPercent === undefined
+      ? {}
+      : { providerProgressPercent: nonNegativeInteger(input.providerProgressPercent, 100) }),
     result,
     ...(typeof input.errorCode === "string" ? { errorCode: input.errorCode } : {}),
     ...(typeof input.actualCostMicro === "string"

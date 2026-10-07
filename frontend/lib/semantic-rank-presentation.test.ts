@@ -14,8 +14,50 @@ import {
   semanticRankingUrlMatch,
   semanticSiteFaviconSources,
   semanticUrlBelongsToProject,
-  semanticRankHistoryByEngine
+  semanticRankHistoryByEngine,
+  semanticRankHistoryDateRows
 } from "./semantic-rank-presentation.ts";
+
+test("puts Yandex and Google positions from the same city and device in one date row", () => {
+  const point = (
+    snapshotId: string,
+    searchEngine: "YANDEX" | "GOOGLE",
+    regionCode: string,
+    observedAt: string,
+    position: number,
+    device: "DESKTOP" | "MOBILE" = "DESKTOP"
+  ) => ({
+    snapshotId,
+    trackingContextId: `context-${snapshotId}`,
+    contextName: "Москва",
+    searchEngine,
+    regionCode,
+    countryCode: "RU",
+    language: "ru",
+    device,
+    provider: "XMLSTOCK" as const,
+    found: true,
+    position,
+    observedAt
+  });
+  const selected = "YANDEX|RU|213|ru|DESKTOP";
+  const rows = semanticRankHistoryDateRows([
+    point("yandex-old", "YANDEX", "213", "2026-10-06T08:00:00.000Z", 10),
+    point("google", "GOOGLE", "1011969", "2026-10-06T11:00:00.000Z", 2),
+    point("yandex-new", "YANDEX", "213", "2026-10-06T18:00:00.000Z", 4),
+    point("other-city", "GOOGLE", "1012040", "2026-10-06T12:00:00.000Z", 6),
+    point("other-device", "GOOGLE", "1011969", "2026-10-06T12:00:00.000Z", 7, "MOBILE"),
+    point("previous-day", "GOOGLE", "1011969", "2026-10-05T12:00:00.000Z", 3)
+  ], selected);
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.positions.get("YANDEX")?.snapshotId, "yandex-new");
+  assert.equal(rows[0]?.positions.get("GOOGLE")?.snapshotId, "google");
+  assert.equal(rows[1]?.positions.get("GOOGLE")?.snapshotId, "previous-day");
+  assert.equal(rows[1]?.positions.has("YANDEX"), false);
+  assert.equal(semanticRankHistoryDateRows([], selected).length, 0);
+  assert.equal(semanticRankHistoryDateRows([], "bad-key").length, 0);
+});
 
 test("keeps the latest 14 keyword snapshots across every technical context", () => {
   const points = Array.from({ length: 17 }, (_, index) => ({

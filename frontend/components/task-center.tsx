@@ -43,6 +43,7 @@ import {
 } from "../lib/connector-routing-presentation";
 import type { OperationResultKind } from "../lib/operation-result-routes";
 import {
+  arsenkinProviderProgressLabel,
   operationStageLabel,
   operationStatusLabel
 } from "../lib/operation-status-presentation";
@@ -95,6 +96,7 @@ interface ProjectTask {
   readonly column: TaskColumn;
   readonly progressCurrent: number;
   readonly progressTotal: number;
+  readonly providerProgressPercent?: number;
   readonly createdAt: string;
   readonly startedAt?: string;
   readonly finishedAt?: string;
@@ -463,6 +465,7 @@ export function TaskCenter({
                 <span className="task-ledger-result">
                   <strong>{<UiText text={progressLabel(task, uiLocale) ?? ""} />}</strong>
                   {task.progressTotal > 0 && <span className="task-card-progress"><i style={{ width: `${taskPercent(task)}%` }} /></span>}
+                  {task.providerProgressPercent !== undefined && <small className="task-provider-progress">{arsenkinProviderProgressLabel(task.providerProgressPercent, uiLocale)}</small>}
                 </span>
                 <span className="task-ledger-time">
                   <time>{formatRelativeDate(task.createdAt, uiLocale)}</time>
@@ -611,6 +614,7 @@ function aiAnswerTask(value: AiAnswerCollectionSummary, uiLocale: string = "ru-R
     column: taskColumn(value.status),
     progressCurrent: completed,
     progressTotal: value.selectedKeywords,
+    ...(value.providerProgressPercent === undefined ? {} : { providerProgressPercent: value.providerProgressPercent }),
     createdAt: value.createdAt,
     ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
@@ -639,7 +643,8 @@ function aiAnswerTask(value: AiAnswerCollectionSummary, uiLocale: string = "ru-R
     resultFacts: [
       { label: "Сохранено", value: formatInteger(value.completedKeywords, uiLocale) },
       { label: "С ошибкой", value: formatInteger(value.failedKeywords, uiLocale) },
-      { label: "Этап", value: operationStageLabel(value.stage, value.status) }
+      { label: "Этап", value: operationStageLabel(value.stage, value.status) },
+      ...(value.providerProgressPercent === undefined ? [] : [{ label: "Arsenkin", value: `${value.providerProgressPercent}% · текущая задача` }])
     ]
   };
 }

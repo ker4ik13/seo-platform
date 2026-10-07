@@ -38,7 +38,10 @@ export function scopedAiAnswerCollection(
   if (
     hasScope !== hasAttempts ||
     saveProjectPosition === null ||
-    (purpose === undefined) !== (saveProjectPosition === undefined)
+    (purpose === undefined) !== (saveProjectPosition === undefined) ||
+    (input.providerProgressPercent !== undefined &&
+      (input.stage !== "provider_poll" ||
+        !["RUNNING", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(String(input.status))))
   ) invalid();
   return {
     id,
@@ -56,6 +59,9 @@ export function scopedAiAnswerCollection(
     selectedKeywords: integer(input.selectedKeywords, 1, aiAnswerCollectionKeywordLimit),
     completedKeywords: integer(input.completedKeywords, 0, aiAnswerCollectionKeywordLimit),
     failedKeywords: integer(input.failedKeywords, 0, aiAnswerCollectionKeywordLimit),
+    ...(input.providerProgressPercent === undefined
+      ? {}
+      : { providerProgressPercent: integer(input.providerProgressPercent, 0, 100) }),
     searchEngine: member(input.searchEngine, aiAnswerSearchEngines),
     regionCode: bounded(input.regionCode, 100),
     device: member(input.device, aiAnswerDevices),

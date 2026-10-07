@@ -88,6 +88,8 @@ export interface AiAnswerCollectionSummary {
   readonly selectedKeywords: number;
   readonly completedKeywords: number;
   readonly failedKeywords: number;
+  /** Progress of the current Arsenkin task, not the number of saved keywords. */
+  readonly providerProgressPercent?: number;
   readonly searchEngine: AiAnswerSearchEngine;
   readonly regionCode: string;
   readonly device: AiAnswerDevice;

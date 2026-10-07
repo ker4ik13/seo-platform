@@ -93,6 +93,7 @@ const ADMIN_JOB_SELECT = {
   progressCurrent: true,
   progressTotal: true,
   progressUnit: true,
+  providerProgressPercent: true,
   actualCostMicro: true,
   currency: true,
   attempt: true,
@@ -528,6 +529,12 @@ function adminOperationSummary(
         : { total: job.progressTotal.toString() }),
       ...(job.progressUnit ? { unit: job.progressUnit } : {})
     },
+    ...(job.type === "AI_ANSWER_COLLECTION" &&
+      job.stage === "provider_poll" &&
+      ["RUNNING", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(job.status) &&
+      typeof job.providerProgressPercent === "number"
+      ? { providerProgressPercent: job.providerProgressPercent }
+      : {}),
     result: safeResultMetrics(job.resultSummary),
     ...(errorCode ? { errorCode } : {}),
     ...(job.actualCostMicro === null

@@ -7408,6 +7408,7 @@ svg { display: block; }
 .task-ledger-operation small { color: var(--muted); font-size: 10px; line-height: 1.4; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-ledger-result { display: grid; gap: 7px; min-width: 0; }
 .task-ledger-result > strong { font-size: 11px; }
+.task-ledger-result > .task-provider-progress { color: var(--brand); font-size: 10px; font-weight: 650; }
 .task-ledger-time { align-items: flex-start; display: flex; flex-direction: column; gap: 5px; }
 .task-ledger-time time { color: var(--muted); font-size: 10px; }
 .task-ledger-time small { color: var(--text); font-size: 9px; font-weight: 650; }
@@ -9145,6 +9146,7 @@ svg { display: block; }
 .semantic-operations-drawer article .semantic-operation-progress-head span {
   font-size: 9px;
 }
+.semantic-operations-drawer article .semantic-provider-progress { color: var(--brand); display: block; font-size: 10px; font-weight: 650; margin-top: 6px; }
 
 .semantic-operation-card.state-error .semantic-operation-status {
   background: #fff0f1;
@@ -11545,6 +11547,31 @@ svg { display: block; }
   font-size: 8px;
   padding: 3px 0;
 }
+
+.semantic-seo-rank-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.semantic-seo-rank-table th,
+.semantic-seo-rank-table td {
+  border-bottom: 1px solid #f0eff5;
+  padding: 9px 6px;
+}
+
+.semantic-seo-rank-table tr:last-child > * { border-bottom: 0; }
+.semantic-seo-rank-table th:first-child { text-align: left; width: 40%; }
+.semantic-seo-rank-table th:not(:first-child),
+.semantic-seo-rank-table td { text-align: right; width: 30%; }
+.semantic-seo-rank-table thead th { color: var(--muted); font-size: 10px; font-weight: 600; }
+.semantic-seo-rank-table thead th:not(:first-child) { white-space: nowrap; }
+.semantic-seo-rank-table thead th svg { margin-right: 5px; vertical-align: middle; }
+.semantic-seo-rank-table tbody th { color: var(--muted); font-size: 11px; font-weight: 400; }
+.semantic-seo-rank-table td { color: var(--text); font-size: 12px; font-weight: 700; }
+.semantic-seo-rank-table td.lost { color: var(--red); }
+.semantic-seo-rank-table td.empty { color: var(--muted); font-weight: 400; }
 
 .semantic-rank-change-rows { display: grid; }
 .semantic-rank-change-rows > div {

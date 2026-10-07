@@ -210,6 +210,20 @@ test("semantic scroll: 800 rows, 100-row pages, rich cells and two open tabs rem
   for (const name of ["E2E выбранная группа A", "E2E выбранная группа B"]) {
     assert.equal(await collectionScope.locator(".semantic-operation-folder-row").filter({ hasText: name }).locator('input[type="checkbox"]').isChecked(), true);
   }
+  // Presentation-only provider percentage: the read model and parser are
+  // verified separately, and this never sends a paid Arsenkin request.
+  await context.route(`**/app/api/projects/${project.id}/ai-answer-collections`, async route => {
+    await route.fulfill({ json: { data: { collections: [{
+      id: randomUUID(), workspaceId: workspace.id, projectId: project.id,
+      provider: "ARSENKIN", status: "RETRY_SCHEDULED", stage: "provider_poll",
+      selectedKeywords: 110, completedKeywords: 0, failedKeywords: 0,
+      providerProgressPercent: 87, searchEngine: "YANDEX", regionCode: "213",
+      device: "DESKTOP", host: "example.com", version: 3,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    }] } } });
+  });
+  await page.goto(`${base}/app/tasks`, { waitUntil: "domcontentloaded" });
+  await page.getByText("Arsenkin: 87% · текущая задача", { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   await writeFile(path.join(output, "semantic-scroll-report.json"), JSON.stringify({ report, requests: requests.length, errors }, null, 2));
 });

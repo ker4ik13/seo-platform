@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { arsenkinTaskLifecycle,arsenkinPollTimeoutMs } from "./arsenkin-task-status.js";
+import { arsenkinTaskLifecycle, arsenkinTaskProgress, arsenkinPollTimeoutMs } from "./arsenkin-task-status.js";
 
 test("Arsenkin task reads allow slow check/get without extending paid submit", () => {
   assert.equal(arsenkinPollTimeoutMs(10_000),30_000);
@@ -26,4 +26,12 @@ test("rejects contradictory or unknown Arsenkin task lifecycles", () => {
   ] as const) {
     assert.equal(arsenkinTaskLifecycle(status, progress), undefined);
   }
+});
+
+test("exposes only a bounded numeric provider task percentage", () => {
+  assert.equal(arsenkinTaskProgress("87%"), 87);
+  assert.equal(arsenkinTaskProgress(0), 0);
+  assert.equal(arsenkinTaskProgress(100), 100);
+  assert.equal(arsenkinTaskProgress("101%"), undefined);
+  assert.equal(arsenkinTaskProgress("private value"), undefined);
 });

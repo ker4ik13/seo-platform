@@ -271,6 +271,8 @@ export interface InternalAdminOperationSummary {
     readonly assignedOperations?: number;
   }[];
   readonly progress: AdminOperationProgress;
+  /** Current Arsenkin task progress; independent of persisted keyword progress. */
+  readonly providerProgressPercent?: number;
   readonly result: AdminOperationResultMetrics;
   readonly errorCode?: string;
   readonly actualCostMicro?: string;

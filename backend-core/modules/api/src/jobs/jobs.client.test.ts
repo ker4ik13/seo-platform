@@ -446,6 +446,35 @@ test("loads one safe platform operation for an admin deep link", async () => {
   }
 });
 
+test("forwards only a bounded Arsenkin task percentage through the admin client", async () => {
+  const originalFetch = globalThis.fetch;
+  let providerProgressPercent = 87;
+  globalThis.fetch = (async (): Promise<Response> => dataResponse({
+    id: crawlJobId,
+    workspaceId,
+    projectId,
+    actorId,
+    type: "AI_ANSWER_COLLECTION",
+    status: "RETRY_SCHEDULED",
+    stage: "provider_poll",
+    provider: "ARSENKIN",
+    progress: { current: "0", total: "110", unit: "KEYWORDS" },
+    providerProgressPercent,
+    result: {},
+    attempt: 17,
+    maxAttempts: 720,
+    createdAt: "2026-10-07T07:13:19.000Z",
+    updatedAt: "2026-10-07T07:36:54.000Z"
+  })) as typeof fetch;
+  try {
+    assert.equal((await client().getAdminOperation(actorId, "request-provider-progress", crawlJobId)).providerProgressPercent, 87);
+    providerProgressPercent = 101;
+    await assert.rejects(() => client().getAdminOperation(actorId, "request-provider-progress-invalid", crawlJobId), DomainError);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("worker-node admin client validates the one-time secret and scoped mutations", async () => {
   const originalFetch = globalThis.fetch;
   const id = "01900000-0000-7000-8000-000000000099";

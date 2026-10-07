@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ArsenkinAiAnswerConnector,
   aiAnswerHtmlToMarkdown,
   arsenkinAiAnswerRequest,
   arsenkinAiAnswerValues
@@ -15,6 +16,22 @@ const context = {
   excludeSubdomains: false,
   brands: ["Новая Технология"]
 };
+
+test("returns Arsenkin's real task percentage without exposing the provider body", async () => {
+  const connector = new ArsenkinAiAnswerConnector(
+    { tryAcquire: async () => ({ allowed: true }) },
+    async () => new Response(JSON.stringify({
+      code: "TASK_STATUS",
+      task_id: "task-1",
+      status: "process",
+      progress: "87%"
+    }), { status: 200, headers: { "content-type": "application/json" } })
+  );
+  assert.deepEqual(
+    await connector.fetchResult("task-1", [query], context, { apiKey: "test-key" }, 10_000),
+    { status: "PENDING", retryAfterSeconds: 5, providerProgressPercent: 87 }
+  );
+});
 
 test("builds the documented Arsenkin ai-serp request", () => {
   assert.deepEqual(

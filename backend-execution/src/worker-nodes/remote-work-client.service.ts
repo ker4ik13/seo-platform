@@ -35,6 +35,8 @@ export class RemoteWorkFailedError extends Error {
   public constructor(public readonly code: string) { super("Remote work did not complete"); this.name = "RemoteWorkFailedError"; }
 }
 
+const UNPAID_CLAIM_WAIT_MS = 10_000;
+
 /** Each runtime process waits on one batched long poll, independently of its lane count. */
 @Injectable()
 export class RemoteWorkClientService implements OnModuleDestroy {
@@ -80,10 +82,23 @@ export class RemoteWorkClientService implements OnModuleDestroy {
         .finally(() => { heartbeatRunning = false; });
     },10_000) : undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let claimTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const receipt = await new Promise<RemoteWorkReceipt>((resolve,reject) => {
         this.pending.set(id,{ token: readToken,resolve,reject });
         timer = setTimeout(() => reject(new RemoteWorkFailedError("WORKER_RESULT_TIMEOUT")),options.timeoutMs+5_000);
+        if(command!=="PROVIDER_HTTP") {
+          claimTimer=setTimeout(() => {
+            if(!this.pending.has(id)) return;
+            // Only PENDING can be abandoned. A concurrent claim wins the row
+            // lock and must finish remotely; local work must never duplicate it.
+            void this.prisma.$queryRaw<{state:string}[]>`SELECT public.abandon_remote_work(${id}::uuid,${readToken}::uuid) AS state`
+              .then(rows => {
+                if(rows[0]?.state==="ABANDONED") this.pending.get(id)?.reject(new RemoteWorkFailedError("WORKER_NOT_STARTED"));
+              })
+              .catch(() => undefined);
+          },Math.min(UNPAID_CLAIM_WAIT_MS,Math.max(250,Math.floor(options.timeoutMs/10))));
+        }
         this.schedulePoll();
       });
       if (heartbeatFailure) throw heartbeatFailure;
@@ -94,7 +109,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
       // is never repeated here; its owning workflow applies the retry policy.
       const rows=await this.prisma.$queryRaw<{state:string}[]>`SELECT public.abandon_remote_work(${id}::uuid,${readToken}::uuid) AS state`;
       if(command!=="PROVIDER_HTTP" && ["FAILED","ABANDONED"].includes(rows[0]?.state ?? "") && error instanceof RemoteWorkFailedError &&
-        (["WORKER_NOT_STARTED","WORKER_OUTCOME_UNKNOWN","WORKER_PROCESS_EXITED","WORKER_EXECUTION_FAILED","WORKER_RESULT_TIMEOUT","MALWARE_SCANNER_UNAVAILABLE","SOURCE_DOWNLOAD_FAILED","ARTIFACT_UPLOAD_FAILED","WORKER_MATERIAL_UNAVAILABLE"].includes(error.code) ||
+        (["WORKER_NOT_STARTED","WORKER_ADMISSION_TIMEOUT","WORKER_OUTCOME_UNKNOWN","WORKER_PROCESS_EXITED","WORKER_EXECUTION_FAILED","WORKER_RESULT_TIMEOUT","MALWARE_SCANNER_UNAVAILABLE","SOURCE_DOWNLOAD_FAILED","ARTIFACT_UPLOAD_FAILED","WORKER_MATERIAL_UNAVAILABLE"].includes(error.code) ||
           (command==="IMPORT_ROWS" && error.code==="INVALID_XLSX"))) {
         // Non-paid work may safely continue locally, but only after the remote
         // receipt is fenced closed. An active CPU upload must not race a local
@@ -107,6 +122,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
     } finally {
       this.pending.delete(id);
       if (timer) clearTimeout(timer);
+      if (claimTimer) clearTimeout(claimTimer);
       if (heartbeat) clearInterval(heartbeat);
     }
   }

@@ -63,3 +63,11 @@ export function operationStageLabel(
 ): string {
   return (stage && stageLabels[stage]) ?? operationStatusLabel(status, stage);
 }
+
+export function arsenkinProviderProgressLabel(percent: number | undefined, locale = "ru-RU"): string | undefined {
+  return percent !== undefined && Number.isInteger(percent) && percent >= 0 && percent <= 100
+    ? locale.startsWith("en")
+      ? `Arsenkin: ${percent}% · current task`
+      : `Arsenkin: ${percent}% · текущая задача`
+    : undefined;
+}

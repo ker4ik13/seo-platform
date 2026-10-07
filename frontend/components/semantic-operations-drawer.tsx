@@ -23,7 +23,7 @@ import {
   connectorRoutingScopeLabel,
   hasConnectorFallback
 } from "../lib/connector-routing-presentation";
-import { compactOperationStatusLabel } from "../lib/operation-status-presentation";
+import { arsenkinProviderProgressLabel, compactOperationStatusLabel } from "../lib/operation-status-presentation";
 import { operationFailureLabel } from "../lib/admin-operation-presentation";
 import { operationDurationLabel } from "../lib/operation-duration";
 import {
@@ -406,6 +406,7 @@ export function SemanticOperationsDrawer({
               <span>{operation.progressLabel}</span>
             </div>
             <div className="semantic-operation-progress"><i style={{ width: `${operation.percent}%` }} /></div>
+            {operation.providerProgressPercent !== undefined && <small className="semantic-provider-progress">{arsenkinProviderProgressLabel(operation.providerProgressPercent, uiLocale)}</small>}
             <div className="semantic-operation-meta"><span>{operation.routeLabel ?? <UiText text="Фоновая операция" />}</span><time>{formatDateTime(operation.createdAt, uiLocale)}</time></div>
             {(operation.durationLabel || operation.resultLabel) && (
               <div className="semantic-operation-card-facts">
@@ -573,6 +574,7 @@ interface Operation {
   readonly statusLabel: string;
   readonly progressLabel: string;
   readonly percent: number;
+  readonly providerProgressPercent?: number;
   readonly tab: OperationTab;
   readonly cancellable: boolean;
   readonly retryable: boolean;
@@ -742,6 +744,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     percent: value.selectedKeywords > 0
       ? Math.round(done / value.selectedKeywords * 100)
       : 0,
+    ...(value.providerProgressPercent === undefined ? {} : { providerProgressPercent: value.providerProgressPercent }),
     tab: operationTab(value.status),
     cancellable: [
       "QUEUED",

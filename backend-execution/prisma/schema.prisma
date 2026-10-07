@@ -194,6 +194,7 @@ model Job {
   progressCurrent      BigInt         @default(0) @map("progress_current")
   progressTotal        BigInt?        @map("progress_total")
   progressUnit         String?        @map("progress_unit") @db.VarChar(32)
+  providerProgressPercent Int?        @map("provider_progress_percent") @db.SmallInt
   estimatedCostMicro   BigInt?        @map("estimated_cost_micro")
   reservedCostMicro    BigInt?        @map("reserved_cost_micro")
   actualCostMicro      BigInt?        @map("actual_cost_micro")

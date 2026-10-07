@@ -52,6 +52,11 @@ export function aiAnswerCollectionSummary(job: Job): AiAnswerCollectionSummary {
     selectedKeywords,
     completedKeywords,
     failedKeywords,
+    ...(job.stage === "provider_poll" &&
+      ["RUNNING", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(job.status) &&
+      typeof job.providerProgressPercent === "number"
+      ? { providerProgressPercent: job.providerProgressPercent }
+      : {}),
     searchEngine,
     regionCode: input.regionCode,
     device: deviceValue,

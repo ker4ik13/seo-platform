@@ -643,6 +643,14 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
+    public.defer_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER, INTEGER, BOOLEAN)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
     public.fail_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
   TO %I',
   :'connector_user'
@@ -804,6 +812,7 @@ BEGIN
     'public.renew_ai_answer_collection_batch_lease(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
     'public.mark_ai_answer_collection_batch_submitting(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
     'public.defer_ai_answer_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.defer_ai_answer_collection_batch(uuid,uuid[],text,integer,text,integer,integer,boolean)'::regprocedure::oid,
     'public.fail_ai_answer_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
     'public.defer_ai_answer_collection_batch_capacity(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
     'public.quarantine_ai_answer_collection_batch_submit(uuid,uuid[],text,integer)'::regprocedure::oid,

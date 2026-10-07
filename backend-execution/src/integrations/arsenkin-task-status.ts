@@ -24,7 +24,7 @@ export function arsenkinTaskLifecycle(
   const status = typeof statusValue === "string"
     ? statusValue.toLocaleLowerCase("en-US")
     : undefined;
-  const progress = taskProgress(progressValue);
+  const progress = arsenkinTaskProgress(progressValue);
   if (status === "finish") {
     return progress === 100 ? "FINISHED" : undefined;
   }
@@ -33,7 +33,7 @@ export function arsenkinTaskLifecycle(
   return progress !== undefined && progress < 100 ? "PENDING" : undefined;
 }
 
-function taskProgress(value: unknown): number | undefined {
+export function arsenkinTaskProgress(value: unknown): number | undefined {
   if (typeof value === "number") {
     return Number.isFinite(value) && value >= 0 && value <= 100
       ? value

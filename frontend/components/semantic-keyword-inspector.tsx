@@ -19,6 +19,7 @@ import {
   normalizeSemanticTargetUrlInput,
   primaryRankContextIds,
   rankEngineLabel,
+  semanticRankHistoryDateRows,
   sameSemanticRankingUrl
 } from "../lib/semantic-rank-presentation";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
@@ -411,8 +412,8 @@ export function SemanticKeywordInspector({
     [aiPositionHistory, item.aiAnswers]
   );
   const positionChanges = useMemo(
-    () => rankHistoryByDate(visibleHistory),
-    [visibleHistory]
+    () => semanticRankHistoryDateRows(insights?.positionHistory ?? [], rankDimensionKey),
+    [insights, rankDimensionKey]
   );
   const aiPositionChanges = useMemo(
     () => rankHistoryByDate(aiChartHistory),
@@ -915,7 +916,7 @@ export function SemanticKeywordInspector({
                       <header>
                         <strong><UiText text="Изменения позиций" /></strong>
                       </header>
-                      <RankChangeRows rows={positionChanges.slice(0, 5)} />
+                      <SeoRankChangeTable rows={positionChanges} />
                     </div>
                   )}
                 </>
@@ -1543,6 +1544,44 @@ interface RankHistoryDateRow {
     "GOOGLE" | "YANDEX",
     SemanticKeywordPositionHistoryPoint
   >;
+}
+
+function SeoRankChangeTable({ rows }: Readonly<{ rows: ReturnType<typeof semanticRankHistoryDateRows> }>) {
+  const { locale, t: uiText } = useUiLocale();
+  return (
+    <table className="semantic-seo-rank-table">
+      <thead>
+        <tr>
+          <th scope="col"><UiText text="Дата" /></th>
+          {(["YANDEX", "GOOGLE"] as const).map((engine) => (
+            <th key={engine} scope="col">
+              <SearchEngineLogo engine={engine} size="compact" />
+              <span>{rankEngineLabel(engine)}</span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.date}>
+            <th scope="row"><time dateTime={row.date}>{formatDate(row.observedAt, locale)}</time></th>
+            {(["YANDEX", "GOOGLE"] as const).map((engine) => {
+              const point = row.positions.get(engine);
+              return (
+                <td
+                  className={!point ? "empty" : point.found ? undefined : "lost"}
+                  key={engine}
+                  title={point ? historyPointTitle(point, locale) : uiText("В этот день замера не было")}
+                >
+                  {point ? (point.found ? point.position ?? "—" : "×") : "—"}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 function RankChangeRows({ rows }: Readonly<{ rows: readonly RankHistoryDateRow[] }>) {
