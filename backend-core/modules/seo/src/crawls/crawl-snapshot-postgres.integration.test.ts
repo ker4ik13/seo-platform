@@ -427,3 +427,29 @@ test("a single-page recheck preserves duplicate issues until a comparable full c
     assert.equal((await service.listIssues(scope.workspaceId, scope.projectId)).issues.filter(issue => issue.code.startsWith("DUPLICATE_")).length, 0);
   } finally { await prisma.$disconnect(); }
 });
+
+test("new crawl restores archived pages for both fresh and 304 snapshots without losing their identity", { skip: !databaseUrl }, async () => {
+  const prisma = new PrismaService(loadAppConfig({ NODE_ENV: "test", DATABASE_URL: databaseUrl! })), service = new CrawlSnapshotService(prisma);
+  const scope = { workspaceId: randomUUID(), projectId: randomUUID() }, actor = randomUUID();
+  const snapshot = { ...pageInput(1, "Page", "a".repeat(64)), ...scope, crawlId: randomUUID(), etag: '"stable"', crawledAt: "2026-10-10T12:00:00.000Z" };
+  try {
+    await service.persistPage(snapshot);
+    const page = await prisma.page.findFirstOrThrow({ where: scope });
+    const archive = async () => prisma.page.update({ where: { id: page.id }, data: { status: "ARCHIVED", archivedBy: actor, archivedAt: new Date(), notes: "Сохранить заметку", priority: 7, version: { increment: 1 } } });
+    await archive();
+    await service.persistPage(snapshot);
+    assert.equal((await prisma.page.findUniqueOrThrow({ where: { id: page.id } })).status, "ARCHIVED", "old receipt replay must not undo a later manual archive");
+    const fresh = { ...snapshot, crawlId: randomUUID(), crawledAt: "2026-10-10T12:01:00.000Z" };
+    await service.persistPage(fresh);
+    let restored = await prisma.page.findUniqueOrThrow({ where: { id: page.id } });
+    assert.equal(restored.status, "ACTIVE"); assert.equal(restored.archivedAt, null); assert.equal(restored.archivedBy, null); assert.equal(restored.notes, "Сохранить заметку"); assert.equal(restored.priority, 7);
+    await archive();
+    await service.persistPage({ ...snapshot, crawlId: randomUUID(), savePageMap: false, crawledAt: "2026-10-10T12:02:00.000Z" });
+    assert.equal((await prisma.page.findUniqueOrThrow({ where: { id: page.id } })).status, "ARCHIVED");
+    const validator = await service.validator({ ...scope, url: snapshot.requestedUrl }); assert.ok(validator);
+    await service.reusePage({ ...scope, sourceSnapshotId: validator.sourceSnapshotId, crawlId: randomUUID(), sequence: 1, requestedUrl: snapshot.requestedUrl, finalUrl: snapshot.finalUrl, redirectChain: [], inSitemap: true, depth: 0, crawledAt: "2026-10-10T12:03:00.000Z" });
+    restored = await prisma.page.findUniqueOrThrow({ where: { id: page.id } });
+    assert.equal(restored.status, "ACTIVE"); assert.equal(restored.archivedAt, null); assert.equal(restored.archivedBy, null); assert.equal(restored.notes, "Сохранить заметку");
+    assert.equal(await prisma.page.count({ where: scope }), 1); assert.equal(await prisma.crawlPageSnapshot.count({ where: scope }), 4);
+  } finally { await prisma.$disconnect(); }
+});

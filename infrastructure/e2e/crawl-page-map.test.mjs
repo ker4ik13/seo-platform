@@ -343,6 +343,24 @@ test("HTTPS UI → remote worker → real public site → saved page facts/posit
     await adminPage.screenshot({ path: output + "/recovered-crawl-admin.png", animations: "disabled" });
     await adminPage.close();
   }
+  await t.test("a new saved crawl restores the archived page through both 304 and fresh HTTP", async () => {
+    const pages = await call("GET", `projects/${project.id}/pages?search=services/&limit=100`);
+    const service = pages.pages.find(item => item.normalizedUrl === site.root + "services/"); assert.ok(service);
+    const current = await call("GET", `projects/${project.id}/pages/${service.id}`);
+    await call("POST", `projects/${project.id}/pages/${service.id}/archive`, {}, current.version);
+    for (const conditionalRequests of [true, false]) {
+      const before = site.events.length;
+      const check = await call("POST", `projects/${project.id}/crawls`, { ...crawlInput, startUrls: [service.normalizedUrl], homepageChecks: [], sitemapUrls: [], maxUrls: 1, maxDepth: 0, conditionalRequests, savePageMap: true });
+      let result = check;
+      for (let attempt = 0; attempt < 80 && ["QUEUED", "RUNNING"].includes(result.status); attempt++) { await delay(500); result = await call("GET", `projects/${project.id}/crawls/${check.id}`); }
+      assert.equal(result.status, "COMPLETED");
+      const restored = await call("GET", `projects/${project.id}/pages/${service.id}`);
+      assert.equal(restored.lifecycleStatus, "ACTIVE"); assert.equal(restored.archivedAt, undefined); assert.equal(restored.archivedBy, undefined);
+      assert.equal(site.events.slice(before).find(event => event.path === "/services/")?.status, conditionalRequests ? 304 : 200);
+      if (conditionalRequests) await call("POST", `projects/${project.id}/pages/${service.id}/archive`, {}, restored.version);
+    }
+  });
+
   await t.test("multi-selection and folder menus archive every scoped page through the background worker", async () => {
     for (let offset = 0; offset < 205; offset += 20) await Promise.all(Array.from({ length: Math.min(20, 205 - offset) }, (_, index) => call("POST", `projects/${project.id}/pages`, { url: `${site.root}bulk-pages/${offset + index}`, aliases: [], pageType: "EXISTING", indexability: "UNKNOWN", priority: 0 })));
     await page.goto(`${base}/app/projects/${project.id}/pages`);

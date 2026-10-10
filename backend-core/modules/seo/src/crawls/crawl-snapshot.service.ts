@@ -168,6 +168,7 @@ export class CrawlSnapshotService {
               where: { id: current.id },
               data: {
                 ...pageProjection(input),
+                ...rediscoveredPageState(current.status),
                 includedInMap: true,
                 version: { increment: 1 }
               }
@@ -405,7 +406,7 @@ export class CrawlSnapshotService {
               { lastModified: { not: null } }
             ]
           },
-          include: { issueOccurrences: true }
+          include: { issueOccurrences: true, page: { select: { status: true } } }
         });
       if (!source || (!source.etag && !source.lastModified)) {
         throw new TypeError("Conditional crawl source is unavailable");
@@ -414,6 +415,7 @@ export class CrawlSnapshotService {
         ? await transaction.page.update({
             where: { id: source.pageId },
             data: {
+              ...rediscoveredPageState(source.page.status),
               indexability: source.indexability,
               httpStatus: source.statusCode,
               canonicalTarget: source.canonicalUrl,
@@ -1302,4 +1304,9 @@ function validatorLinksFitResponse(links: readonly string[]): boolean {
     if (bytes > 3_500_000) return false;
   }
   return true;
+}
+
+/** A new saved crawl brings a rediscovered page back into the active map. */
+function rediscoveredPageState(status: "ACTIVE" | "ARCHIVED" | "DELETED") {
+  return status === "ARCHIVED" ? { status: "ACTIVE" as const, archivedBy: null, archivedAt: null } : {};
 }

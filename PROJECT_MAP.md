@@ -121,9 +121,9 @@ ownership changes или источника истины в браузере. Г
 геометрию/клавиатуру/offline-ошибку и inventory 49 маршрутов на четырёх ширинах.
 Synthetic imported data проходит тот же owning publisher пачками по 500;
 PostgreSQL integration наблюдает реальные counters из `jobs_db.diagnostics`.
-`.github/workflows/quality.yml` содержит source gates и opt-in HTTPS job
-на dedicated self-hosted test runner; production и публичные session artifacts
-не используются. Staff fixtures временные и отзываются после проверки.
+GitHub Actions отключён: сборка и развёртывание выполняются автоматически
+в Dokploy. Команды проверки и HTTPS-скрипты остаются доступны локально;
+staff fixtures временные и отзываются после проверки.
 Текущий usability/design backlog и подтверждённые сценарии —
 `docs/usability-design-audit-2026-10-09.md`; реальные HTTPS regression flows —
 `infrastructure/e2e/project-usability.test.mjs`, многомаршрутный inventory —
@@ -3250,6 +3250,8 @@ XML sitemap parser использует общий `technicalCrawlMaxUrlLimit` (
 устаревшего лимита 1000: иначе выбор 5000 падал до первой страницы. Скорости
 0,1…4 страницы/с передаются как 6…240 requests/minute через общий контракт,
 Platform API, Jobs strict response parser, owning config и оба worker paths.
+`test-crawl-restart.sh` убивает coordinator через SIGKILL на HTTPS-стенде,
+проверяет восстановление supervisor/queue, durable progress и прежних ID страниц.
 `test-real-site-crawl.sh` проверяет реальный sitemap neuroluv.ru (>1000 URL)
 с бюджетом 5000 и bounded scope главная + /ai, а `test-project-note-files.sh`
 проверяет все форматы, реальные API-сохранения, reload и отзыв публичного доступа.
@@ -3292,7 +3294,10 @@ durable Job раз в секунду, получает точную выборк
 Redis keyspace или DB ownership нет. Core SEO хранит страницы, Jobs — только
 выборку ID, lease и прогресс. Tenant-проверка обязательна для всей порции;
 основные страницы кластеров пропускаются с явным числом защищённых страниц.
-Архивные разделы строятся по архивным страницам. Операция доступна в
+Архивные разделы строятся по архивным страницам. Новый сохранённый обход
+восстанавливает заново найденные страницы, включая ответ 304: сохраняются ID,
+заметки и связи, очищаются archivedBy/archivedAt. Replay прежнего receipt
+не меняет архив, установленный после получения этого результата. Операция доступна в
 проектном и административном журналах, поддерживает остановку; миграция
 `20261010180000_page_status_operation_analytics` добавляет её в общую аналитику.
 `api/page-status-jobs.ts` задаёт строгие общие input/result parsers, API
