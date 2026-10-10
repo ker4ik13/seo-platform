@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  parseProjectPageListOptions,
   pageContentStatuses,
   pageIndexabilities,
   pageLifecycleStatuses,
@@ -109,7 +110,7 @@ export function projectPageListQuery(
           "pathPrefix",
           "pageType",
           "indexability",
-          "lifecycleStatus"
+          "lifecycleStatus", "sort", "sortDirection", "dimensionKey", "date", "includeStructure"
         ].includes(key)
     )
   ) {
@@ -154,7 +155,10 @@ export function projectPageListQuery(
     "lifecycleStatus",
     LIFECYCLE_STATUSES
   ) as PageLifecycleStatus | undefined;
+  let options;
+  try { options = parseProjectPageListOptions(query); } catch { invalid("query"); }
   return {
+    ...options,
     limit,
     ...(cursor ? { cursor } : {}),
     ...(search ? { search } : {}),

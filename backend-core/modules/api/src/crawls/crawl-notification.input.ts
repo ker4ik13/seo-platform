@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   technicalCrawlMaxUrlLimit,
+  technicalCrawlMaxIssueLimit,
   technicalCrawlPurposes,
   type InternalDeliverCrawlNotificationInput
 } from "@seo-platform/contracts";
@@ -36,7 +37,7 @@ export function crawlNotificationInput(
         input.purpose as (typeof technicalCrawlPurposes)[number]
       )) ||
     !nonNegativeInteger(input.processedUrls, technicalCrawlMaxUrlLimit) ||
-    !nonNegativeInteger(input.issueCount, 5_000) ||
+    !nonNegativeInteger(input.issueCount, technicalCrawlMaxIssueLimit) ||
     !KEY_PATTERN.test(idempotencyKey) ||
     idempotencyKey !== `crawl-notification:${crawlId}`
   ) {

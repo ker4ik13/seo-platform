@@ -10,10 +10,8 @@ const secondProjectId = "01900000-0000-7000-8000-000000000003";
 const actorId = "01900000-0000-7000-8000-000000000004";
 const jobId = "01900000-0000-7000-8000-000000000005";
 
-function activityService(prisma: PrismaService): OperationActivityService {
-  return new OperationActivityService(Object.assign({ $queryRaw: async () => [] }, prisma) as PrismaService, {
-    selectedForJobs: async () => new Map()
-  } as unknown as RankOperationProvenanceService);
+function activityService(prisma: PrismaService, provenance: RankOperationProvenanceService = { selectedForJobs: async () => new Map() } as unknown as RankOperationProvenanceService): OperationActivityService {
+  return new OperationActivityService(Object.assign({ $queryRaw: async () => [], semanticImport: { findMany: async () => [], findUnique: async () => null, groupBy: async () => [], count: async () => 0 } }, prisma) as PrismaService, provenance);
 }
 
 test("counts only active user-visible operations by project", async () => {
@@ -292,7 +290,7 @@ test("admin operation row includes search engine, exact connection and active wo
         draining: false, deletedAt: null, lastHeartbeatAt: new Date() }]
     }
   } as unknown as PrismaService;
-  const service = new OperationActivityService(prisma, {
+  const service = activityService(prisma, {
     selectedForJobs: async () => new Map([[rankJobId,
       { label: "Личный", displayHint: "••••b313" }]])
   } as unknown as RankOperationProvenanceService);
@@ -329,7 +327,7 @@ test("admin AI answer operation keeps Arsenkin progress separate from saved keyw
     },
     $queryRaw: async () => []
   } as unknown as PrismaService;
-  const service = new OperationActivityService(prisma, {
+  const service = activityService(prisma, {
     selectedForJobs: async () => new Map()
   } as unknown as RankOperationProvenanceService);
   const operation = (await service.adminList({ statusGroup: "ACTIVE", limit: 50 })).data[0];
@@ -359,7 +357,7 @@ test("running Wordstat shows its own key and main server without rank scans", as
       return [];
     }
   } as unknown as PrismaService;
-  const service = new OperationActivityService(prisma, {
+  const service = activityService(prisma, {
     selectedForJobs: async (jobs: readonly { readonly credentialId?: string }[]) => {
       assert.equal(jobs[0]?.credentialId,
         "01900000-0000-7000-8000-000000000020");

@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import {
   pageContentStatuses,
+  parseCrawlTechnicalDetails,
   type InternalChangeProjectPageStatusInput,
   type InternalCreateProjectPageInput,
   type InternalUpdateProjectPageInput,
@@ -16,6 +17,8 @@ import {
   type ProjectPageListQuery,
   type ProjectPageSummary
 } from "@seo-platform/contracts";
+import { PageInsightsService } from "./page-insights.service.js";
+import { sortedPageIds } from "./page-list-sort.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { normalizePageUrl, type NormalizedPageUrl } from "./page-url.js";
@@ -23,6 +26,8 @@ import { normalizePageUrl, type NormalizedPageUrl } from "./page-url.js";
 const CONTENT_STATUSES = new Set<string>(pageContentStatuses);
 const CRAWL_SUMMARY_SELECT = {
   crawlId: true,
+  requestedUrl: true,
+  finalUrl: true,
   statusCode: true,
   responseTimeMs: true,
   sizeBytes: true,
@@ -73,7 +78,7 @@ const PAGE_INCLUDE = {
   ...PAGE_LIST_INCLUDE,
   crawlSnapshots: {
     ...PAGE_LIST_INCLUDE.crawlSnapshots,
-    select: { ...CRAWL_SUMMARY_SELECT, metaTags: true }
+    select: { ...CRAWL_SUMMARY_SELECT, metaTags: true, headings: true, hreflang: true, technicalDetails: true }
   }
 } satisfies Prisma.PageInclude;
 
@@ -89,11 +94,12 @@ interface PageCursor {
   readonly filterHash: string;
   readonly updatedAt: string;
   readonly id: string;
+  readonly sectionRoot?: boolean;
 }
 
 @Injectable()
 export class PageService {
-  public constructor(private readonly prisma: PrismaService) {}
+  public constructor(private readonly prisma: PrismaService, private readonly insights: PageInsightsService) {}
 
   public async list(
     workspaceId: string,
@@ -101,15 +107,18 @@ export class PageService {
     query: ProjectPageListQuery
   ): Promise<ProjectPageCollection> {
     const filterHash = pageFilterHash(query);
-    const cursor = query.cursor
+    const cursor = query.cursor && !query.sort
       ? decodeCursor(query.cursor, filterHash)
       : undefined;
+    const sorted = query.sort ? await sortedPageIds(this.prisma, this.insights, { workspaceId, projectId }, query) : undefined;
+    const prefixIds = sorted?.ids ?? (query.pathPrefix ? await this.prefixPageIds(workspaceId, projectId, query, cursor) : undefined);
     const [rows, structure] = await Promise.all([
       this.prisma.page.findMany({
         where: {
           workspaceId,
           projectId,
           includedInMap: true,
+          ...(prefixIds ? { id: { in: prefixIds } } : {}),
           status: query.lifecycleStatus ?? "ACTIVE",
           ...(query.pageType ? { pageType: query.pageType } : {}),
           ...(query.indexability
@@ -140,25 +149,7 @@ export class PageService {
                   ]
                 }]
               : []),
-            ...(query.pathPrefix
-              ? [{
-                  OR: [
-                    {
-                      normalizedUrl: {
-                        contains: query.pathPrefix,
-                        mode: "insensitive" as const
-                      }
-                    },
-                    {
-                      normalizedUrl: {
-                        endsWith: query.pathPrefix.replace(/\/$/u, ""),
-                        mode: "insensitive" as const
-                      }
-                    }
-                  ]
-                }]
-              : []),
-            ...(cursor
+            ...(cursor && !query.pathPrefix
               ? [{
                   OR: [
                     { updatedAt: { lt: new Date(cursor.updatedAt) } },
@@ -173,9 +164,9 @@ export class PageService {
         },
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take: query.limit + 1,
-        include: PAGE_LIST_INCLUDE
+        include: scopedPageRows(workspaceId, projectId)
       }),
-      cursor
+      query.cursor || query.includeStructure === false
         ? Promise.resolve(undefined)
         : this.prisma.page.findMany({
             where: {
@@ -184,26 +175,33 @@ export class PageService {
               includedInMap: true,
               status: "ACTIVE"
             },
-            select: { normalizedUrl: true },
+            select: { normalizedUrl: true, id: true },
             orderBy: [{ normalizedUrl: "asc" }, { id: "asc" }],
-            take: 5_000
+            take: 5_001
           })
     ]);
+    if (prefixIds) {
+      const order = new Map(prefixIds.map((id, index) => [id, index]));
+      rows.sort((left, right) => order.get(left.id)! - order.get(right.id)!);
+    }
+    const counts = await pageCounts(this.prisma, workspaceId, projectId, rows.slice(0, query.limit).map(row => row.id));
     const hasNext = rows.length > query.limit;
     const visible = rows.slice(0, query.limit);
     const last = visible.at(-1);
     return {
-      pages: visible.map(pageSummary),
+      pages: visible.map(row => pageSummary({ ...row, _count: counts.get(row.id) ?? { targetKeywords: 0, primaryClusters: 0, crawlIssues: 0 } })),
+      ...(sorted?.date ? { rankDate: sorted.date } : {}),
       ...(structure
-        ? { structureUrls: structure.map(({ normalizedUrl }) => normalizedUrl) }
+        ? { structureUrls: structure.slice(0, 5_000).map(({ normalizedUrl }) => normalizedUrl), structurePageIds: structure.slice(0, 5_000).map(({ id }) => id), structureTruncated: structure.length > 5_000 }
         : {}),
       ...(hasNext && last
         ? {
-            nextCursor: encodeCursor({
+            nextCursor: sorted?.nextCursor ?? encodeCursor({
               version: 1,
               filterHash,
               updatedAt: last.updatedAt.toISOString(),
-              id: last.id
+              id: last.id,
+              ...(query.pathPrefix ? { sectionRoot: isSectionRootPage(last.normalizedUrl, query.pathPrefix) } : {})
             })
           }
         : {})
@@ -218,6 +216,24 @@ export class PageService {
     return pageSummary(
       await this.requiredPage(this.prisma, workspaceId, projectId, pageId)
     );
+  }
+
+  private async prefixPageIds(workspaceId: string, projectId: string, query: ProjectPageListQuery, cursor: PageCursor | undefined): Promise<string[]> {
+    const prefix = query.pathPrefix!.replace(/\/$/u, "");
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const pattern = `^https?://[^/?#]+${escaped}(?:/|[?#]|$)`;
+    const rootPattern = `^https?://[^/?#]+${escaped}/?$`;
+    const search = query.search ? `%${query.search.replace(/[\\%_]/gu, "\\$&")}%` : undefined;
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT id FROM pages WHERE workspace_id = ${workspaceId}::uuid AND project_id = ${projectId}::uuid AND included_in_map AND status::text = ${query.lifecycleStatus ?? "ACTIVE"}
+        AND normalized_url ~ ${pattern}
+        ${query.pageType ? Prisma.sql`AND page_type::text = ${query.pageType}` : Prisma.empty}
+        ${query.indexability ? Prisma.sql`AND indexability::text = ${query.indexability}` : Prisma.empty}
+        ${search ? Prisma.sql`AND (normalized_url ILIKE ${search} OR title ILIKE ${search} OR h1 ILIKE ${search})` : Prisma.empty}
+        ${cursor ? Prisma.sql`AND ((normalized_url ~ ${rootPattern}) < ${cursor.sectionRoot ?? false}
+          OR ((normalized_url ~ ${rootPattern}) = ${cursor.sectionRoot ?? false} AND (updated_at, id) < (${new Date(cursor.updatedAt)}, ${cursor.id}::uuid)))` : Prisma.empty}
+      ORDER BY (normalized_url ~ ${rootPattern}) DESC, updated_at DESC, id DESC LIMIT ${query.limit + 1}`);
+    return rows.map((row) => row.id);
   }
 
   public async create(
@@ -542,7 +558,7 @@ export class PageService {
         includedInMap: true,
         status: { not: "DELETED" }
       },
-      include: PAGE_INCLUDE
+      include: scopedPageInclude(PAGE_INCLUDE, workspaceId, projectId)
     });
     if (!page) {
       throw new NotFoundException({
@@ -589,7 +605,7 @@ function pageSummary(
     })),
     pageType: page.pageType,
     indexability: page.indexability,
-    ...(page.httpStatus === null ? {} : { httpStatus: page.httpStatus }),
+    ...(page.httpStatus === null || page.httpStatus === 0 ? {} : { httpStatus: page.httpStatus }),
     ...(page.canonicalTarget
       ? { canonicalTarget: page.canonicalTarget }
       : {}),
@@ -615,6 +631,8 @@ function pageSummary(
       ? {
           latestCrawl: {
             crawlId: latestCrawl.crawlId,
+            requestedUrl: latestCrawl.requestedUrl,
+            finalUrl: latestCrawl.finalUrl,
             statusCode: latestCrawl.statusCode,
             responseTimeMs: latestCrawl.responseTimeMs,
             sizeBytes: latestCrawl.sizeBytes,
@@ -636,6 +654,9 @@ function pageSummary(
               "metaTags" in latestCrawl
                 ? storedMetaTags(latestCrawl.metaTags)
                 : [],
+            ...("headings" in latestCrawl ? { headings: latestCrawl.headings as unknown as NonNullable<NonNullable<ProjectPageSummary["latestCrawl"]>["headings"]> } : {}),
+            ...("hreflang" in latestCrawl ? { hreflang: latestCrawl.hreflang as unknown as NonNullable<NonNullable<ProjectPageSummary["latestCrawl"]>["hreflang"]> } : {}),
+            ...("technicalDetails" in latestCrawl ? { technicalDetails: publicTechnicalDetails(latestCrawl.technicalDetails) } : {}),
             imageCount: latestCrawl.imageCount,
             imagesMissingAlt: latestCrawl.imagesMissingAlt,
             structuredDataTypes: storedStringArray(
@@ -694,9 +715,15 @@ function storedMetaTags(
       ...(name ? { name } : {}),
       ...(property ? { property } : {}),
       ...(httpEquiv ? { httpEquiv } : {}),
+      ...(candidate.source === "HTML" || candidate.source === "HTTP" ? { source: candidate.source } : {}),
       content: candidate.content
     }];
   });
+}
+
+function publicTechnicalDetails(value: Prisma.JsonValue) {
+  const { links: _links, ...facts } = parseCrawlTechnicalDetails(value);
+  return facts;
 }
 
 function pageIdentity(
@@ -848,6 +875,7 @@ function decodeCursor(value: string, filterHash: string): PageCursor {
     !Number.isFinite(new Date(cursor.updatedAt).getTime()) ||
     typeof cursor.id !== "string" ||
     !/^[0-9a-f-]{36}$/iu.test(cursor.id)
+    || cursor.sectionRoot !== undefined && typeof cursor.sectionRoot !== "boolean"
   ) {
     invalidCursor();
   }
@@ -879,4 +907,35 @@ function conflict(message: string): never {
 
 function json(value: unknown): Prisma.InputJsonValue {
   return value as Prisma.InputJsonValue;
+}
+
+function isSectionRootPage(value: string, prefix: string): boolean {
+  const url = new URL(value);
+  return !url.search && url.pathname.replace(/\/$/u, "") === prefix.replace(/\/$/u, "");
+}
+
+function scopedPageInclude<T extends typeof PAGE_LIST_INCLUDE>(include: T, workspaceId: string, projectId: string) {
+  const scope = { workspaceId, projectId };
+  return { ...include, aliases: { ...include.aliases, where: scope }, sources: { ...include.sources, where: scope },
+    crawlSnapshots: { ...include.crawlSnapshots, where: scope }, _count: { select: {
+      targetKeywords: { where: { ...scope, status: "ACTIVE" as const } }, primaryClusters: { where: { ...scope, status: "ACTIVE" as const } }, crawlIssues: { where: { ...scope, resolvedAt: null } }
+    } } };
+}
+
+function scopedPageRows(workspaceId: string, projectId: string) {
+  const { aliases, sources, crawlSnapshots } = scopedPageInclude(PAGE_LIST_INCLUDE, workspaceId, projectId);
+  return { aliases, sources, crawlSnapshots };
+}
+async function pageCounts(prisma: PrismaService, workspaceId: string, projectId: string, ids: readonly string[]) {
+  if (!ids.length) return new Map<string, { targetKeywords: number; primaryClusters: number; crawlIssues: number }>();
+  const rows = await prisma.$queryRaw<{ pageId: string; kind: "targetKeywords" | "primaryClusters" | "crawlIssues"; count: number }[]>`
+    SELECT target_page_id AS "pageId", 'targetKeywords' AS kind, count(*)::int AS count FROM keywords
+      WHERE workspace_id=${workspaceId}::uuid AND project_id=${projectId}::uuid AND status='ACTIVE' AND target_page_id=ANY(${[...ids]}::uuid[]) GROUP BY target_page_id
+    UNION ALL SELECT primary_page_id, 'primaryClusters', count(*)::int FROM clusters
+      WHERE workspace_id=${workspaceId}::uuid AND project_id=${projectId}::uuid AND status='ACTIVE' AND primary_page_id=ANY(${[...ids]}::uuid[]) GROUP BY primary_page_id
+    UNION ALL SELECT page_id, 'crawlIssues', count(*)::int FROM crawl_issues
+      WHERE workspace_id=${workspaceId}::uuid AND project_id=${projectId}::uuid AND resolved_at IS NULL AND page_id=ANY(${[...ids]}::uuid[]) GROUP BY page_id`;
+  const counts = new Map<string, { targetKeywords: number; primaryClusters: number; crawlIssues: number }>();
+  for (const row of rows) { const value = counts.get(row.pageId) ?? { targetKeywords: 0, primaryClusters: 0, crawlIssues: 0 }; value[row.kind] = row.count; counts.set(row.pageId, value); }
+  return counts;
 }

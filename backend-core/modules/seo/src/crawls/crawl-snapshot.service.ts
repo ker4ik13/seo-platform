@@ -1,8 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import {
+  crawlIndexingDirectives,
   crawlPageChangeFields,
   technicalCrawlMaxUrlLimit,
+  technicalCrawlMaxDuplicateGroupLimit,
+  technicalCrawlMaxDuplicateIssueLimit,
+  technicalCrawlFinalizationTimeoutMs,
   type CrawlPageChangeField,
+  type CrawlTechnicalDetails,
   type InternalCrawlPageValidator,
   type InternalFinalizeCrawlSnapshotInput,
   type InternalFinalizeCrawlSnapshotReceipt,
@@ -66,10 +71,12 @@ export class CrawlSnapshotService {
         etag: true,
         lastModified: true,
         internalLinks: true
+        ,metaTags: true
+        ,requestedUrl: true, finalUrl: true
       },
       orderBy: [{ crawledAt: "desc" }, { id: "desc" }]
     });
-    if (!snapshot || (!snapshot.etag && !snapshot.lastModified)) {
+    if (!snapshot || snapshot.requestedUrl !== snapshot.finalUrl || (!snapshot.etag && !snapshot.lastModified)) {
       return null;
     }
     const internalLinks = storedUrlArray(snapshot.internalLinks);
@@ -81,16 +88,19 @@ export class CrawlSnapshotService {
         ? { lastModified: snapshot.lastModified }
         : {}),
       internalLinks
+      ,nofollow: crawlIndexingDirectives(snapshot.metaTags as unknown as NonNullable<InternalPersistCrawlPageInput["metaTags"]>, "robots").nofollow
+      ,...snapshotHeaderEvidence(snapshot.metaTags)
     };
   }
 
   public async persistPage(
     input: InternalPersistCrawlPageInput
   ): Promise<InternalPersistCrawlPageReceipt> {
+    if (input.preserveRequestedUrl && input.redirectChain.length > 0) input = { ...input, indexability: "REDIRECTED" };
     const httpStatusOnly = input.purpose === "HTTP_STATUS_CHECK";
     const savePageMap = input.savePageMap ?? true;
     const identity = normalizePageUrl(
-      httpStatusOnly ? input.requestedUrl : input.finalUrl
+      httpStatusOnly || input.preserveRequestedUrl ? input.requestedUrl : input.finalUrl
     );
     const issues = httpStatusOnly ? [] : input.issues;
     return this.prisma.$transaction(async (transaction) => {
@@ -109,7 +119,8 @@ export class CrawlSnapshotService {
         select: {
           workspaceId: true,
           projectId: true,
-          statusCode: true,
+  statusCode: true,
+  indexability: true,
           _count: { select: { issueOccurrences: true } }
         }
       });
@@ -258,13 +269,15 @@ export class CrawlSnapshotService {
           structuredDataTypes:
             input.structuredDataTypes as Prisma.InputJsonValue,
           metaTags: (input.metaTags ?? []) as unknown as Prisma.InputJsonValue,
+          technicalDetails: { ...snapshotTechnicalDetails(input.technicalDetails), purpose: input.purpose ?? "TECHNICAL_AUDIT" } as unknown as Prisma.InputJsonValue,
+          linkDetails: (input.technicalDetails?.links ?? []) as unknown as Prisma.InputJsonValue,
           wordCount: input.wordCount,
           contentHash: input.contentHash,
           ...(input.etag ? { etag: input.etag } : {}),
           ...(input.lastModified
             ? { lastModified: input.lastModified }
             : {}),
-          indexability: input.indexability,
+          indexability: input.preserveRequestedUrl && input.redirectChain.length > 0 ? "REDIRECTED" : input.indexability,
           crawledAt: new Date(input.crawledAt)
         }
       });
@@ -343,7 +356,7 @@ export class CrawlSnapshotService {
   public async reusePage(
     input: InternalReuseCrawlPageInput
   ): Promise<InternalPersistCrawlPageReceipt> {
-    const identity = normalizePageUrl(input.finalUrl);
+    const identity = normalizePageUrl(input.purpose === "HTTP_STATUS_CHECK" || input.preserveRequestedUrl ? input.requestedUrl : input.finalUrl);
     const httpStatusOnly = input.purpose === "HTTP_STATUS_CHECK";
     const savePageMap = input.savePageMap ?? true;
     return this.prisma.$transaction(async (transaction) => {
@@ -498,6 +511,8 @@ export class CrawlSnapshotService {
           structuredDataTypes:
             source.structuredDataTypes as Prisma.InputJsonValue,
           metaTags: source.metaTags as Prisma.InputJsonValue,
+          technicalDetails: { ...(source.technicalDetails as Record<string, unknown>), purpose: input.purpose ?? "TECHNICAL_AUDIT" } as Prisma.InputJsonValue,
+          linkDetails: source.linkDetails as Prisma.InputJsonValue,
           wordCount: source.wordCount,
           contentHash: source.contentHash,
           etag: source.etag,
@@ -680,6 +695,12 @@ export class CrawlSnapshotService {
         );
       if (input.status === "COMPLETED") {
         await transaction.$executeRaw`
+          WITH current_pages AS MATERIALIZED (
+            SELECT DISTINCT page_id FROM crawl_page_snapshots
+            WHERE workspace_id = ${input.workspaceId}::uuid
+              AND project_id = ${input.projectId}::uuid
+              AND crawl_id = ${input.crawlId}::uuid
+          )
           UPDATE "crawl_issues" AS issue
           SET
             "resolved_at" = CURRENT_TIMESTAMP,
@@ -690,14 +711,17 @@ export class CrawlSnapshotService {
             AND issue."project_id" = ${input.projectId}::uuid
             AND issue."resolved_at" IS NULL
             AND issue."last_crawl_id" <> ${input.crawlId}::uuid
-            AND EXISTS (
-              SELECT 1
-              FROM "crawl_page_snapshots" AS snapshot
-              WHERE
-                snapshot."workspace_id" = issue."workspace_id"
-                AND snapshot."project_id" = issue."project_id"
-                AND snapshot."page_id" = issue."page_id"
-                AND snapshot."crawl_id" = ${input.crawlId}::uuid
+            AND issue.page_id IN (SELECT page_id FROM current_pages)
+            AND (
+              issue.code NOT IN ('DUPLICATE_CONTENT_GROUP', 'DUPLICATE_TITLE_GROUP', 'DUPLICATE_DESCRIPTION_GROUP', 'DUPLICATE_H1_GROUP')
+              OR EXISTS (
+                SELECT 1 FROM crawl_membership_analyses previous
+                WHERE previous.workspace_id = ${input.workspaceId}::uuid
+                  AND previous.project_id = ${input.projectId}::uuid
+                  AND previous.crawl_id = issue.last_crawl_id
+                  AND previous.scope_hash = ${input.scopeHash}
+                  AND previous.status = 'COMPLETED'
+              )
             )
         `;
       }
@@ -705,7 +729,7 @@ export class CrawlSnapshotService {
         accepted: true,
         issueCount: duplicateIssueCount + missingIssueCount
       };
-    });
+    }, { timeout: technicalCrawlFinalizationTimeoutMs });
   }
 
   private async persistDuplicateAnalysis(
@@ -764,18 +788,15 @@ export class CrawlSnapshotService {
             memberCount: group.members.length
           }))
         });
-        await transaction.crawlDuplicateGroupMember.createMany({
-          data: storedGroups.flatMap((group) =>
-            group.members.map((member) => ({
-              workspaceId: input.workspaceId,
-              projectId: input.projectId,
-              crawlId: input.crawlId,
-              groupId: group.id,
-              snapshotId: member.id,
-              pageId: member.pageId
-            }))
-          )
-        });
+        const members = storedGroups.flatMap((group) =>
+          group.members.map((member) => ({ groupId: group.id, snapshotId: member.id, pageId: member.pageId })));
+        await transaction.$executeRaw`
+          INSERT INTO crawl_duplicate_group_members (workspace_id, project_id, crawl_id, group_id, snapshot_id, page_id)
+          SELECT ${input.workspaceId}::uuid, ${input.projectId}::uuid, ${input.crawlId}::uuid,
+            row."groupId"::uuid, row."snapshotId"::uuid, row."pageId"::uuid
+          FROM jsonb_to_recordset(${JSON.stringify(members)}::jsonb)
+            AS row("groupId" text, "snapshotId" text, "pageId" text)
+        `;
         const issueRows = storedGroups.flatMap((group) => {
           const evidence = duplicateIssue(group.kind);
           return group.members.map((member) => ({
@@ -792,15 +813,12 @@ export class CrawlSnapshotService {
             seenAt: member.crawledAt.toISOString()
           }));
         });
-        await transaction.crawlIssueOccurrence.createMany({
-          data: issueRows.map((row) => ({
-            snapshotId: row.snapshotId,
-            code: row.code,
-            severity: row.severity,
-            title: row.title,
-            details: row.details
-          }))
-        });
+        await transaction.$executeRaw`
+          INSERT INTO crawl_issue_occurrences (snapshot_id, code, severity, title, details)
+          SELECT row."snapshotId"::uuid, row.code, row.severity::"CrawlIssueSeverity", row.title, row.details
+          FROM jsonb_to_recordset(${JSON.stringify(issueRows)}::jsonb)
+            AS row("snapshotId" text, code text, severity text, title text, details jsonb)
+        `;
         await transaction.$executeRaw`
           INSERT INTO "crawl_issues" (
             "id",
@@ -1076,39 +1094,42 @@ export class CrawlSnapshotService {
   ): Promise<ProjectCrawlDuplicateGroupCollection> {
     const groups = await this.prisma.crawlDuplicateGroup.findMany({
       where: { workspaceId, projectId, crawlId },
-      include: {
-        members: {
-          include: {
-            page: { select: { url: true } },
-            snapshot: { select: { sequence: true } }
-          }
-        }
-      },
-      orderBy: [
-        { kind: "asc" },
-        { memberCount: "desc" },
-        { id: "asc" }
-      ],
-      take: 2_000
+      orderBy: [{ kind: "asc" }, { memberCount: "desc" }, { id: "asc" }],
+      take: technicalCrawlMaxDuplicateGroupLimit
     });
-    return {
-      groups: groups.map((group) => ({
-        id: group.id,
-        crawlId: group.crawlId,
-        kind: group.kind,
-        memberCount: group.memberCount,
-        members: [...group.members]
-          .sort(
-            (left, right) =>
-              left.snapshot.sequence - right.snapshot.sequence
-          )
-          .map((member) => ({
-            pageId: member.pageId,
-            url: member.page.url
-          })),
-        createdAt: group.createdAt.toISOString()
-      }))
-    };
+    if (!groups.length) return { groups: [] };
+    const [rows, snapshots] = await Promise.all([
+      this.prisma.crawlDuplicateGroupMember.findMany({
+        where: { workspaceId, projectId, crawlId },
+        select: { groupId: true, pageId: true, snapshotId: true },
+        take: technicalCrawlMaxDuplicateIssueLimit + 1
+      }),
+      this.prisma.crawlPageSnapshot.findMany({
+        where: { workspaceId, projectId, crawlId },
+        select: { id: true, sequence: true },
+        take: technicalCrawlMaxUrlLimit + 1
+      })
+    ]);
+    if (rows.length > technicalCrawlMaxDuplicateIssueLimit || snapshots.length > technicalCrawlMaxUrlLimit) {
+      throw new TypeError("Crawl duplicate result exceeds bounds");
+    }
+    const pageIds = [...new Set(rows.map(row => row.pageId))];
+    const pages = await this.prisma.page.findMany({ where: { workspaceId, projectId, id: { in: pageIds } }, select: { id: true, url: true } });
+    const urls = new Map(pages.map(page => [page.id, page.url]));
+    const sequences = new Map(snapshots.map(snapshot => [snapshot.id, snapshot.sequence]));
+    const byGroup = new Map<string, { pageId: string; url: string }[]>();
+    for (const row of rows.sort((left, right) => (sequences.get(left.snapshotId) ?? 0) - (sequences.get(right.snapshotId) ?? 0))) {
+      const url = urls.get(row.pageId);
+      if (!url || !sequences.has(row.snapshotId)) throw new TypeError("Crawl duplicate evidence is incomplete");
+      const members = byGroup.get(row.groupId) ?? [];
+      members.push({ pageId: row.pageId, url });
+      byGroup.set(row.groupId, members);
+    }
+    return { groups: groups.map(group => {
+      const members = byGroup.get(group.id) ?? [];
+      if (members.length !== group.memberCount) throw new TypeError("Crawl duplicate members are incomplete");
+      return { id: group.id, crawlId: group.crawlId, kind: group.kind, memberCount: group.memberCount, members, createdAt: group.createdAt.toISOString() };
+    }) };
   }
 
   public async listAbsentPages(
@@ -1125,7 +1146,7 @@ export class CrawlSnapshotService {
         }
       },
       orderBy: [{ detectedAt: "desc" }, { pageId: "asc" }],
-      take: 1_000
+      take: technicalCrawlMaxUrlLimit
     });
     return {
       crawlId,
@@ -1145,8 +1166,9 @@ export class CrawlSnapshotService {
 function pageProjection(
   input: InternalPersistCrawlPageInput
 ) {
+  if (input.indexability === "BLOCKED_ROBOTS") return { indexability: input.indexability, httpStatus: null, crawledAt: new Date(input.crawledAt) } as const;
   return {
-    indexability: input.indexability,
+    indexability: input.preserveRequestedUrl && input.redirectChain.length > 0 ? "REDIRECTED" as const : input.indexability,
     httpStatus: input.statusCode,
     canonicalTarget: input.canonicalUrl ?? null,
     robots: input.robots ?? null,
@@ -1156,6 +1178,17 @@ function pageProjection(
     language: input.language ?? null,
     crawledAt: new Date(input.crawledAt)
   } as const;
+}
+
+function snapshotTechnicalDetails(value: CrawlTechnicalDetails | undefined) {
+  const { links: _links, ...facts } = value ?? {};
+  return facts;
+}
+
+function snapshotHeaderEvidence(value: Prisma.JsonValue) {
+  const tags = value as unknown as NonNullable<InternalPersistCrawlPageInput["metaTags"]>;
+  const header = tags.filter((tag) => tag.source === "HTTP" && tag.httpEquiv?.toLowerCase() === "x-robots-tag").map((tag) => tag.content).join("\n");
+  return header ? { xRobotsTag: header.slice(0, 4_000) } : {};
 }
 
 function reusedPageInput(
@@ -1168,6 +1201,7 @@ function reusedPageInput(
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     crawlId: input.crawlId,
+    ...(input.preserveRequestedUrl === undefined ? {} : { preserveRequestedUrl: input.preserveRequestedUrl }),
     ...(input.purpose ? { purpose: input.purpose } : {}),
     sequence: input.sequence,
     requestedUrl: input.requestedUrl,

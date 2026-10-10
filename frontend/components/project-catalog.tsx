@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ProjectCollectionCapabilities } from "@seo-platform/contracts";
 import type { AppProject, AppWorkspace } from "../lib/app-types";
-import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
-import { projectCreationErrorMessage } from "../lib/project-creation-error";
+import { ProjectCreationWizard } from "./project-creation-wizard";
 import { Icon } from "./icon";
 import { ProjectFavicon } from "./project-favicon";
 import { useUiLocale, UiText } from "./ui-locale";
@@ -12,26 +12,26 @@ import { useUiLocale, UiText } from "./ui-locale";
 
 export function ProjectCatalog({
   activeProjectId,
+  currentUserId,
   capabilities,
   initialCreateOpen = false,
   projects,
   workspace
 }: Readonly<{
   activeProjectId?: string;
+  currentUserId: string;
   capabilities?: ProjectCollectionCapabilities;
   initialCreateOpen?: boolean;
   projects: readonly AppProject[];
   workspace: AppWorkspace;
 }>) {
   const { t: uiText } = useUiLocale();
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const canCreate = capabilities?.creation.allowed ?? false;
   const [createOpen, setCreateOpen] = useState(
     initialCreateOpen && canCreate
   );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const [duplicateConfirmation, setDuplicateConfirmation] = useState(false);
 
   const visibleProjects = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("ru");
@@ -43,54 +43,10 @@ export function ProjectCatalog({
     );
   }, [projects, query]);
 
-  useEffect(() => {
-    if (!createOpen) return;
-    function closeOnEscape(event: KeyboardEvent): void {
-      if (event.key === "Escape") setCreateOpen(false);
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [createOpen]);
-
   function selectProject(projectId: string, destination = "/app"): void {
     writePreference("seo_workspace", workspace.id);
     writePreference("seo_project", projectId);
     window.location.assign(destination);
-  }
-
-  async function createProject(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setError(undefined);
-    const form = new FormData(event.currentTarget);
-    try {
-      const project = await browserApiRequest<{ readonly id: string }>(
-        `/app/api/workspaces/${encodeURIComponent(workspace.id)}/projects`,
-        {
-          method: "POST",
-          body: {
-            name: String(form.get("name") ?? "").trim(),
-            domain: String(form.get("domain") ?? "").trim(),
-            confirmDuplicateDomain:
-              duplicateConfirmation &&
-              form.get("confirmDuplicateDomain") === "on"
-          }
-        }
-      );
-      selectProject(project.id);
-    } catch (requestError) {
-      setBusy(false);
-      if (
-        requestError instanceof BrowserApiError &&
-        requestError.code === "DUPLICATE"
-      ) {
-        setDuplicateConfirmation(true);
-        setError("Такой домен уже используется. Подтвердите создание отдельного проекта.");
-        return;
-      }
-      setError(projectCreationErrorMessage(requestError));
-    }
   }
 
   return (
@@ -197,57 +153,14 @@ export function ProjectCatalog({
         </section>
       )}
 
-      {createOpen && (
-        <div
-          className="project-dialog-backdrop"
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) setCreateOpen(false);
-          }}
-          role="presentation"
-        >
-          <section aria-labelledby="create-project-title" aria-modal="true" className="project-dialog" role="dialog">
-            <header>
-              <div>
-                <h2 id="create-project-title"><UiText text="Новый проект" /></h2>
-                <p><UiText text="Домен, семантика и история операций будут изолированы внутри проекта." /></p>
-              </div>
-              <button aria-label={uiText("Закрыть")} onClick={() => setCreateOpen(false)} type="button">×</button>
-            </header>
-            <form className="onboarding-form" onSubmit={createProject}>
-              {error && <div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div>}
-              <label className="form-field">
-                <span><UiText text="Название проекта" /></span>
-                <input autoFocus maxLength={160} name="name" placeholder={uiText("Например, Основной сайт")} required />
-              </label>
-              <label className="form-field">
-                <span><UiText text="Домен" /></span>
-                <input
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  name="domain"
-                  onChange={() => {
-                    setDuplicateConfirmation(false);
-                    setError(undefined);
-                  }}
-                  placeholder="example.com"
-                  required
-                />
-                <small><UiText text="Без протокола, пути, параметров и порта" /></small>
-              </label>
-              {duplicateConfirmation && (
-                <label className="checkbox-field">
-                  <input name="confirmDuplicateDomain" required type="checkbox" />
-                  <span><UiText text="Да, это отдельный проект с тем же доменом" /></span>
-                </label>
-              )}
-              <footer>
-                <button className="secondary-button" onClick={() => setCreateOpen(false)} type="button"><UiText text="Отмена" /></button>
-                <button className="primary-button" disabled={busy} type="submit">{busy ? <UiText text="Создаём…" /> : <UiText text="Создать проект" />}</button>
-              </footer>
-            </form>
-          </section>
-        </div>
-      )}
+      {createOpen && <ProjectCreationWizard
+        key={currentUserId + ":" + workspace.id}
+        currentUserId={currentUserId} workspace={workspace}
+        {...(capabilities ? { capabilities } : {})}
+        onClose={(createdId) => { setCreateOpen(false); if (createdId) router.refresh(); }}
+        onOpenProject={(projectId) => selectProject(projectId, "/app/semantics")}
+      />}
+
     </div>
   );
 }

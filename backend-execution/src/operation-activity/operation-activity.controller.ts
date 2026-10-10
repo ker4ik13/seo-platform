@@ -30,6 +30,8 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { OperationActivityService } from "./operation-activity.service.js";
 import { platformAdminOperationQuery } from "./platform-admin-operation-input.js";
 import { OperationCancellationService } from "./operation-cancellation.service.js";
+import { OperationAnalyticsService } from "./operation-analytics.service.js";
+import { parseAnalyticsOperationsQuery } from "@seo-platform/contracts";
 
 type HeadersRecord = Readonly<Record<string, string | string[] | undefined>>;
 
@@ -108,14 +110,30 @@ export class ProjectOperationController {
 @Controller("internal/v1/platform-admin/operations")
 @UseGuards(PlatformApiGuard)
 export class PlatformAdminOperationController {
-  public constructor(private readonly activity: OperationActivityService, private readonly cancellation: OperationCancellationService) {}
+  public constructor(
+    private readonly activity: OperationActivityService,
+    private readonly cancellation: OperationCancellationService,
+    private readonly analytics: OperationAnalyticsService
+  ) {}
+
+  @Post("analytics")
+  public async analyticsReport(@Body() value: unknown, @Headers() headers: HeadersRecord, @Req() request: FastifyRequest) {
+    internalUuid(String(headers["x-actor-id"]), "actorId");
+    let query;
+    try {
+      query = parseAnalyticsOperationsQuery(value);
+    } catch {
+      throw new BadRequestException("Invalid analytics request");
+    }
+    return { data: await this.analytics.report(query.days, query.excludeWorkspaceIds), meta: { requestId: request.id } };
+  }
 
   @Post(":operationId/cancel")
   public async cancel(@Param("operationId") id: string, @Headers() headers: HeadersRecord, @Body() body: unknown, @Req() req: FastifyRequest): Promise<ApiResponse<InternalAdminOperationSummary>> {
     if (!body || typeof body !== "object" || Object.keys(body).length !== 0) throw new BadRequestException("Empty command expected");
     const actor = internalUuid(String(headers["x-actor-id"]), "actorId");
     const operationId = internalUuid(id, "operationId");
-    await this.cancellation.cancel(operationId, actor);
+    await this.cancellation.cancel(operationId, actor, req.id);
     return { data: await this.activity.adminDetail(operationId), meta: { requestId: req.id } };
   }
 

@@ -2,6 +2,7 @@ import {
   coordinatedBrowserSessionRefresh,
   type BrowserSessionRefreshLockManager
 } from "./session-refresh-coordination.ts";
+import { createReadCoalescer } from "./coalesced-read.ts";
 
 export type AdminApiResult<T> =
   | { readonly ok: true; readonly data: T }
@@ -12,7 +13,21 @@ export type AdminApiResult<T> =
       readonly message: string;
     };
 
-export async function adminApi<T = unknown>(
+const coalesceRead = createReadCoalescer();
+
+export function adminApi<T = unknown>(
+  path: string,
+  init?: RequestInit
+): Promise<AdminApiResult<T>> {
+  if ((init?.method ?? "GET") === "GET" && !init?.body) {
+    const identity = browserCookie(csrfCookieName()) ?? "anonymous";
+    return coalesceRead(`${identity}:${path}`, signal => loadAdminApi<T>(path, { ...init, signal }), init?.signal ?? undefined)
+      .catch(() => ({ ok: false, status: 503, message: "API администрирования недоступен" }));
+  }
+  return loadAdminApi<T>(path, init);
+}
+
+async function loadAdminApi<T = unknown>(
   path: string,
   init?: RequestInit
 ): Promise<AdminApiResult<T>> {

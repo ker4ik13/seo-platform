@@ -12,7 +12,7 @@ import {
 import type { InternalWorkspaceExecutionUsage, InternalRankEstimatePricingScope } from "@seo-platform/contracts";
 import type { PrepareSystemConnectorsResult } from "@seo-platform/contracts";
 import type { PlatformProviderAccountSnapshot } from "@seo-platform/contracts";
-import type { InternalExecutionOverview } from "@seo-platform/contracts";
+import { parseAnalyticsOperations, parseAnalyticsOperationsQuery, type InternalExecutionOverview } from "@seo-platform/contracts";
 import type { InternalOperationRoute, InternalPaidOperationUsage, InternalPaidOperationProof, InternalPaidOperationAdmission, PaidOperationKind } from "@seo-platform/contracts";
 import { priceOperation } from "../billing/provider-pricing.js";
 import {
@@ -34,7 +34,10 @@ import {
   technicalCrawlHomepageChecks,
   technicalCrawlHomepageProbeUrls,
   technicalCrawlMaxRequestsPerMinute,
+  parseTechnicalCrawlRuntimeOptions,
+  technicalCrawlRuntimeOptionKeys,
   technicalCrawlMaxUrlLimit,
+  technicalCrawlMaxIssueLimit,
   technicalCrawlPurposes,
   technicalCrawlQueryPolicies,
   technicalCrawlStartUrlLimit,
@@ -301,7 +304,7 @@ export class JobsClient {
       crawlCollectionPath(context.tenant.workspaceId, projectId),
       context
     );
-    const input = exactRecord(value, ["crawls"]);
+    const input = crawlRecord(value, ["crawls"], ["runtimeLimits"]);
     if (!Array.isArray(input.crawls) || input.crawls.length > 50) {
       throw invalidJobsResponse();
     }
@@ -312,7 +315,8 @@ export class JobsClient {
           context.tenant.workspaceId,
           projectId
         )
-      )
+      ),
+      ...(input.runtimeLimits === undefined ? {} : { runtimeLimits: crawlRuntimeLimits(input.runtimeLimits) })
     };
   }
 
@@ -2096,6 +2100,11 @@ export class JobsClient {
     return result as unknown as InternalExecutionOverview;
   }
 
+  public async operationAnalytics(days: 7 | 30 | 90, excludeWorkspaceIds: readonly string[], actorId: string, requestId: string) {
+    const query = parseAnalyticsOperationsQuery({ days, excludeWorkspaceIds });
+    return parseAnalyticsOperations(await this.requestAdmin<unknown>("/internal/v1/platform-admin/operations/analytics", actorId, requestId, "POST", query));
+  }
+
   private async rankPricingScope(context: InternalContext, estimateId: string): Promise<InternalRankEstimatePricingScope> {
     const projectId = requiredProjectId(context.tenant);
     const value = await this.requestIntegration<unknown>("GET", `/internal/v1/workspaces/${encodeURIComponent(context.tenant.workspaceId)}/projects/${encodeURIComponent(projectId)}/rank-estimates/${encodeURIComponent(estimateId)}/pricing-scope`, context);
@@ -2910,6 +2919,11 @@ function platformProviderAccountSnapshot(
   return input as unknown as PlatformProviderAccountSnapshot;
 }
 
+function crawlRuntimeLimits(value: unknown): NonNullable<TechnicalCrawlCollection["runtimeLimits"]> {
+  const data = exactRecord(value, ["requestTimeoutMs", "maxResponseBytes", "maxRedirects"]);
+  return { requestTimeoutMs: boundedPositiveInteger(data.requestTimeoutMs, 30_000), maxResponseBytes: boundedPositiveInteger(data.maxResponseBytes, 4_194_304), maxRedirects: boundedNonNegativeInteger(data.maxRedirects, 10) };
+}
+
 function technicalCrawlResponse(
   value: unknown,
   workspaceId: string,
@@ -2922,6 +2936,7 @@ function technicalCrawlResponse(
     "issueCount", "version", "createdAt"
   ], [
     "actorId",
+    "blockedUrls",
     "failureCode",
     "backoffCode",
     "backoffUntil",
@@ -2933,100 +2948,9 @@ function technicalCrawlResponse(
   const responseWorkspaceId = uuidValue(input.workspaceId);
   const responseProjectId = uuidValue(input.projectId);
   const configInput = record(input.config);
-  const configKeys = Object.keys(configInput).length;
-  const config =
-    configKeys === 5
-      ? exactRecord(configInput, [
-          "startUrls",
-          "maxUrls",
-          "maxDepth",
-          "requestsPerMinute",
-          "obeyRobots"
-        ])
-      : configKeys === 9
-        ? exactRecord(configInput, [
-            "startUrls",
-            "sitemapUrls",
-            "includePatterns",
-            "excludePatterns",
-            "queryPolicy",
-            "maxUrls",
-            "maxDepth",
-            "requestsPerMinute",
-            "obeyRobots"
-          ])
-        : configKeys === 10
-          ? exactRecord(configInput, [
-              "startUrls",
-              "sitemapUrls",
-              "includePatterns",
-              "excludePatterns",
-              "queryPolicy",
-              "maxUrls",
-              "maxDepth",
-              "maxRuntimeSeconds",
-              "requestsPerMinute",
-              "obeyRobots"
-            ])
-          : configKeys === 13
-            ? exactRecord(configInput, [
-                "purpose",
-                "startUrls",
-                "homepageChecks",
-                "sitemapUrls",
-                "includePatterns",
-                "excludePatterns",
-                "queryPolicy",
-                "maxUrls",
-                "maxDepth",
-                "maxRuntimeSeconds",
-                "requestsPerMinute",
-                "obeyRobots",
-                "savePageMap"
-              ])
-            : configKeys === 12 && "savePageMap" in configInput
-              ? exactRecord(configInput, [
-                  "purpose",
-                  "startUrls",
-                  "sitemapUrls",
-                  "includePatterns",
-                  "excludePatterns",
-                  "queryPolicy",
-                  "maxUrls",
-                  "maxDepth",
-                  "maxRuntimeSeconds",
-                  "requestsPerMinute",
-                  "obeyRobots",
-                  "savePageMap"
-                ])
-              : configKeys === 12
-                ? exactRecord(configInput, [
-                    "purpose",
-                    "startUrls",
-                    "homepageChecks",
-                    "sitemapUrls",
-                    "includePatterns",
-                    "excludePatterns",
-                    "queryPolicy",
-                    "maxUrls",
-                    "maxDepth",
-                    "maxRuntimeSeconds",
-                    "requestsPerMinute",
-                    "obeyRobots"
-                  ])
-                : exactRecord(configInput, [
-                    "purpose",
-                    "startUrls",
-                    "sitemapUrls",
-                    "includePatterns",
-                    "excludePatterns",
-                    "queryPolicy",
-                    "maxUrls",
-                    "maxDepth",
-                    "maxRuntimeSeconds",
-                    "requestsPerMinute",
-                    "obeyRobots"
-                  ]);
+  const config = crawlRecord(configInput, ["startUrls", "maxUrls", "maxDepth", "requestsPerMinute", "obeyRobots"], ["purpose", "homepageChecks", "sitemapUrls", "includePatterns", "excludePatterns", "queryPolicy", "maxRuntimeSeconds", "savePageMap", "snapshotIdentity", ...technicalCrawlRuntimeOptionKeys]);
+  let runtimeOptions;
+  try { runtimeOptions = parseTechnicalCrawlRuntimeOptions(config); } catch { throw invalidJobsResponse(); }
   const startUrls = Array.isArray(config.startUrls)
     ? config.startUrls.map(safeCrawlResponseUrl)
     : [];
@@ -3110,6 +3034,7 @@ function technicalCrawlResponse(
       )
     ]).size > Number(config.maxUrls) ||
     config.obeyRobots !== true ||
+    (config.snapshotIdentity !== undefined && !["REQUESTED_URL", "FINAL_URL"].includes(String(config.snapshotIdentity))) ||
     typeof savePageMap !== "boolean"
   ) {
     throw invalidJobsResponse();
@@ -3125,6 +3050,7 @@ function technicalCrawlResponse(
     status: input.status as TechnicalCrawlSummary["status"],
     config: {
       purpose: purpose as TechnicalCrawlSummary["config"]["purpose"],
+      snapshotIdentity: config.snapshotIdentity === "REQUESTED_URL" || purpose === "HTTP_STATUS_CHECK" ? "REQUESTED_URL" : "FINAL_URL",
       startUrls,
       ...(homepageChecks.length > 0
         ? {
@@ -3150,13 +3076,15 @@ function technicalCrawlResponse(
         technicalCrawlMaxRequestsPerMinute
       ),
       obeyRobots: true,
-      savePageMap
+      savePageMap,
+      ...runtimeOptions
     },
     discoveredUrls: boundedNonNegativeInteger(input.discoveredUrls, technicalCrawlMaxUrlLimit),
     processedUrls: boundedNonNegativeInteger(input.processedUrls, technicalCrawlMaxUrlLimit),
     successfulUrls: boundedNonNegativeInteger(input.successfulUrls, technicalCrawlMaxUrlLimit),
     failedUrls: boundedNonNegativeInteger(input.failedUrls, technicalCrawlMaxUrlLimit),
-    issueCount: boundedNonNegativeInteger(input.issueCount, 100_000),
+    blockedUrls: boundedNonNegativeInteger(input.blockedUrls ?? 0, technicalCrawlMaxUrlLimit),
+    issueCount: boundedNonNegativeInteger(input.issueCount, technicalCrawlMaxIssueLimit),
     version: positiveInteger(input.version),
     createdAt: isoDateValue(input.createdAt),
     ...(failureCode ? { failureCode } : {}),
@@ -3182,7 +3110,7 @@ function technicalCrawlResponse(
   };
   if (
     summary.processedUrls !==
-      summary.successfulUrls + summary.failedUrls ||
+      summary.successfulUrls + summary.failedUrls + (summary.blockedUrls ?? 0) ||
     summary.processedUrls > summary.discoveredUrls ||
     !validCrawlLifecycle(
       summary,

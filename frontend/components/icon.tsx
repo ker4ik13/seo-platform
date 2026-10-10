@@ -10,14 +10,18 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   CircleGauge,
   Clock3,
   ClipboardList,
+  ClipboardPaste,
   Copy,
   Crosshair,
   Eye,
   EyeOff,
   FileDown,
+  FileText,
   Files,
   FolderInput,
   FolderKanban,
@@ -44,6 +48,8 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Redo2,
+  Scissors,
   Search,
   Settings,
   Smartphone,
@@ -56,6 +62,7 @@ import {
   TrendingUp,
   TriangleAlert,
   Upload,
+  Undo2,
   Users,
   Wrench,
   X,
@@ -71,6 +78,7 @@ export type IconName =
   | "tools"
   | "tasks"
   | "pages"
+  | "page"
   | "competitors"
   | "note"
   | "settings"
@@ -97,6 +105,8 @@ export type IconName =
   | "sitemap"
   | "folderPlus"
   | "multiGroup"
+  | "expandAll"
+  | "collapseAll"
   | "edit"
   | "arrowUp"
   | "arrowDown"
@@ -117,6 +127,10 @@ export type IconName =
   | "chevronRight"
   | "close"
   | "copy"
+  | "cut"
+  | "paste"
+  | "undo"
+  | "redo"
   | "palette"
   | "calendar"
   | "desktop"
@@ -127,6 +141,10 @@ export type IconName =
   | "gripVertical";
 
 const icons: Readonly<Record<IconName, LucideIcon>> = {
+  cut: Scissors,
+  paste: ClipboardPaste,
+  undo: Undo2,
+  redo: Redo2,
   dashboard: LayoutDashboard,
   projects: FolderKanban,
   semantic: ListTree,
@@ -134,6 +152,7 @@ const icons: Readonly<Record<IconName, LucideIcon>> = {
   tools: Wrench,
   tasks: ClipboardList,
   pages: Files,
+  page: FileText,
   competitors: Users,
   note: StickyNote,
   settings: Settings,
@@ -160,6 +179,8 @@ const icons: Readonly<Record<IconName, LucideIcon>> = {
   sitemap: Network,
   folderPlus: FolderPlus,
   multiGroup: Folders,
+  expandAll: ChevronsUpDown,
+  collapseAll: ChevronsDownUp,
   edit: Pencil,
   arrowUp: ArrowUp,
   arrowDown: ArrowDown,

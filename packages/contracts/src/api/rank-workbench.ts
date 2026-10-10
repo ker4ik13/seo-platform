@@ -12,7 +12,11 @@ export const rankWorkbenchPositionSorts = [
   "POSITION_ASC",
   "POSITION_DESC",
   "CHANGE_ASC",
-  "CHANGE_DESC"
+  "CHANGE_DESC",
+  "TARGET_URL_ASC",
+  "TARGET_URL_DESC",
+  "TARGET_URL_SET_FIRST",
+  "TARGET_URL_EMPTY_FIRST"
 ] as const;
 export type RankWorkbenchPositionSort =
   (typeof rankWorkbenchPositionSorts)[number];
@@ -29,6 +33,8 @@ export interface RankWorkbenchKeywordScope {
 
 export interface RankPositionReportInput extends RankWorkbenchKeywordScope {
   readonly includeUntracked?: boolean;
+  readonly targetUrlState?: "SET" | "EMPTY";
+  readonly multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE";
   readonly mode: "SEO" | "AI";
   readonly dimensionKey: string;
   readonly observedFrom: string;
@@ -66,6 +72,8 @@ export interface RankPositionReportRow {
   readonly language: string;
   readonly createdAt: string;
   readonly groupPath?: string;
+  readonly groupPaths?: readonly string[];
+  readonly groupCount?: number;
   readonly targetUrl?: string;
   readonly frequencies: readonly Readonly<{
     type: "BASE" | "EXACT" | "FIXED";
@@ -222,7 +230,9 @@ export function parseRankPositionReportInput(
     "cursor",
     "sort",
     "mode",
-    "includeUntracked"
+    "includeUntracked",
+    "targetUrlState",
+    "multipleUrlsState"
   ]);
   const dimensionKey = rankDimensionKey(input.dimensionKey);
   const observedFrom = instant(input.observedFrom);
@@ -235,10 +245,13 @@ export function parseRankPositionReportInput(
     ? "SEO"
     : member(input.mode, ["SEO", "AI"] as const);
   if (input.includeUntracked !== undefined && typeof input.includeUntracked !== "boolean") invalid();
+  if (mode === "AI" && input.multipleUrlsState !== undefined) invalid();
   return {
     ...keywordScope(input),
     mode,
     ...(input.includeUntracked === undefined ? {} : { includeUntracked: input.includeUntracked as boolean }),
+    ...(input.targetUrlState === undefined ? {} : { targetUrlState: member(input.targetUrlState, ["SET", "EMPTY"] as const) }),
+    ...(input.multipleUrlsState === undefined ? {} : { multipleUrlsState: member(input.multipleUrlsState, ["MULTIPLE", "NOT_MULTIPLE"] as const) }),
     dimensionKey,
     observedFrom,
     observedBefore,
@@ -386,11 +399,15 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
   const rows = input.rows.map((value) => {
     const row = exactRecord(value, [
       "keywordId", "version", "query", "language", "createdAt", "groupPath",
-      "targetUrl", "frequencies", "cells", "isTracked"
+      "targetUrl", "frequencies", "cells", "isTracked", "groupPaths", "groupCount"
     ]);
     const keywordId = uuid(row.keywordId);
     if (keywordIds.has(keywordId) || !Array.isArray(row.cells) || row.cells.length > dates.length) invalid();
     keywordIds.add(keywordId);
+    if (row.groupPaths !== undefined && (!Array.isArray(row.groupPaths) || row.groupPaths.length > 5)) invalid();
+    const groupPaths = row.groupPaths === undefined ? undefined : (row.groupPaths as unknown[]).map(path => boundedText(path, 4_096));
+    const groupCount = row.groupCount === undefined ? undefined : integer(row.groupCount, 0, Number.MAX_SAFE_INTEGER);
+    if (groupPaths && (new Set(groupPaths).size !== groupPaths.length || groupCount === undefined || groupCount < groupPaths.length)) invalid();
     const cellDates = new Set<string>();
     if (row.isTracked !== undefined && typeof row.isTracked !== "boolean") invalid();
     const cells = row.cells.map((value) => {
@@ -445,6 +462,8 @@ export function parseRankPositionReport(value: unknown): RankPositionReport {
       ...(row.groupPath === undefined || row.groupPath === null
         ? {}
         : { groupPath: boundedText(row.groupPath, 4_096) }),
+      ...(groupPaths === undefined ? {} : { groupPaths }),
+      ...(groupCount === undefined ? {} : { groupCount }),
       ...(row.isTracked === undefined ? {} : { isTracked: row.isTracked as boolean }),
       ...(row.targetUrl === undefined || row.targetUrl === null
         ? {}

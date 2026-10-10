@@ -1,15 +1,15 @@
 "use client";
 
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { useUiLocale, UiText } from "./ui-locale";
-
 
 export function OperationStopConfirmation({
   busy,
   description,
   onCancel,
   onConfirm,
-  title
+  title,
 }: Readonly<{
   busy: boolean;
   description: string;
@@ -20,7 +20,6 @@ export function OperationStopConfirmation({
   const { t: uiText } = useUiLocale();
   return (
     <SemanticModal
-      description={uiText("Проверьте выбранную операцию перед остановкой.")}
       onClose={busy ? () => undefined : onCancel}
       size="small"
       title={uiText("Остановить операцию?")}
@@ -31,8 +30,9 @@ export function OperationStopConfirmation({
           <span>{description}</span>
         </div>
         <p>
-          <UiText text="Новые запросы перестанут обрабатываться. Уже сохранённые результаты и текущий прогресс останутся в журнале." /></p>
-        <div className="semantic-modal-actions">
+          <UiText text="Новые запросы перестанут обрабатываться. Уже сохранённые результаты и текущий прогресс останутся в журнале." />
+        </p>
+        <ConfirmationActions>
           <button
             autoFocus
             className="secondary-button"
@@ -40,16 +40,21 @@ export function OperationStopConfirmation({
             onClick={onCancel}
             type="button"
           >
-            <UiText text="Продолжить сбор" /></button>
+            <UiText text="Продолжить сбор" />
+          </button>
           <button
             className="danger-button"
             disabled={busy}
             onClick={onConfirm}
             type="button"
           >
-            {busy ? <UiText text="Останавливаем…" /> : <UiText text="Остановить" />}
+            {busy ? (
+              <UiText text="Останавливаем…" />
+            ) : (
+              <UiText text="Остановить" />
+            )}
           </button>
-        </div>
+        </ConfirmationActions>
       </div>
     </SemanticModal>
   );

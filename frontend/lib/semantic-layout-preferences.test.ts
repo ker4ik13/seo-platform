@@ -75,7 +75,7 @@ test("clamps corrupted or unsafe layout dimensions", () => {
 
 test("shows regular and AI result URLs in the default semantic layout", () => {
   assert.deepEqual(
-    defaultSemanticViewConfig.columns.slice(5, 13),
+    defaultSemanticViewConfig.columns.slice(4, 12),
     [
       "yandexPosition",
       "yandexRelevantUrl",

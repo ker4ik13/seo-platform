@@ -55,3 +55,9 @@ test("rejects unsafe page drafts and encodes routes", () => {
     "/app/projects/project%20one/pages"
   );
 });
+
+test("page editor rejects a missing priority and invalid publication date before serialization", () => {
+  const draft = emptyProjectPageDraft();
+  assert.ok(validateProjectPageDraft({ ...draft, url: "https://example.com/", priority: "" }).priority);
+  assert.ok(validateProjectPageDraft({ ...draft, url: "https://example.com/", publishedAt: "invalid-date" }).publishedAt);
+});

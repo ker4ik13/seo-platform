@@ -1243,7 +1243,7 @@ function competitorExportPage(
 function appendAdvancedKeywordQuery(url: URL, query: KeywordListQuery): void {
   for (const field of [
     "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
     "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
     , "rankSortDimensionKey"
   ] as const) {

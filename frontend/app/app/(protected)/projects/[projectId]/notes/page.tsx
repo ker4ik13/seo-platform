@@ -23,23 +23,8 @@ export default async function ProjectNotesPage({
   }
   return (
     <>
-      <section className="page-heading project-notes-heading">
-        <div>
-          <div className="project-page-title-row">
-            <h1><UiText text="Заметки" /></h1>
-            <ProjectContextSelect
-              canReorder={context.projectCapabilities?.canReorder ?? false}
-              destination="notes"
-              projectId={context.project.id}
-              projects={context.projects}
-              workspaceId={context.workspace.id}
-            />
-          </div>
-          <p>
-            <UiText text="Markdown-документы проекта. Оставляйте их участникам или открывайте безопасной ссылкой без индексации." /></p>
-        </div>
-      </section>
       <ProjectNotes
+        heading={<div className="project-notes-compact-title"><h1><UiText text="Заметки" /></h1><ProjectContextSelect canReorder={context.projectCapabilities?.canReorder ?? false} destination="notes" projectId={context.project.id} projects={context.projects} workspaceId={context.workspace.id} /></div>}
         canEdit={canEditProjectNotes(
           context.workspace.roleCode,
           context.project.projectAccessLevel

@@ -1,12 +1,15 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type {
-  InternalCrawlPageValidator,
-  InternalFinalizeCrawlSnapshotInput,
-  InternalFinalizeCrawlSnapshotReceipt,
-  InternalGetCrawlPageValidatorInput,
-  InternalPersistCrawlPageInput,
-  InternalPersistCrawlPageReceipt,
-  InternalReuseCrawlPageInput
+import {
+  technicalCrawlMaxFinalizationIssueLimit,
+  technicalCrawlMaxIssuesPerPage,
+  technicalCrawlFinalizationTimeoutMs,
+  type InternalCrawlPageValidator,
+  type InternalFinalizeCrawlSnapshotInput,
+  type InternalFinalizeCrawlSnapshotReceipt,
+  type InternalGetCrawlPageValidatorInput,
+  type InternalPersistCrawlPageInput,
+  type InternalPersistCrawlPageReceipt,
+  type InternalReuseCrawlPageInput
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -56,7 +59,8 @@ export class CrawlSnapshotClient {
     const payload = await this.request(
       "/internal/v1/crawl-snapshots/finalize",
       input,
-      8_192
+      8_192,
+      Math.max(this.config.internalCommandTimeoutMs, technicalCrawlFinalizationTimeoutMs + 5_000)
     );
     return finalizeReceipt(payload);
   }
@@ -64,7 +68,8 @@ export class CrawlSnapshotClient {
   private async request(
     path: string,
     body: object,
-    responseLimit: number | undefined
+    responseLimit: number | undefined,
+    timeoutMs = this.config.internalCommandTimeoutMs
   ): Promise<unknown> {
     const token = this.config.seoDataApiToken;
     if (!token) throw new Error("SEO Data crawl authentication is unavailable");
@@ -79,7 +84,7 @@ export class CrawlSnapshotClient {
           "X-Internal-Token": token
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.config.internalCommandTimeoutMs)
+        signal: AbortSignal.timeout(timeoutMs)
       });
     } catch {
       throw new Error("SEO Data crawl persistence is unavailable");
@@ -140,7 +145,7 @@ function persistReceipt(value: unknown): InternalPersistCrawlPageReceipt {
     typeof data.success !== "boolean" ||
     !Number.isSafeInteger(data.issueCount) ||
     Number(data.issueCount) < 0 ||
-    Number(data.issueCount) > 100 ||
+    Number(data.issueCount) > technicalCrawlMaxIssuesPerPage ||
     typeof meta.requestId !== "string" ||
     meta.requestId.length < 1 ||
     meta.requestId.length > 100
@@ -164,7 +169,7 @@ function finalizeReceipt(
     data.accepted !== true ||
     !Number.isSafeInteger(data.issueCount) ||
     Number(data.issueCount) < 0 ||
-    Number(data.issueCount) > 5_000 ||
+    Number(data.issueCount) > technicalCrawlMaxFinalizationIssueLimit ||
     typeof meta.requestId !== "string" ||
     meta.requestId.length < 1 ||
     meta.requestId.length > 100
@@ -190,7 +195,7 @@ function validatorReceipt(
   const data = recordWithOptional(
     envelope.data,
     ["sourceSnapshotId", "internalLinks"],
-    ["etag", "lastModified"]
+    ["etag", "lastModified", "xRobotsTag", "nofollow"]
   );
   if (
     typeof data.sourceSnapshotId !== "string" ||
@@ -198,6 +203,8 @@ function validatorReceipt(
     !Array.isArray(data.internalLinks) ||
     data.internalLinks.length > 5_000 ||
     data.internalLinks.some((url) => !safeUrl(url)) ||
+    (data.xRobotsTag !== undefined && (typeof data.xRobotsTag !== "string" || data.xRobotsTag.length > 4_000)) ||
+    (data.nofollow !== undefined && typeof data.nofollow !== "boolean") ||
     (
       data.etag === undefined &&
       data.lastModified === undefined
@@ -220,6 +227,8 @@ function validatorReceipt(
       ? { lastModified: data.lastModified }
       : {}),
     internalLinks: data.internalLinks as readonly string[]
+    ,...(typeof data.xRobotsTag === "string" ? { xRobotsTag: data.xRobotsTag } : {})
+    ,...(typeof data.nofollow === "boolean" ? { nofollow: data.nofollow } : {})
   };
 }
 

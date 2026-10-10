@@ -5,6 +5,7 @@ import { jsonLines,remoteArtifact } from "../worker-nodes/remote-artifact.js";
 import {
   domainEventTypes,
   semanticImportTargets,
+  semanticImportMaxTableColumns,
   type SemanticImportColumnPreview,
   type SemanticImportDelimiter,
   type SemanticImportEncoding,
@@ -271,7 +272,7 @@ export class SemanticImportParserService {
             if(record.delimiter!==undefined) {if(!["COMMA","SEMICOLON","TAB"].includes(String(record.delimiter))) throw new RemoteWorkFailedError("INVALID_IMPORT_METADATA");detectedDelimiter=record.delimiter as DetectedImportDelimiter;}
             if(record.sourceMetadata!==undefined) sourceMetadata=remoteImportMetadata(record.sourceMetadata);
           } else if(record.kind==="row" && Object.keys(record).length===2 && Array.isArray(record.values)) {
-            if(record.values.length>500) throw new DelimitedParseError("TOO_MANY_COLUMNS");
+            if(record.values.length>semanticImportMaxTableColumns) throw new DelimitedParseError("TOO_MANY_COLUMNS");
             if(record.values.some(value=>typeof value!=="string" || value.length>1_000_000)) throw new DelimitedParseError("FIELD_TOO_LARGE");
             const values=record.values as string[];if(values.reduce((sum,value)=>sum+value.length,0)>8_000_000) throw new DelimitedParseError("ROW_TOO_LARGE");yield values;
           } else throw new RemoteWorkFailedError("INVALID_IMPORT_ROWS");

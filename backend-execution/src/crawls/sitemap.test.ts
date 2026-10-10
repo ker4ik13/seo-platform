@@ -69,3 +69,11 @@ test("decodes bounded gzip sitemap documents", async () => {
     /INVALID_SITEMAP/u
   );
 });
+
+test("accepts the full UI crawl budget and truncates a larger sitemap at that budget", () => {
+  const xml = `<urlset>${Array.from({ length: 5_010 }, (_, index) => `<url><loc>https://example.com/page-${index}</loc></url>`).join("")}</urlset>`;
+  const parsed = parseSitemapXml(xml, 5_000);
+  assert.equal(parsed.pageUrls.length, 5_000);
+  assert.equal(parsed.pageUrls.at(-1), "https://example.com/page-4999");
+  assert.throws(() => parseSitemapXml(xml, 5_001), /Invalid sitemap location limit/u);
+});

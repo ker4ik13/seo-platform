@@ -1,6 +1,7 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { useConfirmation } from "./use-confirmation";
 
 import type {
   ProjectPageSettings,
@@ -65,6 +66,7 @@ export function SemanticClusterManager({
   const [error, setError] = useState<string>();
   const [editor, setEditor] = useState<ClusterEditor>();
   const [reloadVersion, setReloadVersion] = useState(0);
+  const confirmation = useConfirmation();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,7 +133,7 @@ export function SemanticClusterManager({
   }
 
   async function deleteCluster(cluster: SemanticCluster): Promise<void> {
-    if (!window.confirm(`Удалить кластер «${cluster.name}»?`)) return;
+    if (!await confirmation.confirm({ title: uiText("Удалить кластер «{0}»?", [cluster.name]) })) return;
     setError(undefined);
     try {
       await browserApiRequest<void>(clusterPath(projectId, cluster.id), {
@@ -662,6 +664,7 @@ export function SemanticClusterManager({
           ))}
         </div>
       )}
+      {confirmation.dialog}
     </section>
   );
 }

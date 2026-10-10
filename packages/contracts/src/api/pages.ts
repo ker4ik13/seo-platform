@@ -1,4 +1,5 @@
-import type { CrawlMetaTag } from "./crawls.js";
+import type { CrawlMetaTag, CrawlTechnicalDetails } from "./crawls.js";
+import type { ProjectPageListOptions } from "./page-list-options.js";
 
 export const pageTypes = [
   "EXISTING",
@@ -74,6 +75,8 @@ export interface PageSourceSummary {
 
 export interface ProjectPageCrawlSnapshot {
   readonly crawlId: string;
+  readonly requestedUrl?: string;
+  readonly finalUrl?: string;
   readonly statusCode: number;
   readonly responseTimeMs: number;
   readonly sizeBytes: number;
@@ -86,6 +89,9 @@ export interface ProjectPageCrawlSnapshot {
   readonly robots?: string;
   readonly language?: string;
   readonly metaTags: readonly CrawlMetaTag[];
+  readonly headings?: readonly { readonly level: number; readonly text: string }[];
+  readonly hreflang?: readonly { readonly language: string; readonly url: string }[];
+  readonly technicalDetails?: Omit<CrawlTechnicalDetails, "links">;
   readonly imageCount: number;
   readonly imagesMissingAlt: number;
   readonly structuredDataTypes: readonly string[];
@@ -136,7 +142,7 @@ export interface ProjectPageSummary {
   readonly archivedAt?: string;
 }
 
-export interface ProjectPageListQuery {
+export interface ProjectPageListQuery extends ProjectPageListOptions {
   readonly limit: number;
   readonly cursor?: string;
   readonly search?: string;
@@ -148,10 +154,13 @@ export interface ProjectPageListQuery {
 }
 
 export interface ProjectPageCollection {
+  readonly rankDate?: string;
   readonly pages: readonly ProjectPageSummary[];
   readonly nextCursor?: string;
   /** Active page URLs used to build the client-side site structure tree. */
   readonly structureUrls?: readonly string[];
+  readonly structurePageIds?: readonly string[];
+  readonly structureTruncated?: boolean;
 }
 
 export const pageMutationRestrictions = [
@@ -166,6 +175,7 @@ export type PageMutationRestriction =
 
 export interface ProjectPageAccess {
   readonly canManage: boolean;
+  readonly canViewKeywords?: boolean;
   readonly mutationRestriction: PageMutationRestriction;
 }
 

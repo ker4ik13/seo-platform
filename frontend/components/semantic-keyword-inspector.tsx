@@ -1,5 +1,6 @@
 "use client";
 
+import { WorkspaceSidebar } from "./workspace-sidebar";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   semanticRankDimensionKey,
@@ -35,6 +36,8 @@ import { SemanticKeywordPositionHistoryModal } from "./semantic-keyword-position
 import { SemanticKeywordSerpHistory } from "./semantic-keyword-serp-history";
 import { SemanticKeywordAiPositionHistoryModal } from "./semantic-keyword-ai-position-history-modal";
 import { SemanticModal } from "./semantic-modal";
+import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
+import { KeywordTargetPage, useKeywordTargetPage } from "./page-technical-panel";
 import { SemanticRankDeviceBadge } from "./semantic-rank-context";
 import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
 import { SemanticSeasonalityCharts } from "./semantic-seasonality-chart";
@@ -76,6 +79,7 @@ type SemanticKeywordInspectorTab =
   | "POSITIONS"
   | "SERP"
   | "WORDSTAT"
+  | "PAGE"
   | "NOTE";
 
 type SemanticKeywordInspectorMode = "SEARCH" | "AI";
@@ -120,6 +124,7 @@ export function SemanticKeywordInspector({
   const [insights, setInsights] = useState<SemanticKeywordInsights>();
   const [activeTab, setActiveTab] =
     useState<SemanticKeywordInspectorTab>("OVERVIEW");
+  const targetPage = useKeywordTargetPage(projectId, item.id, item.targetUrl, activeTab === "OVERVIEW" || activeTab === "PAGE");
   const [inspectorMode, setInspectorMode] =
     useState<SemanticKeywordInspectorMode>("SEARCH");
   const [loading, setLoading] = useState(true);
@@ -635,7 +640,7 @@ export function SemanticKeywordInspector({
       : [];
 
   return (
-    <aside
+    <WorkspaceSidebar side="right"
       aria-label={uiText("Детали запроса {0}", [String(item.textOriginal)])}
       className="semantic-keyword-inspector"
     >
@@ -718,13 +723,14 @@ export function SemanticKeywordInspector({
         >
           Wordstat
         </button>
+        <button aria-label={uiText("Страница")} aria-selected={activeTab === "PAGE"} className={`semantic-inspector-icon-tab${activeTab === "PAGE" ? " active" : ""}`} onClick={() => selectInspectorTab("PAGE")} role="tab" title={uiText("Целевая страница и её SEO-параметры")} type="button"><Icon name="page" /></button>
         <button
           aria-label={uiText("Заметка")}
           aria-selected={activeTab === "NOTE"}
-          className={`semantic-inspector-note-tab${activeTab === "NOTE" ? " active" : ""}${note.trim() || noteDirty ? " has-note" : ""}`}
+          className={`semantic-inspector-icon-tab semantic-inspector-note-tab${activeTab === "NOTE" ? " active" : ""}${note.trim() || noteDirty ? " has-note" : ""}`}
           onClick={() => selectInspectorTab("NOTE")}
           role="tab"
-          title={uiText("Заметка")}
+          title={uiText("Заметка к запросу")}
           type="button"
         >
           <Icon name="note" />
@@ -738,6 +744,7 @@ export function SemanticKeywordInspector({
         hidden={activeTab !== "OVERVIEW"}
         role="tabpanel"
       >
+        {activeTab === "OVERVIEW" && <KeywordTargetPage projectId={projectId} targetUrl={item.targetUrl} detailed={false} state={targetPage.state} onRefresh={targetPage.refresh} onOpenDetails={() => selectInspectorTab("PAGE")} />}
         <div className="semantic-inspector-parameter-card">
           <h3><UiText text="Параметры запроса" /></h3>
           <dl>
@@ -1206,6 +1213,7 @@ export function SemanticKeywordInspector({
         </section>
       )}
 
+      {activeTab === "PAGE" && <section className="semantic-inspector-tab-panel semantic-inspector-page-tab" role="tabpanel"><KeywordTargetPage projectId={projectId} targetUrl={item.targetUrl} detailed state={targetPage.state} onRefresh={targetPage.refresh} onOpenDetails={() => selectInspectorTab("PAGE")} /></section>}
       {activeTab === "NOTE" && (
         <section
           className="semantic-inspector-tab-panel semantic-keyword-note"
@@ -1223,6 +1231,7 @@ export function SemanticKeywordInspector({
                 setNoteStatus(undefined);
               }}
               placeholder={uiText("Добавьте контекст, гипотезу или задачу по запросу…")}
+              aria-label={uiText("Заметка к запросу")}
               rows={10}
               value={note}
             />
@@ -1251,34 +1260,13 @@ export function SemanticKeywordInspector({
         </section>
       )}
       {closeConfirmOpen && (
-        <SemanticModal
-          description={uiText("Внесённые изменения будут потеряны")}
-          onClose={() => setCloseConfirmOpen(false)}
-          size="small"
-          title={uiText("Закрыть без сохранения?")}
-        >
-          <div className="semantic-confirm-dialog">
-            <div className="semantic-modal-actions">
-              <button
-                className="primary-button"
-                onClick={() => setCloseConfirmOpen(false)}
-                type="button"
-              >
-                <UiText text="Продолжить редактирование" />
-              </button>
-              <button
-                className="secondary-button"
-                onClick={() => {
-                  setCloseConfirmOpen(false);
-                  onClose();
-                }}
-                type="button"
-              >
-                <UiText text="Закрыть" />
-              </button>
-            </div>
-          </div>
-        </SemanticModal>
+        <UnsavedChangesConfirmation
+          onCancel={() => setCloseConfirmOpen(false)}
+          onConfirm={() => {
+            setCloseConfirmOpen(false);
+            onClose();
+          }}
+        />
       )}
       {serpHistoryOpen && <SemanticKeywordSerpHistory currentUserId={currentUserId} projectId={projectId} keywordId={item.id} keywordText={item.textOriginal} projectDomain={projectDomain} dimensionKey={serpDimensionKey || undefined} onClose={() => setSerpHistoryOpen(false)} />}
       {historyOpen && (
@@ -1450,7 +1438,7 @@ export function SemanticKeywordInspector({
           </form>
         </SemanticModal>
       )}
-    </aside>
+    </WorkspaceSidebar>
   );
 }
 
@@ -2148,6 +2136,7 @@ function readInspectorTabPreference(
       value === "POSITIONS" ||
       value === "SERP" ||
       value === "WORDSTAT" ||
+      value === "PAGE" ||
       value === "NOTE"
       ? value
       : "OVERVIEW";

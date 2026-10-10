@@ -303,6 +303,7 @@ model TechnicalCrawl {
   status            TechnicalCrawlStatus @default(QUEUED)
   discoveredUrls    Int                  @default(0) @map("discovered_urls")
   processedUrls     Int                  @default(0) @map("processed_urls")
+  blockedUrls       Int                  @default(0) @map("blocked_urls")
   successfulUrls    Int                  @default(0) @map("successful_urls")
   failedUrls        Int                  @default(0) @map("failed_urls")
   issueCount        Int                  @default(0) @map("issue_count")
@@ -1172,6 +1173,7 @@ model SemanticImport {
   @@index([workspaceId, projectId, status, createdAt])
   @@index([uploadId, status])
   @@index([status, parsingHeartbeatAt, createdAt])
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "semantic_imports_admin_history_idx")
   @@map("semantic_imports")
 }
 
@@ -1241,6 +1243,29 @@ model AuthEmailDeliveryAttempt {
 
   @@index([status, retryAt, leaseExpiresAt, createdAt], map: "auth_email_delivery_attempts_dispatch_idx")
   @@map("auth_email_delivery_attempts")
+}
+
+model OperationAnalyticsFact {
+  id String @id @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  projectId String? @map("project_id") @db.Uuid
+  actorId String? @map("actor_id") @db.Uuid
+  type String @db.VarChar(100)
+  provider String @db.VarChar(64)
+  origin String @db.VarChar(16)
+  status String @db.VarChar(32)
+  createdAt DateTime @map("created_at") @db.Timestamptz
+  queuedAt DateTime? @map("queued_at") @db.Timestamptz
+  startedAt DateTime? @map("started_at") @db.Timestamptz
+  firstResultAt DateTime? @map("first_result_at") @db.Timestamptz
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz
+  processed BigInt @default(0)
+  providerCostMicro BigInt @default(0) @map("provider_cost_micro")
+  errorCode String? @map("error_code") @db.VarChar(64)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  @@index([createdAt,type,provider],map:"operation_analytics_facts_created_idx")
+  @@index([workspaceId,createdAt],map:"operation_analytics_facts_workspace_idx")
+  @@map("operation_analytics_facts")
 }
 
 model OutboxEvent {

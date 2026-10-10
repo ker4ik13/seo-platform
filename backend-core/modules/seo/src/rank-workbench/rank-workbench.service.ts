@@ -25,6 +25,8 @@ import {
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { decodeRankReadCursor, encodeRankReadCursor, rankReadPage, rankReadWindow, RankReadWindowCache } from "./rank-read-window.js";
+import { historicalKeywordHasMultipleUrls } from "../rank-results/rank-site-url-filter.js";
 import {
   rankDimensionConfigurationPredicate,
   rankDimensionSources
@@ -81,6 +83,17 @@ interface DailyRankRow {
   readonly siteResultCount: bigint;
 }
 
+type PositionStats = Pick<PositionKeywordRow,
+  "totalCount" | "measuredCount" | "foundCount" | "notFoundCount" |
+  "improvedCount" | "declinedCount" | "unchangedCount" | "newCount" | "lostCount" |
+  "top1Count" | "top3Count" | "top5Count" | "top10Count" | "top30Count" | "top50Count" | "top100Count" | "averagePosition">;
+type KeywordMetadataRow = Pick<PositionKeywordRow, "id" | "version" | "query" | "language" | "createdAt" | "isTracked" |
+  "targetUrl" | "groupPath" | "frequencyBase" | "frequencyExact" | "frequencyFixed"> & {
+    readonly groupPaths: readonly string[];
+    readonly groupCount: bigint;
+  };
+type PositionReadWindowRow = PositionStats & { readonly keywordIds: readonly string[] };
+
 interface DailyAiRankRow {
   readonly keywordId: string;
   readonly day: Date;
@@ -104,15 +117,6 @@ interface TrendRow {
   readonly averagePosition: number | null;
 }
 
-interface KeywordPageRow {
-  readonly id: string;
-  readonly version: number;
-  readonly query: string;
-  readonly language: string;
-  readonly groupPath: string | null;
-  readonly targetUrl: string | null;
-  readonly totalCount: bigint;
-}
 
 interface LatestSerpSnapshotRow {
   readonly keywordId: string;
@@ -134,27 +138,10 @@ interface LatestAiSerpSnapshotRow {
   }>[];
 }
 
-const ZERO_SUMMARY: RankPositionReportSummary = {
-  keywordCount: 0,
-  measuredCount: 0,
-  foundCount: 0,
-  notFoundCount: 0,
-  improvedCount: 0,
-  declinedCount: 0,
-  unchangedCount: 0,
-  newCount: 0,
-  lostCount: 0,
-  top1Count: 0,
-  top3Count: 0,
-  top5Count: 0,
-  top10Count: 0,
-  top30Count: 0,
-  top50Count: 0,
-  top100Count: 0
-};
 
 @Injectable()
 export class RankWorkbenchService {
+  private readonly reads = new RankReadWindowCache();
   public constructor(private readonly prisma: PrismaService) {}
 
   public async positions(
@@ -168,19 +155,29 @@ export class RankWorkbenchService {
       scope,
       dimension
     );
-    const offset = decodeOffsetCursor(input.cursor, positionFilterHash(input));
+    const hash = filterHash({ ...scope, input: positionFilterHash(input) });
+    const cursor = decodeRankReadCursor(input.cursor, hash);
     const aiMode = input.mode === "AI";
-    const [rows, trendRows] = await Promise.all([
-      this.positionKeywordPage(scope, input, dimension, sourceDimensions, offset),
-      this.positionTrend(scope, input, dimension, sourceDimensions)
-    ]);
+    const prepared = await this.reads.read(`positions:${hash}:${cursor.asOf}`, async () => {
+      const [projection, trendRows] = await Promise.all([
+        this.positionReadWindow(scope, input, dimension, sourceDimensions, cursor.asOf),
+        this.positionTrend(scope, input, dimension, sourceDimensions, cursor.asOf)
+      ]);
+      const summary = projection[0]!;
+      const window = rankReadWindow(summary.keywordIds);
+      return { value: { window, summary: positionSummary(summary), trendRows }, bytes: window.ids.length * 160 + trendRows.length * 160 + 4_096 };
+    });
+    const { trendRows } = prepared;
     const dates = rankWorkbenchReportDates(
       input.dateLimit,
       trendRows.map(({ day }) => day)
     );
-    const pageRows = rows.slice(0, input.limit);
-    const hasNext = rows.length > input.limit;
-    const keywordIds = pageRows.map(({ id }) => id);
+    const page = rankReadPage(prepared.window, cursor.anchor, input.limit);
+    const hasNext = page.hasNext;
+    const keywordIds = page.ids;
+    const metadata = keywordIds.length ? await this.keywordMetadata(scope, keywordIds, true) : [];
+    const byId = new Map(metadata.map(row => [row.id, row]));
+    const pageRows = keywordIds.flatMap(id => byId.get(id) ? [byId.get(id)!] : []);
     const [dailyRows, dailyAiRows] = keywordIds.length === 0 || dates.length === 0
       ? [[], []] as const
       : aiMode
@@ -191,7 +188,8 @@ export class RankWorkbenchService {
               dimension,
               sourceDimensions,
               keywordIds,
-              dates
+              dates,
+              cursor.asOf
             )
           ] as const
         : [
@@ -201,7 +199,8 @@ export class RankWorkbenchService {
               dimension,
               sourceDimensions,
               keywordIds,
-              dates
+              dates,
+              cursor.asOf
             ),
             []
           ] as const;
@@ -241,11 +240,10 @@ export class RankWorkbenchService {
       });
       cellsByKeyword.set(row.keywordId, byDate);
     }
-    const first = pageRows[0];
     return {
       dimension,
       dates,
-      summary: first ? positionSummary(first) : ZERO_SUMMARY,
+      summary: prepared.summary,
       trend: trendRows
         .filter(({ day }) => dateSet.has(calendarDate(day)))
         .map(positionTrendPoint),
@@ -257,6 +255,8 @@ export class RankWorkbenchService {
         createdAt: row.createdAt.toISOString(),
         isTracked: row.isTracked,
         ...(row.groupPath === null ? {} : { groupPath: row.groupPath }),
+        groupPaths: row.groupPaths,
+        groupCount: safeCount(row.groupCount),
         ...(row.targetUrl === null ? {} : { targetUrl: row.targetUrl }),
         frequencies: positionFrequencies(row),
         cells: dates.flatMap((date) => {
@@ -268,13 +268,10 @@ export class RankWorkbenchService {
         hasNext,
         ...(hasNext
           ? {
-              nextCursor: encodeOffsetCursor(
-                offset + input.limit,
-                positionFilterHash(input)
-              )
+              nextCursor: encodeRankReadCursor(keywordIds.at(-1)!, cursor.asOf, hash)
             }
           : {}),
-        ...(first ? { totalApprox: safeCount(first.totalCount) } : {})
+        totalApprox: prepared.summary.keywordCount
       }
     };
   }
@@ -291,12 +288,19 @@ export class RankWorkbenchService {
         sources: await rankDimensionSources(this.prisma, scope, dimension)
       }))
     );
-    const filterHash = serpFilterHash(input);
-    const offset = decodeOffsetCursor(input.cursor, filterHash);
-    const page = await this.keywordPage(scope, input, offset);
-    const pageRows = page.slice(0, input.limit);
-    const hasNext = page.length > input.limit;
-    const keywordIds = pageRows.map(({ id }) => id);
+    const hash = filterHash({ ...scope, input: serpFilterHash(input) });
+    const cursor = decodeRankReadCursor(input.cursor, hash);
+    const window = await this.reads.read(`serp:${hash}:${cursor.asOf}`, async () => {
+      const [projection] = await this.keywordReadWindow(scope, input, cursor.asOf);
+      const value = rankReadWindow(projection?.keywordIds ?? []);
+      return { value, bytes: value.ids.length * 160 + 4_096 };
+    });
+    const page = rankReadPage(window, cursor.anchor, input.limit);
+    const hasNext = page.hasNext;
+    const keywordIds = page.ids;
+    const metadata = keywordIds.length ? await this.keywordMetadata(scope, keywordIds, false) : [];
+    const byId = new Map(metadata.map(row => [row.id, row]));
+    const pageRows = keywordIds.flatMap(id => byId.get(id) ? [byId.get(id)!] : []);
     const snapshots = keywordIds.length === 0
       ? []
       : (await Promise.all(
@@ -406,11 +410,9 @@ export class RankWorkbenchService {
       page: {
         hasNext,
         ...(hasNext
-          ? { nextCursor: encodeOffsetCursor(offset + input.limit, filterHash) }
+          ? { nextCursor: encodeRankReadCursor(keywordIds.at(-1)!, cursor.asOf, hash) }
           : {}),
-        ...(pageRows[0]
-          ? { totalApprox: safeCount(pageRows[0].totalCount) }
-          : {})
+        totalApprox: window.ids.length
       }
     };
   }
@@ -515,14 +517,14 @@ export class RankWorkbenchService {
     }, { isolationLevel: "Serializable" });
   }
 
-  private positionKeywordPage(
+  private positionReadWindow(
     scope: ReadScope,
     input: RankPositionReportInput,
     dimension: SemanticRankDimension,
     sourceDimensions: readonly SemanticRankDimension[],
-    offset: number
-  ): Promise<PositionKeywordRow[]> {
-    const filters = keywordFilters(scope, input);
+    asOf: string
+  ): Promise<PositionReadWindowRow[]> {
+    const filters = [...keywordFilters(scope, input, sourceDimensions), Prisma.sql`keyword.created_at <= ${new Date(asOf)}`];
     const order = positionOrder(input.sort);
     const regionCodes = [...new Set(sourceDimensions.map(({ regionCode }) => regionCode))];
     const dailyCandidates = input.mode === "AI"
@@ -539,6 +541,8 @@ export class RankWorkbenchService {
             AND snapshot.search_engine::text = ${dimension.searchEngine}
             AND snapshot.region_code IN (${Prisma.join(regionCodes)})
             AND snapshot.device::text = ${dimension.device}
+            AND snapshot.created_at <= ${new Date(asOf)}
+            AND snapshot.observed_at <= ${new Date(asOf)}
             AND snapshot.position_tracking_enabled
             AND snapshot.observed_at >= ${new Date(input.observedFrom)}
             AND snapshot.observed_at < ${new Date(input.observedBefore)}
@@ -559,6 +563,8 @@ export class RankWorkbenchService {
           JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
             AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.created_at <= ${new Date(asOf)}
+            AND snapshot.observed_at <= ${new Date(asOf)}
             AND snapshot.position_tracking_enabled
             AND snapshot.observed_at >= ${new Date(input.observedFrom)}
             AND snapshot.observed_at < ${new Date(input.observedBefore)}
@@ -567,7 +573,7 @@ export class RankWorkbenchService {
             (snapshot.observed_at AT TIME ZONE 'UTC')::date,
             snapshot.observed_at DESC, snapshot.id DESC
         `;
-    return this.prisma.$queryRaw<PositionKeywordRow[]>(Prisma.sql`
+    return this.prisma.$queryRaw<PositionReadWindowRow[]>(Prisma.sql`
       WITH configurations AS MATERIALIZED (
         SELECT context_id, configuration_version
         FROM tracking_context_versions configuration
@@ -598,98 +604,80 @@ export class RankWorkbenchService {
             (SELECT MAX((observed_at AT TIME ZONE 'UTC')::date) FROM daily_candidates)
             THEN latest.position END AS latest_slice_position,
           previous.id AS previous_snapshot_id,
-          previous.position AS previous_position
+          previous.position AS previous_position,
+          ${input.sort === "TARGET_URL_ASC" || input.sort === "TARGET_URL_DESC"
+            ? Prisma.sql`sort_target.normalized_url`
+            : Prisma.sql`NULL::text`} AS target_sort_url
         FROM scoped_keywords keyword
         LEFT JOIN candidates latest
           ON latest.keyword_id = keyword.id AND latest.sequence = 1
         LEFT JOIN candidates previous
           ON previous.keyword_id = keyword.id AND previous.sequence = 2
-      ), paged AS MATERIALIZED (
-        SELECT projected.*,
-          count(*) OVER ()::bigint AS total_count,
-          count(latest_snapshot_id) OVER ()::bigint AS measured_count,
-          count(*) FILTER (WHERE latest_found) OVER ()::bigint AS found_count,
-          count(*) FILTER (WHERE latest_snapshot_id IS NOT NULL AND NOT latest_found) OVER ()::bigint AS not_found_count,
-          count(*) FILTER (WHERE latest_position < previous_position) OVER ()::bigint AS improved_count,
-          count(*) FILTER (WHERE latest_position > previous_position) OVER ()::bigint AS declined_count,
-          count(*) FILTER (WHERE latest_position = previous_position) OVER ()::bigint AS unchanged_count,
-          count(*) FILTER (WHERE latest_position IS NOT NULL AND previous_position IS NULL) OVER ()::bigint AS new_count,
-          count(*) FILTER (WHERE latest_position IS NULL AND previous_position IS NOT NULL) OVER ()::bigint AS lost_count,
-          count(*) FILTER (WHERE latest_position <= 1) OVER ()::bigint AS top1_count,
-          count(*) FILTER (WHERE latest_position <= 3) OVER ()::bigint AS top3_count,
-          count(*) FILTER (WHERE latest_position <= 5) OVER ()::bigint AS top5_count,
-          count(*) FILTER (WHERE latest_position <= 10) OVER ()::bigint AS top10_count,
-          count(*) FILTER (WHERE latest_position <= 30) OVER ()::bigint AS top30_count,
-          count(*) FILTER (WHERE latest_position <= 50) OVER ()::bigint AS top50_count,
-          count(*) FILTER (WHERE latest_position <= 100) OVER ()::bigint AS top100_count,
-          avg(latest_position) FILTER (WHERE latest_position IS NOT NULL) OVER ()::float8 AS average_position
-        FROM projected
-        ORDER BY ${order}
-        OFFSET ${offset}
-        LIMIT ${input.limit + 1}
-      ), enriched AS (
-        SELECT paged.*,
-          target.url AS target_url,
-          group_row.path AS group_path,
-          frequency.base_value AS frequency_base,
-          frequency.exact_value AS frequency_exact,
-          frequency.fixed_value AS frequency_fixed
-        FROM paged
-        LEFT JOIN pages target
-          ON target.workspace_id = ${scope.workspaceId}::uuid
-         AND target.project_id = ${scope.projectId}::uuid
-         AND target.id = paged.target_page_id
-         AND target.status::text = 'ACTIVE'
-        LEFT JOIN LATERAL (
-          SELECT group_value.path
-          FROM keyword_group_memberships membership
-          JOIN keyword_groups group_value
-            ON group_value.id = membership.group_id
-           AND group_value.project_id = membership.project_id
-          WHERE membership.project_id = ${scope.projectId}::uuid
-            AND membership.keyword_id = paged.id
-            AND group_value.status::text = 'ACTIVE'
-            AND group_value.system_kind IS NULL
-          ORDER BY membership.created_at ASC, group_value.id ASC
-          LIMIT 1
-        ) group_row ON true
-        LEFT JOIN LATERAL (
-          SELECT
-            max(latest.value) FILTER (WHERE latest.type = 'BASE') AS base_value,
-            max(latest.value) FILTER (WHERE latest.type = 'EXACT') AS exact_value,
-            max(latest.value) FILTER (WHERE latest.type = 'FIXED') AS fixed_value
-          FROM (
-            SELECT DISTINCT ON (snapshot.type) snapshot.type, snapshot.value
-            FROM frequency_snapshots snapshot
-            WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
-              AND snapshot.project_id = ${scope.projectId}::uuid
-              AND snapshot.keyword_id = paged.id
-              AND snapshot.type IN ('BASE', 'EXACT', 'FIXED')
-            ORDER BY snapshot.type, snapshot.observed_at DESC, snapshot.id DESC
-          ) latest
-        ) frequency ON true
+        ${input.sort === "TARGET_URL_ASC" || input.sort === "TARGET_URL_DESC" ? Prisma.sql`
+          LEFT JOIN pages sort_target ON sort_target.workspace_id = ${scope.workspaceId}::uuid
+            AND sort_target.project_id = ${scope.projectId}::uuid AND sort_target.id = keyword.target_page_id
+        ` : Prisma.empty}
       )
-      SELECT id, version, query, language, created_at AS "createdAt",
-        is_tracked AS "isTracked",
-        group_path AS "groupPath", target_url AS "targetUrl",
-        frequency_base AS "frequencyBase",
-        frequency_exact AS "frequencyExact",
-        frequency_fixed AS "frequencyFixed",
-        latest_snapshot_id AS "latestSnapshotId",
-        latest_found AS "latestFound", latest_position AS "latestPosition",
-        previous_snapshot_id AS "previousSnapshotId",
-        previous_position AS "previousPosition",
-        total_count AS "totalCount", measured_count AS "measuredCount",
-        found_count AS "foundCount", not_found_count AS "notFoundCount",
-        improved_count AS "improvedCount", declined_count AS "declinedCount",
-        unchanged_count AS "unchangedCount", new_count AS "newCount",
-        lost_count AS "lostCount", top1_count AS "top1Count",
-        top3_count AS "top3Count", top5_count AS "top5Count",
-        top10_count AS "top10Count", top30_count AS "top30Count",
-        top50_count AS "top50Count", top100_count AS "top100Count",
-        average_position AS "averagePosition"
-      FROM enriched
-      ORDER BY ${order}
+      SELECT COALESCE(array_agg(id ORDER BY ${order}), ARRAY[]::uuid[]) AS "keywordIds",
+        count(*)::bigint AS "totalCount",
+        count(latest_snapshot_id)::bigint AS "measuredCount",
+        count(*) FILTER (WHERE latest_found)::bigint AS "foundCount",
+        count(*) FILTER (WHERE latest_snapshot_id IS NOT NULL AND NOT latest_found)::bigint AS "notFoundCount",
+        count(*) FILTER (WHERE latest_position < previous_position)::bigint AS "improvedCount",
+        count(*) FILTER (WHERE latest_position > previous_position)::bigint AS "declinedCount",
+        count(*) FILTER (WHERE latest_position = previous_position)::bigint AS "unchangedCount",
+        count(*) FILTER (WHERE latest_position IS NOT NULL AND previous_position IS NULL)::bigint AS "newCount",
+        count(*) FILTER (WHERE latest_position IS NULL AND previous_position IS NOT NULL)::bigint AS "lostCount",
+        count(*) FILTER (WHERE latest_position <= 1)::bigint AS "top1Count",
+        count(*) FILTER (WHERE latest_position <= 3)::bigint AS "top3Count",
+        count(*) FILTER (WHERE latest_position <= 5)::bigint AS "top5Count",
+        count(*) FILTER (WHERE latest_position <= 10)::bigint AS "top10Count",
+        count(*) FILTER (WHERE latest_position <= 30)::bigint AS "top30Count",
+        count(*) FILTER (WHERE latest_position <= 50)::bigint AS "top50Count",
+        count(*) FILTER (WHERE latest_position <= 100)::bigint AS "top100Count",
+        avg(latest_position) FILTER (WHERE latest_position IS NOT NULL)::float8 AS "averagePosition"
+      FROM projected
+    `);
+  }
+
+  private keywordMetadata(scope: ReadScope, keywordIds: readonly string[], includeFrequencies: boolean): Promise<KeywordMetadataRow[]> {
+    if (!keywordIds.length) return Promise.resolve([]);
+    return this.prisma.$queryRaw<KeywordMetadataRow[]>(Prisma.sql`
+      SELECT keyword.id, keyword.version, keyword.text_original AS query, keyword.language,
+        keyword.created_at AS "createdAt", keyword.is_tracked AS "isTracked", target.url AS "targetUrl",
+        (group_row.paths)[1] AS "groupPath", COALESCE(group_row.paths, ARRAY[]::text[]) AS "groupPaths",
+        COALESCE(group_row.total, 0)::bigint AS "groupCount",
+        ${includeFrequencies ? Prisma.sql`frequency.base_value` : Prisma.sql`NULL::bigint`} AS "frequencyBase",
+        ${includeFrequencies ? Prisma.sql`frequency.exact_value` : Prisma.sql`NULL::bigint`} AS "frequencyExact",
+        ${includeFrequencies ? Prisma.sql`frequency.fixed_value` : Prisma.sql`NULL::bigint`} AS "frequencyFixed"
+      FROM keywords keyword
+      LEFT JOIN pages target ON target.workspace_id = ${scope.workspaceId}::uuid
+        AND target.project_id = ${scope.projectId}::uuid AND target.id = keyword.target_page_id AND target.status::text = 'ACTIVE'
+      LEFT JOIN LATERAL (
+        SELECT array_agg(selected.path ORDER BY selected.created_at, selected.id) AS paths, max(selected.total) AS total
+        FROM (
+          SELECT group_value.path, membership.created_at, group_value.id, count(*) OVER ()::bigint AS total
+          FROM keyword_group_memberships membership
+          JOIN keyword_groups group_value ON group_value.id = membership.group_id AND group_value.project_id = membership.project_id
+          WHERE membership.project_id = ${scope.projectId}::uuid AND membership.keyword_id = keyword.id
+            AND group_value.workspace_id = ${scope.workspaceId}::uuid AND group_value.status::text = 'ACTIVE' AND group_value.system_kind IS NULL
+          ORDER BY membership.created_at, group_value.id LIMIT 5
+        ) selected
+      ) group_row ON true
+      ${includeFrequencies ? Prisma.sql`LEFT JOIN LATERAL (
+        SELECT max(latest.value) FILTER (WHERE latest.type = 'BASE') AS base_value,
+          max(latest.value) FILTER (WHERE latest.type = 'EXACT') AS exact_value,
+          max(latest.value) FILTER (WHERE latest.type = 'FIXED') AS fixed_value
+        FROM (
+          SELECT DISTINCT ON (snapshot.type) snapshot.type, snapshot.value
+          FROM frequency_snapshots snapshot
+          WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.keyword_id = keyword.id AND snapshot.type IN ('BASE', 'EXACT', 'FIXED')
+          ORDER BY snapshot.type, snapshot.observed_at DESC, snapshot.id DESC
+        ) latest
+      ) frequency ON true` : Prisma.empty}
+      WHERE keyword.workspace_id = ${scope.workspaceId}::uuid AND keyword.project_id = ${scope.projectId}::uuid
+        AND keyword.id IN (${Prisma.join(keywordIds.map(id => Prisma.sql`${id}::uuid`))}) AND keyword.status::text = 'ACTIVE'
     `);
   }
 
@@ -699,7 +687,8 @@ export class RankWorkbenchService {
     dimension: SemanticRankDimension,
     sourceDimensions: readonly SemanticRankDimension[],
     keywordIds: readonly string[],
-    dates: readonly string[]
+    dates: readonly string[],
+    asOf: string
   ): Promise<DailyRankRow[]> {
     return this.prisma.$queryRaw<DailyRankRow[]>(Prisma.sql`
       WITH configurations AS MATERIALIZED (
@@ -723,6 +712,8 @@ export class RankWorkbenchService {
         WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
           AND snapshot.project_id = ${scope.projectId}::uuid
           AND snapshot.keyword_id IN (${Prisma.join(keywordIds.map((id) => Prisma.sql`${id}::uuid`))})
+            AND snapshot.created_at <= ${new Date(asOf)}
+            AND snapshot.observed_at <= ${new Date(asOf)}
           AND snapshot.position_tracking_enabled
           AND snapshot.observed_at >= ${new Date(input.observedFrom)}
           AND snapshot.observed_at < ${new Date(input.observedBefore)}
@@ -787,7 +778,8 @@ export class RankWorkbenchService {
     dimension: SemanticRankDimension,
     sourceDimensions: readonly SemanticRankDimension[],
     keywordIds: readonly string[],
-    dates: readonly string[]
+    dates: readonly string[],
+    asOf: string
   ): Promise<DailyAiRankRow[]> {
     const regionCodes = [...new Set(sourceDimensions.map(({ regionCode }) => regionCode))];
     return this.prisma.$queryRaw<DailyAiRankRow[]>(Prisma.sql`
@@ -806,6 +798,8 @@ export class RankWorkbenchService {
           AND snapshot.search_engine::text = ${dimension.searchEngine}
           AND snapshot.region_code IN (${Prisma.join(regionCodes)})
           AND snapshot.device::text = ${dimension.device}
+            AND snapshot.created_at <= ${new Date(asOf)}
+            AND snapshot.observed_at <= ${new Date(asOf)}
           AND snapshot.position_tracking_enabled
           AND (snapshot.observed_at AT TIME ZONE 'UTC')::date IN (
             ${Prisma.join(dates.map((date) => Prisma.sql`${date}::date`))}
@@ -833,9 +827,10 @@ export class RankWorkbenchService {
     scope: ReadScope,
     input: RankPositionReportInput,
     dimension: SemanticRankDimension,
-    sourceDimensions: readonly SemanticRankDimension[]
+    sourceDimensions: readonly SemanticRankDimension[],
+    asOf: string
   ): Promise<TrendRow[]> {
-    const filters = keywordFilters(scope, input);
+    const filters = [...keywordFilters(scope, input, sourceDimensions), Prisma.sql`keyword.created_at <= ${new Date(asOf)}`];
     const regionCodes = [...new Set(sourceDimensions.map(({ regionCode }) => regionCode))];
     const latestDaily = input.mode === "AI"
       ? Prisma.sql`
@@ -852,6 +847,8 @@ export class RankWorkbenchService {
             AND snapshot.search_engine::text = ${dimension.searchEngine}
             AND snapshot.region_code IN (${Prisma.join(regionCodes)})
             AND snapshot.device::text = ${dimension.device}
+            AND snapshot.created_at <= ${new Date(asOf)}
+            AND snapshot.observed_at <= ${new Date(asOf)}
             AND snapshot.position_tracking_enabled
             AND snapshot.observed_at >= ${new Date(input.observedFrom)}
             AND snapshot.observed_at < ${new Date(input.observedBefore)}
@@ -873,6 +870,8 @@ export class RankWorkbenchService {
           JOIN scoped_keywords keyword ON keyword.id = snapshot.keyword_id
           WHERE snapshot.workspace_id = ${scope.workspaceId}::uuid
             AND snapshot.project_id = ${scope.projectId}::uuid
+            AND snapshot.created_at <= ${new Date(asOf)}
+            AND snapshot.observed_at <= ${new Date(asOf)}
             AND snapshot.position_tracking_enabled
             AND snapshot.observed_at >= ${new Date(input.observedFrom)}
             AND snapshot.observed_at < ${new Date(input.observedBefore)}
@@ -906,40 +905,11 @@ export class RankWorkbenchService {
     `);
   }
 
-  private keywordPage(
-    scope: ReadScope,
-    input: SerpWorkbenchInput,
-    offset: number
-  ): Promise<KeywordPageRow[]> {
-    const filters = keywordFilters(scope, input);
-    return this.prisma.$queryRaw<KeywordPageRow[]>(Prisma.sql`
-      SELECT keyword.id, keyword.version, keyword.text_original AS query,
-        keyword.language, target.url AS "targetUrl",
-        group_row.path AS "groupPath",
-        count(*) OVER ()::bigint AS "totalCount"
-      FROM keywords keyword
-      LEFT JOIN pages target
-        ON target.workspace_id = ${scope.workspaceId}::uuid
-       AND target.project_id = ${scope.projectId}::uuid
-       AND target.id = keyword.target_page_id
-       AND target.status::text = 'ACTIVE'
-      LEFT JOIN LATERAL (
-        SELECT group_value.path
-        FROM keyword_group_memberships membership
-        JOIN keyword_groups group_value
-          ON group_value.id = membership.group_id
-         AND group_value.project_id = membership.project_id
-        WHERE membership.project_id = ${scope.projectId}::uuid
-          AND membership.keyword_id = keyword.id
-          AND group_value.status::text = 'ACTIVE'
-          AND group_value.system_kind IS NULL
-        ORDER BY membership.created_at ASC, group_value.id ASC
-        LIMIT 1
-      ) group_row ON true
-      WHERE ${Prisma.join(filters, " AND ")}
-      ORDER BY keyword.text_normalized ASC, keyword.id ASC
-      OFFSET ${offset}
-      LIMIT ${input.limit + 1}
+  private keywordReadWindow(scope: ReadScope, input: SerpWorkbenchInput, asOf: string): Promise<{ keywordIds: readonly string[] }[]> {
+    const filters = [...keywordFilters(scope, input), Prisma.sql`keyword.created_at <= ${new Date(asOf)}`];
+    return this.prisma.$queryRaw<{ keywordIds: readonly string[] }[]>(Prisma.sql`
+      SELECT COALESCE(array_agg(keyword.id ORDER BY keyword.text_normalized ASC, keyword.id ASC), ARRAY[]::uuid[]) AS "keywordIds"
+      FROM keywords keyword WHERE ${Prisma.join(filters, " AND ")}
     `);
   }
 
@@ -1026,7 +996,8 @@ export class RankWorkbenchService {
 
 function keywordFilters(
   scope: ReadScope,
-  input: Readonly<{ groupIds?: readonly string[]; search?: string; includeUntracked?: boolean }>
+  input: Readonly<{ groupIds?: readonly string[]; search?: string; includeUntracked?: boolean; targetUrlState?: "SET" | "EMPTY"; multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE"; mode?: "SEO" | "AI"; observedFrom?: string; observedBefore?: string }>,
+  sourceDimensions: readonly SemanticRankDimension[] = []
 ): Prisma.Sql[] {
   const filters: Prisma.Sql[] = [
     Prisma.sql`keyword.workspace_id = ${scope.workspaceId}::uuid`,
@@ -1034,6 +1005,13 @@ function keywordFilters(
     Prisma.sql`keyword.status::text = 'ACTIVE'`
   ];
   if (input.includeUntracked === false) filters.push(Prisma.sql`keyword.is_tracked = TRUE`);
+  if (input.targetUrlState === "SET") filters.push(Prisma.sql`keyword.target_page_id IS NOT NULL`);
+  if (input.targetUrlState === "EMPTY") filters.push(Prisma.sql`keyword.target_page_id IS NULL`);
+  if (input.multipleUrlsState) {
+    if (input.mode !== "SEO" || !input.observedFrom || !input.observedBefore || sourceDimensions.length === 0) throw new TypeError("Invalid URL filter scope");
+    const multiple = historicalKeywordHasMultipleUrls(scope, sourceDimensions, input.observedFrom, input.observedBefore);
+    filters.push(input.multipleUrlsState === "MULTIPLE" ? multiple : Prisma.sql`NOT (${multiple})`);
+  }
   if (input.search) {
     filters.push(Prisma.sql`keyword.text_normalized ILIKE ${`%${input.search}%`}`);
   }
@@ -1071,6 +1049,14 @@ function visibleSnapshotPredicate(
 
 function positionOrder(sort: RankPositionReportInput["sort"]): Prisma.Sql {
   switch (sort) {
+    case "TARGET_URL_ASC":
+      return Prisma.sql`target_sort_url ASC NULLS LAST, text_normalized ASC, id ASC`;
+    case "TARGET_URL_DESC":
+      return Prisma.sql`target_sort_url DESC NULLS LAST, text_normalized ASC, id ASC`;
+    case "TARGET_URL_SET_FIRST":
+      return Prisma.sql`(target_page_id IS NOT NULL) DESC, text_normalized ASC, id ASC`;
+    case "TARGET_URL_EMPTY_FIRST":
+      return Prisma.sql`(target_page_id IS NOT NULL) ASC, text_normalized ASC, id ASC`;
     case "OBSERVED_DESC":
       return Prisma.sql`latest_observed_at DESC NULLS LAST, created_at DESC, text_normalized ASC, id ASC`;
     case "POSITION_ASC":
@@ -1086,7 +1072,7 @@ function positionOrder(sort: RankPositionReportInput["sort"]): Prisma.Sql {
   }
 }
 
-function positionSummary(row: PositionKeywordRow): RankPositionReportSummary {
+function positionSummary(row: PositionStats): RankPositionReportSummary {
   return {
     keywordCount: safeCount(row.totalCount),
     measuredCount: safeCount(row.measuredCount),
@@ -1208,6 +1194,8 @@ function positionFilterHash(input: RankPositionReportInput): string {
   return filterHash({
     mode: input.mode,
     includeUntracked: input.includeUntracked ?? true,
+    ...(input.targetUrlState ? { targetUrlState: input.targetUrlState } : {}),
+    ...(input.multipleUrlsState ? { multipleUrlsState: input.multipleUrlsState } : {}),
     dimensionKey: input.dimensionKey,
     observedFrom: input.observedFrom,
     observedBefore: input.observedBefore,
@@ -1232,28 +1220,6 @@ function filterHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function encodeOffsetCursor(offset: number, hash: string): string {
-  return Buffer.from(JSON.stringify({ offset, hash }), "utf8").toString("base64url");
-}
-
-function decodeOffsetCursor(value: string | undefined, hash: string): number {
-  if (!value) return 0;
-  try {
-    const decoded = Buffer.from(value, "base64url");
-    if (decoded.toString("base64url") !== value) throw new Error("non-canonical");
-    const payload = JSON.parse(decoded.toString("utf8")) as Record<string, unknown>;
-    if (
-      Object.keys(payload).length !== 2 ||
-      !Number.isSafeInteger(payload.offset) ||
-      Number(payload.offset) < 0 ||
-      Number(payload.offset) > 1_000_000 ||
-      payload.hash !== hash
-    ) throw new Error("invalid");
-    return Number(payload.offset);
-  } catch {
-    throw new BadRequestException("Rank workbench cursor is invalid");
-  }
-}
 
 function parseInput<Input, Value>(
   parser: (value: unknown) => Input,

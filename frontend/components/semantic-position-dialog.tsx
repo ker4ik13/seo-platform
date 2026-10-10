@@ -1,4 +1,6 @@
 "use client";
+import type { ProjectOnboardingSettings } from "@seo-platform/contracts";
+import { onboardingRunPreference, readProjectRunPreference, writeProjectRunPreference } from "../lib/project-run-defaults";
 
 import { CustomSelect } from "./custom-select";
 import { SemanticRankTargets } from "./semantic-rank-targets";
@@ -122,6 +124,8 @@ export function SemanticPositionDialog({
   onClose,
   onStarted,
   projectSearchCity,
+  currentUserId,
+  onboarding,
   projectId,
   workspaceId
 }: Readonly<{
@@ -134,6 +138,8 @@ export function SemanticPositionDialog({
   onClose: () => void;
   onStarted: (job: RankJobSummary, batch?: readonly RankJobSummary[]) => void;
   projectSearchCity?: ProjectSearchCity | undefined;
+  currentUserId?: string;
+  onboarding?: ProjectOnboardingSettings;
   projectId: string;
   workspaceId: string;
 }>) {
@@ -271,12 +277,14 @@ export function SemanticPositionDialog({
   useEffect(() => {
     if (loading || initialRun || preferenceRestored.current) return;
     preferenceRestored.current = true;
-    const preferred = readRankTargetPreference(window.localStorage, projectId, contextDraft.searchEngine, competitorMode);
+    const preferred = readProjectRunPreference(window.localStorage, projectId, currentUserId, competitorMode ? "competitors" : "positions", contextDraft.searchEngine)?.targets
+      ?? readRankTargetPreference(window.localStorage, projectId, contextDraft.searchEngine, competitorMode)
+      ?? (!competitorMode ? onboardingRunPreference(onboarding, "positions", contextDraft.searchEngine)?.targets : undefined);
     if (!preferred?.length) return;
     const [first, ...rest] = preferred;
     setContextDraft(current => withLaunchName(current, { ...current, ...first! }));
     setAdditionalTargets(rest);
-  }, [loading, initialRun, projectId, competitorMode, contextDraft.searchEngine, withLaunchName]);
+  }, [loading, initialRun, projectId, currentUserId, onboarding, competitorMode, contextDraft.searchEngine, withLaunchName]);
   const providerUsage = rankProviderUsageEstimate(
     selectedSource,
     displayedKeywordCount * targets.length,
@@ -451,6 +459,9 @@ export function SemanticPositionDialog({
             id === lastSuccessfulJob?.trackingContextId && status === "ACTIVE"
         );
         const projectRegions = projectSemanticSearchRegions(projectSearchCity);
+        const privateLaunch = readProjectRunPreference(window.localStorage, projectId, currentUserId, competitorMode ? "competitors" : "positions");
+        const plannedYandex = onboardingRunPreference(onboarding, "positions", "YANDEX")?.targets[0];
+        const plannedGoogle = onboardingRunPreference(onboarding, "positions", "GOOGLE")?.targets[0];
         const storedYandex = readStoredSemanticRegion(
           window.localStorage,
           projectId,
@@ -465,10 +476,10 @@ export function SemanticPositionDialog({
         );
         let nextPreferredRegions: SemanticSearchRegions = {
           YANDEX:
-            storedYandex ?? projectRegions?.YANDEX ??
+            storedYandex ?? (plannedYandex ? { code: plannedYandex.regionCode, label: plannedYandex.regionLabel } : undefined) ?? projectRegions?.YANDEX ??
             defaultSemanticSearchRegions().YANDEX,
           GOOGLE:
-            storedGoogle ?? projectRegions?.GOOGLE ??
+            storedGoogle ?? (plannedGoogle ? { code: plannedGoogle.regionCode, label: plannedGoogle.regionLabel } : undefined) ?? projectRegions?.GOOGLE ??
             defaultSemanticSearchRegions().GOOGLE
         };
         const nextPreferredRegionSources: SemanticRegionSources = {
@@ -521,13 +532,30 @@ export function SemanticPositionDialog({
         if (initialRun) {
           setContextDraft(rankRetryContextDraft(initialRun));
         } else {
+          const savedDefault = privateLaunch ?? (lastRunContext ? {
+            searchEngine: lastRunContext.configuration.searchEngine,
+            depth: lastRunContext.configuration.depth,
+            targets: [{
+              regionCode: lastRunContext.configuration.regionCode ?? "",
+              regionLabel: lastRunContext.configuration.regionLabel ?? "",
+              device: lastRunContext.configuration.device
+            }]
+          } : !competitorMode ? onboardingRunPreference(onboarding, "positions") : undefined);
+          const launchTargets = savedDefault?.targets;
+          if (launchTargets?.length) setAdditionalTargets(launchTargets.slice(1));
           setContextDraft((current) => ({
             ...contextDraftWithRegion(
-              current,
-              nextPreferredRegions[current.searchEngine],
+              { ...current,
+                ...(savedDefault ? { searchEngine: savedDefault.searchEngine, depth: savedDefault.depth } : {}),
+                ...(privateLaunch?.searchSource ? { searchSource: privateLaunch.searchSource } : {}),
+                ...(privateLaunch?.yandexLiveMode ? { yandexLiveMode: privateLaunch.yandexLiveMode } : {}),
+                ...(privateLaunch?.xmlStockDepthMode ? { xmlStockDepthMode: privateLaunch.xmlStockDepthMode } : {})
+              },
+              nextPreferredRegions[savedDefault?.searchEngine ?? current.searchEngine],
               competitorMode,
               uiLocale
             ),
+            ...launchTargets?.[0],
             scopeMode:
               initialSelections.length > 0
                 ? "KEYWORDS"
@@ -554,7 +582,7 @@ export function SemanticPositionDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [competitorMode, initialGroupIds, initialSelections.length, initialRun, projectId, projectSearchCity, uiLocale, workspaceId]);
+  }, [competitorMode, initialGroupIds, initialSelections.length, initialRun, projectId, projectSearchCity, uiLocale, workspaceId, currentUserId, onboarding]);
 
   useEffect(() => {
     if (
@@ -624,13 +652,21 @@ export function SemanticPositionDialog({
           batch = createRankTargetBatch(effectiveInput);
           multiBatch.current = batch;
         }
-        writeRankTargetPreference(window.localStorage, projectId, effectiveInput.base.searchEngine, competitorMode, effectiveInput.targets);
         if (!rankTargetBatchReady(batch)) {
           await prepareRankTargetBatch(batch, settings, changed);
           return;
         }
         await launchRankTargetBatch(batch, changed);
         const jobs = batch.entries.flatMap(entry => entry.job ? [entry.job] : []);
+        if (jobs.length) {
+          writeRankTargetPreference(window.localStorage, projectId, effectiveInput.base.searchEngine, competitorMode, effectiveInput.targets);
+          writeProjectRunPreference(window.localStorage, projectId, currentUserId, competitorMode ? "competitors" : "positions", {
+            searchEngine: effectiveInput.base.searchEngine, depth: effectiveInput.base.depth, targets: effectiveInput.targets,
+            searchSource: effectiveInput.base.searchSource,
+            ...(effectiveInput.base.yandexLiveMode ? { yandexLiveMode: effectiveInput.base.yandexLiveMode } : {}),
+            ...(effectiveInput.base.xmlStockDepthMode ? { xmlStockDepthMode: effectiveInput.base.xmlStockDepthMode } : {})
+          });
+        }
         if (jobs.length === batch.entries.length) {
           clearRankTargetBatch(window.localStorage, workspaceId, projectId, competitorMode);
           rememberCredential(projectId, effectiveInput.source.id, setLastUsedCredentialId);
@@ -939,6 +975,12 @@ export function SemanticPositionDialog({
       runCommand.current = undefined;
       rememberCredential(projectId, selectedSource.id, setLastUsedCredentialId);
       rememberPositionRegion(projectId, contextDraft, setPreferredRegions);
+      writeProjectRunPreference(window.localStorage, projectId, currentUserId, competitorMode ? "competitors" : "positions", {
+        searchEngine: contextDraft.searchEngine, depth: contextDraft.depth, targets,
+        searchSource: contextDraft.searchSource,
+        ...(contextDraft.yandexLiveMode ? { yandexLiveMode: contextDraft.yandexLiveMode } : {}),
+        ...(contextDraft.xmlStockDepthMode ? { xmlStockDepthMode: contextDraft.xmlStockDepthMode } : {})
+      });
       onStarted(job);
     } catch (requestError) {
       if (stage === "ESTIMATE") {
@@ -1103,7 +1145,14 @@ export function SemanticPositionDialog({
               competitorMode={competitorMode}
               onChange={nextDraft => {
                 if (nextDraft.searchEngine !== contextDraft.searchEngine) {
-                  setAdditionalTargets([]);
+                  const preferred = readProjectRunPreference(window.localStorage, projectId, currentUserId, competitorMode ? "competitors" : "positions", nextDraft.searchEngine)
+                    ?? (!competitorMode ? onboardingRunPreference(onboarding, "positions", nextDraft.searchEngine) : undefined);
+                  if (preferred) {
+                    const [first, ...others] = preferred.targets;
+                    setAdditionalTargets(others);
+                    const depth = selectedSource?.provider === "ARSENKIN" && (nextDraft.searchEngine === "YANDEX" || preferred.depth === 10) ? 30 : preferred.depth;
+                    nextDraft = { ...nextDraft, ...first!, depth };
+                  } else setAdditionalTargets([]);
                 }
                 setContextDraft((current) => withLaunchName(current, {
                   ...nextDraft,
@@ -1227,7 +1276,6 @@ export function SemanticPositionDialog({
         )}
         {currentBatch && <section className="semantic-rank-batch-review" aria-live="polite">
           <header><strong><UiText text="План съёма по городам" /></strong><span><UiText text="Принято задач: {0} из {1}" values={[String(batchStarted), String(currentBatch.entries.length)]} /></span></header>
-          <p><UiText text="Каждое сочетание города и устройства создаёт отдельную задачу. Принятые задачи продолжат работу после закрытия окна." /></p>
           {selectedSource?.mode === "PLATFORM_PAID" && <p><UiText text="Максимальный расход оставшихся съёмов: {0}" values={[batchCharge ?? "—"]} /></p>}
           <ul>{currentBatch.entries.map(entry => <li key={`${entry.draft.regionCode}:${entry.draft.device}`}>
             <span>{searchRegionDisplayName(entry.draft.searchEngine, entry.draft.regionCode, entry.draft.regionLabel)} · <UiText text={entry.draft.device === "DESKTOP" ? "ПК" : "Телефон"} /></span>
@@ -1717,7 +1765,6 @@ function PositionRunParameters({
         <section className="semantic-workflow-panel semantic-position-scope-panel">
           <header>
             <h3>{competitorMode ? <UiText text="Охват сбора" /> : <UiText text="Охват проверки" />}</h3>
-            <p><UiText text="Выберите все запросы, текущее выделение или папки." /></p>
           </header>
           {scope}
         </section>

@@ -70,6 +70,10 @@ export const semanticKeywordSorts = [
   "SOURCE_DESC",
   "TAGS_ASC",
   "TAGS_DESC",
+  "TARGET_URL_ASC",
+  "TARGET_URL_DESC",
+  "TARGET_URL_SET_FIRST",
+  "TARGET_URL_EMPTY_FIRST",
   "FREQUENCY_BASE_DESC",
   "FREQUENCY_BASE_ASC",
   "FREQUENCY_EXACT_DESC",
@@ -169,6 +173,7 @@ export interface KeywordListQuery {
   readonly wordCountMin?: number;
   readonly wordCountMax?: number;
   readonly targetUrlState?: "SET" | "EMPTY";
+  readonly multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE";
   readonly rankDimensionKey?: string;
   readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
   readonly rankPositionMin?: number;

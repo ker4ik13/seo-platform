@@ -31,7 +31,7 @@ export function semanticImportPreviewRowsQuery(
     sortColumn,
     "sortColumn",
     0,
-    499
+    1_108
   );
   if (parsedColumn === undefined && sortDirection !== undefined) {
     invalid("sortDirection");

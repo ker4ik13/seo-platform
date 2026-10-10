@@ -55,7 +55,7 @@ test("accepts a bounded duplicate finalization issue count", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (): Promise<Response> =>
     response({
-      data: { accepted: true, issueCount: 4 },
+      data: { accepted: true, issueCount: 25000 },
       meta: { requestId: "crawl-finalize-001" }
     })) as typeof fetch;
   try {
@@ -68,7 +68,7 @@ test("accepts a bounded duplicate finalization issue count", async () => {
         processedUrls: 2,
         scopeHash: "b".repeat(64)
       }),
-      { accepted: true, issueCount: 4 }
+      { accepted: true, issueCount: 25000 }
     );
   } finally {
     globalThis.fetch = originalFetch;

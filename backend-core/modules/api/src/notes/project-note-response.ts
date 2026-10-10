@@ -1,3 +1,4 @@
+import { projectNoteFormat, projectNoteDelimiter } from "@seo-platform/contracts";
 import type {
   ProjectNoteCollection,
   ProjectNoteSummary,
@@ -44,6 +45,8 @@ export function projectNote(
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     title: input.title,
+    format: noteFormat(input.format),
+    ...delimiterResponse(input.delimiter, noteFormat(input.format)),
     markdown: input.markdown,
     visibility: input.visibility as ProjectNoteVisibility,
     ...(typeof input.publicToken === "string"
@@ -69,6 +72,8 @@ export function publicProjectNote(value: unknown): PublicProjectNote {
   }
   return {
     title: input.title,
+    format: noteFormat(input.format),
+    ...delimiterResponse(input.delimiter, noteFormat(input.format)),
     markdown: input.markdown,
     updatedAt: input.updatedAt
   };
@@ -95,4 +100,16 @@ function invalid(): never {
     message: "SEO data service returned an invalid project note response",
     retryable: true
   });
+}
+
+function noteFormat(value: unknown) {
+  try { return projectNoteFormat(value); } catch { return invalid(); }
+}
+
+function delimiterResponse(value: unknown, format: string) {
+  try {
+    const delimiter = projectNoteDelimiter(value);
+    if (delimiter !== undefined && format !== "CSV") return invalid();
+    return delimiter === undefined ? {} : { delimiter };
+  } catch { return invalid(); }
 }

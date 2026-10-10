@@ -177,6 +177,15 @@ export function ContextMenu({
       aria-label={label}
       className={`context-menu context-menu-${presentation}`}
       onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+        const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)') ?? [])];
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        if (index < 0 || !buttons.length) return;
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next]?.focus({ preventScroll: true });
+      }}
       ref={menuRef}
       role="menu"
       style={{

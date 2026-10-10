@@ -4,6 +4,9 @@ import { CustomSelect } from "./custom-select";
 
 import { useState, type FormEvent } from "react";
 import type { AppWorkspace } from "../lib/app-types";
+import type { ProjectCollectionCapabilities } from "@seo-platform/contracts";
+import { useRouter } from "next/navigation";
+import { ProjectCreationWizard } from "./project-creation-wizard";
 import {
   browserApiRequest,
   BrowserApiError
@@ -98,99 +101,21 @@ export function WorkspaceOnboarding() {
   );
 }
 
-export function ProjectOnboarding({
-  workspace
-}: Readonly<{ workspace: AppWorkspace }>) {
-  const { t: uiText } = useUiLocale();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const [duplicateConfirmation, setDuplicateConfirmation] = useState(false);
-
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setError(undefined);
-    const form = new FormData(event.currentTarget);
-    try {
-      const project = await browserApiRequest<{ readonly id: string }>(
-        `/app/api/workspaces/${encodeURIComponent(workspace.id)}/projects`,
-        {
-          method: "POST",
-          body: {
-            name: String(form.get("name") ?? "").trim(),
-            domain: String(form.get("domain") ?? "").trim(),
-            confirmDuplicateDomain:
-              duplicateConfirmation &&
-              form.get("confirmDuplicateDomain") === "on"
-          }
-        }
-      );
-      writePreference("seo_project", project.id);
-      window.location.assign("/app");
-    } catch (requestError) {
-      setBusy(false);
-      if (
-        requestError instanceof BrowserApiError &&
-        requestError.code === "DUPLICATE"
-      ) {
-        setDuplicateConfirmation(true);
-        setError(
-          "Проект с этим доменом уже есть. Подтвердите осознанное создание дубля."
-        );
-        return;
-      }
-      setError(onboardingError(requestError));
-    }
-  }
-
-  return (
-    <section className="onboarding-panel">
-      <span className="state-icon">2</span>
-      <div>
-        <h1><UiText text="Создайте первый проект" /></h1>
-        <p>
-          <UiText text="Добавьте домен. Поисковые контексты, конкурентов и импорт семантики настроим следующим шагом." /></p>
-      </div>
-      <form className="onboarding-form" onSubmit={submit}>
-        {error && (
-          <div className="inline-alert danger" role="alert">
-            {<UiText text={error ?? ""} />}
-          </div>
-        )}
-        <label className="form-field">
-          <span><UiText text="Название проекта" /></span>
-          <input
-            autoFocus
-            maxLength={160}
-            name="name"
-            placeholder={uiText("Например, Основной сайт")}
-            required
-          />
-        </label>
-        <label className="form-field">
-          <span><UiText text="Домен" /></span>
-          <input
-            autoCapitalize="none"
-            autoCorrect="off"
-            name="domain"
-            placeholder="example.com"
-            required
-          />
-          <small><UiText text="Без пути, параметров и номера порта" /></small>
-        </label>
-        {duplicateConfirmation && (
-          <label className="checkbox-field">
-            <input name="confirmDuplicateDomain" required type="checkbox" />
-            <span><UiText text="Да, это отдельный проект с тем же доменом" /></span>
-          </label>
-        )}
-        <button className="primary-button" disabled={busy} type="submit">
-          {busy ? <UiText text="Создаём…" /> : <UiText text="Создать проект" />}
-        </button>
-      </form>
-    </section>
-  );
+export function ProjectOnboarding({ workspace, currentUserId, capabilities }: Readonly<{
+  workspace: AppWorkspace; currentUserId: string; capabilities?: ProjectCollectionCapabilities;
+}>) {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  return <section className="onboarding-panel">
+    <span className="state-icon">2</span>
+    <div><h1><UiText text="Создайте первый проект" /></h1>
+      <p><UiText text="Добавьте сайт, выберите поисковые срезы и настройте колонки семантики." /></p></div>
+    <button className="primary-button" type="button" disabled={capabilities?.creation.allowed !== true} onClick={() => setOpen(true)}><UiText text="Создать проект" /></button>
+    {open && <ProjectCreationWizard key={currentUserId + ":" + workspace.id} workspace={workspace} currentUserId={currentUserId}
+      {...(capabilities ? { capabilities } : {})}
+      onClose={(createdId) => { setOpen(false); if (createdId) router.refresh(); }}
+      onOpenProject={projectId => { writePreference("seo_project", projectId); window.location.assign("/app/semantics"); }} />}
+  </section>;
 }
 
 function optionalValue(value: FormDataEntryValue | null): string | undefined {

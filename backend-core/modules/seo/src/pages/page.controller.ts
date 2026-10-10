@@ -18,6 +18,8 @@ import type {
   ProjectPageCollection,
   ProjectPageSummary
 } from "@seo-platform/contracts";
+import { parseProjectPageStatisticsQuery, parseProjectPagePanelQuery, type ProjectPageStatisticsCollection, type ProjectPagePanel } from "@seo-platform/contracts";
+import { PageInsightsService } from "./page-insights.service.js";
 import type { FastifyRequest } from "fastify";
 import {
   assertInternalContext,
@@ -41,7 +43,26 @@ type InternalHeaders = Readonly<
 @Controller("internal/v1/projects/:projectId/pages")
 @UseGuards(PlatformApiGuard)
 export class PageController {
-  public constructor(private readonly pages: PageService) {}
+  public constructor(private readonly pages: PageService, private readonly insights: PageInsightsService) {}
+
+  @Get("rank-statistics")
+  public async statistics(@Param("projectId") projectId: string, @Query() query: unknown, @Headers() headers: InternalHeaders, @Req() request: FastifyRequest): Promise<ApiResponse<ProjectPageStatisticsCollection>> {
+    const context = routeContext(projectId, headers);
+    return response(request, await this.insights.statistics(context, parseRead(parseProjectPageStatisticsQuery, query)));
+  }
+
+  @Get("by-keyword/:keywordId")
+  public async targetPage(@Param("projectId") projectId: string, @Param("keywordId") keywordId: string, @Headers() headers: InternalHeaders, @Req() request: FastifyRequest): Promise<ApiResponse<{ page?: ProjectPageSummary }>> {
+    const context = routeContext(projectId, headers);
+    const pageId = await this.insights.targetPageId(context, internalUuid(keywordId, "keywordId"));
+    return response(request, pageId ? { page: await this.pages.get(context.workspaceId, context.projectId, pageId) } : {});
+  }
+
+  @Get(":pageId/panel")
+  public async panel(@Param("projectId") projectId: string, @Param("pageId") pageId: string, @Query() query: unknown, @Headers() headers: InternalHeaders, @Req() request: FastifyRequest): Promise<ApiResponse<ProjectPagePanel>> {
+    const context = routeContext(projectId, headers);
+    return response(request, await this.insights.panel(context, internalUuid(pageId, "pageId"), parseRead(parseProjectPagePanelQuery, query)));
+  }
 
   @Get()
   public async list(
@@ -154,6 +175,10 @@ function routeContext(
     );
   }
   return context;
+}
+
+function parseRead<T>(parser: (value: unknown) => T, value: unknown): T {
+  try { return parser(value); } catch { throw new BadRequestException("Invalid page read query"); }
 }
 
 function assertMutation(

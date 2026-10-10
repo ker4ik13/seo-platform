@@ -24,6 +24,7 @@ import {
 import { RankOperationProvenanceService } from "../rank-runs/rank-operation-provenance.service.js";
 import type { PlatformAdminOperationQuery } from "./platform-admin-operation-input.js";
 import type { RemoteWorkAssignment } from "../worker-nodes/remote-work-assignments.js";
+import { adminImportJob, adminImportSelect, adminImportStatusWhere } from "./admin-import-operation.js";
 
 import { ACTIVE_JOB_STATUSES, ACTIVE_IMPORT_STATUSES } from "../jobs/job-capacity.js";
 import { STORAGE_RESERVING_UPLOAD_STATUSES } from "../uploads/storage-capacity.js";
@@ -107,7 +108,7 @@ const ADMIN_JOB_SELECT = {
   updatedAt: true
 } as const;
 
-type AdminJob = Prisma.JobGetPayload<{ select: typeof ADMIN_JOB_SELECT }>;
+export type AdminJob = Prisma.JobGetPayload<{ select: typeof ADMIN_JOB_SELECT }>;
 
 @Injectable()
 export class OperationActivityService {
@@ -220,12 +221,19 @@ export class OperationActivityService {
     const filteredWhere: Prisma.JobWhereInput = statusWhere
       ? { AND: [listWhere, statusWhere] }
       : listWhere;
-    const anchor = query.cursor
+    const jobAnchor = query.cursor
       ? await this.prisma.job.findUnique({
           where: { id: query.cursor },
           select: { id: true, createdAt: true }
         })
       : undefined;
+    const anchor = jobAnchor ?? (query.cursor ? await this.prisma.semanticImport.findUnique({
+      where: { id: query.cursor }, select: { id: true, createdAt: true }
+    }) : undefined);
+    const afterAnchor = anchor ? { OR: [
+      { createdAt: { lt: anchor.createdAt } },
+      { createdAt: anchor.createdAt, id: { lt: anchor.id } }
+    ] } : {};
     const pageWhere: Prisma.JobWhereInput = anchor
       ? {
           AND: [
@@ -239,7 +247,7 @@ export class OperationActivityService {
           ]
         }
       : filteredWhere;
-    const [jobs, total, active, completed, attention, typeGroups] =
+    const [jobs, total, active, completed, attention, typeGroups, imports, importGroups] =
       await Promise.all([
         this.prisma.job.findMany({
           where: pageWhere,
@@ -261,9 +269,24 @@ export class OperationActivityService {
           by: ["type"],
           where: baseWhere,
           _count: { _all: true }
-        })
+        }),
+        this.prisma.semanticImport.findMany({
+          where: { AND: [adminImportStatusWhere(query.statusGroup), afterAnchor,
+            ...(query.type && query.type !== "SEMANTIC_IMPORT" ? [{ id: { in: [] } }] : [])] },
+          select: adminImportSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: query.limit + 1
+        }),
+        this.prisma.semanticImport.groupBy({ by: ["status"], _count: { _all: true } })
       ]);
-    const page = jobs.slice(0, query.limit);
+    const merged = [...jobs, ...imports.map(adminImportJob)].sort((left, right) =>
+      right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id));
+    const page = merged.slice(0, query.limit);
+    const importTotals = { total: 0, active: 0, completed: 0, attention: 0 };
+    for (const { status, _count } of importGroups) {
+      importTotals.total += _count._all;
+      if (status === "FAILED") importTotals.attention += _count._all;
+      else if (status === "COMPLETED" || status === "CANCELLED") importTotals.completed += _count._all;
+      else importTotals.active += _count._all;
+    }
     const [presentation, frequency] = await Promise.all([
       this.adminRankPresentation(page),
       this.adminFrequencyPresentation(page)
@@ -275,12 +298,13 @@ export class OperationActivityService {
         presentation.workers.get(job.id),
         frequency.get(job.id)
       )),
-      ...(jobs.length > query.limit && page.length > 0
+      ...(merged.length > query.limit && page.length > 0
         ? { nextCursor: page[page.length - 1]!.id }
         : {}),
-      totals: { total, active, completed, attention },
-      types: typeGroups
-        .map(({ type, _count }) => ({ type, count: _count._all }))
+      totals: { total: total + importTotals.total, active: active + importTotals.active,
+        completed: completed + importTotals.completed, attention: attention + importTotals.attention },
+      types: [...typeGroups.map(({ type, _count }) => ({ type, count: _count._all })),
+        ...(importTotals.total ? [{ type: "SEMANTIC_IMPORT", count: importTotals.total }] : [])]
         .sort((left, right) => right.count - left.count || left.type.localeCompare(right.type))
         .slice(0, 50)
     };
@@ -289,11 +313,15 @@ export class OperationActivityService {
   public async adminDetail(
     operationId: string
   ): Promise<InternalAdminOperationSummary> {
-    const job = await this.prisma.job.findUnique({
+    let job = await this.prisma.job.findUnique({
       where: { id: operationId },
       select: ADMIN_JOB_SELECT
     });
-    if (!job || !visibleOperationTypes.some((type) => type === job.type)) {
+    if (!job) {
+      const imported = await this.prisma.semanticImport.findUnique({ where: { id: operationId }, select: adminImportSelect });
+      if (imported) job = adminImportJob(imported);
+    }
+    if (!job || (job.type !== "SEMANTIC_IMPORT" && !visibleOperationTypes.some((type) => type === job.type))) {
       throw new NotFoundException("Operation not found");
     }
     const [presentation, frequency] = await Promise.all([
@@ -404,9 +432,10 @@ export class OperationActivityService {
           JOIN public.jobs job ON job.id=assignment.job_id AND job.status='RUNNING'
           WHERE assignment.node_id=ANY(${nodeIds}::uuid[])
           UNION ALL
-          SELECT assignment.node_id,assignment.job_id FROM public.remote_operation_assignments assignment
-          JOIN public.jobs job ON job.id=assignment.job_id AND job.status='RUNNING'
-          WHERE assignment.node_id=ANY(${nodeIds}::uuid[]) AND assignment.job_id IS NOT NULL
+          SELECT assignment.node_id,COALESCE(assignment.job_id,assignment.operation_id) AS job_id FROM public.remote_operation_assignments assignment
+          LEFT JOIN public.jobs job ON job.id=assignment.job_id
+          LEFT JOIN public.semantic_imports imported ON imported.id=assignment.operation_id AND assignment.capability='IMPORT'
+          WHERE assignment.node_id=ANY(${nodeIds}::uuid[]) AND (job.status='RUNNING' OR imported.status='PARSING')
         ) assigned GROUP BY assigned.node_id`
     ]);
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -454,15 +483,27 @@ export class OperationActivityService {
 
   public async overview(): Promise<InternalExecutionOverview> {
     const now = Date.now();
-    const [active, queued, attention, failed24h, completed30d, groups] = await Promise.all([
+    const [active, queued, attention, failed24h, completed30d, groups, importCounts] = await Promise.all([
       this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: { in: [...ACTIVE_JOB_STATUSES] } } }),
       this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: "QUEUED" } }),
       this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: "ACTION_REQUIRED" } }),
       this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: "FAILED_FINAL", updatedAt: { gte: new Date(now - 86_400_000) } } }),
       this.prisma.job.count({ where: { type: { in: [...visibleOperationTypes] }, status: { in: ["COMPLETED", "PARTIALLY_COMPLETED"] }, finishedAt: { gte: new Date(now - 30 * 86_400_000) } } }),
-      this.prisma.job.groupBy({ by: ["type"], where: { type: { in: [...visibleOperationTypes] }, createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } })
+      this.prisma.job.groupBy({ by: ["type"], where: { type: { in: [...visibleOperationTypes] }, createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } }),
+      Promise.all([
+        this.prisma.semanticImport.count({ where: adminImportStatusWhere("ACTIVE") }),
+        this.prisma.semanticImport.count({ where: { status: { in: ["QUEUED", "READY_TO_PUBLISH"] } } }),
+        this.prisma.semanticImport.count({ where: { status: "FAILED", updatedAt: { gte: new Date(now - 86_400_000) } } }),
+        this.prisma.semanticImport.count({ where: { status: "COMPLETED", updatedAt: { gte: new Date(now - 30 * 86_400_000) } } }),
+        this.prisma.semanticImport.count({ where: { createdAt: { gte: new Date(now - 30 * 86_400_000) } } })
+      ])
     ]);
-    return { active, queued, attention, failed24h, completed30d, byType30d: groups.map(row => ({ type: row.type, count: row._count._all })).sort((a, b) => b.count - a.count).slice(0, 50) };
+    const [importActive, importQueued, importFailed, importCompleted, importTotal] = importCounts;
+    return { active: active + importActive, queued: queued + importQueued, attention,
+      failed24h: failed24h + importFailed, completed30d: completed30d + importCompleted,
+      byType30d: [...groups.map(row => ({ type: row.type, count: row._count._all })),
+        ...(importTotal ? [{ type: "SEMANTIC_IMPORT", count: importTotal }] : [])]
+        .sort((a, b) => b.count - a.count).slice(0, 50) };
   }
 }
 

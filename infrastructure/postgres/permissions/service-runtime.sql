@@ -638,6 +638,7 @@ SELECT format(
   :'runtime_role'
 )
 FROM unnest(CASE current_database()
+  WHEN 'platform_db' THEN ARRAY['public.ingest_product_analytics(uuid,uuid,jsonb,jsonb,jsonb)']
   WHEN 'seo_db' THEN ARRAY[
     'public.rank_data_quality_flags_valid(jsonb)',
     'public.project_workspace_rekey_allowed(jsonb,jsonb)',

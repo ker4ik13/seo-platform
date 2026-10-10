@@ -8,6 +8,8 @@ const crawlId = "01900000-0000-7000-8000-000000000004";
 test("accepts an exact terminal crawl notification command", () => {
   const input = crawlNotificationInput(validInput());
   assert.equal(input.crawlId, crawlId);
+  assert.equal(crawlNotificationInput({ ...validInput(), processedUrls: 5000, issueCount: 525000 }).issueCount, 525000);
+  assert.throws(() => crawlNotificationInput({ ...validInput(), issueCount: 525001 }), BadRequestException);
   assert.equal(input.status, "PARTIALLY_COMPLETED");
   assert.equal(input.purpose, "TECHNICAL_AUDIT");
   assert.equal(

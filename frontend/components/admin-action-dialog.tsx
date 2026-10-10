@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icon";
+import { ConfirmationActions } from "./confirmation-actions";
 
 export function AdminActionDialog({ title, description, defaultReason, onClose, onConfirm }: Readonly<{ title: string; description: string; defaultReason?: string; onClose: () => void; onConfirm: (reason: string) => Promise<string | undefined> }>) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -24,7 +25,7 @@ export function AdminActionDialog({ title, description, defaultReason, onClose, 
       <label className="admin-action-reason">Причина для журнала аудита<textarea autoFocus minLength={8} maxLength={500} required rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Кратко объясните причину действия" /></label>
       <label className="admin-action-confirm"><input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />Подтверждаю действие</label>
       {error && <div className="form-alert" role="alert">{error}</div>}
-      <footer><button className="ghost" disabled={busy} onClick={onClose} type="button">Отмена</button><button className="primary" disabled={busy || !confirmed || reason.trim().length < 8} type="submit">{busy ? "Выполняем…" : "Подтвердить"}</button></footer>
+      <footer><ConfirmationActions><button className="ghost" disabled={busy} onClick={onClose} type="button">Отмена</button><button className="primary" disabled={busy || !confirmed || reason.trim().length < 8} type="submit">{busy ? "Выполняем…" : "Подтвердить"}</button></ConfirmationActions></footer>
     </form>
   </dialog>, host);
 }

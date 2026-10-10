@@ -43,6 +43,7 @@ export default async function SettingsProjectsPage() {
         </section>
       ) : (
         <ProjectCatalog
+          currentUserId={context.user.id}
           {...(context.project ? { activeProjectId: context.project.id } : {})}
           {...(context.projectCapabilities
             ? { capabilities: context.projectCapabilities }

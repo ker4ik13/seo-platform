@@ -40,6 +40,7 @@ import { Icon } from "./icon";
 import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
+import { useConfirmation } from "./use-confirmation";
 import type { SemanticOperationGroup } from "./semantic-operation-scope";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -102,6 +103,7 @@ export function SemanticNegativeKeywordsDialog({
   const [deletedProgress, setDeletedProgress] = useState(0);
   const [error, setError] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
+  const confirmation = useConfirmation();
   const previewRequestInFlight = useRef(false);
   const words = useMemo(() => parseWords(wordsText, caseSensitive), [caseSensitive, wordsText]);
   const endpoint = `/app/api/projects/${encodeURIComponent(projectId)}`;
@@ -255,7 +257,7 @@ export function SemanticNegativeKeywordsDialog({
   async function deletePreset(): Promise<void> {
     const current = presets.find(({ id }) => id === selectedPresetId);
     if (!current || savingPreset || applying) return;
-    if (!window.confirm(`Удалить пресет «${current.name}»? Запросы проекта не изменятся.`)) return;
+    if (!await confirmation.confirm({ title: uiText("Удалить пресет «{0}»?", [current.name]) })) return;
     setSavingPreset(true);
     setError(undefined);
     try {
@@ -830,6 +832,7 @@ export function SemanticNegativeKeywordsDialog({
         {error && <div className="semantic-workflow-feedback"><div className="inline-alert danger" role="alert">{<UiText text={error ?? ""} />}</div></div>}
       </div>
     </SemanticModal>
+    {confirmation.dialog}
     {confirmClose && (
       <UnsavedChangesConfirmation
         onCancel={() => setConfirmClose(false)}

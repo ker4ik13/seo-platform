@@ -39,6 +39,7 @@ test("every controller module using session guards imports IdentityModule", () =
     "NotificationModule",
     "PageModule",
     "PlatformAdminModule",
+    "ProductAnalyticsModule",
     "ProjectNoteModule",
     "ProjectOperationModule",
     "RankingModule",

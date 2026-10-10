@@ -86,14 +86,14 @@ test("production runtime through Caddy: tenant security, real writes and respons
     const publicPath = note.publicUrl ? new URL(note.publicUrl, base).pathname : `/notes/${note.publicToken}`;
     const response = await page.goto(`${base}${publicPath}`);
     assert.equal(response.status(), 200);
-    await page.getByRole("heading", { name: "Проверка публикации", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Проверка публикации.md", exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.__auditXss === undefined), true);
     assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
     assert.match(response.headers()["x-robots-tag"] ?? "", /noindex/u);
     await command(first.api, "PATCH", `projects/${pid}/notes/${note.id}`, { visibility: "PROJECT_MEMBERS" }, { "If-Match": `"v${note.version}"` });
     assert.equal((await first.api.get(`/app/api/public/project-notes/${note.publicToken}`)).status(), 404);
     await page.reload({ waitUntil: "networkidle" });
-    await page.getByText("Заметка недоступна", { exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Файл недоступен", exact: true }).waitFor();
   });
 
   await t.test("real ClamAV rejects the standard harmless EICAR test upload", async () => {

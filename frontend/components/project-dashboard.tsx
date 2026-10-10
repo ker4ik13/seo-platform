@@ -81,12 +81,14 @@ export function ProjectDashboard({
   projectId,
   projectName,
   projectSearchCity,
+  onboarding,
   userName
 }: Readonly<{
   currentUserId: string;
   projectId: string;
   projectName: string;
   projectSearchCity?: ProjectSearchCity;
+  onboarding?: import("@seo-platform/contracts").ProjectOnboardingSettings;
   userName: string;
 }>) {
   const uiLocale = useUiLocale().locale;
@@ -314,6 +316,9 @@ export function ProjectDashboard({
           </header>
           {data ? (
             <ProjectPositionHistoryChart
+              projectId={projectId}
+              currentUserId={currentUserId}
+              {...(onboarding ? { onboarding } : {})}
               preferenceKey={`seonorita:dashboard-tops:v1:${currentUserId}:${projectId}`}
               dimensions={data.rankDimensions.dimensions}
               history={scopedPositionHistory ?? data.positionHistory}

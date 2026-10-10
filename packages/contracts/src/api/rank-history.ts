@@ -76,15 +76,15 @@ export interface RankHistoryProviderFoundItem extends RankHistoryItemBase {
   readonly serpFeatures: readonly [];
 }
 
-/** A manually imported position has no observed result URL or SERP payload. */
+/** A manual import may include a URL, but never invents a provider SERP payload. */
 export interface RankHistoryManualFoundItem extends RankHistoryItemBase {
   readonly provider: "MANUAL_IMPORT";
   readonly found: true;
   readonly position: number;
   readonly absolutePosition?: never;
   readonly pixelPosition?: never;
-  readonly rankingUrl?: never;
-  readonly normalizedRankingUrl?: never;
+  readonly rankingUrl?: string;
+  readonly normalizedRankingUrl?: string;
   readonly title?: never;
   readonly snippet?: never;
   readonly resultType?: never;
@@ -306,15 +306,18 @@ export function redactRankHistoryItem(
       !Number.isSafeInteger(input.position) ||
       input.position < 1 ||
       input.position > 100 ||
-      ["absolutePosition", "pixelPosition", "rankingUrl", "normalizedRankingUrl", "title", "snippet", "resultType", "serpFeatures"].some((key) => key in input)
+      ["absolutePosition", "pixelPosition", "title", "snippet", "resultType", "serpFeatures"].some((key) => key in input) ||
+      (input.rankingUrl === undefined) !== (input.normalizedRankingUrl === undefined)
     ) {
       return invalidRankHistoryItem();
     }
+    if (input.rankingUrl !== undefined) { assertUrl(input.rankingUrl); assertUrl(input.normalizedRankingUrl!); }
     return {
       ...base,
       provider: "MANUAL_IMPORT",
       found: true,
-      position: input.position
+      position: input.position,
+      ...(input.rankingUrl === undefined ? {} : { rankingUrl: input.rankingUrl, normalizedRankingUrl: input.normalizedRankingUrl! }),
     };
   }
 

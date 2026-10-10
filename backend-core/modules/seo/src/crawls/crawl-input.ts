@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  parseCrawlTechnicalDetails,
   technicalCrawlPurposes,
   technicalCrawlStatuses,
   type CrawlIssueSeverity,
@@ -21,6 +22,7 @@ const INDEXABILITIES = new Set([
   "CANONICALIZED",
   "REDIRECTED",
   "ERROR",
+  "BLOCKED_ROBOTS",
   "UNKNOWN"
 ]);
 const SEVERITIES = new Set(["INFO", "WARNING", "ERROR", "CRITICAL"]);
@@ -39,7 +41,7 @@ export function internalPersistCrawlPageInput(
   ];
   const optionalKeys = [
     "title", "description", "h1", "canonicalUrl", "robots", "language",
-    "etag", "lastModified", "purpose", "savePageMap", "metaTags"
+    "etag", "lastModified", "purpose", "savePageMap", "metaTags", "technicalDetails", "preserveRequestedUrl"
   ];
   if (
     Object.keys(input).some(
@@ -59,18 +61,20 @@ export function internalPersistCrawlPageInput(
     "indexability",
     INDEXABILITIES
   ) as CrawlPageIndexability;
+  if ((input.statusCode === 0) !== (indexability === "BLOCKED_ROBOTS")) invalid("statusCode");
   return {
     workspaceId: internalUuid(string(input.workspaceId, "workspaceId", 64), "workspaceId"),
     projectId: internalUuid(string(input.projectId, "projectId", 64), "projectId"),
     crawlId: internalUuid(string(input.crawlId, "crawlId", 64), "crawlId"),
     purpose: crawlPurpose(input.purpose),
+    ...(input.preserveRequestedUrl === undefined ? {} : { preserveRequestedUrl: boolean(input.preserveRequestedUrl, "preserveRequestedUrl") }),
     sequence: integer(input.sequence, "sequence", 1, technicalCrawlMaxUrlLimit),
     requestedUrl: normalizePageUrl(string(input.requestedUrl, "requestedUrl", 4_096)).normalized,
     finalUrl: normalizePageUrl(string(input.finalUrl, "finalUrl", 4_096)).normalized,
     redirectChain: urlArray(input.redirectChain, "redirectChain", 10),
     inSitemap: boolean(input.inSitemap, "inSitemap"),
     depth: integer(input.depth, "depth", 0, 10),
-    statusCode: integer(input.statusCode, "statusCode", 100, 599),
+    statusCode: integer(input.statusCode, "statusCode", indexability === "BLOCKED_ROBOTS" ? 0 : 100, 599),
     responseTimeMs: integer(input.responseTimeMs, "responseTimeMs", 0, 3_600_000),
     sizeBytes: integer(input.sizeBytes, "sizeBytes", 0, 10_000_000),
     contentType: string(input.contentType, "contentType", 160),
@@ -100,6 +104,7 @@ export function internalPersistCrawlPageInput(
       160
     ),
     metaTags: input.metaTags === undefined ? [] : metaTagArray(input.metaTags),
+    ...(input.technicalDetails === undefined ? {} : { technicalDetails: technicalDetails(input.technicalDetails) }),
     wordCount: integer(input.wordCount, "wordCount", 0, 10_000_000),
     contentHash: pattern(input.contentHash, "contentHash", HASH),
     ...optionalHeader(input, "etag", 1_000),
@@ -160,12 +165,12 @@ export function internalReuseCrawlPageInput(
     "inSitemap",
     "depth",
     "crawledAt",
-    "savePageMap"
+    "savePageMap", "preserveRequestedUrl"
   ];
   if (
     Object.keys(input).some((key) => !keys.includes(key)) ||
     keys
-      .filter((key) => !["purpose", "savePageMap"].includes(key))
+      .filter((key) => !["purpose", "savePageMap", "preserveRequestedUrl"].includes(key))
       .some((key) => !(key in input))
   ) {
     invalid("body");
@@ -189,6 +194,7 @@ export function internalReuseCrawlPageInput(
       string(input.sourceSnapshotId, "sourceSnapshotId", 64),
       "sourceSnapshotId"
     ),
+    ...(input.preserveRequestedUrl === undefined ? {} : { preserveRequestedUrl: boolean(input.preserveRequestedUrl, "preserveRequestedUrl") }),
     requestedUrl: normalizePageUrl(
       string(input.requestedUrl, "requestedUrl", 4_096),
       "requestedUrl"
@@ -292,7 +298,8 @@ function metaTagArray(
   if (!Array.isArray(value) || value.length > 200) invalid("metaTags");
   return value.map((candidate, index) => {
     const item = object(candidate);
-    const keys = ["name", "property", "httpEquiv", "content"];
+    const keys = ["name", "property", "httpEquiv", "content", "source"];
+    if (item.source !== undefined && item.source !== "HTML" && item.source !== "HTTP") invalid(`metaTags.${index}.source`);
     if (
       Object.keys(item).some((key) => !keys.includes(key)) ||
       !("content" in item) ||
@@ -306,6 +313,7 @@ function metaTagArray(
       ...optional(item, "name", 160),
       ...optional(item, "property", 160),
       ...optional(item, "httpEquiv", 160),
+      ...(item.source === undefined ? {} : { source: item.source as "HTML" | "HTTP" }),
       content: string(item.content, `metaTags.${index}.content`, 4_000)
     };
   });
@@ -315,6 +323,10 @@ function urlArray(value: unknown, field: string, max: number): readonly string[]
   return stringArray(value, field, max, 4_096).map((url) =>
     normalizePageUrl(url, field).normalized
   );
+}
+
+function technicalDetails(value: unknown) {
+  try { return parseCrawlTechnicalDetails(value); } catch { invalid("technicalDetails"); }
 }
 
 function stringArray(

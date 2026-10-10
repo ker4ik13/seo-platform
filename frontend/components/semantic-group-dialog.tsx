@@ -12,6 +12,7 @@ import {
   semanticGroupDefaultColor
 } from "../lib/semantic-group-colors";
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { SemanticGroupPickerField } from "./semantic-group-picker";
 import { Icon } from "./icon";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
@@ -258,7 +259,7 @@ export function SemanticGroupDialog({
       size="small"
       title={title}
       footer={
-        <div className="semantic-modal-actions">
+        <ConfirmationActions>
           <button
             className="secondary-button"
             disabled={saving}
@@ -288,7 +289,7 @@ export function SemanticGroupDialog({
                         : <UiText text="Создать" />
                       : <UiText text="Сохранить" />}
           </button>
-        </div>
+        </ConfirmationActions>
       }
     >
       <form

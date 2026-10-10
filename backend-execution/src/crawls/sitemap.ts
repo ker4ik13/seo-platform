@@ -1,5 +1,6 @@
 import { gunzip } from "node:zlib";
 import { SaxesParser, type SaxesTagPlain } from "saxes";
+import { technicalCrawlMaxUrlLimit } from "@seo-platform/contracts";
 
 export interface SitemapDocument {
   readonly pageUrls: readonly string[];
@@ -47,7 +48,7 @@ export function parseSitemapXml(
   if (
     !Number.isSafeInteger(maxLocations) ||
     maxLocations < 1 ||
-    maxLocations > 1_000
+    maxLocations > technicalCrawlMaxUrlLimit
   ) {
     throw new TypeError("Invalid sitemap location limit");
   }

@@ -36,6 +36,7 @@ import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticAiAnswerDialog } from "./semantic-ai-answer-dialog";
 import { SemanticRankContext } from "./semantic-rank-context";
 import { SemanticGroupPickerField } from "./semantic-group-picker";
+import { DataState, dataFailureKind, canRetainReadData } from "./data-state";
 import { UiText, useUiLocale } from "./ui-locale";
 
 const MAX_DIMENSIONS = 5;
@@ -68,6 +69,7 @@ export function SerpWorkbench({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
+  const [failureKind, setFailureKind] = useState<ReturnType<typeof dataFailureKind>>("ERROR");
   const [dimensionPickerOpen, setDimensionPickerOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -82,6 +84,7 @@ export function SerpWorkbench({
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const loadingMoreRef = useRef(false);
+  const reportContextRef = useRef("");
 
   useEffect(() => {
     setWatchedDomains(readWatchedDomains(projectId));
@@ -152,14 +155,19 @@ export function SerpWorkbench({
       return;
     }
     const controller = new AbortController();
+    const identity = JSON.stringify({ projectId, input });
+    if (reportContextRef.current !== identity) setReport(undefined);
+    reportContextRef.current = identity;
     setLoading(true);
     setError(undefined);
     void (async () => {
       try {
         const next = await requestSerp(projectId, input, controller.signal);
         if (!controller.signal.aborted) setReport(next);
-      } catch {
+      } catch (error: unknown) {
         if (!controller.signal.aborted) {
+          setFailureKind(dataFailureKind(error));
+          if (!canRetainReadData(error)) setReport(undefined);
           setError(t("Не удалось загрузить сохранённую выдачу."));
         }
       } finally {
@@ -341,11 +349,8 @@ export function SerpWorkbench({
     </section>
 
     <section className="serp-highlight-settings">
-      <div>
+      <div className="serp-highlight-options">
         <strong><UiText text="Подсветка доменов" /></strong>
-        <span>
-          <UiText text="Свой домен отмечен зелёным. Одинаковые домены во всех показанных срезах и запросах получают собственный цвет; уникальные автоматически не выделяются, а добавленные вручную выделяются всегда." />
-        </span>
         <label className="serp-duplicate-toggle">
           <input
             checked={highlightDuplicateDomains}
@@ -360,6 +365,7 @@ export function SerpWorkbench({
       </div>
       <form onSubmit={(event) => { event.preventDefault(); addWatchedDomain(); }}>
         <input
+          aria-label={t("Добавить домен")}
           onChange={(event) => setDomainDraft(event.target.value)}
           placeholder="example.ru"
           value={domainDraft}
@@ -388,12 +394,12 @@ export function SerpWorkbench({
       {loading && !report ? (
         <div className="serp-state" role="status"><UiText text="Загружаем выдачу…" /></div>
       ) : error && !report ? (
-        <div className="serp-state error" role="alert">{error}</div>
+        <DataState kind={failureKind} title={failureKind === "ERROR" ? error : undefined} actionLabel="Повторить" onAction={() => setRevision(value => value + 1)} />
       ) : !report || report.rows.length === 0 ? (
-        <div className="serp-state">
-          <strong><UiText text={aiOnly ? "Сохранённой ИИ-выдачи пока нет" : "Сохранённой выдачи пока нет"} /></strong>
-          <span><UiText text={aiOnly ? "Запустите сбор ИИ-конкурентов для выбранных городов и устройств." : "Запустите сбор конкурентов для выбранных городов и устройств."} /></span>
-        </div>
+        <DataState kind="EMPTY" title={query || groupId ? "Ничего не найдено по фильтрам" : aiOnly ? "Сохранённой ИИ-выдачи пока нет" : "Сохранённой выдачи пока нет"}
+          actionLabel={query || groupId ? "Сбросить фильтры" : "Собрать выдачу"} onAction={() => {
+            if (query || groupId) { setQuery(""); setQueryDraft(""); setGroupId(""); } else setCollectionOpen(true);
+          }} />
       ) : (
         <div className="serp-grid-scroll" ref={gridScrollRef}>
           {report.dimensions.length === 1 && (

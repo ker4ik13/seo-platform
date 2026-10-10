@@ -298,6 +298,7 @@ model User {
   assignedPlatformRoles PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleAssignedBy")
   revokedPlatformRoles  PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleRevokedBy")
   apiTokens             ApiToken[]
+  projectCreationReceipts ProjectCreationReceipt[]
 
   @@index([status, createdAt])
   @@map("users")
@@ -612,6 +613,7 @@ model Project {
   searchCityName             String?       @map("search_city_name") @db.VarChar(160)
   searchCityYandexRegionCode String?       @map("search_city_yandex_region_code") @db.VarChar(16)
   searchCityGoogleRegionCode String?       @map("search_city_google_region_code") @db.VarChar(16)
+  onboarding                 Json?
   status                     ProjectStatus @default(DRAFT)
   displayOrder               Int           @default(0) @map("display_order")
   createdBy                  String        @map("created_by") @db.Uuid
@@ -627,6 +629,7 @@ model Project {
   memberAccesses   ProjectMemberAccess[]
   transferRequests ProjectTransferRequest[]
   apiTokenAccesses ApiTokenProjectAccess[]
+  creationReceipts ProjectCreationReceipt[]
 
   @@unique([workspaceId, slug])
   @@unique([id, workspaceId], map: "projects_tenant_id_key")
@@ -634,6 +637,20 @@ model Project {
   @@index([workspaceId, status, createdAt])
   @@index([ownerUserId, status])
   @@map("projects")
+}
+
+model ProjectCreationReceipt {
+  workspaceId String @map("workspace_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.VarChar(180)
+  requestHash Bytes @map("request_hash")
+  projectId String @unique @map("project_id") @db.Uuid
+  provisionedAt DateTime? @map("provisioned_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  project Project @relation(fields:[projectId], references:[id], onDelete:Cascade)
+  actor User @relation(fields:[actorId], references:[id], onDelete:Cascade)
+  @@id([workspaceId,actorId,idempotencyKey])
+  @@map("project_creation_receipts")
 }
 
 model ProjectLogo {
@@ -1313,6 +1330,76 @@ model AuditEvent {
   @@index([workspaceId, createdAt])
   @@index([resourceType, resourceId, createdAt])
   @@map("audit_events")
+}
+
+model ProductAnalyticsProfile {
+  userId String @id @map("user_id") @db.Uuid
+  isInternal Boolean @default(false) @map("is_internal")
+  firstActiveDay DateTime? @map("first_active_day") @db.Date
+  lastActiveDay DateTime? @map("last_active_day") @db.Date
+  firstValueDay DateTime? @map("first_value_day") @db.Date
+  firstValueAt DateTime? @map("first_value_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  @@index([firstActiveDay,isInternal],map:"product_analytics_profiles_cohort_idx")
+  @@index([createdAt],map:"product_analytics_profiles_created_idx")
+  @@index([isInternal,createdAt],map:"product_analytics_profiles_segment_created_idx")
+  @@map("product_analytics_profiles")
+}
+model ProductAnalyticsDaily {
+  day DateTime @db.Date
+  userId String @map("user_id") @db.Uuid
+  scopeKey String @map("scope_key") @db.Text
+  section String @db.VarChar(24)
+  workspaceId String? @map("workspace_id") @db.Uuid
+  projectId String? @map("project_id") @db.Uuid
+  activeSeconds BigInt @default(0) @map("active_seconds")
+  views BigInt @default(0)
+  actions BigInt @default(0)
+  results BigInt @default(0)
+  sessions BigInt @default(0)
+  errors BigInt @default(0)
+  @@id([day,userId,scopeKey])
+  @@index([scopeKey,day,userId],map:"product_analytics_daily_report_idx")
+  @@index([userId,day],map:"product_analytics_daily_user_idx")
+  @@map("product_analytics_daily")
+}
+model ProductAnalyticsBucket {
+  userId String @map("user_id") @db.Uuid
+  minuteAt DateTime @map("minute_at") @db.Timestamptz
+  scopeKey String @map("scope_key") @db.Text
+  activeMask BigInt @map("active_mask")
+  @@id([userId,minuteAt,scopeKey])
+  @@index([minuteAt,userId],map:"product_analytics_buckets_retention_idx")
+  @@map("product_analytics_buckets")
+}
+model ProductAnalyticsReceipt {
+  eventId String @id @map("event_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz
+  @@index([occurredAt,eventId],map:"product_analytics_receipts_retention_idx")
+  @@index([userId],map:"product_analytics_receipts_user_idx")
+  @@map("product_analytics_receipts")
+}
+model ProductAnalyticsSession {
+  userId String @map("user_id") @db.Uuid
+  sessionId String @map("session_id") @db.Uuid
+  startedAt DateTime @map("started_at") @db.Timestamptz
+  lastAt DateTime @map("last_at") @db.Timestamptz
+  @@id([userId,sessionId])
+  @@index([lastAt,userId],map:"product_analytics_sessions_recent_idx")
+  @@map("product_analytics_sessions")
+}
+model ProductAnalyticsMetric {
+  day DateTime @db.Date
+  userId String @map("user_id") @db.Uuid
+  section String @db.VarChar(24)
+  kind String @db.VarChar(24)
+  count BigInt @default(0)
+  totalValue BigInt @default(0) @map("total_value")
+  histogram Json @default("[0,0,0,0,0,0,0,0,0,0,0]")
+  @@id([day,userId,section,kind])
+  @@index([userId],map:"product_analytics_metrics_user_idx")
+  @@map("product_analytics_metrics")
 }
 
 model OperationalErrorEvent {

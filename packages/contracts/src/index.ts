@@ -6,6 +6,7 @@ export * from "./api/admin-controls.js";
 export * from "./api/remote-work.js";
 export * from "./api/billing.js";
 export * from "./api/crawls.js";
+export * from "./api/crawl-page-facts.js";
 export * from "./api/clustering.js";
 export * from "./api/frequency-collections.js";
 export * from "./api/crawl-automations.js";
@@ -19,6 +20,8 @@ export * from "./api/negative-keywords.js";
 export * from "./api/notes.js";
 export * from "./api/operation-results.js";
 export * from "./api/pages.js";
+export * from "./api/page-list-options.js";
+export * from "./api/page-insights.js";
 export * from "./api/rank-estimates.js";
 export * from "./api/paid-operations.js";
 export * from "./api/refund-requests.js";
@@ -56,6 +59,8 @@ export * from "./http/responses.js";
 export * from "./identifiers.js";
 
 export * from "./api/workspace-usage.js";
+export * from "./api/product-analytics.js";
+export * from "./api/project-onboarding.js";
 
 export * from "./api/npd-processing.js";
 
@@ -63,3 +68,5 @@ export * from "./api/telegram-login.js";
 export * from "./api/rank-policy.js";
 export * from "./api/paid-operation-review.js";
 export * from "./api/rank-dimensions.js";
+
+export * from "./api/note-table.js";

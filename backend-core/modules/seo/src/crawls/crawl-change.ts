@@ -145,7 +145,7 @@ export function detectCrawlPageChange(
   const after = comparableCurrent(current);
   const changedFields = (
     Object.keys(FIELD_SEVERITY) as CrawlPageChangeField[]
-  ).filter((field) => meaningfulChange(field, before[field], after[field]));
+  ).filter((field) => (current.statusCode !== 0 && previous.statusCode !== 0 || field === "indexability") && meaningfulChange(field, before[field], after[field]));
   if (changedFields.length === 0) return undefined;
 
   const fields = changedFields.map((field) =>

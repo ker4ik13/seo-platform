@@ -48,7 +48,7 @@ interface SemanticImportPublishPlan {
   readonly entitlement: SemanticCapacityEntitlement;
 }
 
-const SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS = 40;
+import { semanticImportMaxPublishAttempts } from "./semantic-import-limits.js";
 const KC4_PUBLISH_MAX_ROWS = 1_000;
 
 class SemanticImportPublishInvariantError extends Error {
@@ -774,7 +774,7 @@ export class SemanticImportPublisherService {
 export function semanticImportPublishRetryExhausted(
   attempts: number
 ): boolean {
-  return attempts >= SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS;
+  return attempts >= semanticImportMaxPublishAttempts;
 }
 
 export function semanticImportPublishErrorIsRetryable(error: unknown): boolean {
@@ -816,7 +816,7 @@ export function semanticImportPublishHistoryDateCount(
   if (!mapping.positionHistory) return 1;
   return mapping.positionHistory.layout === "LONG"
     ? 1
-    : positionHistoryDateColumns(headers).length;
+    : (mapping.positionHistory.dateColumns ?? positionHistoryDateColumns(headers)).length;
 }
 
 function semanticImportLegacyPublishBatchSize(

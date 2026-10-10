@@ -1,3 +1,19 @@
+export const projectNoteFormats = ["MARKDOWN", "TEXT", "CSV", "TSV", "JSON"] as const;
+export type ProjectNoteFormat = (typeof projectNoteFormats)[number];
+
+export function projectNoteFormat(value: unknown): ProjectNoteFormat {
+  if (value === undefined) return "MARKDOWN";
+  if (typeof value !== "string" || !projectNoteFormats.includes(value as ProjectNoteFormat)) throw new TypeError("Invalid project note format");
+  return value as ProjectNoteFormat;
+}
+
+/** Один Unicode-символ; кавычки, управляющие символы и surrogate запрещены. */
+export function projectNoteDelimiter(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || [...value].length !== 1 || /["\p{Cc}\p{Cs}]/u.test(value)) throw new TypeError("Invalid CSV delimiter");
+  return value;
+}
+
 export const projectNoteVisibilities = [
   "PROJECT_MEMBERS",
   "PUBLIC"
@@ -12,6 +28,8 @@ export interface ProjectNoteSummary {
   readonly projectId: string;
   readonly title: string;
   readonly markdown: string;
+  readonly format: ProjectNoteFormat;
+  readonly delimiter?: string;
   readonly visibility: ProjectNoteVisibility;
   /** Opaque bearer token. It is returned only to authorized project members. */
   readonly publicToken?: string;
@@ -28,12 +46,16 @@ export interface ProjectNoteCollection {
 
 export interface CreateProjectNoteInput {
   readonly title: string;
+  readonly format?: ProjectNoteFormat;
+  readonly delimiter?: string | null;
   readonly markdown: string;
   readonly visibility: ProjectNoteVisibility;
 }
 
 export interface UpdateProjectNoteInput {
   readonly title?: string;
+  readonly format?: ProjectNoteFormat;
+  readonly delimiter?: string | null;
   readonly markdown?: string;
   readonly visibility?: ProjectNoteVisibility;
 }
@@ -62,6 +84,8 @@ export interface InternalDeleteProjectNoteInput {
 
 export interface PublicProjectNote {
   readonly title: string;
+  readonly format: ProjectNoteFormat;
+  readonly delimiter?: string;
   readonly markdown: string;
   readonly updatedAt: string;
 }

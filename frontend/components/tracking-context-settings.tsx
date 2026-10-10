@@ -37,6 +37,7 @@ import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticRankTargets } from "./semantic-rank-targets";
 import { SemanticRankContext } from "./semantic-rank-context";
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { SemanticFolderDescendantsToggle } from "./semantic-folder-descendants-toggle";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -770,7 +771,7 @@ export function TrackingContextSettingsPanel({
         className="tracking-context-delete-modal"
         description={uiText("Контекст «{0}» больше нельзя будет выбрать для нового съёма.", [String(selected.name)])}
         footer={
-          <>
+          <ConfirmationActions>
             <button
               className="secondary-button"
               disabled={saving}
@@ -786,7 +787,7 @@ export function TrackingContextSettingsPanel({
             >
               {saving ? <UiText text="Удаляем…" /> : <UiText text="Удалить контекст" />}
             </button>
-          </>
+          </ConfirmationActions>
         }
         onClose={() => {
           if (!saving) setDeleteConfirmationOpen(false);

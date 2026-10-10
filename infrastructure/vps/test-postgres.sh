@@ -42,6 +42,47 @@ for entry in 'platform:backend-core-api:PLATFORM' 'seo:backend-core-seo:SEO' 'jo
  DATABASE_URL="postgresql://${db}_owner:${!key}@127.0.0.1:${test_port}/${db}_db" pnpm --filter "@seo-platform/$package" prisma:migrate:deploy >> "${test_root}/race-migrations.log" 2>&1
 done
 export JOBS_NOTIFICATION_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/jobs_db"
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = usability ]; then
+  export SEO_DATA_URL_FILTER_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/seo_db"
+  pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/rank-workbench/rank-workbench-url-filters.postgres.integration.test.ts > "$test_root/usability-seo.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (real imported snapshots, URL filters, sorting, pagination and tenant isolation)'
+  exit 0
+fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = admin-operations ]; then
+  export JOBS_ADMIN_OPERATIONS_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/jobs_db"
+  pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/operation-activity/admin-import-operation.postgres.integration.test.ts > "$test_root/admin-operations.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (merged operations, pagination, import workers and safe metadata)'
+  exit 0
+fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = note-formats ]; then
+  export SEO_NOTE_FORMATS_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/seo_db"
+  pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/notes/project-note-formats.postgres.integration.test.ts > "$test_root/note-formats-seo.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (file formats, preserved content and public token revocation)'
+  exit 0
+fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = page-map ]; then
+  export SEO_PAGE_INSIGHTS_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/seo_db"
+  export SEO_DATA_CRAWL_TEST_DATABASE_URL="$SEO_PAGE_INSIGHTS_TEST_DATABASE_URL"
+  pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/pages/page-insights.postgres.integration.test.ts src/crawls/crawl-snapshot-postgres.integration.test.ts > "$test_root/page-map-seo.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (page statistics, evidence, panels, URL paths and tenant isolation)'
+  exit 0
+fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = onboarding ]; then
+  export PLATFORM_ONBOARDING_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/platform_db"
+  export SEO_ONBOARDING_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/seo_db"
+  pnpm --filter @seo-platform/backend-core-api exec node --import tsx --test src/tenants/project-onboarding.postgres.integration.test.ts > "$test_root/onboarding-core.log" 2>&1
+  pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/project-onboarding/project-onboarding.postgres.integration.test.ts > "$test_root/onboarding-seo.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (project creation replays, bounded bootstrap, tenant isolation, zero keyword/provider work)'
+  exit 0
+fi
+if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = analytics ]; then
+  export PLATFORM_ANALYTICS_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0.0.1:${test_port}/platform_db"
+  export JOBS_ANALYTICS_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
+  pnpm --filter @seo-platform/backend-core-api exec node --import tsx --test src/analytics/product-analytics.postgres.integration.test.ts > "$test_root/analytics-core.log" 2>&1
+  pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/operation-activity/operation-analytics.postgres.integration.test.ts > "$test_root/analytics-jobs.log" 2>&1
+  printf '%s\n' 'postgres-tests result=passed (analytics overlap union, idempotency, tenant scope and canonical operation facts)'
+  exit 0
+fi
 if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = remote-work ]; then
   export JOBS_REMOTE_WORK_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
   export JOBS_FREQUENCY_BATCH_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
@@ -98,7 +139,9 @@ export SEO_DATA_CRAWL_TEST_DATABASE_URL="postgresql://postgres:$PGPASSWORD@127.0
 export SEO_DATA_KEYWORD_SORT_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
 export SEO_DATA_LARGE_RANK_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
 export SEO_DATA_MANUAL_HISTORY_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
+export SEO_NOTE_FORMATS_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
+export SEO_PAGE_INSIGHTS_TEST_DATABASE_URL="$SEO_DATA_CRAWL_TEST_DATABASE_URL"
 pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test src/rank-manifests/large-rank-postgres.integration.test.ts > "${test_root}/large-rank-postgres.log" 2>&1
-pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test --test-concurrency=1 src/crawls/crawl-snapshot-postgres.integration.test.ts src/keywords/keyword-ai-position-sort-postgres.integration.test.ts src/keywords/keyword-rank-dimension-sort-postgres.integration.test.ts src/keywords/keyword-rank-comparison.postgres.integration.test.ts src/semantic-imports/manual-position-history-postgres.integration.test.ts > "${test_root}/seo-postgres-races.log" 2>&1
+pnpm --filter @seo-platform/backend-core-seo exec node --import tsx --test --test-concurrency=1 src/crawls/crawl-snapshot-postgres.integration.test.ts src/keywords/keyword-ai-position-sort-postgres.integration.test.ts src/keywords/keyword-rank-dimension-sort-postgres.integration.test.ts src/keywords/keyword-rank-comparison.postgres.integration.test.ts src/semantic-imports/manual-position-history-postgres.integration.test.ts src/notes/project-note-formats.postgres.integration.test.ts src/pages/page-insights.postgres.integration.test.ts > "${test_root}/seo-postgres-races.log" 2>&1
 
 printf '%s\n' 'postgres-tests result=passed (isolation, notifications, core, execution, SEO); historical pre-upgrade fixture is separate'

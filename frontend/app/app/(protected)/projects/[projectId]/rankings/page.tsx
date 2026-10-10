@@ -21,6 +21,7 @@ export default async function RankHistoryPage({
   const context = await requireProtectedProjectAppContext(projectId);
   if (!context.project || !context.workspace) throw new Error("Project context is missing");
   return <RankingsWorkspace
+          {...(context.project.onboarding ? { onboarding: context.project.onboarding } : {})}
     currentUserId={context.user.id}
     projectDomain={context.project.domain}
     projectId={context.project.id}

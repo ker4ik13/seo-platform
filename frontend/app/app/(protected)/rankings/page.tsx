@@ -18,7 +18,7 @@ export default async function RankingsPage() {
   const context = await requireProtectedAppContext();
   if (!context.project || !context.workspace) {
     return context.workspace ? (
-      <ProjectOnboarding workspace={context.workspace} />
+      <ProjectOnboarding currentUserId={context.user.id} workspace={context.workspace} {...(context.projectCapabilities ? { capabilities: context.projectCapabilities } : {})} />
     ) : (
       <section className="panel panel-empty">
         <strong><UiText text="Сначала создайте рабочую область" /></strong>
@@ -27,6 +27,7 @@ export default async function RankingsPage() {
   }
   return (
     <RankingsWorkspace
+          {...(context.project.onboarding ? { onboarding: context.project.onboarding } : {})}
       currentUserId={context.user.id}
       projectDomain={context.project.domain}
       projectId={context.project.id}

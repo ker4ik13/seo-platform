@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "./custom-date-input";
 import Link from "next/link";
 import {
   type ClipboardEvent,
@@ -469,7 +470,7 @@ export function ApiTokenSettings({
             </label>
             <label className="form-field">
               <span><UiText text="Срок действия" /></span>
-              <input
+              <CustomDateInput
                 min={minimumLocalDate()}
                 onChange={(event) =>
                   setDraft({ ...draft, expiresAt: event.target.value })

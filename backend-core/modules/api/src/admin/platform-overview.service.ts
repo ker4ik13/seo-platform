@@ -25,7 +25,7 @@ export class PlatformOverviewService {
       this.prisma.user.count({ where: { status: { not: "DELETED" } } }),
       this.prisma.user.count({ where: { status: { not: "DELETED" }, createdAt: { gte: week } } }),
       this.prisma.user.count({ where: { status: "PENDING_VERIFICATION" } }),
-      this.prisma.session.groupBy({ by: ["userId"], where: { lastUsedAt: { gte: week }, user: { status: "ACTIVE" } } }),
+      this.prisma.$queryRaw<{count:bigint}[]>`SELECT count(DISTINCT d.user_id)::bigint count FROM product_analytics_daily d JOIN product_analytics_profiles p ON p.user_id=d.user_id WHERE d.scope_key='all' AND d.day>=${new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-6*86_400_000)}::date AND NOT p.is_internal AND (d.active_seconds>=30 OR d.actions>0 OR d.results>0)`,
       this.prisma.workspace.count({ where: { status: { notIn: ["DELETING", "DELETED"] } } }),
       this.prisma.workspace.count({ where: { status: { notIn: ["DELETING", "DELETED"] }, projects: { some: { status: { in: ["ACTIVE", "DRAFT"] } } } } }),
       this.prisma.workspace.count({ where: { status: "READ_ONLY" } }),
@@ -52,7 +52,7 @@ export class PlatformOverviewService {
       return total + (price ? subscription.period === "ANNUAL" ? price.amountMinor / 12n : price.amountMinor : 0n);
     }, 0n);
     return {
-      generatedAt: now.toISOString(), users: { total: users, active7d: activeUsers.length, registered7d, unverified }, workspaces: { total: workspaces, withProjects, paying: subscriptions.length, readOnly }, projects,
+      generatedAt: now.toISOString(), users: { total: users, active7d: Number(activeUsers[0]?.count??0n), registered7d, unverified }, workspaces: { total: workspaces, withProjects, paying: subscriptions.length, readOnly }, projects,
       execution: execution.status === "fulfilled" ? execution.value : null, seo: seo.status === "fulfilled" ? seo.value : null,
       finance: { received30dMinor: money(received._sum.amountMinor ?? 0n), refunded30dMinor: money((refunded._sum.amountMinor ?? 0n) + (manualRefunded._sum.approvedAmountMinor ?? 0n)), receivedYearMinor: money(receivedYear._sum.amountMinor ?? 0n), monthlyPlanValueMinor: money(monthlyPlanValue), pendingRefunds, pendingReceipts, pendingPayments, usageReview, daily: daily.map(row => ({ date: row.day, amountMinor: money(BigInt(row.amount)), payments: Number(row.payments) })) },
       paymentProviders: this.billing.providers(), degraded: [...(execution.status === "rejected" ? ["EXECUTION" as const] : []), ...(seo.status === "rejected" ? ["SEO" as const] : [])]

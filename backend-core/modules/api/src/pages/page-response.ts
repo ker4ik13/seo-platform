@@ -1,4 +1,5 @@
 import {
+  parseCrawlTechnicalDetails,
   pageContentStatuses,
   pageIndexabilities,
   pageLifecycleStatuses,
@@ -27,7 +28,7 @@ export function scopedProjectPageCollection(
   workspaceId: string,
   projectId: string
 ): ProjectPageCollection {
-  const collection = exactRecord(value, ["pages", "nextCursor", "structureUrls"]);
+  const collection = exactRecord(value, ["pages", "nextCursor", "structureUrls", "structurePageIds", "structureTruncated", "rankDate"]);
   if (
     !Array.isArray(collection.pages) ||
     collection.pages.length > 100 ||
@@ -40,6 +41,8 @@ export function scopedProjectPageCollection(
   ) {
     invalidResponse();
   }
+  if (collection.structureTruncated !== undefined && typeof collection.structureTruncated !== "boolean" || collection.structurePageIds !== undefined && (!Array.isArray(collection.structurePageIds) || !Array.isArray(collection.structureUrls) || collection.structurePageIds.length !== collection.structureUrls.length || collection.structurePageIds.some((id) => !uuid(id)) || new Set(collection.structurePageIds).size !== collection.structurePageIds.length)) invalidResponse();
+  if (collection.rankDate !== undefined && (typeof collection.rankDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(collection.rankDate))) invalidResponse();
   const pages = collection.pages.map((page) =>
     scopedProjectPage(page, workspaceId, projectId)
   );
@@ -48,6 +51,9 @@ export function scopedProjectPageCollection(
   }
   return {
     pages,
+    ...(typeof collection.rankDate === "string" ? { rankDate: collection.rankDate } : {}),
+    ...(collection.structurePageIds === undefined ? {} : { structurePageIds: collection.structurePageIds as string[] }),
+    ...(collection.structureTruncated === undefined ? {} : { structureTruncated: collection.structureTruncated as boolean }),
     ...(Array.isArray(collection.structureUrls)
       ? { structureUrls: collection.structureUrls as readonly string[] }
       : {}),
@@ -134,18 +140,19 @@ function optionalLatestCrawl(value: unknown): boolean {
   let crawl: Readonly<Record<string, unknown>>;
   try {
     crawl = exactRecord(value, [
-      "crawlId", "statusCode", "responseTimeMs", "sizeBytes", "contentType",
+      "crawlId", "statusCode", "responseTimeMs", "sizeBytes", "contentType", "requestedUrl", "finalUrl",
       "title", "description", "h1", "h1Count", "canonicalUrl", "robots",
       "language", "metaTags", "imageCount", "imagesMissingAlt",
       "structuredDataTypes", "wordCount", "redirectChain", "inSitemap",
-      "depth", "indexability", "crawledAt"
+      "depth", "indexability", "crawledAt", "headings", "hreflang", "technicalDetails"
     ]);
   } catch {
     return false;
   }
   return (
     uuid(crawl.crawlId) &&
-    integer(crawl.statusCode, 100, 599) &&
+    optionalString(crawl.requestedUrl) && optionalString(crawl.finalUrl) &&
+    (integer(crawl.statusCode, 100, 599) || crawl.statusCode === 0 && crawl.indexability === "BLOCKED_ROBOTS") &&
     integer(crawl.responseTimeMs, 0, 3_600_000) &&
     integer(crawl.sizeBytes, 0, 10_000_000) &&
     nonEmptyString(crawl.contentType) &&
@@ -157,6 +164,9 @@ function optionalLatestCrawl(value: unknown): boolean {
     optionalString(crawl.robots) &&
     optionalString(crawl.language) &&
     metaTagArray(crawl.metaTags) &&
+    optionalTechnicalDetails(crawl.technicalDetails) &&
+    (crawl.headings === undefined || Array.isArray(crawl.headings) && crawl.headings.length <= 500 && crawl.headings.every((item) => { const row = item as Record<string, unknown>; return row && typeof row === "object" && Object.keys(row).length === 2 && integer(row.level, 1, 6) && typeof row.text === "string" && row.text.length <= 1_000; })) &&
+    (crawl.hreflang === undefined || Array.isArray(crawl.hreflang) && crawl.hreflang.length <= 100 && crawl.hreflang.every((item) => { const row = item as Record<string, unknown>; return row && typeof row === "object" && Object.keys(row).length === 2 && typeof row.language === "string" && row.language.length <= 35 && typeof row.url === "string" && row.url.length <= 4_096; })) &&
     integer(crawl.imageCount, 0, 100_000) &&
     integer(crawl.imagesMissingAlt, 0, Number(crawl.imageCount)) &&
     stringArray(crawl.structuredDataTypes, 100) &&
@@ -185,12 +195,13 @@ function metaTagArray(value: unknown): boolean {
       const tag = candidate as Readonly<Record<string, unknown>>;
       return (
         Object.keys(tag).every((key) =>
-          ["name", "property", "httpEquiv", "content"].includes(key)
+          ["name", "property", "httpEquiv", "content", "source"].includes(key)
         ) &&
         nonEmptyString(tag.content) &&
         optionalString(tag.name) &&
         optionalString(tag.property) &&
         optionalString(tag.httpEquiv) &&
+        (tag.source === undefined || tag.source === "HTML" || tag.source === "HTTP") &&
         [tag.name, tag.property, tag.httpEquiv].some(
           (item) => typeof item === "string" && item.length > 0
         )
@@ -205,6 +216,11 @@ function stringArray(value: unknown, max: number): boolean {
     value.length <= max &&
     value.every((item) => typeof item === "string")
   );
+}
+
+function optionalTechnicalDetails(value: unknown): boolean {
+  if (value === undefined) return true;
+  try { const result = parseCrawlTechnicalDetails(value); return result.links === undefined; } catch { return false; }
 }
 
 function pageAlias(value: unknown): PageAliasSummary {

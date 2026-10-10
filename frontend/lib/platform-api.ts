@@ -1,4 +1,5 @@
 import {
+  parseProjectOnboardingSettings,
   projectAccessLevels,
   projectCreationAvailabilityReasons,
   type ProjectCollectionCapabilities
@@ -78,15 +79,19 @@ export const loadProtectedAppContext = cache(
     ]);
     const projects = projectsPayload.map(appProject);
     const preferredProjectId = cookieStore.get("seo_project")?.value;
-    const project = resolveWorkspaceProjectPreference(
+    const preferredProject = resolveWorkspaceProjectPreference(
       projects,
       preferredProjectId
     );
+    const detail = preferredProject ? appProject(await platformApiData<unknown>(
+      "/api/v1/projects/" + encodeURIComponent(preferredProject.id)
+    )) : undefined;
+    const project = preferredProject && detail ? { ...preferredProject, ...detail, ...(preferredProject.projectAccessLevel ? { projectAccessLevel: preferredProject.projectAccessLevel } : {}) } : undefined;
 
     return {
       ...base,
       workspace,
-      projects,
+      projects: project ? projects.map(item => item.id === project.id ? project : item) : projects,
       projectCapabilities: appProjectCapabilities(capabilitiesPayload),
       ...(project ? { project } : {})
     };
@@ -117,6 +122,7 @@ export const loadProtectedProjectAppContext = cache(
     if (!context) throw invalidResponse();
     return {
       ...context,
+      projects: context.projects.map(item => item.id === context.project?.id ? { ...item, ...context.project } : item),
       projectCapabilities: appProjectCapabilities(
         await platformApiData<unknown>(
           `/api/v1/workspaces/${encodeURIComponent(context.workspace!.id)}/project-capabilities`
@@ -285,6 +291,7 @@ function appProject(payload: unknown): AppProject {
     ...(project.searchCity === undefined
       ? {}
       : { searchCity: projectSearchCity(project.searchCity) }),
+    ...(project.onboarding === undefined ? {} : { onboarding: parseProjectOnboardingSettings(project.onboarding) }),
     status: status as AppProject["status"],
     ownerUserId: stringValue(project.ownerUserId),
     ...(project.logoSource === undefined

@@ -10,6 +10,8 @@ import {
   coordinatedBrowserSessionRefresh,
   type BrowserSessionRefreshLockManager
 } from "./session-refresh-coordination.ts";
+import { hasAnalyticsResult, recordAnalyticsRequest } from "./product-analytics.ts";
+import { createReadCoalescer } from "./coalesced-read.ts";
 
 export interface BrowserFieldError {
   readonly path: string;
@@ -75,6 +77,7 @@ interface BrowserApiOptions {
 }
 
 let sessionRefreshPromise: Promise<boolean> | undefined;
+const coalesceRead = createReadCoalescer();
 
 export async function browserApiRequest<Data>(
   path: string,
@@ -169,6 +172,17 @@ async function browserApiPayload(
   path: string,
   options: BrowserApiOptions
 ): Promise<{ readonly response: Response; readonly payload: unknown }> {
+  if ((options.method ?? "GET") === "GET" && options.body === undefined) {
+    const identity = browserCookie(csrfCookieName()) ?? "anonymous";
+    return coalesceRead(`${identity}:${path}`, signal => loadBrowserApiPayload(path, { ...options, signal }), options.signal);
+  }
+  return loadBrowserApiPayload(path, options);
+}
+
+async function loadBrowserApiPayload(
+  path: string,
+  options: BrowserApiOptions
+): Promise<{ readonly response: Response; readonly payload: unknown }> {
   if (!path.startsWith("/app/api/")) {
     throw new Error("Browser API path must use the same-origin BFF");
   }
@@ -194,7 +208,10 @@ async function browserApiPayload(
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
 
-  const response = await sessionAwareFetch(path, {
+  const startedAt = performance.now();
+  let response: Response;
+  try {
+    response = await sessionAwareFetch(path, {
     method,
     headers,
     ...(options.body !== undefined
@@ -203,8 +220,15 @@ async function browserApiPayload(
     credentials: "same-origin",
     cache: "no-store",
     ...(options.signal ? { signal: options.signal } : {})
-  });
+    });
+  } catch (error) {
+    if (!options.signal?.aborted) {
+      recordAnalyticsRequest(path, method, performance.now() - startedAt, 0, isSemanticReadRequest(path, method));
+    }
+    throw error;
+  }
   const payload = await response.json().catch(() => undefined);
+  recordAnalyticsRequest(path, method, performance.now() - startedAt, response.status, isSemanticReadRequest(path, method), hasAnalyticsResult(path, payload));
   if (!response.ok) {
     throw browserApiError(
       response.status,

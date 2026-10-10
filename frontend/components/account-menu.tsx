@@ -35,10 +35,11 @@ export function AccountMenu({
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape" && !rootRef.current?.querySelector(".custom-select.is-open")) setOpen(false);
     };
     const closeForAnotherDropdown = (event: Event) => {
-      if ((event as CustomEvent<EventTarget>).detail !== rootRef.current) {
+      const owner = (event as CustomEvent<EventTarget>).detail;
+      if (owner !== rootRef.current && !(owner instanceof Node && rootRef.current?.contains(owner))) {
         setOpen(false);
       }
     };
@@ -98,7 +99,7 @@ export function AccountMenu({
         </span>
       </button>
       {open && (
-        <div className="account-popover" data-exclusive-dropdown-layer>
+        <div className="account-popover" data-exclusive-dropdown-layer data-dropdown-portal-root>
           <strong>{user.displayName}</strong>
           <span>{user.email}</span>
           <LanguageSwitcher />

@@ -1,0 +1,57 @@
+name: Quality
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      test_https:
+        description: Run real HTTPS checks on the dedicated test stand
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_validation_only
+      NEXT_TELEMETRY_DISABLED: '1'
+      WEB_PUBLIC_URL: https://ci.example.invalid
+      API_PUBLIC_URL: https://api.ci.example.invalid
+      PLATFORM_API_INTERNAL_URL: http://127.0.0.1:4000
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma:validate
+      - run: pnpm prisma:generate
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: node infrastructure/i18n/build-dictionary.mjs --check
+      - run: pnpm test
+      - run: pnpm build
+  https:
+    needs: source
+    if: github.event_name == 'workflow_dispatch' && inputs.test_https && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, seo-platform-ui-test]
+    environment: test-stand
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Real HTTPS UX regression
+        env:
+          SEO_PLATFORM_E2E_CONFIRM: CREATE_TEST_DATA
+        run: bash infrastructure/vps/test-usability.sh
+      # Artifacts stay private on the stand. Never upload session fixtures or raw logs.

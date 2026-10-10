@@ -22,7 +22,7 @@ export default async function HttpStatusCheckerPage({
   return (
     <>
       <UiElement tag="nav" uiLabels={{"aria-label": "Хлебные крошки"}}  className="app-breadcrumbs">
-        <a href="/app/tools"><UiText text="Инструменты" /></a>
+        <a href={`/app/projects/${projectId}/pages`}><UiText text="Карта страниц" /></a>
         <span aria-hidden="true">/</span>
         <span aria-current="page"><UiText text="Обход сайта" /></span>
       </UiElement>

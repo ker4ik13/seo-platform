@@ -47,6 +47,7 @@ import { UiText, useUiLocale } from "./ui-locale";
 
 
 export function SemanticFrequencyDialog({
+  currentUserId,
   onClose,
   onStarted,
   projectId,
@@ -58,6 +59,7 @@ export function SemanticFrequencyDialog({
   workspaceId,
   mode: requestedMode = "FREQUENCY"
 }: Readonly<{
+  currentUserId?: string;
   mode?: FrequencyCollectionMode;
   onClose: () => void;
   onStarted: (collection: FrequencyCollectionSummary) => void;
@@ -309,7 +311,6 @@ export function SemanticFrequencyDialog({
             <header className="semantic-workflow-panel-heading">
               <h3><UiText text="Источник данных" /></h3>
               <a className="semantic-dialog-link" href="/app/settings/integrations"><UiText text="Управлять" /></a>
-              <p><UiText text={seasonalityMode ? "Сезонность Wordstat собирается через XMLStock или Arsenkin и сохраняется для каждого запроса." : "Выберите подключение, через которое будет выполнен сбор."} /></p>
             </header>
             {loadingSources ? (
               <div className="semantic-dialog-loading" role="status"><UiText text="Загружаем подключения…" /></div>
@@ -370,7 +371,6 @@ export function SemanticFrequencyDialog({
           <section className="semantic-workflow-panel semantic-settings-panel">
             <header>
               <h3><UiText text="Настройки сбора" /></h3>
-              <p><UiText text={seasonalityMode ? "Укажите период, детализацию, регион, устройство и виды частотности." : "Укажите регион, устройство и виды частотности."} /></p>
             </header>
             <div className="semantic-frequency-settings">
               {!seasonalityMode && <fieldset className="semantic-check-list">
@@ -401,6 +401,8 @@ export function SemanticFrequencyDialog({
                   <div className="semantic-workflow-field semantic-seasonality-date-field">
                     <span><UiText text="Период" /></span>
                     <CustomDateRangePicker
+                      {...(currentUserId ? { sessionKey: `date-range:seasonality:${currentUserId}:${projectId}:${granularity}` } : {})}
+                      followToday={granularity === "DAY"}
                       active
                       availableRange={seasonalityAvailableRange}
                       dialogLabel="Выбрать период сезонности"
@@ -445,8 +447,6 @@ export function SemanticFrequencyDialog({
                   onChange={({ code }) => setRegionCode(code)}
                   value={regionCode}
                 />
-                <small>
-                  <UiText text="Первый запуск — Россия; затем используется регион последнего успешного запуска." /></small>
               </label>
               <fieldset className="semantic-segmented-field">
                 <legend><UiText text="Устройство" /></legend>
@@ -474,7 +474,6 @@ export function SemanticFrequencyDialog({
           <section className="semantic-workflow-panel semantic-frequency-scope-panel">
             <header>
               <h3><UiText text="Охват сбора" /></h3>
-              <p><UiText text="Выберите все запросы, конкретные запросы или папки." /></p>
             </header>
             <SemanticOperationScope
               activeGroupId={activeGroupId}

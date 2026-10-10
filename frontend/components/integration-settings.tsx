@@ -25,6 +25,7 @@ import {
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
 import { ProviderLogo } from "./provider-logo";
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { WorkspaceIntegrationRouting } from "./workspace-integration-routing";
 import { UiText, useUiLocale } from "./ui-locale";
 import { isVisibleIntegrationProvider } from "../lib/integration-visibility";
@@ -551,7 +552,6 @@ export function IntegrationSettings({
           bodyClassName="integration-credential-modal-body"
           className="integration-credential-modal"
           closeDisabled={saving}
-          description="Браузер передаёт ключ в same-origin API по защищённому HTTPS-соединению. Секрет шифруется внутри сервиса интеграций и больше не показывается."
           onClose={() => setShowCreate(false)}
           size="large"
           title="Новое подключение"
@@ -734,8 +734,6 @@ export function IntegrationSettings({
         <header className="security-card-header">
           <div>
             <h2><UiText text="Сохранённые подключения" /></h2>
-            <p>
-              <UiText text="В задания передаётся только ID подключения; plaintext API-ключ в очереди, события и ответы не попадает." /></p>
           </div>
           <span className="security-status">
             {credentials.length} <UiText text="подключений" before=" " /></span>
@@ -1119,7 +1117,7 @@ export function IntegrationSettings({
               <div>
                 <h2 id="integration-revoke-title"><UiText text="Отключить подключение?" /></h2>
                 <p>
-                  <UiText text="После подтверждения ключ «" />{revokeTarget.label}<UiText text="» будет отозван и перезаписан в активном vault." /></p>
+                  <UiText text="Подключение «{0}» будет отключено." values={[revokeTarget.label]} /></p>
               </div>
               <button
                 aria-label={uiText("Закрыть окно")}
@@ -1142,7 +1140,7 @@ export function IntegrationSettings({
               </div>
             </div>
             {revokeError && <IntegrationErrorAlert error={revokeError} />}
-            <div className="integration-dialog-actions">
+            <ConfirmationActions>
               <button
                 className="secondary-button"
                 disabled={Boolean(revokeOperation)}
@@ -1158,7 +1156,7 @@ export function IntegrationSettings({
               >
                 {revokeOperation === "revoke" ? <UiText text="Отключаем…" /> : <UiText text="Отключить" />}
               </button>
-            </div>
+            </ConfirmationActions>
           </section>
         </div>
       )}

@@ -10,6 +10,7 @@ export interface CrawlDuplicateSnapshot {
   readonly sequence: number;
   readonly finalUrl: string;
   readonly statusCode: number;
+  readonly indexability?: string;
   readonly contentType: string;
   readonly title: string | null;
   readonly description: string | null;
@@ -96,6 +97,7 @@ function isEligibleHtmlSnapshot(snapshot: CrawlDuplicateSnapshot): boolean {
   return (
     snapshot.statusCode >= 200 &&
     snapshot.statusCode < 300 &&
+    snapshot.indexability !== "REDIRECTED" &&
     snapshot.contentType.toLocaleLowerCase("en-US").startsWith("text/html")
   );
 }

@@ -5,7 +5,7 @@ import { AdminOperationCancel } from "../../components/admin-operation-cancel";
 import { Icon } from "../../components/icon";
 import { ProviderLogo } from "../../components/provider-logo";
 import { adminOperationName, adminSearchProductLabel, operationFailureLabel } from "../../lib/admin-operation-presentation";
-import { arsenkinProviderProgressLabel } from "../../lib/operation-status-presentation";
+import { arsenkinProviderProgressLabel, operationStageLabel } from "../../lib/operation-status-presentation";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -345,22 +345,7 @@ function operationStage(operation: AdminOperationSummary): string {
       ? "Сбор и сохранение позиций"
       : "Подготовка запросов к съёму";
   }
-  return ({
-    PREPARING_SCOPE: "Подготовка охвата",
-    WAITING_FOR_QUEUE: "Ожидает очереди",
-    READY_TO_SUBMIT: "Готово к отправке",
-    SUBMITTING: "Отправка провайдеру",
-    WAITING_PROVIDER: "Ожидает ответ провайдера",
-    FETCHING_RESULT: "Получение результата",
-    PERSISTING_RESULT: "Сохранение результата",
-    FINALIZING: "Завершение операции",
-    SUBMIT_OUTCOME_UNKNOWN: "Нужна сверка отправки",
-    waiting_provider_capacity: "Ожидает свободный слот",
-    retry_scheduled: "Ожидает",
-    collecting: "Сбор данных",
-    provider_poll: "Arsenkin обрабатывает",
-    FINISHED: "Завершено"
-  } as Readonly<Record<string, string>>)[operation.stage ?? ""] ?? operation.stage ?? "—";
+  return operationStageLabel(operation.stage, operation.status);
 }
 function progressPercent(operation: AdminOperationSummary): number | undefined {
   if (!operation.progress.total) return undefined;

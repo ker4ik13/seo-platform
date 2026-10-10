@@ -2,7 +2,7 @@
 .hero { align-items: center; background: linear-gradient(135deg, #f1efff, #fff); border: 1px solid #ddd9ff; border-radius: 16px; display: flex; gap: 16px; padding: 22px; }
 .heroIcon { align-items: center; background: #fff; border: 1px solid #d9d4ff; border-radius: 14px; color: var(--brand); display: flex; flex: 0 0 54px; height: 54px; justify-content: center; }
 .heroIcon svg { height: 25px; width: 25px; }
-.hero span { color: var(--brand); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.hero span { color: var(--brand); font-size: var(--font-meta, 11px); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .hero h1 { font-size: clamp(24px, 3vw, 34px); letter-spacing: -.04em; margin-top: 3px; }
 .hero p { color: var(--muted); font-size: 12px; line-height: 1.55; margin-top: 6px; max-width: 760px; }
 .layout { align-items: start; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 290px; }
@@ -11,13 +11,13 @@
 .panel { display: grid; gap: 16px; padding: 18px; }
 .panel > header { align-items: flex-start; display: flex; gap: 11px; }
 .panel > header h2, .summary h2 { font-size: 15px; }
-.panel > header p { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.panel > header p { color: var(--muted); font-size: var(--font-meta, 11px); margin-top: 3px; }
 .step { align-items: center; background: #efedff; border-radius: 9px; color: var(--brand); display: flex; flex: 0 0 30px; font-size: 11px; font-weight: 800; height: 30px; justify-content: center; }
 .field { display: grid; gap: 6px; min-width: 0; }
 .field > span { font-size: 11px; font-weight: 700; }
 .field input, .field textarea { background: #fff; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--text); font: inherit; font-size: 12px; min-width: 0; padding: 10px 11px; resize: vertical; width: 100%; }
 .field input:focus, .field textarea:focus { border-color: #aaa1f4; box-shadow: 0 0 0 3px rgba(103, 88, 239, .1); outline: 0; }
-.field small, .summary > small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.field small, .summary > small { color: var(--muted); font-size: var(--font-meta, 11px); line-height: 1.45; }
 .segmented { background: #f4f4f8; border-radius: 10px; display: grid; gap: 3px; grid-template-columns: 1fr 1fr; padding: 3px; }
 .segmented button, .presetRow button { align-items: center; background: transparent; border: 0; border-radius: 7px; color: var(--muted); display: inline-flex; font-size: 11px; font-weight: 700; justify-content: center; line-height: 1.2; min-height: 36px; text-align: center; }
 .segmented button:hover:not(:disabled), .presetRow button:hover:not(:disabled) { background: #eeecff; color: var(--brand); }
@@ -26,18 +26,18 @@
 .siteScope svg { color: var(--brand); flex: 0 0 20px; height: 20px; width: 20px; }
 .siteScope strong, .siteScope span { display: block; }
 .siteScope strong { font-size: 12px; }
-.siteScope span { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.siteScope span { color: var(--muted); font-size: var(--font-meta, 11px); margin-top: 3px; }
 .fileButton { align-items: center; border: 1px dashed #c9c4ef; border-radius: 9px; color: var(--brand); cursor: pointer; display: flex; gap: 8px; justify-content: center; min-height: 42px; padding: 8px; }
 .fileButton:hover { background: #f8f7ff; border-color: #a99ff0; }
 .fileButton:focus-within { box-shadow: 0 0 0 3px rgba(91, 61, 245, .14); }
 .fileButton svg { height: 15px; width: 15px; }
-.fileButton span { font-size: 10px; font-weight: 700; }
+.fileButton span { font-size: var(--font-meta, 11px); font-weight: 700; }
 .fileButton input { height: 1px; opacity: 0; position: absolute; width: 1px; }
 .presetRow { display: grid; gap: 7px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .presetRow button { border: 1px solid var(--line); }
 .presetRow button[aria-pressed="true"] { border-color: #c7c1ff; }
 .twoColumns { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.safetyNote { align-items: center; background: #edf9f3; border-radius: 9px; color: #25724a; display: flex; font-size: 9px; gap: 7px; line-height: 1.4; padding: 9px 10px; }
+.safetyNote { align-items: center; background: #edf9f3; border-radius: 9px; color: #25724a; display: flex; font-size: var(--font-meta, 11px); gap: 7px; line-height: 1.4; padding: 9px 10px; }
 .safetyNote svg { flex: 0 0 14px; height: 14px; width: 14px; }
 .advanced { overflow: hidden; }
 .advanced > summary { align-items: center; cursor: pointer; display: flex; justify-content: space-between; list-style: none; padding: 15px 18px; }
@@ -45,29 +45,65 @@
 .advanced > summary:hover { background: #faf9ff; }
 .advanced > summary strong, .advanced > summary small { display: block; }
 .advanced > summary strong { font-size: 12px; }
-.advanced > summary small { color: var(--muted); font-size: 9px; margin-top: 3px; }
-.advanced > summary b { color: var(--brand); font-size: 10px; }
+.advanced > summary small { color: var(--muted); font-size: var(--font-meta, 11px); margin-top: 3px; }
+.advanced > summary b { color: var(--brand); font-size: var(--font-meta, 11px); }
 .advanced[open] > summary { border-bottom: 1px solid var(--line); }
 .advancedBody { display: grid; gap: 14px; padding: 18px; }
 .checkbox { align-items: flex-start; display: flex; gap: 9px; }
 .checkbox input { accent-color: var(--brand); margin-top: 2px; }
 .checkbox strong, .checkbox small { display: block; }
 .checkbox strong { font-size: 11px; }
-.checkbox small { color: var(--muted); font-size: 9px; line-height: 1.4; margin-top: 3px; }
+.checkbox small { color: var(--muted); font-size: var(--font-meta, 11px); line-height: 1.4; margin-top: 3px; }
 .checkList { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .checkList .checkbox { background: #fafaff; border: 1px solid var(--line); border-radius: 11px; min-height: 92px; padding: 13px; }
 .checkList .checkbox:has(input:checked) { background: #f5f3ff; border-color: #cec8ff; }
 .checkList .checkbox input { flex: 0 0 16px; height: 16px; width: 16px; }
 .checkList .checkbox strong { font-size: 12px; }
-.checkList .checkbox small { font-size: 10px; line-height: 1.5; }
+.checkList .checkbox small { font-size: var(--font-meta, 11px); line-height: 1.5; }
 .summary { display: grid; gap: 14px; padding: 17px; position: sticky; top: 76px; }
 .summary dl { display: grid; margin: 0; }
 .summary dl > div { align-items: baseline; border-bottom: 1px solid var(--line); display: flex; gap: 12px; justify-content: space-between; padding: 9px 0; }
-.summary dt { color: var(--muted); font-size: 9px; }
-.summary dd { font-size: 10px; font-weight: 700; margin: 0; max-width: 160px; text-align: right; }
+.summary dt { color: var(--muted); font-size: var(--font-meta, 11px); }
+.summary dd { font-size: var(--font-meta, 11px); font-weight: 700; margin: 0; max-width: 160px; text-align: right; }
 .summary button { font-size: 11px; justify-content: center; min-height: 42px; white-space: nowrap; width: 100%; }
-.restriction { background: #fff3f4; border-radius: 8px; color: #a52b3b; font-size: 9px; line-height: 1.4; padding: 9px; }
+.restriction { background: #fff3f4; border-radius: 8px; color: #a52b3b; font-size: var(--font-meta, 11px); line-height: 1.4; padding: 9px; }
 .error { background: #fff1f3; border: 1px solid #ffd1d8; border-radius: 10px; color: #a52b3b; font-size: 11px; padding: 11px 13px; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .summary { position: static; } }
 @media (max-width: 720px) { .checkList { grid-template-columns: 1fr; } .checkList .checkbox { min-height: 0; } }
 @media (max-width: 620px) { .hero { align-items: flex-start; padding: 16px; } .heroIcon { flex-basis: 42px; height: 42px; } .twoColumns { grid-template-columns: 1fr; } .presetRow { grid-template-columns: repeat(2, 1fr); } .panel, .advancedBody { padding: 14px; } }
+
+.hero { background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 6px 0 14px; justify-content: space-between; }
+.hero h1 { font-size: 20px; margin: 0; }
+.hero small { display: block; color: var(--muted); font-size: 11px; margin-top: 6px; }
+.hero > a { font-size: 12px; min-height: 34px; }
+.hero > a svg { width: 14px; height: 14px; }
+.layout { grid-template-columns: minmax(0,1fr) 320px; gap: 18px; }
+.panel, .summary, .advanced { border-radius: 9px; box-shadow: none; }
+.panel { padding: 16px; gap: 13px; }
+.panel h2, .summary h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.field input, .field textarea { font-size: 12px; min-height: 36px; padding: 8px 10px; border-radius: 7px; }
+.field > span { font-weight: 500; color: var(--muted); }
+.presetRow { display: flex; flex-wrap: wrap; gap: 6px; }
+.presetRow button { padding-inline: 12px; min-height: 32px; }
+.checkbox { align-items: center; font-size: 12px; }
+.summary { top: 76px; padding: 16px; }
+.summary dd { font-weight: 500; }
+.summary button { font-size: 12px; }
+.advanced > summary { padding: 11px 14px; }
+.advanced > summary svg { width: 15px; height: 15px; color: var(--muted); }
+.advanced > summary strong { font-weight: 500; }
+.advancedBody { padding: 14px; }
+.progressWorkspace { display: grid; gap: 18px; min-width: 0; }
+.progressHeader { display: flex; align-items: center !important; justify-content: space-between; gap: 12px; }
+.progressNumbers { display: flex; flex-wrap: wrap; gap: 28px; }
+.progressNumbers > div { display: grid; gap: 6px; }
+.progressNumbers small { color: var(--muted); font-size: 11px; }
+.progressNumbers strong { font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.progressTrack { height: 6px; border-radius: 6px; background: #f0eef8; overflow: hidden; }
+.progressTrack span { height: 100%; display: block; background: var(--brand); }
+.progressActions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.progressActions > :where(a,button) { min-height: 34px; font-size: 12px; }
+.progressActions svg { height: 14px; width: 14px; }
+.backoff { padding: 11px 12px; border-radius: 8px; background: #fff8e8; color: #91620d; font-size: 12px; line-height: 1.6; }
+@media(max-width: 900px) { .layout { grid-template-columns: minmax(0,1fr); } }
+@media(max-width: 620px) { .hero { padding: 6px 0 12px; align-items: center; } .hero > a { padding-inline: 9px; } .field input, .field textarea { font-size: 16px; } .progressNumbers { gap: 16px; } }

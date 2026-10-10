@@ -8,6 +8,9 @@ import {
   type ProjectPositionTopThreshold,
   type SemanticRankDimension
 } from "@seo-platform/contracts";
+import type { ProjectOnboardingSettings } from "@seo-platform/contracts";
+import { projectChartDefaultTops } from "../lib/project-chart-defaults";
+import { calendarToday, clearCalendarRangeSession, readCalendarRangeSession, sessionCalendarRange } from "../lib/date-range-session";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   projectPositionHistoryAvailableRange,
@@ -48,6 +51,9 @@ type SelectedPeriod = ProjectPositionHistoryPeriod | "CUSTOM";
 
 export function ProjectPositionHistoryChart({
   preferenceKey,
+  onboarding,
+  projectId,
+  currentUserId,
   dimensions,
   history,
   includeUntracked,
@@ -59,6 +65,9 @@ export function ProjectPositionHistoryChart({
 }: Readonly<{
   dimensions: readonly SemanticRankDimension[];
   preferenceKey: string;
+  onboarding?: ProjectOnboardingSettings;
+  projectId?: string;
+  currentUserId?: string;
   history: ProjectPositionHistory;
   includeUntracked: boolean;
   onIncludeUntrackedChange: (includeUntracked: boolean) => void;
@@ -74,16 +83,27 @@ export function ProjectPositionHistoryChart({
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [chartWidth, setChartWidth] = useState(DEFAULT_CHART_WIDTH);
   const plotRef = useRef<HTMLDivElement>(null);
+  const dateSessionKey = `date-range:chart:${preferenceKey}`;
+  useEffect(() => {
+    try {
+      const saved = readCalendarRangeSession(window.sessionStorage, dateSessionKey);
+      if (!saved) return;
+      setCustomRange(sessionCalendarRange({ value: saved, available: { from: saved.from, to: calendarToday() }, session: saved, today: calendarToday() }));
+      setPeriod("CUSTOM");
+    } catch { /* Default period remains usable without optional storage. */ }
+  }, [dateSessionKey]);
   const [visibleTops, setVisibleTops] = useState<
     ReadonlySet<ProjectPositionTopThreshold>
   >(() => new Set(projectPositionTopThresholds));
   const [activePointId, setActivePointId] = useState<string>();
   useEffect(() => {
     try {
-      const saved: unknown = JSON.parse(window.localStorage.getItem(preferenceKey) ?? "null");
+      const scopedKey = preferenceKey + ":" + rankDimensionKey;
+      const saved: unknown = JSON.parse(window.localStorage.getItem(scopedKey) ?? window.localStorage.getItem(preferenceKey) ?? "null");
       if (Array.isArray(saved)) setVisibleTops(new Set(projectPositionTopThresholds.filter((top) => saved.includes(top))));
+      else setVisibleTops(new Set(projectId && currentUserId ? projectChartDefaultTops(onboarding, rankDimensionKey, projectId, currentUserId, window.localStorage) : projectPositionTopThresholds));
     } catch { /* Default series remain available without storage. */ }
-  }, [preferenceKey]);
+  }, [preferenceKey, onboarding, rankDimensionKey, projectId, currentUserId]);
   const availableTops = projectPositionTopThresholds.filter((top) => top <= 50 || history.points.some((point) => projectPositionTopValue(point, top) > projectPositionTopValue(point, top === 100 ? 50 : 100)));
   const availableRange = useMemo(
     () => projectPositionHistoryAvailableRange(history.points),
@@ -140,7 +160,7 @@ export function ProjectPositionHistoryChart({
       const next = new Set(current);
       if (next.has(top)) next.delete(top);
       else next.add(top);
-      try { window.localStorage.setItem(preferenceKey, JSON.stringify([...next])); } catch { /* In-memory preferences still work. */ }
+      try { window.localStorage.setItem(preferenceKey + ":" + rankDimensionKey, JSON.stringify([...next])); } catch { /* In-memory preferences still work. */ }
       return next;
     });
   }
@@ -179,6 +199,7 @@ export function ProjectPositionHistoryChart({
               className={period === value ? "is-active" : ""}
               key={value}
               onClick={() => {
+                try { clearCalendarRangeSession(window.sessionStorage, dateSessionKey); } catch { /* Optional browser preference. */ }
                 setPeriod(value);
                 setDatePickerOpen(false);
               }}
@@ -189,6 +210,7 @@ export function ProjectPositionHistoryChart({
           ))}
           {availableRange && (
             <ProjectPositionDateRangePicker
+              sessionKey={dateSessionKey}
               active={period === "CUSTOM"}
               availableRange={availableRange}
               onApply={(range) => {

@@ -14,7 +14,6 @@ import type {
   ClusteringProposalResultRow,
   ClusteringProposalSectionResult,
   CrawlOperationResultPage,
-  CrawlOperationResultRow,
   ConfirmKeywordResearchRunInput,
   FrequencyOperationResult,
   FrequencyOperationResultRow,
@@ -36,7 +35,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties
@@ -89,6 +87,7 @@ import {
 } from "../lib/seo-regions";
 import { ProviderLogo } from "./provider-logo";
 import { CustomSelect } from "./custom-select";
+import { CrawlResultTable as CrawlTable } from "./crawl-result-table";
 import { Icon } from "./icon";
 import { OperationIdentity } from "./operation-identity";
 import { KeywordResearchRunPreview } from "./keyword-research-workspace";
@@ -356,7 +355,6 @@ export function OperationResultWorkspace({
         <div className={styles.state} role="status">
           <span className={styles.spinner} />
           <strong><UiText text="Загружаем результат операции…" /></strong>
-          <p><UiText text="Получаем только данные этого запуска в текущем проекте." /></p>
         </div>
       </section>
     );
@@ -2333,158 +2331,6 @@ function rankKeywordLabel(row: RankOperationResultRow) {
     : row.keyword;
 }
 
-function CrawlTable({ result }: Readonly<{ result: CrawlOperationResultPage }>) {
-  const uiLocale = useUiLocale().locale;
-  const { t: uiText } = useUiLocale();
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<CrawlStatusFilter>("ALL");
-  const [sort, setSort] = useState<CrawlSort>("SEQUENCE_ASC");
-  const rows = useMemo(
-    () => crawlRows(result.rows, query, statusFilter, sort),
-    [query, result.rows, sort, statusFilter]
-  );
-  if (result.rows.length === 0) {
-    return <EmptyRows active={isActiveStatus(result.crawl.status)} />;
-  }
-  const httpStatusCheck = result.crawl.config.purpose === "HTTP_STATUS_CHECK";
-  return (
-    <div className={styles.crawlResult}>
-      <div className={styles.crawlToolbar}>
-        <label>
-          <span className={styles.visuallyHidden}><UiText text="Поиск URL" /></span>
-          <input
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={uiText("Найти URL")}
-            type="search"
-            value={query}
-          />
-        </label>
-        <CustomSelect
-          aria-label={uiText("Фильтр HTTP-ответов")}
-          onChange={(event) => setStatusFilter(event.target.value as CrawlStatusFilter)}
-          value={statusFilter}
-        >
-          <option value="ALL"><UiText text="Все ответы" /></option>
-          <option value="2XX"><UiText text="Успешные · 2xx" /></option>
-          <option value="3XX"><UiText text="Ответы · 3xx" /></option>
-          <option value="4XX"><UiText text="Ошибки клиента · 4xx" /></option>
-          <option value="5XX"><UiText text="Ошибки сервера · 5xx" /></option>
-          <option value="REDIRECTS"><UiText text="Только редиректы" /></option>
-          <option value="ISSUES"><UiText text="Только с проблемами" /></option>
-        </CustomSelect>
-        <CustomSelect
-          aria-label={uiText("Сортировка результатов")}
-          onChange={(event) => setSort(event.target.value as CrawlSort)}
-          value={sort}
-        >
-          <option value="SEQUENCE_ASC"><UiText text="В порядке обхода" /></option>
-          <option value="STATUS_ASC"><UiText text="HTTP-код · по возрастанию" /></option>
-          <option value="STATUS_DESC"><UiText text="HTTP-код · по убыванию" /></option>
-          <option value="TIME_DESC"><UiText text="Самые медленные" /></option>
-          <option value="TIME_ASC"><UiText text="Самые быстрые" /></option>
-          <option value="URL_ASC"><UiText text="URL · А—Я" /></option>
-        </CustomSelect>
-        <span>{formatInteger(rows.length, uiLocale)} <UiText text="из" before=" " after=" " />{formatInteger(result.rows.length, uiLocale)}</span>
-      </div>
-      {rows.length === 0 ? (
-        <div className={styles.filteredEmpty}>
-          <strong><UiText text="По выбранным условиям страниц нет" /></strong>
-          <button onClick={() => { setQuery(""); setStatusFilter("ALL"); }} type="button"><UiText text="Сбросить фильтры" /></button>
-        </div>
-      ) : httpStatusCheck ? (
-        <div className={styles.tableScroll}>
-          <table className={`${styles.table} ${styles.httpTable}`}>
-            <caption><UiText text="HTTP-ответы этого запуска" /></caption>
-            <thead><tr><th>#</th><th>URL</th><th>HTTP</th><th className={styles.centerCell}><UiText text="Цепочка редиректов" /></th><th className={styles.centerCell}><UiText text="Время" /></th><th className={styles.centerCell}><UiText text="Размер" /></th><th className={styles.centerCell}><UiText text="Тип ответа" /></th></tr></thead>
-            <tbody>{rows.map((row) => (
-              <tr key={`${row.sequence}:${row.requestedUrl}`}>
-                <td>{row.sequence + 1}</td>
-                <td className={`${styles.primaryCell} ${styles.urlCell}`}><ExternalUrl value={row.finalUrl} />{row.requestedUrl !== row.finalUrl && <small><UiText text="Запрошено:" after=" " />{row.requestedUrl}</small>}</td>
-                <td><HttpStatus status={row.statusCode} /></td>
-                <td className={styles.centerCell}><RedirectChain row={row} /></td>
-                <td className={`${styles.numberCell} ${styles.centerCell}`}>{formatInteger(row.responseTimeMs, uiLocale)} <UiText text="мс" before=" " /></td>
-                <td className={`${styles.numberCell} ${styles.centerCell}`}>{formatBytes(row.sizeBytes)}</td>
-                <td className={styles.centerCell}>{row.contentType || "—"}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      ) : (
-        <div className={styles.tableScroll}>
-          <table className={`${styles.table} ${styles.wideTable}`}>
-            <caption><UiText text="Страницы технического аудита" /></caption>
-            <thead><tr><th>#</th><th>URL</th><th>HTTP</th><th><UiText text="Индексируемость" /></th><th>Title / H1</th><th><UiText text="Проблемы" /></th><th><UiText text="Время" /></th><th><UiText text="Размер" /></th><th><UiText text="Слова" /></th><th><UiText text="Ссылки" /></th></tr></thead>
-            <tbody>{rows.map((row) => (
-              <tr key={`${row.sequence}:${row.requestedUrl}`}>
-                <td>{row.sequence + 1}</td>
-                <td className={`${styles.primaryCell} ${styles.urlCell}`}><ExternalUrl value={row.finalUrl} />{row.requestedUrl !== row.finalUrl && <small><UiText text="Запрошено:" after=" " />{row.requestedUrl}</small>}</td>
-                <td><HttpStatus status={row.statusCode} /></td>
-                <td>{<UiText text={indexabilityLabel(row.indexability) ?? ""} />}</td>
-                <td className={styles.longCell}><strong>{row.title ?? <UiText text="Без title" />}</strong><small>{row.h1 ?? <UiText text="Без H1" />}</small></td>
-                <td><IssueSummary row={row} /></td>
-                <td className={styles.numberCell}>{formatInteger(row.responseTimeMs, uiLocale)} <UiText text="мс" before=" " /></td>
-                <td className={styles.numberCell}>{formatBytes(row.sizeBytes)}</td>
-                <td className={styles.numberCell}>{formatInteger(row.wordCount, uiLocale)}</td>
-                <td className={styles.numberCell}>{formatInteger(row.internalLinkCount, uiLocale)} / {formatInteger(row.externalLinkCount, uiLocale)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-type CrawlStatusFilter = "ALL" | "2XX" | "3XX" | "4XX" | "5XX" | "REDIRECTS" | "ISSUES";
-type CrawlSort = "SEQUENCE_ASC" | "STATUS_ASC" | "STATUS_DESC" | "TIME_ASC" | "TIME_DESC" | "URL_ASC";
-
-function crawlRows(
-  source: readonly CrawlOperationResultRow[],
-  query: string,
-  statusFilter: CrawlStatusFilter,
-  sort: CrawlSort
-): readonly CrawlOperationResultRow[] {
-  const normalizedQuery = query.trim().toLocaleLowerCase("ru");
-  const filtered = source.filter((row) => {
-    if (normalizedQuery && !`${row.requestedUrl} ${row.finalUrl}`.toLocaleLowerCase("ru").includes(normalizedQuery)) return false;
-    if (statusFilter === "REDIRECTS") return row.redirectChain.length > 0 || (row.statusCode >= 300 && row.statusCode < 400);
-    if (statusFilter === "ISSUES") return row.issues.length > 0 || row.statusCode >= 400;
-    if (statusFilter === "2XX") return row.statusCode >= 200 && row.statusCode < 300;
-    if (statusFilter === "3XX") return row.statusCode >= 300 && row.statusCode < 400;
-    if (statusFilter === "4XX") return row.statusCode >= 400 && row.statusCode < 500;
-    if (statusFilter === "5XX") return row.statusCode >= 500;
-    return true;
-  });
-  return [...filtered].sort((left, right) => {
-    if (sort === "STATUS_ASC") return left.statusCode - right.statusCode || left.sequence - right.sequence;
-    if (sort === "STATUS_DESC") return right.statusCode - left.statusCode || left.sequence - right.sequence;
-    if (sort === "TIME_ASC") return left.responseTimeMs - right.responseTimeMs || left.sequence - right.sequence;
-    if (sort === "TIME_DESC") return right.responseTimeMs - left.responseTimeMs || left.sequence - right.sequence;
-    if (sort === "URL_ASC") return left.requestedUrl.localeCompare(right.requestedUrl, "ru");
-    return left.sequence - right.sequence;
-  });
-}
-
-function RedirectChain({ row }: Readonly<{ row: CrawlOperationResultRow }>) {
-  if (row.redirectChain.length === 0) return <span className={styles.noIssues}><UiText text="Нет" /></span>;
-  const chain = [row.requestedUrl, ...row.redirectChain];
-  if (chain.at(-1) !== row.finalUrl) chain.push(row.finalUrl);
-  return (
-    <details className={styles.redirectChain}>
-      <summary>{row.redirectChain.length} {pluralRedirect(row.redirectChain.length)}</summary>
-      <ol>{chain.map((url, index) => <li key={`${index}:${url}`}><ExternalUrl value={url} /></li>)}</ol>
-    </details>
-  );
-}
-
-function pluralRedirect(value: number): string {
-  const mod100 = value % 100;
-  const mod10 = value % 10;
-  if (mod100 >= 11 && mod100 <= 14) return "переходов";
-  if (mod10 === 1) return "переход";
-  if (mod10 >= 2 && mod10 <= 4) return "перехода";
-  return "переходов";
-}
 
 function ResearchTable({ result }: Readonly<{ result: KeywordResearchRunSummary }>) {
   const uiLocale = useUiLocale().locale;
@@ -2529,15 +2375,7 @@ function RankState({ state }: Readonly<{ state: RankOperationResultRow["state"] 
   return <span className={`${styles.itemStatus} ${state === "FOUND" ? styles.found : state === "NOT_FOUND" ? styles.notFound : ""}`}>{state === "FOUND" ? <UiText text="Найден" /> : state === "NOT_FOUND" ? <UiText text="Не найден" /> : <UiText text="Ожидает" />}</span>;
 }
 
-function HttpStatus({ status }: Readonly<{ status: number }>) {
-  const tone = status >= 500 ? styles.httpError : status >= 400 ? styles.httpWarning : status >= 300 ? styles.httpRedirect : styles.httpSuccess;
-  return <span className={`${styles.httpStatus} ${tone}`}>{status}</span>;
-}
 
-function IssueSummary({ row }: Readonly<{ row: CrawlOperationResultRow }>) {
-  if (row.issues.length === 0) return <span className={styles.noIssues}><UiText text="Нет" /></span>;
-  return <span className={styles.issueSummary} title={row.issues.map(({ title }) => title).join("\n")}>{row.issues.length} · {row.issues.slice(0, 2).map(({ title }) => title).join(", ")}</span>;
-}
 
 function ExternalUrl({ value }: Readonly<{ value: string | undefined }>) {
   const { t: uiText } = useUiLocale();
@@ -3013,13 +2851,11 @@ function rankPosition(row: RankOperationResultRow, uiLocale: string = "ru-RU"): 
 function formatOptionalNumber(value: number | undefined, uiLocale: string = "ru-RU"): string { return value === undefined ? "—" : formatInteger(value, uiLocale); }
 function formatDecimal(value: string, uiLocale: string = "ru-RU"): string { const number = Number(value); return Number.isSafeInteger(number) ? formatInteger(number, uiLocale) : value; }
 function formatInteger(value: number, uiLocale: string = "ru-RU"): string { return new Intl.NumberFormat(uiLocale).format(value); }
-function formatBytes(value: number): string { if (value < 1024) return `${value} Б`; if (value < 1_048_576) return `${(value / 1024).toFixed(1)} КБ`; return `${(value / 1_048_576).toFixed(1)} МБ`; }
 function formatDateTime(value: string | undefined, uiLocale: string = "ru-RU"): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(uiLocale, { dateStyle: "short", timeStyle: "short" }).format(date); }
 function safeExternalUrl(value: string): string | undefined { try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined; } catch { return undefined; } }
 function providerLabel(provider: "XMLSTOCK" | "ARSENKIN"): string { return provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"; }
 function frequencyTypeLabel(type: string): string { return ({ BASE: "База", EXACT: '""', FIXED: '"!"' } as Readonly<Record<string, string>>)[type] ?? type; }
 function deviceLabel(device: string): string { return ({ ALL: "Все устройства", DESKTOP: "Десктоп", MOBILE: "Мобильные", PHONE_ONLY: "Телефоны", TABLET_ONLY: "Планшеты" } as Readonly<Record<string, string>>)[device] ?? device; }
-function indexabilityLabel(value: string): string { return ({ INDEXABLE: "Индексируется", NOINDEX: "Noindex", CANONICALIZED: "Canonical на другой URL", REDIRECTED: "Редирект", ERROR: "Ошибка", UNKNOWN: "Не определено" } as Readonly<Record<string, string>>)[value] ?? value; }
 function clusteringRowStateLabel(row: ClusteringProposalResultRow): string {
   const currentCluster = row.currentClusterName
     ? `SEO-кластер «${row.currentClusterName}»`

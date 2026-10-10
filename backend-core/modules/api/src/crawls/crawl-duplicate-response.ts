@@ -1,5 +1,8 @@
 import {
   crawlDuplicateKinds,
+  technicalCrawlMaxDuplicateGroupLimit,
+  technicalCrawlMaxDuplicateIssueLimit,
+  technicalCrawlMaxUrlLimit,
   type CrawlDuplicateKind,
   type ProjectCrawlDuplicateGroupCollection,
   type ProjectCrawlDuplicateGroupSummary
@@ -17,12 +20,12 @@ export function crawlDuplicateGroupCollection(
   if (
     Object.keys(input).length !== 1 ||
     !Array.isArray(input.groups) ||
-    input.groups.length > 2_000
+    input.groups.length > technicalCrawlMaxDuplicateGroupLimit
   ) invalid();
   const groups = input.groups.map(group);
   if (
     new Set(groups.map(({ id }) => id)).size !== groups.length ||
-    groups.reduce((total, item) => total + item.members.length, 0) > 4_000
+    groups.reduce((total, item) => total + item.members.length, 0) > technicalCrawlMaxDuplicateIssueLimit
   ) invalid();
   return { groups };
 }
@@ -46,7 +49,7 @@ function group(value: unknown): ProjectCrawlDuplicateGroupSummary {
     !KINDS.has(input.kind) ||
     !Number.isSafeInteger(input.memberCount) ||
     Number(input.memberCount) < 2 ||
-    Number(input.memberCount) > 1_000 ||
+    Number(input.memberCount) > technicalCrawlMaxUrlLimit ||
     !Array.isArray(input.members) ||
     input.members.length !== input.memberCount ||
     !date(input.createdAt)

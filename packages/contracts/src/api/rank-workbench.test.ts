@@ -22,6 +22,17 @@ const dimension = {
 };
 const dimensionKey = semanticRankDimensionKey(dimension);
 
+test("preserves exact URL filters and rejects unsupported combinations", () => {
+  const base = { dimensionKey, observedFrom: "2026-08-01T00:00:00.000Z", observedBefore: "2026-09-01T00:00:00.000Z", dateLimit: 31, limit: 100, sort: "TARGET_URL_SET_FIRST" };
+  const parsed = parseRankPositionReportInput({ ...base, targetUrlState: "SET", multipleUrlsState: "NOT_MULTIPLE" });
+  assert.equal(parsed.targetUrlState, "SET");
+  assert.equal(parsed.multipleUrlsState, "NOT_MULTIPLE");
+  assert.equal(parsed.sort, "TARGET_URL_SET_FIRST");
+  assert.throws(() => parseRankPositionReportInput({ ...base, multipleUrlsState: "UNKNOWN" }));
+  assert.throws(() => parseRankPositionReportInput({ ...base, mode: "AI", multipleUrlsState: "MULTIPLE" }));
+  assert.throws(() => parseRankPositionReportInput({ ...base, targetUrlState: false }));
+});
+
 test("parses a bounded daily position report command", () => {
   assert.deepEqual(parseRankPositionReportInput({
     dimensionKey,

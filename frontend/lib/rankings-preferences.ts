@@ -1,9 +1,18 @@
-import type { ProjectSearchCity, SemanticRankDimension } from "@seo-platform/contracts";
+import { rankWorkbenchPositionSorts, type ProjectSearchCity, type SemanticRankDimension, type RankWorkbenchPositionSort } from "@seo-platform/contracts";
 
 
 export const rankingsQueryColumnMinWidth = 210;
 export const rankingsQueryColumnMaxWidth = 520;
 export const rankingsQueryColumnDefaultWidth = 300;
+export const rankingsNumberColumnDefaultWidth = 52;
+export const rankingsNumberColumnMinWidth = 36;
+export const rankingsNumberColumnMaxWidth = 120;
+
+export function clampNumberColumnWidth(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.round(Math.min(rankingsNumberColumnMaxWidth, Math.max(rankingsNumberColumnMinWidth, value)))
+    : rankingsNumberColumnDefaultWidth;
+}
 
 export interface RankingsPreferences {
   readonly mode: "SEO" | "AI";
@@ -12,7 +21,10 @@ export interface RankingsPreferences {
   readonly groupId: string;
   readonly dateFrom: string;
   readonly dateThrough: string;
-  readonly sort: "OBSERVED_DESC" | "QUERY_ASC" | "POSITION_ASC" | "POSITION_DESC" | "CHANGE_ASC" | "CHANGE_DESC";
+  readonly sort: RankWorkbenchPositionSort;
+  readonly targetUrlState?: "SET" | "EMPTY";
+  readonly multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE";
+  readonly numberColumnWidth?: number;
   readonly queryColumnWidth: number;
   readonly hiddenDates: readonly string[];
   readonly includeUntracked?: boolean;
@@ -23,9 +35,7 @@ interface StorageLike {
   setItem(key: string, value: string): void;
 }
 
-const SORTS = new Set<RankingsPreferences["sort"]>([
-  "OBSERVED_DESC", "QUERY_ASC", "POSITION_ASC", "POSITION_DESC", "CHANGE_ASC", "CHANGE_DESC"
-]);
+const SORTS = new Set<RankingsPreferences["sort"]>(rankWorkbenchPositionSorts);
 
 export function readRankingsPreferences(
   projectId: string,
@@ -60,7 +70,10 @@ export function readRankingsPreferences(
       queryColumnWidth: clampQueryColumnWidth(value.queryColumnWidth),
       hiddenDates: Array.isArray(value.hiddenDates)
         ? [...new Set(value.hiddenDates.flatMap((date) => calendarDate(date) ? [date as string] : []))].slice(0, 31)
-        : fallback.hiddenDates
+        : fallback.hiddenDates,
+      ...(value.numberColumnWidth === undefined ? {} : { numberColumnWidth: clampNumberColumnWidth(value.numberColumnWidth) }),
+      ...(value.targetUrlState === "SET" || value.targetUrlState === "EMPTY" ? { targetUrlState: value.targetUrlState } : {}),
+      ...(value.multipleUrlsState === "MULTIPLE" || value.multipleUrlsState === "NOT_MULTIPLE" ? { multipleUrlsState: value.multipleUrlsState } : {})
     };
   } catch {
     return fallback;
@@ -77,6 +90,7 @@ export function writeRankingsPreferences(
     storage.setItem(storageKey(projectId, currentUserId), JSON.stringify({
       ...value,
       queryColumnWidth: clampQueryColumnWidth(value.queryColumnWidth),
+      ...(value.numberColumnWidth === undefined ? {} : { numberColumnWidth: clampNumberColumnWidth(value.numberColumnWidth) }),
       hiddenDates: [...new Set(value.hiddenDates)].slice(0, 31)
     }));
   } catch {

@@ -3,6 +3,7 @@ import type {
   ProjectSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
+import { parseProjectOnboardingSettings } from "@seo-platform/contracts";
 import type {
   Project,
   User,
@@ -43,7 +44,7 @@ export function toWorkspaceSummary(
 }
 
 export function toProjectSummary(
-  project: Project,
+  project: Omit<Project, "onboarding"> & { onboarding?: Project["onboarding"] },
   projectAccessLevel?: ProjectAccessLevel,
   logo?: Readonly<{
     source: string | null;
@@ -58,6 +59,7 @@ export function toProjectSummary(
     domain: project.domain,
     locale: project.locale,
     timezone: project.timezone,
+    ...(project.onboarding ? { onboarding: parseProjectOnboardingSettings(project.onboarding) } : {}),
     ...(project.searchCityName &&
     project.searchCityYandexRegionCode &&
     project.searchCityGoogleRegionCode

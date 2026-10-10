@@ -486,7 +486,7 @@ export function scopedInternalCrawlOperationResultPage(
       requestedUrl: row.requestedUrl,
       finalUrl: row.finalUrl,
       redirectChain: safeUrlArray(row.redirectChain, 10),
-      statusCode: integer(row.statusCode, 100, 599),
+      statusCode: integer(row.statusCode, row.indexability === "BLOCKED_ROBOTS" ? 0 : 100, 599),
       responseTimeMs: integer(row.responseTimeMs, 0),
       sizeBytes: integer(row.sizeBytes, 0),
       contentType: row.contentType,

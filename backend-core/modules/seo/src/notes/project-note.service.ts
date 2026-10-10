@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   ConflictException,
+  BadRequestException,
   Injectable,
   NotFoundException
 } from "@nestjs/common";
@@ -13,6 +14,7 @@ import type {
   PublicProjectNote
 } from "@seo-platform/contracts";
 import type { ProjectNote } from "../generated/prisma/client.js";
+import { projectNoteDelimiter, noteDelimiter, parseDelimitedRows, serializeDelimitedRows } from "@seo-platform/contracts";
 import { PrismaService } from "../database/prisma.service.js";
 
 @Injectable()
@@ -48,6 +50,8 @@ export class ProjectNoteService {
           projectId: input.projectId,
           title: input.title,
           markdown: input.markdown,
+          format: input.format ?? "MARKDOWN",
+          delimiter: delimiterFor(input.format ?? "MARKDOWN", input.markdown, input.delimiter),
           visibility: input.visibility,
           ...(input.visibility === "PUBLIC"
             ? { publicToken: createPublicToken() }
@@ -83,6 +87,15 @@ export class ProjectNoteService {
               visibility: "PROJECT_MEMBERS" as const,
               publicToken: null
             };
+    const format = input.format ?? current.format;
+    const oldDelimiter = noteDelimiter(current.markdown, current.format, current.delimiter);
+    const delimiter = delimiterFor(format, input.markdown ?? current.markdown,
+      input.delimiter === undefined && current.format === format ? current.delimiter : input.delimiter);
+    let markdown = input.markdown;
+    if (markdown === undefined && format === "CSV" && current.format === "CSV" && delimiter !== oldDelimiter) {
+      try { markdown = serializeDelimitedRows(parseDelimitedRows(current.markdown, oldDelimiter), delimiter!); }
+      catch { throw new BadRequestException("Cannot change delimiter: CSV contains unclosed quotes"); }
+    }
     const changed = await this.prisma.projectNote.updateMany({
       where: {
         id: noteId,
@@ -93,9 +106,11 @@ export class ProjectNoteService {
       },
       data: {
         ...(input.title === undefined ? {} : { title: input.title }),
-        ...(input.markdown === undefined
+        ...(input.format === undefined ? {} : { format: input.format }),
+        delimiter,
+        ...(markdown === undefined
           ? {}
-          : { markdown: input.markdown }),
+          : { markdown }),
         ...visibilityData,
         updatedBy: input.actorId,
         version: { increment: 1 }
@@ -153,6 +168,8 @@ export class ProjectNoteService {
     }
     return {
       title: note.title,
+      format: note.format,
+      ...(note.delimiter ? { delimiter: note.delimiter } : {}),
       markdown: note.markdown,
       updatedAt: note.updatedAt.toISOString()
     };
@@ -181,6 +198,8 @@ function summary(note: ProjectNote): ProjectNoteSummary {
     workspaceId: note.workspaceId,
     projectId: note.projectId,
     title: note.title,
+    format: note.format,
+    ...(note.delimiter ? { delimiter: note.delimiter } : {}),
     markdown: note.markdown,
     visibility: note.visibility,
     ...(note.publicToken ? { publicToken: note.publicToken } : {}),
@@ -190,4 +209,13 @@ function summary(note: ProjectNote): ProjectNoteSummary {
     createdAt: note.createdAt.toISOString(),
     updatedAt: note.updatedAt.toISOString()
   };
+}
+
+function delimiterFor(format: string, content: string, value?: string | null): string | null {
+  const delimiter = projectNoteDelimiter(value);
+  if (format !== "CSV") {
+    if (delimiter !== undefined) throw new BadRequestException("Delimiter requires CSV format");
+    return null;
+  }
+  return noteDelimiter(content, "CSV", delimiter);
 }

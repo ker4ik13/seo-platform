@@ -2,6 +2,7 @@
 
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { useConfirmation } from "./use-confirmation";
 
 import { useEffect, useState, type FormEvent } from "react";
 import {
@@ -44,6 +45,7 @@ export function SemanticSavedViews({
   onActiveViewChange
 }: SemanticSavedViewsProps) {
   const { t: uiText } = useUiLocale();
+  const confirmation = useConfirmation();
   const [views, setViews] = useState<readonly SemanticSavedView[]>([]);
   const [name, setName] = useState("");
   const [scope, setScope] = useState<"PRIVATE" | "PROJECT_SHARED">(
@@ -137,7 +139,7 @@ export function SemanticSavedViews({
   }
 
   async function deleteView(view: SemanticSavedView): Promise<void> {
-    if (!window.confirm(`Удалить представление «${view.name}»?`)) return;
+    if (!await confirmation.confirm({ title: uiText("Удалить представление «{0}»?", [view.name]) })) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -263,6 +265,7 @@ export function SemanticSavedViews({
       <section className="semantic-saved-views embedded">
         <header><strong><UiText text="Сохранённые представления" /></strong><span>{loading ? "…" : visibleViews.length}</span></header>
         {body}
+        {confirmation.dialog}
       </section>
     );
   }
@@ -270,6 +273,7 @@ export function SemanticSavedViews({
     <details className="semantic-saved-views" data-exclusive-dropdown>
       <summary><UiText text="Представления" /><span>{loading ? "…" : visibleViews.length}</span></summary>
       {body}
+      {confirmation.dialog}
     </details>
   );
 }

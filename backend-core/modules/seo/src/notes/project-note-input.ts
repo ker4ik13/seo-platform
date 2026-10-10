@@ -1,6 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   projectNoteVisibilities,
+  projectNoteFormat,
+  projectNoteDelimiter,
   type InternalCreateProjectNoteInput,
   type InternalDeleteProjectNoteInput,
   type InternalUpdateProjectNoteInput,
@@ -19,13 +21,17 @@ export function internalCreateProjectNoteInput(
     "actorId",
     "title",
     "markdown",
-    "visibility"
+    "visibility",
+    "format",
+    "delimiter"
   ]);
   return {
     ...scope(input),
     title: text(input.title, "title", 160, false),
     markdown: text(input.markdown, "markdown", undefined, true),
-    visibility: visibility(input.visibility)
+    visibility: visibility(input.visibility),
+    format: noteFormat(input.format),
+    ...delimiterInput(input.delimiter, noteFormat(input.format))
   };
 }
 
@@ -39,7 +45,9 @@ export function internalUpdateProjectNoteInput(
     "version",
     "title",
     "markdown",
-    "visibility"
+    "visibility",
+    "format",
+    "delimiter"
   ]);
   const title = optionalText(input.title, "title", 160, false);
   const markdown = optionalText(input.markdown, "markdown", undefined, true);
@@ -48,13 +56,17 @@ export function internalUpdateProjectNoteInput(
   if (
     title === undefined &&
     markdown === undefined &&
-    nextVisibility === undefined
+    nextVisibility === undefined &&
+    input.format === undefined &&
+    input.delimiter === undefined
   ) {
     invalid("body");
   }
   return {
     ...scope(input),
     version: positiveInteger(input.version, "version"),
+    ...(input.format === undefined ? {} : { format: noteFormat(input.format) }),
+    ...delimiterInput(input.delimiter, input.format === undefined ? undefined : noteFormat(input.format)),
     ...(title === undefined ? {} : { title }),
     ...(markdown === undefined ? {} : { markdown }),
     ...(nextVisibility === undefined
@@ -134,7 +146,7 @@ function text(
     typeof value !== "string" ||
     (max !== undefined && value.length > max)
   ) invalid(field);
-  const normalized = value.normalize("NFKC").trim();
+  const normalized = allowEmpty ? value : value.normalize("NFKC").trim();
   if (!allowEmpty && !normalized) invalid(field);
   return normalized;
 }
@@ -155,4 +167,17 @@ function positiveInteger(value: unknown, field: string): number {
 
 function invalid(field: string): never {
   throw new BadRequestException(`Invalid project note field: ${field}`);
+}
+
+function noteFormat(value: unknown) {
+  try { return projectNoteFormat(value); } catch { return invalid("format"); }
+}
+
+function delimiterInput(value: unknown, format?: string) {
+  if (value === undefined) return {};
+  try {
+    const delimiter = projectNoteDelimiter(value);
+    if (delimiter !== undefined && format !== undefined && format !== "CSV") return invalid("delimiter");
+    return { delimiter: delimiter ?? null };
+  } catch { return invalid("delimiter"); }
 }

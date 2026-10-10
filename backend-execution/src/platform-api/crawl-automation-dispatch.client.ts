@@ -124,7 +124,7 @@ function crawlSummary(
   ] as const;
   const crawl =
     exactRecord(value, fields) ??
-    exactRecord(value, [...fields, "actorId"]);
+    exactRecord(value, [...fields, "actorId"]) ?? exactRecord(value, [...fields, "blockedUrls"]) ?? exactRecord(value, [...fields, "actorId", "blockedUrls"]);
   if (
     !crawl ||
     !uuid(crawl.id) ||
@@ -138,6 +138,7 @@ function crawlSummary(
     !nonNegativeInteger(crawl.processedUrls) ||
     !nonNegativeInteger(crawl.successfulUrls) ||
     !nonNegativeInteger(crawl.failedUrls) ||
+    (crawl.blockedUrls !== undefined && !nonNegativeInteger(crawl.blockedUrls)) ||
     !nonNegativeInteger(crawl.issueCount) ||
     !isoDate(crawl.createdAt)
   ) {
@@ -149,7 +150,9 @@ function crawlSummary(
   } catch {
     return invalidResponse();
   }
-  if (JSON.stringify(config) !== JSON.stringify(input.config)) {
+  const { snapshotIdentity: _actualIdentity, ...actualIntent } = config;
+  const { snapshotIdentity: _expectedIdentity, ...expectedIntent } = storedCrawlConfig(input.config as unknown as Prisma.JsonValue);
+  if (JSON.stringify(actualIntent) !== JSON.stringify(expectedIntent)) {
     invalidResponse();
   }
   return {
@@ -164,6 +167,7 @@ function crawlSummary(
     processedUrls: crawl.processedUrls as number,
     successfulUrls: crawl.successfulUrls as number,
     failedUrls: crawl.failedUrls as number,
+    ...(crawl.blockedUrls === undefined ? {} : { blockedUrls: crawl.blockedUrls as number }),
     issueCount: crawl.issueCount as number,
     version: crawl.version as number,
     createdAt: crawl.createdAt as string

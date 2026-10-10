@@ -56,3 +56,8 @@ test("rejects homepage checks for audits and configurations that exceed maxUrls"
     })
   );
 });
+
+test("owning crawl parser accepts four pages per second and rejects faster settings", () => {
+  assert.equal(crawlConfig({ ...base, requestsPerMinute: 240 }).requestsPerMinute, 240);
+  assert.throws(() => crawlConfig({ ...base, requestsPerMinute: 241 }));
+});

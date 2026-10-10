@@ -1,3 +1,4 @@
+import { PageInsightsService } from "./page-insights.service.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PrismaService } from "../database/prisma.service.js";
@@ -10,7 +11,9 @@ const pageId = "01900000-0000-7000-8000-000000000004";
 
 test("combines site-structure navigation with independent text search", async () => {
   const listQueries: Array<{ readonly where?: unknown; readonly take?: number }> = [];
-  const service = new PageService({
+  const prefixQueries: Array<{ readonly sql: string; readonly values: readonly unknown[] }> = [];
+  const service = makePageService({
+    $queryRaw: async (query: { readonly sql: string; readonly values: readonly unknown[] }) => { prefixQueries.push(query); return []; },
     page: {
       findMany: async (input: { readonly where?: unknown; readonly take?: number }) => {
         listQueries.push(input);
@@ -28,23 +31,11 @@ test("combines site-structure navigation with independent text search", async ()
 
   const pageQuery = listQueries.find(({ take }) => take === 51);
   const where = pageQuery?.where as { readonly AND?: readonly unknown[] };
-  assert.equal(where.AND?.length, 2);
-  assert.deepEqual(where.AND?.[1], {
-    OR: [
-      {
-        normalizedUrl: {
-          contains: "/catalog/",
-          mode: "insensitive"
-        }
-      },
-      {
-        normalizedUrl: {
-          endsWith: "/catalog",
-          mode: "insensitive"
-        }
-      }
-    ]
-  });
+  assert.equal(where.AND?.length, 1);
+  assert.equal(prefixQueries.length, 1);
+  assert.ok(prefixQueries[0]?.values.includes("^https?://[^/?#]+/catalog(?:/|[?#]|$)"));
+  assert.ok(prefixQueries[0]?.values.includes("%товар%"));
+  assert.ok(prefixQueries[0]?.values.includes(51));
 });
 
 test("promotes a hidden crawl backing page instead of creating a duplicate URL", async () => {
@@ -81,7 +72,7 @@ test("promotes a hidden crawl backing page instead of creating a duplicate URL",
       }
     }
   };
-  const service = new PageService({
+  const service = makePageService({
     pageCreateReceipt: { findUnique: async () => null },
     $transaction: async (
       callback: (client: typeof transaction) => Promise<unknown>
@@ -153,3 +144,5 @@ function pageAggregate() {
     _count: { targetKeywords: 0, primaryClusters: 0, crawlIssues: 0 }
   };
 }
+
+function makePageService(prisma: PrismaService) { return new PageService(prisma, new PageInsightsService(prisma)); }

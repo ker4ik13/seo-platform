@@ -62,7 +62,7 @@ const BODY_QUERY_FIELDS = [
   "limit", "cursor", "keywordIds", "includeNotes", "metricProjection", "rankColumnKeys", "search", "tag", "intent", "groupId", "groupIds",
   "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
   , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
   "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore",
   "rankSortDimensionKey"
 ] as const;
@@ -180,6 +180,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const wordCountMin = optionalInteger(query.wordCountMin, "wordCountMin");
   const wordCountMax = optionalInteger(query.wordCountMax, "wordCountMax");
   const targetUrlState = optionalEnum(query.targetUrlState, "targetUrlState", ["SET", "EMPTY"] as const);
+  const multipleUrlsState = optionalEnum(query.multipleUrlsState, "multipleUrlsState", ["MULTIPLE", "NOT_MULTIPLE"] as const);
   const rankDimensionKey = optionalSingleString(query.rankDimensionKey, "rankDimensionKey");
   if (rankDimensionKey && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid("rankDimensionKey");
   const rankState = optionalEnum(query.rankState, "rankState", ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const);
@@ -268,7 +269,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(frequencyExactMin ? { frequencyExactMin } : {}), ...(frequencyExactMax ? { frequencyExactMax } : {}),
     ...(frequencyFixedMin ? { frequencyFixedMin } : {}), ...(frequencyFixedMax ? { frequencyFixedMax } : {}),
     ...(wordCountMin === undefined ? {} : { wordCountMin }), ...(wordCountMax === undefined ? {} : { wordCountMax }),
-    ...(targetUrlState ? { targetUrlState } : {}), ...(rankDimensionKey ? { rankDimensionKey } : {}),
+    ...(targetUrlState ? { targetUrlState } : {}), ...(multipleUrlsState ? { multipleUrlsState } : {}), ...(rankDimensionKey ? { rankDimensionKey } : {}),
     ...(rankState ? { rankState } : {}), ...(rankPositionMin === undefined ? {} : { rankPositionMin }),
     ...(rankPositionMax === undefined ? {} : { rankPositionMax }), ...(rankCheckedFrom ? { rankCheckedFrom } : {}),
     ...(rankCheckedBefore ? { rankCheckedBefore } : {}),

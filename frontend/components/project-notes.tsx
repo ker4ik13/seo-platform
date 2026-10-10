@@ -1,383 +1,99 @@
 "use client";
 
-import type {
-  ProjectNoteCollection,
-  ProjectNoteSummary,
-  ProjectNoteVisibility
-} from "@seo-platform/contracts";
-import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent, type CSSProperties } from "react";
+import { projectNoteFormats, projectNoteFormat, type ProjectNoteCollection, type ProjectNoteFormat, type ProjectNoteSummary, type ProjectNoteVisibility } from "@seo-platform/contracts";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
+import { noteFileExtensions, noteFileName, downloadNoteFile, tabularNote, noteDelimiter, parseDelimitedRows, serializeDelimitedRows } from "../lib/project-note-files";
+import { CsvDelimiterControl } from "./csv-delimiter-control";
+import { CustomSelect } from "./custom-select";
+import { FormField } from "./form-field";
 import { Icon } from "./icon";
-import { useUiLocale, UiText } from "./ui-locale";
+import { ProjectNoteDocument } from "./project-note-document";
+import { SemanticModal } from "./semantic-modal";
+import { SpreadsheetEditor } from "./spreadsheet-editor";
+import { WorkspaceSidebar, WorkspaceSidebarSeparator } from "./workspace-sidebar";
+import { useConfirmation } from "./use-confirmation";
+import { UiText, useUiLocale } from "./ui-locale";
+import styles from "./project-notes.module.css";
 
+interface NoteDraft { title: string; markdown: string; format: ProjectNoteFormat; delimiter?: string; visibility: ProjectNoteVisibility; }
+const emptyDraft = (): NoteDraft => ({ title: "", markdown: "", format: "MARKDOWN", visibility: "PROJECT_MEMBERS" });
 
-interface NoteDraft {
-  readonly title: string;
-  readonly markdown: string;
-  readonly visibility: ProjectNoteVisibility;
-}
-
-const EMPTY_DRAFT: NoteDraft = {
-  title: "",
-  markdown: "",
-  visibility: "PROJECT_MEMBERS"
-};
-
-export function ProjectNotes({
-  projectId,
-  canEdit
-}: Readonly<{ projectId: string; canEdit: boolean }>) {
-  const uiLocale = useUiLocale().locale;
-  const { t: uiText } = useUiLocale();
+export function ProjectNotes({ projectId, canEdit, heading }: Readonly<{ projectId: string; canEdit: boolean; heading?: ReactNode }>) {
+  const { t, locale } = useUiLocale();
   const [notes, setNotes] = useState<readonly ProjectNoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [draft, setDraft] = useState<NoteDraft>(EMPTY_DRAFT);
-  const [view, setView] = useState<"edit" | "preview">("edit");
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const selected = useMemo(
-    () => notes.find((note) => note.id === selectedId),
-    [notes, selectedId]
-  );
-  const dirty = selected
-    ? selected.title !== draft.title ||
-      selected.markdown !== draft.markdown ||
-      selected.visibility !== draft.visibility
-    : Boolean(draft.title || draft.markdown);
-
+  const [draft, setDraft] = useState<NoteDraft>(emptyDraft);
+  const [view, setView] = useState<"edit" | "preview" | "source">("edit");
+  const [search, setSearch] = useState("");
+  const [mobileListOpen, setMobileListOpen] = useState(false);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>(), [notice, setNotice] = useState<string>();
+  const [revision, setRevision] = useState(0), [sidebarWidth, setSidebarWidth] = useState(248);
+  const [createOpen, setCreateOpen] = useState(false), [newDraft, setNewDraft] = useState<NoteDraft>(emptyDraft);
+  const [delimiterValid, setDelimiterValid] = useState(true), [newDelimiterValid, setNewDelimiterValid] = useState(true);
+  const [createError, setCreateError] = useState<string>();
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const confirmation = useConfirmation();
+  const selected = notes.find((note) => note.id === selectedId);
+  const dirty = Boolean(selected && (selected.title !== draft.title || selected.markdown !== draft.markdown || projectNoteFormat(selected.format) !== draft.format || selected.visibility !== draft.visibility || selected.format === "CSV" && (noteDelimiter(selected.markdown, selected.format, selected.delimiter) !== draft.delimiter || !delimiterValid)));
+  const filtered = useMemo(() => notes.filter((note) => noteFileName(note.title, projectNoteFormat(note.format)).toLocaleLowerCase().includes(search.toLocaleLowerCase())), [notes, search]);
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    browserApiRequest<ProjectNoteCollection>(notesPath(projectId), {
-      signal: controller.signal
-    })
-      .then((collection) => {
-        if (controller.signal.aborted) return;
-        setNotes(collection.notes);
-        const first = collection.notes[0];
-        setSelectedId(first?.id);
-        setDraft(first ? draftFrom(first) : EMPTY_DRAFT);
-        setView("edit");
-        setConfirmDelete(false);
-        setError(undefined);
-        setNotice(undefined);
-      })
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted) setError(errorMessage(caught));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  useEffect(() => {
+    const controller = new AbortController(); setLoading(true); setError(undefined); setNotes([]); setSelectedId(undefined); setDraft(emptyDraft());
+    void browserApiRequest<ProjectNoteCollection>(notesPath(projectId), { signal: controller.signal }).then((collection) => {
+      if (controller.signal.aborted) return;
+      setNotes(collection.notes); const first = collection.notes[0]; setSelectedId(first?.id); setDraft(first ? fromNote(first) : emptyDraft()); setDelimiterValid(true);
+    }).catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [projectId]);
-
-  function selectNote(note: ProjectNoteSummary): void {
-    if (dirty && !window.confirm("Отменить несохранённые изменения?")) return;
-    setSelectedId(note.id);
-    setDraft(draftFrom(note));
-    setConfirmDelete(false);
-    setError(undefined);
-    setNotice(undefined);
-  }
-
-  function createDraft(): void {
-    if (dirty && !window.confirm("Отменить несохранённые изменения?")) return;
-    setSelectedId(undefined);
-    setDraft(EMPTY_DRAFT);
-    setView("edit");
-    setConfirmDelete(false);
-    setError(undefined);
-    setNotice(undefined);
-  }
-
-  async function save(): Promise<void> {
-    if (!canEdit || busy || !draft.title.trim()) return;
-    setBusy(true);
-    setError(undefined);
-    setNotice(undefined);
+  }, [projectId, revision]);
+  async function leaveDraft() { return !dirty || await confirmation.confirm({ title: "Отменить несохранённые изменения?", description: "Внесённые изменения будут потеряны", confirmLabel: "Отменить изменения" }); }
+  async function select(note: ProjectNoteSummary) { if (busy || !await leaveDraft()) return; setMobileListOpen(false); setSelectedId(note.id); setDraft(fromNote(note)); setDelimiterValid(true); setView("edit"); setError(undefined); setNotice(undefined); }
+  async function createFile() { if (busy || !await leaveDraft()) return; setNewDraft(emptyDraft()); setNewDelimiterValid(true); setCreateError(undefined); setCreateOpen(true); }
+  async function persist(input: NoteDraft, current?: ProjectNoteSummary) {
+    if (!canEdit || busy) return;
+    if (!input.title.trim()) { if (current) setError("Введите имя файла."); else setCreateError("Введите имя файла."); return; }
+    setBusy(true); setError(undefined); setNotice(undefined); setCreateError(undefined);
     try {
-      const saved = selected
-        ? await browserApiRequest<ProjectNoteSummary>(
-            `${notesPath(projectId)}/${encodeURIComponent(selected.id)}`,
-            {
-              method: "PATCH",
-              ifMatch: selected.version,
-              body: draft
-            }
-          )
-        : await browserApiRequest<ProjectNoteSummary>(notesPath(projectId), {
-            method: "POST",
-            body: draft
-          });
-      setNotes((current) => [
-        saved,
-        ...current.filter((note) => note.id !== saved.id)
-      ]);
-      setSelectedId(saved.id);
-      setDraft(draftFrom(saved));
-      setNotice("Заметка сохранена.");
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+      const saved = await browserApiRequest<ProjectNoteSummary>(current ? `${notesPath(projectId)}/${current.id}` : notesPath(projectId), { method: current ? "PATCH" : "POST", ...(current ? { ifMatch: current.version } : {}), body: { ...input, markdown: !current && !input.markdown ? input.format === "CSV" ? `${input.delimiter ?? ","}\n${input.delimiter ?? ","}` : input.format === "TSV" ? "\t\n\t" : input.format === "JSON" ? "{}" : "" : input.markdown } });
+      setNotes((all) => [saved, ...all.filter((note) => note.id !== saved.id)]); setSelectedId(saved.id); setDraft(fromNote(saved)); setDelimiterValid(true); setCreateOpen(false); setView("edit"); setNotice("Файл сохранён.");
+    } catch (caught) { const message = errorMessage(caught); if (createOpen) setCreateError(message); else setError(message); } finally { setBusy(false); }
   }
-
-  async function archive(): Promise<void> {
-    if (!selected || !canEdit || busy) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      await browserApiRequest<void>(
-        `${notesPath(projectId)}/${encodeURIComponent(selected.id)}`,
-        { method: "DELETE", ifMatch: selected.version }
-      );
-      const remaining = notes.filter((note) => note.id !== selected.id);
-      setNotes(remaining);
-      const next = remaining[0];
-      setSelectedId(next?.id);
-      setDraft(next ? draftFrom(next) : EMPTY_DRAFT);
-      setConfirmDelete(false);
-      setNotice("Заметка удалена.");
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+  async function removeFile() {
+    if (!selected || !await confirmation.confirm({ title: "Удалить файл?", description: noteFileName(selected.title, selected.format), confirmLabel: "Удалить" })) return;
+    setBusy(true); setError(undefined);
+    try { await browserApiRequest(`${notesPath(projectId)}/${selected.id}`, { method: "DELETE", ifMatch: selected.version }); const remaining = notes.filter((note) => note.id !== selected.id); setNotes(remaining); setSelectedId(remaining[0]?.id); setDraft(remaining[0] ? fromNote(remaining[0]) : emptyDraft()); setDelimiterValid(true); }
+    catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
   }
-
-  async function copyPublicLink(): Promise<void> {
-    if (!selected?.publicToken) return;
-    const url = `${window.location.origin}/notes/${selected.publicToken}`;
-    await navigator.clipboard.writeText(url);
-    setNotice("Публичная ссылка скопирована.");
-  }
-
-  return (
-    <section className="project-notes-layout">
-      <aside className="project-notes-list panel" aria-label={uiText("Заметки проекта")}>
-        <div className="project-notes-list-header">
-          <strong><UiText text="База знаний" /></strong>
-          {canEdit && (
-            <button
-              aria-label={uiText("Новая заметка")}
-              className="icon-button"
-              onClick={createDraft}
-              title={uiText("Новая заметка")}
-              type="button"
-            >
-              <Icon name="plus" />
-            </button>
-          )}
-        </div>
-        {loading ? (
-          <div className="project-notes-state"><UiText text="Загружаем заметки…" /></div>
-        ) : notes.length === 0 ? (
-          <div className="project-notes-state">
-            <strong><UiText text="Заметок пока нет" /></strong>
-            <span><UiText text="Создайте первую Markdown-заметку проекта." /></span>
-          </div>
-        ) : (
-          <div className="project-note-items">
-            {notes.map((note) => (
-              <button
-                className={`project-note-item${note.id === selectedId ? " active" : ""}`}
-                key={note.id}
-                onClick={() => selectNote(note)}
-                type="button"
-              >
-                <strong>{note.title}</strong>
-                <span>
-                  {note.visibility === "PUBLIC" ? <UiText text="Открыта по ссылке" /> : <UiText text="Только участники" />}
-                  <time dateTime={note.updatedAt}>
-                    {new Intl.DateTimeFormat(uiLocale, {
-                      day: "2-digit",
-                      month: "short"
-                    }).format(new Date(note.updatedAt))}
-                  </time>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </aside>
-
-      <article className="project-note-editor panel">
-        <header className="project-note-editor-header">
-          <div>
-            <small>{selected ? <UiText text="Заметка проекта" /> : <UiText text="Новая заметка" />}</small>
-            <h2>{draft.title || <UiText text="Без названия" />}</h2>
-          </div>
-          <div className="project-note-tabs" role="tablist">
-            <button
-              aria-selected={view === "edit"}
-              className={view === "edit" ? "active" : undefined}
-              onClick={() => setView("edit")}
-              role="tab"
-              type="button"
-            >
-              <UiText text="Редактор" /></button>
-            <button
-              aria-selected={view === "preview"}
-              className={view === "preview" ? "active" : undefined}
-              onClick={() => setView("preview")}
-              role="tab"
-              type="button"
-            >
-              <UiText text="Просмотр" /></button>
-          </div>
-        </header>
-
-        {(error || notice) && (
-          <div className={`inline-alert ${error ? "danger" : "success"}`} role={error ? "alert" : "status"}>
-            {error ?? notice}
-          </div>
-        )}
-
-        <div className="project-note-title-row">
-          <label className="form-field">
-            <span><UiText text="Название" /></span>
-            <input
-              autoFocus={!selected}
-              disabled={!canEdit || busy}
-              maxLength={160}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, title: event.target.value }))
-              }
-              placeholder={uiText("Например, План продвижения")}
-              value={draft.title}
-            />
-          </label>
-          <label className="form-field project-note-visibility">
-            <span><UiText text="Доступ" /></span>
-            <select
-              disabled={!canEdit || busy}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  visibility: event.target.value as ProjectNoteVisibility
-                }))
-              }
-              value={draft.visibility}
-            >
-              <option value="PROJECT_MEMBERS"><UiText text="Только участники" /></option>
-              <option value="PUBLIC"><UiText text="Все по ссылке" /></option>
-            </select>
-          </label>
-        </div>
-
-        {view === "edit" ? (
-          <label className="project-note-markdown-field">
-            <span>Markdown</span>
-            <textarea
-              disabled={!canEdit || busy}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  markdown: event.target.value
-                }))
-              }
-              placeholder={uiText("# Заголовок\\n\\nДобавьте текст, чек-лист или [ссылку](https://example.com).")}
-              value={draft.markdown}
-            />
-            <small>{draft.markdown.length.toLocaleString(uiLocale)} <UiText text="символов" before=" " /></small>
-          </label>
-        ) : (
-          <MarkdownDocument markdown={draft.markdown} />
-        )}
-
-        <footer className="project-note-actions">
-          <div className="project-note-share-actions">
-            {selected?.publicToken && selected.visibility === "PUBLIC" && (
-              <>
-                <button className="secondary-button" onClick={() => void copyPublicLink()} type="button">
-                  <UiText text="Копировать ссылку" /></button>
-                <a
-                  className="secondary-button"
-                  href={`/notes/${selected.publicToken}`}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  <UiText text="Открыть" /></a>
-              </>
-            )}
-          </div>
-          <div className="security-actions">
-            {selected && canEdit && (
-              confirmDelete ? (
-                <>
-                  <button className="danger-button" disabled={busy} onClick={() => void archive()} type="button">
-                    <UiText text="Подтвердить удаление" /></button>
-                  <button className="secondary-button" disabled={busy} onClick={() => setConfirmDelete(false)} type="button">
-                    <UiText text="Отмена" /></button>
-                </>
-              ) : (
-                <button className="secondary-button danger-text-button" disabled={busy} onClick={() => setConfirmDelete(true)} type="button">
-                  <UiText text="Удалить" /></button>
-              )
-            )}
-            {canEdit && (
-              <button
-                className="primary-button"
-                disabled={busy || !dirty || !draft.title.trim()}
-                onClick={() => void save()}
-                type="button"
-              >
-                {busy ? <UiText text="Сохраняем…" /> : selected ? <UiText text="Сохранить" /> : <UiText text="Создать заметку" />}
-              </button>
-            )}
-          </div>
-        </footer>
+  async function copyLink() { if (!selected?.publicToken) return; try { await navigator.clipboard.writeText(`${location.origin}/notes/${selected.publicToken}`); setNotice("Публичная ссылка скопирована."); } catch { setError("Не удалось скопировать ссылку."); } }
+  function download() { if (selected) downloadNoteFile(draft.title, draft.markdown, draft.format); }
+  function resize(event: PointerEvent<HTMLDivElement>) { event.preventDefault(); const initial = sidebarWidth, start = event.clientX; const move = (pointer: globalThis.PointerEvent) => setSidebarWidth(Math.max(190, Math.min(420, initial + pointer.clientX - start))); const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop, { once: true }); window.addEventListener("pointercancel", stop, { once: true }); }
+  return <section className={styles.workspace}>
+    <header className={styles.topbar}>{heading}<button className={`secondary-button ${styles.mobileButton}`} aria-label={t("Файлы проекта")} onClick={() => setMobileListOpen(!mobileListOpen)} type="button"><Icon name="list" /><UiText text="Файлы" /></button><span className={styles.count}>{notes.length} <UiText text="файлов" /></span>{canEdit && <><button className="secondary-button" disabled={busy} onClick={() => uploadRef.current?.click()} type="button"><Icon name="import" /><UiText text="Загрузить файл" /></button><input className="visually-hidden" ref={uploadRef} type="file" accept=".md,.txt,.csv,.tsv,.json" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void file.text().then(async (content) => { if (!await leaveDraft()) return; const extension = file.name.split(".").at(-1)?.toLowerCase(), format = projectNoteFormats.find((value) => noteFileExtensions[value] === extension) ?? "TEXT"; setNewDelimiterValid(true); setNewDraft({ title: file.name.replace(/\.[^.]+$/u, ""), markdown: content, format, ...(format === "CSV" ? { delimiter: noteDelimiter(content, format) } : {}), visibility: "PROJECT_MEMBERS" }); setCreateOpen(true); }).catch(() => setError("Не удалось прочитать файл.")); event.target.value = ""; }} /><button className="primary-button" disabled={busy} onClick={() => void createFile()} type="button"><Icon name="plus" /><UiText text="Новый файл" /></button></>}</header>
+    <div className={`${styles.layout}${mobileListOpen ? ` ${styles.listOpen}` : ""}`} style={{ "--notes-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+      <WorkspaceSidebar className={styles.sidebar} aria-label={t("Файлы проекта")}><header><strong><UiText text="Файлы" /></strong><span>{notes.length}</span></header><div className={styles.search}><Icon name="search" /><input type="search" aria-label={t("Найти файл")} placeholder={t("Найти файл")} value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className={styles.files}>{loading ? <p role="status"><UiText text="Загрузка…" /></p> : filtered.length === 0 ? <p className={styles.muted}><UiText text={notes.length ? "Файлы не найдены." : "Файлов пока нет."} /></p> : filtered.map((note) => <button className={note.id === selectedId ? styles.activeFile : undefined} disabled={busy} key={note.id} onClick={() => void select(note)} type="button"><Icon name={tabularNote(note.format) ? "semantic" : "note"} /><span>{noteFileName(note.title, note.format)}</span>{note.visibility === "PUBLIC" && <Icon name="link" />}</button>)}</div></WorkspaceSidebar>
+      <WorkspaceSidebarSeparator aria-label={t("Изменить ширину списка файлов")} aria-valuemin={190} aria-valuemax={420} aria-valuenow={sidebarWidth} onPointerDown={resize} onDoubleClick={() => setSidebarWidth(248)} onKeyDown={(event) => { if (["ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); setSidebarWidth((value) => Math.max(190, Math.min(420, value + (event.key === "ArrowRight" ? 12 : -12)))); } }} />
+      <article className={styles.editor}>{error && <div className={styles.error} role="alert">{error}<button className="text-button" onClick={() => { void leaveDraft().then((allowed) => { if (allowed) setRevision((value) => value + 1); }); }} type="button"><UiText text="Обновить" /></button></div>}{notice && !dirty && <p className={styles.notice} role="status">{notice}</p>}
+      {selected ? <><header className={styles.filebar}><input aria-label={t("Имя файла")} disabled={!canEdit || busy} maxLength={160} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /><span className={styles.extension}>.{noteFileExtensions[draft.format]}</span>{draft.format === "CSV" && <CsvDelimiterControl key={selected.id} value={draft.delimiter ?? ","} disabled={!canEdit || busy} onValidityChange={setDelimiterValid} onChange={delimiter => { try { setDraft(changeDelimiter(draft, delimiter)); setError(undefined); } catch { setDelimiterValid(false); setError("Не удалось сменить разделитель: проверьте кавычки в исходном тексте."); } }} />}<div className={styles.tabs} role="tablist" aria-label={t("Режим файла")}>{([["edit", tabularNote(draft.format) ? "Таблица" : "Редактор"], ...(tabularNote(draft.format) ? [["source", "Исходный текст"]] : []), ["preview", "Предпросмотр"]] as const).map(([key, label]) => <button key={key} role="tab" aria-selected={view === key} onClick={() => setView(key as typeof view)} type="button"><UiText text={label} /></button>)}</div><CustomSelect aria-label={t("Доступ к файлу")} value={draft.visibility} disabled={!canEdit || busy} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as ProjectNoteVisibility })}><option value="PROJECT_MEMBERS"><UiText text="Только участники" /></option><option value="PUBLIC"><UiText text="Все по ссылке" /></option></CustomSelect></header>
+      <div className={styles.content} role="tabpanel">{view === "preview" ? <ProjectNoteDocument content={draft.markdown} format={draft.format} delimiter={draft.delimiter} /> : tabularNote(draft.format) && view === "edit" ? <SpreadsheetEditor key={`${selected.id}:${draft.delimiter ?? ""}`} content={draft.markdown} format={draft.format} delimiter={draft.delimiter} readOnly={!canEdit || busy} onChange={(markdown) => setDraft(current => ({ ...current, markdown }))} /> : <textarea className={styles.textarea} aria-label={t("Содержимое файла")} disabled={!canEdit || busy} value={draft.markdown} spellCheck={draft.format === "TEXT"} onChange={(event) => setDraft({ ...draft, markdown: event.target.value })} />}</div>
+      <footer className={styles.footer}><span>{dirty ? <UiText text="Изменено" /> : new Date(selected.updatedAt).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })}</span><button className="secondary-button" onClick={download} type="button"><Icon name="export" /><UiText text="Скачать" /></button>{selected.publicToken && selected.visibility === "PUBLIC" && <><button className="secondary-button" onClick={() => void copyLink()} type="button"><Icon name="link" /><UiText text="Копировать ссылку" /></button><a className="secondary-button" href={`/notes/${selected.publicToken}`} target="_blank" rel="noopener noreferrer"><UiText text="Открыть" /></a></>}{canEdit && <><button className="text-button" disabled={busy} onClick={() => void removeFile()} type="button"><Icon name="trash" /><UiText text="Удалить" /></button><button className={`primary-button ${styles.save}`} disabled={busy || !dirty || !draft.title.trim() || !delimiterValid} onClick={() => void persist(draft, selected)} type="button"><UiText text={busy ? "Сохраняем…" : "Сохранить"} /></button></>}</footer></> : !loading && <div className={styles.empty}><Icon name="note" /><h2><UiText text="Создайте первый файл" /></h2>{canEdit && <button className="primary-button" disabled={busy} onClick={() => void createFile()} type="button"><UiText text="Новый файл" /></button>}</div>}
       </article>
-    </section>
-  );
-}
-
-export function MarkdownDocument({ markdown }: Readonly<{ markdown: string }>) {
-  return (
-    <div className="markdown-document">
-      {markdown ? (
-        <ReactMarkdown
-          components={{
-            a: ({ children, href }) => (
-              <a href={href} rel="noopener noreferrer" target="_blank">
-                {children}
-              </a>
-            )
-          }}
-          remarkPlugins={[remarkGfm]}
-        >
-          {markdown}
-        </ReactMarkdown>
-      ) : (
-        <div className="project-notes-state"><UiText text="Добавьте текст в редакторе." /></div>
-      )}
     </div>
-  );
+    {createOpen && <SemanticModal title="Новый файл" onClose={() => setCreateOpen(false)} closeDisabled={busy} footer={<div className={styles.createActions}><button className="secondary-button" disabled={busy} onClick={() => setCreateOpen(false)} type="button"><UiText text="Отмена" /></button><button className="primary-button" disabled={busy || !newDraft.title.trim() || !newDelimiterValid} onClick={() => void persist(newDraft)} type="button"><UiText text={busy ? "Создаём…" : "Создать"} /></button></div>}><div className={styles.createForm}><FormField label="Имя файла" error={createError}><input autoFocus value={newDraft.title} maxLength={160} onChange={(event) => setNewDraft({ ...newDraft, title: event.target.value })} /></FormField><FormField label="Формат файла"><CustomSelect value={newDraft.format} onChange={event => { const format = event.target.value as ProjectNoteFormat; setNewDelimiterValid(true); const { delimiter: _old, ...rest } = newDraft; setNewDraft({ ...rest, format, ...(format === "CSV" ? { delimiter: noteDelimiter(newDraft.markdown, format) } : {}) }); }}>{projectNoteFormats.map((format) => <option key={format} value={format}>.{noteFileExtensions[format]}{format === "MARKDOWN" ? " · Markdown" : format === "TEXT" ? t(" · Текст") : ""}</option>)}</CustomSelect></FormField>{newDraft.format === "CSV" && <FormField label="Разделитель"><CsvDelimiterControl key={newDraft.format} value={newDraft.delimiter ?? ","} disabled={busy} onValidityChange={setNewDelimiterValid} onChange={delimiter => setNewDraft(current => ({ ...current, delimiter }))} /></FormField>}<small>{noteFileName(newDraft.title, newDraft.format)}</small></div></SemanticModal>}
+    {confirmation.dialog}
+  </section>;
 }
+export function MarkdownDocument({ markdown }: Readonly<{ markdown: string }>) { return <ProjectNoteDocument content={markdown} format="MARKDOWN" />; }
+function notesPath(projectId: string) { return `/app/api/projects/${encodeURIComponent(projectId)}/notes`; }
+function fromNote(note: ProjectNoteSummary): NoteDraft { return { title: note.title, markdown: note.markdown, format: projectNoteFormat(note.format), ...(note.format === "CSV" ? { delimiter: noteDelimiter(note.markdown, note.format, note.delimiter) } : {}), visibility: note.visibility }; }
+function errorMessage(error: unknown) { return error instanceof BrowserApiError ? error.status === 409 ? "Файл изменён в другой вкладке. Обновите страницу перед сохранением." : error.message : "Не удалось выполнить операцию с файлом."; }
 
-function notesPath(projectId: string): string {
-  return `/app/api/projects/${encodeURIComponent(projectId)}/notes`;
-}
-
-function draftFrom(note: ProjectNoteSummary): NoteDraft {
-  return {
-    title: note.title,
-    markdown: note.markdown,
-    visibility: note.visibility
-  };
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof BrowserApiError) {
-    if (error.status === 409) return "Заметка изменилась в другой вкладке. Обновите страницу.";
-    return `${error.message}${error.requestId ? ` Код запроса: ${error.requestId}.` : ""}`;
-  }
-  return "Не удалось выполнить операцию с заметкой.";
+function changeDelimiter(draft: NoteDraft, delimiter: string): NoteDraft {
+  const previous = noteDelimiter(draft.markdown, draft.format, draft.delimiter);
+  return { ...draft, delimiter, markdown: previous === delimiter || !draft.markdown ? draft.markdown : serializeDelimitedRows(parseDelimitedRows(draft.markdown, previous), delimiter) };
 }

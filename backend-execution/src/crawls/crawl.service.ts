@@ -10,6 +10,9 @@ import {
 } from "@nestjs/common";
 import {
   technicalCrawlHomepageProbeUrls,
+  technicalCrawlMaxFinalizationIssueLimit,
+  parseTechnicalCrawlRuntimeOptions,
+  technicalCrawlRuntimeOptionKeys,
   type InternalCancelTechnicalCrawlInput,
   type InternalCreateTechnicalCrawlInput,
   type TechnicalCrawlCollection,
@@ -337,7 +340,7 @@ export class CrawlService {
     crawlId: string,
     leaseOwner: string,
     leaseSeconds: number,
-    result: { readonly success: boolean; readonly issueCount: number },
+    result: { readonly success: boolean; readonly issueCount: number; readonly skipped?: boolean },
     checkpoint: CrawlCheckpoint
   ): Promise<void> {
     assertLease(leaseOwner, leaseSeconds);
@@ -352,7 +355,9 @@ export class CrawlService {
           checkpoint: crawlCheckpointJson(checkpoint),
           discoveredUrls: checkpoint.seen.length,
           processedUrls: { increment: 1 },
-          ...(result.success
+          ...(result.skipped
+            ? { blockedUrls: { increment: 1 } }
+            : result.success
             ? { successfulUrls: { increment: 1 } }
             : { failedUrls: { increment: 1 } }),
           issueCount: { increment: result.issueCount },
@@ -449,7 +454,7 @@ export class CrawlService {
     if (
       !Number.isSafeInteger(additionalIssueCount) ||
       additionalIssueCount < 0 ||
-      additionalIssueCount > 5_000
+      additionalIssueCount > technicalCrawlMaxFinalizationIssueLimit
     ) {
       throw new TypeError("Invalid additional crawl issue count");
     }
@@ -708,6 +713,8 @@ function configJson(input: InternalCreateTechnicalCrawlInput): Prisma.InputJsonV
     requestsPerMinute: input.requestsPerMinute,
     obeyRobots: true,
     savePageMap: input.savePageMap
+    ,snapshotIdentity: input.snapshotIdentity ?? "REQUESTED_URL"
+    ,...parseTechnicalCrawlRuntimeOptions(input as unknown as Readonly<Record<string, unknown>>)
   };
 }
 
@@ -716,8 +723,12 @@ function idempotencyScope(input: InternalCreateTechnicalCrawlInput): string {
 }
 
 function requestHash(input: InternalCreateTechnicalCrawlInput): string {
+  const intent = configJson(input) as Record<string, Prisma.InputJsonValue>;
+  delete intent.snapshotIdentity;
+  const defaults = parseTechnicalCrawlRuntimeOptions({ purpose: input.purpose });
+  for (const key of technicalCrawlRuntimeOptionKeys) if (intent[key] === defaults[key]) delete intent[key];
   return createHash("sha256")
-    .update(JSON.stringify(configJson(input)), "utf8")
+    .update(JSON.stringify(intent), "utf8")
     .digest("hex");
 }
 

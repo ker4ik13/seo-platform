@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "./custom-date-input";
 import { CustomSelect } from "./custom-select";
 
 import { useEffect, useMemo, useState } from "react";
@@ -317,7 +318,7 @@ export function NotificationSettings({
           </label>
           <label className="form-field">
             <span><UiText text="Время дневного дайджеста" /></span>
-            <input
+            <CustomDateInput
               onChange={(event) => {
                 setSaved(false);
                 setDraft({ ...draft, digestTime: event.target.value });
@@ -342,7 +343,7 @@ export function NotificationSettings({
           <div className="notification-time-grid">
             <label className="form-field">
               <span><UiText text="Начало" /></span>
-              <input
+              <CustomDateInput
                 onChange={(event) => {
                   setSaved(false);
                   setDraft({
@@ -359,7 +360,7 @@ export function NotificationSettings({
             </label>
             <label className="form-field">
               <span><UiText text="Окончание" /></span>
-              <input
+              <CustomDateInput
                 onChange={(event) => {
                   setSaved(false);
                   setDraft({

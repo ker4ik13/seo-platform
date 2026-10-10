@@ -80,8 +80,12 @@ test(
       NODE_ENV: "test",
       DATABASE_URL: databaseUrl!
     }));
-    const queryRaw = (strings: TemplateStringsArray, ...values: unknown[]) =>
-        database.$queryRaw(Prisma.sql`
+    const queryRaw = (input: TemplateStringsArray | Prisma.Sql, ...values: unknown[]) => {
+      const statement = Array.isArray(input) ? Prisma.sql(input as TemplateStringsArray, ...values) : input as Prisma.Sql;
+      const strings = [...statement.strings];
+      // Добавить CTE owning query к fixture CTE, сохраняя параметры и реальные ORDER BY.
+      strings[0] = strings[0]!.replace(/^\s*WITH\b/u, ",");
+      return database.$queryRaw(Prisma.sql`
           WITH keywords AS (
             SELECT * FROM jsonb_to_recordset(${JSON.stringify(keywords)}::jsonb)
               AS fixture(id uuid, workspace_id uuid, project_id uuid, status text)
@@ -109,8 +113,9 @@ test(
                 observed_at timestamptz
               )
           )
-          ${Prisma.sql(strings, ...values)}
+          ${Prisma.sql(strings, ...statement.values)}
         `);
+    };
     const service = new KeywordService({
       $queryRaw: queryRaw,
       $transaction: async (work: (transaction: unknown) => Promise<unknown>) =>

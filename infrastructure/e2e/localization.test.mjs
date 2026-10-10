@@ -49,7 +49,8 @@ test("RU/EN through Caddy: persisted UI preference, untranslated user data, sett
   await page.getByText("сохранить настройки", { exact: true }).first().waitFor();
   assert.equal(await page.locator(".avatar-copy strong").innerText(), "Настройки");
   await page.locator(".avatar-button").click();
-  await page.getByRole("combobox", { name: "Interface language", exact: true }).selectOption("ru");
+  await page.getByRole("combobox", { name: "Interface language", exact: true }).click();
+  await page.getByRole("option", { name: "Русский", exact: true }).click();
   await page.waitForFunction(() => document.documentElement.lang === "ru");
   await page.reload({ waitUntil: "networkidle" });
   assert.equal(await page.locator("html").getAttribute("lang"), "ru");

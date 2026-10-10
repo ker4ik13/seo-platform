@@ -66,7 +66,7 @@ const FILTER_FIELDS = new Set([
   "priorityMin",
   "priorityMax",
   "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
   "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
 ]);
 
@@ -301,6 +301,7 @@ function advancedExportFilters(input: Readonly<Record<string, unknown>>) {
   const wordCountMin = number("wordCountMin", 10_000), wordCountMax = number("wordCountMax", 10_000), rankPositionMin = number("rankPositionMin", 100), rankPositionMax = number("rankPositionMax", 100);
   if ((wordCountMin && wordCountMax && wordCountMin > wordCountMax) || (rankPositionMin && rankPositionMax && rankPositionMin > rankPositionMax)) invalid("filters.range");
   const targetUrlState = input.targetUrlState === undefined ? undefined : enumValue(input.targetUrlState, ["SET", "EMPTY"] as const, "filters.targetUrlState");
+  const multipleUrlsState = input.multipleUrlsState === undefined ? undefined : enumValue(input.multipleUrlsState, ["MULTIPLE", "NOT_MULTIPLE"] as const, "filters.multipleUrlsState");
   const rankState = input.rankState === undefined ? undefined : enumValue(input.rankState, ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const, "filters.rankState");
   const rankDimensionKey = input.rankDimensionKey;
   if (rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid("filters.rankDimensionKey");
@@ -309,7 +310,7 @@ function advancedExportFilters(input: Readonly<Record<string, unknown>>) {
   if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) invalid("filters.rankCheckedFrom");
   if (!rankDimensionKey && (rankState || rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) invalid("filters.rankDimensionKey");
   if ((rankState === "NOT_CHECKED" && (rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) || (rankState === "NOT_FOUND" && (rankPositionMin || rankPositionMax))) invalid("filters.rankState");
-  return { ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}), ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}), ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}), ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}), ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}), ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {}) };
+  return { ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}), ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}), ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}), ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(multipleUrlsState ? { multipleUrlsState } : {}), ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}), ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}), ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {}) };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

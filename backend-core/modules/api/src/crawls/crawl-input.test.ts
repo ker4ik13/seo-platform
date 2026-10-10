@@ -26,7 +26,12 @@ test("accepts one same-origin bounded crawl command", () => {
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
       obeyRobots: true,
-      savePageMap: true
+      savePageMap: true,
+      conditionalRequests: true,
+      respectNofollow: false,
+      requestTimeoutMs: 20_000,
+      maxResponseBytes: 2_000_000,
+      maxRedirects: 5
     }
   );
 });
@@ -132,7 +137,12 @@ test("normalizes bounded sitemap scope and rejects unsafe patterns", () => {
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 20,
       obeyRobots: true,
-      savePageMap: true
+      savePageMap: true,
+      conditionalRequests: true,
+      respectNofollow: false,
+      requestTimeoutMs: 20_000,
+      maxResponseBytes: 2_000_000,
+      maxRedirects: 5
     }
   );
   assert.throws(() =>
@@ -158,3 +168,8 @@ function baseConfig() {
     obeyRobots: true
   };
 }
+
+test("accepts the four-page-per-second UI setting without weakening the upper bound", () => {
+  assert.equal(createTechnicalCrawlInput({ ...baseConfig(), requestsPerMinute: 240 }).requestsPerMinute, 240);
+  assert.throws(() => createTechnicalCrawlInput({ ...baseConfig(), requestsPerMinute: 241 }));
+});

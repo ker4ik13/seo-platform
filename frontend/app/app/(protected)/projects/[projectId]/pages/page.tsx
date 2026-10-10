@@ -28,29 +28,19 @@ export default async function ProjectPagesPage({
     throw new Error("Project workspace context is missing");
   }
   return (
-    <>
-      <section className="page-heading page-map-heading">
-        <div>
-          <div className="project-page-title-row">
-            <h1><UiText text="Карта страниц" /></h1>
-            <ProjectContextSelect
-              canReorder={context.projectCapabilities?.canReorder ?? false}
-              destination="pages"
-              projectId={project.id}
-              projects={context.projects}
-              workspaceId={workspace.id}
-            />
-          </div>
-          <p>
-            <UiText text="URL проекта, их состояние, семантика и результаты технических проверок — в одном рабочем экране." /></p>
-        </div>
-      </section>
-      <ProjectPageMap
+    <ProjectPageMap
+        heading={<div className="page-map-title"><h1><UiText text="Карта страниц" /></h1><ProjectContextSelect
+          canReorder={context.projectCapabilities?.canReorder ?? false}
+          destination="pages"
+          projectId={project.id}
+          projects={context.projects}
+          workspaceId={workspace.id}
+        /></div>}
         key={project.id}
+        currentUserId={context.user.id}
         projectDomain={project.domain}
         projectId={project.id}
         projectName={project.name}
-      />
-    </>
+    />
   );
 }

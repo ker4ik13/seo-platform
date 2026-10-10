@@ -82,6 +82,10 @@ export const semanticImportTargets = [
   "ranking.google.url",
   "context.search_engine",
   "context.region",
+  "context.region_code",
+  "context.country",
+  "context.language",
+  "context.device",
   "metric.observed_at",
   "keyword.tags",
   "metric.kei",
@@ -90,6 +94,7 @@ export const semanticImportTargets = [
 
 /** Bounded normalization batch shared by Jobs and the SEO data owner. */
 export const semanticImportNormalizeMaxRows = 5_000;
+export const semanticImportMaxTableColumns = 1_109;
 /** Bounded publication transaction shared by Jobs and the SEO data owner. */
 export const semanticImportPublishMaxRows = 5_000;
 
@@ -193,12 +198,7 @@ export interface SemanticImportMapping {
   readonly positionHistory?: SemanticPositionHistoryImportOptions;
 }
 
-export interface SemanticPositionHistoryImportOptions {
-  /** WIDE reads one date per column; LONG reads date and position mappings per row. */
-  readonly layout?: "WIDE" | "LONG";
-  /** Default observation time for one-snapshot files without a date column. */
-  readonly observedAt?: string;
-  /** One uploaded file represents exactly one search engine. */
+export interface SemanticPositionHistoryImportContext {
   readonly searchEngine: "YANDEX" | "GOOGLE";
   readonly countryCode: string;
   readonly regionCode: string;
@@ -207,10 +207,27 @@ export interface SemanticPositionHistoryImportOptions {
   readonly device: "DESKTOP" | "MOBILE";
 }
 
+export interface SemanticPositionHistoryDateColumn {
+  readonly sourceIndex: number;
+  readonly observedAt: string;
+  readonly rankingUrlSourceIndex?: number;
+  /** An explicit override; otherwise the wizard defaults and row metadata apply. */
+  readonly context?: SemanticPositionHistoryImportContext;
+}
+
+export interface SemanticPositionHistoryImportOptions extends SemanticPositionHistoryImportContext {
+  /** WIDE reads one date per column; LONG reads date and position mappings per row. */
+  readonly layout?: "WIDE" | "LONG";
+  /** Default observation time for one-snapshot files without a date column. */
+  readonly observedAt?: string;
+  /** Explicit WIDE bindings, including a separate URL column for each snapshot. */
+  readonly dateColumns?: readonly SemanticPositionHistoryDateColumn[];
+}
+
 export function parseSemanticPositionHistoryImportOptions(value: unknown): SemanticPositionHistoryImportOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid position history options");
   const input = value as Record<string, unknown>;
-  const allowed = ["layout", "observedAt", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
+  const allowed = ["layout", "observedAt", "dateColumns", "searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"];
   if (Object.keys(input).some(key => !allowed.includes(key)) ||
     (input.layout !== undefined && input.layout !== "WIDE" && input.layout !== "LONG") ||
     (input.observedAt !== undefined &&
@@ -225,9 +242,8 @@ export function parseSemanticPositionHistoryImportOptions(value: unknown): Seman
   try { language = Intl.getCanonicalLocales(input.language.trim())[0]!; } catch { throw new TypeError("Invalid position history language"); }
   let observedAt: string | undefined;
   if (typeof input.observedAt === "string") {
-    const date = new Date(input.observedAt);
-    if (Number.isNaN(date.getTime())) throw new TypeError("Invalid position history date");
-    observedAt = date.toISOString();
+    observedAt = semanticPositionHistoryObservedAt(input.observedAt);
+    if (!observedAt) throw new TypeError("Invalid position history date");
   }
   const result: SemanticPositionHistoryImportOptions = {
     ...(input.layout ? { layout: input.layout as "WIDE" | "LONG" } : {}),
@@ -242,7 +258,70 @@ export function parseSemanticPositionHistoryImportOptions(value: unknown): Seman
   if (!parseSemanticRankDimensionKey(semanticRankDimensionKey(result))) {
     throw new TypeError("Invalid position history context");
   }
-  return result;
+  if (input.dateColumns === undefined) return result;
+  if (input.layout === "LONG" || !Array.isArray(input.dateColumns) || input.dateColumns.length < 1 || input.dateColumns.length > 1_100) {
+    throw new TypeError("Invalid position history columns");
+  }
+  const sources = new Set<number>();
+  const snapshots = new Set<string>();
+  const dateColumns = input.dateColumns.map((value): SemanticPositionHistoryDateColumn => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Invalid position history column");
+    const column = value as Record<string, unknown>;
+    if (Object.keys(column).some(key => !["sourceIndex", "observedAt", "rankingUrlSourceIndex", "context"].includes(key)) ||
+      !Number.isSafeInteger(column.sourceIndex) || Number(column.sourceIndex) < 0 || Number(column.sourceIndex) > 1_108 ||
+      (column.rankingUrlSourceIndex !== undefined && (!Number.isSafeInteger(column.rankingUrlSourceIndex) || Number(column.rankingUrlSourceIndex) < 0 || Number(column.rankingUrlSourceIndex) > 1_108 || column.sourceIndex === column.rankingUrlSourceIndex)) ||
+      typeof column.observedAt !== "string") throw new TypeError("Invalid position history column");
+    const date = semanticPositionHistoryObservedAt(column.observedAt);
+    if (!date || sources.has(Number(column.sourceIndex))) throw new TypeError("Invalid position history column date");
+    let context: SemanticPositionHistoryImportContext | undefined;
+    if (column.context !== undefined) {
+      if (!column.context || typeof column.context !== "object" || Array.isArray(column.context) ||
+        Object.keys(column.context).some(key => !["searchEngine", "countryCode", "regionCode", "regionLabel", "language", "device"].includes(key))) throw new TypeError("Invalid position history column context");
+      context = parseSemanticPositionHistoryImportOptions(column.context);
+    }
+    const key = `${date}|${semanticRankDimensionKey(context ?? result)}`;
+    if (snapshots.has(key)) throw new TypeError("Duplicate position history snapshot");
+    sources.add(Number(column.sourceIndex));
+    snapshots.add(key);
+    return {
+      sourceIndex: Number(column.sourceIndex), observedAt: date,
+      ...(column.rankingUrlSourceIndex === undefined ? {} : { rankingUrlSourceIndex: Number(column.rankingUrlSourceIndex) }),
+      ...(context ? { context } : {}),
+    };
+  });
+  if (dateColumns.some(column => column.rankingUrlSourceIndex !== undefined && sources.has(column.rankingUrlSourceIndex))) {
+    throw new TypeError("Position and URL columns overlap");
+  }
+  return { ...result, dateColumns };
+}
+
+export function semanticPositionHistoryObservedAt(value: string): string | undefined {
+  const source = value.normalize("NFKC").trim();
+  const date = source.includes("T") ? undefined : semanticPositionHistoryHeaderDate(source);
+  if (date) return `${date}T12:00:00.000Z`;
+  // A malformed day must not be normalized into another month by Date.parse.
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u.test(source)) return undefined;
+  const day = source.slice(0, 10);
+  if (!semanticPositionHistoryHeaderDate(day)) return undefined;
+  const parsed = new Date(source);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+/** Source headers are suggestions only; the explicit bindings remain editable. */
+export function semanticPositionHistoryColumnHeader(value: string): Readonly<{
+  kind: "POSITION" | "URL"; observedAt: string; searchEngine?: "YANDEX" | "GOOGLE";
+}> | undefined {
+  const source = value.normalize("NFKC").trim();
+  const bare = semanticPositionHistoryHeaderDate(source);
+  const dates = source.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]\d{4}/gu);
+  const day = bare ?? (dates?.length === 1 ? semanticPositionHistoryHeaderDate(dates[0]!) : undefined);
+  if (!day || /частотност|frequency|wordstat/iu.test(source)) return undefined;
+  const engine = /(?:^|[\s:·|/_-])(yandex|яндекс|google|гугл)(?=$|[\s:·|/_-])/iu.exec(source)?.[1]?.toLowerCase();
+  return {
+    kind: /url|урл|страниц|ссылк/iu.test(source) ? "URL" : "POSITION",
+    observedAt: `${day}T12:00:00.000Z`,
+    ...(engine ? { searchEngine: engine === "google" || engine === "гугл" ? "GOOGLE" as const : "YANDEX" as const } : {}),
+  };
 }
 
 /** Detects compact external-service headers such as `Яндекс:XML Desktop Москва [213]`. */

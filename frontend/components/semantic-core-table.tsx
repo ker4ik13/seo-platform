@@ -1,19 +1,21 @@
 "use client";
+import { TableSortButton } from "./table-sort-button";
+import { WorkspaceSidebarSeparator } from "./workspace-sidebar";
 import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 import { semanticCursorPageIssue } from "../lib/semantic-cursor-page";
 import { moveSemanticColumn } from "../lib/semantic-column-order";
+import { applySemanticViewPreset } from "../lib/semantic-view-presets";
 
 import { CustomSelect } from "./custom-select";
 import { ChoiceToggle } from "./choice-toggle";
 import { InfoTooltip } from "./info-tooltip";
+import { KeywordUrlFilters, KeywordUrlFilterChips } from "./keyword-url-filters";
 import { KeywordTagPicker } from "./keyword-tag-picker";
 import { LanguageSelect } from "./locale-selects";
 import { uniqueKeywordTags } from "../lib/keyword-tags";
-import { rankColumnLabel, rankDimensionColumns, rankDimensionLabel } from "../lib/rank-dimension-presentation";
-import {
-  searchRegionDisplayName,
-  seoRegionDisplayName
-} from "../lib/seo-regions";
+import { rankDimensionColumns, rankDimensionLabel } from "../lib/rank-dimension-presentation";
+import { semanticColumnLabel, semanticSystemColumns as semanticColumns } from "../lib/semantic-column-presentation";
+import { seoRegionDisplayName } from "../lib/seo-regions";
 import { useSemanticRankComparison } from "./use-semantic-rank-comparison";
 import {
   SemanticRankCheckedAtCell,
@@ -23,6 +25,7 @@ import {
 } from "./semantic-rank-comparison-cell";
 import { SemanticRankContext } from "./semantic-rank-context";
 import { CustomDateRangePicker } from "./custom-date-range-picker";
+import { calendarToday, readCalendarRangeSession, sessionCalendarRange } from "../lib/date-range-session";
 
 import {
   semanticKeywordDefaultPageSize,
@@ -37,6 +40,9 @@ import {
   semanticKeywordPageSizes,
   semanticSavedViewQueryIndicators,
   semanticSystemColumnKeys,
+  projectOnboardingViewConfig,
+  projectOnboardingDimensions,
+  parseProjectOnboardingSettings,
   type SemanticKeywordPageSize,
   type SemanticKeywordMultiSearch,
   type SemanticKeywordBulkCreatePreviewResult,
@@ -173,6 +179,8 @@ import { SemanticModal } from "./semantic-modal";
 import { SemanticExportFolderPicker } from "./semantic-export-folder-picker";
 import { SemanticVersionHistory } from "./semantic-version-history";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticColumnHeader } from "./semantic-column-header";
+import { ConfirmationActions } from "./confirmation-actions";
 import {
   KeywordDataGrid,
   type KeywordDataGridRowPresence
@@ -207,7 +215,6 @@ import {
   type SemanticKeywordSort,
   type SemanticQueryIndicator,
   type SemanticSavedView,
-  type SemanticSystemColumn,
   type SemanticViewColumn,
   type SemanticViewConfig,
   type SemanticViewFilters
@@ -384,7 +391,7 @@ interface SemanticCoreTableProps {
   readonly projectName: string;
   readonly projects: readonly Pick<
     AppProject,
-    "id" | "name" | "domain" | "version" | "activeOperationCount" | "searchCity"
+    "id" | "name" | "domain" | "version" | "activeOperationCount" | "searchCity" | "onboarding"
   >[];
   readonly workspaceId: string;
   readonly workspaceRoleCode: string;
@@ -444,6 +451,9 @@ export function SemanticCoreTable({
   const [draftConfig, setDraftConfig] = useState<SemanticViewConfig>(
     defaultSemanticViewConfig
   );
+  const onboardingSignature = JSON.stringify(projects.find(project => project.id === projectId)?.onboarding ?? null);
+  const configuredOnboarding = useMemo(() => onboardingSignature === "null" ? undefined : parseProjectOnboardingSettings(JSON.parse(onboardingSignature)), [onboardingSignature]);
+  const initialOnboardingView = useMemo(() => configuredOnboarding ? projectOnboardingViewConfig(configuredOnboarding) : defaultSemanticViewConfig, [configuredOnboarding]);
   const [viewConfig, setViewConfig] = useState<SemanticViewConfig>(
     defaultSemanticViewConfig
   );
@@ -501,6 +511,7 @@ export function SemanticCoreTable({
   const [exportHistoryTo, setExportHistoryTo] = useState(
     () => semanticHistoryDefaultRange().to
   );
+  const [exportDatePickerOpen, setExportDatePickerOpen] = useState(false);
   const [exportHistoryIncludeAllKeywords, setExportHistoryIncludeAllKeywords] =
     useState(false);
   const [exporting, setExporting] = useState(false);
@@ -1578,7 +1589,7 @@ export function SemanticCoreTable({
           explicitlyAppliedView ?? personalView ?? defaultSharedView;
         const storedConfig = semanticViewConfigWithoutAppliedView(
           semanticViewConfigForCurrentSchema(
-            appliedView?.config ?? projectView?.config ?? defaultSemanticViewConfig
+            appliedView?.config ?? projectView?.config ?? initialOnboardingView
           )
         );
         const nextConfig = appliedView || projectView
@@ -1706,7 +1717,7 @@ export function SemanticCoreTable({
         if (!controller.signal.aborted) setTableViewReadyProjectId(projectId);
       });
     return () => controller.abort();
-  }, [activateSavedView, currentUserId, projectId]);
+  }, [activateSavedView, currentUserId, projectId, initialOnboardingView]);
 
   useEffect(() => {
     if (!bulkNotice && !exportNotice) return;
@@ -1788,6 +1799,15 @@ export function SemanticCoreTable({
       }
     }, otherFilters.groupId));
     setFilterOpen(false);
+  }
+
+  function clearUrlFilter(field: "targetUrlState" | "multipleUrlsState"): void {
+    const clear = (current: SemanticViewConfig): SemanticViewConfig => {
+      const { [field]: _value, ...filters } = current.filters; void _value;
+      return { ...current, filters };
+    };
+    setDraftConfig(clear);
+    setViewConfig(clear);
   }
 
   function submitSearch(event: FormEvent<HTMLFormElement>): void {
@@ -3235,6 +3255,11 @@ export function SemanticCoreTable({
   }
 
   function openExport(groupId?: string): void {
+    const dateKey = `date-range:export:${currentUserId}:${projectId}`;
+    let session;
+    try { session = readCalendarRangeSession(window.sessionStorage, dateKey); } catch { /* Optional date preference. */ }
+    const range = sessionCalendarRange({ value: session ?? { from: exportHistoryFrom, to: exportHistoryTo }, available: { from: "1970-01-01", to: calendarToday() }, session, today: calendarToday() });
+    setExportHistoryFrom(range.from); setExportHistoryTo(range.to); setExportDatePickerOpen(false);
     setExportDialog(groupId ? { groupId } : {});
     setExportScope(
       groupId
@@ -3896,8 +3921,13 @@ export function SemanticCoreTable({
     }
     return { items: comparisonItems, resolvedKeys };
   }, [items]);
+  const effectiveRankDimensions = useMemo(() => [...new Map([
+    ...projectOnboardingDimensions({ engines: configuredOnboarding?.engines ?? [] }),
+    ...rankCatalog.dimensions
+  ].map(dimension => [dimension.key, dimension])).values()], [configuredOnboarding, rankCatalog.dimensions]);
   const rankComparison = {
     ...rankCatalog,
+    dimensions: effectiveRankDimensions,
     items: embeddedRankComparison.items,
     resolvedKeys: embeddedRankComparison.resolvedKeys,
     loading: loading || rankCatalog.loading,
@@ -4412,7 +4442,7 @@ export function SemanticCoreTable({
         remotePresence={remoteSemanticGroupPresence}
         {...(total === undefined ? {} : { total })}
       />
-      <div
+      <WorkspaceSidebarSeparator
         aria-label={uiText("Изменить ширину дерева групп")}
         aria-orientation="vertical"
         aria-valuemax={semanticGroupSidebarMaxWidth}
@@ -4471,6 +4501,8 @@ export function SemanticCoreTable({
             )}
           </label>
         </form>
+        <KeywordUrlFilterChips targetUrlState={viewConfig.filters.targetUrlState} multipleUrlsState={viewConfig.filters.multipleUrlsState}
+          onTargetClear={() => clearUrlFilter("targetUrlState")} onMultipleClear={() => clearUrlFilter("multipleUrlsState")} />
         <details
           className="semantic-filter-disclosure"
           data-exclusive-dropdown
@@ -4684,6 +4716,7 @@ export function SemanticCoreTable({
                 availableRange={filterAvailableDateRange}
                 className="semantic-filter-date-picker"
                 dialogLabel="Выбрать даты съёма"
+                sessionKey={`date-range:semantics:${currentUserId}:${projectId}:${viewConfig.appliedViewId ?? "personal"}`}
                 disabled={!draftConfig.filters.rankDimensionKey || draftConfig.filters.rankState === "NOT_CHECKED"}
                 modal
                 onApply={({ from, to }) => updateRankDateRange(from, to)}
@@ -4701,10 +4734,8 @@ export function SemanticCoreTable({
             </div>
           </div>
         </section>
-        <label>
-          <span><UiText text="Целевой URL" /></span>
-          <CustomSelect value={draftConfig.filters.targetUrlState ?? ""} onChange={(event) => updateAdvancedFilter("targetUrlState", event.target.value as "" | "SET" | "EMPTY")}><option value=""><UiText text="Любой" /></option><option value="SET"><UiText text="Задан" /></option><option value="EMPTY"><UiText text="Не задан" /></option></CustomSelect>
-        </label>
+        <KeywordUrlFilters targetUrlState={draftConfig.filters.targetUrlState} multipleUrlsState={draftConfig.filters.multipleUrlsState}
+          onTargetChange={state => updateAdvancedFilter("targetUrlState", state)} onMultipleChange={state => updateAdvancedFilter("multipleUrlsState", state)} />
         <label>
           <span><UiText text="Сортировка" /></span>
           <CustomSelect
@@ -4737,6 +4768,10 @@ export function SemanticCoreTable({
             <option value="SOURCE_ASC"><UiText text="Источник: А → Я" /></option>
             <option value="SOURCE_DESC"><UiText text="Источник: Я → А" /></option>
             <option value="TAGS_ASC"><UiText text="Теги: А → Я" /></option>
+            <option value="TARGET_URL_ASC"><UiText text="Целевой URL: А → Я" /></option>
+            <option value="TARGET_URL_DESC"><UiText text="Целевой URL: Я → А" /></option>
+            <option value="TARGET_URL_SET_FIRST"><UiText text="С целевым URL сначала" /></option>
+            <option value="TARGET_URL_EMPTY_FIRST"><UiText text="Без целевого URL сначала" /></option>
             <option value="TAGS_DESC"><UiText text="Теги: Я → А" /></option>
             <option value="FREQUENCY_BASE_DESC"><UiText text="База: больше → меньше" /></option>
             <option value="FREQUENCY_BASE_ASC"><UiText text="База: меньше → больше" /></option>
@@ -4799,7 +4834,7 @@ export function SemanticCoreTable({
             ? `Тег будет снят со всех связанных запросов и удалён из проекта.`
             : `Кластер будет снят со всех связанных запросов и удалён из проекта.`}
           footer={(
-            <>
+            <ConfirmationActions>
               <button
                 className="secondary-button"
                 disabled={deletingFilterTaxonomy}
@@ -4818,7 +4853,7 @@ export function SemanticCoreTable({
                   ? <UiText text="Удаляем…" />
                   : <UiText text="Удалить" />}
               </button>
-            </>
+            </ConfirmationActions>
           )}
           onClose={() => setFilterTaxonomyDelete(undefined)}
           presenceKey="semantic-filter-taxonomy-delete"
@@ -5049,24 +5084,11 @@ export function SemanticCoreTable({
                 </div>
                 <p className="semantic-history-export-compatibility"><UiText text="Выбранные поисковые системы экспортируются в отдельные вкладки одного файла." /></p>
                 <div className="semantic-history-export-dates">
-                  <label>
-                    <span><UiText text="С даты" /></span>
-                    <input
-                      disabled={exporting || exportJob?.status === "COMPLETED"}
-                      onChange={(event) => setExportHistoryFrom(event.target.value)}
-                      type="date"
-                      value={exportHistoryFrom}
-                    />
-                  </label>
-                  <label>
-                    <span><UiText text="По дату включительно" /></span>
-                    <input
-                      disabled={exporting || exportJob?.status === "COMPLETED"}
-                      onChange={(event) => setExportHistoryTo(event.target.value)}
-                      type="date"
-                      value={exportHistoryTo}
-                    />
-                  </label>
+                  <CustomDateRangePicker active alwaysShowYear availableRange={{ from: "1970-01-01", to: calendarToday() }}
+                    sessionKey={`date-range:export:${currentUserId}:${projectId}`} disabled={exporting || exportJob?.status === "COMPLETED"} dialogLabel="Выбрать период экспорта"
+                    onApply={({ from, to }) => { setExportHistoryFrom(from); setExportHistoryTo(to); }}
+                    onOpenChange={setExportDatePickerOpen} onReset={() => { const range = semanticHistoryDefaultRange(); setExportHistoryFrom(range.from); setExportHistoryTo(range.to); }}
+                    open={exportDatePickerOpen} resetLabel="Последние 90 дней" triggerLabel="Период экспорта" value={{ from: exportHistoryFrom, to: exportHistoryTo }} />
                 </div>
                 <label className="semantic-control-check semantic-history-export-untracked">
                   <input
@@ -5869,22 +5891,10 @@ export function SemanticCoreTable({
                   onResizeEnd: (width: number) =>
                     resizeSemanticColumn(column, width, true),
                   header: nextSort ? (
-                    <button
-                      aria-label={`${columnLabel(column, customColumns, rankComparison.dimensions, uiLocale)}. ${sortActionLabel(nextSort.sort)}`}
-                      className={direction ? "active" : undefined}
-                      disabled={savingFolderSort}
-                      onClick={() => void changeFolderSort(
-                        nextSort.sort,
-                        nextSort.rankSortDimensionKey
-                      )}
-                      type="button"
-                    >
-                      <span>{columnHeader(column, customColumns, rankComparison.dimensions, uiLocale)}</span>
-                      <i aria-hidden="true">
-                        {direction === "ascending" ? "↑" : direction === "descending" ? "↓" : "↕"}
-                      </i>
-                    </button>
-                  ) : columnHeader(column, customColumns, rankComparison.dimensions, uiLocale),
+                    <TableSortButton label={`${columnLabel(column, customColumns, rankComparison.dimensions, uiLocale)}. ${sortActionLabel(nextSort.sort)}`} direction={direction} disabled={savingFolderSort} onClick={() => void changeFolderSort(nextSort.sort, nextSort.rankSortDimensionKey)}>
+                      {columnHeader(column, customColumns, rankComparison.dimensions)}
+                    </TableSortButton>
+                  ) : columnHeader(column, customColumns, rankComparison.dimensions),
                   cell: (item: SemanticKeyword) => {
                     const rankColumn = parseSemanticRankColumnKey(column);
                     if (rankColumn) {
@@ -5984,7 +5994,7 @@ export function SemanticCoreTable({
         </>
       )}
       {rightSidebar?.type === "KEYWORD" && focusedKeyword && (
-        <div
+        <WorkspaceSidebarSeparator
           aria-label={uiText("Изменить ширину панели запроса")}
           aria-orientation="vertical"
           aria-valuemax={semanticInspectorMaxWidth}
@@ -6173,7 +6183,7 @@ export function SemanticCoreTable({
                 ? <UiText text="Это окончательное удаление. Данные частотности, позиций и связанные записи также будут удалены." />
                 : <UiText text="Параллельно изменённые строки не будут перезаписаны; остальные появятся в корзине." />}
             </div>
-            <div className="semantic-modal-actions">
+            <ConfirmationActions>
               <button className="secondary-button" disabled={saving} onClick={() => { setDeleteSelectionOpen(false); setActionIds(null); }} type="button"><UiText text="Отмена" /></button>
               <button className="danger-button" disabled={saving} onClick={() => void deleteSelectedKeywords(mutationIds)} type="button">
                 {saving
@@ -6186,7 +6196,7 @@ export function SemanticCoreTable({
                     ? <UiText text="Удалить навсегда" />
                     : <UiText text="В корзину" />}
               </button>
-            </div>
+            </ConfirmationActions>
           </div>
         </SemanticModal>
       )}
@@ -6213,6 +6223,8 @@ export function SemanticCoreTable({
       )}
       {positionDialogOpen && (
         <SemanticPositionDialog
+          currentUserId={currentUserId}
+          {...(projects.find(project => project.id === projectId)?.onboarding ? { onboarding: projects.find(project => project.id === projectId)!.onboarding! } : {})}
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialScope={initialCollectionGroupScope}
@@ -6238,6 +6250,8 @@ export function SemanticCoreTable({
       )}
       {competitorDialogOpen && (
         <SemanticPositionDialog
+          currentUserId={currentUserId}
+          {...(projects.find(project => project.id === projectId)?.onboarding ? { onboarding: projects.find(project => project.id === projectId)!.onboarding! } : {})}
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialScope={initialCollectionGroupScope}
@@ -6265,6 +6279,8 @@ export function SemanticCoreTable({
       )}
       {aiAnswerDialogOpen && (
         <SemanticAiAnswerDialog
+          currentUserId={currentUserId}
+          {...(projects.find(project => project.id === projectId)?.onboarding ? { onboarding: projects.find(project => project.id === projectId)!.onboarding! } : {})}
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialScope={initialCollectionGroupScope}
@@ -6284,6 +6300,8 @@ export function SemanticCoreTable({
       )}
       {aiCompetitorDialogOpen && (
         <SemanticAiAnswerDialog
+          currentUserId={currentUserId}
+          {...(projects.find(project => project.id === projectId)?.onboarding ? { onboarding: projects.find(project => project.id === projectId)!.onboarding! } : {})}
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialScope={initialCollectionGroupScope}
@@ -6309,7 +6327,7 @@ export function SemanticCoreTable({
         />
       )}
       {frequencyDialogOpen && (
-        <SemanticFrequencyDialog
+        <SemanticFrequencyDialog currentUserId={currentUserId}
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialScope={initialCollectionGroupScope}
@@ -6328,7 +6346,7 @@ export function SemanticCoreTable({
         />
       )}
       {seasonalityDialogOpen && (
-        <SemanticFrequencyDialog
+        <SemanticFrequencyDialog currentUserId={currentUserId}
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialScope={initialCollectionGroupScope}
@@ -6423,6 +6441,7 @@ export function SemanticCoreTable({
       )}
       {rightSidebar?.type === "OPERATIONS" && (
         <SemanticOperationsDrawer
+          currentUserId={currentUserId}
           onClose={() => setRightSidebar(undefined)}
           onClusteringApplied={() => {
             setCheckedIds(new Set());
@@ -6467,6 +6486,7 @@ export function SemanticCoreTable({
             density: defaultSemanticViewConfig.density,
             queryIndicators: semanticSavedViewQueryIndicators
           }))}
+          onPreset={preset => setDraftConfig(current => applySemanticViewPreset(current, preset, rankColumns.map(({ key }) => key)))}
           onToggleColumn={toggleColumn}
           onToggleQueryIndicator={toggleQueryIndicator}
           projectId={projectId}
@@ -6619,7 +6639,7 @@ function semanticKeywordMetricProjectionFor(
 
 const semanticAdvancedFilterFields = [
   "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+  "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
   "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
 ] as const;
 
@@ -6735,38 +6755,6 @@ const semanticCompetitorRowLabels: Record<typeof semanticCompetitorRowColumnKeys
   competitorObservedAt: "Дата съёма", competitorProvider: "Провайдер"
 };
 
-const semanticColumns: readonly Readonly<{
-  key: SemanticSystemColumn;
-  label: string;
-}>[] = [
-  { key: "query", label: "Запрос" },
-  { key: "frequency", label: "База" },
-  { key: "frequencyExact", label: '""' },
-  { key: "frequencyFixed", label: '"!"' },
-  { key: "wordCount", label: "WS" },
-  { key: "yandexPosition", label: "Позиция Яндекс" },
-  { key: "yandexRelevantUrl", label: "URL из съёма Яндекс" },
-  { key: "googlePosition", label: "Позиция Google" },
-  { key: "googleRelevantUrl", label: "URL из съёма Google" },
-  { key: "yandexAiPosition", label: "ИИ позиция Яндекс" },
-  { key: "yandexAiRelevantUrl", label: "URL ИИ-выдачи Яндекс" },
-  { key: "googleAiPosition", label: "ИИ позиция Google" },
-  { key: "googleAiRelevantUrl", label: "URL ИИ-выдачи Google" },
-  { key: "yandexCheckedAt", label: "Дата съёма Яндекс" },
-  { key: "googleCheckedAt", label: "Дата съёма Google" },
-  { key: "yandexAiCheckedAt", label: "Дата съёма ИИ Яндекс" },
-  { key: "googleAiCheckedAt", label: "Дата съёма ИИ Google" },
-  { key: "visibility", label: "Видимость" },
-  { key: "group", label: "Группа" },
-  { key: "cluster", label: "Кластер" },
-  { key: "targetUrl", label: "Целевой URL" },
-  { key: "tags", label: "Теги" },
-  { key: "intent", label: "Интент" },
-  { key: "priority", label: "Приоритет" },
-  { key: "source", label: "Источник" },
-  { key: "updatedAt", label: "Обновлён" }
-];
-
 const semanticCompetitorExportColumns: readonly Readonly<{
   key: SemanticExportColumnKey;
   label: string;
@@ -6849,6 +6837,8 @@ function nextSemanticColumnSort(
       return target(current === "TEXT_ASC" ? "TEXT_DESC" : "TEXT_ASC");
     case "priority":
       return target(current === "PRIORITY_DESC" ? "PRIORITY_ASC" : "PRIORITY_DESC");
+    case "targetUrl":
+      return target(current === "TARGET_URL_ASC" ? "TARGET_URL_DESC" : "TARGET_URL_ASC");
     case "source":
       return target(current === "SOURCE_ASC" ? "SOURCE_DESC" : "SOURCE_ASC");
     case "tags":
@@ -6945,82 +6935,15 @@ function columnLabel(
   rankDimensions: readonly SemanticRankDimension[] = [],
   locale = "ru"
 ): string {
-  const rankLabel = rankColumnLabel(column, rankDimensions, locale);
-  if (rankLabel) return rankLabel;
-  if (column.startsWith("custom:")) {
-    return (
-      customColumns.find(({ id }) => `custom:${id}` === column)?.name ??
-      "Удалённая колонка"
-    );
-  }
-  return (
-    semanticColumns.find(({ key }) => key === column)?.label ?? column
-  );
+  return semanticColumnLabel(column, customColumns, rankDimensions, locale);
 }
 
 function columnHeader(
   column: SemanticViewColumn,
   customColumns: readonly SemanticCustomColumn[],
-  rankDimensions: readonly SemanticRankDimension[] = [],
-  locale = "ru"
+  rankDimensions: readonly SemanticRankDimension[] = []
 ) {
-  const rank = parseSemanticRankColumnKey(column);
-  if (rank) {
-    const dimension = rankDimensions.find(value => value.key === rank.dimension.key) ?? rank.dimension;
-    const aiMetric = rank.metric.startsWith("ai");
-    const metricLabel = rank.metric === "position" || rank.metric === "aiPosition"
-      ? aiMetric ? "ИИ-позиция" : "Позиция"
-      : rank.metric === "url" || rank.metric === "aiUrl"
-        ? aiMetric ? "URL в ИИ" : "URL"
-        : aiMetric ? "Дата ИИ" : "Дата";
-    return <span className="semantic-rank-column-header" title={rankColumnLabel(column, rankDimensions, locale)}>{aiMetric ? <Icon name="ai" /> : <SearchEngineLogo engine={dimension.searchEngine} size="compact" />}<span>{searchRegionDisplayName(dimension.searchEngine, dimension.regionCode, dimension.regionLabel)}<small><UiText text={dimension.device === "DESKTOP" ? "ПК" : "Телефон"} /> · <UiText text={metricLabel} /></small></span></span>;
-  }
-  if (column === "frequency") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> <UiText text="База" before=" " /></span>;
-  }
-  if (column === "frequencyExact") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> &quot;&quot;</span>;
-  }
-  if (column === "frequencyFixed") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> &quot;!&quot;</span>;
-  }
-  if (column === "yandexPosition") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> <UiText text="Позиция" before=" " /></span>;
-  }
-  if (column === "googlePosition") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="GOOGLE" size="compact" /> <UiText text="Позиция" before=" " /></span>;
-  }
-  if (column === "yandexRelevantUrl") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> URL</span>;
-  }
-  if (column === "googleRelevantUrl") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="GOOGLE" size="compact" /> URL</span>;
-  }
-  if (column === "yandexAiRelevantUrl") {
-    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="YANDEX" size="compact" /><Icon name="ai" /> <UiText text="ИИ URL" before=" " /></span>;
-  }
-  if (column === "googleAiRelevantUrl") {
-    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="GOOGLE" size="compact" /><Icon name="ai" /> <UiText text="ИИ URL" before=" " /></span>;
-  }
-  if (column === "yandexCheckedAt") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="YANDEX" size="compact" /> <UiText text="Съём" before=" " /></span>;
-  }
-  if (column === "googleCheckedAt") {
-    return <span className="semantic-engine-header"><SearchEngineLogo engine="GOOGLE" size="compact" /> <UiText text="Съём" before=" " /></span>;
-  }
-  if (column === "yandexAiPosition") {
-    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="YANDEX" size="compact" /><Icon name="ai" /> <UiText text="ИИ позиция" before=" " /></span>;
-  }
-  if (column === "googleAiPosition") {
-    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="GOOGLE" size="compact" /><Icon name="ai" /> <UiText text="ИИ позиция" before=" " /></span>;
-  }
-  if (column === "yandexAiCheckedAt") {
-    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="YANDEX" size="compact" /><Icon name="ai" /> <UiText text="ИИ съём" before=" " /></span>;
-  }
-  if (column === "googleAiCheckedAt") {
-    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="GOOGLE" size="compact" /><Icon name="ai" /> <UiText text="ИИ съём" before=" " /></span>;
-  }
-  return columnLabel(column, customColumns);
+  return <SemanticColumnHeader column={column} customColumns={customColumns} rankDimensions={rankDimensions} />;
 }
 
 function SemanticSiteResultsModal({
@@ -7418,7 +7341,7 @@ function keywordColumn(
     case "cluster":
       return <span title={item.clusterName}>{item.clusterName ?? "—"}</span>;
     case "targetUrl":
-      return <span title={item.targetUrl}>{item.targetUrl ?? "—"}</span>;
+      return <SemanticRankUrlCell url={item.targetUrl} />;
     case "tags":
       return item.tags.length > 0 ? (
         <span className="semantic-tags">

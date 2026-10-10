@@ -33,7 +33,7 @@ test("parses bounded semantic import preview pagination and sorting", () => {
     { sortColumn: 0, sortDirection: "ASC" }
   );
   assert.throws(
-    () => semanticImportPreviewRowsQuery(undefined, "500", "ASC"),
+    () => semanticImportPreviewRowsQuery(undefined, "1109", "ASC"),
     BadRequestException
   );
   assert.throws(

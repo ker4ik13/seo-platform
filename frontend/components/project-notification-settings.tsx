@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "./custom-date-input";
 import { useEffect, useMemo, useState } from "react";
 import {
   browserApiRequest,
@@ -262,7 +263,7 @@ export function ProjectNotificationSettings({
         {draft.mode === "PAUSED" && (
           <label className="form-field project-pause-field">
             <span><UiText text="Приостановить до" /></span>
-            <input
+            <CustomDateInput
               max={localDateTime(
                 new Date(Date.now() + 366 * 24 * 60 * 60 * 1_000)
               )}

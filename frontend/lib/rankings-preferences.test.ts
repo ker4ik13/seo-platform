@@ -28,6 +28,27 @@ const fallback: RankingsPreferences = {
   includeUntracked: false
 };
 
+test("URL filters and the number-column width survive reload only in their own scope", () => {
+  const storage = new MemoryStorage();
+  writeRankingsPreferences("project-a", "user-a", { ...fallback, targetUrlState: "EMPTY", multipleUrlsState: "NOT_MULTIPLE", sort: "TARGET_URL_EMPTY_FIRST", numberColumnWidth: 70 }, storage);
+  const loaded = readRankingsPreferences("project-a", "user-a", fallback, storage);
+  assert.equal(loaded.targetUrlState, "EMPTY");
+  assert.equal(loaded.multipleUrlsState, "NOT_MULTIPLE");
+  assert.equal(loaded.numberColumnWidth, 70);
+  assert.equal(loaded.sort, "TARGET_URL_EMPTY_FIRST");
+  assert.deepEqual(readRankingsPreferences("project-a", "user-b", fallback, storage), fallback);
+});
+
+test("obsolete density is ignored without losing saved dates or column widths", () => {
+  const storage = new MemoryStorage();
+  storage.setItem("seonorita:rankings-view:v1:user-a:project-a", JSON.stringify({
+    ...fallback, density: "COMFORTABLE", hiddenDates: ["2026-08-18"], queryColumnWidth: 360,
+  }));
+  assert.deepEqual(readRankingsPreferences("project-a", "user-a", fallback, storage), {
+    ...fallback, hiddenDates: ["2026-08-18"], queryColumnWidth: 360,
+  });
+});
+
 test("keeps all ranking screen controls isolated by user and project", () => {
   const storage = new MemoryStorage();
   const saved: RankingsPreferences = {

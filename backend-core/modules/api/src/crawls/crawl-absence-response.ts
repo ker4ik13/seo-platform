@@ -1,6 +1,7 @@
-import type {
-  ProjectCrawlAbsentPageCollection,
-  ProjectCrawlAbsentPageSummary
+import {
+  technicalCrawlMaxUrlLimit,
+  type ProjectCrawlAbsentPageCollection,
+  type ProjectCrawlAbsentPageSummary
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 
@@ -16,7 +17,7 @@ export function crawlAbsentPageCollection(
     Object.keys(input).length !== 2 ||
     input.crawlId !== expectedCrawlId ||
     !Array.isArray(input.pages) ||
-    input.pages.length > 1_000
+    input.pages.length > technicalCrawlMaxUrlLimit
   ) {
     invalid();
   }

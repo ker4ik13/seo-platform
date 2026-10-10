@@ -163,6 +163,7 @@ export interface ProjectSummary {
   readonly locale: string;
   readonly timezone: string;
   readonly searchCity?: ProjectSearchCity;
+  readonly onboarding?: import("./project-onboarding.js").ProjectOnboardingSettings;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
   readonly ownerUserId: string;
   readonly logoSource?: "CUSTOM" | "DISCOVERED";
@@ -298,6 +299,7 @@ export interface CreateProjectInput {
   readonly locale?: string;
   readonly timezone?: string;
   readonly searchCity?: ProjectSearchCity;
+  readonly onboarding?: import("./project-onboarding.js").ProjectOnboardingSettings;
   readonly confirmDuplicateDomain?: boolean;
 }
 

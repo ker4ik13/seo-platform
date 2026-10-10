@@ -1,5 +1,11 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
+  parseProjectOnboardingInitialization,
+  type ProjectOnboardingSettings,
+  type InternalInitializeProjectOnboardingInput
+} from "@seo-platform/contracts";
+import { parseProjectPageStatisticsCollection, parseProjectPagePanel, type ProjectPageStatisticsQuery, type ProjectPageStatisticsCollection, type ProjectPagePanelQuery, type ProjectPagePanel } from "@seo-platform/contracts";
+import {
   isSemanticRankDimensionSort,
   parseRankDimensionHistoryDeletion,
   parseRankDimensionMergeSettings,
@@ -47,6 +53,7 @@ import {
   semanticSavedViewQueryIndicators,
   semanticSavedViewSchemaVersions,
   semanticSavedViewScopes,
+  semanticSavedViewColumnOrderLimit,
   semanticNegativeKeywordMatchModes,
   semanticNegativeKeywordWordLimit,
   semanticDuplicatePreviewPageSizes,
@@ -423,7 +430,7 @@ export class SeoDataClient {
     }
     for (const field of [
       "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
       "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore",
       "rankSortDimensionKey"
     ] as const) {
@@ -2398,12 +2405,45 @@ export class SeoDataClient {
     if (query.lifecycleStatus) {
       url.searchParams.set("lifecycleStatus", query.lifecycleStatus);
     }
+    if (query.sort) url.searchParams.set("sort", query.sort);
+    if (query.sortDirection) url.searchParams.set("sortDirection", query.sortDirection);
+    if (query.dimensionKey) url.searchParams.set("dimensionKey", query.dimensionKey);
+    if (query.date) url.searchParams.set("date", query.date);
+    if (query.includeStructure !== undefined) url.searchParams.set("includeStructure", String(query.includeStructure));
     const payload = await this.request("GET", url, context);
     return scopedProjectPageCollection(
       responseData(payload),
       scope.workspaceId,
       scope.projectId
     );
+  }
+
+  public async projectPageStatistics(context: InternalContext, input: ProjectPageStatisticsQuery): Promise<ProjectPageStatisticsCollection> {
+    const url = projectPageUrl(context, this.config.services.seoData, "rank-statistics");
+    url.searchParams.set("pageIds", input.pageIds.join(",")); url.searchParams.set("dimensionKey", input.dimensionKey); url.searchParams.set("date", input.date);
+    const payload = await this.request("GET", url, context);
+    let result: ProjectPageStatisticsCollection;
+    try { result = parseProjectPageStatisticsCollection(responseData(payload)); } catch { throw invalidResponse(); }
+    if (result.dimensionKey !== input.dimensionKey || input.date !== "latest" && result.date !== input.date || result.pages.length !== input.pageIds.length || result.pages.some((page) => !input.pageIds.includes(page.pageId))) throw invalidResponse();
+    return result;
+  }
+
+  public async projectPagePanel(context: InternalContext, pageId: string, input: ProjectPagePanelQuery): Promise<ProjectPagePanel> {
+    const url = projectPageUrl(context, this.config.services.seoData, `${pageId}/panel`);
+    for (const [key, value] of Object.entries(input)) if (value !== undefined) url.searchParams.set(key, String(value));
+    const payload = await this.request("GET", url, context);
+    let result: ProjectPagePanel;
+    try { result = parseProjectPagePanel(responseData(payload)); } catch { throw invalidResponse(); }
+    if (result.pageId !== pageId || result.section !== input.section || (result.keywords ?? result.links ?? result.history ?? []).length > input.limit) throw invalidResponse();
+    return result;
+  }
+
+  public async projectKeywordTargetPage(context: InternalContext, keywordId: string): Promise<{ page?: ProjectPageSummary }> {
+    const scope = trackingScope(context);
+    const payload = await this.request("GET", projectPageUrl(context, this.config.services.seoData, `by-keyword/${keywordId}`), context);
+    const data = objectValue(responseData(payload));
+    if (!data || Object.keys(data).some((key) => key !== "page")) throw invalidResponse();
+    return data.page === undefined ? {} : { page: scopedProjectPage(data.page, scope.workspaceId, scope.projectId) };
   }
 
   public async listProjectCrawlIssues(
@@ -2814,6 +2854,16 @@ export class SeoDataClient {
     const payload = await response.json().catch(() => undefined);
     if (!response.ok) throw upstreamError(response.status, payload);
     return payload;
+  }
+
+  public async initializeProjectOnboarding(context: InternalContext, settings: ProjectOnboardingSettings) {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalInitializeProjectOnboardingInput = {
+      workspaceId: context.tenant.workspaceId, projectId, actorId: context.actorId,
+      canManageShared: ["OWNER", "ADMIN"].includes(context.tenant.roleCode), settings
+    };
+    const url = new URL("/internal/v1/projects/" + encodeURIComponent(projectId) + "/onboarding", this.config.services.seoData);
+    return parseProjectOnboardingInitialization(responseData(await this.request("POST", url, context, body)), projectId);
   }
 
   private async request(
@@ -6044,7 +6094,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     "priorityMin",
     "priorityMax",
     "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
     "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
   ]);
   const filterKeys = Object.keys(filters);
@@ -6180,6 +6230,7 @@ function validAdvancedSavedViewFilters(filters: Readonly<Record<string, unknown>
   if (!bounded(filters.wordCountMin, 10_000) || !bounded(filters.wordCountMax, 10_000) || !bounded(filters.rankPositionMin, 100) || !bounded(filters.rankPositionMax, 100)) return false;
   if ((typeof filters.wordCountMin === "number" && typeof filters.wordCountMax === "number" && filters.wordCountMin > filters.wordCountMax) || (typeof filters.rankPositionMin === "number" && typeof filters.rankPositionMax === "number" && filters.rankPositionMin > filters.rankPositionMax)) return false;
   if (filters.targetUrlState !== undefined && filters.targetUrlState !== "SET" && filters.targetUrlState !== "EMPTY") return false;
+  if (filters.multipleUrlsState !== undefined && filters.multipleUrlsState !== "MULTIPLE" && filters.multipleUrlsState !== "NOT_MULTIPLE") return false;
   if (filters.rankState !== undefined && !["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"].includes(String(filters.rankState))) return false;
   if (filters.rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(filters.rankDimensionKey)) return false;
   const instant = (value: unknown) => value === undefined || (typeof value === "string" && value.length === 24 && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value);
@@ -6210,7 +6261,7 @@ function validSavedViewColumnOrder(
   return value === undefined || (
     Array.isArray(value) &&
     value.length >= 1 &&
-    value.length <= 128 &&
+    value.length <= semanticSavedViewColumnOrderLimit &&
     value.every(
       (column) =>
         typeof column === "string" &&

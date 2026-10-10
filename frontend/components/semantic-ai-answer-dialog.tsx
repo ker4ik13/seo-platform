@@ -1,4 +1,6 @@
 "use client";
+import type { ProjectOnboardingSettings } from "@seo-platform/contracts";
+import { onboardingRunPreference, readProjectRunPreference, writeProjectRunPreference } from "../lib/project-run-defaults";
 import { prepareOperationAttempt, type OperationAttempt } from "../lib/operation-attempt";
 
 import {
@@ -44,6 +46,8 @@ export function SemanticAiAnswerDialog({
   onClose,
   onStarted,
   projectDomain,
+  currentUserId,
+  onboarding,
   projectId,
   workspaceId
 }: Readonly<{
@@ -55,6 +59,8 @@ export function SemanticAiAnswerDialog({
   onClose: () => void;
   onStarted: (collection: AiAnswerCollectionSummary) => void;
   projectDomain: string;
+  currentUserId?: string;
+  onboarding?: ProjectOnboardingSettings;
   projectId: string;
   workspaceId: string;
 }>) {
@@ -120,8 +126,13 @@ export function SemanticAiAnswerDialog({
         "AI_ANSWERS"
       );
     setRegions(saved);
-    setTargets([{ regionCode: saved.YANDEX.code, regionLabel: saved.YANDEX.label, device: "DESKTOP" }]);
-  }, [projectId]);
+    const preferred = readProjectRunPreference(window.localStorage, projectId, currentUserId, "ai")
+      ?? onboardingRunPreference(onboarding, "ai");
+    if (preferred) {
+      setSearchEngine(preferred.searchEngine);
+      setTargets(preferred.targets);
+    } else setTargets([{ regionCode: saved.YANDEX.code, regionLabel: saved.YANDEX.label, device: "DESKTOP" }]);
+  }, [projectId, currentUserId, onboarding]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -205,6 +216,7 @@ export function SemanticAiAnswerDialog({
         targets[0]!.regionCode
       );
       onStarted(collections[0]!);
+      writeProjectRunPreference(window.localStorage, projectId, currentUserId, "ai", { searchEngine, depth: 30, targets });
     } catch (requestError) {
       if (requestError instanceof BrowserApiError && requestError.code === "OPERATION_CANCELLED") return;
       setError(aiAnswerErrorMessage(requestError));
@@ -257,7 +269,6 @@ export function SemanticAiAnswerDialog({
           <section className="semantic-workflow-panel semantic-ai-source-panel">
             <header>
               <h3><UiText text="Поисковые системы" /></h3>
-              <p><UiText text="Выберите ИИ-выдачу и подключение провайдера." /></p>
             </header>
             <div aria-label={uiText("Поисковая система ИИ-ответа")} className="semantic-engine-cards" role="group">
               {(["YANDEX", "GOOGLE"] as const).map((engine) => (
@@ -268,7 +279,9 @@ export function SemanticAiAnswerDialog({
                   onClick={() => {
                     setSearchEngine(engine);
                     const preferred = regions[engine];
-                    setTargets([{
+                    const remembered = readProjectRunPreference(window.localStorage, projectId, currentUserId, "ai", engine)
+                      ?? onboardingRunPreference(onboarding, "ai", engine);
+                    setTargets(remembered?.targets ?? [{
                       regionCode: preferred.code,
                       regionLabel: preferred.label,
                       device: targets[0]?.device ?? "DESKTOP"
@@ -379,7 +392,6 @@ export function SemanticAiAnswerDialog({
           <section className="semantic-workflow-panel semantic-ai-scope-panel">
             <header>
               <h3>{competitorMode ? <UiText text="Охват сбора" /> : <UiText text="Охват проверки" />}</h3>
-              <p><UiText text="Выберите все запросы, текущее выделение или папки." /></p>
             </header>
             <SemanticOperationScope
               activeGroupId={activeGroupId}

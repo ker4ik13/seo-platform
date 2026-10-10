@@ -55,6 +55,7 @@ export interface SemanticExportFilters {
   readonly wordCountMin?: number;
   readonly wordCountMax?: number;
   readonly targetUrlState?: "SET" | "EMPTY";
+  readonly multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE";
   readonly rankDimensionKey?: string;
   readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
   readonly rankPositionMin?: number;

@@ -1,4 +1,5 @@
 "use client";
+import { CustomSelect } from "./custom-select";
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ComponentPropsWithRef, type JSX, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
@@ -35,7 +36,7 @@ export const useUiLocale = (): LocaleState => useContext(LocaleContext);
 export function UiText({ text, values, before = "", after = "" }: UiMessage & { before?: string; after?: string }) { const { t } = useUiLocale(); return <>{before}{t(text, values)}{after}</>; }
 export function LanguageSwitcher() {
   const { locale, change, saving, error } = useUiLocale();
-  return <div className="ui-language-control"><label><span>{locale === "en" ? "Language" : "Язык"}</span><select aria-label={locale === "en" ? "Interface language" : "Язык интерфейса"} value={locale} disabled={saving} onChange={event => void change(event.target.value as UiLocale)}><option value="ru">Русский</option><option value="en">English</option></select></label>{error && <small role="status">{error}</small>}</div>;
+  return <div className="ui-language-control"><label><span>{locale === "en" ? "Language" : "Язык"}</span><CustomSelect aria-label={locale === "en" ? "Interface language" : "Язык интерфейса"} value={locale} disabled={saving} onChange={event => void change(event.target.value as UiLocale)}><option value="ru">Русский</option><option value="en">English</option></CustomSelect></label>{error && <small role="status">{error}</small>}</div>;
 }
 export function AuthLanguageSwitcher() { const path = usePathname(); return /^\/app\/(?:login|register|mfa|forgot-password|reset-password|verify-email|workspace-invites)(?:\/|$)/u.test(path) ? <div className="auth-language-switcher"><LanguageSwitcher /></div> : null; }
 

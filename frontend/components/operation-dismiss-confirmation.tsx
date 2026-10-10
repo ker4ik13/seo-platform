@@ -1,6 +1,7 @@
 "use client";
 
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { useUiLocale, UiText } from "./ui-locale";
 
 export function OperationDismissConfirmation({
@@ -8,7 +9,7 @@ export function OperationDismissConfirmation({
   description,
   onCancel,
   onConfirm,
-  title
+  title,
 }: Readonly<{
   busy: boolean;
   description: string;
@@ -29,9 +30,7 @@ export function OperationDismissConfirmation({
           <strong>{title}</strong>
           <span>{description}</span>
         </div>
-        <p>
-          <UiText text="Сохранённые результаты, расчёты и аудит останутся доступными системе." /></p>
-        <div className="semantic-modal-actions">
+        <ConfirmationActions>
           <button
             autoFocus
             className="secondary-button"
@@ -39,7 +38,8 @@ export function OperationDismissConfirmation({
             onClick={onCancel}
             type="button"
           >
-            <UiText text="Отмена" /></button>
+            <UiText text="Отмена" />
+          </button>
           <button
             className="danger-button"
             disabled={busy}
@@ -48,7 +48,7 @@ export function OperationDismissConfirmation({
           >
             {busy ? <UiText text="Удаляем…" /> : <UiText text="Удалить" />}
           </button>
-        </div>
+        </ConfirmationActions>
       </div>
     </SemanticModal>
   );

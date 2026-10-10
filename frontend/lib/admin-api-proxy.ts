@@ -26,6 +26,7 @@ const ADMIN_ROOTS = new Set([
   "refund-requests",
   "provider-accounts",
   "overview",
+  "analytics",
   "usage-reviews"
 ]);
 const MAX_BODY_BYTES = 64 * 1_024;

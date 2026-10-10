@@ -7,13 +7,20 @@ import { ClusteringRunService } from "../clustering-runs/clustering-run.service.
 import { KeywordResearchService } from "../keyword-research/keyword-research.service.js";
 import { CrawlService } from "../crawls/crawl.service.js";
 import { SemanticExportService } from "../semantic-exports/semantic-export.service.js";
+import { SemanticImportService } from "../imports/semantic-import.service.js";
 
 /** Delegates cancellation to each existing owning workflow; never edits its state by hand. */
 @Injectable()
 export class OperationCancellationService {
-  public constructor(private readonly prisma: PrismaService, private readonly ranks: RankRunService, private readonly frequency: FrequencyCollectionService, private readonly ai: AiAnswerCollectionService, private readonly clustering: ClusteringRunService, private readonly research: KeywordResearchService, private readonly crawl: CrawlService, private readonly exports: SemanticExportService) {}
-  public async cancel(id: string, actorId: string): Promise<void> {
+  public constructor(private readonly prisma: PrismaService, private readonly ranks: RankRunService, private readonly frequency: FrequencyCollectionService, private readonly ai: AiAnswerCollectionService, private readonly clustering: ClusteringRunService, private readonly research: KeywordResearchService, private readonly crawl: CrawlService, private readonly exports: SemanticExportService, private readonly imports: SemanticImportService) {}
+  public async cancel(id: string, actorId: string, requestId: string): Promise<void> {
     const job = await this.prisma.job.findUnique({ where: { id }, select: { workspaceId: true, projectId: true, type: true, version: true, technicalCrawl: { select: { id: true, version: true } }, keywordResearchRun: { select: { id: true, version: true } } } });
+    if (!job) {
+      const imported = await this.prisma.semanticImport.findUnique({ where: { id }, select: { workspaceId: true, projectId: true } });
+      if (!imported) throw new NotFoundException("Operation not found");
+      await this.imports.cancel(id, { ...imported, actorId }, requestId);
+      return;
+    }
     if (!job?.projectId) throw new NotFoundException("Operation not found");
     const scope = { workspaceId: job.workspaceId, projectId: job.projectId, actorId };
     switch (job.type) {

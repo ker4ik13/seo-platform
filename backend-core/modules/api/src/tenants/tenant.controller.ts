@@ -54,6 +54,8 @@ import {
 import { TenantService } from "./tenant.service.js";
 import { ProjectLogoService } from "./project-logo.service.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { ProjectOnboardingService } from "./project-onboarding.service.js";
+import { requiredIdempotencyKey } from "../common/idempotency-key.js";
 
 @Controller("api/v1")
 export class TenantController {
@@ -62,7 +64,8 @@ export class TenantController {
   public constructor(
     private readonly tenants: TenantService,
     private readonly projectLogos: ProjectLogoService,
-    @Optional() private readonly jobs?: JobsClient
+    @Optional() private readonly jobs?: JobsClient,
+    @Optional() private readonly onboarding?: ProjectOnboardingService
   ) {}
 
   @Get("workspaces")
@@ -319,12 +322,17 @@ export class TenantController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<ProjectSummary>> {
+    const input = createProjectInput(body);
+    const key = input.onboarding ? requiredIdempotencyKey(headerValue(request, "idempotency-key")) : undefined;
+    if (input.onboarding && !this.onboarding) throw new ServiceUnavailableException("Project onboarding is unavailable");
     const project = await this.tenants.createProject(
       principal.userId,
       requiredWorkspaceId(request),
-      createProjectInput(body),
-      requestContext(request)
+      input,
+      requestContext(request),
+      key
     );
+    if (input.onboarding) await this.onboarding!.initialize(principal.userId, project, requestContext(request));
     setEntityVersion(reply, project.version);
     return apiResponse(request, project, project.version);
   }

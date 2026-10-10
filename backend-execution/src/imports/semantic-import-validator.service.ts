@@ -4,6 +4,7 @@ import {
   semanticImportMaxGroupDepth,
   semanticImportNormalizeMaxRows,
   semanticPositionHistoryHeaderDate,
+  semanticPositionHistoryObservedAt,
   semanticKeywordIntents,
   type SemanticImportMapping,
   type SemanticImportPositionValue,
@@ -159,7 +160,7 @@ export class SemanticImportValidatorService {
     if (
       mapping.positionHistory &&
       mapping.positionHistory.layout !== "LONG" &&
-      positionHistoryDateColumns(headers).length === 0
+      (mapping.positionHistory.dateColumns ?? positionHistoryDateColumns(headers)).length === 0
     ) {
       throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
     }
@@ -258,7 +259,8 @@ export class SemanticImportValidatorService {
           ...(keyword ? { normalizedHash: keyword.normalizedHash } : {}),
           ...(canonicalRow ? { canonicalRow } : {}),
           issues: [...issues],
-          isValid: Boolean(canonicalRow),
+          isValid: Boolean(canonicalRow) && !(mapping.positionHistory &&
+            ["POSITION_HISTORY_CONTEXT_INVALID", "POSITION_HISTORY_DATES_REQUIRED", "INVALID_POSITION", "INVALID_OBSERVED_AT", "INVALID_RANKING_URL"].some(code => issues.has(code))),
           projectDuplicate: keyword?.existsInProject ?? false
         } satisfies ValidatedRow;
       });
@@ -546,7 +548,11 @@ export function canonicalImportRow(
   ].filter(
     (item): item is NonNullable<typeof item> => item !== undefined
   );
-  const observedAt = validDate(value("metric.observed_at"), issues);
+  const rawObservedAt = value("metric.observed_at");
+  const observedAt = mapping.positionHistory && rawObservedAt
+    ? semanticPositionHistoryObservedAt(rawObservedAt)
+    : validDate(rawObservedAt, issues);
+  if (mapping.positionHistory && rawObservedAt && !observedAt) issues.add("INVALID_OBSERVED_AT");
   const tags = splitTags(value("keyword.tags"));
   const priority = optionalPriority(value("keyword.priority"), issues);
   const isFavorite = optionalBoolean(
@@ -593,7 +599,8 @@ export function canonicalImportRow(
   for (const column of mapping.columns) {
     const raw = values[column.sourceIndex]?.trim();
     if (!raw) continue;
-    if (mapping.positionHistory && (semanticPositionHistoryHeaderDate(headers[column.sourceIndex] ?? "") || positionHistoryMetadataHeader(headers[column.sourceIndex] ?? ""))) continue;
+    if (mapping.positionHistory && (column.target.startsWith("context.") || column.target.startsWith("ranking.") ||
+      semanticPositionHistoryHeaderDate(headers[column.sourceIndex] ?? "") || positionHistoryMetadataHeader(headers[column.sourceIndex] ?? ""))) continue;
     if (
       options.sourceFormat === "KC4" &&
       (KC4_NATIVE_POSITION_HEADERS.has(headers[column.sourceIndex] ?? "") ||

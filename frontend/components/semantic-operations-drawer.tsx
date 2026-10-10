@@ -64,6 +64,7 @@ import { SemanticSideDrawer } from "./semantic-side-drawer";
 type OperationTab = "ACTIVE" | "COMPLETED" | "ERROR";
 
 export function SemanticOperationsDrawer({
+  currentUserId,
   onClose,
   onClusteringApplied,
   onFrequencySettled,
@@ -72,6 +73,7 @@ export function SemanticOperationsDrawer({
   refreshToken = 0,
   watchedFrequencyId
 }: Readonly<{
+  currentUserId: string;
   onClose: () => void;
   onClusteringApplied?: () => void;
   onFrequencySettled?: () => void;
@@ -362,7 +364,7 @@ export function SemanticOperationsDrawer({
   return (
     <>
     {rankRetry && <SemanticPositionDialog projectId={projectId} workspaceId={rankRetry.result.job.workspaceId} groups={rankRetry.groups} initialSelections={rankRetry.selections} initialRun={rankRetry.result} mode={rankRetry.result.execution.purpose === "COMPETITOR_SERP" ? "competitors" : "positions"} onClose={() => setRankRetry(undefined)} onStarted={() => { setRankRetry(undefined); void load(); }} />}
-      {frequencyRetry && <SemanticFrequencyDialog projectId={projectId} workspaceId={workspaceId} groups={frequencyRetry.groups} initialSelections={frequencyRetry.selections} initialConfiguration={frequencyRetry.collection} onClose={() => setFrequencyRetry(undefined)} onStarted={() => { setFrequencyRetry(undefined); void load(); }} />}
+      {frequencyRetry && <SemanticFrequencyDialog currentUserId={currentUserId} projectId={projectId} workspaceId={workspaceId} groups={frequencyRetry.groups} initialSelections={frequencyRetry.selections} initialConfiguration={frequencyRetry.collection} onClose={() => setFrequencyRetry(undefined)} onStarted={() => { setFrequencyRetry(undefined); void load(); }} />}
     <SemanticSideDrawer
       ariaLabel="Задачи и операции"
       className="semantic-operations-drawer"

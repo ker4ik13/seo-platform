@@ -11,6 +11,7 @@ import { ProjectTransferService } from "./project-transfer.service.js";
 import { ProjectLogoService } from "./project-logo.service.js";
 import { TenantController } from "./tenant.controller.js";
 import { TenantService } from "./tenant.service.js";
+import { ProjectOnboardingService } from "./project-onboarding.service.js";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TenantService } from "./tenant.service.js";
   controllers: [TenantController, TeamController, ProjectTransferController],
   providers: [
     TenantService,
+    ProjectOnboardingService,
     TeamService,
     ProjectTransferService,
     ProjectLogoService

@@ -1,6 +1,7 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { useConfirmation } from "./use-confirmation";
 
 import { useEffect, useState, type FormEvent } from "react";
 import {
@@ -50,6 +51,7 @@ export function SemanticCustomColumnManager({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [retryVersion, setRetryVersion] = useState(0);
+  const confirmation = useConfirmation();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,11 +146,7 @@ export function SemanticCustomColumnManager({
   }
 
   async function deleteColumn(column: SemanticCustomColumn): Promise<void> {
-    if (
-      !window.confirm(
-        `Удалить колонку «${column.name}»? Значения перестанут отображаться.`
-      )
-    ) {
+    if (!await confirmation.confirm({ title: uiText("Удалить колонку «{0}»?", [column.name]), description: "Значения перестанут отображаться." })) {
       return;
     }
     setSaving(true);
@@ -316,6 +314,7 @@ export function SemanticCustomColumnManager({
           ))}
         </div>
       )}
+      {confirmation.dialog}
     </section>
   );
 }

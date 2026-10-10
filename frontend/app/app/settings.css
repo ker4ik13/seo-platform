@@ -73,7 +73,7 @@
   width: 100%;
 }
 .settings-navigation-toggle > span:first-child { display: grid; gap: 2px; text-align: left; }
-.settings-navigation-toggle small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.settings-navigation-toggle small { color: var(--muted); font-size: var(--font-meta, 11px); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .settings-navigation-toggle strong { font-size: 13px; }
 .settings-navigation-toggle > span:last-child { display: none; }
 .settings-navigation-toggle > svg:last-child { display: none; }
@@ -93,7 +93,7 @@
 .content.content-settings .settings-tabs a.active { background: #ece8ff; border-color: #d7d0ff; box-shadow: inset 3px 0 0 var(--brand); color: #5130cf; font-weight: 700; }
 .content.content-settings .settings-tabs-heading {
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-meta, 11px);
   font-weight: 800;
   gap: 5px;
   letter-spacing: .08em;
@@ -126,7 +126,7 @@
 .content.content-settings .security-card-header > div { flex: 1 1 auto; }
 .content.content-settings :is(h2, .security-card-header h2) { font-size: 14px; line-height: 1.35; }
 .content.content-settings :is(p, .inline-alert, .checkbox-field, .security-flow > p) { font-size: 11px; line-height: 1.45; }
-.content.content-settings :is(small, .billing-label, .settings-card-eyebrow, .security-status) { font-size: 9px; line-height: 1.45; }
+.content.content-settings :is(small, .billing-label, .settings-card-eyebrow, .security-status) { font-size: var(--font-meta, 11px); line-height: 1.45; }
 .content.content-settings :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
 .content.content-settings .custom-select-trigger {
   border-radius: 8px;

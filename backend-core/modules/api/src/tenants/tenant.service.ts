@@ -1,4 +1,6 @@
 import { Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import type { Prisma, Project, ProjectCreationReceipt } from "../generated/prisma/client.js";
 import {
   domainEventTypes,
   type CreateProjectInput,
@@ -411,6 +413,7 @@ export class TenantService {
     if (!membership) throw this.notFound();
 
     const projects = await this.prisma.project.findMany({
+      omit: { onboarding: true },
       where: {
         workspaceId,
         status: { notIn: ["DELETING", "DELETED"] },
@@ -604,8 +607,22 @@ export class TenantService {
     userId: string,
     workspaceId: string,
     input: CreateProjectInput,
-    context: RequestContext
+    context: RequestContext,
+    idempotencyKey?: string
   ): Promise<ProjectSummary> {
+    const creationHash = input.onboarding && idempotencyKey
+      ? createHash("sha256").update(JSON.stringify({
+          ...input, name: input.name.trim(), domain: normalizeDomain(input.domain)
+        })).digest()
+      : undefined;
+    if (input.onboarding && !creationHash) throw validationError("idempotencyKey", "IDEMPOTENCY_KEY_REQUIRED", "Повтор создания должен использовать тот же ключ команды");
+    if (creationHash && idempotencyKey) {
+      const receipt = await this.prisma.projectCreationReceipt.findUnique({
+        where: { workspaceId_actorId_idempotencyKey: { workspaceId, actorId: userId, idempotencyKey } },
+        include: { project: true }
+      });
+      if (receipt) return replayCreatedProject(receipt, creationHash, workspaceId);
+    }
     const workspace = await this.prisma.workspace.findUnique({
       where: { id: workspaceId }
     });
@@ -619,10 +636,8 @@ export class TenantService {
     }
 
     const domain = normalizeDomain(input.domain);
-    await this.ensureDuplicateDomainConfirmed(
-      workspaceId,
-      domain,
-      input.confirmDuplicateDomain ?? false
+    if (!creationHash) await this.ensureDuplicateDomainConfirmed(
+      workspaceId, domain, input.confirmDuplicateDomain ?? false
     );
     const slug = input.slug
       ? normalizeSlug(input.slug)
@@ -632,6 +647,19 @@ export class TenantService {
       const project = await this.prisma.$transaction(async (transaction) => {
         const locked = await lockWorkspaceProjectOrders(transaction, [workspaceId]);
         if (locked.length !== 1) throw this.notFound();
+        if (creationHash && idempotencyKey) {
+          const receipt = await transaction.projectCreationReceipt.findUnique({
+            where: { workspaceId_actorId_idempotencyKey: { workspaceId, actorId: userId, idempotencyKey } },
+            include: { project: true }
+          });
+          if (receipt) {
+            replayCreatedProject(receipt, creationHash, workspaceId);
+            return receipt.project;
+          }
+          await this.ensureDuplicateDomainConfirmed(
+            workspaceId, domain, input.confirmDuplicateDomain ?? false, undefined, transaction
+          );
+        }
         if (locked[0]?.status !== "ACTIVE") {
           throw new DomainError({
             statusCode: 402,
@@ -653,6 +681,7 @@ export class TenantService {
             timezone: normalizeTimezone(
               input.timezone ?? workspace.timezone
             ),
+            ...(input.onboarding ? { onboarding: input.onboarding as unknown as Prisma.InputJsonObject } : {}),
             ...(input.searchCity
               ? {
                   searchCityName: input.searchCity.name,
@@ -671,6 +700,11 @@ export class TenantService {
             ownerUserId: workspace.ownerUserId
           }
         });
+        if (creationHash && idempotencyKey) {
+          await transaction.projectCreationReceipt.create({
+            data: { workspaceId, actorId: userId, idempotencyKey, requestHash: creationHash, projectId: created.id }
+          });
+        }
         await this.audit.record(
           {
             actorId: userId,
@@ -1037,10 +1071,11 @@ export class TenantService {
     workspaceId: string,
     domain: string,
     confirmed: boolean,
-    excludeProjectId?: string
+    excludeProjectId?: string,
+    database: Pick<PrismaService, "project"> = this.prisma
   ): Promise<void> {
     if (confirmed) return;
-    const duplicate = await this.prisma.project.findFirst({
+    const duplicate = await database.project.findFirst({
       where: {
         workspaceId,
         domain,
@@ -1078,6 +1113,20 @@ export class TenantService {
       message: "Resource not found"
     });
   }
+}
+
+function replayCreatedProject(
+  receipt: ProjectCreationReceipt & { project: Project },
+  hash: Buffer,
+  workspaceId: string
+): ProjectSummary {
+  if (!Buffer.from(receipt.requestHash).equals(hash)) throw new DomainError({
+    statusCode: 409, code: "IDEMPOTENCY_CONFLICT", message: "Повтор создания должен содержать прежние параметры"
+  });
+  if (receipt.project.workspaceId !== workspaceId || !["ACTIVE", "DRAFT"].includes(receipt.project.status)) throw new DomainError({
+    statusCode: 409, code: "RESOURCE_STATE_CONFLICT", message: "Созданный проект изменил рабочую область или состояние"
+  });
+  return toProjectSummary(receipt.project);
 }
 
 function requiredWorkspaceOwner(

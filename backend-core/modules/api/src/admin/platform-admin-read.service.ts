@@ -192,9 +192,9 @@ export class PlatformAdminReadService {
 
   public async cancelOperation(operationId: string, actorId: string, requestId: string, reason: string): Promise<AdminOperationSummary> {
     const current = await this.operation(operationId, actorId, requestId);
-    await this.audit.record({ actorId, workspaceId: current.workspaceId, ...(current.projectId ? { projectId: current.projectId } : {}), action: "platform_admin.operation.cancel_requested", resourceType: "job", resourceId: operationId, reason, outcome: "REQUESTED", requestId });
+    await this.audit.record({ actorId, workspaceId: current.workspaceId, ...(current.projectId ? { projectId: current.projectId } : {}), action: "platform_admin.operation.cancel_requested", resourceType: "operation", resourceId: operationId, reason, outcome: "REQUESTED", requestId });
     await this.jobs.cancelAdminOperation(actorId, requestId, operationId);
-    await this.audit.record({ actorId, workspaceId: current.workspaceId, action: "platform_admin.operation.cancel_resolved", resourceType: "job", resourceId: operationId, reason, requestId });
+    await this.audit.record({ actorId, workspaceId: current.workspaceId, action: "platform_admin.operation.cancel_resolved", resourceType: "operation", resourceId: operationId, reason, requestId });
     return this.operation(operationId, actorId, requestId);
   }
 

@@ -30,11 +30,15 @@ import {
 import { PlatformAdminReadService } from "./platform-admin-read.service.js";
 import { PlatformAdminWorkerNodeController } from "./platform-admin-worker-nodes.controller.js";
 import { PlatformAdminWorkerNodeService } from "./platform-admin-worker-nodes.service.js";
+import { ProductAnalyticsModule } from "../analytics/product-analytics.module.js";
+import { PlatformAnalyticsController } from "./platform-analytics.controller.js";
+import { PlatformAnalyticsService } from "./platform-analytics.service.js";
 
 @Module({
-  imports: [AuditModule, BillingModule, IdentityModule, JobsModule, SeoDataModule],
+  imports: [AuditModule, BillingModule, IdentityModule, JobsModule, SeoDataModule,ProductAnalyticsModule],
   controllers: [
     PlatformAdminControlController,
+    PlatformAnalyticsController,
     PlatformUsageReviewController,
     PlatformOverviewController,
     PlatformProviderController,
@@ -50,6 +54,7 @@ import { PlatformAdminWorkerNodeService } from "./platform-admin-worker-nodes.se
   ],
   providers: [
     PlatformAdminControlService,
+    PlatformAnalyticsService,
     PlatformOverviewService,
     PlatformAdminService,
     PlatformAdminWorkspaceService,

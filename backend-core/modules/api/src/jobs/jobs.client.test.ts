@@ -699,11 +699,23 @@ test("upgrades a rolling legacy crawl response with safe scope defaults", async 
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
       obeyRobots: true,
-      savePageMap: true
+      savePageMap: true,
+      conditionalRequests: true,
+      respectNofollow: false,
+      requestTimeoutMs: 20_000,
+      maxResponseBytes: 2_000_000,
+      maxRedirects: 5,
+      snapshotIdentity: "FINAL_URL"
     });
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("reads actual robot-skipped progress without treating it as malformed HTTP progress", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> => dataResponse(crawlResponseData({ status: "RUNNING", startedAt: "2026-08-01T10:00:00.000Z", discoveredUrls: 4, processedUrls: 3, successfulUrls: 2, failedUrls: 0, blockedUrls: 1 }))) as typeof fetch;
+  try { const crawl = await client().getTechnicalCrawl(projectContext("request-crawl-blocked-001"), crawlId); assert.equal(crawl.processedUrls, 3); assert.equal(crawl.blockedUrls, 1); } finally { globalThis.fetch = originalFetch; }
 });
 
 test("accepts explicit homepage redirect checks from the execution service", async () => {
@@ -746,6 +758,14 @@ test("accepts explicit homepage redirect checks from the execution service", asy
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("accepts the bounded issue total of a 5000-page crawl", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> => dataResponse(crawlResponseData({ issueCount: 525000 }))) as typeof fetch;
+  try {
+    assert.equal((await client().getTechnicalCrawl(projectContext("request-crawl-large-001"), crawlId)).issueCount, 525000);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("preserves a disabled Page Map projection from the execution service", async () => {

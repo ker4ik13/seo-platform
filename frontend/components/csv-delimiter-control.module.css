@@ -1,0 +1,6 @@
+.control { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.control > :global(.custom-select) { width: 172px; }
+.control :global(.custom-select-trigger) { min-height: 32px; font-size: 12px; }
+.control > input { width: 64px; min-height: 32px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
+.control > input[aria-invalid="true"] { border-color: var(--red); }
+.control > small { flex-basis: 100%; color: var(--red); font-size: 11px; }

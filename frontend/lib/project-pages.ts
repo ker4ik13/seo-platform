@@ -101,6 +101,7 @@ export function validateProjectPageDraft(
     errors.canonicalTarget = "Canonical должен быть абсолютным HTTP(S) URL.";
   }
   if (
+    !draft.priority.trim() ||
     !Number.isInteger(Number(draft.priority)) ||
     Number(draft.priority) < 0 ||
     Number(draft.priority) > 100
@@ -119,6 +120,7 @@ export function validateProjectPageDraft(
       errors.language = "Укажите BCP-47 код языка.";
     }
   }
+  if (draft.publishedAt && !Number.isFinite(new Date(draft.publishedAt).getTime())) errors.publishedAt = "Укажите корректную дату публикации.";
   return errors;
 }
 

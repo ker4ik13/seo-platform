@@ -6,7 +6,7 @@ import { useAdminAutoRefresh } from "../../lib/use-admin-auto-refresh";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
 
-type Destination = "workspaces" | "projects" | "operations" | "receipts" | "refunds" | "providers" | "usage";
+type Destination = "analytics" | "workspaces" | "projects" | "operations" | "receipts" | "refunds" | "providers" | "usage";
 const integer = (value: number, uiLocale: string = "ru-RU") => new Intl.NumberFormat(uiLocale).format(value);
 const money = (value: number, uiLocale: string = "ru-RU") => new Intl.NumberFormat(uiLocale, { style: "currency", currency: "RUB", maximumFractionDigits: 2 }).format(value / 100);
 export function Overview({ onNavigate }: { onNavigate: (screen: Destination) => void }) {
@@ -31,7 +31,7 @@ export function Overview({ onNavigate }: { onNavigate: (screen: Destination) => 
   if (!data) return <div className="content"><section className="panel"><p role={error ? "alert" : "status"}>{error ?? <UiText text="Собираем показатели…" />}</p></section></div>;
   const finance = data.finance;
   const kpis = [
-    { label: "Активны за 7 дней", value: integer(data.users.active7d, uiLocale), hint: `${integer(data.users.total, uiLocale)} пользователей всего`, to: "workspaces" as const },
+    { label: "Активны за 7 дней", value: integer(data.users.active7d, uiLocale), hint: `${integer(data.users.total, uiLocale)} пользователей всего`, to: "analytics" as const },
     { label: "Платные рабочие области", value: integer(data.workspaces.paying, uiLocale), hint: `${integer(data.workspaces.total, uiLocale)} рабочих областей`, to: "workspaces" as const },
     { label: "Проекты", value: integer(data.projects, uiLocale), hint: `${integer(data.workspaces.withProjects, uiLocale)} областей с проектами`, to: "projects" as const },
     { label: "Ключевые запросы", value: data.seo ? integer(data.seo.activeKeywords, uiLocale) : "—", hint: data.seo ? `${integer(data.seo.activatedWorkspaces, uiLocale)} областей начали работу` : "SEO-данные временно недоступны", to: "projects" as const },

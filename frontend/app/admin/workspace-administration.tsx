@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "../../components/custom-date-input";
 import { CustomSelect } from "../../components/custom-select";
 import { AdminDirectorySortControl } from "../../components/admin-directory-sort";
 import { AdminStateAction } from "../../components/admin-state-action";
@@ -439,7 +440,7 @@ function WorkspaceDrawer({
             )}
             <label>
               <span><UiText text="Действует до" /></span>
-              <input
+              <CustomDateInput
                 max={dateTimeLocal(addYears(new Date(), 5))}
                 min={dateTimeLocal(addMinutes(new Date(), 1))}
                 onChange={(event) => setPeriodEnd(event.target.value)}

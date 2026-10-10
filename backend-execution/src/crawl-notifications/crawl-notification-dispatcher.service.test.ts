@@ -63,7 +63,7 @@ test("delivers the final notification for a full 5,000-page crawl", () => {
   for (const processedUrls of [1_001, 5_000]) {
     assert.equal(crawlNotificationPayload({
       ...event,
-      payload: { ...event.payload as object, processedUrls }
+      payload: { ...event.payload as object, processedUrls, issueCount: 525000 }
     }).processedUrls, processedUrls);
   }
   for (const processedUrls of [-1, 5_001, 1.5]) {

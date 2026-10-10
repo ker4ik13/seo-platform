@@ -306,6 +306,17 @@ model SemanticSavedView {
   @@map("semantic_saved_views")
 }
 
+model ProjectOnboardingInitialization {
+  workspaceId String @map("workspace_id") @db.Uuid
+  projectId String @map("project_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  settingsHash Bytes @map("settings_hash")
+  responseSnapshot Json @map("response_snapshot")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@id([workspaceId,projectId])
+  @@map("project_onboarding_initializations")
+}
+
 model SemanticNegativeKeywordPreset {
   id                String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId       String       @map("workspace_id") @db.Uuid
@@ -595,12 +606,22 @@ enum ProjectNoteVisibility {
   PUBLIC
 }
 
+enum ProjectNoteFormat {
+  MARKDOWN
+  TEXT
+  CSV
+  TSV
+  JSON
+}
+
 model ProjectNote {
   id          String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId String                @map("workspace_id") @db.Uuid
   projectId   String                @map("project_id") @db.Uuid
   title       String                @db.VarChar(160)
   markdown    String                @db.Text
+  format      ProjectNoteFormat     @default(MARKDOWN)
+  delimiter   String?               @db.VarChar(4)
   visibility  ProjectNoteVisibility @default(PROJECT_MEMBERS)
   publicToken String?               @unique(map: "project_notes_public_token_key") @map("public_token") @db.VarChar(64)
   createdBy   String                @map("created_by") @db.Uuid
@@ -696,6 +717,8 @@ model CrawlPageSnapshot {
   imagesMissingAlt     Int              @map("images_missing_alt")
   structuredDataTypes  Json             @map("structured_data_types")
   metaTags             Json             @default("[]") @map("meta_tags")
+  technicalDetails     Json             @default("{}") @map("technical_details")
+  linkDetails          Json             @default("[]") @map("link_details")
   wordCount            Int              @map("word_count")
   contentHash          String           @map("content_hash") @db.Char(64)
   etag                 String?          @db.VarChar(1000)

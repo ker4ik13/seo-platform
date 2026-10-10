@@ -1270,16 +1270,14 @@ export function loadAppConfig(
       "CRAWL_CONTACT_URL",
       "CRAWL_CONCURRENCY",
       "CRAWL_DISPATCH_SECONDS",
-      "CRAWL_LEASE_SECONDS",
-      "CRAWL_REQUEST_TIMEOUT_MS",
-      "CRAWL_MAX_RESPONSE_BYTES",
-      "CRAWL_MAX_REDIRECTS"
+      "CRAWL_LEASE_SECONDS"
     ].some((key) => optional(env, key) !== undefined)
   ) {
     throw new Error(
       "Only the crawl-worker process may receive crawler configuration"
     );
   }
+  if (processRole !== "CRAWL_WORKER" && processRole !== "HTTP" && ["CRAWL_REQUEST_TIMEOUT_MS", "CRAWL_MAX_RESPONSE_BYTES", "CRAWL_MAX_REDIRECTS"].some((key) => optional(env, key) !== undefined)) throw new Error("Only HTTP and crawl-worker may receive crawler budgets");
   const crawlContactUrl =
     optional(env, "CRAWL_CONTACT_URL") ??
     (nodeEnv === "production" ? undefined : "https://crawler.invalid/crawler");

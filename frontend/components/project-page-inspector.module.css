@@ -1,0 +1,50 @@
+.inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--surface); border-left: 1px solid var(--line); overflow: hidden; }
+.header { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.header > div { min-width: 0; flex: 1; display: grid; gap: 6px; }
+.header small { color: var(--muted); font-size: 11px; }
+.header h2 { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.header a { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.close { display: grid; place-items: center; height: 32px; width: 32px; flex: none; border: 0; background: none; padding: 0; color: var(--muted); }
+.close svg { width: 16px; height: 16px; }
+.tabs { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); flex: none; border-bottom: 1px solid var(--line); }
+.tabs button { display: grid; gap: 5px; justify-items: center; min-width: 0; border: 0; border-bottom: 2px solid transparent; background: none; padding: 10px 2px 8px; color: var(--muted); font-size: 11px; }
+.tabs svg { height: 15px; width: 15px; }
+.tabs button[aria-selected="true"] { color: var(--brand); background: var(--brand-soft); border-bottom-color: var(--brand); }
+.body { padding: 14px; flex: 1; min-height: 0; overflow: auto; display: grid; align-content: start; gap: 18px; overscroll-behavior: contain; }
+.section { display: grid; gap: 10px; min-width: 0; }
+.section + .section { border-top: 1px solid var(--line); padding-top: 16px; }
+.section h3 { font-size: 12px; margin: 0; }
+.section p { font-size: 12px; line-height: 1.5; }
+.stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.stats > div { display: grid; gap: 6px; min-width: 0; }
+.stats small { color: var(--muted); font-size: 11px; }
+.stats strong { font-size: 19px; font-weight: 600; }
+.footer { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px; flex: none; border-top: 1px solid var(--line); }
+.footer > :where(a,button) { flex: 1; min-width: 0; justify-content: center; padding-inline: 8px; font-size: 12px; }
+.footer > a { flex-basis: 100%; }
+.tableWrap { overflow: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.table th { text-align: left; color: var(--muted); font-size: 11px; font-weight: 500; padding: 8px 5px; border-bottom: 1px solid var(--line); }
+.table td { text-align: left; vertical-align: top; padding: 10px 5px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; max-width: 190px; }
+.table small { display: block; margin-top: 5px; font-size: 11px; color: var(--muted); }
+.table td:last-child { min-width: 45px; }
+.table a { color: var(--brand); }
+.issue { display: grid; gap: 7px; padding: 10px; border-radius: 7px; background: #fff6e8; font-size: 12px; }
+.issue small { color: var(--muted); font-size: 11px; }
+.issue pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.muted { color: var(--muted); font-size: 12px; }
+.directions { display: flex; flex-wrap: wrap; gap: 6px; }
+.directions button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--surface); font-size: 11px; }
+.directions button[aria-pressed="true"] { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); }
+.comparison { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+.comparison :global(.custom-select) { min-width: 0; width: 100%; }
+.comparison :global(.custom-select-trigger) { min-height: 42px; padding: 0 8px; font-size: 11px; }
+.snapshotLabel { display: grid; gap: 2px; text-align: left; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.snapshotLabel > span:last-child { color: var(--muted); }
+.comparisonTable { table-layout: fixed; }
+.comparisonTable td { min-width: 0; }
+.comparisonTable :where(th,td):first-child { overflow-wrap: normal; word-break: normal; }
+@media(max-width: 900px) { .inspector { position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 20; box-shadow: var(--shadow); } }
+@media(max-width: 680px) { .close { width: 44px; height: 44px; } .comparison :global(.custom-select-trigger) { min-height: 44px; } .inspector { position: fixed; inset: 64px 0 0; z-index: 90; height: auto; min-height: 0; box-shadow: 0 8px 40px #25203130; } }
+
+.footer .recheck { flex-basis: 100%; }

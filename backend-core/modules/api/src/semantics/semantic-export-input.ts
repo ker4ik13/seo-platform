@@ -258,7 +258,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
       "priorityMin",
       "priorityMax"
       , "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
       "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
     ],
     "filters"
@@ -291,7 +291,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
   );
   const advancedInput = Object.fromEntries([
     "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax", "frequencyFixedMin", "frequencyFixedMax",
-    "wordCountMin", "wordCountMax", "targetUrlState", "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax",
+    "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState", "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax",
     "rankCheckedFrom", "rankCheckedBefore"
   ].flatMap(field => input[field] === undefined ? [] : [[field, String(input[field])]]));
   const { limit: _limit, sort: _sort, ...advanced } = keywordListQuery({ limit: "1", sort: "CREATED_DESC", ...advancedInput });

@@ -4,6 +4,8 @@ import {
   Controller,
   Get,
   Headers,
+  Inject,
+  Optional,
   Param,
   Post,
   Req,
@@ -26,6 +28,8 @@ import {
   internalCreateTechnicalCrawlInput
 } from "./crawl-input.js";
 import { CrawlService } from "./crawl.service.js";
+import { APP_CONFIG } from "../config/config.module.js";
+import type { AppConfig } from "../config/app-config.js";
 
 type HeadersRecord = Readonly<
   Record<string, string | string[] | undefined>
@@ -36,7 +40,7 @@ type HeadersRecord = Readonly<
 )
 @UseGuards(PlatformApiGuard)
 export class CrawlController {
-  public constructor(private readonly crawls: CrawlService) {}
+  public constructor(private readonly crawls: CrawlService, @Optional() @Inject(APP_CONFIG) private readonly config?: AppConfig) {}
 
   @Get()
   public async list(
@@ -48,7 +52,7 @@ export class CrawlController {
     const context = routeContext(workspaceId, projectId, headers);
     return response(
       request,
-      await this.crawls.list(context.workspaceId, context.projectId)
+      { ...await this.crawls.list(context.workspaceId, context.projectId), ...(this.config ? { runtimeLimits: { requestTimeoutMs: Math.min(this.config.crawl.requestTimeoutMs, 30_000), maxResponseBytes: Math.min(this.config.crawl.maxResponseBytes, 4_194_304), maxRedirects: this.config.crawl.maxRedirects } } : {}) }
     );
   }
 

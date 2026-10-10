@@ -16,7 +16,8 @@ test("normalizes a markdown note and its visibility", () => {
     }),
     {
       title: "План продвижения",
-      markdown: "# План\n\n[Ссылка](https://example.com)",
+      markdown: "  # План\n\n[Ссылка](https://example.com)  ",
+      format: "MARKDOWN",
       visibility: "PUBLIC"
     }
   );
@@ -31,7 +32,7 @@ test("accepts project notes longer than the former 100 000 character limit", () 
       markdown,
       visibility: "PROJECT_MEMBERS"
     }).markdown,
-    markdown.trim()
+    markdown
   );
 });
 
@@ -53,4 +54,20 @@ test("accepts only opaque public note tokens", () => {
   const token = "a".repeat(43);
   assert.equal(projectNoteToken(token), token);
   assert.throws(() => projectNoteToken("short"), DomainError);
+});
+
+test("file format reaches the strict producer input and content remains byte-for-byte text", () => {
+  const markdown = '  A,B\n"001","a,b"\n';
+  const input = createProjectNoteInput({ title: "Таблица", markdown, format: "CSV", visibility: "PROJECT_MEMBERS" });
+  assert.equal(input.format, "CSV"); assert.equal(input.markdown, markdown);
+  assert.equal(updateProjectNoteInput({ format: "TEXT" }).format, "TEXT");
+  assert.throws(() => createProjectNoteInput({ title: "x", markdown: "", format: "BINARY", visibility: "PUBLIC" }));
+});
+
+test("CSV commands accept explicit delimiters, including delimiter-only updates", () => {
+  const base = { title: "CSV", markdown: "a;b", visibility: "PROJECT_MEMBERS", format: "CSV" };
+  assert.equal(createProjectNoteInput({ ...base, delimiter: ";" }).delimiter, ";");
+  assert.equal(updateProjectNoteInput({ delimiter: "🧩" }).delimiter, "🧩");
+  for (const delimiter of ["", "ab", '"', "\n", "\t"]) assert.throws(() => createProjectNoteInput({ ...base, delimiter }));
+  assert.throws(() => createProjectNoteInput({ ...base, format: "TEXT", delimiter: ";" }));
 });

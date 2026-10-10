@@ -1,0 +1,9 @@
+.select { min-width: 0; width: 100%; }
+.select :global(.custom-select-trigger) { font-size: 12px; }
+.select :global(.semantic-rank-context), .popover :global(.semantic-rank-context) { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; flex-wrap: nowrap; }
+.select :global(.semantic-rank-context-region), .popover :global(.semantic-rank-context-region) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select :global(.semantic-rank-device-badge), .popover :global(.semantic-rank-device-badge) { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.select :global(.semantic-rank-device-badge svg), .popover :global(.semantic-rank-device-badge svg) { width: 14px; height: 14px; }
+.popover :global(.semantic-rank-context-engine) { min-width: 54px; font-size: 12px; }
+.popover :global(.custom-select-option > span:last-child) { flex: 1; min-width: 0; }
+.language { color: var(--muted); font-size: 11px; }

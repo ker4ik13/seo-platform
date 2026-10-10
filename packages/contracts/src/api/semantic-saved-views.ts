@@ -34,6 +34,8 @@ export type SemanticSavedViewQueryIndicator =
 
 export const semanticSavedViewSchemaVersions = [1, 2, 3, 4] as const;
 export const semanticSavedViewCurrentSchemaVersion = 4 as const;
+/** Full catalog order, including hidden columns; visible columns remain limited to 128. */
+export const semanticSavedViewColumnOrderLimit = 512 as const;
 export type SemanticSavedViewSchemaVersion =
   (typeof semanticSavedViewSchemaVersions)[number];
 
@@ -93,6 +95,7 @@ export interface SemanticSavedViewFilters {
   readonly wordCountMin?: number;
   readonly wordCountMax?: number;
   readonly targetUrlState?: "SET" | "EMPTY";
+  readonly multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE";
   readonly rankDimensionKey?: string;
   readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
   readonly rankPositionMin?: number;

@@ -54,17 +54,18 @@ test("uses observed days directly when a long range has no more than the limit",
   assert.deepEqual(dates, ["2026-08-08", "2025-10-10"]);
 });
 
-test("reads AI position mode only from immutable AI snapshots", async () => {
+test("unit SQL generation: AI mode reads immutable AI snapshots, never SEO snapshots", async () => {
   const queries: unknown[] = [];
+  const generated = new Error("SQL generation captured; no database is simulated");
   const service = new RankWorkbenchService({
     $queryRaw: async (query: unknown) => {
       queries.push(query);
-      return [];
+      throw generated;
     },
     rankDimensionMerge: { findMany: async () => [] }
   } as unknown as PrismaService);
 
-  const report = await service.positions(
+  await assert.rejects(service.positions(
     {
       workspaceId: "01900000-0000-7000-8000-000000000001",
       projectId: "01900000-0000-7000-8000-000000000002"
@@ -78,9 +79,8 @@ test("reads AI position mode only from immutable AI snapshots", async () => {
       limit: 100,
       sort: "QUERY_ASC"
     }
-  );
+  ), error => error === generated);
 
-  assert.equal(report.rows.length, 0);
   assert.equal(queries.length, 2);
   for (const query of queries) {
     const text = sqlText(query);
@@ -95,15 +95,16 @@ function sqlText(value: unknown): string {
   return strings.join(" ");
 }
 
-test("position order uses the latest project slice, not an older best position", async () => {
+test("unit SQL generation: position order uses the latest project slice, not an older best position", async () => {
   const queries: unknown[] = [];
+  const generated = new Error("SQL generation captured; no database is simulated");
   const service = new RankWorkbenchService({
-    $queryRaw: async (query: unknown) => { queries.push(query); return []; },
+    $queryRaw: async (query: unknown) => { queries.push(query); throw generated; },
     rankDimensionMerge: { findMany: async () => [] }
   } as unknown as PrismaService);
-  await service.positions({ workspaceId: "01900000-0000-7000-8000-000000000001", projectId: "01900000-0000-7000-8000-000000000002" }, {
+  await assert.rejects(service.positions({ workspaceId: "01900000-0000-7000-8000-000000000001", projectId: "01900000-0000-7000-8000-000000000002" }, {
     mode: "SEO", dimensionKey: "YANDEX|RU|213|ru|DESKTOP", observedFrom: "2026-08-01T00:00:00.000Z", observedBefore: "2026-09-11T00:00:00.000Z", dateLimit: 31, limit: 100, sort: "POSITION_ASC", includeUntracked: false
-  });
+  }), error => error === generated);
   const page = queries.map(sqlText).find((text) => text.includes("latest_slice_position"));
   assert.ok(page);
   assert.match(page, /MAX\(\(observed_at AT TIME ZONE 'UTC'\)::date\)/u);

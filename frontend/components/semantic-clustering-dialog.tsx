@@ -224,7 +224,6 @@ export function SemanticClusteringDialog({
           <section className="semantic-workflow-panel semantic-clustering-source-panel">
             <header>
               <h3><UiText text="Источник и выдача" /></h3>
-              <p><UiText text="Выберите поисковик и подключение Arsenkin." /></p>
             </header>
             <div aria-label={uiText("Поисковая система")} className="semantic-engine-cards" role="group">
               {(["YANDEX", "GOOGLE"] as const).map((engine) => (
@@ -251,8 +250,6 @@ export function SemanticClusteringDialog({
                 }))}
                 value={regionCode}
               />
-              <small>
-                <UiText text="Первый запуск — Москва; затем используется регион последней успешной кластеризации." /></small>
             </label>
             <div className="semantic-provider-field">
               <div className="semantic-provider-field-heading">
@@ -371,7 +368,6 @@ export function SemanticClusteringDialog({
           <section className="semantic-workflow-panel semantic-clustering-scope-panel">
             <header>
               <h3><UiText text="Запросы" /></h3>
-              <p><UiText text="Выберите вручную, из папок или весь проект." /></p>
             </header>
             <SemanticOperationScope
               activeGroupId={activeGroupId}

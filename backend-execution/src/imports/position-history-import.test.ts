@@ -4,6 +4,43 @@ import { importedPositionHistory, isPositionHistorySummary, positionHistoryDateC
 
 const defaults = { searchEngine: "GOOGLE" as const, countryCode: "RU", regionCode: "1011969", regionLabel: "Москва", language: "ru", device: "DESKTOP" as const };
 
+test("explicit wide bindings pair each date with its own URL and preserve mixed search engines", () => {
+  const issues = new Set<string>();
+  const points = importedPositionHistory(["term", "a", "b", "c", "d"], ["ключ", "9", "https://example.com/old", "2", "https://example.com/new"], {
+    ...defaults, layout: "WIDE", dateColumns: [
+      { sourceIndex: 1, rankingUrlSourceIndex: 2, observedAt: "2026-10-01T12:00:00.000Z" },
+      { sourceIndex: 3, rankingUrlSourceIndex: 4, observedAt: "2026-10-01T12:00:00.000Z", context: { ...defaults, searchEngine: "YANDEX", regionCode: "213" } },
+    ],
+  }, issues);
+  assert.deepEqual(points.map(point => [point.searchEngine, point.position, point.rankingUrl]), [
+    ["GOOGLE", 9, "https://example.com/old"], ["YANDEX", 2, "https://example.com/new"],
+  ]);
+  assert.equal(issues.size, 0);
+});
+
+test("long metadata can be mapped from arbitrary headers and city codes are engine-specific", () => {
+  const history = { ...defaults, layout: "LONG" as const };
+  const mapping = { columns: [
+    { sourceIndex: 0, target: "keyword.text" as const }, { sourceIndex: 1, target: "metric.observed_at" as const },
+    { sourceIndex: 2, target: "context.search_engine" as const }, { sourceIndex: 3, target: "context.region" as const },
+    { sourceIndex: 4, target: "context.device" as const }, { sourceIndex: 5, target: "ranking.position" as const },
+  ], defaultLanguage: "ru", groupSeparator: "/", duplicatePolicy: "MERGE_NON_EMPTY" as const, createMissingKeywords: true, positionHistory: history };
+  for (const [engine, regionCode] of [["Яндекс", "213"], ["Google", "1011969"]]) {
+    const issues = new Set<string>();
+    const points = importedPositionHistory(["A", "B", "C", "D", "E", "F"], ["ключ", "08.10.2026", engine!, "Москва", "Телефон", "8"], history, issues, mapping);
+    assert.equal(points[0]?.regionCode, regionCode);
+    assert.equal(points[0]?.device, "MOBILE");
+    assert.equal(issues.size, 0);
+  }
+});
+
+test("malformed dates are errors and blank long measurements do not create snapshots", () => {
+  const issues = new Set<string>();
+  assert.deepEqual(importedPositionHistory(["Запрос", "Дата", "Позиция"], ["ключ", "31.02.2026", "7"], { ...defaults, layout: "LONG" }, issues), []);
+  assert.ok(issues.has("INVALID_OBSERVED_AT"));
+  assert.deepEqual(importedPositionHistory(["Запрос", "Дата", "Позиция"], ["ключ", "08.10.2026", ""], { ...defaults, layout: "LONG" }, new Set()), []);
+});
+
 test("wide position history distinguishes missing measurements, not-found dashes and decimal integers", () => {
   const headers = ["Запросы", "2025-12-23", "30.12.2025", "2026/01/12", "2026-01-20"];
   assert.equal(positionHistoryDateColumns(headers).length, 4);

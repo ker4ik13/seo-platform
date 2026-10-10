@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Parser } from "htmlparser2";
+import { crawlIndexingDirectives, parseCrawlTechnicalDetails, type CrawlMetaTag, type CrawlLinkEvidence, type CrawlTechnicalDetails } from "@seo-platform/contracts";
 import type { PublicFetchResult } from "./public-http.js";
 
 export interface CrawlHeading {
@@ -34,12 +35,8 @@ export interface CrawlPageAnalysis {
   readonly imageCount: number;
   readonly imagesMissingAlt: number;
   readonly structuredDataTypes: readonly string[];
-  readonly metaTags: readonly {
-    readonly name?: string;
-    readonly property?: string;
-    readonly httpEquiv?: string;
-    readonly content: string;
-  }[];
+  readonly metaTags: readonly CrawlMetaTag[];
+  readonly technicalDetails?: CrawlTechnicalDetails;
   readonly wordCount: number;
   readonly contentHash: string;
   readonly indexability:
@@ -55,15 +52,28 @@ export interface CrawlPageAnalysis {
 /** Keep an HTTP snapshot for non-HTML resources without interpreting binary data as markup. */
 export function analyzeCrawlResource(response: PublicFetchResult, finalUrl: string): CrawlPageAnalysis {
   if (response.contentType === "text/html" || response.contentType === "application/xhtml+xml") {
-    return analyzeHtmlPage({ html: response.body.toString("utf8"), finalUrl, statusCode: response.statusCode, responseTimeMs: response.responseTimeMs, sizeBytes: response.sizeBytes });
+    return responseDirectives(analyzeHtmlPage({ html: response.body.toString("utf8"), finalUrl, statusCode: response.statusCode, responseTimeMs: response.responseTimeMs, sizeBytes: response.sizeBytes }), response);
   }
-  return {
+  return responseDirectives({
     h1Count: 0, headings: [], hreflang: [], internalLinks: [], externalLinks: [],
     imageCount: 0, imagesMissingAlt: 0, structuredDataTypes: [], metaTags: [], wordCount: 0,
     contentHash: createHash("sha256").update(response.body).digest("hex"),
     indexability: response.statusCode >= 400 ? "ERROR" : response.redirectChain.length > 0 ? "REDIRECTED" : "UNKNOWN",
     issues: [{ code: "NON_HTML_RESOURCE", severity: "INFO", title: "Ресурс не в формате HTML", details: { contentType: response.contentType ?? "application/octet-stream" } }]
-  };
+  }, response);
+}
+
+function responseDirectives(analysis: CrawlPageAnalysis, response: PublicFetchResult): CrawlPageAnalysis {
+  const metaTags: readonly CrawlMetaTag[] = response.xRobotsTag ? [...analysis.metaTags.slice(0, 199), { httpEquiv: "X-Robots-Tag", source: "HTTP", content: response.xRobotsTag }] : analysis.metaTags;
+  const generic = crawlIndexingDirectives(metaTags, "robots");
+  const restricted = generic.noindex || (["googlebot", "yandex"] as const).some((agent) => crawlIndexingDirectives(metaTags, agent).noindex);
+  const scopedIssues = (["googlebot", "yandex"] as const).flatMap((agent) => {
+    const directives = crawlIndexingDirectives(metaTags, agent);
+    return directives.noindex && !generic.noindex ? [issue(`${agent.toUpperCase()}_NOINDEX`, "ERROR", agent === "googlebot" ? "Индексация запрещена для Google" : "Индексация запрещена для Яндекса", { directive: [...directives.meta, ...directives.headers].join("; ").slice(0, 4_000), agent })] : [];
+  });
+  return { ...analysis, metaTags, technicalDetails: { ...analysis.technicalDetails, responseHeadersCaptured: true }, ...(generic.meta.length || generic.headers.length ? { robots: [...generic.meta, ...generic.headers].join(", ").slice(0, 255) } : {}),
+    ...(restricted && response.statusCode >= 200 && response.statusCode < 300 ? { indexability: "NOINDEX" as const } : {}),
+    issues: [...analysis.issues, ...(generic.noindex && analysis.indexability !== "NOINDEX" ? [issue("NOINDEX", "ERROR", "Страница закрыта от индексации", { source: "X-Robots-Tag" })] : []), ...scopedIssues] };
 }
 
 const MAX_LINKS = 5_000;
@@ -74,16 +84,16 @@ const MAX_TEXT_FIELD = 4_000;
 
 /** A remote node returns the same bounded analysis as the local parser. */
 export function parseCrawlPageAnalysis(value:unknown):CrawlPageAnalysis {
-  const row=analysisRecord(value),allowed=new Set(["title","description","h1","h1Count","canonicalUrl","robots","language","headings","hreflang","internalLinks","externalLinks","imageCount","imagesMissingAlt","structuredDataTypes","metaTags","wordCount","contentHash","indexability","issues"]);
+  const row=analysisRecord(value),allowed=new Set(["title","description","h1","h1Count","canonicalUrl","robots","language","headings","hreflang","internalLinks","externalLinks","imageCount","imagesMissingAlt","structuredDataTypes","metaTags","technicalDetails","wordCount","contentHash","indexability","issues"]);
   if(Object.keys(row).some(key=>!allowed.has(key)) || typeof row.contentHash!=="string" || !/^[a-f0-9]{64}$/u.test(row.contentHash) || !["INDEXABLE","NOINDEX","CANONICALIZED","REDIRECTED","ERROR","UNKNOWN"].includes(String(row.indexability))) analysisInvalid();
   const optional:Partial<Record<"title"|"description"|"h1"|"canonicalUrl"|"robots"|"language",string>>={};
   for(const key of ["title","description","h1","canonicalUrl","robots","language"] as const) if(row[key]!==undefined) optional[key]=analysisText(row[key],MAX_TEXT_FIELD);
   const links=(value:unknown)=>analysisArray(value,MAX_LINKS).map(item=>analysisText(item,MAX_TEXT_FIELD));
-  return {...optional,h1Count:analysisCount(row.h1Count),imageCount:analysisCount(row.imageCount),imagesMissingAlt:analysisCount(row.imagesMissingAlt),wordCount:analysisCount(row.wordCount),contentHash:row.contentHash,indexability:row.indexability as CrawlPageAnalysis["indexability"],
+  return {...optional,...(row.technicalDetails===undefined?{}:{technicalDetails:parseCrawlTechnicalDetails(row.technicalDetails)}),h1Count:analysisCount(row.h1Count),imageCount:analysisCount(row.imageCount),imagesMissingAlt:analysisCount(row.imagesMissingAlt),wordCount:analysisCount(row.wordCount),contentHash:row.contentHash,indexability:row.indexability as CrawlPageAnalysis["indexability"],
     headings:analysisArray(row.headings,MAX_HEADINGS).map(value=>{const item=analysisRecord(value);const level=analysisCount(item.level);if(Object.keys(item).length!==2 || level<1 || level>6) analysisInvalid();return {level,text:analysisText(item.text,MAX_TEXT_FIELD)};}),
     hreflang:analysisArray(row.hreflang,MAX_HREFLANG).map(value=>{const item=analysisRecord(value);if(Object.keys(item).length!==2) analysisInvalid();return {language:analysisText(item.language,64),url:analysisText(item.url,MAX_TEXT_FIELD)};}),
     internalLinks:links(row.internalLinks),externalLinks:links(row.externalLinks),structuredDataTypes:analysisArray(row.structuredDataTypes,100).map(value=>analysisText(value,MAX_TEXT_FIELD)),
-    metaTags:analysisArray(row.metaTags,MAX_META_TAGS).map(value=>{const item=analysisRecord(value);if(Object.keys(item).some(key=>!["name","property","httpEquiv","content"].includes(key))) analysisInvalid();return {content:analysisText(item.content,MAX_TEXT_FIELD),...(item.name===undefined ? {} : {name:analysisText(item.name,MAX_TEXT_FIELD)}),...(item.property===undefined ? {} : {property:analysisText(item.property,MAX_TEXT_FIELD)}),...(item.httpEquiv===undefined ? {} : {httpEquiv:analysisText(item.httpEquiv,MAX_TEXT_FIELD)})};}),
+    metaTags:analysisArray(row.metaTags,MAX_META_TAGS).map(value=>{const item=analysisRecord(value);if(Object.keys(item).some(key=>!["name","property","httpEquiv","content","source"].includes(key))) analysisInvalid();if(item.source!==undefined&&!["HTML","HTTP"].includes(String(item.source)))analysisInvalid();return {...(item.source===undefined?{}:{source:item.source as "HTML"|"HTTP"}),content:analysisText(item.content,MAX_TEXT_FIELD),...(item.name===undefined ? {} : {name:analysisText(item.name,MAX_TEXT_FIELD)}),...(item.property===undefined ? {} : {property:analysisText(item.property,MAX_TEXT_FIELD)}),...(item.httpEquiv===undefined ? {} : {httpEquiv:analysisText(item.httpEquiv,MAX_TEXT_FIELD)})};}),
     issues:analysisArray(row.issues,500).map(value=>{const item=analysisRecord(value),details=analysisRecord(item.details);if(Object.keys(item).length!==4 || typeof item.code!=="string" || !/^[A-Z][A-Z0-9_]{0,79}$/u.test(item.code) || !["INFO","WARNING","ERROR","CRITICAL"].includes(String(item.severity)) || Object.keys(details).length>50 || Object.entries(details).some(([key,value])=>key.length>100 || !(typeof value==="boolean" || typeof value==="number" && Number.isFinite(value) || typeof value==="string" && value.length<=MAX_TEXT_FIELD))) analysisInvalid();return {code:item.code,severity:item.severity as CrawlDetectedIssue["severity"],title:analysisText(item.title,MAX_TEXT_FIELD),details:details as Record<string,string|number|boolean>};})};
 }
 function analysisRecord(value:unknown):Record<string,unknown>{if(!value || typeof value!=="object" || Array.isArray(value)) analysisInvalid();return value as Record<string,unknown>;}
@@ -126,6 +136,8 @@ export function analyzeHtmlPage(input: {
   let imagesMissingAlt = 0;
   let jsonLdDepth = 0;
   let jsonLd = "";
+  const linkDetails: CrawlLinkEvidence[] = [];
+  let currentLink: { url: string; anchor: string; rel: readonly string[]; kind: "INTERNAL" | "EXTERNAL" } | undefined;
 
   const parser = new Parser(
     {
@@ -153,7 +165,7 @@ export function analyzeHtmlPage(input: {
             description = boundedText(attributes.content, MAX_TEXT_FIELD);
           }
           if (
-            ["robots", "googlebot", "yandex"].includes(nameValue ?? "") &&
+            nameValue === "robots" &&
             attributes.content
           ) {
             robots = mergeRobots(robots, attributes.content);
@@ -203,6 +215,8 @@ export function analyzeHtmlPage(input: {
             internalLinks,
             externalLinks
           );
+          const url = normalizedLink(attributes.href, baseUrl);
+          if (url && linkDetails.length < MAX_LINKS) currentLink = { url, anchor: "", rel: [...relationTokens(attributes.rel)].slice(0, 20), kind: new URL(url).origin === baseUrl.origin ? "INTERNAL" : "EXTERNAL" };
         }
         if (tag === "img") {
           imageCount += 1;
@@ -221,9 +235,11 @@ export function analyzeHtmlPage(input: {
         if (currentHeading) currentHeading.text += text;
         if (jsonLdDepth > 0) jsonLd += text;
         if (hiddenDepth === 0) visibleText.push(text);
+        if (currentLink && hiddenDepth === 0) currentLink.anchor = (currentLink.anchor + text).slice(0, 500);
       },
       onclosetag(name) {
         const tag = name.toLowerCase();
+        if (tag === "a" && currentLink) { linkDetails.push({ ...currentLink, anchor: normalizedText(currentLink.anchor, 500) ?? "" }); currentLink = undefined; }
         if (tag === "title" && titleDepth > 0) titleDepth -= 1;
         if (
           currentHeading &&
@@ -263,7 +279,7 @@ export function analyzeHtmlPage(input: {
   const h1 = h1Values[0]?.text;
   const text = normalizedText(visibleText.join(" "), 2_000_000) ?? "";
   const wordCount = text.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
-  const noindex = relationTokens(robots).has("noindex");
+  const noindex = relationTokens(robots).has("noindex") || relationTokens(robots).has("none");
   const canonicalized =
     canonicalUrl !== undefined &&
     canonicalUrl !== normalizedLink(input.finalUrl, baseUrl);
@@ -295,6 +311,7 @@ export function analyzeHtmlPage(input: {
     imagesMissingAlt,
     structuredDataTypes: [...structuredDataTypes].sort(),
     metaTags,
+    technicalDetails: { links: linkDetails },
     wordCount,
     contentHash: createHash("sha256").update(text, "utf8").digest("hex"),
     indexability,

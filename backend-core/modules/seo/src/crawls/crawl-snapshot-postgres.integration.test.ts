@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import type { InternalPersistCrawlPageInput } from "@seo-platform/contracts";
 import { loadAppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -353,3 +354,76 @@ function duplicatePageInput(
     crawledAt: `2026-07-31T08:00:0${sequence}.000Z`
   };
 }
+
+test("finalizes 5000 pages, all four duplicate kinds and 5000 absences idempotently", { skip: !databaseUrl, timeout: 120_000 }, async (t) => {
+  const prisma = new PrismaService(loadAppConfig({ NODE_ENV: "test", DATABASE_URL: databaseUrl! }));
+  const service = new CrawlSnapshotService(prisma);
+  const workspaceId = randomUUID();
+  const projectId = randomUUID();
+  const crawlId = randomUUID();
+  try {
+    await service.persistPage({ ...pageInput(1, "Shared title", "a".repeat(64)), workspaceId, projectId, crawlId, requestedUrl: "https://radar.example.com/large/1", finalUrl: "https://radar.example.com/large/1" });
+    await prisma.$executeRaw`
+      INSERT INTO pages (workspace_id, project_id, url, normalized_url, url_hash, updated_at)
+      SELECT ${workspaceId}::uuid, ${projectId}::uuid,
+        'https://radar.example.com/large/' || sequence,
+        'https://radar.example.com/large/' || sequence,
+        encode(sha256(convert_to('https://radar.example.com/large/' || sequence, 'UTF8')), 'hex'), CURRENT_TIMESTAMP
+      FROM generate_series(2, 5000) AS sequence
+    `;
+    await prisma.$executeRaw`
+      INSERT INTO crawl_page_snapshots (
+        workspace_id, project_id, crawl_id, sequence, page_id,
+        requested_url, final_url, final_url_hash, redirect_chain, in_sitemap,
+        depth, status_code, response_time_ms, size_bytes, content_type,
+        title, description, h1, h1_count, headings, hreflang, internal_links,
+        external_links, image_count, images_missing_alt, structured_data_types,
+        word_count, content_hash, indexability, crawled_at
+      )
+      SELECT ${workspaceId}::uuid, ${projectId}::uuid, ${crawlId}::uuid,
+        split_part(page.url, '/large/', 2)::integer, page.id,
+        page.url, page.url, page.url_hash, '[]'::jsonb, false,
+        0, 200, 250, 4096, 'text/html',
+        'Shared title', 'Description', 'Heading', 1, '[]'::jsonb, '[]'::jsonb,
+        '[]'::jsonb, '[]'::jsonb, 0, 0, '[]'::jsonb, 100,
+        ${"a".repeat(64)}, 'INDEXABLE'::"PageIndexability", CURRENT_TIMESTAMP
+      FROM pages page
+      WHERE page.project_id = ${projectId}::uuid
+        AND page.url <> 'https://radar.example.com/large/1'
+    `;
+    const input = { workspaceId, projectId, crawlId, status: "COMPLETED" as const, processedUrls: 5000, scopeHash: "e".repeat(64) };
+    const receipt = { accepted: true as const, issueCount: 20000 };
+    const started = performance.now();
+    assert.deepEqual(await service.finalize(input), receipt);
+    assert.deepEqual(await service.finalize(input), receipt);
+    t.diagnostic(`large finalization ${Math.round(performance.now() - started)} ms`);
+    const groups = await service.listDuplicateGroups(workspaceId, projectId, crawlId);
+    t.diagnostic(`large groups ${Math.round(performance.now() - started)} ms`);
+    assert.deepEqual(groups.groups.map(({ memberCount }) => memberCount), [5000, 5000, 5000, 5000]);
+    const missingCrawlId = randomUUID();
+    const missingInput = { ...input, crawlId: missingCrawlId, processedUrls: 0 };
+    assert.deepEqual(await service.finalize(missingInput), { accepted: true, issueCount: 5000 });
+    assert.deepEqual(await service.finalize(missingInput), { accepted: true, issueCount: 5000 });
+    t.diagnostic(`large absences ${Math.round(performance.now() - started)} ms`);
+    assert.equal((await service.listAbsentPages(workspaceId, projectId, missingCrawlId)).pages.length, 5000);
+  } finally { await prisma.$disconnect(); }
+});
+
+test("a single-page recheck preserves duplicate issues until a comparable full crawl resolves them", { skip: !databaseUrl, timeout: 15_000 }, async () => {
+  const prisma = new PrismaService(loadAppConfig({ NODE_ENV: "test", DATABASE_URL: databaseUrl! }));
+  const service = new CrawlSnapshotService(prisma);
+  const scope = { workspaceId: randomUUID(), projectId: randomUUID() };
+  const firstCrawl = randomUUID();
+  try {
+    for (const sequence of [1, 2]) await service.persistPage({ ...duplicatePageInput(sequence), ...scope, crawlId: firstCrawl });
+    await service.finalize({ ...scope, crawlId: firstCrawl, status: "COMPLETED", processedUrls: 2, scopeHash: "a".repeat(64) });
+    const singleCrawl = randomUUID();
+    await service.persistPage({ ...duplicatePageInput(1), ...scope, crawlId: singleCrawl, crawledAt: "2026-10-10T12:00:00.000Z" });
+    await service.finalize({ ...scope, crawlId: singleCrawl, status: "COMPLETED", processedUrls: 1, scopeHash: "b".repeat(64) });
+    assert.equal((await service.listIssues(scope.workspaceId, scope.projectId)).issues.filter(issue => issue.code.startsWith("DUPLICATE_")).length, 8);
+    const finalCrawl = randomUUID();
+    for (const sequence of [1, 2]) await service.persistPage({ ...duplicatePageInput(sequence), ...scope, crawlId: finalCrawl, title: `Title ${sequence}`, description: `Description ${sequence}`, h1: `Heading ${sequence}`, contentHash: String(sequence).repeat(64), crawledAt: "2026-10-10T13:00:00.000Z" });
+    await service.finalize({ ...scope, crawlId: finalCrawl, status: "COMPLETED", processedUrls: 2, scopeHash: "a".repeat(64) });
+    assert.equal((await service.listIssues(scope.workspaceId, scope.projectId)).issues.filter(issue => issue.code.startsWith("DUPLICATE_")).length, 0);
+  } finally { await prisma.$disconnect(); }
+});

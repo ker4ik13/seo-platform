@@ -117,3 +117,8 @@ test("rejects cross-tenant and response-shape drift", () => {
     DomainError
   );
 });
+
+test("strict consumer accepts the frozen day of a sorted rank list", () => {
+  assert.equal(scopedProjectPageCollection({ pages: [page], rankDate: "2026-10-08" }, workspaceId, projectId).rankDate, "2026-10-08");
+  assert.throws(() => scopedProjectPageCollection({ pages: [page], rankDate: "bad" }, workspaceId, projectId), DomainError);
+});

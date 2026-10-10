@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { semanticRankDimensionKey } from "@seo-platform/contracts";
+import { semanticRankDimensionKey, parseSerpWorkbenchReport } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import { RankWorkbenchService } from "./rank-workbench.service.js";
@@ -18,12 +18,13 @@ const dimension = {
   device: "DESKTOP" as const
 };
 
-test("projects imported Key Collector SERP through the canonical workbench contract", async () => {
+test("unit: maps Key Collector persistence fields through the strict SERP consumer", async () => {
   let snapshotQuery = "";
   const prisma = {
     rankDimensionMerge: { findMany: async () => [] },
     $queryRaw: async (query: Prisma.Sql) => {
       const sql = query.strings.join(" ");
+      if (sql.includes('AS "keywordIds"')) return [{ keywordIds: [keywordId] }];
       if (sql.includes("count(*) OVER")) {
         return [{
           id: keywordId,
@@ -62,10 +63,10 @@ test("projects imported Key Collector SERP through the canonical workbench contr
   const service = new RankWorkbenchService(prisma);
   const dimensionKey = semanticRankDimensionKey(dimension);
 
-  const report = await service.serp(
+  const report = parseSerpWorkbenchReport(await service.serp(
     { workspaceId, projectId },
     { dimensionKeys: [dimensionKey], groupIds: [groupId], limit: 50 }
-  );
+  ));
 
   assert.match(snapshotQuery, /'KEY_COLLECTOR'/u);
   assert.equal(report.rows[0]?.snapshots[0]?.provider, "KEY_COLLECTOR");

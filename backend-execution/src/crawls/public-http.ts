@@ -32,6 +32,7 @@ export interface PublicFetchResult {
   readonly etag?: string;
   readonly lastModified?: string;
   readonly retryAfterMs?: number;
+  readonly xRobotsTag?: string;
 }
 
 export class PublicFetchError extends Error {
@@ -148,6 +149,7 @@ export async function fetchPublicResource(
         redirectChain: redirects,
         ...(result.etag ? { etag: result.etag } : {}),
         ...(result.lastModified ? { lastModified: result.lastModified } : {}),
+        ...(result.xRobotsTag ? { xRobotsTag: result.xRobotsTag } : {}),
         ...(result.retryAfterMs !== undefined
           ? { retryAfterMs: result.retryAfterMs }
           : {})
@@ -207,6 +209,7 @@ async function requestOnce(
   readonly etag?: string;
   readonly lastModified?: string;
   readonly retryAfterMs?: number;
+  readonly xRobotsTag?: string;
   readonly body: Buffer;
 }> {
   const addresses = await resolver(url.hostname);
@@ -260,6 +263,7 @@ function requestResolvedAddress(
   readonly etag?: string;
   readonly lastModified?: string;
   readonly retryAfterMs?: number;
+  readonly xRobotsTag?: string;
   readonly body: Buffer;
 }> {
   const transport = url.protocol === "https:" ? https : http;
@@ -297,6 +301,10 @@ function requestResolvedAddress(
         const statusCode = response.statusCode ?? 0;
         const contentType = mediaType(response.headers["content-type"]);
         const location = singleHeader(response.headers.location);
+        const xRobotsTag = response.rawHeaders.reduce<string[]>((headers, name, index) => {
+          if (index % 2 === 0 && name.toLowerCase() === "x-robots-tag") headers.push(response.rawHeaders[index + 1] ?? "");
+          return headers;
+        }, []).join("\n").slice(0, 4_000);
         const etag = boundedHeader(response.headers.etag);
         const lastModified = boundedHeader(
           response.headers["last-modified"]
@@ -363,6 +371,7 @@ function requestResolvedAddress(
             ...(location ? { location } : {}),
             ...(etag ? { etag } : {}),
             ...(lastModified ? { lastModified } : {}),
+            ...(xRobotsTag ? { xRobotsTag } : {}),
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
             body: Buffer.concat(chunks, bytes)
           });

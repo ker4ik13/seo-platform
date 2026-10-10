@@ -13,6 +13,7 @@ import {
   type RankJobStatus,
   type RankJobSummary
 } from "@seo-platform/contracts";
+import { operationStageLabel } from "./operation-status-presentation.ts";
 import { BrowserApiError } from "./browser-api.ts";
 import {
   stableIdempotencyCommand,
@@ -113,19 +114,9 @@ export interface RankJobPresentation {
   readonly tone: "danger" | "info" | "muted" | "success" | "warning";
 }
 
-const stageLabels: Readonly<Record<RankJobStage, string>> = {
-  PREPARING_SCOPE: "Фиксируем состав запросов",
-  WAITING_FOR_QUEUE: "Ожидает исполнения",
-  WAITING_EXECUTION_GRANT: "Проверяем разрешение на выполнение",
-  READY_TO_SUBMIT: "Готовим безопасную отправку",
-  SUBMITTING: "Передаём задачу провайдеру",
-  WAITING_PROVIDER: "Провайдер обрабатывает задачу",
-  FETCHING_RESULT: "Получаем результат",
-  PERSISTING_RESULT: "Сохраняем позиции",
-  FINALIZING: "Фиксируем итог задачи",
-  SUBMIT_OUTCOME_UNKNOWN: "Требуется проверка исхода",
-  FINISHED: "Завершено"
-};
+const stageLabels: Readonly<Record<RankJobStage, string>> = Object.fromEntries(
+  rankJobStages.map(stage => [stage, operationStageLabel(stage, "RUNNING")])
+) as Record<RankJobStage, string>;
 
 const failureMessages: Readonly<Record<RankJobFailureCode, string>> = {
   ESTIMATE_EXPIRED:

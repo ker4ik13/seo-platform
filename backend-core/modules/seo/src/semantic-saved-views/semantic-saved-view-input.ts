@@ -10,6 +10,7 @@ import {
   semanticSavedViewQueryIndicators,
   semanticSavedViewSchemaVersions,
   semanticSavedViewScopes,
+  semanticSavedViewColumnOrderLimit,
   semanticSystemColumnKeys,
   type InternalCreateSemanticSavedViewInput,
   type InternalDeleteSemanticSavedViewInput,
@@ -189,7 +190,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     "priorityMin",
     "priorityMax",
     "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+    "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
     "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
   ]);
   const search = optionalString(input.search, "config.filters.search", 200);
@@ -271,6 +272,7 @@ function advancedFilters(input: Readonly<Record<string, unknown>>, field: string
   if (wordCountMin && wordCountMax && wordCountMin > wordCountMax) invalid(`${field}.wordCountMin`);
   if (rankPositionMin && rankPositionMax && rankPositionMin > rankPositionMax) invalid(`${field}.rankPositionMin`);
   const targetUrlState = input.targetUrlState === undefined ? undefined : requiredEnum(input.targetUrlState, ["SET", "EMPTY"] as const, `${field}.targetUrlState`);
+  const multipleUrlsState = input.multipleUrlsState === undefined ? undefined : requiredEnum(input.multipleUrlsState, ["MULTIPLE", "NOT_MULTIPLE"] as const, `${field}.multipleUrlsState`);
   const rankState = input.rankState === undefined ? undefined : requiredEnum(input.rankState, ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const, `${field}.rankState`);
   const rankDimensionKey = input.rankDimensionKey;
   if (rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(rankDimensionKey)) invalid(`${field}.rankDimensionKey`);
@@ -287,7 +289,7 @@ function advancedFilters(input: Readonly<Record<string, unknown>>, field: string
     ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}),
     ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}),
     ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}),
-    ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}),
+    ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(multipleUrlsState ? { multipleUrlsState } : {}),
     ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}),
     ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}),
     ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {})
@@ -301,7 +303,7 @@ function requiredColumns(
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
-    value.length > 128
+    value.length > (field === "config.columnOrder" ? semanticSavedViewColumnOrderLimit : 128)
   ) {
     invalid(field);
   }

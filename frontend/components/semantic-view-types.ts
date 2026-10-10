@@ -70,6 +70,7 @@ export interface SemanticViewFilters {
   readonly wordCountMin?: number;
   readonly wordCountMax?: number;
   readonly targetUrlState?: "SET" | "EMPTY";
+  readonly multipleUrlsState?: "MULTIPLE" | "NOT_MULTIPLE";
   readonly rankDimensionKey?: string;
   readonly rankState?: "CHECKED" | "FOUND" | "NOT_FOUND" | "NOT_CHECKED";
   readonly rankPositionMin?: number;
@@ -166,7 +167,6 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
     "frequency",
     "frequencyExact",
     "frequencyFixed",
-    "wordCount",
     "yandexPosition",
     "yandexRelevantUrl",
     "googlePosition",
@@ -179,12 +179,9 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
     "googleCheckedAt",
     "yandexAiCheckedAt",
     "googleAiCheckedAt",
-    "group",
     "cluster",
     "targetUrl",
-    "tags",
     "intent",
-    "source",
     "updatedAt"
   ],
   columnOrder: semanticSystemColumnKeys,

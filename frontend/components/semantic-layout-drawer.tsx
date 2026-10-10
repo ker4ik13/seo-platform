@@ -21,6 +21,7 @@ import {
   semanticQueryIndicatorsFor
 } from "./semantic-view-types";
 import { Icon } from "./icon";
+import { semanticViewPresets, type SemanticViewPreset } from "../lib/semantic-view-presets";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticSideDrawer } from "./semantic-side-drawer";
 import { useUiLocale, UiText } from "./ui-locale";
@@ -42,6 +43,7 @@ export function SemanticLayoutDrawer({
   onMoveColumn,
   onOpenCustomColumns,
   onReset,
+  onPreset,
   onToggleColumn,
   onToggleQueryIndicator,
   projectId,
@@ -72,6 +74,7 @@ export function SemanticLayoutDrawer({
   ) => void;
   onOpenCustomColumns: () => void;
   onReset: () => void;
+  onPreset: (preset: SemanticViewPreset) => void;
   onToggleColumn: (column: SemanticViewColumn) => void;
   onToggleQueryIndicator: (indicator: SemanticQueryIndicator) => void;
   projectId: string;
@@ -142,7 +145,9 @@ export function SemanticLayoutDrawer({
 
       {tab === "COLUMNS" && (
         <div className="semantic-layout-body">
-          <p className="semantic-layout-rank-help"><UiText text="Для сравнения городов включите их позиции, URL и даты съёма. Названия колонок содержат город и устройство." /></p>
+          <div className="view-preset-controls" aria-label={uiText("Быстрые представления")}>
+            {semanticViewPresets.map(preset => <button className="secondary-button" key={preset.id} type="button" onClick={() => onPreset(preset.id)}><UiText text={preset.label} /></button>)}
+          </div>
           <p className="semantic-layout-rank-help"><UiText text="Включено колонок: {0} из 128." values={[String(config.columns.length)]} /></p>
           {rankError && <div className="inline-alert warning"><UiText text={rankError} /><button type="button" onClick={onRefreshRanks}><UiText text="Повторить" /></button></div>}
           <label className="semantic-layout-search">

@@ -33,7 +33,7 @@ test("finishes an expired crawl as a bounded partial result", async () => {
     config: () => config,
     checkpoint: () => ({
       version: 2,
-      pending: [],
+      pending: [{ url: "https://example.com/pending", depth: 1, inSitemap: false }],
       seen: [...config.startUrls],
       sitemapPending: [],
       sitemapSeen: [],
@@ -90,4 +90,21 @@ test("finishes an expired crawl as a bounded partial result", async () => {
     "MAX_RUNTIME_EXCEEDED",
     4
   ]]);
+});
+
+test("retries finalization from a complete checkpoint without fetching after the runtime deadline", async () => {
+  const finished: unknown[][] = [], failed: unknown[][] = [];
+  const crawl = { id: "01900000-0000-7000-8000-000000000011", workspaceId: "01900000-0000-7000-8000-000000000012", projectId: "01900000-0000-7000-8000-000000000013", status: "RUNNING", processedUrls: 2568, failedUrls: 0, startedAt: new Date(0) };
+  let rejectFinalization = false;
+  const runner = new CrawlRunnerService({ crawl: { leaseSeconds: 120 } } as never, {
+    claim: async () => crawl, config: () => config,
+    checkpoint: () => ({ version: 2, pending: [], seen: [], sitemapPending: [], sitemapSeen: [], scopeReady: true }),
+    get: async () => crawl, finish: async (...args: unknown[]) => { finished.push(args); }, fail: async (...args: unknown[]) => { failed.push(args); }
+  } as never, { finalize: async () => { if (rejectFinalization) throw new Error("private database error"); return { accepted: true, issueCount: 12000 }; } } as never,
+  { currentBackoff: async () => { throw new Error("No HTTP/host access during finalization"); } } as never);
+  await runner.process(crawl.id, "worker", true);
+  assert.deepEqual(finished, [[crawl.id, "worker", "COMPLETED", undefined, 12000]]);
+  rejectFinalization = true;
+  await runner.process(crawl.id, "worker", true);
+  assert.deepEqual(failed, [[crawl.id, "CRAWL_FINALIZATION_FAILED", "worker"]]);
 });

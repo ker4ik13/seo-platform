@@ -28,6 +28,13 @@ test("keeps large Markdown notes intact at the SEO storage boundary", () => {
     markdown
   });
 
-  assert.equal(created.markdown, markdown.trim());
-  assert.equal(updated.markdown, markdown.trim());
+  assert.equal(created.markdown, markdown);
+  assert.equal(updated.markdown, markdown);
+});
+
+test("owning CSV commands preserve the delimiter and reject invalid symbols", () => {
+  const scope = { workspaceId: "01900000-0000-7000-8000-000000000001", projectId: "01900000-0000-7000-8000-000000000002", actorId: "01900000-0000-7000-8000-000000000003" };
+  assert.equal(internalCreateProjectNoteInput({ ...scope, title: "CSV", markdown: "a;b", format: "CSV", delimiter: ";", visibility: "PROJECT_MEMBERS" }).delimiter, ";");
+  assert.equal(internalUpdateProjectNoteInput({ ...scope, version: 1, delimiter: "|" }).delimiter, "|");
+  assert.throws(() => internalUpdateProjectNoteInput({ ...scope, version: 1, delimiter: "ab" }));
 });

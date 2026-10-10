@@ -30,9 +30,9 @@ export const apiDocSections = [
   {
     slug: "project-data",
     title: "Страницы и заметки",
-    description: "Страницы, Markdown-примечания, папки и цветовая легенда проекта.",
+    description: "Страницы, файлы заметок, папки и цветовая легенда проекта.",
     group: "Основное API",
-    keywords: ["pages", "notes", "markdown", "colors", "legend", "папки"]
+    keywords: ["pages", "notes", "markdown", "csv", "tsv", "json", "colors", "legend", "папки"]
   },
   {
     slug: "positions",
@@ -222,12 +222,12 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("crawls-create", "POST", "/projects/{projectId}/crawls", "audits:run", "Запустить технический аудит", "audits"),
   endpoint("pages", "GET", "/projects/{projectId}/pages", "pages:read", "Страницы проекта", "project-data"),
   endpoint("pages-create", "POST", "/projects/{projectId}/pages", "pages:write", "Создать страницу", "project-data"),
-  endpoint("notes", "GET", "/projects/{projectId}/notes", "notes:read", "Заметки проекта с полным Markdown", "project-data", {
+  endpoint("notes", "GET", "/projects/{projectId}/notes", "notes:read", "Файлы заметок проекта с содержимым", "project-data", {
     request: "Path: projectId (UUID). Тело и query отсутствуют.",
-    response: "200 · data: { notes: ProjectNote[] }; ProjectNote содержит id, title, markdown, visibility, version, createdAt и updatedAt."
+    response: "200 · data: { notes: ProjectNote[] }; ProjectNote содержит id, title, format, markdown, visibility, version, createdAt и updatedAt. Поле markdown хранит текст выбранного формата."
   }),
   endpoint("notes-create", "POST", "/projects/{projectId}/notes", "notes:write", "Создать заметку", "project-data", {
-    request: "JSON: { title: string, markdown: string, visibility: PROJECT_MEMBERS | PUBLIC }.",
+    request: "JSON: { title: string, markdown: string, visibility: PROJECT_MEMBERS | PUBLIC, format?: MARKDOWN | TEXT | CSV | TSV | JSON }. По умолчанию MARKDOWN.",
     response: "201 · data: ProjectNote; заголовок ETag содержит актуальную version."
   }),
   endpoint("integration-settings", "GET", "/projects/{projectId}/integration-settings", "integrations:read", "Маршрутизация интеграций проекта", "integrations"),
@@ -362,15 +362,18 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("crawl-result", "GET", "/projects/{projectId}/crawls/{crawlId}/result", "audits:read", "Постраничный результат обхода", "audits"),
   endpoint("crawl-cancel", "POST", "/projects/{projectId}/crawls/{crawlId}/cancel", "audits:run", "Отменить технический аудит", "audits"),
   endpoint("page-get", "GET", "/projects/{projectId}/pages/{pageId}", "pages:read", "Получить страницу проекта", "project-data"),
+  endpoint("page-statistics", "GET", "/projects/{projectId}/pages/rank-statistics", "pages:read", "Пакетная статистика страниц; также нужен positions:read", "project-data"),
+  endpoint("page-keyword-target", "GET", "/projects/{projectId}/pages/by-keyword/{keywordId}", "pages:read", "Целевая страница запроса; также нужен semantics:read", "project-data"),
+  endpoint("page-panel", "GET", "/projects/{projectId}/pages/{pageId}/panel", "pages:read", "Ссылки, история или семантика страницы; для ключей нужен semantics:read", "project-data"),
   endpoint("page-update", "PATCH", "/projects/{projectId}/pages/{pageId}", "pages:write", "Изменить страницу проекта", "project-data"),
   endpoint("page-archive", "POST", "/projects/{projectId}/pages/{pageId}/archive", "pages:write", "Архивировать страницу", "project-data"),
   endpoint("page-restore", "POST", "/projects/{projectId}/pages/{pageId}/restore", "pages:write", "Восстановить страницу", "project-data"),
-  endpoint("note-get", "GET", "/projects/{projectId}/notes/{noteId}", "notes:read", "Получить полную Markdown-заметку", "project-data", {
+  endpoint("note-get", "GET", "/projects/{projectId}/notes/{noteId}", "notes:read", "Получить файл заметки с содержимым", "project-data", {
     request: "Path: projectId, noteId (UUID). Тело и query отсутствуют.",
     response: "200 · data: ProjectNote; ETag содержит version для последующего PATCH или DELETE."
   }),
   endpoint("note-update", "PATCH", "/projects/{projectId}/notes/{noteId}", "notes:write", "Изменить заметку", "project-data", {
-    request: "Headers: If-Match. JSON: любое непустое подмножество { title, markdown, visibility }.",
+    request: "Headers: If-Match. JSON: любое непустое подмножество { title, markdown, visibility, format }.",
     response: "200 · data: обновлённый ProjectNote; ETag содержит новую version."
   }),
   endpoint("note-delete", "DELETE", "/projects/{projectId}/notes/{noteId}", "notes:write", "Удалить заметку", "project-data", {

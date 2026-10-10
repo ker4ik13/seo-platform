@@ -19,6 +19,20 @@ const statusLabels: Readonly<Record<string, string>> = {
 };
 
 const stageLabels: Readonly<Record<string, string>> = {
+  PREPARING_SCOPE: "Подготовка охвата",
+  WAITING_FOR_QUEUE: "Ожидает очереди",
+  WAITING_EXECUTION_GRANT: "Подготовка запросов к съёму",
+  READY_TO_SUBMIT: "Готово к отправке",
+  SUBMITTING: "Отправка провайдеру",
+  WAITING_PROVIDER: "Ожидает ответ провайдера",
+  FETCHING_RESULT: "Получение результата",
+  PERSISTING_RESULT: "Сохранение результата",
+  FINALIZING: "Завершение операции",
+  SUBMIT_OUTCOME_UNKNOWN: "Нужна сверка отправки",
+  FINISHED: "Завершено",
+  collecting: "Сбор данных",
+  preparing: "Подготовка запросов",
+  waiting_rate_limit: "Ожидает лимит запросов",
   clustering: "Подготовка кластеризации",
   submitting: "Отправка в Arsenkin",
   provider_poll: "Ожидает результат Arsenkin",

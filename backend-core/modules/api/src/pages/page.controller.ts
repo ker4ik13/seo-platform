@@ -1,6 +1,8 @@
 import {
   Body,
+  BadRequestException,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -19,6 +21,7 @@ import type {
   ProjectPageSettings,
   ProjectPageSummary
 } from "@seo-platform/contracts";
+import { parseProjectPageStatisticsQuery, parseProjectPagePanelQuery, type ProjectPageStatisticsCollection, type ProjectPagePanel } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
@@ -61,6 +64,34 @@ export class PageController {
     private readonly audit: AuditService
   ) {}
 
+  @Get("rank-statistics")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async statistics(@Query() query: unknown, @Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiResponse<ProjectPageStatisticsCollection>> {
+    const tenant = requiredProjectTenant(request);
+    assertRelatedRead(request, "positions:read");
+    return apiResponse(request, await this.seoData.projectPageStatistics(internalProjectContext(request, principal, tenant), readInput(parseProjectPageStatisticsQuery, query)));
+  }
+
+  @Get("by-keyword/:keywordId")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async targetPage(@Param("keywordId") keywordId: string, @Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiResponse<{ page?: ProjectPageSummary }>> {
+    const tenant = requiredProjectTenant(request);
+    assertRelatedRead(request, "semantics:read");
+    return apiResponse(request, await this.seoData.projectKeywordTargetPage(internalProjectContext(request, principal, tenant), assertUuid(keywordId, "keywordId")));
+  }
+
+  @Get(":pageId/panel")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async panel(@Param("pageId") pageId: string, @Query() query: unknown, @Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiResponse<ProjectPagePanel>> {
+    const tenant = requiredProjectTenant(request), input = readInput(parseProjectPagePanelQuery, query);
+    if (input.section === "SEMANTICS") assertRelatedRead(request, "semantics:read");
+    if (input.dimensionKey) assertRelatedRead(request, "positions:read");
+    return apiResponse(request, await this.seoData.projectPagePanel(internalProjectContext(request, principal, tenant), assertUuid(pageId, "pageId"), input));
+  }
+
   @Get()
   @RequirePermission("page.view")
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
@@ -70,9 +101,11 @@ export class PageController {
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<ProjectPageSettings>> {
     const tenant = requiredProjectTenant(request);
+    const input = projectPageQuery(query);
+    if (input.dimensionKey) assertRelatedRead(request, "positions:read");
     const collection = await this.seoData.listProjectPages(
       internalProjectContext(request, principal, tenant),
-      projectPageQuery(query)
+      input
     );
     return apiResponse(request, {
       ...collection,
@@ -280,8 +313,17 @@ function pageAccess(tenant: AuthorizedProjectTenant): ProjectPageAccess {
           : "NONE";
   return {
     canManage: mutationRestriction === "NONE",
+    canViewKeywords: hasEffectiveProjectPermission(tenant.roleCode, tenant.projectAccessLevel, "semantic.view"),
     mutationRestriction
   };
+}
+
+function assertRelatedRead(request: TenantRequest, scope: "semantics:read" | "positions:read") {
+  const tenant = requiredProjectTenant(request);
+  if (!hasEffectiveProjectPermission(tenant.roleCode, tenant.projectAccessLevel, "semantic.view") || request.apiTokenAuthorization && !request.apiTokenAuthorization.scopes.includes(scope)) throw new ForbiddenException("Недостаточно прав для просмотра связанных данных");
+}
+function readInput<T>(parse: (value: unknown) => T, value: unknown): T {
+  try { return parse(value); } catch { throw new BadRequestException("Некорректные параметры страницы"); }
 }
 
 function committedAudit(

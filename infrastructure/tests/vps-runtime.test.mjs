@@ -30,6 +30,7 @@ const shellScripts = [
   "smoke-public-api.sh",
   "smoke-runtime.sh",
   "test-browser.sh",
+  "test-usability.sh",
   "test-postgres.sh",
   "start-runtime.sh",
   "status-runtime.sh",
@@ -172,6 +173,11 @@ test("VPS operational alerts isolate Telegram secret and hash error details", as
 
   assert.match(alertBlock, /BIND_ADDRESS=127\.0\.0\.1/u);
   assert.match(alertBlock, /OPERATIONAL_ALERTS_PORT=4004/u);
+  assert.ok(alertBlock.includes(
+    'PLATFORM_DATABASE_URL="postgresql://platform_runtime:${PLATFORM_DATABASE_PASSWORD}@${postgres_url}/platform_db"'
+  ));
+  assert.doesNotMatch(alertBlock, /PLATFORM_DATABASE_OWNER_PASSWORD/u);
+  assert.doesNotMatch(alertBlock, /SEO_DATABASE|JOBS_DATABASE|REALTIME_DATABASE/u);
   assert.match(alertBlock, /TELEGRAM_ALERT_BOT_TOKEN/u);
   assert.doesNotMatch(coreBlock, /TELEGRAM_ALERT_BOT_TOKEN/u);
   assert.ok(

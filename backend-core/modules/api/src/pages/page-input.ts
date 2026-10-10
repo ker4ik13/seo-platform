@@ -1,6 +1,7 @@
 import { validationError } from "../common/domain-error.js";
 import { assertUuid } from "../common/identifier.js";
 import {
+  parseProjectPageListOptions,
   pageContentStatuses,
   pageIndexabilities,
   pageLifecycleStatuses,
@@ -64,7 +65,7 @@ export function projectPageQuery(value: unknown): ProjectPageListQuery {
     "pathPrefix",
     "pageType",
     "indexability",
-    "lifecycleStatus"
+    "lifecycleStatus", "sort", "sortDirection", "dimensionKey", "date", "includeStructure"
   ];
   if (Object.keys(query).some((key) => !allowed.includes(key))) {
     invalid("query");
@@ -103,7 +104,10 @@ export function projectPageQuery(value: unknown): ProjectPageListQuery {
     "lifecycleStatus",
     LIFECYCLE_STATUSES
   ) as PageLifecycleStatus | undefined;
+  let options;
+  try { options = parseProjectPageListOptions(query); } catch { invalid("query"); }
   return {
+    ...options,
     limit,
     ...(cursor ? { cursor } : {}),
     ...(search ? { search } : {}),

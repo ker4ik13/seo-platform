@@ -270,7 +270,13 @@ export class SemanticImportService {
       throw new ConflictException("Semantic import headers are unavailable");
     }
     if (
-      input.columns.some(({ sourceIndex }) => sourceIndex >= headers.length)
+      input.columns.some(({ sourceIndex }) => sourceIndex >= headers.length) ||
+      input.positionHistory?.dateColumns?.some(({ sourceIndex, rankingUrlSourceIndex }) =>
+        sourceIndex >= headers.length ||
+        (rankingUrlSourceIndex !== undefined && rankingUrlSourceIndex >= headers.length) ||
+        input.columns.some(column => column.target !== "ignore" &&
+          (column.sourceIndex === sourceIndex || column.sourceIndex === rankingUrlSourceIndex))
+      )
     ) {
       throw new UnprocessableEntityException(
         "Semantic import mapping references an unknown column"

@@ -27,7 +27,7 @@ export default async function DashboardPage({
       {showWorkspaceOnboarding ? (
         <WorkspaceOnboarding />
       ) : !context.project ? (
-        <ProjectOnboarding workspace={context.workspace} />
+        <ProjectOnboarding currentUserId={context.user.id} workspace={context.workspace} {...(context.projectCapabilities ? { capabilities: context.projectCapabilities } : {})} />
       ) : (
         <>
           {context.workspace.status === "READ_ONLY" && (
@@ -51,6 +51,7 @@ export default async function DashboardPage({
             </aside>
           )}
           <ProjectDashboard
+            {...(context.project.onboarding ? { onboarding: context.project.onboarding } : {})}
             currentUserId={context.user.id}
             projectId={context.project.id}
             projectName={context.project.name}

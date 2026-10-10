@@ -1,5 +1,6 @@
 import {
   technicalCrawlMaxRequestsPerMinute,
+  parseTechnicalCrawlRuntimeOptions,
   technicalCrawlMaxUrlLimit,
   technicalCrawlHomepageChecks,
   technicalCrawlHomepageProbeUrls,
@@ -31,6 +32,7 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
   const includePatterns = input.includePatterns ?? [];
   const excludePatterns = input.excludePatterns ?? [];
   const savePageMap = input.savePageMap ?? true;
+  if (input.snapshotIdentity !== undefined && input.snapshotIdentity !== "REQUESTED_URL" && input.snapshotIdentity !== "FINAL_URL") throw new TypeError("Stored crawl identity is invalid");
   if (
     !Array.isArray(input.startUrls) ||
     !input.startUrls.every((item) => typeof item === "string") ||
@@ -116,6 +118,7 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
   }
   return {
     purpose: purpose as TechnicalCrawlPurpose,
+    snapshotIdentity: input.snapshotIdentity === "REQUESTED_URL" || purpose === "HTTP_STATUS_CHECK" ? "REQUESTED_URL" : "FINAL_URL",
     startUrls,
     ...(homepageChecks.length > 0
       ? {
@@ -132,7 +135,8 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
     maxRuntimeSeconds: Number(input.maxRuntimeSeconds ?? 3_600),
     requestsPerMinute: Number(input.requestsPerMinute),
     obeyRobots: true,
-    savePageMap
+    savePageMap,
+    ...parseTechnicalCrawlRuntimeOptions(input)
   };
 }
 
@@ -166,6 +170,7 @@ export function technicalCrawlSummary(
     processedUrls: crawl.processedUrls,
     successfulUrls: crawl.successfulUrls,
     failedUrls: crawl.failedUrls,
+    blockedUrls: crawl.blockedUrls ?? 0,
     issueCount: crawl.issueCount,
     ...(crawl.failureCode ? { failureCode: crawl.failureCode } : {}),
     ...(crawl.backoffCode

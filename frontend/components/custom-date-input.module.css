@@ -1,0 +1,24 @@
+.field { position: relative; min-width: 0; width: 100%; }
+.trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-strong, var(--line)); border-radius: 8px; background: var(--surface, #fff); color: var(--ink); font: inherit; font-size: 13px; text-align: left; }
+.trigger > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trigger svg { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.trigger svg:last-child { width: 13px; height: 13px; }
+.trigger[aria-expanded="true"] { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.trigger[aria-invalid="true"] { border-color: var(--red); }
+.placeholder { color: var(--muted); }
+.popover { position: fixed; z-index: 2400; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface, #fff); box-shadow: 0 12px 36px #24203026; overflow: auto; color: var(--ink); }
+.header { display: grid; grid-template-columns: 32px minmax(0,1fr) 78px 32px; gap: 4px; align-items: center; padding-bottom: 10px; }
+.header > button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.header > button:first-child svg { transform: rotate(180deg); }
+.header svg { width: 16px; height: 16px; }
+.header :global(.custom-select-trigger), .timeFields :global(.custom-select-trigger) { min-height: 34px; padding: 5px 8px; font-size: 12px; }
+.popover :global(.dashboard-calendar-month) { width: 100%; }
+.popover :global(.dashboard-calendar-month > strong) { display: none; }
+.popover :global(.dashboard-calendar-days button) { min-height: 36px; }
+.timeFields { display: flex; gap: 10px; padding-top: 12px; }
+.timeFields > label { display: grid; gap: 5px; flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+.footer { display: flex; align-items: center; gap: 10px; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--line); }
+.footer :global(.primary-button) { margin-left: auto; padding: 0 10px; min-height: 34px; font-size: 12px; }
+.footer :global(.text-button) { min-height: 32px; padding: 4px; font-size: 12px; }
+.error { color: var(--red); font-size: 12px; margin: 8px 0 0; }
+@media (max-width: 680px) { .trigger, .header > button, .header :global(.custom-select-trigger), .timeFields :global(.custom-select-trigger), .footer > button { min-height: 44px; } .popover :global(.dashboard-calendar-days button) { min-height: 40px; } }

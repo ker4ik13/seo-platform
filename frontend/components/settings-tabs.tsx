@@ -148,6 +148,7 @@ export function SettingsTabs({
           aria-current={active === "billing" ? "page" : undefined}
           className={active === "billing" ? "active" : undefined}
           href="/app/settings/billing"
+          prefetch={false}
         >
           <Icon name="tasks" />
           <UiText text="Тариф и оплата" /></Link>

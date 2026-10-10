@@ -1,5 +1,6 @@
 "use client";
 
+import { WorkspaceSidebar } from "./workspace-sidebar";
 import {
   useEffect,
   useMemo,
@@ -17,6 +18,7 @@ import {
   type SemanticGroupDropPlacement
 } from "../lib/semantic-group-drag";
 import { semanticGroupColors } from "../lib/semantic-group-colors";
+import { useVirtualWindow } from "../lib/use-virtual-window";
 import { normalizeSemanticGroupName } from "../lib/semantic-group-name-batch";
 import {
   semanticAllRegularGroupIds,
@@ -158,6 +160,7 @@ export function SemanticGroupTree({
   const inlineRenameCancelIdRef = useRef<string | undefined>(undefined);
   const inlineRenameCommitIdRef = useRef<string | undefined>(undefined);
   const inlineRenameInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const selectionAnchorIdRef = useRef<string | undefined>(undefined);
   const activeGroupIdSet = useMemo(
     () => new Set(activeGroupIds),
@@ -186,6 +189,11 @@ export function SemanticGroupTree({
       ),
     [expandedIds, groups]
   );
+  const expandableIds = useMemo(() => {
+    const parentIds = new Set(groups.filter(group => !group.systemKind && group.parentId).map(group => group.parentId));
+    return groups.filter(group => !group.systemKind && parentIds.has(group.id)).map(group => group.id);
+  }, [groups]);
+  const allExpanded = expandableIds.length > 0 && expandableIds.every(id => effectiveExpandedIds.has(id));
   const flatGroups = useMemo(
     () =>
       flattenGroups(
@@ -195,6 +203,7 @@ export function SemanticGroupTree({
       ),
     [effectiveExpandedIds, groups, search]
   );
+  const rowWindow = useVirtualWindow(listRef, flatGroups.length, 28, 0, 150);
   const groupById = useMemo(
     () => new Map(groups.map((group) => [group.id, group] as const)),
     [groups]
@@ -386,6 +395,40 @@ export function SemanticGroupTree({
   }
 
   function handleTreeKeyDown(event: KeyboardEvent<HTMLElement>): void {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement || target instanceof HTMLElement && target.isContentEditable) return;
+    const row = target instanceof HTMLElement ? target.closest<HTMLElement>("[data-group-id]") : undefined;
+    const index = row ? flatGroups.findIndex(value => value.group.id === row.dataset.groupId) : -1;
+    if (index >= 0 && ["ArrowUp", "ArrowDown", "Home", "End", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault();
+      const current = flatGroups[index]!;
+      let nextIndex = event.key === "Home" ? 0 : event.key === "End" ? flatGroups.length - 1
+        : event.key === "ArrowUp" ? Math.max(0, index - 1) : event.key === "ArrowDown" ? Math.min(flatGroups.length - 1, index + 1) : index;
+      if (event.key === "ArrowRight" && current.hasChildren && !effectiveExpandedIds.has(current.group.id)) {
+        onExpandedIdsChange(new Set([...effectiveExpandedIds, current.group.id]));
+      } else if (event.key === "ArrowRight" && current.hasChildren) nextIndex = Math.min(flatGroups.length - 1, index + 1);
+      if (event.key === "ArrowLeft" && current.hasChildren && effectiveExpandedIds.has(current.group.id)) {
+        const ids = new Set(effectiveExpandedIds); ids.delete(current.group.id); onExpandedIdsChange(ids);
+      } else if (event.key === "ArrowLeft" && current.group.parentId) {
+        nextIndex = flatGroups.findIndex(value => value.group.id === current.group.parentId);
+      }
+      const next = flatGroups[nextIndex];
+      if (!next) return;
+      if (event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        const range = semanticGroupRangeSelection(flatGroups.map(value => value.group.id), selectionAnchorIdRef.current ?? current.group.id, next.group.id);
+        if (range) setSelectedIds(range);
+      }
+      const list = listRef.current;
+      if (list && flatGroups.length > 150) {
+        if (nextIndex * 28 < list.scrollTop) list.scrollTop = nextIndex * 28;
+        else if ((nextIndex + 1) * 28 > list.scrollTop + list.clientHeight) list.scrollTop = (nextIndex + 1) * 28 - list.clientHeight;
+      }
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        listRef.current?.querySelector<HTMLButtonElement>(`[data-group-id="${next.group.id}"] .semantic-group-name`)?.focus();
+      }));
+      return;
+    }
     if (
       !(event.metaKey || event.ctrlKey) ||
       event.key.toLocaleLowerCase("en") !== "a" ||
@@ -574,6 +617,7 @@ export function SemanticGroupTree({
         className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${primaryPresence ? ` remote-presence presence-color-${primaryPresence.colorIndex}` : ""}${rowDragPlacement ? ` drag-${rowDragPlacement}` : ""}`}
         data-presence-cursor-anchor="true"
         data-presence-key={`semantic-group:${group.id}`}
+        data-group-id={group.id}
         draggable={!group.systemKind && inlineRename?.groupId !== group.id}
         key={group.id}
         onContextMenu={(event) => openContextMenu(event, group)}
@@ -751,7 +795,7 @@ export function SemanticGroupTree({
   }
 
   return (
-    <nav
+    <WorkspaceSidebar as="nav"
       aria-label={uiText("Группы семантического ядра")}
       className="semantic-group-tree"
       data-presence-cursor-anchor="true"
@@ -799,12 +843,22 @@ export function SemanticGroupTree({
             <Icon name="multiGroup" />
           </button>
           <button
+            aria-label={uiText(allExpanded ? "Свернуть все папки" : "Раскрыть все папки")}
+            className="semantic-group-expand-all"
+            disabled={expandableIds.length === 0}
+            onClick={() => onExpandedIdsChange(new Set(allExpanded ? [] : expandableIds))}
+            title={uiText(allExpanded ? "Свернуть все папки" : "Раскрыть все папки")}
+            type="button"
+          >
+            <Icon name={allExpanded ? "collapseAll" : "expandAll"} />
+          </button>
+          <button
             aria-label={uiText("Создать корневую группу")}
             onClick={() => onCreate()}
             title={uiText("Создать группу")}
             type="button"
           >
-            +
+            <Icon name="plus" />
           </button>
           {onClose && (
             <button
@@ -883,6 +937,8 @@ export function SemanticGroupTree({
       </button>
       <div
         className={`semantic-group-tree-list${dragTarget?.placement === "root" ? " root-drop-target" : ""}`}
+        data-virtualized={flatGroups.length > 150 || undefined}
+        ref={listRef}
         onDragOver={(event) => {
           if (event.target !== event.currentTarget) return;
           event.preventDefault();
@@ -903,7 +959,9 @@ export function SemanticGroupTree({
           drop({ placement: "root" });
         }}
       >
-        {flatGroups.map((value, index) => renderGroupRow(value, index, uiLocale))}
+        {rowWindow.paddingTop > 0 && <div aria-hidden="true" style={{ height: rowWindow.paddingTop }} />}
+        {flatGroups.slice(rowWindow.start, rowWindow.end).map((value, index) => renderGroupRow(value, rowWindow.start + index, uiLocale))}
+        {rowWindow.paddingBottom > 0 && <div aria-hidden="true" style={{ height: rowWindow.paddingBottom }} />}
       </div>
       {systemGroups.length > 0 && (
         <div className="semantic-system-groups">
@@ -970,7 +1028,7 @@ export function SemanticGroupTree({
           )}
         </ContextMenu>
       )}
-    </nav>
+    </WorkspaceSidebar>
   );
 }
 

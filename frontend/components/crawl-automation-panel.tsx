@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "./custom-date-input";
 import { CustomSelect } from "./custom-select";
 
 import type {
@@ -200,7 +201,7 @@ export function CrawlAutomationPanel({
           </label>
           <label className="form-field">
             <span><UiText text="Время запуска" /></span>
-            <input
+            <CustomDateInput
               onChange={(event) => setTime(event.target.value)}
               required
               type="time"
@@ -209,7 +210,7 @@ export function CrawlAutomationPanel({
           </label>
           <label className="form-field">
             <span><UiText text="Окно с" /></span>
-            <input
+            <CustomDateInput
               onChange={(event) => setWindowStart(event.target.value)}
               required
               type="time"
@@ -218,7 +219,7 @@ export function CrawlAutomationPanel({
           </label>
           <label className="form-field">
             <span><UiText text="Окно до" /></span>
-            <input
+            <CustomDateInput
               onChange={(event) => setWindowEnd(event.target.value)}
               required
               type="time"

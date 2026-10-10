@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ProjectOnboardingModule } from "./project-onboarding/project-onboarding.module.js";
 import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
@@ -32,6 +33,7 @@ import { RankWorkbenchModule } from "./rank-workbench/rank-workbench.module.js";
 
 @Module({
   imports: [
+    ProjectOnboardingModule,
     ConfigModule,
     DatabaseModule,
     MessagingModule,

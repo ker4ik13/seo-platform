@@ -27,7 +27,9 @@ import {
   type PublicFetchResult
   ,type PublicFetchOptions
 } from "./public-http.js";
-import { robotsAllows } from "./robots.js";
+import { createRobotsPolicy } from "./robots.js";
+import { createHash } from "node:crypto";
+import { crawlIndexingDirectives, technicalCrawlRequestTimeoutMs, technicalCrawlMaxResponseBytes } from "@seo-platform/contracts";
 import {
   CrawlHostStateService,
   type CrawlHostFailureCode
@@ -42,6 +44,10 @@ interface PendingUrl {
   readonly url: string;
   readonly depth: number;
   readonly inSitemap: boolean;
+}
+
+function robotEvidence(policy: ReturnType<typeof createRobotsPolicy>, url: string, origin: string) {
+  return (["seoplatformcrawler", "googlebot", "yandex"] as const).map((agent) => ({ agent, ...policy.access(new URL(url), agent === "yandex" ? "yandexbot" : agent), sourceUrl: `${origin}/robots.txt` }));
 }
 
 @Injectable()
@@ -92,6 +98,16 @@ export class CrawlRunnerService {
     let sequence = crawl.processedUrls;
     let failureCode = "CRAWL_EXECUTION_FAILED";
     try {
+      // Сохранённый полный checkpoint требует только идемпотентной финализации.
+      // Повтор после сбоя БД не скачивает robots и не теряет результат по deadline.
+      if (scopeReady && pending.length === 0 && sitemapPending.length === 0) {
+        const current = await this.crawls.get(crawl.workspaceId, crawl.projectId, crawl.id);
+        await this.complete(crawl, crawlConfig, leaseOwner,
+          current.status === "CANCEL_REQUESTED" ? "CANCELLED" :
+            current.failedUrls > 0 ? "PARTIALLY_COMPLETED" : "COMPLETED",
+          current.processedUrls);
+        return;
+      }
       assertCrawlRuntime(deadline);
       const existingBackoff = await this.hostStates.currentBackoff(host);
       if (existingBackoff) {
@@ -115,6 +131,7 @@ export class CrawlRunnerService {
       }
       failureCode = "ROBOTS_UNAVAILABLE";
       const robots = await this.loadRobots(origin, paceRequest, deadline);
+      const robotsPolicy = createRobotsPolicy(robots);
       if (!scopeReady) {
         failureCode = "SITEMAP_UNAVAILABLE";
         while (sitemapPending.length > 0) {
@@ -239,19 +256,25 @@ export class CrawlRunnerService {
           return;
         }
         const next = pending.shift()!;
-        if (!robotsAllows(robots, new URL(next.url))) {
+        if (!robotsPolicy.access(new URL(next.url)).allowed) {
           await this.crawls.saveCheckpoint(
             crawl.id,
             leaseOwner,
             leaseSeconds,
             currentCheckpoint(
-              pending,
+              [next, ...pending],
               seen,
               sitemapPending,
               sitemapSeen,
               scopeReady
             )
           );
+          sequence += 1;
+          await this.snapshots.persistPage({ workspaceId: crawl.workspaceId, projectId: crawl.projectId, crawlId: crawl.id, purpose: crawlConfig.purpose, preserveRequestedUrl: crawlConfig.snapshotIdentity === "REQUESTED_URL", savePageMap: crawlConfig.savePageMap ?? true,
+            sequence, requestedUrl: next.url, finalUrl: next.url, redirectChain: [], inSitemap: next.inSitemap, depth: next.depth,
+            statusCode: 0, responseTimeMs: 0, sizeBytes: 0, contentType: "application/x-robots-blocked", h1Count: 0, headings: [], hreflang: [], internalLinks: [], externalLinks: [], imageCount: 0, imagesMissingAlt: 0, structuredDataTypes: [], metaTags: [], wordCount: 0, contentHash: createHash("sha256").update("ROBOTS_BLOCKED").digest("hex"), indexability: "BLOCKED_ROBOTS", issues: [], crawledAt: new Date().toISOString(),
+            technicalDetails: { robotsAccess: robotEvidence(robotsPolicy, next.url, origin) } });
+          await this.crawls.recordPage(crawl.id, leaseOwner, leaseSeconds, { success: false, skipped: true, issueCount: 0 }, currentCheckpoint(pending, seen, sitemapPending, sitemapSeen, scopeReady));
           continue;
         }
         await this.crawls.saveCheckpoint(
@@ -271,20 +294,20 @@ export class CrawlRunnerService {
         let success = false;
         let responseBackoffUntil: Date | undefined;
         try {
-          const validator = crawlConfig.purpose === "HTTP_STATUS_CHECK"
+          const validator = crawlConfig.conditionalRequests === false || (crawlConfig.conditionalRequests === undefined && crawlConfig.purpose === "HTTP_STATUS_CHECK")
             ? null
             : await this.snapshots.validator({
                 workspaceId: crawl.workspaceId,
                 projectId: crawl.projectId,
                 url: next.url
               });
-          const response = await this.resource(next.url, {
+          const requestOptions: PublicFetchOptions = {
             timeoutMs: remainingRequestTimeout(
               deadline,
-              this.config.crawl.requestTimeoutMs
+              Math.min(this.config.crawl.requestTimeoutMs, crawlConfig.requestTimeoutMs ?? technicalCrawlRequestTimeoutMs)
             ),
-            maxBytes: this.config.crawl.maxResponseBytes,
-            maxRedirects: this.config.crawl.maxRedirects,
+            maxBytes: Math.min(this.config.crawl.maxResponseBytes, crawlConfig.maxResponseBytes ?? technicalCrawlMaxResponseBytes),
+            maxRedirects: Math.min(this.config.crawl.maxRedirects, crawlConfig.maxRedirects ?? 5),
             accept: "text/html,application/xhtml+xml;q=0.9",
             allowedContentTypes: ["text/html", "application/xhtml+xml"],
             acceptAnyContentType: true,
@@ -302,7 +325,12 @@ export class CrawlRunnerService {
                   }
                 }
               : {})
-          },true,crawlConfig.purpose==="HTTP_STATUS_CHECK");
+          };
+          let response = await this.resource(next.url, requestOptions, true, crawlConfig.purpose === "HTTP_STATUS_CHECK");
+          if (response.statusCode === 304 && response.xRobotsTag && response.xRobotsTag !== validator?.xRobotsTag) {
+            const { conditional: _conditional, ...freshOptions } = requestOptions;
+            response = await this.resource(next.url, freshOptions, true, crawlConfig.purpose === "HTTP_STATUS_CHECK");
+          }
           const normalizedFinalUrl = normalizedScopeUrl(
             response.finalUrl,
             crawlConfig.queryPolicy
@@ -334,6 +362,7 @@ export class CrawlRunnerService {
               projectId: crawl.projectId,
               crawlId: crawl.id,
               purpose: crawlConfig.purpose,
+              preserveRequestedUrl: crawlConfig.snapshotIdentity === "REQUESTED_URL",
               sequence,
               sourceSnapshotId: validator.sourceSnapshotId,
               requestedUrl: response.requestedUrl,
@@ -344,7 +373,7 @@ export class CrawlRunnerService {
               crawledAt,
               savePageMap: crawlConfig.savePageMap ?? true
             });
-            internalLinks = validator.internalLinks;
+            internalLinks = crawlConfig.respectNofollow && validator.nofollow ? [] : validator.internalLinks;
           } else {
             const analysis = response.analysis ?? analyzeCrawlResource(response, normalizedFinalUrl);
             const payload: InternalPersistCrawlPageInput = {
@@ -352,6 +381,7 @@ export class CrawlRunnerService {
               projectId: crawl.projectId,
               crawlId: crawl.id,
               purpose: crawlConfig.purpose,
+              preserveRequestedUrl: crawlConfig.snapshotIdentity === "REQUESTED_URL",
               savePageMap: crawlConfig.savePageMap ?? true,
               sequence,
               requestedUrl: response.requestedUrl,
@@ -366,6 +396,7 @@ export class CrawlRunnerService {
                 response.contentType ??
                 "application/octet-stream",
               ...analysis,
+              technicalDetails: { ...analysis.technicalDetails, robotsAccess: robotEvidence(robotsPolicy, next.url, origin) },
               ...(crawlConfig.purpose === "HTTP_STATUS_CHECK"
                 ? { issues: [] }
                 : {}),
@@ -376,7 +407,7 @@ export class CrawlRunnerService {
               crawledAt
             };
             receipt = await this.snapshots.persistPage(payload);
-            internalLinks = analysis.internalLinks;
+            internalLinks = crawlConfig.respectNofollow && crawlIndexingDirectives(analysis.metaTags, "robots").nofollow ? [] : analysis.internalLinks;
           }
           issueCount = receipt.issueCount;
           success = receipt.success;
@@ -464,22 +495,28 @@ export class CrawlRunnerService {
         current.processedUrls
       );
     } catch (error) {
+      let failure = error;
       if (error instanceof CrawlMaxRuntimeSignal) {
         const current = await this.crawls.get(
           crawl.workspaceId,
           crawl.projectId,
           crawl.id
         );
-        await this.complete(
-          crawl,
-          crawlConfig,
-          leaseOwner,
-          "PARTIALLY_COMPLETED",
-          current.processedUrls,
-          "MAX_RUNTIME_EXCEEDED"
-        );
-        return;
+        try {
+          await this.complete(
+            crawl,
+            crawlConfig,
+            leaseOwner,
+            "PARTIALLY_COMPLETED",
+            current.processedUrls,
+            "MAX_RUNTIME_EXCEEDED"
+          );
+          return;
+        } catch (finalizationError) {
+          failure = finalizationError;
+        }
       }
+      if (failure instanceof CrawlFinalizationError) failureCode = "CRAWL_FINALIZATION_FAILED";
       const hostBackoff =
         error instanceof CrawlHostBackoffSignal
           ? error
@@ -511,6 +548,7 @@ export class CrawlRunnerService {
         return;
       }
       if (finalAttempt) {
+        this.logger.error(`Crawl failed crawlId=${crawl.id} code=${failureCode}`);
         await this.crawls.fail(crawl.id, failureCode, leaseOwner);
         return;
       }
@@ -531,22 +569,26 @@ export class CrawlRunnerService {
     processedUrls: number,
     failureCode?: string
   ): Promise<void> {
-    const receipt = await this.snapshots.finalize({
-      workspaceId: crawl.workspaceId,
-      projectId: crawl.projectId,
-      crawlId: crawl.id,
-      purpose: crawlConfig.purpose,
-      status,
-      processedUrls,
-      scopeHash: crawlMembershipScopeHash(crawlConfig)
-    });
-    await this.crawls.finish(
-      crawl.id,
-      leaseOwner,
-      status,
-      failureCode,
-      receipt.issueCount
-    );
+    try {
+      const receipt = await this.snapshots.finalize({
+        workspaceId: crawl.workspaceId,
+        projectId: crawl.projectId,
+        crawlId: crawl.id,
+        purpose: crawlConfig.purpose,
+        status,
+        processedUrls,
+        scopeHash: crawlMembershipScopeHash(crawlConfig)
+      });
+      await this.crawls.finish(
+        crawl.id,
+        leaseOwner,
+        status,
+        failureCode,
+        receipt.issueCount
+      );
+    } catch {
+      throw new CrawlFinalizationError();
+    }
   }
 
   private async loadRobots(
@@ -636,9 +678,9 @@ export class CrawlRunnerService {
             typeof value.bodyBase64!=="string" || !Array.isArray(value.redirectChain) || value.redirectChain.length>options.maxRedirects || value.redirectChain.some(item=>typeof item!=="string" || item.length>16*1024) ||
             !Number.isSafeInteger(value.sizeBytes) || Number(value.sizeBytes)<0 || Number(value.sizeBytes)>options.maxBytes || typeof value.responseTimeMs!=="number" || !Number.isFinite(value.responseTimeMs) || value.responseTimeMs<0) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
           const body=Buffer.from(value.bodyBase64,"base64");if(body.length!==value.sizeBytes) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
-          for(const key of ["contentType","etag","lastModified"]) if(value[key]!==undefined && (typeof value[key]!=="string" || (value[key] as string).length>8_192)) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
+          for(const key of ["contentType","etag","lastModified","xRobotsTag"]) if(value[key]!==undefined && (typeof value[key]!=="string" || (value[key] as string).length>8_192)) throw new RemoteWorkFailedError("INVALID_CRAWL_RESULT");
           return {requestedUrl:url,finalUrl:value.finalUrl,statusCode:Number(value.statusCode),body,sizeBytes:Number(value.sizeBytes),responseTimeMs:value.responseTimeMs,redirectChain:value.redirectChain as string[],
-            ...(value.contentType===undefined ? {} : {contentType:value.contentType as string}),...(value.etag===undefined ? {} : {etag:value.etag as string}),...(value.lastModified===undefined ? {} : {lastModified:value.lastModified as string}),
+            ...(value.contentType===undefined ? {} : {contentType:value.contentType as string}),...(value.etag===undefined ? {} : {etag:value.etag as string}),...(value.lastModified===undefined ? {} : {lastModified:value.lastModified as string}),...(value.xRobotsTag===undefined ? {} : {xRobotsTag:(value.xRobotsTag as string).slice(0,4_000)}),
             ...(typeof value.retryAfterMs==="number" && Number.isFinite(value.retryAfterMs) && value.retryAfterMs>=0 ? {retryAfterMs:value.retryAfterMs} : {}),...(data.analysis===undefined ? {} : {analysis:parseCrawlPageAnalysis(data.analysis)})};
         },local);
     } catch(error) {
@@ -717,6 +759,13 @@ class CrawlMaxRuntimeSignal extends Error {
   public constructor() {
     super("MAX_RUNTIME_EXCEEDED");
     this.name = "CrawlMaxRuntimeSignal";
+  }
+}
+
+class CrawlFinalizationError extends Error {
+  public constructor() {
+    super("CRAWL_FINALIZATION_FAILED");
+    this.name = "CrawlFinalizationError";
   }
 }
 

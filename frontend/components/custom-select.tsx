@@ -34,6 +34,7 @@ import { Icon } from "./icon";
 
 
 interface CustomSelectOption {
+  readonly accessibleLabel?: string | undefined;
   readonly disabled: boolean;
   readonly key: string;
   readonly label: ReactNode;
@@ -82,6 +83,7 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly popoverMinWidth?: number;
   readonly searchPlaceholder?: string;
   readonly searchable?: boolean;
+  readonly selectedLabel?: ReactNode;
   readonly showSelectedCheck?: boolean;
   readonly value?: string | number;
 }
@@ -112,6 +114,7 @@ export function CustomSelect({
   required = false,
   searchPlaceholder = "Поиск…",
   searchable = false,
+  selectedLabel,
   showSelectedCheck = true,
   title,
   optionOrderLabel = "Изменить порядок",
@@ -532,11 +535,11 @@ export function CustomSelect({
         onKeyDown={handleKeyDown}
         ref={triggerRef}
         role="combobox"
-        title={title}
+        title={title ?? selectedOption?.searchText}
         type="button"
       >
         <span className={`custom-select-value${selectedOption ? "" : " is-placeholder"}`}>
-          {selectedOption?.label ?? <UiText text={placeholder} />}
+          {selectedOption ? selectedLabel ?? selectedOption.label : <UiText text={placeholder} />}
         </span>
         <span aria-hidden="true" className="custom-select-chevron" />
       </button>
@@ -574,6 +577,7 @@ export function CustomSelect({
                   key={option.key}
                 >
                   <button
+                  aria-label={option.accessibleLabel}
                   aria-disabled={option.disabled}
                   aria-selected={option.value === selectedValue}
                   className={`custom-select-option${index === activeIndex ? " is-active" : ""}${option.value === selectedValue ? " is-selected" : ""}${draggedValue === option.value ? " is-dragging" : ""}${dropTarget?.value === option.value ? ` drop-${dropTarget.edge}` : ""}${onOptionOrderChange ? " is-reorderable" : ""}`}
@@ -670,14 +674,16 @@ function collectOptions(children: ReactNode, t: (text: string, values?: readonly
         const option = child as ReactElement<{
           children?: ReactNode;
           disabled?: boolean;
+          label?: string;
           value?: string | number;
         }>;
         const value = String(option.props.value ?? textFromNode(option.props.children, text => text));
         const searchText = normalizeSelectSearchText(
-          `${textFromNode(option.props.children, t)} ${value}`
+          `${option.props.label ?? textFromNode(option.props.children, t)} ${value}`
         );
         result.push({
           disabled: Boolean(option.props.disabled),
+          accessibleLabel: option.props.label,
           key: String(option.key ?? `${value}-${result.length}`),
           label: option.props.children,
           searchText,

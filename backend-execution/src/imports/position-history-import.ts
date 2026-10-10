@@ -1,259 +1,160 @@
 import {
-  parseSemanticRankDimensionKey,
-  semanticPositionHistoryHeaderDate,
-  semanticRankDimensionKey,
-  type SemanticImportMapping,
-  type SemanticImportRankHistoryValue,
-  type SemanticPositionHistoryImportOptions
+  parseSemanticRankDimensionKey, semanticPositionHistoryColumnHeader, semanticPositionHistoryObservedAt,
+  semanticRankDimensionKey, type SemanticImportMapping, type SemanticImportRankHistoryValue,
+  type SemanticPositionHistoryImportContext, type SemanticPositionHistoryImportOptions, type SemanticPositionHistoryDateColumn,
 } from "@seo-platform/contracts";
+import { googleRussiaRegionRows, yandexRussiaRegionRows } from "@seo-platform/contracts/seo-regions";
 
 export const POSITION_HISTORY_MAX_DATE_COLUMNS = 1_100;
-
 const HEADER_ALIASES = {
-  engine: new Set(["поисковик", "поисковая система", "search engine", "engine"]),
-  regionCode: new Set(["код региона", "region code", "region id"]),
-  regionLabel: new Set(["город", "регион", "city", "region"]),
-  country: new Set(["страна", "country"]),
-  language: new Set(["язык", "language"]),
-  device: new Set(["устройство", "device"]),
-  observedAt: new Set(["дата", "дата проверки", "дата съема", "date", "checked at", "observed at"]),
-  position: new Set(["позиция", "position", "rank"]),
-  rankingUrl: new Set([
-    "url",
-    "урл",
-    "url из выдачи",
-    "урл из выдачи",
-    "ссылка из выдачи",
-    "найденный url",
-    "найденная страница",
-    "релевантный url",
-    "релевантная страница",
-    "url позиции",
-    "ranking url",
-    "ranking page",
-    "serp url",
-    "result url",
-    "relevant url"
-  ])
+  "context.search_engine": ["поисковик", "поисковая система", "search engine", "engine"],
+  "context.region_code": ["код региона", "region code", "region id"],
+  "context.region": ["город", "регион", "city", "region"],
+  "context.country": ["страна", "country"],
+  "context.language": ["язык выдачи", "язык", "language", "serp language"],
+  "context.device": ["устройство", "device"],
+  "metric.observed_at": ["дата", "дата снимка", "дата проверки", "дата съема", "дата съёма", "date", "checked at", "observed at"],
+  "ranking.position": ["позиция", "position", "rank"],
+  "ranking.url": ["url", "урл", "url из поиска", "url из выдачи", "урл из выдачи", "ссылка из выдачи", "найденный url", "найденная страница", "релевантный url", "релевантная страница", "url позиции", "ranking url", "ranking page", "serp url", "result url", "relevant url"],
+} as const;
+const REGION_ROWS = { YANDEX: yandexRussiaRegionRows, GOOGLE: googleRussiaRegionRows };
+const REGION_BY_NAME = { YANDEX: regionNames(yandexRussiaRegionRows), GOOGLE: regionNames(googleRussiaRegionRows) };
+const REGION_CODES: Record<"YANDEX" | "GOOGLE", ReadonlySet<string>> = {
+  YANDEX: new Set(yandexRussiaRegionRows.map(([code]) => code)),
+  GOOGLE: new Set(googleRussiaRegionRows.map(([code]) => code)),
 };
+const REGION_LABELS = { YANDEX: new Map<string, string>(REGION_ROWS.YANDEX), GOOGLE: new Map<string, string>(REGION_ROWS.GOOGLE) };
 
-export function positionHistoryDateColumns(headers: readonly string[]): readonly Readonly<{ sourceIndex: number; observedAt: string }>[] {
+export function positionHistoryDateColumns(headers: readonly string[]) {
   const dates = headers.flatMap((header, sourceIndex) => {
-    const date = semanticPositionHistoryHeaderDate(header);
-    return date ? [{ sourceIndex, observedAt: `${date}T12:00:00.000Z` }] : [];
+    const date = semanticPositionHistoryColumnHeader(header);
+    return date?.kind === "POSITION" ? [{ sourceIndex, observedAt: date.observedAt }] : [];
   });
-  if (dates.length < 1 || dates.length > POSITION_HISTORY_MAX_DATE_COLUMNS || new Set(dates.map(item => item.observedAt)).size !== dates.length) return [];
-  return dates;
+  return dates.length < 1 || dates.length > POSITION_HISTORY_MAX_DATE_COLUMNS ||
+    new Set(dates.map(item => item.observedAt)).size !== dates.length ? [] : dates;
 }
-
 export function positionHistoryMetadataHeader(value: string): boolean {
-  const normalized = normalizeHeader(value);
-  return Object.values(HEADER_ALIASES).some(aliases => aliases.has(normalized));
+  return Object.values(HEADER_ALIASES).some(aliases => (aliases as readonly string[]).includes(normalize(value)));
 }
-
 export function isPositionHistorySummary(value: string): boolean {
   return /^(?:ТОП|TOP)\s*[-–—]?\s*\d+$/iu.test(value.normalize("NFKC").trim());
 }
 
 export function importedPositionHistory(
-  headers: readonly string[], values: readonly string[], defaults: SemanticPositionHistoryImportOptions, issues: Set<string>, mapping?: SemanticImportMapping
+  headers: readonly string[], values: readonly string[], defaults: SemanticPositionHistoryImportOptions,
+  issues: Set<string>, mapping?: SemanticImportMapping,
 ): readonly SemanticImportRankHistoryValue[] {
+  const cell = (target: SemanticImportMapping["columns"][number]["target"]): string => {
+    const mapped = mapping?.columns.find(column => column.target === target);
+    if (mapped) return normalizedCell(values[mapped.sourceIndex]);
+    const aliases = HEADER_ALIASES[target as keyof typeof HEADER_ALIASES] as readonly string[] | undefined;
+    const index = aliases ? headers.findIndex((header, index) => aliases.includes(normalize(header)) &&
+      !mapping?.columns.some(column => column.sourceIndex === index)) : -1;
+    return normalizedCell(values[index]);
+  };
   if (defaults.layout === "LONG") {
-    return importedLongPositionHistory(headers, values, defaults, issues, mapping);
-  }
-  const dates = positionHistoryDateColumns(headers);
-  if (!dates.length) { issues.add("POSITION_HISTORY_DATES_REQUIRED"); return []; }
-  if (dates.every(({ sourceIndex }) => !(values[sourceIndex]?.trim()))) return [];
-  const index = (aliases: ReadonlySet<string>) => headers.findIndex(header => aliases.has(normalizeHeader(header)));
-  const engineRaw = normalizedCell(values[index(HEADER_ALIASES.engine)]);
-  const deviceRaw = normalizedCell(values[index(HEADER_ALIASES.device)]);
-  const countryRaw = normalizedCell(values[index(HEADER_ALIASES.country)]);
-  const regionCodeRaw = normalizedCell(values[index(HEADER_ALIASES.regionCode)]);
-  const regionLabelRaw = normalizedCell(values[index(HEADER_ALIASES.regionLabel)]);
-  const languageRaw = normalizedCell(values[index(HEADER_ALIASES.language)]);
-  const engine = optionalEngine(engineRaw);
-  const device = optionalDevice(deviceRaw);
-  const countryCode = (countryRaw || defaults.countryCode).toUpperCase();
-  const regionCode = regionCodeRaw || defaults.regionCode;
-  const regionLabel = regionLabelRaw || defaults.regionLabel;
-  const language = languageRaw || defaults.language;
-  const finalDevice = device ?? defaults.device;
-  const rankingUrl = importedRankingUrl(
-    mappedValue(mapping, values, rankingUrlTarget(defaults.searchEngine)) ||
-      mappedValue(mapping, values, "ranking.url") ||
-      normalizedCell(values[index(HEADER_ALIASES.rankingUrl)]),
-    issues
-  );
-  const dimensionKey = semanticRankDimensionKey({ searchEngine: defaults.searchEngine, countryCode, regionCode, language, device: finalDevice });
-  if (
-    (engineRaw && !engine) || (engine && engine !== defaults.searchEngine) ||
-    (deviceRaw && !device) || countryRaw.length > 2 || regionCodeRaw.length > 100 ||
-    regionLabelRaw.length > 160 || languageRaw.length > 16 || !regionLabel ||
-    !parseSemanticRankDimensionKey(dimensionKey)
-  ) {
-    issues.add("POSITION_HISTORY_CONTEXT_INVALID"); return [];
-  }
-  const result: SemanticImportRankHistoryValue[] = [];
-  for (const { sourceIndex, observedAt } of dates) {
-    const raw = values[sourceIndex]?.normalize("NFKC").trim() ?? "";
-    if (!raw) continue; // Empty means this date was never checked.
-    if (/^[-–—]$/u.test(raw)) {
-      result.push({ searchEngine: defaults.searchEngine, countryCode, regionCode, regionLabel, language, device: finalDevice, observedAt, found: false });
-      continue;
+    const yandex = cell("ranking.yandex.position"), google = cell("ranking.google.position");
+    const candidates = yandex || google
+      ? [...(yandex ? [{ engine: "YANDEX" as const, raw: yandex }] : []), ...(google ? [{ engine: "GOOGLE" as const, raw: google }] : [])]
+      : [{ engine: optionalEngine(cell("context.search_engine")) ?? defaults.searchEngine, raw: cell("ranking.position") }];
+    const result: SemanticImportRankHistoryValue[] = [];
+    for (const candidate of candidates) {
+      if (!candidate.raw) continue;
+      const observedAt = semanticPositionHistoryObservedAt(cell("metric.observed_at") || defaults.observedAt || "");
+      if (!observedAt) { issues.add("INVALID_OBSERVED_AT"); continue; }
+      const context = rowContext(candidate.engine, defaults, cell, issues);
+      if (!context) continue;
+      const point = positionPoint(candidate.raw, cell(rankingUrlTarget(candidate.engine)) || cell("ranking.url"), context, observedAt, issues, true);
+      if (point) result.push(point);
     }
-    const normalized = raw.replace(/[\s\u00a0]+/gu, "");
-    if (!/^(?:[1-9]\d?|100)(?:[.,]0+)?$/u.test(normalized)) { issues.add("INVALID_POSITION"); continue; }
-    const position = Number(normalized.replace(",", "."));
-    if (!Number.isSafeInteger(position) || position < 1 || position > 100) { issues.add("INVALID_POSITION"); continue; }
-    result.push({
-      searchEngine: defaults.searchEngine,
-      countryCode,
-      regionCode,
-      regionLabel,
-      language,
-      device: finalDevice,
-      observedAt,
-      found: true,
-      position,
-      ...(rankingUrl ? { rankingUrl } : {})
-    });
+    return result;
+  }
+  const dates: readonly SemanticPositionHistoryDateColumn[] = defaults.dateColumns ?? positionHistoryDateColumns(headers);
+  if (!dates.length) { issues.add("POSITION_HISTORY_DATES_REQUIRED"); return []; }
+  const result: SemanticImportRankHistoryValue[] = [];
+  for (const column of dates) {
+    const raw = normalizedCell(values[column.sourceIndex]);
+    if (!raw) continue;
+    const override = column.context;
+    const selected = override ?? defaults;
+    const engine = optionalEngine(cell("context.search_engine"));
+    if (!defaults.dateColumns && engine && engine !== defaults.searchEngine) { issues.add("POSITION_HISTORY_CONTEXT_INVALID"); continue; }
+    const context = rowContext(override?.searchEngine ?? engine ?? defaults.searchEngine, selected, override ? () => "" : cell, issues);
+    if (!context) continue;
+    const urlIndex = column.rankingUrlSourceIndex;
+    const rawUrl = urlIndex !== undefined ? normalizedCell(values[urlIndex]) : cell(rankingUrlTarget(context.searchEngine)) || cell("ranking.url");
+    const point = positionPoint(raw, rawUrl, context, column.observedAt, issues, false);
+    if (point) result.push(point);
   }
   return result;
 }
 
-function importedLongPositionHistory(
-  headers: readonly string[],
-  values: readonly string[],
-  defaults: SemanticPositionHistoryImportOptions,
-  issues: Set<string>,
-  mapping?: SemanticImportMapping
-): readonly SemanticImportRankHistoryValue[] {
-  const mapped = (target: SemanticImportMapping["columns"][number]["target"]): string => {
-    const column = mapping?.columns.find((candidate) => candidate.target === target);
-    return normalizedCell(column ? values[column.sourceIndex] : undefined);
-  };
-  const indexed = (aliases: ReadonlySet<string>): string => {
-    const sourceIndex = headers.findIndex((header) => aliases.has(normalizeHeader(header)));
-    return normalizedCell(values[sourceIndex]);
-  };
-  const engineRaw = mapped("context.search_engine") || indexed(HEADER_ALIASES.engine);
-  const explicitEngine = optionalEngine(engineRaw);
-  const yandexPosition = mapped("ranking.yandex.position");
-  const googlePosition = mapped("ranking.google.position");
-  const genericPosition = mapped("ranking.position");
-  const searchEngine = yandexPosition
-    ? "YANDEX"
-    : googlePosition
-      ? "GOOGLE"
-      : explicitEngine ?? defaults.searchEngine;
-  const rawPosition = yandexPosition || googlePosition || genericPosition || indexed(HEADER_ALIASES.position);
-  const rawRankingUrl = mapped(rankingUrlTarget(searchEngine)) ||
-    mapped("ranking.url") ||
-    indexed(HEADER_ALIASES.rankingUrl);
-  const rawObservedAt = mapped("metric.observed_at") || indexed(HEADER_ALIASES.observedAt) || defaults.observedAt || "";
-  if ((engineRaw && !explicitEngine) || !rawPosition || !rawObservedAt) {
-    issues.add("POSITION_HISTORY_CONTEXT_INVALID");
-    return [];
-  }
-  const observedAt = normalizedObservedAt(rawObservedAt);
-  if (!observedAt) {
-    issues.add("INVALID_OBSERVED_AT");
-    return [];
-  }
-  const deviceRaw = indexed(HEADER_ALIASES.device);
+function rowContext(
+  engine: "YANDEX" | "GOOGLE", defaults: SemanticPositionHistoryImportContext,
+  cell: (target: SemanticImportMapping["columns"][number]["target"]) => string, issues: Set<string>,
+): SemanticPositionHistoryImportContext | undefined {
+  const engineRaw = cell("context.search_engine"), deviceRaw = cell("context.device");
   const device = optionalDevice(deviceRaw);
-  const countryRaw = indexed(HEADER_ALIASES.country);
-  const regionCodeRaw = indexed(HEADER_ALIASES.regionCode);
-  const regionLabelRaw = mapped("context.region") || indexed(HEADER_ALIASES.regionLabel);
-  const languageRaw = indexed(HEADER_ALIASES.language);
-  const countryCode = (countryRaw || defaults.countryCode).toUpperCase();
-  const regionCode = regionCodeRaw || defaults.regionCode;
-  const regionLabel = regionLabelRaw || defaults.regionLabel;
-  const language = languageRaw || defaults.language;
-  const finalDevice = device ?? defaults.device;
-  if (
-    (deviceRaw && !device) ||
-    countryCode.length !== 2 ||
-    !regionCode || regionCode.length > 100 ||
-    !regionLabel || regionLabel.length > 160 ||
-    !parseSemanticRankDimensionKey(semanticRankDimensionKey({ searchEngine, countryCode, regionCode, language, device: finalDevice }))
-  ) {
-    issues.add("POSITION_HISTORY_CONTEXT_INVALID");
-    return [];
+  const countryCode = (cell("context.country") || defaults.countryCode).toUpperCase();
+  let regionCode = cell("context.region_code"), regionLabel = cell("context.region");
+  const languageRaw = cell("context.language") || defaults.language;
+  let language: string;
+  try { language = Intl.getCanonicalLocales(languageRaw)[0]!; }
+  catch { issues.add("POSITION_HISTORY_CONTEXT_INVALID"); return undefined; }
+  if ((engineRaw && !optionalEngine(engineRaw)) || (deviceRaw && !device) || !/^[A-Z]{2}$/u.test(countryCode)) {
+    issues.add("POSITION_HISTORY_CONTEXT_INVALID"); return undefined;
   }
-  if (/^(?:0|-|–|—|не найден[ао]?)$/iu.test(rawPosition)) {
-    return [{ searchEngine, countryCode, regionCode, regionLabel, language, device: finalDevice, observedAt, found: false }];
+  if (regionCode) {
+    const other = engine === "YANDEX" ? "GOOGLE" : "YANDEX";
+    if (countryCode === "RU" && REGION_CODES[other].has(regionCode) && !REGION_CODES[engine].has(regionCode)) { issues.add("POSITION_HISTORY_CONTEXT_INVALID"); return undefined; }
+    regionLabel ||= REGION_LABELS[engine].get(regionCode) ?? (regionCode === defaults.regionCode ? defaults.regionLabel : "");
+  } else if (regionLabel || engine !== defaults.searchEngine) {
+    regionLabel ||= defaults.regionLabel;
+    const candidates = countryCode === "RU" ? REGION_BY_NAME[engine].get(normalize(regionLabel)) : undefined;
+    if (!candidates || candidates.length !== 1) { issues.add("POSITION_HISTORY_CONTEXT_INVALID"); return undefined; }
+    [regionCode, regionLabel] = candidates[0]!;
+  } else {
+    regionCode = defaults.regionCode;
+    regionLabel = defaults.regionLabel;
   }
-  const normalized = rawPosition.replace(/[\s\u00a0]+/gu, "").replace(",", ".");
-  const position = Number(normalized);
-  if (!/^(?:[1-9]\d?|100)(?:\.0+)?$/u.test(normalized) || !Number.isSafeInteger(position)) {
-    issues.add("INVALID_POSITION");
-    return [];
-  }
-  const rankingUrl = importedRankingUrl(rawRankingUrl, issues);
-  return [{
-    searchEngine,
-    countryCode,
-    regionCode,
-    regionLabel,
-    language,
-    device: finalDevice,
-    observedAt,
-    found: true,
-    position,
-    ...(rankingUrl ? { rankingUrl } : {})
-  }];
+  const context = { searchEngine: engine, countryCode, regionCode, regionLabel, language, device: device ?? defaults.device };
+  if (!regionLabel || regionLabel.length > 160 || !parseSemanticRankDimensionKey(semanticRankDimensionKey(context))) { issues.add("POSITION_HISTORY_CONTEXT_INVALID"); return undefined; }
+  return context;
 }
 
-export function importedRankingUrl(
-  value: string | undefined,
-  issues: Set<string>
-): string | undefined {
+function positionPoint(raw: string, rawUrl: string, context: SemanticPositionHistoryImportContext, observedAt: string, issues: Set<string>, legacyLong: boolean): SemanticImportRankHistoryValue | undefined {
+  if (/^(?:[-–—]{1,2}|не найден[ао]?|not found)$/iu.test(raw) || (legacyLong && raw === "0")) return { ...context, observedAt, found: false };
+  const normalized = raw.replace(/[\s\u00a0]+/gu, "").replace(",", ".");
+  if (!/^(?:[1-9]\d?|100)(?:\.0+)?$/u.test(normalized)) { issues.add("INVALID_POSITION"); return undefined; }
+  const rankingUrl = importedRankingUrl(rawUrl, issues);
+  return { ...context, observedAt, found: true, position: Number(normalized), ...(rankingUrl ? { rankingUrl } : {}) };
+}
+
+export function importedRankingUrl(value: string | undefined, issues: Set<string>): string | undefined {
   if (!value) return undefined;
-  const candidates = [value.trim(), ...value.split(/[\s;]+/u)]
-    .map((candidate) => candidate.trim())
-    .filter((candidate, index, values) =>
-      candidate.length > 0 &&
-      candidate.length <= 8_192 &&
-      values.indexOf(candidate) === index
-    );
+  const candidates = [value.trim(), ...value.split(/[\s;]+/u)].map(candidate => candidate.trim())
+    .filter((candidate, index, values) => candidate.length > 0 && candidate.length <= 8_192 && values.indexOf(candidate) === index);
   for (const candidate of candidates) {
-    try {
-      const url = new URL(candidate);
-      if (["http:", "https:"].includes(url.protocol)) return candidate;
-    } catch {
-      // Some exports prepend text or keep several URLs in one cell.
-    }
+    try { const url = new URL(candidate); if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) return candidate; }
+    catch { /* Some exports prepend text or keep several URLs in one cell. */ }
   }
   issues.add("INVALID_RANKING_URL");
   return undefined;
 }
-
-function mappedValue(
-  mapping: SemanticImportMapping | undefined,
-  values: readonly string[],
-  target: SemanticImportMapping["columns"][number]["target"]
-): string {
-  const column = mapping?.columns.find((candidate) => candidate.target === target);
-  return normalizedCell(column ? values[column.sourceIndex] : undefined);
+function regionNames(rows: readonly (readonly [string, string])[]) {
+  const result = new Map<string, (readonly [string, string])[]>();
+  for (const row of rows) {
+    for (const key of new Set([normalize(row[1]), normalize(row[1].split(" · ")[0]!)])) result.set(key, [...(result.get(key) ?? []), row]);
+  }
+  return result;
 }
-
-function rankingUrlTarget(
-  searchEngine: "YANDEX" | "GOOGLE"
-): "ranking.yandex.url" | "ranking.google.url" {
-  return searchEngine === "YANDEX"
-    ? "ranking.yandex.url"
-    : "ranking.google.url";
-}
-
-function normalizedObservedAt(value: string): string | undefined {
-  const dateOnly = semanticPositionHistoryHeaderDate(value);
-  if (dateOnly) return `${dateOnly}T12:00:00.000Z`;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-}
-
-function normalizeHeader(value: string): string { return value.normalize("NFKC").trim().toLocaleLowerCase("ru"); }
+function rankingUrlTarget(engine: "YANDEX" | "GOOGLE") { return engine === "YANDEX" ? "ranking.yandex.url" as const : "ranking.google.url" as const; }
+function normalize(value: string): string { return value.normalize("NFKC").trim().toLocaleLowerCase("ru"); }
 function normalizedCell(value: string | undefined): string { return value?.normalize("NFKC").trim() ?? ""; }
-function optionalEngine(value: string | undefined): "YANDEX" | "GOOGLE" | undefined { const text = normalizeHeader(value ?? ""); return text.includes("янд") || text === "yandex" ? "YANDEX" : text.includes("google") || text.includes("гугл") ? "GOOGLE" : undefined; }
-function optionalDevice(value: string | undefined): "DESKTOP" | "MOBILE" | undefined { const text = normalizeHeader(value ?? ""); return ["desktop", "десктоп", "пк", "computer"].includes(text) ? "DESKTOP" : ["mobile", "мобильное", "мобайл", "телефон", "phone"].includes(text) ? "MOBILE" : undefined; }
+function optionalEngine(value: string): "YANDEX" | "GOOGLE" | undefined {
+  return /^(?:yandex|яндекс)(?: live| xml)?$/iu.test(value) ? "YANDEX" : /^(?:google|гугл)$/iu.test(value) ? "GOOGLE" : undefined;
+}
+function optionalDevice(value: string): "DESKTOP" | "MOBILE" | undefined {
+  const text = normalize(value);
+  return ["desktop", "десктоп", "пк", "computer"].includes(text) ? "DESKTOP" : ["mobile", "мобильное", "мобильный", "мобайл", "телефон", "phone"].includes(text) ? "MOBILE" : undefined;
+}

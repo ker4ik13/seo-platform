@@ -64,6 +64,7 @@ test("revokes a public token when a note becomes member-only", async () => {
   });
 
   assert.deepEqual(updateData, {
+    delimiter: null,
     visibility: "PROJECT_MEMBERS",
     publicToken: null,
     updatedBy: actorId,
@@ -88,6 +89,8 @@ function row(
     workspaceId,
     projectId,
     title: patch.title ?? "План",
+    format: "MARKDOWN" as const,
+    delimiter: null,
     markdown: patch.markdown ?? "# План",
     visibility: patch.visibility ?? "PROJECT_MEMBERS",
     publicToken: patch.publicToken ?? null,
@@ -99,3 +102,15 @@ function row(
     archivedAt: null
   };
 }
+
+test("rejects conversion of malformed CSV before any persisted update", async () => {
+  let writes = 0;
+  const service = new ProjectNoteService({ projectNote: {
+    findFirst: async () => ({ ...row(), format: "CSV", delimiter: ",", markdown: '"unfinished' }),
+    updateMany: async () => { writes++; return { count: 1 }; }
+  } } as unknown as PrismaService);
+  await assert.rejects(service.update(noteId, { workspaceId, projectId, actorId, version: 1, delimiter: ";" }), (error: unknown) => {
+    return error instanceof Error && "getStatus" in error && (error as { getStatus: () => number }).getStatus() === 400;
+  });
+  assert.equal(writes, 0);
+});

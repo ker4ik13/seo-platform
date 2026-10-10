@@ -1,4 +1,6 @@
 import {
+  parseTechnicalCrawlRuntimeOptions,
+  technicalCrawlRuntimeOptionKeys,
   technicalCrawlMaxRequestsPerMinute,
   technicalCrawlMaxUrlLimit,
   technicalCrawlHomepageChecks,
@@ -33,7 +35,8 @@ export function createTechnicalCrawlInput(
     "maxRuntimeSeconds",
     "requestsPerMinute",
     "obeyRobots",
-    "savePageMap"
+    "savePageMap" ,
+    ...technicalCrawlRuntimeOptionKeys
   ];
   if (
     Object.keys(input).some((key) => !keys.includes(key)) ||
@@ -112,7 +115,8 @@ export function createTechnicalCrawlInput(
       technicalCrawlMaxRequestsPerMinute
     ),
     obeyRobots: true,
-    savePageMap: optionalBoolean(input.savePageMap, true)
+    savePageMap: optionalBoolean(input.savePageMap, true),
+    ...runtimeOptions(input)
   };
 }
 
@@ -261,4 +265,8 @@ function invalid(field: string): never {
     "INVALID_CRAWL_FIELD",
     `Invalid technical crawl field: ${field}`
   );
+}
+
+function runtimeOptions(value: Readonly<Record<string, unknown>>) {
+  try { return parseTechnicalCrawlRuntimeOptions(value); } catch { invalid("runtimeOptions"); }
 }

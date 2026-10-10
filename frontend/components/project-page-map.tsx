@@ -1,14 +1,32 @@
 "use client";
 
+import { TableSortButton } from "./table-sort-button";
+import { WorkspaceSidebar, WorkspaceSidebarSeparator } from "./workspace-sidebar";
+import { CustomDateInput } from "./custom-date-input";
 import { CustomSelect } from "./custom-select";
+import { ProjectPageInspector } from "./project-page-inspector";
+import { PageMapDiagram } from "./page-map-diagram";
+import { RankDimensionSelect } from "./rank-dimension-select";
+import { ProjectPageEditor } from "./project-page-editor";
+import { sortSiteSections } from "../lib/page-map-layout";
+import { buildSiteStructure, type SiteStructureNode } from "../lib/site-structure";
+import { pageIndexabilityLabel, pageTypeLabel } from "../lib/page-presentation";
+import { usePageStatistics } from "../lib/use-page-statistics";
+import { useVirtualWindow } from "../lib/use-virtual-window";
 
 import {
-  pageContentStatuses,
   pageIndexabilities,
   pageTypes,
+  parseSemanticRankDimensionCatalog,
+  parseSemanticRankDimensionKey,
+  projectPageSortFields,
+  type ProjectPageSortField,
+  type TechnicalCrawlSummary,
+  type CreateTechnicalCrawlInput,
+  type SemanticRankDimension,
+  type ProjectPageStatistics,
   type ProjectCrawlIssueCollection,
   type ProjectCrawlIssueSummary,
-  type PageContentStatus,
   type PageIndexability,
   type PageLifecycleStatus,
   type PageType,
@@ -43,7 +61,6 @@ import {
 } from "../lib/project-pages";
 import { Icon } from "./icon";
 import { UiText, useUiLocale } from "./ui-locale";
-import { LanguageSelect } from "./locale-selects";
 
 
 interface PageFilters {
@@ -68,6 +85,9 @@ const DEFAULT_FILTERS: PageFilters = {
 const PAGE_MAP_COLUMN_DEFAULTS = {
   url: 330,
   http: 72,
+  indexability: 148,
+  keywords: 88,
+  averagePosition: 116,
   title: 220,
   h1: 190,
   responseTime: 104,
@@ -77,15 +97,20 @@ const PAGE_MAP_COLUMN_DEFAULTS = {
 } as const;
 
 type PageMapColumn = keyof typeof PAGE_MAP_COLUMN_DEFAULTS;
+const PAGE_MAP_SORT_COLUMNS: Readonly<Partial<Record<PageMapColumn, ProjectPageSortField>>> = { url: "URL", http: "HTTP", indexability: "INDEXABILITY", keywords: "KEYWORDS", averagePosition: "AVERAGE_POSITION", title: "TITLE", h1: "H1", responseTime: "RESPONSE_TIME", size: "SIZE", issues: "ISSUES" };
 type PageMapColumnWidths = Record<PageMapColumn, number>;
 
 const PAGE_MAP_COLUMN_ORDER = Object.keys(
   PAGE_MAP_COLUMN_DEFAULTS
 ) as readonly PageMapColumn[];
+const PAGE_MAP_COLUMN_LABELS: Readonly<Record<PageMapColumn, string>> = { url: "URL / страница", http: "HTTP", indexability: "Ограничения", keywords: "Запросы", averagePosition: "Средняя позиция", title: "Title", h1: "H1", responseTime: "Ответ", size: "Размер", issues: "Проблемы", actions: "Действия" };
 
 const PAGE_MAP_COLUMN_MINIMUMS: Readonly<PageMapColumnWidths> = {
   url: 220,
   http: 60,
+  indexability: 120,
+  keywords: 76,
+  averagePosition: 100,
   title: 130,
   h1: 120,
   responseTime: 82,
@@ -95,10 +120,14 @@ const PAGE_MAP_COLUMN_MINIMUMS: Readonly<PageMapColumnWidths> = {
 };
 
 export function ProjectPageMap({
+  heading,
+  currentUserId,
   projectDomain,
   projectId,
   projectName
 }: Readonly<{
+  heading: ReactNode;
+  currentUserId: string;
   projectDomain: string;
   projectId: string;
   projectName: string;
@@ -106,6 +135,7 @@ export function ProjectPageMap({
   const uiLocale = useUiLocale().locale;
   const { t: uiText } = useUiLocale();
   const [collection, setCollection] = useState<ProjectPageSettings>();
+  const collectionScopeRef = useRef("");
   const [filters, setFilters] = useState<PageFilters>(DEFAULT_FILTERS);
   const [appliedFilters, setAppliedFilters] =
     useState<PageFilters>(DEFAULT_FILTERS);
@@ -141,19 +171,57 @@ export function ProjectPageMap({
   const [structureExpansion, setStructureExpansion] = useState<
     Readonly<Record<string, boolean>>
   >({});
-  const [layoutHydrated, setLayoutHydrated] = useState(false);
+  const preferenceScope = `${currentUserId}:${projectId}`;
+  const [hydratedScope, setHydratedScope] = useState("");
+  const layoutHydrated = hydratedScope === preferenceScope;
+  const [view, setView] = useState<"TABLE" | "DIAGRAM">("TABLE");
+  const [visibleColumns, setVisibleColumns] = useState<readonly PageMapColumn[]>(["url", "http", "indexability", "keywords", "averagePosition", "issues", "actions"]);
+  const [dimensions, setDimensions] = useState<readonly SemanticRankDimension[]>([]);
+  const [sortField, setSortField] = useState<ProjectPageSortField>("URL");
+  const [sortDirection, setSortDirection] = useState<"ASC" | "DESC">("ASC");
+  const pageCache = useRef(new Map<string, { at: number; value: ProjectPageSettings }>());
+  const structureRef = useRef<Pick<ProjectPageSettings, "structureUrls" | "structurePageIds" | "structureTruncated">>({});
+  const revisionRef = useRef(-1);
+  const [checking, setChecking] = useState<{ pageId: string; crawl?: TechnicalCrawlSummary }>();
+  const [dimensionKey, setDimensionKey] = useState("");
+  const [rankDate, setRankDate] = useState("latest");
+  const [diagramPageIds, setDiagramPageIds] = useState<readonly string[]>([]);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const tableWindow = useVirtualWindow(tableScrollRef, view === "TABLE" ? collection?.pages.length ?? 0 : 0, 56, 35, 100);
+  const currentRows = (collection?.pages ?? []).slice(tableWindow.start, tableWindow.end);
+  const statisticIds = [...(selectedPageId ? [selectedPageId] : []), ...(view === "TABLE" ? currentRows.map((row) => row.id) : diagramPageIds)];
+  const rankStatistics = usePageStatistics(projectId, statisticIds, dimensionKey, sortField === "AVERAGE_POSITION" ? collection?.rankDate ?? rankDate : rankDate, reload, collection?.access.canViewKeywords === true);
+
+  useEffect(() => {
+    if (!collection?.access.canViewKeywords) return;
+    const controller = new AbortController();
+    void browserApiRequest<unknown>(`/app/api/projects/${encodeURIComponent(projectId)}/keyword-ranks/dimensions`, { signal: controller.signal }).then(parseSemanticRankDimensionCatalog).then((catalog) => {
+      if (!controller.signal.aborted) { setDimensions(catalog.dimensions); if (!catalog.dimensions.length) setSortField("URL"); setDimensionKey((old) => catalog.dimensions.some((dimension) => dimension.key === old) ? old : catalog.dimensions[0]?.key ?? ""); }
+    }).catch((error: unknown) => { if (!controller.signal.aborted) setOperationError(errorMessage(error, "Не удалось загрузить поисковые срезы.")); });
+    return () => controller.abort();
+  }, [projectId, collection?.access.canViewKeywords]);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      const scopeKey = pagesUrl(projectId, appliedFilters, selectedStructurePath, undefined, sortField, sortDirection, dimensionKey, rankDate, false);
+      collectionScopeRef.current = scopeKey;
+      const cached = pageCache.current.get(scopeKey);
+      if (cached && Date.now() - cached.at < 30_000) { setCollection(cached.value); setLoading(false); setLoadError(undefined); return; }
       setLoading(true);
       setLoadError(undefined);
       try {
-        const next = await browserApiRequest<ProjectPageSettings>(
-          pagesUrl(projectId, appliedFilters, selectedStructurePath),
+        const result = await browserApiRequest<ProjectPageSettings>(
+          pagesUrl(projectId, appliedFilters, selectedStructurePath, undefined, sortField, sortDirection, dimensionKey, rankDate, !structureRef.current.structureUrls),
           signal ? { signal } : {}
         );
+        if (signal?.aborted || collectionScopeRef.current !== scopeKey) return;
+        if (result.structureUrls) structureRef.current = { structureUrls: result.structureUrls, ...(result.structurePageIds ? { structurePageIds: result.structurePageIds } : {}), ...(result.structureTruncated === undefined ? {} : { structureTruncated: result.structureTruncated }) };
+        const next = { ...result, ...structureRef.current };
+        if (pageCache.current.size >= 12) pageCache.current.delete(pageCache.current.keys().next().value!);
+        pageCache.current.set(scopeKey, { at: Date.now(), value: next });
         setCollection(next);
       } catch (error) {
+        if (error instanceof BrowserApiError && error.status === 403 && sortField === "AVERAGE_POSITION") { setSortField("URL"); setSortDirection("ASC"); return; }
         if (!signal?.aborted) {
           setLoadError(
             errorMessage(error, "Не удалось загрузить карту страниц.")
@@ -163,27 +231,42 @@ export function ProjectPageMap({
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [projectId, appliedFilters, selectedStructurePath]
+    [projectId, appliedFilters, selectedStructurePath, sortField, sortDirection, dimensionKey, rankDate]
   );
 
   useEffect(() => {
-    const saved = readPageMapLayout(projectId);
+    const saved = readPageMapLayout(currentUserId, projectId);
+    pageCache.current.clear(); structureRef.current = {}; revisionRef.current = -1;
+    setCollection(undefined); setSelectedPageId(undefined); setSelectedPageDetail(undefined); setChecking(undefined); setLoading(true);
     if (saved) {
       setStructureWidth(saved.structureWidth);
       setInspectorWidth(saved.inspectorWidth);
       setColumnWidths(saved.columnWidths);
       setStructureExpansion(saved.structureExpansion);
+      setVisibleColumns(saved.visibleColumns);
+      setView(saved.view);
+      setDimensionKey(saved.dimensionKey ?? ""); setRankDate(saved.rankDate ?? "latest");
+      if (saved.filters) { setFilters(saved.filters); setAppliedFilters(saved.filters); }
+      if (saved.selectedPath) setSelectedStructurePath(saved.selectedPath);
+      setSortField(saved.sortField ?? "URL"); setSortDirection(saved.sortDirection ?? "ASC");
     }
-    setLayoutHydrated(true);
-  }, [projectId]);
+    else {
+      setStructureWidth(248); setInspectorWidth(330); setColumnWidths({ ...PAGE_MAP_COLUMN_DEFAULTS }); setStructureExpansion({});
+      setVisibleColumns(["url", "http", "indexability", "keywords", "averagePosition", "issues", "actions"]);
+      setView("TABLE"); setDimensionKey(""); setRankDate("latest"); setSortField("URL"); setSortDirection("ASC");
+      setFilters(DEFAULT_FILTERS); setAppliedFilters(DEFAULT_FILTERS); setSelectedStructurePath("/");
+    }
+    setHydratedScope(preferenceScope);
+  }, [currentUserId, projectId, preferenceScope]);
 
   useEffect(() => {
     if (!layoutHydrated) return;
-    savePageMapLayout(projectId, {
+    savePageMapLayout(currentUserId, projectId, {
       structureWidth,
       inspectorWidth,
       columnWidths,
       structureExpansion
+      ,visibleColumns, view, dimensionKey, rankDate, sortField, sortDirection, filters: appliedFilters, selectedPath: selectedStructurePath
     });
   }, [
     columnWidths,
@@ -192,13 +275,17 @@ export function ProjectPageMap({
     projectId,
     structureExpansion,
     structureWidth
+    ,visibleColumns, view, currentUserId, dimensionKey, rankDate, sortField, sortDirection, appliedFilters, selectedStructurePath
   ]);
 
   useEffect(() => {
+    if (!layoutHydrated) return;
+    if (revisionRef.current !== reload) { pageCache.current.clear(); structureRef.current = {}; revisionRef.current = reload; }
+    tableScrollRef.current?.scrollTo({ top: 0 });
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, reload]);
+  }, [load, reload, layoutHydrated]);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -211,20 +298,28 @@ export function ProjectPageMap({
     };
   }, []);
 
-  useEffect(() => {
-    if (!editor) return;
-    function closeOnEscape(event: KeyboardEvent): void {
-      if (event.key === "Escape" && busyId === undefined) setEditor(undefined);
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [busyId, editor]);
 
-  const canManage = online && collection?.access.canManage === true;
+
+  const canManage = layoutHydrated && online && collection?.access.canManage === true;
   const structure = useMemo(
     () => buildSiteStructure(collection?.structureUrls ?? []),
     [collection?.structureUrls]
   );
+  const hasDataFilters = filterCount(appliedFilters) > 0;
+  const diagramStructure = useMemo(() => {
+    if (hasDataFilters) return buildSiteStructure((collection?.pages ?? []).map((page) => page.normalizedUrl));
+    return selectedStructurePath === "/" ? structure : buildSiteStructure((collection?.structureUrls ?? []).filter((url) => pageMatchesStructure(url, selectedStructurePath)));
+  }, [hasDataFilters, collection?.pages, collection?.structureUrls, selectedStructurePath, structure]);
+  const diagramNodes = diagramStructure.nodes;
+  const pageIdsByPath = useMemo(() => {
+    const byUrl = new Map((collection?.pages ?? []).map((page) => [page.normalizedUrl, page.id]));
+    const result = new Map<string, string>();
+    for (const [index, url] of (collection?.structureUrls ?? []).entries()) {
+      const id = collection?.structurePageIds?.[index] ?? byUrl.get(url);
+      if (id) { const pathname = new URL(url).pathname; result.set(pathname === "/" ? "/" : `${pathname.replace(/\/$/u, "")}/`, id); }
+    }
+    return result;
+  }, [collection?.structureUrls, collection?.structurePageIds, collection?.pages]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -290,14 +385,14 @@ export function ProjectPageMap({
     setEditor({ page, draft: projectPageDraft(page) });
   }
 
-  async function openInspector(page: ProjectPageSummary): Promise<void> {
+  const openInspector = useCallback(async (page: ProjectPageSummary, loaded = false): Promise<void> => {
     const requestId = inspectorRequestRef.current + 1;
     inspectorRequestRef.current = requestId;
     const issueRequestId = issueRequestRef.current + 1;
     issueRequestRef.current = issueRequestId;
     setSelectedPageId(page.id);
-    setSelectedPageDetail(undefined);
-    setInspectorLoading(true);
+    setSelectedPageDetail(loaded ? page : undefined);
+    setInspectorLoading(!loaded);
     setSelectedPageIssues([]);
     setIssuesError(undefined);
     setIssuesLoading((page.openIssueCount ?? 0) > 0);
@@ -323,6 +418,7 @@ export function ProjectPageMap({
           }
         });
     }
+    if (loaded) return;
     try {
       const detail = await browserApiRequest<ProjectPageSummary>(
         projectPageApiPath(projectId, page.id)
@@ -341,7 +437,15 @@ export function ProjectPageMap({
         setInspectorLoading(false);
       }
     }
-  }
+  }, [projectId]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("pageId");
+    if (!id || !/^[0-9a-f-]{36}$/iu.test(id)) return;
+    const controller = new AbortController(), requestId = ++inspectorRequestRef.current;
+    void browserApiRequest<ProjectPageSummary>(projectPageApiPath(projectId, id), { signal: controller.signal }).then((page) => { if (!controller.signal.aborted && inspectorRequestRef.current === requestId) void openInspector(page, true); }).catch((caught: unknown) => { if (!controller.signal.aborted) setOperationError(errorMessage(caught, "Не удалось открыть страницу.")); });
+    return () => controller.abort();
+  }, [projectId, openInspector]);
 
   function closeInspector(): void {
     inspectorRequestRef.current += 1;
@@ -394,6 +498,8 @@ export function ProjectPageMap({
               })
         }
       );
+      pageCache.current.clear();
+      setReload(value => value + 1);
       setCollection((value) =>
         value
           ? withPage(value, saved, appliedFilters, selectedStructurePath)
@@ -412,6 +518,41 @@ export function ProjectPageMap({
     }
   }
 
+  async function recheckPage(page: ProjectPageSummary) {
+    if (!canManage || checking) return;
+    setOperationError(undefined); setSuccess(undefined); setChecking({ pageId: page.id });
+    try {
+      const input: CreateTechnicalCrawlInput = {
+        purpose: "TECHNICAL_AUDIT", startUrls: [page.normalizedUrl], sitemapUrls: [], includePatterns: [], excludePatterns: [],
+        queryPolicy: "PRESERVE", maxUrls: 1, maxDepth: 0, maxRuntimeSeconds: 300,
+        requestsPerMinute: 240, obeyRobots: true, savePageMap: true, conditionalRequests: false
+      };
+      const crawl = await browserApiRequest<TechnicalCrawlSummary>(`/app/api/projects/${encodeURIComponent(projectId)}/crawls`, { method: "POST", idempotencyKey: `crawl:${globalThis.crypto.randomUUID()}`, body: input });
+      setChecking({ pageId: page.id, crawl }); setSuccess("Проверка страницы запущена.");
+    } catch (caught) { setChecking(undefined); setOperationError(errorMessage(caught, "Не удалось запустить проверку страницы.")); }
+  }
+  useEffect(() => {
+    if (!checking?.crawl) return;
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
+    const pageId = checking.pageId, crawlId = checking.crawl.id;
+    const poll = async () => {
+      try {
+        const crawl = await browserApiRequest<TechnicalCrawlSummary>(`/app/api/projects/${encodeURIComponent(projectId)}/crawls/${crawlId}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(crawl.status)) { timer = setTimeout(() => void poll(), 2000); return; }
+        const updated = await browserApiRequest<ProjectPageSummary>(projectPageApiPath(projectId, pageId), { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setCollection(previous => previous ? { ...previous, pages: previous.pages.map(item => item.id === pageId ? updated : item) } : previous);
+        setSelectedPageDetail(previous => previous?.id === pageId ? updated : previous);
+        setChecking(undefined); setReload(value => value + 1);
+        if (crawl.status === "COMPLETED" && !crawl.failedUrls) setSuccess("Страница проверена.");
+        else setOperationError("Проверка страницы завершилась с ошибкой. Результат доступен в операциях.");
+      } catch (caught) { if (!controller.signal.aborted) { setChecking(undefined); setOperationError(errorMessage(caught, "Не удалось получить результат проверки страницы.")); } }
+    };
+    void poll();
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+  }, [checking, projectId]);
+
   async function changeStatus(
     page: ProjectPageSummary,
     operation: "archive" | "restore"
@@ -429,6 +570,8 @@ export function ProjectPageMap({
           ifMatch: page.version
         }
       );
+      pageCache.current.clear();
+      setReload(value => value + 1);
       setCollection((value) =>
         value
           ? withPage(value, saved, appliedFilters, selectedStructurePath)
@@ -456,7 +599,8 @@ export function ProjectPageMap({
   }
 
   const loadMore = useCallback(async (): Promise<void> => {
-    if (!collection?.nextCursor || loadingMoreRef.current) return;
+    const scopeKey = pagesUrl(projectId, appliedFilters, selectedStructurePath, undefined, sortField, sortDirection, dimensionKey, rankDate, false);
+    if (!collection?.nextCursor || loadingMoreRef.current || collectionScopeRef.current !== scopeKey) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
     setOperationError(undefined);
@@ -466,17 +610,19 @@ export function ProjectPageMap({
           projectId,
           appliedFilters,
           selectedStructurePath,
-          collection.nextCursor
+          collection.nextCursor, sortField, sortDirection, dimensionKey, rankDate, false
         )
       );
+      if (collectionScopeRef.current !== scopeKey) return;
       setCollection({
         ...next,
         pages: [...collection.pages, ...next.pages],
         ...(collection.structureUrls
-          ? { structureUrls: collection.structureUrls }
+          ? { structureUrls: collection.structureUrls, ...(collection.structurePageIds ? { structurePageIds: collection.structurePageIds } : {}), ...(collection.structureTruncated === undefined ? {} : { structureTruncated: collection.structureTruncated }) }
           : {})
       });
     } catch (error) {
+      if (collectionScopeRef.current !== scopeKey) return;
       setOperationError(
         errorMessage(error, "Не удалось загрузить следующую страницу.")
       );
@@ -484,7 +630,7 @@ export function ProjectPageMap({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [appliedFilters, collection, projectId, selectedStructurePath]);
+  }, [appliedFilters, collection, projectId, selectedStructurePath, sortField, sortDirection, dimensionKey, rankDate]);
 
   useEffect(() => {
     const target = loadMoreButtonRef.current;
@@ -499,18 +645,22 @@ export function ProjectPageMap({
     return () => observer.disconnect();
   }, [collection?.nextCursor, loadMore]);
 
-  if (loading && !collection) {
+  useEffect(() => {
+    if (view === "DIAGRAM" && hasDataFilters && collection?.nextCursor && !loading && !loadingMore && !operationError) void loadMore();
+  }, [view, hasDataFilters, collection?.nextCursor, loading, loadingMore, operationError, loadMore]);
+
+  if (!layoutHydrated || (loading && !collection)) {
     return (
-      <section className="panel page-map-state" aria-busy="true">
+      <div className="page-map"><header className="page-map-primary-actions">{heading}</header><section className="panel page-map-state" aria-busy="true">
         <span className="spinner" aria-hidden="true" />
         <p><UiText text="Загружаем страницы проекта…" /></p>
-      </section>
+      </section></div>
     );
   }
 
   if (loadError && !collection) {
     return (
-      <section className="panel page-map-state" role="alert">
+      <div className="page-map"><header className="page-map-primary-actions">{heading}</header><section className="panel page-map-state" role="alert">
         <h2><UiText text="Карта страниц недоступна" /></h2>
         <p>{<UiText text={loadError ?? ""} />}</p>
         <button
@@ -519,7 +669,7 @@ export function ProjectPageMap({
           type="button"
         >
           <UiText text="Повторить" /></button>
-      </section>
+      </section></div>
     );
   }
 
@@ -531,37 +681,49 @@ export function ProjectPageMap({
     ({ id }) => id === selectedPageId
   );
   const selectedPage =
-    selectedListPage && selectedPageDetail?.id === selectedListPage.id
+    selectedPageDetail?.id === selectedPageId
       ? selectedPageDetail
       : selectedListPage;
   const pageMapStyle = {
     "--page-map-structure-width": `${structureWidth}px`,
     "--page-map-inspector-width": `${inspectorWidth}px`
   } as CSSProperties;
-  const tableWidth = PAGE_MAP_COLUMN_ORDER.reduce(
+  const tableWidth = visibleColumns.reduce(
     (total, column) => total + columnWidths[column],
     0
   );
+  const openPageId = async (id: string) => {
+    const page = collection.pages.find((row) => row.id === id);
+    if (page) { await openInspector(page); return; }
+    const requestId = ++inspectorRequestRef.current;
+    try { const detail = await browserApiRequest<ProjectPageSummary>(projectPageApiPath(projectId, id)); if (requestId === inspectorRequestRef.current) await openInspector(detail, true); }
+    catch (error) { setOperationError(errorMessage(error, "Не удалось открыть страницу.")); }
+  };
 
   return (
     <div className="page-map" style={pageMapStyle}>
       {!online && (
-        <div className="inline-warning" role="status">
+        <div className="inline-alert warning page-map-notice" role="status">
           <UiText text="Нет сети. Данные доступны для просмотра, изменения временно отключены." /></div>
       )}
       {collection.access.mutationRestriction !== "NONE" && (
-        <div className="inline-note" role="status">
+        <div className="inline-alert page-map-notice" role="status">
           {<UiText text={restrictionLabel(collection.access.mutationRestriction) ?? ""} />}
         </div>
       )}
+      {loadError && <div className="inline-alert error page-map-notice" role="alert">{loadError}<button className="text-button" onClick={() => setReload((value) => value + 1)} type="button"><UiText text="Повторить" /></button></div>}
       {operationError && (
-        <div className="inline-error" role="alert">{<UiText text={operationError ?? ""} />}</div>
+        <div className="inline-alert error page-map-notice" role="alert">{<UiText text={operationError ?? ""} />}</div>
       )}
       {success && (
-        <div className="inline-success" role="status">{<UiText text={success ?? ""} />}</div>
+        <div className="inline-alert success page-map-notice" role="status">{<UiText text={success ?? ""} />}</div>
       )}
 
       <section className="page-map-primary-actions" aria-label={uiText("Действия карты страниц")}>
+        {heading}
+        <div className="page-map-view-switch" aria-label={uiText("Вид карты страниц")}><button aria-pressed={view === "TABLE"} onClick={() => setView("TABLE")} type="button"><Icon name="list" /><UiText text="Список" /></button><button aria-pressed={view === "DIAGRAM"} onClick={() => setView("DIAGRAM")} type="button"><Icon name="sitemap" /><UiText text="Схема" /></button></div>
+        <span className="page-map-count">
+          {structure.total.toLocaleString(uiLocale)}{collection.structureTruncated ? "+" : ""} <UiText text="страниц в структуре" before=" " /></span>
         <a
           className="primary-button"
           href={`/app/projects/${encodeURIComponent(projectId)}/tools/http-status-checker`}
@@ -571,38 +733,17 @@ export function ProjectPageMap({
         <button className="secondary-button" onClick={exportVisiblePages} type="button">
           <Icon name="export" />
           <UiText text="Экспорт" /></button>
-        <span>
-          {structure.total.toLocaleString(uiLocale)} <UiText text="страниц в структуре" before=" " /></span>
+
+        <button
+          className="primary-button"
+          disabled={!canManage || busyId !== undefined}
+          onClick={startCreate}
+          type="button"
+        >
+          <UiText text="Добавить страницу" /></button>
+        {view === "TABLE" && <details className="page-map-columns" data-exclusive-dropdown><summary><Icon name="list" /><UiText text="Колонки" /></summary><div>{PAGE_MAP_COLUMN_ORDER.map((column) => <label key={column}><input checked={visibleColumns.includes(column)} disabled={column === "url"} onChange={(event) => setVisibleColumns((old) => event.target.checked ? PAGE_MAP_COLUMN_ORDER.filter((key) => old.includes(key) || key === column) : old.filter((key) => key !== column))} type="checkbox" /><UiText text={PAGE_MAP_COLUMN_LABELS[column]} /></label>)}</div></details>}
       </section>
 
-      <div className="page-map-workspace">
-        <SiteStructure
-          domain={projectDomain}
-          expansion={structureExpansion}
-          nodes={structure.nodes}
-          onSelect={filterByStructure}
-          onToggle={(path, defaultExpanded) =>
-            setStructureExpansion((current) => ({
-              ...current,
-              [path]: !(current[path] ?? defaultExpanded)
-            }))
-          }
-          selectedPath={selectedStructurePath}
-          total={structure.total}
-        />
-        <PanelResizeHandle
-          label={uiText("Изменить ширину структуры сайта")}
-          onDoubleClick={() => setStructureWidth(248)}
-          onPointerDown={(event) =>
-            beginHorizontalResize(event, {
-              initial: structureWidth,
-              minimum: 190,
-              maximum: 420,
-              onChange: setStructureWidth
-            })
-          }
-        />
-        <div className="page-map-main">
         <section className="panel page-map-toolbar">
         <form className="page-map-commandbar" onSubmit={applyFilters}>
           <label className="form-field page-map-search">
@@ -659,7 +800,7 @@ export function ProjectPageMap({
                   <option value=""><UiText text="Все состояния" /></option>
                   {pageIndexabilities.map((value) => (
                     <option key={value} value={value}>
-                      {<UiText text={indexabilityLabel(value) ?? ""} />}
+                      {<UiText text={pageIndexabilityLabel(value) ?? ""} />}
                     </option>
                   ))}
                 </CustomSelect>
@@ -696,37 +837,36 @@ export function ProjectPageMap({
             </div>
           </details>
         </form>
-        <button
-          className="primary-button"
-          disabled={!canManage || busyId !== undefined}
-          onClick={startCreate}
-          type="button"
-        >
-          <UiText text="Добавить страницу" /></button>
+        {collection.access.canViewKeywords && <div className="page-map-rank-toolbar"><label><span className="visually-hidden"><UiText text="Поисковый срез для позиций" /></span><RankDimensionSelect ariaLabel={uiText("Поисковый срез для позиций")} dimensions={dimensions} value={dimensionKey} onChange={setDimensionKey} /></label><button className="secondary-button" aria-pressed={rankDate === "latest"} onClick={() => setRankDate("latest")} type="button"><UiText text="Последний съём" /></button><CustomDateInput aria-label={uiText("Дата съёма для карты страниц")} required type="date" value={rankDate === "latest" ? rankStatistics.date ?? new Date().toISOString().slice(0, 10) : rankDate} onChange={(event) => setRankDate(event.target.value)} /><button className="secondary-button page-map-refresh" aria-label={uiText("Обновить карту страниц")} title={uiText("Обновить карту страниц")} disabled={loading || rankStatistics.loading} onClick={() => setReload((value) => value + 1)} type="button"><Icon name="refresh" /></button>{rankStatistics.error && <span role="alert">{rankStatistics.error}</span>}</div>}
         </section>
 
-      {editor && (
-        <div
-          className="page-map-editor-backdrop"
-          data-dropdown-portal-root
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target && busyId === undefined) {
-              setEditor(undefined);
-            }
-          }}
-          role="presentation"
-        >
-          <PageEditor
-            busy={busyId !== undefined}
-            draft={editor.draft}
-            errors={errors}
-            existing={editor.page !== undefined}
-            onCancel={() => setEditor(undefined)}
-            onChange={changeDraft}
-            onSubmit={submitPage}
-          />
-        </div>
-      )}
+      <div className={`page-map-workspace${view === "DIAGRAM" ? " is-diagram" : ""}`}>
+        {view === "TABLE" && <>
+        <SiteStructure
+          domain={projectDomain}
+          nodes={structure.nodes}
+          onSelect={filterByStructure}
+          selectedPath={selectedStructurePath}
+          total={structure.total}
+        />
+        <PanelResizeHandle
+          label={uiText("Изменить ширину структуры сайта")}
+          onDoubleClick={() => setStructureWidth(248)}
+          onPointerDown={(event) =>
+            beginHorizontalResize(event, {
+              initial: structureWidth,
+              minimum: 190,
+              maximum: 420,
+              onChange: setStructureWidth
+            })
+          }
+        />
+        </>}
+        <div className="page-map-main">
+
+
+      {editor && <ProjectPageEditor projectId={projectId} busy={busyId !== undefined} draft={editor.draft} errors={errors} existing={editor.page !== undefined} errorMessage={operationError} onCancel={() => setEditor(undefined)} onChange={changeDraft} onSubmit={submitPage} />}
+
 
         <div className={selectedPage ? "page-map-content has-inspector" : "page-map-content"}>
         {collection.pages.length === 0 ? (
@@ -745,15 +885,15 @@ export function ProjectPageMap({
               <UiText text="Добавить первую страницу" /></button>
           )}
           </section>
-        ) : (
+        ) : view === "DIAGRAM" ? <div className="page-map-diagram-shell"><PageMapDiagram domain={projectDomain} nodes={diagramNodes} total={diagramStructure.total} pages={collection.pages} pageIdsByPath={pageIdsByPath} expansion={structureExpansion} selectedPageId={selectedPageId} statistics={rankStatistics.values} onToggle={(path, expanded) => setStructureExpansion((old) => ({ ...old, [path]: !expanded }))} onSelectPage={(id) => void openPageId(id)} onSelectPath={filterByStructure} onVisiblePages={setDiagramPageIds} />{loadingMore && hasDataFilters && <span className="page-map-diagram-loading" role="status"><UiText text="Загрузка схемы…" /></span>}</div> : (
           <section className="panel page-map-list">
-            <div className="page-map-table-wrap">
+            <div className="page-map-table-wrap" ref={tableScrollRef}>
               <table
-                className="page-map-table has-sized-columns"
+                className="page-map-table semantic-table has-sized-columns"
                 style={{ minWidth: "100%", width: `${tableWidth}px` }}
               >
               <colgroup>
-                {PAGE_MAP_COLUMN_ORDER.map((column) => (
+                {visibleColumns.map((column) => (
                   <col
                     key={column}
                     style={{ width: `${columnWidths[column]}px` }}
@@ -762,18 +902,12 @@ export function ProjectPageMap({
               </colgroup>
               <thead>
                 <tr>
-                  <PageMapColumnHeader column="url" label={uiText("URL / страница")} onResize={resizeColumn} width={columnWidths.url} />
-                  <PageMapColumnHeader column="http" label="HTTP" onResize={resizeColumn} width={columnWidths.http} />
-                  <PageMapColumnHeader column="title" label="Title" onResize={resizeColumn} width={columnWidths.title} />
-                  <PageMapColumnHeader column="h1" label="H1" onResize={resizeColumn} width={columnWidths.h1} />
-                  <PageMapColumnHeader column="responseTime" label={uiText("Время")} onResize={resizeColumn} width={columnWidths.responseTime} />
-                  <PageMapColumnHeader column="size" label={uiText("Размер")} onResize={resizeColumn} width={columnWidths.size} />
-                  <PageMapColumnHeader column="issues" label={uiText("Проблемы")} onResize={resizeColumn} width={columnWidths.issues} />
-                  <PageMapColumnHeader column="actions" label={uiText("Действия")} onResize={resizeColumn} width={columnWidths.actions} />
+                  {visibleColumns.map((column) => <PageMapColumnHeader key={column} column={column} label={uiText(PAGE_MAP_COLUMN_LABELS[column])} onResize={resizeColumn} width={columnWidths[column]} direction={PAGE_MAP_SORT_COLUMNS[column] === sortField ? sortDirection === "ASC" ? "ascending" : "descending" : undefined} onSort={PAGE_MAP_SORT_COLUMNS[column] ? () => { setSortDirection(PAGE_MAP_SORT_COLUMNS[column] === sortField && sortDirection === "ASC" ? "DESC" : "ASC"); setSortField(PAGE_MAP_SORT_COLUMNS[column]!); } : undefined} disabled={column === "averagePosition" && !dimensionKey} />)}
                 </tr>
               </thead>
                 <tbody>
-                  {collection.pages.map((page) => (
+                  {tableWindow.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={visibleColumns.length} style={{ height: tableWindow.paddingTop, padding: 0, border: 0 }} /></tr>}
+                  {currentRows.map((page) => (
                     <PageRow
                       busy={busyId === page.id}
                       canManage={canManage}
@@ -789,9 +923,12 @@ export function ProjectPageMap({
                         )
                       }
                       page={page}
+                      columns={visibleColumns}
+                      statistics={rankStatistics.values[page.id]}
                       selected={selectedPageId === page.id}
                     />
                   ))}
+                  {tableWindow.paddingBottom > 0 && <tr aria-hidden="true"><td colSpan={visibleColumns.length} style={{ height: tableWindow.paddingBottom, padding: 0, border: 0 }} /></tr>}
                 </tbody>
               </table>
             </div>
@@ -825,7 +962,15 @@ export function ProjectPageMap({
                 })
               }
             />
-            <PageInspector
+            <ProjectPageInspector
+              projectId={projectId}
+              canViewKeywords={collection.access.canViewKeywords === true}
+              statistics={rankStatistics.values[selectedPage.id]}
+              dimensionKey={dimensionKey}
+              date={rankStatistics.date ?? rankDate}
+              onRecheck={() => void recheckPage(selectedPage)}
+              checking={checking?.pageId === selectedPage.id}
+              onStatus={() => void changeStatus(selectedPage, selectedPage.lifecycleStatus === "ACTIVE" ? "archive" : "restore")}
               canManage={canManage}
               issues={selectedPageIssues}
               issuesError={issuesError}
@@ -851,17 +996,16 @@ function PanelResizeHandle({
 }: Readonly<{
   label: string;
   onDoubleClick: () => void;
-  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
 }>) {
   const { t: uiText } = useUiLocale();
   return (
-    <button
+    <WorkspaceSidebarSeparator
       aria-label={label}
       className="page-map-panel-resizer"
       onDoubleClick={onDoubleClick}
       onPointerDown={onPointerDown}
       title={uiText("{0}. Двойной клик — сбросить.", [String(label)])}
-      type="button"
     />
   );
 }
@@ -870,8 +1014,9 @@ function PageMapColumnHeader({
   column,
   label,
   onResize,
-  width
+  width, direction, onSort, disabled
 }: Readonly<{
+  direction?: "ascending" | "descending" | undefined; onSort?: (() => void) | undefined; disabled?: boolean;
   column: PageMapColumn;
   label: string;
   onResize: (column: PageMapColumn, width: number) => void;
@@ -885,15 +1030,15 @@ function PageMapColumnHeader({
   }
 
   return (
-    <th className="page-map-resizable-column" scope="col">
-      <span>{label}</span>
+    <th className="page-map-resizable-column semantic-resizable-column" scope="col" data-column={column} aria-sort={direction}>
+      {onSort ? <TableSortButton label={label} direction={direction} disabled={disabled} onClick={onSort}>{label}</TableSortButton> : <span>{label}</span>}
       <span
         aria-label={uiText("Изменить ширину колонки «{0}»", [String(label)])}
         aria-orientation="vertical"
         aria-valuemax={640}
         aria-valuemin={PAGE_MAP_COLUMN_MINIMUMS[column]}
         aria-valuenow={width}
-        className="page-map-column-resizer"
+        className="page-map-column-resizer semantic-column-resizer"
         onDoubleClick={() => onResize(column, PAGE_MAP_COLUMN_DEFAULTS[column])}
         onKeyDown={resizeFromKeyboard}
         onPointerDown={(event) =>
@@ -950,691 +1095,40 @@ function beginHorizontalResize(
   ownerWindow.addEventListener("pointercancel", stop, { once: true });
 }
 
-interface SiteStructureNode {
-  readonly name: string;
-  readonly path: string;
-  readonly count: number;
-  readonly depth: number;
-  readonly children: readonly SiteStructureNode[];
-}
 
-function SiteStructure({
-  domain,
-  expansion,
-  nodes,
-  onSelect,
-  onToggle,
-  selectedPath,
-  total
-}: Readonly<{
-  domain: string;
-  expansion: Readonly<Record<string, boolean>>;
-  nodes: readonly SiteStructureNode[];
-  onSelect: (path: string) => void;
-  onToggle: (path: string, defaultExpanded: boolean) => void;
-  selectedPath: string;
-  total: number;
+function SiteStructure({ domain, nodes, onSelect, selectedPath, total }: Readonly<{
+  domain: string; nodes: readonly SiteStructureNode[]; onSelect: (path: string) => void; selectedPath: string; total: number;
 }>) {
-  const uiLocale = useUiLocale().locale;
-  const { t: uiText } = useUiLocale();
-  return (
-    <aside className="panel page-map-structure" aria-label={uiText("Структура сайта")}>
-      <header>
-        <div>
-          <h2><UiText text="Структура сайта" /></h2>
-          <span>{domain}</span>
-        </div>
-      </header>
-      <button
-        aria-pressed={selectedPath === "/"}
-        className="page-map-tree-root"
-        onClick={() => onSelect("/")}
-        type="button"
-      >
-        <Icon name="sitemap" />
-        <span><UiText text="Все страницы" /></span>
-        <strong>{total.toLocaleString(uiLocale)}</strong>
-      </button>
-      {nodes.length > 0 ? (
-        <ul className="page-map-tree">
-          {nodes.slice(0, 120).map((node) => (
-            <SiteStructureBranch
-              expansion={expansion}
-              key={node.path}
-              node={node}
-              onSelect={onSelect}
-              onToggle={onToggle}
-              selectedPath={selectedPath}
-            />
-          ))}
-        </ul>
-      ) : (
-        <p className="page-map-tree-empty">
-          <UiText text="Структура появится после первого сохранённого обхода." /></p>
-      )}
-    </aside>
-  );
+  const { locale, t } = useUiLocale();
+  return <WorkspaceSidebar className="page-map-structure" aria-label={t("Структура сайта")}><header><div><h2><UiText text="Структура сайта" /></h2><span>{domain}</span></div></header>
+    <button className="page-map-tree-root" aria-pressed={selectedPath === "/"} onClick={() => onSelect("/")} type="button"><Icon name="sitemap" /><span><UiText text="Все страницы" /></span><strong>{total.toLocaleString(locale)}</strong></button>
+    <ul className="page-map-tree">{sortSiteSections(nodes).map((node) => <li key={node.path}><button className={`page-map-tree-select${selectedPath === node.path ? " selected" : ""}`} aria-pressed={selectedPath === node.path} onClick={() => onSelect(node.path)} type="button"><Icon name="projects" /><span>/{node.name}</span><strong>{node.count.toLocaleString(locale)}</strong></button></li>)}</ul>
+    {nodes.length === 0 && <p className="page-map-tree-empty"><UiText text="Структура появится после первого сохранённого обхода." /></p>}
+  </WorkspaceSidebar>;
 }
 
-function SiteStructureBranch({
-  expansion,
-  node,
-  onSelect,
-  onToggle,
-  selectedPath
-}: Readonly<{
-  expansion: Readonly<Record<string, boolean>>;
-  node: SiteStructureNode;
-  onSelect: (path: string) => void;
-  onToggle: (path: string, defaultExpanded: boolean) => void;
-  selectedPath: string;
+
+function PageRow({ busy, canManage, onEdit, onSelect, onStatus, page, selected, columns, statistics }: Readonly<{
+  busy: boolean; canManage: boolean; onEdit: () => void; onSelect: () => void; onStatus: () => void; page: ProjectPageSummary; selected: boolean;
+  columns: readonly PageMapColumn[]; statistics?: ProjectPageStatistics | undefined;
 }>) {
-  const uiLocale = useUiLocale().locale;
-  const { t: uiText } = useUiLocale();
-  const hasChildren = node.children.length > 0;
-  const defaultExpanded = node.depth < 3;
-  const expanded = hasChildren && (expansion[node.path] ?? defaultExpanded);
-  return (
-    <li>
-      <div
-        className={`page-map-tree-row${selectedPath === node.path ? " selected" : ""}`}
-        style={{ paddingLeft: `${10 + (node.depth - 1) * 16}px` }}
-      >
-        {hasChildren ? (
-          <button
-            aria-expanded={expanded}
-            aria-label={uiText("{0} папку «{1}»", [String(expanded ? "Свернуть" : "Развернуть"), String(node.name)])}
-            className="page-map-tree-toggle"
-            onClick={() => {
-              onToggle(node.path, defaultExpanded);
-              if (
-                expanded &&
-                selectedPath !== node.path &&
-                selectedPath.startsWith(node.path)
-              ) {
-                onSelect(node.path);
-              }
-            }}
-            title={expanded ? uiText("Свернуть папку") : uiText("Развернуть папку")}
-            type="button"
-          >
-            <Icon name="chevronRight" />
-          </button>
-        ) : (
-          <span aria-hidden="true" className="page-map-tree-toggle-spacer" />
-        )}
-        <button
-          aria-pressed={selectedPath === node.path}
-          className="page-map-tree-select"
-          onClick={() => onSelect(node.path)}
-          type="button"
-        >
-          <Icon name={hasChildren ? "projects" : "pages"} />
-          <span>{node.name}</span>
-          <strong>{node.count.toLocaleString(uiLocale)}</strong>
-        </button>
-      </div>
-      {expanded && (
-        <ul>
-          {node.children.slice(0, 80).map((child) => (
-            <SiteStructureBranch
-              expansion={expansion}
-              key={child.path}
-              node={child}
-              onSelect={onSelect}
-              onToggle={onToggle}
-              selectedPath={selectedPath}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
+  const { locale, t } = useUiLocale();
+  const crawl = page.latestCrawl, title = crawl?.title ?? page.title, h1 = crawl?.h1 ?? page.h1, status = crawl?.statusCode || page.httpStatus;
+  const cells: Readonly<Record<PageMapColumn, ReactNode>> = {
+    url: <div className="page-map-url"><a href={page.normalizedUrl} onClick={(event) => event.stopPropagation()} rel="noopener noreferrer" target="_blank">{pagePath(page.normalizedUrl)}</a><span>{title || page.normalizedUrl}</span></div>,
+    http: <span className={`page-map-http status-${httpStatusKind(status)}`}>{status ?? "—"}</span>,
+    indexability: <span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>{pageIndexabilityLabel(page.indexability)}</span>,
+    keywords: page.assignedKeywordCount,
+    averagePosition: <div className="page-map-average" title={statistics ? `Измерено: ${statistics.measuredCount} / ${statistics.assignedCount}; найдено по этому URL: ${statistics.matchedCount}; другой URL: ${statistics.differentPageCount}` : t("Нет замеров")}><span>{statistics?.averagePosition?.toLocaleString(locale, { maximumFractionDigits: 2 }) ?? "—"}</span>{statistics && <small>{statistics.measuredCount} / {statistics.assignedCount}</small>}</div>,
+    title: <span className="page-map-clamp">{title || "—"}</span>, h1: <span className="page-map-clamp">{h1 || "—"}</span>,
+    responseTime: crawl && crawl.statusCode ? `${crawl.responseTimeMs.toLocaleString(locale)} мс` : "—", size: crawl && crawl.statusCode ? formatBytes(crawl.sizeBytes, locale) : "—",
+    issues: <span className={`page-map-issue-count${(page.openIssueCount ?? 0) > 0 ? " has-issues" : ""}`}>{page.openIssueCount ?? "—"}</span>,
+    actions: <div className="page-map-actions">{page.lifecycleStatus === "ACTIVE" && <button className="text-button" disabled={!canManage || busy} onClick={(event) => { event.stopPropagation(); onEdit(); }} type="button"><UiText text="Изменить" /></button>}<button className="text-button" disabled={!canManage || busy} onClick={(event) => { event.stopPropagation(); onStatus(); }} type="button"><UiText text={page.lifecycleStatus === "ACTIVE" ? "В архив" : "Восстановить"} /></button></div>
+  };
+  return <tr aria-selected={selected} data-page-id={page.id} className={selected ? "selected" : undefined} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }} tabIndex={0}>{columns.map((column) => <td key={column} data-column={column}>{cells[column]}</td>)}</tr>;
 }
 
-function PageEditor({
-  busy,
-  draft,
-  errors,
-  existing,
-  onCancel,
-  onChange,
-  onSubmit
-}: Readonly<{
-  busy: boolean;
-  draft: ProjectPageDraft;
-  errors: ProjectPageDraftErrors;
-  existing: boolean;
-  onCancel: () => void;
-  onChange: (patch: Partial<ProjectPageDraft>) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}>) {
-  const { t: uiText } = useUiLocale();
-  const hasAdvancedErrors = Boolean(
-    errors.httpStatus ||
-    errors.language ||
-    errors.canonicalTarget ||
-    errors.aliases ||
-    errors.ownerId
-  );
-  return (
-    <section aria-labelledby="page-map-editor-title" aria-modal="true" className="panel page-map-editor" role="dialog">
-      <header>
-        <div>
-          <p className="eyebrow">{existing ? <UiText text="Редактирование" /> : <UiText text="Новая страница" />}</p>
-          <h2 id="page-map-editor-title">{existing ? <UiText text="Параметры страницы" /> : <UiText text="Добавить в карту" />}</h2>
-        </div>
-        <button className="text-button" onClick={onCancel} type="button">
-          <UiText text="Закрыть" /></button>
-      </header>
-      <form className="page-map-editor-grid" onSubmit={onSubmit}>
-        <EditorField
-          error={errors.url}
-          label={uiText("Канонический URL")}
-          wide
-        >
-          <input
-            aria-invalid={Boolean(errors.url)}
-            onChange={(event) => onChange({ url: event.target.value })}
-            placeholder="https://example.com/service/"
-            required
-            type="url"
-            value={draft.url}
-          />
-        </EditorField>
-        <EditorField label={uiText("Тип")}>
-          <CustomSelect
-            onChange={(event) =>
-              onChange({ pageType: event.target.value as PageType })
-            }
-            value={draft.pageType}
-          >
-            {pageTypes.map((value) => (
-              <option key={value} value={value}>{<UiText text={pageTypeLabel(value) ?? ""} />}</option>
-            ))}
-          </CustomSelect>
-        </EditorField>
-        <EditorField label={uiText("Индексируемость")}>
-          <CustomSelect
-            onChange={(event) =>
-              onChange({
-                indexability: event.target.value as PageIndexability
-              })
-            }
-            value={draft.indexability}
-          >
-            {pageIndexabilities.map((value) => (
-              <option key={value} value={value}>
-                {<UiText text={indexabilityLabel(value) ?? ""} />}
-              </option>
-            ))}
-          </CustomSelect>
-        </EditorField>
-        <EditorField error={errors.priority} label={uiText("Приоритет")}>
-          <input
-            max="100"
-            min="0"
-            onChange={(event) => onChange({ priority: event.target.value })}
-            required
-            type="number"
-            value={draft.priority}
-          />
-        </EditorField>
-        <EditorField label="Title" wide>
-          <input
-            onChange={(event) => onChange({ title: event.target.value })}
-            value={draft.title}
-          />
-        </EditorField>
-        <EditorField label="H1" wide>
-          <input
-            onChange={(event) => onChange({ h1: event.target.value })}
-            value={draft.h1}
-          />
-        </EditorField>
-        <EditorField label={uiText("Статус контента")}>
-          <CustomSelect
-            onChange={(event) =>
-              onChange({
-                contentStatus: event.target.value as PageContentStatus | ""
-              })
-            }
-            value={draft.contentStatus}
-          >
-            <option value=""><UiText text="Не задан" /></option>
-            {pageContentStatuses.map((value) => (
-              <option key={value} value={value}>{<UiText text={contentStatusLabel(value) ?? ""} />}</option>
-            ))}
-          </CustomSelect>
-        </EditorField>
-        <details className="page-map-advanced" open={hasAdvancedErrors || undefined}>
-          <summary><UiText text="Дополнительные параметры" /></summary>
-          <div className="page-map-advanced-grid">
-            <EditorField error={errors.httpStatus} label={uiText("HTTP-код")}>
-              <input
-                inputMode="numeric"
-                onChange={(event) => onChange({ httpStatus: event.target.value })}
-                placeholder="200"
-                value={draft.httpStatus}
-              />
-            </EditorField>
-            <EditorField error={errors.language} label={uiText("Язык")}>
-              <LanguageSelect
-                onChange={(event) => onChange({ language: event.target.value })}
-                value={draft.language}
-              />
-            </EditorField>
-            <EditorField label={uiText("Шаблон")}>
-              <input
-                onChange={(event) => onChange({ template: event.target.value })}
-                placeholder="service-detail"
-                value={draft.template}
-              />
-            </EditorField>
-            <EditorField label="Robots">
-              <input
-                onChange={(event) => onChange({ robots: event.target.value })}
-                placeholder="index, follow"
-                value={draft.robots}
-              />
-            </EditorField>
-            <EditorField label="Description" wide>
-              <textarea
-                onChange={(event) => onChange({ description: event.target.value })}
-                rows={2}
-                value={draft.description}
-              />
-            </EditorField>
-            <EditorField error={errors.canonicalTarget} label="Canonical target" wide>
-              <input
-                onChange={(event) =>
-                  onChange({ canonicalTarget: event.target.value })
-                }
-                placeholder="https://example.com/canonical/"
-                type="url"
-                value={draft.canonicalTarget}
-              />
-            </EditorField>
-            <EditorField error={errors.aliases} label={uiText("Алиасы URL")} wide>
-              <textarea
-                onChange={(event) => onChange({ aliases: event.target.value })}
-                placeholder={"https://example.com/old-url/\nhttps://example.com/legacy/"}
-                rows={3}
-                value={draft.aliases}
-              />
-            </EditorField>
-            <EditorField error={errors.ownerId} label={uiText("ID владельца")}>
-              <input
-                onChange={(event) => onChange({ ownerId: event.target.value })}
-                value={draft.ownerId}
-              />
-            </EditorField>
-            <EditorField label={uiText("Опубликована")}>
-              <input
-                onChange={(event) => onChange({ publishedAt: event.target.value })}
-                type="datetime-local"
-                value={draft.publishedAt}
-              />
-            </EditorField>
-            <EditorField label={uiText("Заметки")} wide>
-              <textarea
-                onChange={(event) => onChange({ notes: event.target.value })}
-                rows={3}
-                value={draft.notes}
-              />
-            </EditorField>
-          </div>
-        </details>
-        <div className="page-map-editor-actions">
-          <button className="secondary-button" onClick={onCancel} type="button">
-            <UiText text="Отмена" /></button>
-          <button className="primary-button" disabled={busy} type="submit">
-            {busy ? <UiText text="Сохраняем…" /> : <UiText text="Сохранить" />}
-          </button>
-        </div>
-      </form>
-    </section>
-  );
-}
 
-function EditorField({
-  children,
-  error,
-  label,
-  wide = false
-}: Readonly<{
-  children: ReactNode;
-  error?: string | undefined;
-  label: string;
-  wide?: boolean;
-}>) {
-  return (
-    <label className={`form-field${wide ? " page-map-field-wide" : ""}`}>
-      <span>{label}</span>
-      {children}
-      {error && <small className="field-error">{<UiText text={error ?? ""} />}</small>}
-    </label>
-  );
-}
-
-function PageRow({
-  busy,
-  canManage,
-  onEdit,
-  onSelect,
-  onStatus,
-  page,
-  selected
-}: Readonly<{
-  busy: boolean;
-  canManage: boolean;
-  onEdit: () => void;
-  onSelect: () => void;
-  onStatus: () => void;
-  page: ProjectPageSummary;
-  selected: boolean;
-}>) {
-  const uiLocale = useUiLocale().locale;
-  const crawl = page.latestCrawl;
-  const title = crawl?.title ?? page.title;
-  const h1 = crawl?.h1 ?? page.h1;
-  const statusCode = crawl?.statusCode ?? page.httpStatus;
-  return (
-    <tr
-      aria-selected={selected}
-      className={selected ? "selected" : undefined}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
-      onClick={onSelect}
-      tabIndex={0}
-    >
-      <td>
-        <div className="page-map-url">
-          <a href={page.normalizedUrl} rel="noreferrer" target="_blank">
-            {pagePath(page.normalizedUrl)}
-          </a>
-          <span>{title || page.normalizedUrl}</span>
-          <small>{page.assignedKeywordCount} <UiText text="запросов ·" before=" " after=" " />{page.assignedClusterCount} <UiText text="кластеров" before=" " /></small>
-        </div>
-      </td>
-      <td>
-        <span className={`page-map-http status-${httpStatusKind(statusCode)}`}>
-          {statusCode ?? "—"}
-        </span>
-      </td>
-      <td><span className="page-map-clamp">{title || "—"}</span></td>
-      <td><span className="page-map-clamp">{h1 || "—"}</span></td>
-      <td>{crawl ? <UiText text="{0} мс" values={[String(crawl.responseTimeMs.toLocaleString(uiLocale))]} /> : "—"}</td>
-      <td>{crawl ? formatBytes(crawl.sizeBytes, uiLocale) : "—"}</td>
-      <td>
-        <span className={`page-map-issue-count${(page.openIssueCount ?? 0) > 0 ? " has-issues" : ""}`}>
-          {(page.openIssueCount ?? 0) > 0 ? page.openIssueCount : <UiText text="Нет" />}
-        </span>
-      </td>
-      <td>
-        <div className="page-map-actions">
-          {page.lifecycleStatus === "ACTIVE" && (
-            <button
-              className="text-button"
-              disabled={!canManage || busy}
-              onClick={(event) => {
-                event.stopPropagation();
-                onEdit();
-              }}
-              type="button"
-            >
-              <UiText text="Изменить" /></button>
-          )}
-          <button
-            className="text-button"
-            disabled={!canManage || busy}
-            onClick={(event) => {
-              event.stopPropagation();
-              onStatus();
-            }}
-            type="button"
-          >
-            {busy
-              ? <UiText text="Сохраняем…" />
-              : page.lifecycleStatus === "ACTIVE"
-                ? <UiText text="В архив" />
-                : <UiText text="Восстановить" />}
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-function PageInspector({
-  canManage,
-  issues,
-  issuesError,
-  issuesLoading,
-  loading,
-  onClose,
-  onEdit,
-  page
-}: Readonly<{
-  canManage: boolean;
-  issues: readonly ProjectCrawlIssueSummary[];
-  issuesError?: string | undefined;
-  issuesLoading: boolean;
-  loading: boolean;
-  onClose: () => void;
-  onEdit: () => void;
-  page: ProjectPageSummary;
-}>) {
-  const uiLocale = useUiLocale().locale;
-  const { t: uiText } = useUiLocale();
-  const crawl = page.latestCrawl;
-  const title = crawl?.title ?? page.title;
-  const description = crawl?.description ?? page.description;
-  const h1 = crawl?.h1 ?? page.h1;
-  const canonical = crawl?.canonicalUrl ?? page.canonicalTarget;
-  return (
-    <aside className="page-map-inspector" aria-label={uiText("Информация о странице")}>
-      <header>
-        <div>
-          <span><UiText text="Страница" /></span>
-          <h2>{pagePath(page.normalizedUrl)}</h2>
-          <a href={page.normalizedUrl} rel="noreferrer" target="_blank">{page.normalizedUrl}</a>
-        </div>
-        <div className="page-map-inspector-actions">
-          {page.lifecycleStatus === "ACTIVE" && (
-            <button className="secondary-button" disabled={!canManage} onClick={onEdit} type="button"><UiText text="Изменить" /></button>
-          )}
-          <button aria-label={uiText("Закрыть")} className="page-map-inspector-close" onClick={onClose} type="button">×</button>
-        </div>
-      </header>
-      <div className="page-map-inspector-body">
-        {loading && (
-          <p className="page-map-inspector-loading" role="status">
-            <span aria-hidden="true" className="spinner" />
-            <UiText text="Загружаем данные последнего обхода…" /></p>
-        )}
-        <section>
-          <h3><UiText text="Обзор" /></h3>
-          <dl>
-            <div><dt><UiText text="Индексируемость" /></dt><dd><span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>{<UiText text={indexabilityLabel(page.indexability) ?? ""} />}</span></dd></div>
-            <div><dt><UiText text="Тип" /></dt><dd>{<UiText text={pageTypeLabel(page.pageType) ?? ""} />}</dd></div>
-            <div><dt>HTTP</dt><dd>{crawl?.statusCode ?? page.httpStatus ?? "—"}</dd></div>
-            <div><dt><UiText text="Проблемы" /></dt><dd>{page.openIssueCount ?? 0}</dd></div>
-            <div><dt><UiText text="В sitemap" /></dt><dd>{crawl ? (crawl.inSitemap ? "Да" : "Нет") : "—"}</dd></div>
-          </dl>
-        </section>
-        <section className="page-map-issues">
-          <header>
-            <h3><UiText text="Проблемы" /></h3>
-            <span className={(page.openIssueCount ?? 0) > 0 ? "has-issues" : undefined}>
-              {page.openIssueCount ?? 0}
-            </span>
-          </header>
-          {issuesLoading ? (
-            <p className="page-map-inspector-loading" role="status">
-              <span aria-hidden="true" className="spinner" />
-              <UiText text="Загружаем найденные проблемы…" /></p>
-          ) : issuesError ? (
-            <p className="page-map-issue-error" role="alert">{<UiText text={issuesError ?? ""} />}</p>
-          ) : issues.length > 0 ? (
-            <div className="page-map-issue-list">
-              {issues.map((issue) => (
-                <article className={`page-map-issue severity-${issue.severity.toLowerCase()}`} key={issue.id}>
-                  <header>
-                    <strong>{issue.title}</strong>
-                    <span>{<UiText text={issueSeverityLabel(issue.severity) ?? ""} />}</span>
-                  </header>
-                  <small>{issue.code} <UiText text="· замечено" before=" " after=" " />{formatPageDate(issue.lastSeenAt, uiLocale)}</small>
-                  {Object.keys(issue.details).length > 0 && (
-                    <dl>
-                      {Object.entries(issue.details).map(([key, value]) => (
-                        <div key={key}>
-                          <dt>{<UiText text={issueDetailLabel(key) ?? ""} />}</dt>
-                          <dd>{String(value)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                </article>
-              ))}
-            </div>
-          ) : (page.openIssueCount ?? 0) > 0 ? (
-            <p className="page-map-issue-empty">
-              <UiText text="Сводка показывает проблемы, но подробности не вошли в текущую выборку аудита." /></p>
-          ) : (
-            <p className="page-map-issue-empty"><UiText text="Открытых проблем не найдено." /></p>
-          )}
-        </section>
-        <section>
-          <h3><UiText text="SEO-проверки" /></h3>
-          <dl>
-            <div><dt>Title</dt><dd className={lengthTone(title, 20, 70)}>{title ? <UiText text="{0} символов" values={[String(title.length)]} /> : <UiText text="Нет" />}</dd></div>
-            <div><dt>Description</dt><dd className={lengthTone(description, 40, 180)}>{description ? <UiText text="{0} символов" values={[String(description.length)]} /> : <UiText text="Нет" />}</dd></div>
-            <div><dt>H1</dt><dd>{crawl ? crawl.h1Count : h1 ? 1 : 0}</dd></div>
-            <div><dt>Canonical</dt><dd>{canonical || <UiText text="Не задан" />}</dd></div>
-            <div><dt>Robots</dt><dd>{crawl?.robots ?? page.robots ?? "—"}</dd></div>
-          </dl>
-          {title && <p><strong>Title:</strong> {title}</p>}
-          {description && <p><strong>Description:</strong> {description}</p>}
-          {h1 && <p><strong>H1:</strong> {h1}</p>}
-        </section>
-        <section>
-          <h3><UiText text="Загрузка и содержимое" /></h3>
-          <dl>
-            <div><dt><UiText text="Время ответа" /></dt><dd>{crawl ? <UiText text="{0} мс" values={[String(crawl.responseTimeMs.toLocaleString(uiLocale))]} /> : "—"}</dd></div>
-            <div><dt><UiText text="Размер" /></dt><dd>{crawl ? formatBytes(crawl.sizeBytes, uiLocale) : "—"}</dd></div>
-            <div><dt><UiText text="Тип ответа" /></dt><dd>{crawl?.contentType ?? "—"}</dd></div>
-            <div><dt><UiText text="Слов" /></dt><dd>{crawl?.wordCount.toLocaleString(uiLocale) ?? "—"}</dd></div>
-            <div><dt><UiText text="Изображений" /></dt><dd>{crawl?.imageCount ?? "—"}</dd></div>
-            <div><dt><UiText text="Без alt" /></dt><dd>{crawl?.imagesMissingAlt ?? "—"}</dd></div>
-          </dl>
-        </section>
-        <section>
-          <h3><UiText text="Семантика" /></h3>
-          <dl>
-            <div><dt><UiText text="Запросов" /></dt><dd>{page.assignedKeywordCount}</dd></div>
-            <div><dt><UiText text="Кластеров" /></dt><dd>{page.assignedClusterCount}</dd></div>
-            <div><dt><UiText text="Приоритет" /></dt><dd>{page.priority}</dd></div>
-          </dl>
-        </section>
-        {crawl && crawl.metaTags.length > 0 && (
-          <details className="page-map-meta-tags">
-            <summary><UiText text="Метатеги ·" after=" " />{crawl.metaTags.length}</summary>
-            <div>
-              {crawl.metaTags.map((tag, index) => (
-                <article key={`${tag.name ?? tag.property ?? tag.httpEquiv}-${index}`}>
-                  <strong>{tag.name ?? tag.property ?? tag.httpEquiv}</strong>
-                  <span>{tag.content}</span>
-                </article>
-              ))}
-            </div>
-          </details>
-        )}
-        <section>
-          <h3><UiText text="Источники и даты" /></h3>
-          <dl>
-            <div><dt><UiText text="Источники" /></dt><dd>{page.sources.map(({ source }) => sourceLabel(source)).join(", ") || "—"}</dd></div>
-            <div><dt><UiText text="Обновлена" /></dt><dd>{formatPageDate(page.updatedAt, uiLocale)}</dd></div>
-            <div><dt><UiText text="Последний обход" /></dt><dd>{crawl ? formatPageDate(crawl.crawledAt, uiLocale) : <UiText text="Не запускался" />}</dd></div>
-          </dl>
-        </section>
-      </div>
-    </aside>
-  );
-}
-
-function formatPageDate(value: string, uiLocale: string = "ru-RU"): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat(uiLocale, { dateStyle: "medium", timeStyle: "short" }).format(parsed);
-}
-
-function buildSiteStructure(
-  urls: readonly string[]
-): Readonly<{ total: number; nodes: readonly SiteStructureNode[] }> {
-  interface MutableNode {
-    name: string;
-    path: string;
-    count: number;
-    depth: number;
-    children: Map<string, MutableNode>;
-  }
-  const roots = new Map<string, MutableNode>();
-  for (const value of urls) {
-    let pathname: string;
-    try {
-      pathname = new URL(value).pathname;
-    } catch {
-      continue;
-    }
-    const segments = pathname.split("/").filter(Boolean);
-    let children = roots;
-    let path = "";
-    for (const [index, segment] of segments.entries()) {
-      path += `/${segment}`;
-      const key = `${path}/`;
-      let node = children.get(key);
-      if (!node) {
-        node = {
-          name: decodedPathSegment(segment),
-          path: key,
-          count: 0,
-          depth: index + 1,
-          children: new Map()
-        };
-        children.set(key, node);
-      }
-      node.count += 1;
-      children = node.children;
-    }
-  }
-  const freeze = (values: Iterable<MutableNode>): readonly SiteStructureNode[] =>
-    [...values]
-      .sort((left, right) =>
-        left.name.localeCompare(right.name, "ru", { numeric: true })
-      )
-      .map((node) => ({
-        name: node.name,
-        path: node.path,
-        count: node.count,
-        depth: node.depth,
-        children: freeze(node.children.values())
-      }));
-  return { total: urls.length, nodes: freeze(roots.values()) };
-}
-
-function decodedPathSegment(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
 
 function pagePath(value: string): string {
   try {
@@ -1658,15 +1152,6 @@ function formatBytes(value: number, uiLocale: string = "ru-RU"): string {
   return `${(value / 1_048_576).toLocaleString(uiLocale, { maximumFractionDigits: 1 })} МБ`;
 }
 
-function lengthTone(
-  value: string | undefined,
-  minimum: number,
-  maximum: number
-): "is-good" | "is-warning" {
-  return value && value.length >= minimum && value.length <= maximum
-    ? "is-good"
-    : "is-warning";
-}
 
 function csvCell(value: string | number): string {
   return `"${String(value).replaceAll('"', '""')}"`;
@@ -1683,12 +1168,13 @@ function pagesUrl(
   projectId: string,
   filters: PageFilters,
   structurePath: string,
-  cursor?: string
+  cursor?: string, sort: ProjectPageSortField = "URL", direction: "ASC" | "DESC" = "ASC", dimensionKey = "", date = "latest", includeStructure = false
 ): string {
   const query = new URLSearchParams({
     limit: "50",
-    lifecycleStatus: filters.lifecycleStatus
+    lifecycleStatus: filters.lifecycleStatus, sort, sortDirection: direction, includeStructure: String(includeStructure)
   });
+  if (sort === "AVERAGE_POSITION" && dimensionKey) { query.set("dimensionKey", dimensionKey); query.set("date", date); }
   if (filters.search.trim()) query.set("search", filters.search.trim());
   if (structurePath !== "/") query.set("pathPrefix", structurePath);
   if (filters.pageType) query.set("pageType", filters.pageType);
@@ -1761,72 +1247,6 @@ function isVersionConflict(error: unknown): boolean {
   );
 }
 
-const PAGE_TYPE_LABELS: Readonly<Record<PageType, string>> = {
-  EXISTING: "Существующая",
-  PLANNED: "План",
-  REDIRECTED: "Редирект",
-  DELETED: "Удалённая",
-  EXTERNAL: "Внешняя",
-  UNKNOWN: "Не определён"
-};
-
-const INDEXABILITY_LABELS: Readonly<Record<PageIndexability, string>> = {
-  UNKNOWN: "Не проверено",
-  INDEXABLE: "Индексируется",
-  NOINDEX: "Noindex",
-  BLOCKED_ROBOTS: "Закрыта robots",
-  CANONICALIZED: "Canonical на другую",
-  REDIRECTED: "Редирект",
-  ERROR: "Ошибка"
-};
-
-const CONTENT_STATUS_LABELS: Readonly<Record<PageContentStatus, string>> = {
-  IDEA: "Идея",
-  RESEARCH: "Исследование",
-  BRIEF: "Бриф",
-  WRITING: "Написание",
-  REVIEW: "Проверка",
-  APPROVED: "Согласовано",
-  PUBLISHING: "Публикация",
-  PUBLISHED: "Опубликовано",
-  OPTIMIZATION: "Оптимизация",
-  PAUSED: "Пауза",
-  REJECTED: "Отклонено",
-  ARCHIVED: "Архив"
-};
-
-function pageTypeLabel(value: PageType): string {
-  return PAGE_TYPE_LABELS[value];
-}
-
-function indexabilityLabel(value: PageIndexability): string {
-  return INDEXABILITY_LABELS[value];
-}
-
-function contentStatusLabel(value: PageContentStatus): string {
-  return CONTENT_STATUS_LABELS[value];
-}
-
-function sourceLabel(value: ProjectPageSummary["sources"][number]["source"]): string {
-  return value === "MANUAL" ? "вручную" : value.toLocaleLowerCase();
-}
-
-function issueSeverityLabel(
-  value: ProjectCrawlIssueSummary["severity"]
-): string {
-  if (value === "CRITICAL") return "Критично";
-  if (value === "ERROR") return "Ошибка";
-  if (value === "WARNING") return "Важно";
-  return "Информация";
-}
-
-function issueDetailLabel(value: string): string {
-  return value
-    .replaceAll(/([a-z\d])([A-Z])/gu, "$1 $2")
-    .replaceAll("_", " ")
-    .toLocaleLowerCase("ru-RU");
-}
-
 function pageMatchesStructure(url: string, structurePath: string): boolean {
   if (structurePath === "/") return true;
   try {
@@ -1847,15 +1267,19 @@ interface StoredPageMapLayout {
   readonly inspectorWidth: number;
   readonly columnWidths: PageMapColumnWidths;
   readonly structureExpansion: Readonly<Record<string, boolean>>;
+  readonly visibleColumns: readonly PageMapColumn[];
+  readonly view: "TABLE" | "DIAGRAM";
+  readonly filters?: PageFilters; readonly selectedPath?: string;
+  readonly dimensionKey?: string; readonly rankDate?: string; readonly sortField?: ProjectPageSortField; readonly sortDirection?: "ASC" | "DESC";
 }
 
-function pageMapLayoutKey(projectId: string): string {
-  return `seo-platform:page-map-layout:${projectId}`;
+function pageMapLayoutKey(userId: string, projectId: string): string {
+  return `seo-platform:page-map-layout:v2:${userId}:${projectId}`;
 }
 
-function readPageMapLayout(projectId: string): StoredPageMapLayout | undefined {
+function readPageMapLayout(userId: string, projectId: string): StoredPageMapLayout | undefined {
   try {
-    const raw = globalThis.localStorage?.getItem(pageMapLayoutKey(projectId));
+    const raw = globalThis.localStorage?.getItem(pageMapLayoutKey(userId, projectId));
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as Partial<StoredPageMapLayout>;
     if (
@@ -1882,7 +1306,14 @@ function readPageMapLayout(projectId: string): StoredPageMapLayout | undefined {
       ) as PageMapColumnWidths,
       structureExpansion: normalizeStructureExpansion(
         parsed.structureExpansion
-      )
+      ),
+      visibleColumns: Array.isArray(parsed.visibleColumns) ? ["url", ...PAGE_MAP_COLUMN_ORDER.filter((key) => key !== "url" && parsed.visibleColumns!.includes(key))] : ["url", "http", "indexability", "keywords", "averagePosition", "issues", "actions"],
+      view: parsed.view === "DIAGRAM" ? "DIAGRAM" : "TABLE",
+      ...(parseSemanticRankDimensionKey(parsed.dimensionKey) ? { dimensionKey: parsed.dimensionKey! } : {}),
+      rankDate: parsed.rankDate && (parsed.rankDate === "latest" || /^\d{4}-\d{2}-\d{2}$/u.test(parsed.rankDate)) ? parsed.rankDate : "latest",
+      ...(parsed.selectedPath?.startsWith("/") && !/[?#]/u.test(parsed.selectedPath) && parsed.selectedPath.length <= 2048 ? { selectedPath: parsed.selectedPath } : {}),
+      ...(parsed.filters && typeof parsed.filters.search === "string" && parsed.filters.search.length <= 300 && (!parsed.filters.pageType || pageTypes.includes(parsed.filters.pageType)) && (!parsed.filters.indexability || pageIndexabilities.includes(parsed.filters.indexability)) && ["ACTIVE", "ARCHIVED"].includes(parsed.filters.lifecycleStatus) ? { filters: parsed.filters } : {}),
+      sortField: projectPageSortFields.includes(parsed.sortField!) ? parsed.sortField! : "URL", sortDirection: parsed.sortDirection === "DESC" ? "DESC" : "ASC"
     };
   } catch {
     return undefined;
@@ -1907,12 +1338,13 @@ function normalizeStructureExpansion(
 }
 
 function savePageMapLayout(
+  userId: string,
   projectId: string,
   layout: StoredPageMapLayout
 ): void {
   try {
     globalThis.localStorage?.setItem(
-      pageMapLayoutKey(projectId),
+      pageMapLayoutKey(userId, projectId),
       JSON.stringify(layout)
     );
   } catch {

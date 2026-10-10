@@ -1,0 +1,6 @@
+.sidebar { min-width: 0; min-height: 0; background: #fbfbfc; border-radius: 0; box-shadow: none; }
+.left { border-right: 1px solid var(--line); }
+.right { border-left: 1px solid var(--line); }
+.separator { align-self: stretch; position: relative; min-height: 0; width: 10px; border: 0; background: transparent; padding: 0; cursor: col-resize; touch-action: none; z-index: 29; outline: none; }
+.grip { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 8px; height: 42px; border: 1px solid #cfd3dc; border-radius: 999px; box-shadow: 0 2px 7px #1418241f; background: #fff radial-gradient(circle, #858c9b 1px, transparent 1.4px) center / 4px 6px; }
+.separator:hover .grip, .separator:focus-visible .grip { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }

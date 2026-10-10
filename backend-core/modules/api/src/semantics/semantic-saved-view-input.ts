@@ -9,6 +9,7 @@ import {
   semanticSavedViewQueryIndicators,
   semanticSavedViewSchemaVersions,
   semanticSavedViewScopes,
+  semanticSavedViewColumnOrderLimit,
   semanticSystemColumnKeys,
   type CreateSemanticSavedViewInput,
   type SemanticSavedViewConfig,
@@ -184,7 +185,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
       "priorityMin",
       "priorityMax",
       "frequencyBaseMin", "frequencyBaseMax", "frequencyExactMin", "frequencyExactMax",
-      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState",
+      "frequencyFixedMin", "frequencyFixedMax", "wordCountMin", "wordCountMax", "targetUrlState", "multipleUrlsState",
       "rankDimensionKey", "rankState", "rankPositionMin", "rankPositionMax", "rankCheckedFrom", "rankCheckedBefore"
     ],
     "config.filters"
@@ -253,6 +254,7 @@ function advancedFilters(input: Readonly<Record<string, unknown>>): Omit<Semanti
   if (wordCountMin && wordCountMax && wordCountMin > wordCountMax) bad("wordCountMin");
   if (rankPositionMin && rankPositionMax && rankPositionMin > rankPositionMax) bad("rankPositionMin");
   const targetUrlState = input.targetUrlState === undefined ? undefined : requiredEnum(input.targetUrlState, ["SET", "EMPTY"] as const, "config.filters.targetUrlState");
+  const multipleUrlsState = input.multipleUrlsState === undefined ? undefined : requiredEnum(input.multipleUrlsState, ["MULTIPLE", "NOT_MULTIPLE"] as const, "config.filters.multipleUrlsState");
   const rankState = input.rankState === undefined ? undefined : requiredEnum(input.rankState, ["CHECKED", "FOUND", "NOT_FOUND", "NOT_CHECKED"] as const, "config.filters.rankState");
   const rankDimensionKey = input.rankDimensionKey;
   if (rankDimensionKey !== undefined && !parseSemanticRankDimensionKey(rankDimensionKey)) bad("rankDimensionKey");
@@ -261,7 +263,7 @@ function advancedFilters(input: Readonly<Record<string, unknown>>): Omit<Semanti
   if (rankCheckedFrom && rankCheckedBefore && rankCheckedFrom >= rankCheckedBefore) bad("rankCheckedFrom");
   if (!rankDimensionKey && (rankState || rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) bad("rankDimensionKey");
   if ((rankState === "NOT_CHECKED" && (rankPositionMin || rankPositionMax || rankCheckedFrom || rankCheckedBefore)) || (rankState === "NOT_FOUND" && (rankPositionMin || rankPositionMax))) bad("rankState");
-  return { ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}), ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}), ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}), ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}), ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}), ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {}) };
+  return { ...(baseMin ? { frequencyBaseMin: baseMin } : {}), ...(baseMax ? { frequencyBaseMax: baseMax } : {}), ...(exactMin ? { frequencyExactMin: exactMin } : {}), ...(exactMax ? { frequencyExactMax: exactMax } : {}), ...(fixedMin ? { frequencyFixedMin: fixedMin } : {}), ...(fixedMax ? { frequencyFixedMax: fixedMax } : {}), ...(wordCountMin ? { wordCountMin } : {}), ...(wordCountMax ? { wordCountMax } : {}), ...(targetUrlState ? { targetUrlState } : {}), ...(multipleUrlsState ? { multipleUrlsState } : {}), ...(typeof rankDimensionKey === "string" ? { rankDimensionKey } : {}), ...(rankState ? { rankState } : {}), ...(rankPositionMin ? { rankPositionMin } : {}), ...(rankPositionMax ? { rankPositionMax } : {}), ...(rankCheckedFrom ? { rankCheckedFrom } : {}), ...(rankCheckedBefore ? { rankCheckedBefore } : {}) };
 }
 
 function requiredColumns(
@@ -271,7 +273,7 @@ function requiredColumns(
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
-    value.length > 128
+    value.length > (field === "config.columnOrder" ? semanticSavedViewColumnOrderLimit : 128)
   ) {
     invalid(field, "Must contain 1 to 128 columns");
   }

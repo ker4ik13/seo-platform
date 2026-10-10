@@ -161,7 +161,7 @@
 
 .sectionNavigation > div > span {
   color: #8a9098;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   font-weight: 750;
   letter-spacing: .09em;
   margin-bottom: 5px;
@@ -198,7 +198,7 @@
 
 .sidebarMeta span {
   color: #8a9098;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -210,7 +210,7 @@
 
 .sidebarMeta small {
   color: var(--docs-muted);
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
 }
 
 .searchResults {
@@ -239,7 +239,7 @@
   background: #e9ebee;
   border-radius: 999px;
   color: #5b626d;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   padding: 2px 7px;
 }
 
@@ -268,7 +268,7 @@
 
 .searchResults > a small {
   color: var(--docs-muted);
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   line-height: 1.4;
 }
 
@@ -281,7 +281,7 @@
 
 .searchEndpointLine code {
   color: #343942;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -432,7 +432,7 @@
 
 .codeBlock > div > small {
   color: #979da8;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   margin-left: 8px;
   text-transform: uppercase;
 }
@@ -443,7 +443,7 @@
   border-radius: 6px;
   color: #d9dce1;
   font: inherit;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   margin-left: auto;
   min-height: 28px;
   padding: 0 9px;
@@ -493,7 +493,7 @@
 .endpointHeader > span {
   color: #6b727d;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
 }
 
 .endpointHeader > p {
@@ -506,7 +506,7 @@
   display: inline-flex;
   flex: 0 0 auto;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
+  font-size: var(--font-meta, 11px);
   font-weight: 800;
   justify-content: center;
   letter-spacing: .03em;
@@ -574,7 +574,7 @@
 .routeSummary small {
   color: #6b727d;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
 }
 
 .tableScroll {
@@ -602,7 +602,7 @@
 .tableScroll th {
   background: #f7f8f9;
   color: #656c76;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   letter-spacing: .04em;
   text-transform: uppercase;
 }
@@ -639,7 +639,7 @@
   background: transparent;
   color: #555c68;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   padding: 0;
 }
 
@@ -682,7 +682,7 @@
   color: #4d3bc7;
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   height: 22px;
   justify-content: center;
   width: 22px;
@@ -698,7 +698,7 @@
 .statusFlow code {
   background: #eef0f2;
   color: #353a43;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   position: relative;
 }
 
@@ -787,7 +787,7 @@
 .endpointReferenceList code {
   color: #30353d;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   overflow-wrap: anywhere;
 }
 
@@ -800,7 +800,7 @@
 .endpointReferenceList small {
   color: #6d7480;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
+  font-size: var(--font-meta, 11px);
 }
 
 .endpointFormats {
@@ -817,7 +817,7 @@
 
 .endpointFormats h3 {
   color: #626975;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   letter-spacing: .04em;
   margin: 0 0 7px;
   text-transform: uppercase;
@@ -836,7 +836,7 @@
 
 .endpointFormats pre code {
   color: inherit;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
   line-height: 1.55;
 }
 
@@ -869,7 +869,7 @@
 
 .pageNavigation a span {
   color: #767d87;
-  font-size: 10px;
+  font-size: var(--font-meta, 11px);
 }
 
 .pageNavigation a strong {

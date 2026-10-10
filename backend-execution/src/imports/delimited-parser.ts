@@ -1,12 +1,13 @@
 import {
   isSemanticPositionSnapshotHeader,
+  semanticImportMaxTableColumns,
   type SemanticImportDelimiter,
   type SemanticImportEncoding,
   type SemanticImportHeaderMode
 } from "@seo-platform/contracts";
 
 const SAMPLE_BYTES = 64 * 1_024;
-const DEFAULT_MAX_COLUMNS = 500;
+const DEFAULT_MAX_COLUMNS = semanticImportMaxTableColumns;
 const DEFAULT_MAX_FIELD_CHARS = 1_000_000;
 const DEFAULT_MAX_ROW_CHARS = 8_000_000;
 

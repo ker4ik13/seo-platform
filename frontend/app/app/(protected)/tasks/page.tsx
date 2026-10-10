@@ -9,9 +9,10 @@ export default async function TasksPage() {
   return !context.workspace ? (
     <WorkspaceOnboarding />
   ) : !context.project ? (
-    <ProjectOnboarding workspace={context.workspace} />
+    <ProjectOnboarding currentUserId={context.user.id} workspace={context.workspace} {...(context.projectCapabilities ? { capabilities: context.projectCapabilities } : {})} />
   ) : (
     <TaskCenter
+      currentUserId={context.user.id}
       canReorderProjects={context.projectCapabilities?.canReorder ?? false}
       projectId={context.project.id}
       projects={context.projects}

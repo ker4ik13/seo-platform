@@ -1131,7 +1131,7 @@ function requiredConfiguration(
   return configuration;
 }
 
-function configurationCreateData(
+export function configurationCreateData(
   scope: {
     readonly workspaceId: string;
     readonly projectId: string;
@@ -1176,7 +1176,7 @@ function omitNestedContextScope(
   return nested;
 }
 
-function hashConfiguration(
+export function hashConfiguration(
   configuration: TrackingContextConfigurationInput
 ): string {
   return createHash("sha256")

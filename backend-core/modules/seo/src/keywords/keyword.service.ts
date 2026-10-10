@@ -1,3 +1,4 @@
+import { currentKeywordHasMultipleUrls } from "../rank-results/rank-site-url-filter.js";
 import { rankDimensionMetadata } from "../rank-results/rank-dimension.js";
 import {
   rankDimensionConfigurationPredicate,
@@ -636,6 +637,13 @@ export class KeywordService {
       : undefined;
     const tag = normalizeTagName(query.tag ?? "");
     const sort = query.sort ?? "CREATED_DESC";
+    const urlFilterMergeTargets = query.multipleUrlsState
+      ? resolvedRankDimensionMergeTargets(await this.prisma.rankDimensionMerge.findMany({
+          where: { workspaceId, projectId }, take: 2_000,
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { sourceDimensionKey: true, targetDimensionKey: true, targetRegionLabel: true }
+        }))
+      : undefined;
     const selectedGroup = query.groupId
       ? await this.prisma.keywordGroup.findFirst({
           where: {
@@ -741,7 +749,8 @@ export class KeywordService {
                   tag,
                   sort,
                   cursor,
-                  keywordStatus
+                  keywordStatus,
+                  urlFilterMergeTargets
                 );
               }, { maxWait: 2_000, timeout: 25_000 })
             : metricSortedKeywordPage(
@@ -753,7 +762,8 @@ export class KeywordService {
                 tag,
                 sort,
                 cursor,
-                keywordStatus
+                keywordStatus,
+                urlFilterMergeTargets
               )
           : sort === "TAGS_ASC" || sort === "TAGS_DESC"
             ? tagSortedKeywordPage(
@@ -765,13 +775,14 @@ export class KeywordService {
               tag,
               sort,
               cursor,
-              keywordStatus
+              keywordStatus,
+              urlFilterMergeTargets
             )
-            : rawSortedKeywordPage(this.prisma, workspaceId, projectId, query, search, tag, sort, cursor, keywordStatus),
+            : rawSortedKeywordPage(this.prisma, workspaceId, projectId, query, search, tag, sort, cursor, keywordStatus, urlFilterMergeTargets),
         cursor
           ? Promise.resolve(undefined)
           : advancedFilters
-            ? rawKeywordCount(this.prisma, workspaceId, projectId, query, search, tag, keywordStatus)
+            ? rawKeywordCount(this.prisma, workspaceId, projectId, query, search, tag, keywordStatus, urlFilterMergeTargets)
             : this.prisma.keyword.count({ where: baseWhere })
       ]);
       hasNext = externalPage.ids.length > query.limit;
@@ -1052,7 +1063,7 @@ export class KeywordService {
         configuration
       ])
     );
-    const indicatorDimensionMergeTargets = resolvedRankDimensionMergeTargets(
+    const indicatorDimensionMergeTargets = urlFilterMergeTargets ?? resolvedRankDimensionMergeTargets(
       currentRanks.length === 0 ||
         (!includeTargetUrlIndicator && !includeMultipleUrlIndicator)
         ? []
@@ -4482,6 +4493,7 @@ function keywordFilterHash(
       wordCountMin: query.wordCountMin ?? null,
       wordCountMax: query.wordCountMax ?? null,
       targetUrlState: query.targetUrlState ?? null,
+      ...(query.multipleUrlsState ? { multipleUrlsState: query.multipleUrlsState } : {}),
       rankDimensionKey: query.rankDimensionKey ?? null,
       rankState: query.rankState ?? null,
       rankPositionMin: query.rankPositionMin ?? null,
@@ -4518,6 +4530,10 @@ function keywordOrderBy(
       return [{ sourceMode: "desc" }, { id: "desc" }];
     case "TAGS_ASC":
     case "TAGS_DESC":
+    case "TARGET_URL_ASC":
+    case "TARGET_URL_DESC":
+    case "TARGET_URL_SET_FIRST":
+    case "TARGET_URL_EMPTY_FIRST":
       throw new Error("Tag keyword sorts are resolved by tagSortedKeywordPage");
     case "CREATED_DESC":
       return [{ createdAt: "desc" }, { id: "desc" }];
@@ -4577,6 +4593,10 @@ function cursorValue(
       return row.sourceMode;
     case "TAGS_ASC":
     case "TAGS_DESC":
+    case "TARGET_URL_ASC":
+    case "TARGET_URL_DESC":
+    case "TARGET_URL_SET_FIRST":
+    case "TARGET_URL_EMPTY_FIRST":
       throw new Error("Tag cursor value is provided by tagSortedKeywordPage");
     case "FREQUENCY_BASE_DESC":
     case "FREQUENCY_BASE_ASC":
@@ -4669,7 +4689,7 @@ function isRankPositionKeywordSort(sort: SemanticKeywordSort): boolean {
 }
 
 function isExternalKeywordSort(sort: SemanticKeywordSort): boolean {
-  return isMetricKeywordSort(sort) || sort === "TAGS_ASC" || sort === "TAGS_DESC";
+  return isMetricKeywordSort(sort) || sort.startsWith("TARGET_URL_") || sort === "TAGS_ASC" || sort === "TAGS_DESC";
 }
 
 function previousFoundPositionKey(
@@ -4685,16 +4705,17 @@ function hasAdvancedKeywordFilters(query: KeywordListQuery): boolean {
   return [
     query.frequencyBaseMin, query.frequencyBaseMax, query.frequencyExactMin, query.frequencyExactMax,
     query.frequencyFixedMin, query.frequencyFixedMax, query.wordCountMin, query.wordCountMax,
-    query.targetUrlState, query.rankState, query.rankPositionMin, query.rankPositionMax,
+    query.targetUrlState, query.multipleUrlsState, query.rankState, query.rankPositionMin, query.rankPositionMax,
     query.rankCheckedFrom, query.rankCheckedBefore
   ].some(value => value !== undefined);
 }
 
 async function rawKeywordCount(
   prisma: PrismaService, workspaceId: string, projectId: string, query: KeywordListQuery,
-  search: string, tag: string, keywordStatus: "ACTIVE" | "DELETED"
+  search: string, tag: string, keywordStatus: "ACTIVE" | "DELETED",
+  urlFilterMergeTargets: ReadonlyMap<string, SemanticRankDimension> = new Map()
 ): Promise<number> {
-  const filters = keywordRawFilters(workspaceId, projectId, query, search, tag, keywordStatus);
+  const filters = keywordRawFilters(workspaceId, projectId, query, search, tag, keywordStatus, urlFilterMergeTargets);
   const rows = await prisma.$queryRaw<readonly { count: bigint }[]>`
     SELECT count(*)::bigint AS count FROM keywords k WHERE ${Prisma.join(filters, " AND ")}
   `;
@@ -4706,11 +4727,35 @@ async function rawKeywordCount(
 async function rawSortedKeywordPage(
   prisma: PrismaService, workspaceId: string, projectId: string, query: KeywordListQuery,
   search: string, tag: string, sort: SemanticKeywordSort, cursor: KeywordCursor | undefined,
-  keywordStatus: "ACTIVE" | "DELETED"
+  keywordStatus: "ACTIVE" | "DELETED",
+  urlFilterMergeTargets: ReadonlyMap<string, SemanticRankDimension> = new Map()
 ): Promise<Readonly<{ ids: readonly string[]; sortValueById: Map<string, string | number> }>> {
-  const filters = keywordRawFilters(workspaceId, projectId, query, search, tag, keywordStatus);
+  const filters = keywordRawFilters(workspaceId, projectId, query, search, tag, keywordStatus, urlFilterMergeTargets);
   const ascending = isAscendingKeywordSort(sort), operator = ascending ? Prisma.sql`>` : Prisma.sql`<`;
   const direction = ascending ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+  if (sort === "TARGET_URL_SET_FIRST" || sort === "TARGET_URL_EMPTY_FIRST") {
+    const field = Prisma.sql`CASE WHEN k.target_page_id IS NULL THEN 0 ELSE 1 END`;
+    const direction = sort === "TARGET_URL_EMPTY_FIRST" ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+    const operator = sort === "TARGET_URL_EMPTY_FIRST" ? Prisma.sql`>` : Prisma.sql`<`;
+    const value = cursor ? requiredCursorNumber(cursor.sortValue) : undefined;
+    const rows = await prisma.$queryRaw<readonly { id: string; sort_value: number }[]>`
+      SELECT k.id, ${field} AS sort_value FROM keywords k
+      WHERE ${Prisma.join(filters, " AND ")}
+        ${value === undefined ? Prisma.empty : Prisma.sql`AND (${field}, k.id) ${operator} (${value}, ${cursor!.id}::uuid)`}
+      ORDER BY ${field} ${direction}, k.id ${direction} LIMIT ${query.limit + 1}`;
+    return { ids: rows.map(row => row.id), sortValueById: new Map(rows.map(row => [row.id, row.sort_value])) };
+  }
+  if (sort === "TARGET_URL_ASC" || sort === "TARGET_URL_DESC") {
+    const field = Prisma.sql`COALESCE(target.normalized_url, ${ascending ? "\u{10ffff}" : ""}::text)`;
+    const value = cursor ? requiredCursorString(cursor.sortValue) : undefined;
+    const rows = await prisma.$queryRaw<readonly { id: string; sort_value: string }[]>`
+      SELECT k.id, ${field} AS sort_value FROM keywords k
+      LEFT JOIN pages target ON target.workspace_id = k.workspace_id AND target.project_id = k.project_id AND target.id = k.target_page_id
+      WHERE ${Prisma.join(filters, " AND ")}
+        ${value === undefined ? Prisma.empty : Prisma.sql`AND (${field}, k.id) ${operator} (${value}, ${cursor!.id}::uuid)`}
+      ORDER BY ${field} ${direction}, k.id ${direction} LIMIT ${query.limit + 1}`;
+    return { ids: rows.map(row => row.id), sortValueById: new Map(rows.map(row => [row.id, row.sort_value])) };
+  }
   if (sort === "PRIORITY_ASC" || sort === "PRIORITY_DESC") {
     const value = cursor ? requiredCursorNumber(cursor.sortValue) : undefined;
     const rows = await prisma.$queryRaw<readonly { id: string; sort_value: number }[]>`
@@ -4864,7 +4909,8 @@ async function metricSortedKeywordPage(
   tag: string,
   sort: SemanticKeywordSort,
   cursor: KeywordCursor | undefined,
-  keywordStatus: "ACTIVE" | "DELETED"
+  keywordStatus: "ACTIVE" | "DELETED",
+  urlFilterMergeTargets: ReadonlyMap<string, SemanticRankDimension> = new Map()
 ): Promise<Readonly<{
   ids: readonly string[];
   sortValueById: Map<string, string>;
@@ -4948,7 +4994,8 @@ async function metricSortedKeywordPage(
     query,
     search,
     tag,
-    keywordStatus
+    keywordStatus,
+    urlFilterMergeTargets
   );
   const metricJoin = sort.startsWith("FREQUENCY_")
     ? Prisma.sql`
@@ -5195,7 +5242,8 @@ async function tagSortedKeywordPage(
   tag: string,
   sort: SemanticKeywordSort,
   cursor: KeywordCursor | undefined,
-  keywordStatus: "ACTIVE" | "DELETED"
+  keywordStatus: "ACTIVE" | "DELETED",
+  urlFilterMergeTargets: ReadonlyMap<string, SemanticRankDimension> = new Map()
 ): Promise<Readonly<{
   ids: readonly string[];
   sortValueById: Map<string, string>;
@@ -5208,7 +5256,8 @@ async function tagSortedKeywordPage(
     query,
     search,
     tag,
-    keywordStatus
+    keywordStatus,
+    urlFilterMergeTargets
   );
   const cursorValue = cursor
     ? requiredCursorString(cursor.sortValue)
@@ -5262,7 +5311,8 @@ function keywordRawFilters(
   query: KeywordListQuery,
   search: string,
   tag: string,
-  keywordStatus: "ACTIVE" | "DELETED"
+  keywordStatus: "ACTIVE" | "DELETED",
+  urlFilterMergeTargets: ReadonlyMap<string, SemanticRankDimension> = new Map()
 ): Prisma.Sql[] {
   const filters: Prisma.Sql[] = [
     Prisma.sql`k.workspace_id = ${workspaceId}::uuid`,
@@ -5329,6 +5379,10 @@ function keywordRawFilters(
   if (query.wordCountMax !== undefined) filters.push(Prisma.sql`${wordCount} <= ${query.wordCountMax}`);
   if (query.targetUrlState === "SET") filters.push(Prisma.sql`k.target_page_id IS NOT NULL`);
   if (query.targetUrlState === "EMPTY") filters.push(Prisma.sql`k.target_page_id IS NULL`);
+  if (query.multipleUrlsState) {
+    const multiple = currentKeywordHasMultipleUrls({ workspaceId, projectId }, urlFilterMergeTargets, query.rankDimensionKey);
+    filters.push(query.multipleUrlsState === "MULTIPLE" ? multiple : Prisma.sql`NOT (${multiple})`);
+  }
   if (query.rankDimensionKey && (query.rankState || query.rankPositionMin !== undefined || query.rankPositionMax !== undefined || query.rankCheckedFrom || query.rankCheckedBefore)) {
     const dimension = parseSemanticRankDimensionKey(query.rankDimensionKey);
     if (!dimension) throw new Error("Validated rank dimension is invalid");

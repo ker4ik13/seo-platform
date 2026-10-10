@@ -1,5 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  parseTechnicalCrawlRuntimeOptions,
+  technicalCrawlRuntimeOptionKeys,
   technicalCrawlMaxRequestsPerMinute,
   technicalCrawlMaxUrlLimit,
   technicalCrawlHomepageChecks,
@@ -47,6 +49,7 @@ export function internalCreateTechnicalCrawlInput(
     "requestsPerMinute",
     "obeyRobots",
     "savePageMap",
+    ...technicalCrawlRuntimeOptionKeys,
     "jobCapacity"
   ]);
   return {
@@ -145,6 +148,7 @@ export function crawlConfig(
   }
   return {
     purpose,
+    snapshotIdentity: "REQUESTED_URL",
     startUrls: urls,
     ...(homepageChecks.length > 0 ? { homepageChecks } : {}),
     sitemapUrls,
@@ -166,7 +170,8 @@ export function crawlConfig(
       technicalCrawlMaxRequestsPerMinute
     ),
     obeyRobots: true,
-    savePageMap: optionalBoolean(value.savePageMap, true)
+    savePageMap: optionalBoolean(value.savePageMap, true),
+    ...runtimeOptions(value)
   };
 }
 
@@ -284,4 +289,8 @@ function integer(
 
 function invalid(field: string): never {
   throw new BadRequestException(`Invalid technical crawl field: ${field}`);
+}
+
+function runtimeOptions(value: Readonly<Record<string, unknown>>) {
+  try { return parseTechnicalCrawlRuntimeOptions(value); } catch { invalid("runtimeOptions"); }
 }

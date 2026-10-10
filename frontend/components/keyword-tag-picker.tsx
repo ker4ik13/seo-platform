@@ -17,6 +17,7 @@ import {
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { UiText, useUiLocale } from "./ui-locale";
 
 interface PickerTagOption {
@@ -248,10 +249,10 @@ export function KeywordTagPicker({
           closeDisabled={deleting}
           description="Тег будет снят со всех связанных запросов и удалён из проекта."
           footer={(
-            <>
+            <ConfirmationActions>
               <button className="secondary-button" disabled={deleting} onClick={() => setDeleteTarget(undefined)} type="button"><UiText text="Отмена" /></button>
               <button className="danger-button" disabled={deleting} onClick={() => void deleteTag()} type="button">{deleting ? <UiText text="Удаляем…" /> : <UiText text="Удалить тег" />}</button>
-            </>
+            </ConfirmationActions>
           )}
           onClose={() => setDeleteTarget(undefined)}
           presenceKey="semantic-tag-delete"

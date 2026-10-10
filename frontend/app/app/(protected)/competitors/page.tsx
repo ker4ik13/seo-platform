@@ -18,7 +18,7 @@ export default async function CompetitorsPage() {
     <>
       {!context.project || !context.workspace ? (
         context.workspace ? (
-          <ProjectOnboarding workspace={context.workspace} />
+          <ProjectOnboarding currentUserId={context.user.id} workspace={context.workspace} {...(context.projectCapabilities ? { capabilities: context.projectCapabilities } : {})} />
         ) : (
           <section className="panel panel-empty">
             <strong><UiText text="Сначала создайте рабочую область" /></strong>

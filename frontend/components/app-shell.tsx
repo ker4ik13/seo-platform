@@ -63,12 +63,12 @@ const navigation: readonly {
     available: true
   },
   {
-    label: "Обход сайта",
-    icon: "http",
-    href: "/app/tools",
-    section: "crawl",
-    projectScoped: true,
-    available: true
+    label: "Карта страниц",
+    icon: "pages",
+    href: "/app/pages",
+    section: "pages",
+    available: true,
+    projectScoped: true
   },
   {
     label: "Операции",
@@ -76,14 +76,6 @@ const navigation: readonly {
     href: "/app/tasks",
     section: "tasks",
     available: true
-  },
-  {
-    label: "Карта страниц",
-    icon: "pages",
-    href: "/app/pages",
-    section: "pages",
-    available: true,
-    projectScoped: true
   },
   {
     label: "Заметки",
@@ -98,11 +90,13 @@ const navigation: readonly {
 const mobileNavigationSections = new Set([
   "overview",
   "serp",
-  "crawl",
+  "pages",
   "semantics",
   "rankings",
   "tasks"
 ]);
+
+import { ProductAnalyticsTracker } from "./product-analytics-tracker";
 
 export function AppShell({
   children,
@@ -116,6 +110,7 @@ export function AppShell({
   const { t: uiText } = useUiLocale();
   const pathname = usePathname();
   const activeSection = appNavigationSection(pathname);
+  const navigationSection = activeSection === "crawl" ? "pages" : activeSection;
   const isSerpWorkbench = /^\/app\/projects\/[0-9a-f-]+\/tools\/serp\/?$/u.test(pathname ?? "");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initiallyCollapsed);
   const hasProject = Boolean(context.project);
@@ -139,6 +134,7 @@ export function AppShell({
       : item.href;
   return (
     <WorkspaceUsageProvider workspace={context.workspace}>
+    <ProductAnalyticsTracker userId={context.user.id} {...(context.workspace?{workspaceId:context.workspace.id}:{})} {...(context.project?{projectId:context.project.id}:{})} />
     <OperationConfirmationHost workspaceId={context.workspace?.id} locale={context.user.locale} />
     <ProjectOperationActivityProvider
       projects={context.projects}
@@ -187,10 +183,10 @@ export function AppShell({
             isNavigationAvailable(item) ? (
               <Link
                 aria-current={
-                  item.section === activeSection ? "page" : undefined
+                  item.section === navigationSection ? "page" : undefined
                 }
                 className={
-                  item.section === activeSection
+                  item.section === navigationSection
                     ? "nav-item active"
                     : "nav-item"
                 }
@@ -287,10 +283,10 @@ export function AppShell({
               isNavigationAvailable(item) ? (
                 <Link
                   aria-current={
-                    item.section === activeSection ? "page" : undefined
+                    item.section === navigationSection ? "page" : undefined
                   }
                   className={
-                    item.section === activeSection ? "active" : undefined
+                    item.section === navigationSection ? "active" : undefined
                   }
                   href={navigationHref(item)}
                   key={item.label}

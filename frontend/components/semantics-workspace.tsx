@@ -5,6 +5,7 @@ import { SemanticClusterManager } from "./semantic-cluster-manager";
 import { SemanticCoreTable } from "./semantic-core-table";
 import { SemanticCustomColumnManager } from "./semantic-custom-column-manager";
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import { SemanticUpload } from "./semantic-upload";
 import {
   SemanticTrashRecoveryDialog,
@@ -144,13 +145,13 @@ export function SemanticsWorkspace({
         <SemanticModal
           description="Обработка и подготовленные настройки сохранятся, но окно текущего импорта закроется."
           footer={
-            <div className="semantic-modal-actions">
+            <ConfirmationActions>
               <button autoFocus className="secondary-button" onClick={() => setConfirmImportClose(false)} type="button"><UiText text="Остаться" /></button>
               <button className="danger-button" onClick={() => {
                 setConfirmImportClose(false);
                 setActiveTool(undefined);
               }} type="button"><UiText text="Закрыть окно" /></button>
-            </div>
+            </ConfirmationActions>
           }
           onClose={() => setConfirmImportClose(false)}
           presenceKey="semantic-modal:confirm-import-close"

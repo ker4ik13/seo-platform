@@ -1,0 +1,15 @@
+.shell { min-height: 100dvh; padding: 24px 20px 60px; background: #f5f6fa; color: var(--text,#182032); }
+.brand { display: flex; align-items: center; gap: 8px; width: min(960px,100%); margin: 0 auto 24px; font-size: 15px; }
+.document { width: min(960px,100%); margin: 0 auto; background: #fff; border: 1px solid var(--line,#e1e4ed); border-radius: 14px; overflow: hidden; box-shadow: 0 10px 40px #20243709; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px; border-bottom: 1px solid var(--line,#e1e4ed); }
+.header > div { min-width: 0; }
+.header h1 { font-size: 25px; line-height: 1.35; margin: 10px 0 8px; overflow-wrap: anywhere; }
+.header time { color: var(--muted,#737f94); font-size: 12px; }
+.kind { display: inline-flex; border-radius: 6px; padding: 4px 7px; font-size: 11px; background: var(--brand-soft,#eeebff); color: var(--brand,#6545ff); text-transform: uppercase; }
+.download { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line,#e1e4ed); border-radius: 7px; padding: 8px 10px; font: inherit; font-size: 12px; background: #fff; }
+.download svg { width: 15px; height: 15px; }
+.state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 50dvh; color: var(--muted,#737f94); }
+.state h1 { font-size: 22px; color: var(--text); }
+.state p { margin: 0; text-align: center; }
+.state button { border: 1px solid var(--line); border-radius: 7px; padding: 8px 14px; background: #fff; font: inherit; }
+@media(max-width: 680px) { .shell { padding: 16px 8px 40px; } .brand { padding: 0 8px; margin-bottom: 16px; } .header { padding: 18px 16px; flex-wrap: wrap; gap: 10px; } .header h1 { font-size: 21px; } .download { min-height: 44px; } }

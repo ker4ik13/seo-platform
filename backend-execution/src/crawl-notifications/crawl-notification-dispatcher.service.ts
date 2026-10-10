@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import {
   technicalCrawlMaxUrlLimit,
+  technicalCrawlMaxIssueLimit,
   type InternalDeliverCrawlNotificationInput
 } from "@seo-platform/contracts";
 import { PrismaService } from "../database/prisma.service.js";
@@ -169,7 +170,7 @@ export function crawlNotificationPayload(
       String(payload.status)
     ) ||
     !nonNegativeInteger(payload.processedUrls, technicalCrawlMaxUrlLimit) ||
-    !nonNegativeInteger(payload.issueCount, 5_000) ||
+    !nonNegativeInteger(payload.issueCount, technicalCrawlMaxIssueLimit) ||
     payload.idempotencyKey !==
       `crawl-notification:${event.aggregateId}`
   ) {

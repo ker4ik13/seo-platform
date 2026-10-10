@@ -68,3 +68,9 @@ test("accepts a site-structure path independently from text search", () => {
     }
   );
 });
+
+test("page list carries sort, rank scope and structure control through the public parser", () => {
+  assert.deepEqual(projectPageQuery({ sort: "AVERAGE_POSITION", sortDirection: "DESC", dimensionKey: "YANDEX|RU|213|ru|DESKTOP", date: "2026-10-08", includeStructure: "false" }), { limit: 50, sort: "AVERAGE_POSITION", sortDirection: "DESC", dimensionKey: "YANDEX|RU|213|ru|DESKTOP", date: "2026-10-08", includeStructure: false });
+  assert.throws(() => projectPageQuery({ sort: "invalid" }), DomainError);
+  assert.throws(() => projectPageQuery({ sort: "AVERAGE_POSITION" }), DomainError);
+});

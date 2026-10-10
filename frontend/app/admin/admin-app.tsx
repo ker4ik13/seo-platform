@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "../../components/custom-date-input";
 import { CustomSelect } from "../../components/custom-select";
 import { Icon } from "../../components/icon";
 import { AdminHeaderActions, AdminOverlay } from "../../components/admin-overlay";
@@ -36,18 +37,20 @@ import { RefundAdministration } from "./refund-administration";
 import { ProviderAdministration } from "./provider-administration";
 import { Overview } from "./overview";
 import { UsageReview } from "./usage-review";
+import { Analytics } from "./analytics";
 import { UiText, useUiLocale } from "../../components/ui-locale";
 
 
-type Screen = "overview" | "workspaces" | "projects" | "operations" | "workers" | "receipts" | "staff" | "refunds" | "providers" | "usage";
+type Screen = "overview" | "analytics" | "workspaces" | "projects" | "operations" | "workers" | "receipts" | "staff" | "refunds" | "providers" | "usage";
 const screenTitles: Readonly<Record<Screen, string>> = {
   overview: "Обзор", workspaces: "Рабочие области", projects: "Проекты", operations: "Операции",
   workers: "Воркеры", receipts: "Чеки НПД", staff: "Роли платформы", refunds: "Возвраты",
-  providers: "Провайдеры", usage: "Расходы на проверке"
+  providers: "Провайдеры", usage: "Расходы на проверке",analytics:"Аналитика"
 };
 
 const adminScreens: readonly Screen[] = [
   "overview",
+  "analytics",
   "workspaces",
   "projects",
   "operations",
@@ -118,10 +121,12 @@ export function AdminApp() {
       setProfile(response.data);
       if (
         !response.data.roles.some((role) =>
-          ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS"].includes(role)
+          ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS","ANALYST"].includes(role)
         )
       ) {
         navigateScreen("staff");
+      } else if(response.data.roles.includes("ANALYST")&&!response.data.roles.some(role=>["SUPER_ADMIN","FINANCE","SUPPORT","OPERATIONS"].includes(role))) {
+        navigateScreen("analytics");
       }
       setAuthState("ready");
       return;
@@ -187,6 +192,7 @@ export function AdminApp() {
   if (!profile) return <StatePage text="Профиль администратора недоступен." />;
 
   const canManageStaff = profile.roles.includes("SUPER_ADMIN");
+  const canViewAnalytics=profile.roles.some(role=>["SUPER_ADMIN","FINANCE","SUPPORT","OPERATIONS","ANALYST"].includes(role));
   const canViewWorkspaces = profile.roles.some((role) =>
     ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS"].includes(role)
   );
@@ -201,7 +207,7 @@ export function AdminApp() {
   const canViewProviders = canManageBilling || profile.roles.includes("OPERATIONS");
   const canManageWorkers = profile.roles.includes("SUPER_ADMIN") || profile.roles.includes("OPERATIONS");
   const hasVisibleScreen =
-    canViewWorkspaces || canViewPlatformDirectory || canViewReceipts || canManageStaff;
+    canViewWorkspaces || canViewPlatformDirectory || canViewReceipts || canManageStaff || canViewAnalytics;
   return (
     <div className="admin-shell">
       <aside className="sidebar">
@@ -211,6 +217,7 @@ export function AdminApp() {
         </a>
         <nav aria-label={uiText("Разделы администрирования")}>
           {canViewWorkspaces && <AdminNavLink screen="overview" active={screen === "overview"}><Icon name="dashboard" /> <UiText text="Обзор" before=" " /></AdminNavLink>}
+          {canViewAnalytics&&<AdminNavLink screen="analytics" active={screen==="analytics"}><Icon name="trend"/> Аналитика</AdminNavLink>}
           {canViewWorkspaces && (
             <AdminNavLink screen="workspaces" active={screen === "workspaces"}>
               <Icon name="projects" /> <UiText text="Рабочие области" before=" " /></AdminNavLink>
@@ -258,6 +265,7 @@ export function AdminApp() {
                 value={screen}
               >
                 {canViewWorkspaces && <option value="overview"><UiText text="Обзор" /></option>}
+                {canViewAnalytics&&<option value="analytics">Аналитика</option>}
                 {canViewWorkspaces && <option value="workspaces"><UiText text="Рабочие области" /></option>}
                 {canViewPlatformDirectory && <option value="projects"><UiText text="Проекты" /></option>}
                 {canViewPlatformDirectory && <option value="operations"><UiText text="Операции" /></option>}
@@ -272,7 +280,7 @@ export function AdminApp() {
           </div>
           <div className="topbar-actions">
             <div className="admin-page-actions" id="admin-page-actions" />
-            <span className="system-state" title="Данные обновляются автоматически каждую секунду"><i /> 1 сек.</span>
+            <span className="system-state" title={screen==="analytics"?"Аналитический отчёт кешируется на 5 минут":"Данные обновляются автоматически каждую секунду"}><i /> {screen==="analytics"?"5 мин.":"1 сек."}</span>
             <button className="ghost" onClick={() => void logout()} type="button">
               <UiText text="Выйти" /></button>
           </div>
@@ -282,6 +290,8 @@ export function AdminApp() {
             text="Для этого аккаунта пока нет доступных административных разделов. Нужна подходящая роль платформы."
             title={uiText("Нет доступных разделов")}
           />
+        ) : screen === "analytics" && canViewAnalytics ? (
+          <Analytics canFinance={canManageBilling}/>
         ) : screen === "overview" && canViewWorkspaces ? (
           <Overview onNavigate={navigateScreen} />
         ) : screen === "usage" && canManageBilling ? (
@@ -623,14 +633,14 @@ function ReceiptDrawer({
             {action !== "register" && (
               <>
                 <label><span><UiText text="Подтверждение аннулирования" /></span><input name="cancellationOfficialReference" placeholder={uiText("Официальный ID/номер операции")} required /></label>
-                <label><span><UiText text="Дата аннулирования" /></span><input defaultValue={localNow()} name="cancelledAt" required type="datetime-local" /></label>
+                <label><span><UiText text="Дата аннулирования" /></span><CustomDateInput defaultValue={localNow()} name="cancelledAt" required type="datetime-local" /></label>
               </>
             )}
             {action !== "cancel" && (
               <>
                 <label><span><UiText text="ID нового чека" /></span><input name="officialReceiptId" placeholder={uiText("Например, 205ldfqqhc")} required /></label>
                 <label><span><UiText text="Официальный print URL" /></span><input name="officialReceiptUrl" placeholder="https://lknpd.nalog.ru/api/v1/receipt/…/…/print" required type="url" /></label>
-                <label><span><UiText text="Дата регистрации" /></span><input defaultValue={localNow()} name="registeredAt" required type="datetime-local" /></label>
+                <label><span><UiText text="Дата регистрации" /></span><CustomDateInput defaultValue={localNow()} name="registeredAt" required type="datetime-local" /></label>
                 <label className="check"><input name="amountChecked" required type="checkbox" /><span><UiText text="Сумма чека в «Мой налог» совпадает:" after=" " /><strong>{money(action === "replace" ? receipt.grossAmountMinor - receipt.refundedAmountMinor : receipt.grossAmountMinor, uiLocale)}</strong></span></label>
                 <label className="check"><input name="buyerChecked" required type="checkbox" /><span><UiText text="Тип и данные покупателя сверены со snapshot" /></span></label>
               </>

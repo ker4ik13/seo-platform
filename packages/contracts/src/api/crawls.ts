@@ -21,7 +21,10 @@ export type TechnicalCrawlPurpose =
 
 export const technicalCrawlStartUrlLimit = 1_000;
 export const technicalCrawlMaxUrlLimit = 5_000;
-export const technicalCrawlMaxRequestsPerMinute = 60;
+export const technicalCrawlMaxRequestsPerMinute = 240;
+export const technicalCrawlRequestTimeoutMs = 20_000;
+export const technicalCrawlMaxResponseBytes = 2_000_000;
+export const technicalCrawlFinalizationTimeoutMs = 30_000;
 
 export const technicalCrawlQueryPolicies = [
   "DROP_TRACKING",
@@ -42,6 +45,8 @@ export type TechnicalCrawlHomepageCheck =
   (typeof technicalCrawlHomepageChecks)[number];
 
 export interface TechnicalCrawlConfig {
+  /** Frozen identity algorithm; absent legacy audits continue with final-URL identity. */
+  readonly snapshotIdentity?: "REQUESTED_URL" | "FINAL_URL";
   readonly purpose: TechnicalCrawlPurpose;
   readonly startUrls: readonly string[];
   /** Optional homepage redirect probes used only by HTTP_STATUS_CHECK. */
@@ -57,6 +62,11 @@ export interface TechnicalCrawlConfig {
   readonly obeyRobots: true;
   /** Whether crawl discoveries and SEO metadata are exposed in Page Map. */
   readonly savePageMap?: boolean;
+  readonly conditionalRequests?: boolean;
+  readonly respectNofollow?: boolean;
+  readonly requestTimeoutMs?: number;
+  readonly maxResponseBytes?: number;
+  readonly maxRedirects?: number;
 }
 
 export function technicalCrawlHomepageProbeUrls(
@@ -118,6 +128,7 @@ export interface TechnicalCrawlSummary {
   readonly processedUrls: number;
   readonly successfulUrls: number;
   readonly failedUrls: number;
+  readonly blockedUrls?: number;
   readonly issueCount: number;
   readonly failureCode?: string;
   readonly backoffCode?:
@@ -136,6 +147,7 @@ export interface TechnicalCrawlSummary {
 
 export interface TechnicalCrawlCollection {
   readonly crawls: readonly TechnicalCrawlSummary[];
+  readonly runtimeLimits?: Readonly<{ requestTimeoutMs: number; maxResponseBytes: number; maxRedirects: number }>;
 }
 
 export interface TechnicalCrawlAccess {
@@ -181,6 +193,7 @@ export type CrawlPageIndexability =
   | "CANONICALIZED"
   | "REDIRECTED"
   | "ERROR"
+  | "BLOCKED_ROBOTS"
   | "UNKNOWN";
 
 export interface CrawlPageIssueEvidence {
@@ -195,9 +208,34 @@ export interface CrawlMetaTag {
   readonly property?: string;
   readonly httpEquiv?: string;
   readonly content: string;
+  /** Absent on legacy HTML tags; HTTP evidence is never inferred from http-equiv. */
+  readonly source?: "HTML" | "HTTP";
+}
+
+export interface CrawlRobotsAccessEvidence {
+  readonly agent: "seoplatformcrawler" | "googlebot" | "yandex";
+  readonly allowed: boolean;
+  readonly group: string;
+  readonly rule?: string;
+  readonly sourceUrl: string;
+}
+
+export interface CrawlLinkEvidence {
+  readonly url: string;
+  readonly anchor: string;
+  readonly rel: readonly string[];
+  readonly kind: "INTERNAL" | "EXTERNAL";
+}
+
+export interface CrawlTechnicalDetails {
+  readonly purpose?: TechnicalCrawlPurpose;
+  readonly responseHeadersCaptured?: boolean;
+  readonly robotsAccess?: readonly CrawlRobotsAccessEvidence[];
+  readonly links?: readonly CrawlLinkEvidence[];
 }
 
 export interface InternalPersistCrawlPageInput {
+  readonly preserveRequestedUrl?: boolean;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly crawlId: string;
@@ -235,6 +273,7 @@ export interface InternalPersistCrawlPageInput {
   readonly structuredDataTypes: readonly string[];
   /** Empty for snapshots created before meta-tag capture was enabled. */
   readonly metaTags?: readonly CrawlMetaTag[];
+  readonly technicalDetails?: CrawlTechnicalDetails;
   readonly wordCount: number;
   readonly contentHash: string;
   readonly etag?: string;
@@ -262,9 +301,12 @@ export interface InternalCrawlPageValidator {
   readonly etag?: string;
   readonly lastModified?: string;
   readonly internalLinks: readonly string[];
+  readonly xRobotsTag?: string;
+  readonly nofollow?: boolean;
 }
 
 export interface InternalReuseCrawlPageInput {
+  readonly preserveRequestedUrl?: boolean;
   readonly workspaceId: string;
   readonly projectId: string;
   readonly crawlId: string;
@@ -403,6 +445,17 @@ export const crawlDuplicateKinds = [
   "DESCRIPTION",
   "H1"
 ] as const;
+
+export const technicalCrawlMaxDuplicateGroupLimit =
+  Math.floor(technicalCrawlMaxUrlLimit / 2) * crawlDuplicateKinds.length;
+export const technicalCrawlMaxDuplicateIssueLimit =
+  technicalCrawlMaxUrlLimit * crawlDuplicateKinds.length;
+export const technicalCrawlMaxFinalizationIssueLimit =
+  technicalCrawlMaxDuplicateIssueLimit + technicalCrawlMaxUrlLimit;
+export const technicalCrawlMaxIssuesPerPage = 100;
+export const technicalCrawlMaxIssueLimit =
+  technicalCrawlMaxUrlLimit * technicalCrawlMaxIssuesPerPage +
+  technicalCrawlMaxFinalizationIssueLimit;
 
 export type CrawlDuplicateKind = (typeof crawlDuplicateKinds)[number];
 

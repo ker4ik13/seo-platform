@@ -8,7 +8,7 @@ import type {
   UpdateProjectInput,
   UpdateWorkspaceInput
 } from "@seo-platform/contracts";
-import { projectLogoContentTypes } from "@seo-platform/contracts";
+import { projectLogoContentTypes, parseProjectOnboardingSettings } from "@seo-platform/contracts";
 import {
   inputObject,
   optionalBooleanField,
@@ -169,6 +169,11 @@ export function createProjectInput(value: unknown): CreateProjectInput {
     "confirmDuplicateDomain"
   );
   const searchCity = optionalProjectSearchCity(input.searchCity);
+  let onboarding;
+  if (input.onboarding !== undefined) {
+    try { onboarding = parseProjectOnboardingSettings(input.onboarding); }
+    catch { throw validationError("onboarding", "INVALID_ONBOARDING", "Проверьте поисковые срезы и колонки проекта"); }
+  }
 
   return {
     name: stringField(input, "name", { min: 1, max: 160 }),
@@ -177,6 +182,7 @@ export function createProjectInput(value: unknown): CreateProjectInput {
     ...(locale ? { locale } : {}),
     ...(timezone ? { timezone } : {}),
     ...(searchCity ? { searchCity } : {}),
+    ...(onboarding ? { onboarding } : {}),
     ...(confirmDuplicateDomain === undefined
       ? {}
       : { confirmDuplicateDomain })

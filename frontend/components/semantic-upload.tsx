@@ -1,23 +1,29 @@
 "use client";
 
+import { CustomDateInput } from "./custom-date-input";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import type { IconName } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
 import { LanguageSelect } from "./locale-selects";
+import { SemanticImportDateContext } from "./semantic-import-date-context";
+import { useVirtualWindow } from "../lib/use-virtual-window";
+import { initialPositionHistoryColumns, positionHistoryMappingError, positionImportColumnChoice, removePositionHistorySource, spreadsheetColumnLetter, type PositionImportColumnChoice } from "../lib/position-import-mapping";
 import {
   semanticImportTargets,
-  semanticPositionHistoryHeaderDate,
   isSemanticPositionSnapshotHeader,
+  semanticPositionHistoryColumnHeader,
   type SemanticImportPreviewRow,
   type SemanticImportPreviewRowsPage,
+  type SemanticPositionHistoryDateColumn,
   type SemanticPositionHistoryImportOptions,
   type SemanticImportTarget
 } from "@seo-platform/contracts";
 
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -53,82 +59,16 @@ interface UploadPartUrls {
   }[];
 }
 
-interface SemanticImportColumnPreview {
-  readonly index: number;
-  readonly sourceName: string;
-  readonly suggestedTarget: string;
-  readonly confidence: number;
-}
 
-interface SemanticImportPreview {
-  readonly columns: readonly SemanticImportColumnPreview[];
-  readonly sampleRows: readonly (readonly string[])[];
-  readonly totalRows: string;
-  readonly validRows: string;
-  readonly warningRows: string;
-  readonly errorRows: string;
-}
+type SemanticImportPreview = import("@seo-platform/contracts").SemanticImportPreview;
 
-interface SemanticImportMappingColumn {
-  readonly sourceIndex: number;
-  readonly target: string;
-  readonly customName?: string;
-}
+type SemanticImportMappingColumn = import("@seo-platform/contracts").SemanticImportMappingColumn;
 
-interface SemanticImportValidation {
-  readonly totalRows: string;
-  readonly validRows: string;
-  readonly warningRows: string;
-  readonly errorRows: string;
-  readonly duplicateRowsInFile: string;
-  readonly existingKeywordsInProject: string;
-  readonly newKeywordsSkipped: string;
-  readonly uniqueKeywordsToProcess: string;
-  readonly issueCounts: Readonly<Record<string, string>>;
-}
+type SemanticImportValidation = import("@seo-platform/contracts").SemanticImportValidationSummary;
 
-interface SemanticImportResult {
-  readonly partial: boolean;
-  readonly semanticVersionId: string;
-  readonly semanticVersionNumber: number;
-  readonly createdKeywords: string;
-  readonly updatedKeywords: string;
-  readonly skippedKeywords: string;
-  readonly createdGroups: string;
-  readonly createdPages: string;
-  readonly createdTags: string;
-  readonly createdMetricSnapshots: string;
-  readonly trashedDuplicateCandidates?: readonly Readonly<{
-    keywordId: string;
-    version: number;
-    text: string;
-    language: string;
-  }>[];
-  readonly trashedDuplicateCandidatesTruncated?: boolean;
-}
+type SemanticImportResult = import("@seo-platform/contracts").SemanticImportResultSummary;
 
-interface SemanticImportSummary {
-  readonly id: string;
-  readonly uploadId: string;
-  readonly status: string;
-  readonly stage: string;
-  readonly sourceFormat: string;
-  readonly progressBytes: string;
-  readonly totalBytes: string;
-  readonly preview?: SemanticImportPreview;
-  readonly mapping?: {
-    readonly columns: readonly SemanticImportMappingColumn[];
-    readonly defaultLanguage: string;
-    readonly groupSeparator: string;
-    readonly duplicatePolicy: string;
-    readonly createMissingKeywords: boolean;
-    readonly positionHistory?: SemanticPositionHistoryImportOptions;
-  };
-  readonly validation?: SemanticImportValidation;
-  readonly result?: SemanticImportResult;
-  readonly failureCode?: string;
-  readonly version: number;
-}
+type SemanticImportSummary = import("@seo-platform/contracts").SemanticImportSummary;
 
 interface StoredUploadSession {
   readonly uploadId: string;
@@ -242,6 +182,8 @@ export function SemanticUpload({
   const [defaultLanguage, setDefaultLanguage] = useState("ru");
   const [groupSeparator, setGroupSeparator] = useState("/");
   const [positionHistory, setPositionHistory] = useState<SemanticPositionHistoryImportOptions>();
+  const [editingHistoryColumn, setEditingHistoryColumn] = useState<number>();
+  const wideColumnsDraft = useRef<readonly SemanticPositionHistoryDateColumn[] | undefined>(undefined);
   const [validation, setValidation] =
     useState<SemanticImportValidation>();
   const [importResult, setImportResult] =
@@ -267,6 +209,10 @@ export function SemanticUpload({
   const [previewReloadNonce, setPreviewReloadNonce] = useState(0);
   const previewRowsRequest = useRef<AbortController | undefined>(undefined);
   const previewTable = useRef<HTMLDivElement | null>(null);
+  const previewHead = useRef<HTMLTableSectionElement | null>(null);
+  const [previewHeadHeight, setPreviewHeadHeight] = useState(160);
+  const mappingBySource = useMemo(() => new Map(mappingColumns.map(column => [column.sourceIndex, column])), [mappingColumns]);
+  const previewAvailable = Boolean(importPreview && ["preview", "validating", "validation-ready", "publishing"].includes(stage));
   const activeRequests = useRef(new Set<XMLHttpRequest>());
   const backgroundRequest = useRef<AbortController | undefined>(undefined);
   const cancelled = useRef(false);
@@ -327,6 +273,16 @@ export function SemanticUpload({
         rowNumber: String(index + 1),
         values
       }));
+  const previewWindow = useVirtualWindow(previewTable, visiblePreviewRows.length, 30, previewHeadHeight, 40);
+  useLayoutEffect(() => {
+    const head = previewHead.current;
+    if (!head) return;
+    const measure = () => setPreviewHeadHeight(head.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(head);
+    return () => observer.disconnect();
+  }, [previewAvailable, importPreview?.columns.length]);
   const semanticCancellationStages: readonly UploadStage[] = [
     "parsing",
     "import-pending",
@@ -377,10 +333,7 @@ export function SemanticUpload({
     setPreviewRowsError(undefined);
     setPreviewRowsLoaded(false);
     if (
-      !["preview", "validating", "validation-ready", "publishing"].includes(stage) ||
-      !completedImportId ||
-      !importPreview ||
-      positionHistory
+      !previewAvailable || !completedImportId
     ) {
       setPreviewRowsLoading(false);
       return;
@@ -413,12 +366,10 @@ export function SemanticUpload({
     return () => controller.abort();
   }, [
     completedImportId,
-    importPreview,
-    positionHistory,
+    previewAvailable,
     previewSort,
     previewReloadNonce,
     projectId,
-    stage
   ]);
 
   useEffect(() => {
@@ -448,6 +399,8 @@ export function SemanticUpload({
     setDefaultLanguage("ru");
     setGroupSeparator("/");
     setPositionHistory(undefined);
+    wideColumnsDraft.current = undefined;
+    setEditingHistoryColumn(undefined);
     setDuplicatePolicy(
       nativeKeyCollector ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY"
     );
@@ -555,8 +508,7 @@ export function SemanticUpload({
         setPositionHistory(semanticImport.mapping?.positionHistory ??
           (positionImport
             ? {
-                ...defaultPositionHistoryOptions(file?.name),
-                layout: detectedHistory ? "WIDE" : "LONG"
+                ...initialHistoryOptions(semanticImport.preview, file?.name, detectedHistory),
               }
             : undefined));
         setStage("preview");
@@ -687,12 +639,13 @@ export function SemanticUpload({
 
   function updateMapping(
     sourceIndex: number,
-    target: string,
+    target: SemanticImportTarget,
     sourceName: string
   ): void {
     setMappingColumns((current) => {
       const singleton = !["custom", "ignore"].includes(target);
-      return current.map((column) => {
+      const all = current.some(column => column.sourceIndex === sourceIndex) ? current : [...current, { sourceIndex, target: "ignore" as const }];
+      return all.map((column) => {
         if (
           singleton &&
           column.sourceIndex !== sourceIndex &&
@@ -704,7 +657,7 @@ export function SemanticUpload({
             )?.sourceName ?? `Колонка ${column.sourceIndex + 1}`;
           return {
             sourceIndex: column.sourceIndex,
-            target: "custom",
+            target: "custom" as const,
             customName: column.customName ?? fallbackName
           };
         }
@@ -719,6 +672,54 @@ export function SemanticUpload({
           : column;
       });
     });
+  }
+
+  function changeHistoryColumn(sourceIndex: number, patch: Partial<SemanticPositionHistoryDateColumn>, inherit = false): void {
+    setPositionHistory(current => current ? { ...current, dateColumns: (current.dateColumns ?? []).map(column => {
+      if (column.sourceIndex !== sourceIndex) return column;
+      const updated = { ...column, ...patch };
+      if (!inherit) return updated;
+      const { context: _removed, ...rest } = updated;
+      return rest;
+    }) } : current);
+  }
+
+  function linkHistoryUrl(urlSourceIndex: number, positionSourceIndex: number): void {
+    setPositionHistory(current => {
+      if (!current) return current;
+      const cleared = removePositionHistorySource(current, urlSourceIndex);
+      return { ...cleared, dateColumns: (cleared.dateColumns ?? []).map(column => column.sourceIndex === positionSourceIndex ? { ...column, rankingUrlSourceIndex: urlSourceIndex } : column) };
+    });
+  }
+
+  function updateImportColumn(sourceIndex: number, choice: PositionImportColumnChoice, sourceName: string): void {
+    if (positionHistory && choice === "history.position") {
+      const header = semanticPositionHistoryColumnHeader(sourceName);
+      setPositionHistory(current => {
+        if (!current) return current;
+        const cleared = removePositionHistorySource(current, sourceIndex);
+        return { ...cleared, dateColumns: [...(cleared.dateColumns ?? []), { sourceIndex, observedAt: header?.observedAt ?? "" }].sort((a, b) => a.sourceIndex - b.sourceIndex) };
+      });
+      updateMapping(sourceIndex, "ignore", sourceName);
+    } else if (positionHistory && choice === "history.url") {
+      const dates = positionHistory.dateColumns ?? [];
+      const header = semanticPositionHistoryColumnHeader(sourceName);
+      const target = dates.find(column => column.observedAt === header?.observedAt) ?? [...dates].reverse().find(column => column.sourceIndex < sourceIndex) ?? dates[0];
+      if (!target) { setError("Сначала выберите колонку позиции и её дату."); return; }
+      linkHistoryUrl(sourceIndex, target.sourceIndex);
+      updateMapping(sourceIndex, "ignore", sourceName);
+    } else {
+      if (positionHistory) setPositionHistory(current => current ? removePositionHistorySource(current, sourceIndex) : current);
+      updateMapping(sourceIndex, choice as SemanticImportTarget, sourceName);
+    }
+  }
+
+  function changeHistoryLayout(layout: "WIDE" | "LONG"): void {
+    if (!importPreview || !positionHistory) return;
+    if (positionHistory.dateColumns) wideColumnsDraft.current = positionHistory.dateColumns;
+    const { dateColumns: _previous, ...defaults } = positionHistory;
+    setPositionHistory({ ...defaults, layout, ...(layout === "WIDE" ? { dateColumns: wideColumnsDraft.current ?? initialPositionHistoryColumns(importPreview.columns, defaults) } : {}) });
+    setMappingColumns(layout === "WIDE" ? positionHistoryMapping(importPreview) : presetMapping(importPreview, "POSITIONS"));
   }
 
   function updateCustomName(
@@ -804,8 +805,7 @@ export function SemanticUpload({
     setDuplicatePolicy(source === "KEY_COLLECTOR" && nativeProject ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY");
     setPositionHistory(source === "POSITIONS"
       ? {
-          ...defaultPositionHistoryOptions(file?.name),
-          layout: detectedHistory ? "WIDE" : "LONG"
+          ...initialHistoryOptions(importPreview, file?.name, detectedHistory),
         }
       : undefined);
     setMessage(
@@ -846,7 +846,8 @@ export function SemanticUpload({
             method: "POST",
             ifMatch: importVersion,
             body: {
-              columns: mappingColumns,
+              columns: mappingColumns.filter(column => column.target !== "ignore" ||
+                !positionHistory?.dateColumns?.some(date => date.sourceIndex === column.sourceIndex || date.rankingUrlSourceIndex === column.sourceIndex)),
               defaultLanguage,
               groupSeparator,
               duplicatePolicy,
@@ -1234,47 +1235,54 @@ export function SemanticUpload({
             <label className="import-position-history-toggle">
               <input checked={Boolean(positionHistory)} onChange={(event) => {
                 if (event.target.checked) {
-                  setPositionHistory(defaultPositionHistoryOptions(file?.name));
+                  setPositionHistory(initialHistoryOptions(importPreview, file?.name, true));
                   setMappingColumns(positionHistoryMapping(importPreview));
                 } else {
                   setPositionHistory(undefined);
                   setMappingColumns(suggestedMapping(importPreview));
                 }
               }} type="checkbox" />
-              <span><strong><UiText text="Импортировать историю позиций по датам" /></strong><small><UiText text="Один файл — одна поисковая система. Пустая ячейка означает, что замера не было; -, – и — означают, что позиция не найдена." /></small></span>
+              <span><strong><UiText text="Импортировать историю позиций по датам" /></strong></span>
             </label>
           )}
           {positionHistory && (
             <section className="import-position-history-settings">
               <header><Icon name="history" /><div><strong><UiText text="Параметры истории позиций" /></strong><small>{positionHistory.layout === "LONG" ? mappingColumns.some(({ target }) => target === "metric.observed_at") ? <UiText text="Построчный формат: дата и позиция берутся из каждой строки" /> : <UiText text="Один снимок: выберите дату и контекст ниже" /> : <UiText text="Найдено колонок с датами: {0}" values={[String(positionHistoryDateCount(importPreview))]} />}</small></div></header>
               <div>
-                <label><span><UiText text="Поисковая система файла" /></span><CustomSelect value={positionHistory.searchEngine} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, searchEngine: event.target.value as "YANDEX" | "GOOGLE" } : current)}><option value="YANDEX"><UiText text="Яндекс" /></option><option value="GOOGLE">Google</option></CustomSelect></label>
+                <label><span><UiText text="Расположение позиций" /></span><CustomSelect aria-label={uiText("Расположение позиций")} value={positionHistory.layout ?? "WIDE"} disabled={stage !== "preview"} onChange={event => changeHistoryLayout(event.target.value === "WIDE" ? "WIDE" : "LONG")}>
+                  <option value="WIDE"><UiText text="Каждая колонка — дата" /></option><option value="LONG"><UiText text="Каждая строка — снимок" /></option>
+                </CustomSelect></label>
+                <label><span><UiText text="Поисковая система по умолчанию" /></span><CustomSelect value={positionHistory.searchEngine} disabled={stage !== "preview"} onChange={event => setPositionHistory(current => current ? { ...current, searchEngine: event.target.value === "GOOGLE" ? "GOOGLE" : "YANDEX", regionCode: "", regionLabel: "" } : current)}>
+                  <option value="YANDEX"><SearchEngineLogo engine="YANDEX" size="compact" /><UiText text="Яндекс" /></option><option value="GOOGLE"><SearchEngineLogo engine="GOOGLE" size="compact" />Google</option>
+                </CustomSelect></label>
                 <label><span><UiText text="Город / регион по умолчанию" /></span><SearchableRegionSelect kind={positionHistory.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"} value={positionHistory.regionCode} valueLabel={positionHistory.regionLabel} onChange={({ code, label }) => setPositionHistory(current => current ? { ...current, regionCode: code, regionLabel: label } : current)} /></label>
                 <label><span><UiText text="Устройство по умолчанию" /></span><CustomSelect value={positionHistory.device} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, device: event.target.value as "DESKTOP" | "MOBILE" } : current)}><option value="DESKTOP"><UiText text="ПК" /></option><option value="MOBILE"><UiText text="Телефон" /></option></CustomSelect></label>
                 <label><span><UiText text="Язык выдачи" /></span><LanguageSelect value={positionHistory.language} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, language: event.target.value } : current)} /></label>
-                {positionHistory.layout === "LONG" && !mappingColumns.some(({ target }) => target === "metric.observed_at") && <label><span><UiText text="Дата снимка" /></span><input aria-label={uiText("Дата снимка")} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, observedAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "" } : current)} required type="date" value={positionHistory.observedAt?.slice(0, 10) ?? ""} /></label>}
+                {positionHistory.layout === "LONG" && !mappingColumns.some(({ target }) => target === "metric.observed_at") && <label><span><UiText text="Дата снимка" /></span><CustomDateInput aria-label={uiText("Дата снимка")} disabled={stage !== "preview"} onChange={(event) => setPositionHistory(current => current ? { ...current, observedAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "" } : current)} required type="date" value={positionHistory.observedAt?.slice(0, 10) ?? ""} /></label>}
               </div>
-              <p><UiText text="Если дата или контекст указаны отдельными колонками файла, значения строки имеют приоритет. Для файла одного снимка выберите дату, поисковик, город и устройство здесь." /></p>
             </section>
           )}
-          {!positionHistory && <div
+          {<div
             aria-busy={previewRowsLoading}
-            className="import-preview-table"
+            className="import-preview-table import-spreadsheet"
             onScroll={previewTableScrolled}
             ref={previewTable}
             tabIndex={0}
           >
             <table>
-              <thead>
+              <thead ref={previewHead}>
+                <tr className="import-spreadsheet-letters"><th className="import-spreadsheet-index" />{importPreview.columns.map(column => <th key={column.index}>{spreadsheetColumnLetter(column.index)}</th>)}</tr>
                 <tr>
+                  <th className="import-spreadsheet-index">1</th>
                   {importPreview.columns.map((column) => {
-                    const selected =
-                      mappingColumns.find(
-                        ({ sourceIndex }) => sourceIndex === column.index
-                      ) ?? {
+                    const selected: SemanticImportMappingColumn =
+                      mappingBySource.get(column.index) ?? {
                         sourceIndex: column.index,
-                        target: column.suggestedTarget
+                        target: positionHistory ? "ignore" : MAPPING_TARGETS.includes(column.suggestedTarget as SemanticImportTarget) ? column.suggestedTarget as SemanticImportTarget : "custom"
                     };
+                    const historyColumn = positionHistory?.dateColumns?.find(item => item.sourceIndex === column.index);
+                    const urlColumn = positionHistory?.dateColumns?.find(item => item.rankingUrlSourceIndex === column.index);
+                    const choice = positionImportColumnChoice(column.index, mappingBySource, positionHistory);
                     return (
                       <th key={column.index}>
                         <div className="import-preview-column-heading">
@@ -1303,18 +1311,13 @@ export function SemanticUpload({
                         </div>
                         {stage === "preview" ? (
                           <>
-                            <small className="import-mapping-field-label"><UiText text="Поле назначения" /></small>
                             <CustomSelect
                               aria-label={uiText("Назначение колонки {0}", [String(column.sourceName)])}
-                              onChange={(event) =>
-                                updateMapping(
-                                  column.index,
-                                  event.target.value,
-                                  column.sourceName
-                                )
-                              }
-                              value={selected.target}
+                              onChange={event => updateImportColumn(column.index, event.target.value as PositionImportColumnChoice, column.sourceName)}
+                              value={choice}
                             >
+                              {positionHistory?.layout === "WIDE" && <option value="history.position"><UiText text="Позиция по дате" /></option>}
+                              {positionHistory?.layout === "WIDE" && <option value="history.url"><UiText text="URL по дате" /></option>}
                               {MAPPING_TARGETS.map((target) => (
                                 <option key={target} value={target}>
                                   <span className="import-mapping-target-option">
@@ -1324,7 +1327,19 @@ export function SemanticUpload({
                                 </option>
                               ))}
                             </CustomSelect>
-                            {selected.target === "custom" && (
+                            {historyColumn && <div className="import-history-column-fields">
+                              <CustomDateInput aria-label={uiText("Дата колонки {0}", [column.sourceName])} lang={uiLocale} type="date" value={historyColumn.observedAt.slice(0, 10)} onChange={event => changeHistoryColumn(column.index, { observedAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "" })} />
+                              <button className="import-history-context" type="button" onClick={() => setEditingHistoryColumn(column.index)}>
+                                <SearchEngineLogo engine={historyColumn.context?.searchEngine ?? positionHistory!.searchEngine} size="compact" />
+                                <span>{historyColumn.context?.regionLabel ?? positionHistory!.regionLabel} · <UiText text={(historyColumn.context?.device ?? positionHistory!.device) === "MOBILE" ? "Телефон" : "ПК"} /></span>
+                                <Icon name="chevronDown" />
+                              </button>
+                            </div>}
+                            {choice === "history.url" && <CustomSelect aria-label={uiText("Дата URL колонки {0}", [column.sourceName])} value={urlColumn ? String(urlColumn.sourceIndex) : ""} onChange={event => linkHistoryUrl(column.index, Number(event.target.value))}>
+                              <option value=""><UiText text="Выберите дату позиции" /></option>
+                              {positionHistory?.dateColumns?.map(item => <option key={item.sourceIndex} value={String(item.sourceIndex)}>{item.observedAt.slice(0, 10)} · {importPreview.columns[item.sourceIndex]?.sourceName}</option>)}
+                            </CustomSelect>}
+                            {choice === "custom" && (
                               <label className="import-custom-column-name">
                                 <span><UiText text="Название своей колонки" /></span>
                                 <input
@@ -1344,7 +1359,7 @@ export function SemanticUpload({
                         ) : (
                           <span className="import-mapping-readonly">
                             {mappingTargetIcon(selected.target as SemanticImportTarget)}
-                            <span>{selected.target === "custom"
+                            <span>{historyColumn ? historyColumn.observedAt.slice(0, 10) : urlColumn ? <UiText text="URL по дате" /> : selected.target === "custom"
                               ? selected.customName ?? column.sourceName
                               : <UiText text={mappingTargetLabel(selected.target as SemanticImportTarget)} />}</span>
                           </span>
@@ -1355,8 +1370,10 @@ export function SemanticUpload({
                 </tr>
               </thead>
               <tbody>
-                {visiblePreviewRows.map((row) => (
+                {previewWindow.paddingTop > 0 && <tr className="import-preview-spacer" aria-hidden="true"><td colSpan={importPreview.columns.length + 1} style={{ height: previewWindow.paddingTop }} /></tr>}
+                {visiblePreviewRows.slice(previewWindow.start, previewWindow.end).map((row) => (
                   <tr key={row.rowNumber}>
+                    <td className="import-spreadsheet-index">{row.rowNumber}</td>
                     {importPreview.columns.map((column) => (
                       <td key={column.index}>
                         {row.values[column.index] || "—"}
@@ -1364,10 +1381,11 @@ export function SemanticUpload({
                     ))}
                   </tr>
                 ))}
+                {previewWindow.paddingBottom > 0 && <tr className="import-preview-spacer" aria-hidden="true"><td colSpan={importPreview.columns.length + 1} style={{ height: previewWindow.paddingBottom }} /></tr>}
               </tbody>
             </table>
           </div>}
-          {!positionHistory && (
+          {(
             <div className="import-preview-pagination-status" role="status">
               <span>
                 <UiText text="Показано {0} из {1}" values={[
@@ -1386,16 +1404,7 @@ export function SemanticUpload({
               )}
             </div>
           )}
-          <small className="upload-note import-preview-note">
-            <UiText text={positionHistory
-              ? positionHistory.layout === "WIDE"
-                ? "Колонки с датами распознаны автоматически; сопоставлять их вручную не нужно."
-                : "Колонка позиции и URL из выдачи распознаны автоматически; проверьте дату и контекст снимка."
-              : stage === "preview"
-                ? "Для каждой исходной колонки выберите поле назначения, «Своя колонка» или «Не импортировать». Таблица прокручивается по горизонтали и вертикали; её шапка остаётся на месте."
-                : source === "KEY_COLLECTOR"
-                  ? "Нативный профиль Key Collector применён автоматически; нестандартные данные сохранятся в пользовательских колонках."
-                  : "Сопоставление проверено и готово к публикации."} /></small>
+          {positionHistoryMappingError(positionHistory, mappingColumns) && <p className="inline-alert" role="alert"><UiText text={positionHistoryMappingError(positionHistory, mappingColumns)!} /></p>}
           {stage === "preview" && (
             <section className="import-mapping-settings">
               <header>
@@ -1524,6 +1533,7 @@ export function SemanticUpload({
         </div>
       )}
       <div className="security-actions">
+        {stage === "validation-ready" && <button className="secondary-button" type="button" onClick={() => { setValidation(undefined); setStage("preview"); }}><UiText text="Изменить сопоставление" /></button>}
         {stage === "preview" && (
           <button
             className="primary-button"
@@ -1539,7 +1549,8 @@ export function SemanticUpload({
               ) ||
               (positionHistory?.layout === "LONG" &&
                 !positionHistory.observedAt &&
-                !mappingColumns.some(({ target }) => target === "metric.observed_at"))
+                !mappingColumns.some(({ target }) => target === "metric.observed_at")) ||
+              Boolean(positionHistoryMappingError(positionHistory, mappingColumns))
             }
             onClick={() => void validateImport(uiLocale)}
             type="button"
@@ -1606,6 +1617,12 @@ export function SemanticUpload({
           ? "После проверки безопасности поля KC4 сопоставляются и публикуются автоматически."
           : "После загрузки файл не публикуется сразу: сначала идут антивирусная проверка, распознавание колонок и preview конфликтов."} /></small>
       }
+      {editingHistoryColumn !== undefined && positionHistory && <SemanticImportDateContext
+        value={positionHistory.dateColumns?.find(column => column.sourceIndex === editingHistoryColumn)?.context ?? positionHistory}
+        onApply={context => { changeHistoryColumn(editingHistoryColumn, { context }); setEditingHistoryColumn(undefined); }}
+        onDefault={() => { changeHistoryColumn(editingHistoryColumn, {}, true); setEditingHistoryColumn(undefined); }}
+        onClose={() => setEditingHistoryColumn(undefined)}
+      />}
         </div>
       </div>
     </section>
@@ -2252,6 +2269,10 @@ function mappingTargetLabel(value: SemanticImportTarget): string {
     "ranking.google.url": "Google · Релевантный URL",
     "context.search_engine": "Поисковая система",
     "context.region": "Регион",
+    "context.region_code": "Код региона",
+    "context.country": "Страна",
+    "context.language": "Язык выдачи",
+    "context.device": "Устройство",
     "metric.observed_at": "Дата проверки",
     "keyword.tags": "Теги",
     "metric.kei": "KEI",
@@ -2296,7 +2317,7 @@ function suggestedMapping(
     const suggested = MAPPING_TARGETS.some(
       (target) => target === column.suggestedTarget
     )
-      ? column.suggestedTarget
+      ? column.suggestedTarget as SemanticImportTarget
       : "custom";
     const singleton = !["custom", "ignore"].includes(suggested);
     const target =
@@ -2337,7 +2358,7 @@ function presetMapping(
     const alias = importPresetTarget(normalized, preset);
     const suggested = alias ?? (
       MAPPING_TARGETS.includes(column.suggestedTarget as SemanticImportTarget)
-        ? column.suggestedTarget
+        ? column.suggestedTarget as SemanticImportTarget
         : "custom"
     );
     const singleton = !["custom", "ignore"].includes(suggested);
@@ -2361,13 +2382,18 @@ function importPresetTarget(
   if (preset === "POSITIONS" && positionRankingUrlHeader(value)) return "ranking.url";
   if (preset === "POSITIONS" && isSemanticPositionSnapshotHeader(value)) return "ranking.position";
   if (/^(?:целевой url|целевая страница|посадочная страница|target url|landing page)$/iu.test(value)) return "page.target_url";
+  if (/^(?:язык запроса|keyword language)$/iu.test(value)) return "keyword.language";
+  if (preset === "POSITIONS" && /^(?:язык выдачи|язык|language|serp language)$/iu.test(value)) return "context.language";
   if (/^(?:язык|language|locale)$/iu.test(value)) return "keyword.language";
   if (/^(?:заметка|комментарий|note|comment)$/iu.test(value)) return "keyword.note";
   if (/^(?:избранное|favorite)$/iu.test(value)) return "keyword.favorite";
   if (/^(?:отслеживается|отслеживать|tracked|tracking)$/iu.test(value)) return "keyword.tracked";
-  if (/^(?:дата|дата проверки|дата съема|date|checked at|observed at)$/iu.test(value)) return "metric.observed_at";
+  if (/^(?:дата|дата снимка|дата проверки|дата съема|дата съёма|date|checked at|observed at)$/iu.test(value)) return "metric.observed_at";
   if (/^(?:поисковик|поисковая система|search engine)$/iu.test(value)) return "context.search_engine";
   if (/^(?:регион|город|region|city)$/iu.test(value)) return "context.region";
+  if (/^(?:код региона|region code|region id)$/iu.test(value)) return "context.region_code";
+  if (/^(?:страна|country)$/iu.test(value)) return "context.country";
+  if (/^(?:устройство|device)$/iu.test(value)) return "context.device";
   if (/^(?:позиция яндекс|яндекс позиция|yandex position)$/iu.test(value)) return "ranking.yandex.position";
   if (/^(?:url яндекс|яндекс url|yandex url)$/iu.test(value)) return "ranking.yandex.url";
   if (/^(?:позиция google|google position)$/iu.test(value)) return "ranking.google.position";
@@ -2419,7 +2445,12 @@ function isPositionSnapshotPreview(preview: SemanticImportPreview): boolean {
 }
 
 function positionHistoryDateCount(preview: SemanticImportPreview): number {
-  return preview.columns.filter(column => semanticPositionHistoryHeaderDate(column.sourceName)).length;
+  return preview.columns.filter(column => semanticPositionHistoryColumnHeader(column.sourceName)?.kind === "POSITION").length;
+}
+
+function initialHistoryOptions(preview: SemanticImportPreview, filename: string | undefined, wide: boolean): SemanticPositionHistoryImportOptions {
+  const defaults = defaultPositionHistoryOptions(filename);
+  return { ...defaults, layout: wide ? "WIDE" : "LONG", ...(wide ? { dateColumns: initialPositionHistoryColumns(preview.columns, defaults) } : {}) };
 }
 
 function positionHistoryMapping(preview: SemanticImportPreview): readonly SemanticImportMappingColumn[] {
@@ -2427,21 +2458,16 @@ function positionHistoryMapping(preview: SemanticImportPreview): readonly Semant
     /^(?:запрос(?:ы)?|ключ(?:евая фраза)?|фраза|query|keyword)$/iu.test(column.sourceName.normalize("NFKC").trim())
   ) ?? preview.columns[0];
   if (!keyword) return [];
-  const keywordLanguage = preview.columns.find(column =>
-    /^(?:язык запроса|keyword language)$/iu.test(column.sourceName.normalize("NFKC").trim())
-  );
-  const rankingUrl = preview.columns.find(column =>
-    positionRankingUrlHeader(column.sourceName)
-  );
-  return [
-    { sourceIndex: keyword.index, target: "keyword.text" },
-    ...(keywordLanguage ? [{ sourceIndex: keywordLanguage.index, target: "keyword.language" as const }] : []),
-    ...(rankingUrl ? [{ sourceIndex: rankingUrl.index, target: "ranking.url" as const }] : [])
-  ];
+  return presetMapping(preview, "POSITIONS").map(column => {
+    if (column.sourceIndex === keyword.index) return { sourceIndex: keyword.index, target: "keyword.text" };
+    const header = preview.columns[column.sourceIndex]?.sourceName ?? "";
+    if (semanticPositionHistoryColumnHeader(header) || column.target === "keyword.text") return { sourceIndex: column.sourceIndex, target: "ignore" };
+    return column;
+  });
 }
 
 function positionRankingUrlHeader(value: string): boolean {
-  return /^(?:url|урл|url из выдачи|урл из выдачи|ссылка из выдачи|найденный url|найденная страница|релевантный url|релевантная страница|url позиции|ranking url|ranking page|serp url|result url|relevant url)$/iu.test(
+  return /^(?:url|урл|url из поиска|url из выдачи|урл из выдачи|ссылка из выдачи|найденный url|найденная страница|релевантный url|релевантная страница|url позиции|ranking url|ranking page|serp url|result url|relevant url)$/iu.test(
     value.normalize("NFKC").trim()
   );
 }

@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 7 октября 2026 года.
+Актуально на 10 октября 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -72,6 +72,98 @@ backup Dokploy запускает `pg_dump` внутри контейнера и
 имя базы.
 
 ## 2. Каталоги
+
+Создание проекта использует один ProjectCreationWizard в каталоге и первом
+онбординге. Три шага выбирают SEO/ИИ, города/устройства/глубину и начальные
+колонки. Предпросмотр прокручивается отдельно и использует общий с семантикой
+SemanticColumnHeader (`lib/semantic-column-presentation.ts`) с бренд-логотипами.
+ConfirmationActions задаёт одинаковую адаптивную геометрию кнопок закрытия,
+остановки и удаления; ошибки, цены и последствия действий сохраняются.
+Общие form-field/workflow-field не растягивают input из-за подсказки соседа.
+Дерево семантики одним действием раскрывает/сворачивает все обычные ветви;
+это presentation state, а не новое чтение ключей. В семантике и позициях доступны
+targetUrlState и multipleUrlsState, URL-сортировки и scoped сохранение выбора.
+SEO `rank-results/rank-site-url-filter.ts` проверяет второй distinct URL домена
+в последнем видимом снимке, с tenant/merge/history boundaries; экспорт и saved
+views проводят те же строгие filters через Core/Jobs/SEO без client-side отсечения.
+Матрица позиций имеет resizable колонку № и portal InfoTooltip, использующий
+уже загруженные row facts без hover-запросов. KeywordSeasonalityModal читает
+существующий scoped insights только при явном открытии.
+`lib/date-range-session.ts` обновляет только конец диапазона новой вкладки до
+сегодня; принятая ручная дата не сбрасывается при reopen/reload/background refresh.
+Периоды MONTH/WEEK остаются bounded завершёнными периодами провайдера.
+Матрица позиций и дерево папок используют общий fixed-height window
+`frontend/lib/virtual-window.ts` и lifecycle-hook `use-virtual-window.ts`:
+DOM ограничен viewport и overscan, номера остаются в полном серверном порядке.
+Клавиатурная навигация проходит через границы окна. `InfoTooltip` во всех
+экранах использует native button, portal, focus/touch/Escape; SemanticModal
+восстанавливает фокус после закрытия. `use-confirmation.tsx` заменяет
+browser confirm для заметок, колонок, представлений, кластеров и пресетов.
+`keyword-url-filters.tsx` — общие типизированные URL-условия и removable chips.
+`rankings-date-columns.tsx` содержит только выбор видимых дат; строки позиций
+имеют прежнюю компактную высоту, ширина меняется ручками самих колонок.
+Общий CustomDateRangePicker выводит календарь fixed-portal поверх формы
+в том же native dialog top layer; date-range-popover-position учитывает
+свободное место и visual viewport, не увеличивая scroll тела модалки.
+`semantic-view-presets.ts` даёт явные пресеты без сброса filters/custom widths.
+`coalesced-read.ts` объединяет только pending browser/admin GET, не хранит
+результаты и изолирует отмену каждого потребителя. Фоновый refresh матрицы
+не удаляет сохранённые строки при временной ошибке сети.
+SEO `rank-workbench/rank-read-window.ts` держит ограниченное окно opaque
+keyword IDs в серверном порядке. Связанный с tenant/filter cursor содержит
+last ID и watermark. Полная проекция, сводка и trend рассчитываются один раз;
+следующие страницы читают metadata/cells только своей пачки без SQL OFFSET.
+Owner-local cache ограничен 32 MiB, 16 окнами и 120 секундами простоя;
+холодный экземпляр восстанавливает окно по watermark, без новых таблиц,
+ownership changes или источника истины в браузере. Группы строки возвращаются
+пакетно после pagination: до пяти путей и общий count, без hover-запросов.
+`infrastructure/vps/test-usability.sh` запускает реальные HTTPS flows,
+геометрию/клавиатуру/offline-ошибку и inventory 49 маршрутов на четырёх ширинах.
+Synthetic imported data проходит тот же owning publisher пачками по 500;
+PostgreSQL integration наблюдает реальные counters из `jobs_db.diagnostics`.
+`.github/workflows/quality.yml` содержит source gates и opt-in HTTPS job
+на dedicated self-hosted test runner; production и публичные session artifacts
+не используются. Staff fixtures временные и отзываются после проверки.
+Текущий usability/design backlog и подтверждённые сценарии —
+`docs/usability-design-audit-2026-10-09.md`; реальные HTTPS regression flows —
+`infrastructure/e2e/project-usability.test.mjs`, многомаршрутный inventory —
+`infrastructure/e2e/usability-audit.mjs`. Новые URL-filters также проверяются
+на отдельном PostgreSQL через `test-postgres.sh` с suite `usability`.
+Core хранит immutable projects.onboarding и scoped
+project_creation_receipts; SEO Data ProjectOnboardingModule одной bounded
+транзакцией создаёт tracking contexts/configurations, saved view и
+project_onboarding_initializations. Повтор команды не создаёт второй проект
+и не переписывает пользовательские представления. В metadata-bootstrap
+нет чтения ключей, assignment materialization, jobs или provider calls.
+Полный шаблон возвращается только для выбранного проекта: каталоги omit-ят
+JSON, BFF гидратирует активный проект одним bounded чтением. Запланированные
+географические колонки доступны до первого замера без фиктивных позиций.
+Последние принятые параметры хранятся по user/project/purpose/engine и имеют
+приоритет над стартовым шаблоном. Порядок saved view допускает 512 ключей
+каталога, но видимый набор по-прежнему максимум 128. Новые default не
+включают WS/Группу/Теги/Источник; существующие views не мигрируются.
+График обзора использует исходную глубину среза только без явного личного
+выбора. Границы и replay — ADR-2026-058.
+
+`backend-core/modules/api/src/analytics` владеет пакетным сбором продуктовой
+активности через `/api/v1/analytics/activity` и `platform_db.product_analytics_*`.
+AppShell подключает `ProductAnalyticsTracker`: типизированные события, активное
+время с idle/focus/visibility, безопасные timing-метрики. Минутные bitmap
+объединяют пересечения вкладок; retry receipts и UUID сессии предотвращают
+дублирование. Raw minute/receipt данные живут 2 дня, дневные агрегаты 400 дней.
+`admin/platform-analytics.*` и `/admin?screen=analytics` дают графики аудитории,
+использования, активации/удержания, операций, финансов и качества. Периоды
+7/30/90 дней, UTC, сегмент и вкладка сохраняются в URL; отчёт single-flight
+кешируется 5 минут и обновляется в браузере раз в минуту. ANALYST видит
+продуктовые показатели; финансовые поля доступны FINANCE/SUPER_ADMIN и имеют
+отдельный ключ кеша. Existing overview считает active7d из этих агрегатов,
+а не по фоновому использованию auth session.
+
+Execution сохраняет `jobs_db.operation_analytics_facts` компактными триггерами
+Job/import без per-keyword записи; Core получает агрегаты через существующий
+Platform API → Jobs канал, с проверкой общего строгого контракта. Подготовка,
+первый результат, выполнение, исходы, тип/провайдер и расписания не смешиваются
+с активностью человека. Границы и retention — ADR-2026-057.
 
 Глобальный поиск AppShell (`global-search.tsx`, `lib/global-search.ts`)
 лениво читает доступные пользователю проекты через существующие tenant-scoped
@@ -312,7 +404,7 @@ Arsenkin submit marker и ждать ресурса без расхода поп
 | `frontend` | Next.js routes, UI, `/app`, `/admin`, browser/server BFF helpers |
 | `backend-core` | composition root и supervisor Core |
 | `backend-core/modules/api` | identity, workspace/project/RBAC, hashed personal API tokens, billing, audit, public API orchestration |
-| `backend-core/modules/seo` | semantics, clustering proposals/apply, project Markdown notes, pages, rank manifests/results/history, crawl snapshots |
+| `backend-core/modules/seo` | semantics, clustering proposals/apply, project note files, pages, rank manifests/results/history, crawl snapshots |
 | `backend-core/modules/realtime` | Socket.IO, session revoke, notifications и Web Push persistence |
 | `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency/clustering workers |
 | `packages/contracts` | общие versioned HTTP/event/error contracts без бизнес-логики |
@@ -1809,7 +1901,8 @@ receiver через отдельный `OPERATIONAL_ALERT_TOKEN`; только C
 message/stack/request/tenant payload, одинаковые fingerprints дедуплицируются,
 а порт 4004 не публикуется. Split-process VPS supervisor хэширует error/fatal
 строку локально и передаёт только code/severity/fingerprint.
-Core alert child дополнительно получает только `PLATFORM_DATABASE_URL` и через
+Core alert child дополнительно получает только `PLATFORM_DATABASE_URL`
+(включая штатный VPS-запуск с ролью `platform_runtime`, без owner credentials) и через
 owner-модуль `backend-core/modules/api/src/operational-error-journal.ts`
 записывает тот же очищенный envelope в новую таблицу Platform DB
 `operational_error_events`. Валидные workspace/project/operation UUID
@@ -2003,7 +2096,7 @@ connector proof не меняется, поэтому безопасное об�
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users (включая bounded account avatar до 512 KiB), sessions, hashed personal API tokens и project allowlists, workspaces (включая bounded workspace avatar до 512 KiB), projects, их общий `display_order` и bounded project logos до 512 KiB, project transfer requests, RBAC, billing ledger/usage reservations, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая keyword notes, saved views, проектные легенды цветов и персональные read receipts, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin/Key Collector SERP results, persistent project position-history projections и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes, saved views, проектные легенды цветов и персональные read receipts, presets минус-слов и durable clustering proposals), project note files, pages, rankings, immutable normalized XMLStock/Arsenkin/Key Collector SERP results, persistent project position-history projections и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -2834,6 +2927,20 @@ project write lock; большой выбор Web применяет после�
 
 ### Импорт и crawl
 
+Позиции CSV/TSV/XLSX используют редактируемую Excel-подобную таблицу с
+постраничным чтением и ограниченным DOM-окном строк. В shared contracts
+`positionHistory.dateColumns` связывает колонку позиции с датой, отдельным
+URL и необязательным географическим срезом. LONG использует явные назначения
+даты/позиции/URL/поисковика/города/кода региона/устройства/страны/языка;
+совпадающие запросы объединяются publisher-ом с сохранением разных снимков.
+Некорректные даты, URL и география исключают строку из публикации и видны в
+проверке. Legacy mapping без dateColumns сохраняет прежнюю трактовку.
+Manual rank history API допускает фактически импортированную пару URL,
+но не приписывает ей provider SERP/title/snippet. Новых таблиц и владельцев
+данных нет. `test-position-import.sh` проверяет реальные файлы через HTTPS,
+ClamAV, очереди/worker и публичное чтение сохранённой истории; API/SQL
+результаты не подменяются.
+
 Upload хранится в S3 и при включённой inspection role проходит ClamAV. Import
 role стримит CSV/XLSX/KC4 в staging и публикует bounded idempotent chunks.
 Web показывает три доступных входа в тот же безопасный pipeline: нативный
@@ -3040,7 +3147,7 @@ database guard терминальных `MANUAL_RANK_CHECK` не обходит�
 queue или таблица не добавлены. В UI он называется «Обход сайта»: принимает до
 1 000 стартовых URL и обходит до 5 000 страниц только домена проекта, sitemap
 и внутренние ссылки со скоростью не
-более 60 запросов в минуту на host, сохраняет status/redirect chain по мере
+более 240 запросов в минуту на host, сохраняет status/redirect chain по мере
 обхода и не создаёт SEO issues, duplicate analysis или Radar page changes.
 Опциональные `homepageChecks` сервером разворачиваются в bounded probes для
 HTTP, альтернативного `www` и путей с `//`…`/////`; они входят в `maxUrls`,
@@ -3064,10 +3171,103 @@ robots, structured data, image/alt/word metrics, response time и размер.
 Page Map передаёт выбор дерева отдельным `pathPrefix`, показывает конкретные
 tenant-scoped crawl issue evidence по проверенному `pageId` в инспекторе,
 держит table header сверху и локально запоминает изменяемую ширину дерева,
-инспектора и колонок. Папки структуры раскрываются и сворачиваются независимо;
-явные состояния раскрытия ограниченно сохраняются в project-scoped browser
-layout, а глубокие ветки не создают большой DOM до открытия. Notes не
+инспектора и колонок. Слева перечислены разделы верхнего уровня без повторного списка URL.
+При выборе раздела SEO Data ставит его собственный URL первым, затем возвращает
+вложенные страницы; порядок и cursor учитывают корневую страницу и не теряют
+более новые дочерние URL между страницами выборки. Notes не
 растягивает одну карточку на всю высоту списка и не дублирует page heading.
+
+Сортировка карты страниц проходит через общий `api/page-list-options.ts`,
+строгие public/owning parsers и `pages/page-list-sort.ts`: HTTP, ограничения,
+запросы, средняя позиция, Title/H1, время ответа, размер, проблемы и дата изменения.
+SEO Data сортирует полный tenant/filter scope до keyset pagination; корень выбранного
+раздела закреплён первым, неизвестные значения в конце. Cursor связан с пользовательской
+выборкой и фиксирует день `latest` для средней позиции. Подсчёты назначений/проблем
+читаются одним bounded запросом только для текущих page IDs; связанные чтения
+явно ограничены workspace/project. Structure manifest загружается один раз на
+обновление, последующие папки/страницы его не перечитывают. Browser cache ограничен
+12 первыми страницами и 30 секундами, изменения сбрасывают его. Общий
+`TableSortButton` даёт одинаковые заголовки семантике и карте. Метрики и действия карты центрированы, ограничения используют компактные бейджи. Целевой URL семантики переиспользует `SemanticRankUrlCell`; PAGE/NOTE tabs имеют одинаковую ширину и размер иконок с отдельными подсказками. Ширины, колонки,
+вид, фильтры, выбранный раздел, сортировка, поисковый срез и дата сохраняются
+локально по authenticated user ID + project ID, до первого запроса после reload.
+«Перепроверить» сразу создаёт обычную worker operation ровно для одного URL,
+без sitemap/дочерних ссылок; после terminal state перечитывает сохранённый Page.
+
+Карта страниц использует две компактные строки: заголовок проекта с действиями
+и поиск с фильтрами/поисковым срезом; остальную высоту занимают таблица или схема.
+Переиспользуемый `frontend/lib/use-canvas-viewport.ts` управляет перемещением
+полотна мышью/касанием, прокруткой и масштабом относительно указателя или центра;
+«Вписать» учитывает обе стороны области. Управление остаётся закреплено поверх
+полотна, drag не активирует кнопку узла. Выбор двух снимков в инспекторе использует
+общий `CustomSelect`, включая портал, клавиатуру и закрытие по Escape.
+`frontend/lib/page-presentation.ts` даёт одинаковые подписи индексируемости
+таблице, фильтрам и сравнению истории; дата/время выбранных снимков отображаются
+раздельно, чтобы точное время оставалось видимым в узком инспекторе.
+
+Карта переключается между таблицей и `PageMapDiagram`; общий
+`frontend/lib/site-structure.ts` строит структуру один раз.
+`frontend/lib/page-map-layout.ts` располагает все раскрытые узлы без кнопки
+«Ещё» и сортирует ветви по количеству страниц. Большие списки соседних страниц
+располагаются сеткой до шести колонок; размеры поддеревьев считаются один раз,
+карточки не перекрываются и не превращаются в длинную вертикальную полосу. Рендер схемы ограничен видимой
+областью; при малом масштабе используются лёгкие SVG-карточки. Узел открывается
+кликом, отдельная иконка сворачивает/раскрывает ветку. Выбор раздела строит схему
+по полному structure manifest, а не по первым 50 строкам таблицы; результаты
+остальных фильтров дочитываются автоматически без кнопки «Ещё». Ширины и видимые колонки сохраняются в browser layout
+проекта, таблица использует общий bounded virtual window. Схема, зум и изменение
+ширины не создают crawl-команд. Browser statistics cache переиспользует уже
+прочитанные значения выбранного проекта/среза/даты; новые видимые страницы
+дочитываются пачками до 100, а обновление и смена среза сбрасывают кэш. `PageInsightsService` в SEO Data считает позиции
+пачкой до 100 page IDs, по выбранному географическому срезу и дню; explicit
+`latest` разрешается в последний день с сохранёнными замерами. Средняя включает
+только найденные позиции назначенных отслеживаемых запросов именно этого URL
+или подтверждённых aliases; not-found, отсутствие замера и другой URL различимы.
+Owner-local cache ограничен 32 записями и пятью секундами, запросы нескольких
+читателей объединяются. Видимость удалённой/объединённой rank history сохраняется.
+Семантика, ссылки и история страницы читаются отдельными bounded panels;
+входящие ссылки ограничены конкретным crawl, а не всей историей проекта.
+Public API дополнительно проверяет semantic/position scopes для связанных данных.
+`PageTechnicalFacts` используется в пяти вкладках `ProjectPageInspector` и
+новой PAGE-вкладке карточки запроса; общий keyword-target hook не делает повторный
+GET при переходе из обзора в PAGE. Заметка заполняет оставшуюся высоту инспектора,
+не изменяется resize-жестом и сохраняет действия внизу.
+
+`HttpStatusCheckTool` поддерживает SEO/HTTP, сайт/раздел/sitemap/список, пути,
+query policy, глубину, rate/runtime/download/redirect budgets, conditional
+requests и respectNofollow. UI получает только числовые runtime ceilings;
+HTTP-role не получает contact/worker/lease settings и не выполняет crawl.
+Migration `20261010140000_crawl_analysis_5000_urls` согласует PostgreSQL bounds
+анализа дублей и исчезнувших URL с общим пределом 5000 страниц, сохраняя tenant FK,
+immutable triggers и status checks. Четыре вида дублей дают до 10000 групп/20000
+occurrences; finalization receipt допускает ещё 5000 исчезнувших URL. Worker,
+public strict consumers и уведомления используют общие вычисляемые пределы,
+без обрезания участников групп. Полностью обработанный checkpoint повторяет
+идемпотентную финализацию без HTTP и независимо от истёкшего runtime budget;
+отдельный безопасный код `CRAWL_FINALIZATION_FAILED` отличает её сбой от обхода. Перепроверка одного URL сохраняет общесайтовые duplicate issues; разрешить их может только завершённый обход с сопоставимым scope hash. Набор текущих страниц материализуется один раз при разрешении issues.
+PG regression проверяет 5000 страниц, все четыре группы по 5000 участников,
+повтор финализации и исчезновение 5000 URL. Bounded JSON bulk inserts избегают десятков тысяч SQL bind-параметров; транзакция финализации ограничена 30 секундами и имеет согласованный worker HTTP timeout.
+XML sitemap parser использует общий `technicalCrawlMaxUrlLimit` (5000) вместо
+устаревшего лимита 1000: иначе выбор 5000 падал до первой страницы. Скорости
+0,1…4 страницы/с передаются как 6…240 requests/minute через общий контракт,
+Platform API, Jobs strict response parser, owning config и оба worker paths.
+`test-real-site-crawl.sh` проверяет реальный sitemap neuroluv.ru (>1000 URL)
+с бюджетом 5000 и bounded scope главная + /ai, а `test-project-note-files.sh`
+проверяет все форматы, реальные API-сохранения, reload и отзыв публичного доступа.
+`CrawlProgressPanel` читает реальные immutable результаты через HTTPS, пять
+секунд только в видимой вкладке и лишь пока операция активна; общая
+`CrawlResultTable` применяется и в отдельном результате операции.
+Robots policy компилируется один раз, wildcard matching не использует
+backtracking regex, конфликт одинаковой специфичности решается в пользу Allow.
+Robots-запрет записывается как snapshot с `statusCode=0` (HTTP не выполнялся) и
+отдельный `blocked_urls`; старые numeric bounds и равенство счётчиков сохранены.
+HTML/HTTP директивы Google/Yandex не объединяются; X-Robots-Tag имеет explicit
+HTTP provenance. JSON `technical_details` и `link_details` расширяют существующий
+immutable snapshot без новой таблицы или смены ownership. Новые crawl сохраняют
+REQUESTED_URL identity без перепривязки target keywords через редирект;
+старые незавершённые audits сохраняют frozen FINAL_URL algorithm.
+Проверки: `test-postgres.sh` suite `page-map` и `test-crawl-page-map.sh`
+(HTTPS UI, реальный remote worker, публичный fixture через системный Caddy,
+файловый импорт позиций и сохранённые факты); ответы API/воркера не подменяются.
 
 ### Notifications
 
@@ -3112,6 +3312,20 @@ Core проверяет platform role независимо от tenant membershi
 позволяет менять ledger history.
 
 ### Platform admin: проекты и операции
+
+Журнал Execution объединяет Jobs и самостоятельные `semantic_imports` без
+создания дублирующего Job. `admin-import-operation.ts` проецирует состояния
+разбора/публикации, прогресс, безопасные счётчики и ошибки в `SEMANTIC_IMPORT`.
+Общая сортировка и cursor pagination проходят обе истории, фильтры и admin
+overview учитывают импорт. Остановка делегируется `SemanticImportService` с
+действительным admin actor/request и Core audit. Миграция
+`20261010110000_admin_import_worker_assignments` добавляет индекс истории
+импортов и расширяет существующий bounded assignment selector на import IDs.
+HTTP-роли лишь создают команды и читают результат. Обход, позиции, частотности,
+ИИ, кластеризация, подбор, импорт и экспорт исполняются выделенными worker
+ролями; доступные узлы Gateway получают совместимые шаги, основной worker
+остаётся разрешённым резервом по ADR-2026-054. HTTPS E2E проверяет реальный
+import/crawl/export, строгий admin consumer и назначенный узел.
 
 Admin BFF отдельно allowlist-ит collection route `projects`, collection
 `operations` и exact UUID detail `operations/:operationId`; остальные
@@ -3191,7 +3405,45 @@ session, CSRF, exact-name confirmation и `If-Match`, без интеракти�
 
 ### Проектные заметки
 
-Core SEO владеет versioned Markdown-заметками. Защищённые CRUD routes проходят
+Core SEO владеет versioned файлами заметок: MARKDOWN, TEXT, CSV, TSV и JSON.
+Миграция `20261010160000_project_note_csv_delimiter` добавляет nullable разделитель CSV
+с ограничением на один Unicode-символ; существующие файлы не переписываются.
+`contracts/api/note-table.ts` содержит общий parser/serializer и legacy
+автоопределение запятой/точки с запятой. Явный разделитель проходит через оба
+command parsers, owning storage, строгие private/public consumers, таблицу и
+preview. `CsvDelimiterControl` переиспользуется при создании и редактировании;
+смена разделителя перекодирует ячейки без изменения значений, а delimiter-only
+API-команда делает ту же конверсию в owning service. Неверный символ блокирует
+сохранение; публичный просмотр использует сохранённый разделитель.
+Миграция `20261010100000_project_note_file_formats` добавляет только enum и
+`project_notes.format` с default MARKDOWN; существующие содержимое, версии и
+публичные токены сохраняются. Legacy wire/storage имя `markdown` хранит текст
+всех форматов; пробелы, переводы строк и ведущие нули не изменяются parsers.
+Клиент показывает расширение, выбор формата при создании, редактирование и
+предпросмотр. Общий `SpreadsheetEditor` используется для CSV/TSV в приватном
+редакторе и public read-only view; строки виртуализируются, поддерживаются
+добавление/удаление строк и колонок, клавиатура и вставка диапазона из Excel.
+`spreadsheet-grid.ts` содержит выбор диапазона/строк/колонок и операции над
+матрицей. Shift и Ctrl/Cmd расширяют выделение; общий `ContextMenu` даёт
+вставку до/после, удаление, очистку и clipboard actions. Ctrl/Cmd+V сохраняет
+TSV/Excel quoting и ведущие нули, достраивает обе оси, поддерживает выбранные
+несмежные колонки. `use-spreadsheet-history.ts` хранит ограниченную историю
+файла с группировкой ввода в одну ячейку. Ширины колонок меняются ручками;
+F2/двойной клик включает ввод, Alt+Enter сохраняет перенос внутри ячейки.
+Переход на другой файл сбрасывает только локальное состояние редактора.
+`project-note-files.ts` переиспользуется для кодирования таблиц, имени/MIME и
+скачивания, `ProjectNoteDocument` — для безопасного Markdown/plain/JSON/table
+preview. Публичная страница имеет самостоятельные module styles и не зависит
+от CSS защищённого `/app`.
+`WorkspaceSidebar` и `WorkspaceSidebarSeparator` задают общую основу дерева
+семантики, её инспектора, карты страниц и списка файлов. Разделитель
+перекрывает одну границу панелей: ширина его grid track равна
+нулю, область перетаскивания — 10 px, ручка центрируется на линии. В карте и
+заметках нет дополнительной полосы или двойного border рядом с контентом.
+Вкладка целевой страницы имеет общий ритм секций и нижний safe-area отступ. В навигации карта
+стоит после выдачи, затем операции; обход доступен действием карты.
+
+Защищённые CRUD routes проходят
 через Core API и проверенный workspace/project context; Markdown рендерится без
 raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку внутри проекта, а
 `PUBLIC` создаёт opaque random token и public `no-store`/`noindex` route.
@@ -3232,6 +3484,20 @@ SEO boundary; колонка остаётся PostgreSQL `TEXT`, а общий t
   синтетические tenant-данные и проверяет token lifecycle, scope/project/
   cross-tenant boundaries, cookie-denied identifier discovery, семантику,
   rank estimate/run и общий порядок проектов без вывода plaintext token.
+
+Общие UI-компоненты: `RankDimensionSelect` переиспользует `SemanticRankContext`
+для брендовых логотипов, города и иконки устройства в карте и позициях.
+`CustomDateInput` заменяет нативные date/datetime/time controls в приложении,
+импорте, расписаниях и админке; сохраняет прежние строковые значения, имена
+FormData, min/max/required, работает внутри modal top layer. `CalendarMonth` и
+`frontend/lib/calendar.ts` общие для одиночной даты и существующего календаря
+диапазонов. `ProjectPageEditor` использует `SemanticModal`, общий `FormField`,
+селекты языка/участника и календарь; прокручивается только тело, шапка и действия
+не перекрывают поля. `test-custom-ui-controls.sh` проверяет через HTTPS сохранение языка из
+кастомного селекта, вложенный dropdown в account menu и клавиатурную навигацию календаря; `test-position-import.sh`
+проверяет редактирование даты реального файла и сохранённую историю позиций.
+`ProjectMemberSelect` читает tenant-scoped presence directory
+и показывает ошибки с повтором; идентификаторы участников не предлагаются вводом.
 
 ## 8. Проверка
 

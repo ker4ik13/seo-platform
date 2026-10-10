@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomDateInput } from "./custom-date-input";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   RankTrackingAutomationSettings,
@@ -22,6 +23,7 @@ import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
+import { ConfirmationActions } from "./confirmation-actions";
 import styles from "./rank-automation-panel.module.css";
 import { UiText, useUiLocale } from "./ui-locale";
 
@@ -375,7 +377,7 @@ export function RankAutomationPanel({
           {draft.cadence === "ONCE" ? (
             <label className={styles.wide}>
               <span><UiText text="Дата и время запуска" /></span>
-              <input
+              <CustomDateInput
                 min={minimumRunAtValue || undefined}
                 onChange={(event) => setDraft({ ...draft, runAt: event.target.value })}
                 type="datetime-local"
@@ -388,7 +390,7 @@ export function RankAutomationPanel({
           ) : (
             <label>
               <span><UiText text="Время запуска" /></span>
-              <input
+              <CustomDateInput
                 onChange={(event) => setDraft({ ...draft, time: event.target.value })}
                 type="time"
                 value={draft.time}
@@ -620,7 +622,7 @@ export function RankAutomationPanel({
       <SemanticModal
         description={uiText("Расписание «{0}» больше не будет запускаться.", [automationToDelete.name])}
         footer={
-          <>
+          <ConfirmationActions>
             <button
               className="secondary-button"
               disabled={busy}
@@ -637,7 +639,7 @@ export function RankAutomationPanel({
             >
               {busy ? <UiText text="Удаляем…" /> : <UiText text="Удалить регулярный съём" />}
             </button>
-          </>
+          </ConfirmationActions>
         }
         onClose={() => {
           if (!busy) setAutomationToDelete(undefined);

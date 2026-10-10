@@ -429,8 +429,7 @@ function storedHistoryItem(
       record.position > 100 ||
       record.absolutePosition !== null ||
       record.pixelPosition !== null ||
-      record.rankingUrl !== null ||
-      record.normalizedRankingUrl !== null ||
+      (record.rankingUrl === null) !== (record.normalizedRankingUrl === null) ||
       record.title !== null ||
       record.snippet !== null ||
       record.resultType !== "ORGANIC" ||
@@ -443,7 +442,8 @@ function storedHistoryItem(
       ...common,
       provider: "MANUAL_IMPORT",
       found: true,
-      position: record.position
+      position: record.position,
+      ...(record.rankingUrl === null ? {} : { rankingUrl: record.rankingUrl, normalizedRankingUrl: record.normalizedRankingUrl! }),
     });
   }
   if (record.provider === "KEY_COLLECTOR") {

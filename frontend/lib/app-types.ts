@@ -40,6 +40,7 @@ export interface AppProject {
   readonly locale: string;
   readonly timezone: string;
   readonly searchCity?: ProjectSearchCity;
+  readonly onboarding?: import("@seo-platform/contracts").ProjectOnboardingSettings;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
   readonly ownerUserId: string;
   readonly logoSource?: "CUSTOM" | "DISCOVERED";
