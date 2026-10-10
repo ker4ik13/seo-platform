@@ -3524,7 +3524,10 @@ FormData, min/max/required, работает внутри modal top layer. `Cale
 `frontend/lib/calendar.ts` общие для одиночной даты и существующего календаря
 диапазонов. `ProjectPageEditor` использует `SemanticModal`, общий `FormField`,
 селекты языка/участника и календарь; прокручивается только тело, шапка и действия
-не перекрывают поля. `test-custom-ui-controls.sh` проверяет через HTTPS сохранение языка из
+не перекрывают поля. `CustomSelect` прокручивает только собственный список опций, включая вложенные
+порталы меню профиля; focus использует preventScroll. `test-custom-ui-controls.sh`
+сравнивает координаты шапки и scroll предков при открытии языка и клавиатурной
+навигации, а также проверяет через HTTPS сохранение языка из
 кастомного селекта, вложенный dropdown в account menu и клавиатурную навигацию календаря; `test-position-import.sh`
 проверяет редактирование даты реального файла и сохранённую историю позиций.
 `ProjectMemberSelect` читает tenant-scoped presence directory

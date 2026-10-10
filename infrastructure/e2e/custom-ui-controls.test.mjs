@@ -25,7 +25,18 @@ test("custom locale selector persists and calendar supports keyboard navigation 
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(base + "/app/semantics");
   await page.locator(".avatar-button").click();
+  const geometry = () => page.evaluate(() => ({ window: [scrollX, scrollY], header: document.querySelector(".topbar")?.getBoundingClientRect().toJSON(), main: document.querySelector(".app-main")?.getBoundingClientRect().toJSON(), scroll: [...document.querySelectorAll("*")].filter(node => !node.closest(".custom-select-popover") && (node.scrollTop || node.scrollLeft)).map(node => [node.className, node.scrollLeft, node.scrollTop]) }));
+  const beforeLanguage = await geometry();
   await page.getByRole("combobox", { name: "Interface language", exact: true }).click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: output + "/profile-language-open.png" });
+  const afterLanguage = await geometry();
+  await writeFile(output + "/profile-language-geometry.json", JSON.stringify({ beforeLanguage, afterLanguage }, null, 2), { mode: 0o600 });
+  assert.deepEqual(afterLanguage, beforeLanguage, "opening a language dropdown must not scroll the screen or its ancestors");
+  await page.keyboard.press("End"); await page.waitForTimeout(100);
+  assert.deepEqual(await geometry(), beforeLanguage, "keyboard options scroll only their own list");
+  await page.keyboard.press("Home"); await page.waitForTimeout(100);
+  assert.deepEqual(await geometry(), beforeLanguage);
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".avatar-button").getAttribute("aria-expanded"), "true", "Escape closes the child select before the account menu");
   await page.getByRole("combobox", { name: "Interface language", exact: true }).click();

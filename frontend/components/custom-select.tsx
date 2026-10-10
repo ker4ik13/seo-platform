@@ -216,9 +216,23 @@ export function CustomSelect({
     });
   }, [popoverMinWidth]);
 
+  const revealOption = useCallback((index: number): void => {
+    const container = optionsRef.current;
+    const option = document.getElementById(`${listboxId}-option-${index}`);
+    if (!container || !option || !container.contains(option)) return;
+    const bounds = container.getBoundingClientRect();
+    const item = option.getBoundingClientRect();
+    const top = bounds.top + container.clientTop;
+    const bottom = top + container.clientHeight;
+    // scrollIntoView also scrolls ancestors of a nested portal, including
+    // the whole workspace. Only the option list owns this scroll.
+    if (item.top < top) container.scrollTop += item.top - top;
+    else if (item.bottom > bottom) container.scrollTop += item.bottom - bottom;
+  }, [listboxId]);
+
   useEffect(() => {
     if (!autoFocus) return;
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
   }, [autoFocus]);
 
   useEffect(() => {
@@ -282,7 +296,7 @@ export function CustomSelect({
 
   useEffect(() => {
     if (!open || !searchable) return;
-    searchRef.current?.focus();
+    searchRef.current?.focus({ preventScroll: true });
   }, [open, searchable]);
 
   useEffect(() => {
@@ -302,20 +316,16 @@ export function CustomSelect({
         optionsRef.current?.scrollTo({ top: 0 });
         return;
       }
-      document
-        .getElementById(`${listboxId}-option-${nextIndex}`)
-        ?.scrollIntoView({ block: "nearest" });
+      revealOption(nextIndex);
     });
     return () => cancelAnimationFrame(frame);
-  }, [filteredOptionSignature, listboxId, open, query, selectedValue]);
+  }, [filteredOptionSignature, open, query, selectedValue, revealOption]);
 
   useEffect(() => {
     if (!open || activeIndex < 0 || !revealActiveOptionRef.current) return;
     revealActiveOptionRef.current = false;
-    document
-      .getElementById(`${listboxId}-option-${activeIndex}`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, listboxId, open]);
+    revealOption(activeIndex);
+  }, [activeIndex, open, revealOption]);
 
   function show(): void {
     if (disabled) return;
