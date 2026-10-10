@@ -97,7 +97,7 @@ export class RemoteWorkClientService implements OnModuleDestroy {
                 if(rows[0]?.state==="ABANDONED") this.pending.get(id)?.reject(new RemoteWorkFailedError("WORKER_NOT_STARTED"));
               })
               .catch(() => undefined);
-          },Math.min(UNPAID_CLAIM_WAIT_MS,Math.max(250,Math.floor(options.timeoutMs/10))));
+          },command==="CRAWL_RESOURCE" ? UNPAID_CLAIM_WAIT_MS : Math.min(UNPAID_CLAIM_WAIT_MS,Math.max(250,Math.floor(options.timeoutMs/10))));
         }
         this.schedulePoll();
       });

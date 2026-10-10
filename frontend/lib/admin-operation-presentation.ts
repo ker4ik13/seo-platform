@@ -14,6 +14,7 @@ export function adminOperationName(operation: Pick<AdminOperationSummary, "type"
     TECHNICAL_CRAWL: "Обход сайта",
     KEYWORD_RESEARCH: "Исследование запросов",
     SEMANTIC_IMPORT: "Импорт семантики",
+    PAGE_STATUS_CHANGE: "Архив страниц",
     SEMANTIC_EXPORT: "Экспорт семантики"
   } as Record<string, string>)[operation.type] ?? operation.type.toLocaleLowerCase("ru-RU").replaceAll("_", " ");
 }

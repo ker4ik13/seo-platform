@@ -1,3 +1,4 @@
+import { parsePageStatusBatchResult, pageStatusIds, type PageStatusInput } from "@seo-platform/contracts";
 import { Inject, Injectable } from "@nestjs/common";
 import { parseSemanticRankDimensionMetadata, parseSemanticRankComparisonItems, parseSemanticRankDimensionCatalog, type SemanticRankComparisonInput } from "@seo-platform/contracts";
 import {
@@ -536,6 +537,13 @@ export class SeoDataClient {
       throw new SeoDataClientError("UNAVAILABLE", true);
     }
     return envelope.data as readonly SemanticCustomColumn[];
+  }
+
+  public async preparePageStatus(body: { workspaceId: string; projectId: string; actorId: string; input: PageStatusInput }): Promise<readonly string[]> {
+    return pageStatusIds(await this.requestBounded("/internal/v1/page-status/prepare", body, 4_000_000));
+  }
+  public async applyPageStatus(body: { workspaceId: string; projectId: string; actorId: string; input: PageStatusInput }) {
+    return parsePageStatusBatchResult(await this.requestBounded("/internal/v1/page-status/apply", body, 8192));
   }
 
   private async request(

@@ -1,3 +1,6 @@
+import { parsePageStatusInput, type PageStatusJobSummary } from "@seo-platform/contracts";
+import { JobsClient } from "../jobs/jobs.client.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import {
   Body,
   BadRequestException,
@@ -61,8 +64,30 @@ export class PageController {
 
   public constructor(
     private readonly seoData: SeoDataClient,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly jobs: JobsClient,
+    private readonly billing: BillingEntitlementService
   ) {}
+
+  @Post("status-jobs")
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission("page.manage")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async createStatusJob(@Body() body: unknown, @Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiResponse<PageStatusJobSummary>> {
+    const tenant = requiredMutableProjectTenant(request);
+    let input; try { input = parsePageStatusInput(body); } catch { throw new BadRequestException("Invalid page selection"); }
+    await this.audit.record({ actorId: principal.userId, workspaceId: tenant.workspaceId, projectId: tenant.projectId, action: "page.bulk_status_requested", resourceType: "project", resourceId: tenant.projectId, outcome: "REQUESTED", requestId: requestContext(request).requestId });
+    const job = await this.jobs.createPageStatus({ tenant, actorId: principal.userId, requestId: requestContext(request).requestId }, input, requiredIdempotencyKey(headerValue(request, "idempotency-key")), await this.billing.jobCapacity(tenant.workspaceId));
+    await recordCommittedAudit(this.audit, this.logger, { actorId: principal.userId, workspaceId: tenant.workspaceId, projectId: tenant.projectId, action: "page.bulk_status_queued", resourceType: "job", resourceId: job.id, outcome: "SUCCESS", requestId: requestContext(request).requestId });
+    return apiResponse(request, job);
+  }
+  @Get("status-jobs/:jobId")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async statusJob(@Param("jobId") id: string, @Req() request: TenantRequest, @CurrentPrincipal() principal: AuthenticatedPrincipal): Promise<ApiResponse<PageStatusJobSummary>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(request, await this.jobs.getPageStatus({ tenant, actorId: principal.userId, requestId: requestContext(request).requestId }, assertUuid(id, "jobId")));
+  }
 
   @Get("rank-statistics")
   @RequirePermission("page.view")

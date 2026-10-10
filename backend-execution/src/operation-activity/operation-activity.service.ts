@@ -30,6 +30,7 @@ import { ACTIVE_JOB_STATUSES, ACTIVE_IMPORT_STATUSES } from "../jobs/job-capacit
 import { STORAGE_RESERVING_UPLOAD_STATUSES } from "../uploads/storage-capacity.js";
 
 const visibleOperationTypes = [
+  "PAGE_STATUS_CHANGE",
   "FREQUENCY_COLLECTION",
   "MANUAL_RANK_CHECK",
   "AI_ANSWER_COLLECTION",

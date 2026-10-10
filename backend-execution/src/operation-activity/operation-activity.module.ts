@@ -1,3 +1,4 @@
+import { PageStatusModule } from "../page-status/page-status.module.js";
 import { Module } from "@nestjs/common";
 import { InternalModule } from "../internal/internal.module.js";
 import { RankRunModule } from "../rank-runs/rank-run.module.js";
@@ -18,7 +19,7 @@ import { OperationActivityService } from "./operation-activity.service.js";
 import { OperationAnalyticsService } from "./operation-analytics.service.js";
 
 @Module({
-  imports: [InternalModule, RankRunModule, FrequencyCollectionModule, AiAnswerCollectionModule, ClusteringRunModule, KeywordResearchModule, CrawlModule, SemanticExportModule, SemanticImportModule],
+  imports: [PageStatusModule, InternalModule, RankRunModule, FrequencyCollectionModule, AiAnswerCollectionModule, ClusteringRunModule, KeywordResearchModule, CrawlModule, SemanticExportModule, SemanticImportModule],
   controllers: [
     OperationActivityController,
     PlatformAdminOperationController,

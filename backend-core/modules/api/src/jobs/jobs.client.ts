@@ -1,3 +1,4 @@
+import { parsePageStatusJobSummary, type PageStatusInput, type PageStatusJobSummary, type JobCapacityEntitlement as PageStatusCapacity } from "@seo-platform/contracts";
 import { Inject, Injectable } from "@nestjs/common";
 import type { InternalPaidUsageReview, PaidUsageReviewTicket, ResolvePaidUsageInput } from "@seo-platform/contracts";
 import {
@@ -2370,6 +2371,17 @@ export class JobsClient {
     const envelope = allowlistedRecord(payload, ["data", "meta"]);
     if (!Object.hasOwn(envelope, "data")) throw invalidJobsResponse();
     return envelope.data as Data;
+  }
+
+  public async createPageStatus(context: InternalContext, input: PageStatusInput, idempotencyKey: string, jobCapacity: PageStatusCapacity): Promise<PageStatusJobSummary> {
+    const summary = parsePageStatusJobSummary(await this.request("POST", "/internal/v1/page-status-jobs", context, { input, idempotencyKey, jobCapacity, correlationId: context.requestId }));
+    if (summary.workspaceId !== context.tenant.workspaceId || summary.projectId !== context.tenant.projectId) throw dependencyUnavailable();
+    return summary;
+  }
+  public async getPageStatus(context: InternalContext, id: string): Promise<PageStatusJobSummary> {
+    const summary = parsePageStatusJobSummary(await this.request("GET", `/internal/v1/page-status-jobs/${id}`, context));
+    if (summary.id !== id || summary.workspaceId !== context.tenant.workspaceId || summary.projectId !== context.tenant.projectId) throw dependencyUnavailable();
+    return summary;
   }
 
   private async request<Data>(

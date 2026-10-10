@@ -14,11 +14,11 @@ export async function remoteWorkerFixture(t) {
   assert.equal(runtime.REMOTE_WORK_ENABLED, "true");
   const prisma = new PrismaService({ databaseUrl: `postgresql://jobs_owner:${encodeURIComponent(runtime.JOBS_DATABASE_OWNER_PASSWORD)}@127.0.0.1:5432/jobs_db`, databasePoolMax: 2, processRole: "HTTP" });
   const nodes = new WorkerNodeService(prisma);
-  const created = await nodes.create({ name: `[E2E] Gateway ${randomUUID().slice(0, 8)}`, capabilities: ["IMPORT", "EXPORT", "INSPECTION", "CRAWL"], maxHttpSlots: 4, maxCpuSlots: 2 });
+  const created = await nodes.create({ name: `[E2E] Gateway ${randomUUID().slice(0, 8)}`, capabilities: ["IMPORT", "EXPORT", "INSPECTION", "CRAWL"], maxHttpSlots: 16, maxCpuSlots: 2 });
   await nodes.setEnabled(created.node.id, true);
   const agent = spawn(process.execPath, [new URL("../../backend-execution/dist/remote-worker.main.js", import.meta.url).pathname], {
     cwd: process.env.SEO_PLATFORM_E2E_OUTPUT_DIR,
-    env: { PATH: process.env.PATH, NODE_ENV: "test", WORKER_CONTROL_URL: runtime.SEO_PLATFORM_PUBLIC_URL, WORKER_NODE_ID: created.node.id, WORKER_NODE_TOKEN: created.token, WORKER_HTTP_SLOTS: "4", WORKER_RANK_SLOTS: "0", WORKER_CPU_SLOTS: "2", WORKER_WORDSTAT_SLOTS: "0", WORKER_RESEARCH_SLOTS: "0", WORKER_AI_ANSWER_SLOTS: "0", WORKER_CLUSTERING_SLOTS: "0", WORKER_CRAWL_SLOTS: "4", WORKER_IMPORT_SLOTS: "2", WORKER_EXPORT_SLOTS: "2", WORKER_INSPECTION_SLOTS: "1", WORKER_MALWARE_SCANNER_HOST: "127.0.0.1", WORKER_MALWARE_SCANNER_PORT: "3310", WORKER_HEARTBEAT_MS: "3000" },
+    env: { PATH: process.env.PATH, NODE_ENV: "test", WORKER_CONTROL_URL: runtime.SEO_PLATFORM_PUBLIC_URL, WORKER_NODE_ID: created.node.id, WORKER_NODE_TOKEN: created.token, WORKER_HTTP_SLOTS: "16", WORKER_RANK_SLOTS: "0", WORKER_CPU_SLOTS: "2", WORKER_WORDSTAT_SLOTS: "0", WORKER_RESEARCH_SLOTS: "0", WORKER_AI_ANSWER_SLOTS: "0", WORKER_CLUSTERING_SLOTS: "0", WORKER_CRAWL_SLOTS: "16", WORKER_IMPORT_SLOTS: "2", WORKER_EXPORT_SLOTS: "2", WORKER_INSPECTION_SLOTS: "1", WORKER_MALWARE_SCANNER_HOST: "127.0.0.1", WORKER_MALWARE_SCANNER_PORT: "3310", WORKER_HEARTBEAT_MS: "3000" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let logs = "";

@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   parseCreatedWorkerNode,
   parseWorkerNodeConfiguration,
-  parseWorkerNodeView
+  parseWorkerNodeView, workerEffectiveCapabilitySlots
   ,parseWorkerNodeRemovalInput, parseRemovedWorkerNode
 } from "./worker-nodes.js";
 
@@ -61,4 +61,11 @@ test("worker deletion requires explicit confirmation and a secret-free receipt",
   const removed = { id: node.id, deletedAt: new Date().toISOString() };
   assert.deepEqual(parseRemovedWorkerNode(removed), removed);
   assert.throws(() => parseRemovedWorkerNode({ ...removed, token: "forbidden" }));
+});
+
+test("crawl capacity requires the pacing protocol but preserves legacy rank capacity", () => {
+  const parsedNode = parseWorkerNodeView({ ...node, capabilities: ["RANK", "CRAWL"], reportedCapabilitySlots: { RANK: 8, CRAWL: 8 } });
+  assert.equal(workerEffectiveCapabilitySlots(parsedNode, "CRAWL"), 0);
+  assert.equal(workerEffectiveCapabilitySlots({ ...parsedNode, protocolVersion: 2 }, "CRAWL"), 8);
+  assert.equal(workerEffectiveCapabilitySlots(parsedNode, "RANK"), 8);
 });

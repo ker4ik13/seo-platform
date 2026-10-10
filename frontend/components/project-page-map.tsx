@@ -1,5 +1,9 @@
 "use client";
 
+import { TableSelectionCheckbox } from "./table-selection-checkbox";
+import { ContextMenu, type ContextMenuItem } from "./context-menu";
+import { useConfirmation } from "./use-confirmation";
+import { parsePageStatusJobSummary, type PageStatusInput, type PageStatusJobSummary } from "@seo-platform/contracts";
 import { TableSortButton } from "./table-sort-button";
 import { WorkspaceSidebar, WorkspaceSidebarSeparator } from "./workspace-sidebar";
 import { CustomDateInput } from "./custom-date-input";
@@ -41,6 +45,7 @@ import {
   useState,
   type CSSProperties,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode
@@ -151,6 +156,13 @@ export function ProjectPageMap({
   const [busyId, setBusyId] = useState<string>();
   const [online, setOnline] = useState(true);
   const [reload, setReload] = useState(0);
+  const { confirm, dialog: confirmationDialog } = useConfirmation();
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const selectionAnchor = useRef<string | undefined>(undefined);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; page?: ProjectPageSummary; pageIds?: readonly string[]; path?: string }>();
+  const [bulkJob, setBulkJob] = useState<PageStatusJobSummary>();
+  const [bulkStarting, setBulkStarting] = useState(false);
+  useEffect(() => { setBulkJob(undefined); setBulkStarting(false); }, [projectId]);
   const [selectedPageId, setSelectedPageId] = useState<string>();
   const [selectedPageDetail, setSelectedPageDetail] =
     useState<ProjectPageSummary>();
@@ -182,6 +194,7 @@ export function ProjectPageMap({
   const pageCache = useRef(new Map<string, { at: number; value: ProjectPageSettings }>());
   const structureRef = useRef<Pick<ProjectPageSettings, "structureUrls" | "structurePageIds" | "structureTruncated">>({});
   const revisionRef = useRef(-1);
+  const structureLifecycleRef = useRef<PageLifecycleStatus>("ACTIVE");
   const [checking, setChecking] = useState<{ pageId: string; crawl?: TechnicalCrawlSummary }>();
   const [dimensionKey, setDimensionKey] = useState("");
   const [rankDate, setRankDate] = useState("latest");
@@ -203,6 +216,7 @@ export function ProjectPageMap({
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      if (structureLifecycleRef.current !== appliedFilters.lifecycleStatus) { structureRef.current = {}; pageCache.current.clear(); structureLifecycleRef.current = appliedFilters.lifecycleStatus; }
       const scopeKey = pagesUrl(projectId, appliedFilters, selectedStructurePath, undefined, sortField, sortDirection, dimensionKey, rankDate, false);
       collectionScopeRef.current = scopeKey;
       const cached = pageCache.current.get(scopeKey);
@@ -553,6 +567,56 @@ export function ProjectPageMap({
     return () => { controller.abort(); if (timer) clearTimeout(timer); };
   }, [checking, projectId]);
 
+  function selectRow(page: ProjectPageSummary, event: Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">, checkbox = false): void {
+    if (event.shiftKey && selectionAnchor.current && collection) {
+      const start = collection.pages.findIndex(row => row.id === selectionAnchor.current), end = collection.pages.findIndex(row => row.id === page.id);
+      if (start >= 0 && end >= 0) {
+        const next = new Set(event.ctrlKey || event.metaKey ? selectedIds : []);
+        for (const row of collection.pages.slice(Math.min(start, end), Math.max(start, end) + 1)) next.add(row.id);
+        setSelectedIds(next); return;
+      }
+    }
+    selectionAnchor.current = page.id;
+    if (checkbox || event.ctrlKey || event.metaKey) {
+      setSelectedIds(previous => { const next = new Set(previous); if (next.has(page.id)) next.delete(page.id); else next.add(page.id); return next; });
+    } else { setSelectedIds(new Set([page.id])); void openInspector(page); }
+  }
+  function pageMenu(event: ReactMouseEvent, page: ProjectPageSummary): void {
+    event.preventDefault();
+    const ids = selectedIds.has(page.id) ? [...selectedIds] : [page.id];
+    setSelectedIds(new Set(ids));
+    setContextMenu({ x: event.clientX, y: event.clientY, page, pageIds: ids });
+  }
+  async function startBulkStatus(input: PageStatusInput): Promise<void> {
+    if (!canManage || bulkStarting || bulkJob && ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(bulkJob.status)) return;
+    const scope = input.pathPrefix ? input.pathPrefix === "/" ? "все страницы проекта" : `все страницы раздела ${input.pathPrefix}` : `${input.pageIds?.length ?? 0} стр.`;
+    if (!await confirm({ title: input.operation === "archive" ? "Перенести страницы в архив?" : "Восстановить страницы?", description: `${input.operation === "archive" ? "В архив будут перенесены" : "Будут восстановлены"} ${scope}.`, confirmLabel: input.operation === "archive" ? "В архив" : "Восстановить" })) return;
+    setBulkStarting(true); setOperationError(undefined); setSuccess(undefined);
+    try {
+      const job = parsePageStatusJobSummary(await browserApiRequest<unknown>(`/app/api/projects/${encodeURIComponent(projectId)}/pages/status-jobs`, { method: "POST", body: input, idempotencyKey: `page-status:${globalThis.crypto.randomUUID()}` }));
+      setBulkJob(job); setSelectedIds(new Set());
+    } catch (error) { setOperationError(errorMessage(error, "Не удалось запустить операцию со страницами.")); }
+    finally { setBulkStarting(false); }
+  }
+  useEffect(() => { setSelectedIds(new Set()); setContextMenu(undefined); selectionAnchor.current = undefined; }, [projectId, selectedStructurePath, appliedFilters, sortField, sortDirection]);
+  const bulkJobId = bulkJob?.id;
+  useEffect(() => {
+    if (!bulkJobId) return;
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const next = parsePageStatusJobSummary(await browserApiRequest<unknown>(`/app/api/projects/${encodeURIComponent(projectId)}/pages/status-jobs/${bulkJobId}`, { signal: controller.signal }));
+        if (controller.signal.aborted) return;
+        setBulkJob(next);
+        if (["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(next.status)) { timer = setTimeout(() => void poll(), 1000); return; }
+        pageCache.current.clear(); structureRef.current = {}; revisionRef.current = -1; setReload(value => value + 1); closeInspector();
+        if (next.status === "FAILED_FINAL") setOperationError("Не удалось завершить операцию со страницами. Повторите действие.");
+        else setSuccess(`Обработано: ${next.processed}. Изменено: ${next.changed}.${next.blocked ? ` Сохранены страницы с основными кластерами: ${next.blocked}.` : ""}`);
+      } catch (error) { if (!controller.signal.aborted) { setOperationError(errorMessage(error, "Не удалось получить прогресс операции.")); timer = setTimeout(() => void poll(), 2000); } }
+    };
+    void poll(); return () => { controller.abort(); clearTimeout(timer); };
+  }, [projectId, bulkJobId]);
+
   async function changeStatus(
     page: ProjectPageSummary,
     operation: "archive" | "restore"
@@ -673,6 +737,24 @@ export function ProjectPageMap({
     );
   }
 
+  function pageContextItems(): readonly ContextMenuItem[] {
+    if (!contextMenu) return [];
+    const input = contextMenu.path ? { pathPrefix: contextMenu.path } : { pageIds: contextMenu.pageIds ?? [] };
+    const multiple = (contextMenu.pageIds?.length ?? 0) > 1;
+    const busy = bulkStarting || bulkJob !== undefined && ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(bulkJob.status);
+    const rows = collection?.pages.filter(row => contextMenu.pageIds?.includes(row.id)) ?? [];
+    return [
+      ...(contextMenu.path ? [{ id: "open", label: "Открыть раздел", icon: <Icon name="projects" />, onSelect: () => filterByStructure(contextMenu.path!) }] : contextMenu.page && !multiple ? [
+        { id: "open", label: "Открыть страницу", icon: <Icon name="pages" />, onSelect: () => void openInspector(contextMenu.page!) },
+        { id: "edit", label: "Изменить", disabled: !canManage, onSelect: () => startEdit(contextMenu.page!) },
+        { id: "recheck", label: "Перепроверить", disabled: !canManage || checking !== undefined, onSelect: () => void recheckPage(contextMenu.page!) }
+      ] : []),
+      { id: "copy", label: contextMenu.path ? "Копировать путь" : "Копировать URL", onSelect: () => { void navigator.clipboard.writeText(contextMenu.path ?? rows.map(row => row.url).join("\n")).catch(() => setOperationError("Не удалось скопировать URL.")); } },
+      { id: "archive", label: "В архив", dividerBefore: true, danger: true, disabled: !canManage || busy, onSelect: () => void startBulkStatus({ ...input, operation: "archive" }) },
+      { id: "restore", label: "Восстановить", disabled: !canManage || busy, onSelect: () => void startBulkStatus({ ...input, operation: "restore" }) }
+    ];
+  }
+
   if (!collection) return null;
   const activeFilterCount = filterCount(appliedFilters);
   const hasActiveMapFilter =
@@ -688,7 +770,7 @@ export function ProjectPageMap({
     "--page-map-structure-width": `${structureWidth}px`,
     "--page-map-inspector-width": `${inspectorWidth}px`
   } as CSSProperties;
-  const tableWidth = visibleColumns.reduce(
+  const tableWidth = 40 + visibleColumns.reduce(
     (total, column) => total + columnWidths[column],
     0
   );
@@ -847,6 +929,8 @@ export function ProjectPageMap({
           nodes={structure.nodes}
           onSelect={filterByStructure}
           selectedPath={selectedStructurePath}
+          archived={appliedFilters.lifecycleStatus === "ARCHIVED"}
+          onContextMenu={(event, path) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, path }); }}
           total={structure.total}
         />
         <PanelResizeHandle
@@ -863,8 +947,15 @@ export function ProjectPageMap({
         />
         </>}
         <div className="page-map-main">
+          {(selectedIds.size > 0 || bulkStarting || bulkJob && ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(bulkJob.status)) && <div className="page-map-selection-toolbar">
+            {selectedIds.size > 0 && <><span><UiText text="Выбрано" />: {selectedIds.size}</span><button className="text-button" type="button" onClick={() => setSelectedIds(new Set())}><UiText text="Снять выделение" /></button></>}
+            {selectedIds.size > 0 && canManage && <><button className="text-button" disabled={bulkStarting || bulkJob?.status === "RUNNING" || bulkJob?.status === "QUEUED"} type="button" onClick={() => void startBulkStatus({ operation: appliedFilters.lifecycleStatus === "ARCHIVED" ? "restore" : "archive", pageIds: [...selectedIds] })}><UiText text={appliedFilters.lifecycleStatus === "ARCHIVED" ? "Восстановить" : "В архив"} /></button></>}
+            {bulkStarting ? <span role="status"><UiText text="Запуск операции…" /></span> : bulkJob && ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(bulkJob.status) && <span role="status"><UiText text="Обработка страниц" />: {bulkJob.processed} / {bulkJob.total ?? "—"}</span>}
+          </div>}
 
 
+      {confirmationDialog}
+      {contextMenu && <ContextMenu label={uiText(contextMenu.path ? "Действия с разделом" : "Действия со страницами")} x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(undefined)} items={pageContextItems()} />}
       {editor && <ProjectPageEditor projectId={projectId} busy={busyId !== undefined} draft={editor.draft} errors={errors} existing={editor.page !== undefined} errorMessage={operationError} onCancel={() => setEditor(undefined)} onChange={changeDraft} onSubmit={submitPage} />}
 
 
@@ -879,8 +970,10 @@ export function ProjectPageMap({
                 : <UiText text="Страниц пока нет" />}
           </h2>
           <p>
-            <UiText text="Добавьте существующую или планируемую посадочную страницу. URL, назначенные запросы и последующие результаты crawl будут объединены в одной карточке." /></p>
-          {canManage && appliedFilters.lifecycleStatus === "ACTIVE" && (
+            <UiText text={appliedFilters.lifecycleStatus === "ARCHIVED" ? "Здесь будут страницы, перенесённые в архив." : hasActiveMapFilter ? "Измените фильтры или выберите другой раздел." : "Добавьте первую страницу или запустите обход сайта."} /></p>
+          {appliedFilters.lifecycleStatus === "ARCHIVED" && <button className="secondary-button" type="button" onClick={() => { setFilters(value => ({ ...value, lifecycleStatus: "ACTIVE" })); setAppliedFilters(value => ({ ...value, lifecycleStatus: "ACTIVE" })); }}><UiText text="Активные страницы" /></button>}
+          {appliedFilters.lifecycleStatus === "ACTIVE" && hasActiveMapFilter && <button className="secondary-button" type="button" onClick={resetFilters}><UiText text="Сбросить фильтры" /></button>}
+          {canManage && appliedFilters.lifecycleStatus === "ACTIVE" && !hasActiveMapFilter && (
             <button className="primary-button" onClick={startCreate} type="button">
               <UiText text="Добавить первую страницу" /></button>
           )}
@@ -890,9 +983,11 @@ export function ProjectPageMap({
             <div className="page-map-table-wrap" ref={tableScrollRef}>
               <table
                 className="page-map-table semantic-table has-sized-columns"
+                onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); setSelectedIds(new Set(collection.pages.map(page => page.id))); } }}
                 style={{ minWidth: "100%", width: `${tableWidth}px` }}
               >
               <colgroup>
+                <col style={{ width: 40 }} />
                 {visibleColumns.map((column) => (
                   <col
                     key={column}
@@ -902,18 +997,22 @@ export function ProjectPageMap({
               </colgroup>
               <thead>
                 <tr>
+                  <th className="page-map-selection-cell"><TableSelectionCheckbox label={uiText("Выбрать загруженные страницы")} checked={collection.pages.length > 0 && collection.pages.every(page => selectedIds.has(page.id))} mixed={selectedIds.size > 0 && !collection.pages.every(page => selectedIds.has(page.id))} onChange={checked => setSelectedIds(checked ? new Set(collection.pages.map(page => page.id)) : new Set())} /></th>
                   {visibleColumns.map((column) => <PageMapColumnHeader key={column} column={column} label={uiText(PAGE_MAP_COLUMN_LABELS[column])} onResize={resizeColumn} width={columnWidths[column]} direction={PAGE_MAP_SORT_COLUMNS[column] === sortField ? sortDirection === "ASC" ? "ascending" : "descending" : undefined} onSort={PAGE_MAP_SORT_COLUMNS[column] ? () => { setSortDirection(PAGE_MAP_SORT_COLUMNS[column] === sortField && sortDirection === "ASC" ? "DESC" : "ASC"); setSortField(PAGE_MAP_SORT_COLUMNS[column]!); } : undefined} disabled={column === "averagePosition" && !dimensionKey} />)}
                 </tr>
               </thead>
                 <tbody>
-                  {tableWindow.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={visibleColumns.length} style={{ height: tableWindow.paddingTop, padding: 0, border: 0 }} /></tr>}
+                  {tableWindow.paddingTop > 0 && <tr aria-hidden="true"><td colSpan={visibleColumns.length + 1} style={{ height: tableWindow.paddingTop, padding: 0, border: 0 }} /></tr>}
                   {currentRows.map((page) => (
                     <PageRow
                       busy={busyId === page.id}
                       canManage={canManage}
                       key={page.id}
                       onEdit={() => startEdit(page)}
-                      onSelect={() => void openInspector(page)}
+                      onSelect={(event) => selectRow(page, event)}
+                      onCheck={(event) => selectRow(page, event, true)}
+                      onContextMenu={(event) => pageMenu(event, page)}
+                      checked={selectedIds.has(page.id)}
                       onStatus={() =>
                         void changeStatus(
                           page,
@@ -925,10 +1024,10 @@ export function ProjectPageMap({
                       page={page}
                       columns={visibleColumns}
                       statistics={rankStatistics.values[page.id]}
-                      selected={selectedPageId === page.id}
+                      selected={selectedIds.has(page.id) || selectedPageId === page.id}
                     />
                   ))}
-                  {tableWindow.paddingBottom > 0 && <tr aria-hidden="true"><td colSpan={visibleColumns.length} style={{ height: tableWindow.paddingBottom, padding: 0, border: 0 }} /></tr>}
+                  {tableWindow.paddingBottom > 0 && <tr aria-hidden="true"><td colSpan={visibleColumns.length + 1} style={{ height: tableWindow.paddingBottom, padding: 0, border: 0 }} /></tr>}
                 </tbody>
               </table>
             </div>
@@ -1096,20 +1195,20 @@ function beginHorizontalResize(
 }
 
 
-function SiteStructure({ domain, nodes, onSelect, selectedPath, total }: Readonly<{
-  domain: string; nodes: readonly SiteStructureNode[]; onSelect: (path: string) => void; selectedPath: string; total: number;
+function SiteStructure({ domain, nodes, onSelect, onContextMenu, selectedPath, total, archived }: Readonly<{
+  domain: string; nodes: readonly SiteStructureNode[]; onSelect: (path: string) => void; onContextMenu: (event: ReactMouseEvent, path: string) => void; selectedPath: string; total: number; archived: boolean;
 }>) {
   const { locale, t } = useUiLocale();
   return <WorkspaceSidebar className="page-map-structure" aria-label={t("Структура сайта")}><header><div><h2><UiText text="Структура сайта" /></h2><span>{domain}</span></div></header>
-    <button className="page-map-tree-root" aria-pressed={selectedPath === "/"} onClick={() => onSelect("/")} type="button"><Icon name="sitemap" /><span><UiText text="Все страницы" /></span><strong>{total.toLocaleString(locale)}</strong></button>
-    <ul className="page-map-tree">{sortSiteSections(nodes).map((node) => <li key={node.path}><button className={`page-map-tree-select${selectedPath === node.path ? " selected" : ""}`} aria-pressed={selectedPath === node.path} onClick={() => onSelect(node.path)} type="button"><Icon name="projects" /><span>/{node.name}</span><strong>{node.count.toLocaleString(locale)}</strong></button></li>)}</ul>
-    {nodes.length === 0 && <p className="page-map-tree-empty"><UiText text="Структура появится после первого сохранённого обхода." /></p>}
+    <button className="page-map-tree-root" onContextMenu={event => onContextMenu(event, "/")} aria-pressed={selectedPath === "/"} onClick={() => onSelect("/")} type="button"><Icon name="sitemap" /><span><UiText text="Все страницы" /></span><strong>{total.toLocaleString(locale)}</strong></button>
+    <ul className="page-map-tree">{sortSiteSections(nodes).map((node) => <li key={node.path}><button className={`page-map-tree-select${selectedPath === node.path ? " selected" : ""}`} onContextMenu={event => onContextMenu(event, node.path)} aria-pressed={selectedPath === node.path} onClick={() => onSelect(node.path)} type="button"><Icon name="projects" /><span>/{node.name}</span><strong>{node.count.toLocaleString(locale)}</strong></button></li>)}</ul>
+    {nodes.length === 0 && <p className="page-map-tree-empty"><UiText text={archived ? "Нет архивированных разделов." : "В структуре пока нет разделов."} /></p>}
   </WorkspaceSidebar>;
 }
 
 
-function PageRow({ busy, canManage, onEdit, onSelect, onStatus, page, selected, columns, statistics }: Readonly<{
-  busy: boolean; canManage: boolean; onEdit: () => void; onSelect: () => void; onStatus: () => void; page: ProjectPageSummary; selected: boolean;
+function PageRow({ busy, canManage, onEdit, onSelect, onStatus, onCheck, onContextMenu, checked, page, selected, columns, statistics }: Readonly<{
+  busy: boolean; canManage: boolean; onEdit: () => void; onSelect: (event: Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => void; onCheck: (event: ReactMouseEvent) => void; onContextMenu: (event: ReactMouseEvent) => void; checked: boolean; onStatus: () => void; page: ProjectPageSummary; selected: boolean;
   columns: readonly PageMapColumn[]; statistics?: ProjectPageStatistics | undefined;
 }>) {
   const { locale, t } = useUiLocale();
@@ -1125,7 +1224,7 @@ function PageRow({ busy, canManage, onEdit, onSelect, onStatus, page, selected, 
     issues: <span className={`page-map-issue-count${(page.openIssueCount ?? 0) > 0 ? " has-issues" : ""}`}>{page.openIssueCount ?? "—"}</span>,
     actions: <div className="page-map-actions">{page.lifecycleStatus === "ACTIVE" && <button className="text-button" disabled={!canManage || busy} onClick={(event) => { event.stopPropagation(); onEdit(); }} type="button"><UiText text="Изменить" /></button>}<button className="text-button" disabled={!canManage || busy} onClick={(event) => { event.stopPropagation(); onStatus(); }} type="button"><UiText text={page.lifecycleStatus === "ACTIVE" ? "В архив" : "Восстановить"} /></button></div>
   };
-  return <tr aria-selected={selected} data-page-id={page.id} className={selected ? "selected" : undefined} onClick={onSelect} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }} tabIndex={0}>{columns.map((column) => <td key={column} data-column={column}>{cells[column]}</td>)}</tr>;
+  return <tr aria-selected={selected} data-page-id={page.id} className={selected ? "selected" : undefined} onClick={onSelect} onContextMenu={onContextMenu} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect({ ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }); } }} tabIndex={0}><td className="page-map-selection-cell"><TableSelectionCheckbox label={`Выбрать ${pagePath(page.url)}`} checked={checked} onClick={event => { event.stopPropagation(); onCheck(event); }} /></td>{columns.map((column) => <td key={column} data-column={column}>{cells[column]}</td>)}</tr>;
 }
 
 

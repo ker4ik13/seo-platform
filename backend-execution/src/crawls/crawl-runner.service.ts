@@ -4,6 +4,7 @@ import type { TechnicalCrawl } from "../generated/prisma/client.js";
 import { RemoteWorkClientService,RemoteWorkFailedError,type RemoteWorkScope } from "../worker-nodes/remote-work-client.service.js";
 import { remoteJson } from "../worker-nodes/remote-artifact.js";
 import type {
+  InternalCrawlPageValidator,
   InternalPersistCrawlPageInput,
   InternalPersistCrawlPageReceipt,
   TechnicalCrawlConfig
@@ -35,6 +36,7 @@ import {
   type CrawlHostFailureCode
 } from "./crawl-host-state.service.js";
 import { CrawlService } from "./crawl.service.js";
+import { CrawlPagePrefetch, crawlPagePrefetchCapacity } from "./crawl-page-prefetch.js";
 import {
   parseSitemapXml,
   sitemapBodyText
@@ -44,6 +46,11 @@ interface PendingUrl {
   readonly url: string;
   readonly depth: number;
   readonly inSitemap: boolean;
+}
+
+interface FetchedPage {
+  readonly validator: InternalCrawlPageValidator | null;
+  readonly response: PublicFetchResult & { readonly analysis?: CrawlPageAnalysis };
 }
 
 function robotEvidence(policy: ReturnType<typeof createRobotsPolicy>, url: string, origin: string) {
@@ -94,6 +101,15 @@ export class CrawlRunnerService {
     const paceRequest = requestPacer(
       crawlConfig.requestsPerMinute,
       deadline
+    );
+    const prefetch = new CrawlPagePrefetch<PendingUrl, FetchedPage>(
+      crawlPagePrefetchCapacity(crawlConfig.requestsPerMinute, Math.min(this.config.crawl.maxResponseBytes, crawlConfig.maxResponseBytes ?? technicalCrawlMaxResponseBytes)),
+      (page, assertOpen) => this.fetchPage(crawl, crawlConfig, page, deadline, async () => {
+        assertOpen();
+        await paceRequest();
+        assertOpen();
+      }, assertOpen),
+      error => !(error instanceof PublicFetchError) || hostFailureFetchCodes.has(error.code)
     );
     let sequence = crawl.processedUrls;
     let failureCode = "CRAWL_EXECUTION_FAILED";
@@ -246,6 +262,7 @@ export class CrawlRunnerService {
       failureCode = "CRAWL_EXECUTION_FAILED";
       while (pending.length > 0 && sequence < crawlConfig.maxUrls) {
         if (await this.crawls.isCancellationRequested(crawl.id)) {
+          await prefetch.close();
           await this.complete(
             crawl,
             crawlConfig,
@@ -255,6 +272,9 @@ export class CrawlRunnerService {
           );
           return;
         }
+        // Pending includes every uncommitted page, even when its HTTP is ready.
+        // A retry therefore reuses its receipt and the same snapshot sequence.
+        prefetch.fill(fetchablePages(pending, robotsPolicy));
         const next = pending.shift()!;
         if (!robotsPolicy.access(new URL(next.url)).allowed) {
           await this.crawls.saveCheckpoint(
@@ -294,43 +314,7 @@ export class CrawlRunnerService {
         let success = false;
         let responseBackoffUntil: Date | undefined;
         try {
-          const validator = crawlConfig.conditionalRequests === false || (crawlConfig.conditionalRequests === undefined && crawlConfig.purpose === "HTTP_STATUS_CHECK")
-            ? null
-            : await this.snapshots.validator({
-                workspaceId: crawl.workspaceId,
-                projectId: crawl.projectId,
-                url: next.url
-              });
-          const requestOptions: PublicFetchOptions = {
-            timeoutMs: remainingRequestTimeout(
-              deadline,
-              Math.min(this.config.crawl.requestTimeoutMs, crawlConfig.requestTimeoutMs ?? technicalCrawlRequestTimeoutMs)
-            ),
-            maxBytes: Math.min(this.config.crawl.maxResponseBytes, crawlConfig.maxResponseBytes ?? technicalCrawlMaxResponseBytes),
-            maxRedirects: Math.min(this.config.crawl.maxRedirects, crawlConfig.maxRedirects ?? 5),
-            accept: "text/html,application/xhtml+xml;q=0.9",
-            allowedContentTypes: ["text/html", "application/xhtml+xml"],
-            acceptAnyContentType: true,
-            userAgent: this.config.crawl.userAgent,
-            beforeRequest: paceRequest,
-            ...(validator
-              ? {
-                  conditional: {
-                    ...(validator.etag
-                      ? { etag: validator.etag }
-                      : {}),
-                    ...(validator.lastModified
-                      ? { lastModified: validator.lastModified }
-                      : {})
-                  }
-                }
-              : {})
-          };
-          let response = await this.resource(next.url, requestOptions, true, crawlConfig.purpose === "HTTP_STATUS_CHECK");
-          if (response.statusCode === 304 && response.xRobotsTag && response.xRobotsTag !== validator?.xRobotsTag) {
-            const { conditional: _conditional, ...freshOptions } = requestOptions;
-            response = await this.resource(next.url, freshOptions, true, crawlConfig.purpose === "HTTP_STATUS_CHECK");
-          }
+          const { validator, response } = await prefetch.take(next);
           const normalizedFinalUrl = normalizedScopeUrl(
             response.finalUrl,
             crawlConfig.queryPolicy
@@ -469,6 +453,7 @@ export class CrawlRunnerService {
           )
         );
         if (responseBackoffUntil) {
+          await prefetch.close();
           await this.crawls.releaseForHostBackoff(
             crawl.id,
             leaseOwner,
@@ -478,6 +463,7 @@ export class CrawlRunnerService {
           return;
         }
       }
+      await prefetch.close();
       const current = await this.crawls.get(
         crawl.workspaceId,
         crawl.projectId,
@@ -495,6 +481,7 @@ export class CrawlRunnerService {
         current.processedUrls
       );
     } catch (error) {
+      await prefetch.close();
       let failure = error;
       if (error instanceof CrawlMaxRuntimeSignal) {
         const current = await this.crawls.get(
@@ -554,7 +541,60 @@ export class CrawlRunnerService {
       }
       await this.crawls.releaseForRetry(crawl.id, leaseOwner);
       throw new Error("Technical crawl retry scheduled");
+    } finally {
+      await prefetch.close();
     }
+  }
+
+  private async fetchPage(
+    crawl: TechnicalCrawl,
+    crawlConfig: TechnicalCrawlConfig,
+    next: PendingUrl,
+    deadline: Date,
+    paceRequest: () => Promise<void>,
+    assertOpen: () => void
+  ): Promise<FetchedPage> {
+    const validator = crawlConfig.conditionalRequests === false || (crawlConfig.conditionalRequests === undefined && crawlConfig.purpose === "HTTP_STATUS_CHECK")
+      ? null
+      : await this.snapshots.validator({
+          workspaceId: crawl.workspaceId,
+          projectId: crawl.projectId,
+          url: next.url
+        });
+    const requestOptions: PublicFetchOptions = {
+      timeoutMs: remainingRequestTimeout(
+        deadline,
+        Math.min(this.config.crawl.requestTimeoutMs, crawlConfig.requestTimeoutMs ?? technicalCrawlRequestTimeoutMs)
+      ),
+      maxBytes: Math.min(this.config.crawl.maxResponseBytes, crawlConfig.maxResponseBytes ?? technicalCrawlMaxResponseBytes),
+      maxRedirects: Math.min(this.config.crawl.maxRedirects, crawlConfig.maxRedirects ?? 5),
+      accept: "text/html,application/xhtml+xml;q=0.9",
+      allowedContentTypes: ["text/html", "application/xhtml+xml"],
+      acceptAnyContentType: true,
+      userAgent: this.config.crawl.userAgent,
+      beforeRequest: paceRequest,
+      ...(validator
+        ? {
+            conditional: {
+              ...(validator.etag
+                ? { etag: validator.etag }
+                : {}),
+              ...(validator.lastModified
+                ? { lastModified: validator.lastModified }
+                : {})
+            }
+          }
+        : {})
+    };
+    assertOpen();
+    let response = await this.resource(next.url, requestOptions, true, crawlConfig.purpose === "HTTP_STATUS_CHECK");
+    if (response.statusCode === 304 && response.xRobotsTag && response.xRobotsTag !== validator?.xRobotsTag) {
+      const { conditional: _conditional, ...freshOptions } = requestOptions;
+      assertOpen();
+      response = await this.resource(next.url, freshOptions, true, crawlConfig.purpose === "HTTP_STATUS_CHECK");
+    }
+    assertHostResponseAvailable(response);
+    return { validator, response };
   }
 
   private async complete(
@@ -665,12 +705,10 @@ export class CrawlRunnerService {
   private async resource(url:string,options:PublicFetchOptions,analyze=false,httpStatusOnly=false):Promise<PublicFetchResult & {analysis?:CrawlPageAnalysis}> {
     const context=this.remoteContext.getStore();
     if(!this.remote || !context || !await this.remote.available("CRAWL")) return fetchPublicResource(url,options);
-    await options.beforeRequest?.();
-    let first=true;
-    const local=()=>fetchPublicResource(url,{...options,beforeRequest:async()=>{if(first){first=false;return;}await options.beforeRequest?.();}});
+    const local=()=>fetchPublicResource(url,options);
     const {beforeRequest:_pace,...serializable}=options;
     try {
-      return await this.remote.execute(context.scope,"CRAWL","CRAWL_RESOURCE",{url,options:serializable,analyze,httpStatusOnly,queryPolicy:context.queryPolicy,redirectDelayMs:Math.ceil(60_000/context.requestsPerMinute)},
+      return await this.remote.execute(context.scope,"CRAWL","CRAWL_RESOURCE",{url,options:serializable,analyze,httpStatusOnly,queryPolicy:context.queryPolicy,redirectDelayMs:Math.ceil(60_000/context.requestsPerMinute),requestPacing:{crawlId:context.scope.operationId,requestsPerMinute:context.requestsPerMinute}},
         {resource:"HTTP",timeoutMs:Math.min(600_000,options.timeoutMs+15_000+options.maxRedirects*Math.ceil(60_000/context.requestsPerMinute)),onWait:context.heartbeat},async result=>{
           const data=await remoteJson(result,options.maxBytes*4+4*1_048_576);
           const value=data.response && typeof data.response==="object" ? data.response as Record<string,unknown> : undefined;
@@ -687,6 +725,12 @@ export class CrawlRunnerService {
       if(error instanceof RemoteWorkFailedError && ["INVALID_URL","INVALID_REQUEST_HEADER","INVALID_NOT_MODIFIED","FORBIDDEN_ADDRESS","DNS_FAILED","TIMEOUT","RESPONSE_TOO_LARGE","REDIRECT_LIMIT","INVALID_REDIRECT","UNSUPPORTED_CONTENT_TYPE","UNSUPPORTED_CONTENT_ENCODING","NETWORK_ERROR"].includes(error.code)) throw new PublicFetchError(error.code as PublicFetchError["code"]);
       throw error;
     }
+  }
+}
+
+function* fetchablePages(pending: readonly PendingUrl[], policy: ReturnType<typeof createRobotsPolicy>): Iterable<PendingUrl> {
+  for (const page of pending) {
+    if (policy.access(new URL(page.url)).allowed) yield page;
   }
 }
 
@@ -775,17 +819,20 @@ function requestPacer(
 ): () => Promise<void> {
   const intervalMs = Math.ceil(60_000 / requestsPerMinute);
   let nextRequestAt = 0;
-  return async () => {
-    assertCrawlRuntime(deadline);
-    const waitMs = Math.max(0, nextRequestAt - Date.now());
-    if (Date.now() + waitMs >= deadline.getTime()) {
-      throw new CrawlMaxRuntimeSignal();
-    }
-    nextRequestAt = Math.max(nextRequestAt, Date.now()) + intervalMs;
-    if (waitMs === 0) return;
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, waitMs);
+  let previous = Promise.resolve();
+  return () => {
+    const request = previous.then(async () => {
+      assertCrawlRuntime(deadline);
+      const waitMs = Math.max(0, nextRequestAt - Date.now());
+      if (Date.now() + waitMs >= deadline.getTime()) throw new CrawlMaxRuntimeSignal();
+      if (waitMs > 0) await new Promise<void>(resolve => setTimeout(resolve, waitMs));
+      assertCrawlRuntime(deadline);
+      // Serialize admission from the actual wake-up, so a busy event loop
+      // cannot release several overdue timers as a burst.
+      nextRequestAt = Date.now() + intervalMs;
     });
+    previous = request.catch(() => undefined);
+    return request;
   };
 }
 

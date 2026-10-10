@@ -70,3 +70,4 @@ export * from "./api/paid-operation-review.js";
 export * from "./api/rank-dimensions.js";
 
 export * from "./api/note-table.js";
+export * from "./api/page-status-jobs.js";

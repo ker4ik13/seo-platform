@@ -1,3 +1,4 @@
+import { PageStatusModule } from "./page-status/page-status.module.js";
 import { Module } from "@nestjs/common";
 import { PaidOperationModule } from "./paid-operations/paid-operation.module.js";
 import { ConfigModule } from "./config/config.module.js";
@@ -29,6 +30,7 @@ import { WorkerNodeModule } from "./worker-nodes/worker-node.module.js";
 
 @Module({
   imports: [
+    PageStatusModule,
     PaidOperationModule,
     ConfigModule.forRole("HTTP"),
     DatabaseModule,

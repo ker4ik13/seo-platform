@@ -243,6 +243,9 @@ function operationDescriptor(jobType: string, jobId: string): {
       deepLink: "/app/tasks"
     };
   }
+  if (jobType === "PAGE_STATUS_CHANGE") {
+    return { eventType: "JOB", label: "Архив страниц", deepLink: "/app/tasks" };
+  }
   if (jobType === "SEMANTIC_EXPORT") {
     return {
       eventType: "REPORT",

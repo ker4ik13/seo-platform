@@ -91,6 +91,35 @@ test("HTTPS UI → remote worker → real public site → saved page facts/posit
     const operation = (await operationResponse.json()).data; assert.equal(operation.type, "SEMANTIC_EXPORT"); assert.equal(operation.status, "COMPLETED");
   });
 
+  for (const rate of [3, 4]) {
+    await t.test(`paced batches sustain ${rate} pages/sec on a slow public site`, async () => {
+      const urls = Array.from({ length: 24 }, (_, index) => `${site.root}throughput/${rate}/${index}`);
+      await page.goto(`${base}/app/projects/${project.id}/tools/http-status-checker`);
+      await page.getByRole("combobox", { name: "Источник URL", exact: true }).click(); await page.getByRole("option", { name: "Список URL", exact: true }).click();
+      await page.getByLabel("URL — по одному в строке", { exact: false }).fill(urls.join("\n"));
+      await page.getByLabel("Лимит страниц", { exact: true }).fill("24");
+      await page.getByRole("combobox", { name: "Скорость на домен", exact: true }).click(); await page.getByRole("option", { name: `${rate} страницы/с`, exact: true }).click();
+      const created = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === `/app/api/projects/${project.id}/crawls`);
+      await page.getByRole("button", { name: "Запустить обход", exact: true }).click();
+      const response = await created; assert.equal(response.status(), 202);
+      let speedCrawl = (await response.json()).data;
+      for (let attempt = 0; attempt < 70 && ["QUEUED", "RUNNING"].includes(speedCrawl.status); attempt++) {
+        await delay(1000); speedCrawl = await call("GET", `projects/${project.id}/crawls/${speedCrawl.id}`);
+      }
+      assert.equal(speedCrawl.status, "COMPLETED"); assert.equal(speedCrawl.processedUrls, 24); assert.equal(speedCrawl.failedUrls, 0);
+      const events = site.events.filter(event => event.path.startsWith(`/throughput/${rate}/`));
+      assert.equal(events.length, 24);
+      const duration = (events.at(-1).startedAt - events[0].startedAt) / 1000, actualRate = 23 / duration;
+      const peak = Math.max(...events.map(event => events.filter(other => other.startedAt <= event.startedAt && other.finishedAt > event.startedAt).length));
+      const tasks = await worker.prisma.remoteWorkTask.findMany({ where: { operationId: speedCrawl.id, state: "COMPLETED" }, select: { claimedAt: true }, orderBy: { claimedAt: "asc" } });
+      const batchSize = Math.max(...tasks.map(task => tasks.filter(other => Math.abs(other.claimedAt - task.claimedAt) < 50).length));
+      console.log(JSON.stringify({ configuredPagesPerSecond: rate, actualPagesPerSecond: Number(actualRate.toFixed(2)), peakHttp: peak, maxClaimBatch: batchSize }));
+      assert.ok(actualRate >= rate * 0.8 && actualRate <= rate * 1.15, `configured ${rate}, actual ${actualRate.toFixed(2)} pages/sec`);
+      assert.ok(peak >= 3); assert.ok(batchSize >= 2, "center must hand out multiple pages together");
+      await page.getByRole("heading", { name: "Обход завершён", exact: true }).waitFor({ timeout: 15000 });
+    });
+  }
+
   let crawl, crawlInput;
   await t.test("UI config passes controls through the center to the remote crawl worker", async () => {
     await page.goto(`${base}/app/projects/${project.id}/tools/http-status-checker`);
@@ -314,6 +343,61 @@ test("HTTPS UI → remote worker → real public site → saved page facts/posit
     await adminPage.screenshot({ path: output + "/recovered-crawl-admin.png", animations: "disabled" });
     await adminPage.close();
   }
+  await t.test("multi-selection and folder menus archive every scoped page through the background worker", async () => {
+    for (let offset = 0; offset < 205; offset += 20) await Promise.all(Array.from({ length: Math.min(20, 205 - offset) }, (_, index) => call("POST", `projects/${project.id}/pages`, { url: `${site.root}bulk-pages/${offset + index}`, aliases: [], pageType: "EXISTING", indexability: "UNKNOWN", priority: 0 })));
+    await page.goto(`${base}/app/projects/${project.id}/pages`);
+    await page.getByRole("button", { name: "Список", exact: true }).click();
+    const folder = page.locator(".page-map-tree-select").filter({ has: page.getByText("/bulk-pages", { exact: true }) });
+    await folder.click();
+    const checks = page.locator('tr[data-page-id] .page-map-selection-cell input');
+    await checks.nth(0).focus(); await checks.nth(0).press("Space"); await checks.nth(1).click({ modifiers: ["Shift"] });
+    assert.equal(await page.locator('tr[data-page-id] .page-map-selection-cell input:checked').count(), 2);
+    await page.locator('tr[data-page-id]').nth(1).click({ button: "right" });
+    const menu = page.getByRole("menu", { name: "Действия со страницами", exact: true }); await menu.waitFor();
+    await page.screenshot({ path: output + "/page-map-multi-select-menu.png" });
+    const created = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/pages/status-jobs"));
+    await menu.getByRole("menuitem", { name: "В архив", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "В архив", exact: true }).click();
+    const response = await created; assert.equal(response.status(), 202); const selectedJob = (await response.json()).data;
+    async function finishedJob(id) {
+      let result;
+      for (let attempt = 0; attempt < 80; attempt++) {
+        result = await call("GET", `projects/${project.id}/pages/status-jobs/${id}`);
+        if (!["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(result.status)) break;
+        await delay(500);
+      }
+      assert.equal(result.status, "COMPLETED"); return result;
+    }
+    assert.equal((await finishedJob(selectedJob.id)).changed, 2);
+    await page.getByText(/Обработано: 2[.] Изменено: 2[.]/u).waitFor();
+    const active = await call("GET", `projects/${project.id}/pages?pathPrefix=/bulk-pages&limit=100&includeStructure=false`);
+    assert.ok(active.nextCursor, "folder extends beyond the loaded API page");
+    await folder.click({ button: "right" });
+    const folderCreated = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/pages/status-jobs"));
+    await page.getByRole("menu", { name: "Действия с разделом", exact: true }).getByRole("menuitem", { name: "В архив", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "В архив", exact: true }).click();
+    const folderJob = (await (await folderCreated).json()).data;
+    assert.equal((await finishedJob(folderJob.id)).changed, 203);
+    await page.getByText(/Обработано: 203[.] Изменено: 203[.]/u).waitFor();
+    assert.equal((await call("GET", `projects/${project.id}/pages?pathPrefix=/bulk-pages&limit=100`)).pages.length, 0);
+    const journal = await adminApi.get(`/admin/api/operations/${folderJob.id}`); assert.equal(journal.status(), 200); assert.equal((await journal.json()).data.type, "PAGE_STATUS_CHANGE");
+    await page.locator(".page-map-filter-disclosure > summary").click();
+    const lifecycle = page.locator(".form-field").filter({ has: page.locator("span", { hasText: /^Раздел$/u }) });
+    await lifecycle.getByRole("combobox").click(); await page.getByRole("option", { name: "Архив", exact: true }).click();
+    await page.getByRole("button", { name: "Показать", exact: true }).click();
+    await folder.waitFor(); await folder.click({ button: "right" });
+    const restoreCreated = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/pages/status-jobs"));
+    await page.getByRole("menu", { name: "Действия с разделом", exact: true }).getByRole("menuitem", { name: "Восстановить", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Восстановить", exact: true }).click();
+    const restored = (await (await restoreCreated).json()).data; assert.equal((await finishedJob(restored.id)).changed, 205);
+    await page.getByText(/Обработано: 205[.] Изменено: 205[.]/u).waitFor();
+    const forbidden = await outsider.get(`/app/api/projects/${project.id}/pages/status-jobs/${folderJob.id}`); assert.ok([403,404].includes(forbidden.status()));
+    await page.screenshot({ path: output + "/page-map-bulk-operation-completed.png" });
+    await page.getByRole("button", { name: "Активные страницы", exact: true }).click();
+    await page.locator('tr[data-page-id]').first().waitFor();
+    assert.ok((await call("GET", `projects/${project.id}/pages?pathPrefix=/bulk-pages&limit=100`)).pages.length > 0);
+  });
+
   assert.deepEqual(errors, []); assert.deepEqual(serverErrors, []);
   await writeFile(output + "/crawl-page-map-results.json", JSON.stringify({ processed: crawl.processedUrls, blocked: crawl.blockedUrls, realHttpRequests: site.events.length, workerReceipts: await worker.prisma.remoteWorkTask.count({ where: { operationId: crawl.id, nodeId: worker.nodeId, state: "COMPLETED" } }), browserErrors: errors, serverErrors }, null, 2), { mode: 0o600 });
 });

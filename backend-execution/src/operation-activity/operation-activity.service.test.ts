@@ -40,6 +40,7 @@ test("counts only active user-visible operations by project", async () => {
       projectId: { not: null },
       type: {
         in: [
+          "PAGE_STATUS_CHANGE",
           "FREQUENCY_COLLECTION",
           "MANUAL_RANK_CHECK",
           "AI_ANSWER_COLLECTION",
@@ -98,6 +99,7 @@ test("dismisses a failed operation and advances the guarded Job version", async 
       projectId: firstProjectId,
       type: {
         in: [
+          "PAGE_STATUS_CHANGE",
           "FREQUENCY_COLLECTION",
           "MANUAL_RANK_CHECK",
           "AI_ANSWER_COLLECTION",
@@ -243,7 +245,7 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
   const filteredTypes = (countQueries[1] as { where: { AND: unknown[] } }).where.AND[0];
   assert.deepEqual(filteredTypes, { type: { in: [
-    "FREQUENCY_COLLECTION", "MANUAL_RANK_CHECK", "AI_ANSWER_COLLECTION",
+    "PAGE_STATUS_CHANGE", "FREQUENCY_COLLECTION", "MANUAL_RANK_CHECK", "AI_ANSWER_COLLECTION",
     "CLUSTERING_RUN", "TECHNICAL_CRAWL", "KEYWORD_RESEARCH", "SEMANTIC_EXPORT"
   ] } });
   assert.deepEqual((countQueries[1] as { where: { AND: unknown[] } }).where.AND[1], {

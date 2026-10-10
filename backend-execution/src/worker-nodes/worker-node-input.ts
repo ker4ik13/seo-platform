@@ -9,7 +9,7 @@ import {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface WorkerNodeHeartbeat {
-  readonly protocolVersion: 1;
+  readonly protocolVersion: 1 | 2;
   readonly httpSlots: number;
   readonly rankSlots: number;
   readonly cpuSlots: number;
@@ -39,7 +39,7 @@ export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
     ...(value && typeof value === "object" && Object.hasOwn(value,"buildHash") ? ["buildHash"] : [])
   ]);
   if (
-    input.protocolVersion !== 1 ||
+    (input.protocolVersion !== 1 && input.protocolVersion !== 2) ||
     !boundedInteger(input.httpSlots, 0, 512) ||
     !boundedInteger(input.rankSlots, 0, 512) ||
     Number(input.rankSlots) > Number(input.httpSlots) ||
@@ -51,7 +51,7 @@ export function workerNodeHeartbeat(value: unknown): WorkerNodeHeartbeat {
       (typeof input.buildHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.buildHash)))
   ) invalid();
   return {
-    protocolVersion: 1,
+    protocolVersion: input.protocolVersion,
     httpSlots: input.httpSlots,
     rankSlots: input.rankSlots,
     cpuSlots: input.cpuSlots,

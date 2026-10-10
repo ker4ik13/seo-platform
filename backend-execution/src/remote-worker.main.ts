@@ -15,6 +15,8 @@ import { workerBuildHash } from "./worker-nodes/worker-build-version.js";
 import { keepHeartbeatUntilDrained } from "./worker-nodes/remote-worker-lifecycle.js";
 import { WorkerRankResultBatcher } from "./worker-nodes/worker-rank-result-batcher.js";
 
+import { RemoteCrawlRequestPacer } from "./worker-nodes/remote-crawl-request-pacer.js";
+
 const CLAIM_CADENCE_CHECK_MS=100;
 const HTTP_WORK_CAPABILITIES=workerCapabilities.filter(capability=>
   capability!=="RANK" && !["IMPORT","EXPORT","INSPECTION"].includes(capability));
@@ -23,7 +25,7 @@ const CPU_WORK_CAPABILITIES=workerCapabilities.filter(capability=>
 
 async function main():Promise<void> {
   const config=await loadRemoteWorkerConfig(),buildHash=await workerBuildHash(),client=new WorkerHttpClient(config),claimController=new AbortController(),heartbeatController=new AbortController();
-  const rankResults=new WorkerRankResultBatcher(client);
+  const rankResults=new WorkerRankResultBatcher(client),crawlPacer=new RemoteCrawlRequestPacer();
   process.stdout.write(`Воркер: сборка ${buildHash.slice(0,12)}\n`);
   process.once("SIGINT",()=>claimController.abort());process.once("SIGTERM",()=>claimController.abort());
   const active=new Map<WorkerCapability,number>();let httpActive=0,cpuActive=0,inspectionReady=false,authenticationRejected=false;
@@ -45,10 +47,10 @@ async function main():Promise<void> {
     while(!heartbeatController.signal.aborted) {
       try {
         if(config.malware) {try{await new ClamdMalwareScannerAdapter(config.malware).healthCheck();inspectionReady=true;}catch{inspectionReady=false;}}
-        const node=parseWorkerNodeView(await client.post("heartbeat",{protocolVersion:1,httpSlots:config.httpSlots,rankSlots:config.rankSlots,cpuSlots:config.cpuSlots,
+        const node=parseWorkerNodeView(await client.post("heartbeat",{protocolVersion:2,httpSlots:config.httpSlots,rankSlots:config.rankSlots,cpuSlots:config.cpuSlots,
           memoryBytes:String(Math.min(totalmem(),process.constrainedMemory() || totalmem())),activeWorkItems:httpActive+cpuActive,
           capabilitySlots:{...config.capabilitySlots,INSPECTION:inspectionReady ? config.capabilitySlots.INSPECTION ?? 0 : 0},buildHash},64*1024,5_000,heartbeatController.signal));
-        if(node.id!==config.nodeId || node.protocolVersion!==1) throw new Error("Invalid worker identity");
+        if(node.id!==config.nodeId || node.protocolVersion!==2) throw new Error("Invalid worker identity");
         effectiveCapacity = {
           httpSlots: node.maxHttpSlots,
           cpuSlots: node.maxCpuSlots,
@@ -127,7 +129,7 @@ async function main():Promise<void> {
         for(const task of tasks) start(task,task.resource,()=>{
           const done=()=>cancellations.delete(task.id);
           if(task.resource==="CPU") return runCpu(task,config,client,stop=>cancellations.set(task.id,stop)).finally(done);
-          const abort=new AbortController();cancellations.set(task.id,()=>abort.abort());return runWork(task,config,client,abort.signal).finally(done);
+          const abort=new AbortController();cancellations.set(task.id,()=>abort.abort());return runWork(task,config,client,abort.signal,crawlPacer).finally(done);
         });
         for(const task of ranks) start(task,"HTTP",()=>runRank(task,rankResults));
       } catch(error) {
@@ -145,9 +147,9 @@ async function main():Promise<void> {
   });
 }
 
-async function runWork(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,signal:AbortSignal):Promise<string|undefined> {
+async function runWork(task:RemoteWorkTask,config:RemoteWorkerConfig,client:WorkerHttpClient,signal:AbortSignal,crawlPacer:RemoteCrawlRequestPacer):Promise<string|undefined> {
   let result;
-  try {result=await executeRemoteWork(task,config,fetch,signal);}
+  try {result=await executeRemoteWork(task,config,fetch,signal,crawlPacer);}
   catch(error){const code=error instanceof WorkExecutionError ? error.code : error && typeof error==="object" && "code" in error && typeof error.code==="string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(error.code) ? error.code : "WORKER_OUTCOME_UNKNOWN";await client.complete(task.ticket,undefined,undefined,code);return code;}
   await client.complete(task.ticket,result.result,result.parts);
   return undefined;

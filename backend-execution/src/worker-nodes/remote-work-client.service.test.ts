@@ -131,3 +131,29 @@ test("provider work admits 64 independent items in one SQL batch and one receipt
   assert.deepEqual(batchSizes, [64]);
   assert.equal(polls, 1);
 });
+
+test("concurrent crawl pages are admitted as batches instead of one SQL call per page", async (t) => {
+  const nativeFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = nativeFetch; });
+  const batchSizes: number[] = [];
+  const prisma = { $queryRaw: async (query: TemplateStringsArray, serialized: string) => {
+    if (query.join("").includes("remote_work_available")) return [{ available: true }];
+    assert.match(query.join(""), /enqueue_remote_work_batch/u);
+    const entries = JSON.parse(serialized) as unknown[];
+    batchSizes.push(entries.length);
+    return entries.map((_, index) => ({ ordinal: index + 1, id: randomUUID(), readToken: randomUUID(), nodeId: randomUUID(), blocked: false, errorCode: null }));
+  } } as unknown as PrismaService;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { entries: { id: string }[] };
+    return new Response(JSON.stringify({ data: body.entries.map(({ id }) => ({ id, state: "COMPLETED", result: { ready: true } })) }));
+  };
+  const client = new RemoteWorkClientService(prisma, { remoteWorkEnabled: true, remoteWorkControlUrl: "http://127.0.0.1:4002" } as AppConfig);
+  t.after(() => client.onModuleDestroy());
+  const scope = { origin: "JOB" as const, operationId: randomUUID(), workspaceId: randomUUID() };
+  await Promise.all(Array.from({ length: 8 }, async (_, index) => {
+    return client.execute(scope, "CRAWL", "CRAWL_RESOURCE", { index }, { resource: "HTTP", timeoutMs: 5000 }, () => true, async () => false);
+  }));
+  assert.equal(batchSizes.reduce((sum, size) => sum + size, 0), 8);
+  assert.ok(Math.max(...batchSizes) >= 3);
+  assert.ok(batchSizes.length < 8);
+});

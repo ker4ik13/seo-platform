@@ -1,5 +1,7 @@
+import type { PageStatusInput, PageStatusBatchResult } from "@seo-platform/contracts";
 import { createHash } from "node:crypto";
 import {
+  BadRequestException,
   ConflictException,
   HttpException,
   HttpStatus,
@@ -173,7 +175,7 @@ export class PageService {
               workspaceId,
               projectId,
               includedInMap: true,
-              status: "ACTIVE"
+              status: query.lifecycleStatus ?? "ACTIVE"
             },
             select: { normalizedUrl: true, id: true },
             orderBy: [{ normalizedUrl: "asc" }, { id: "asc" }],
@@ -473,6 +475,34 @@ export class PageService {
       }
       throw error;
     }
+  }
+
+  public async prepareStatus(scope: { workspaceId: string; projectId: string; input: PageStatusInput }): Promise<readonly string[]> {
+    const { input } = scope;
+    if (input.pageIds) {
+      const pages = await this.prisma.page.findMany({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: [...input.pageIds] }, includedInMap: true, status: { not: "DELETED" } }, select: { id: true, status: true } });
+      if (pages.length !== input.pageIds.length) throw new NotFoundException("Page selection not found");
+      return pages.filter(page => page.status === (input.operation === "archive" ? "ACTIVE" : "ARCHIVED")).map(page => page.id).sort();
+    }
+    const prefix = input.pathPrefix === "/" ? "" : input.pathPrefix!.replace(/\/$/u, "");
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), pattern = prefix ? `^https?://[^/?#]+${escaped}(?:/|[?#]|$)` : "^https?://";
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`SELECT id FROM pages WHERE workspace_id=${scope.workspaceId}::uuid AND project_id=${scope.projectId}::uuid AND included_in_map AND status::text=${input.operation === "archive" ? "ACTIVE" : "ARCHIVED"} AND normalized_url ~ ${pattern} ORDER BY id LIMIT 50001`;
+    if (rows.length > 50000) throw new BadRequestException("Page action limit exceeded");
+    return rows.map(page => page.id);
+  }
+
+  public async applyStatus(scope: { workspaceId: string; projectId: string; actorId: string; input: PageStatusInput }): Promise<PageStatusBatchResult> {
+    const ids = scope.input.pageIds;
+    if (!ids?.length || ids.length > 200) throw new BadRequestException("Invalid page action batch");
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM pages WHERE workspace_id=${scope.workspaceId}::uuid AND project_id=${scope.projectId}::uuid AND id=ANY(${[...ids]}::uuid[]) ORDER BY id FOR UPDATE`;
+      const pages = await tx.page.findMany({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: [...ids] }, includedInMap: true, status: { not: "DELETED" } }, select: { id: true, status: true, _count: { select: { primaryClusters: true } } } });
+      if (pages.length !== ids.length) throw new NotFoundException("Page selection not found");
+      const status = scope.input.operation === "archive" ? "ARCHIVED" : "ACTIVE";
+      const allowed = pages.filter(page => status === "ACTIVE" || page.status === "ARCHIVED" || page._count.primaryClusters === 0);
+      await tx.page.updateMany({ where: { workspaceId: scope.workspaceId, projectId: scope.projectId, id: { in: allowed.map(page => page.id) }, status: { not: status } }, data: { status, updatedBy: scope.actorId, version: { increment: 1 }, ...(status === "ARCHIVED" ? { archivedBy: scope.actorId, archivedAt: new Date() } : { archivedBy: null, archivedAt: null }) } });
+      return { changed: allowed.length, blocked: pages.length - allowed.length };
+    });
   }
 
   public archive(

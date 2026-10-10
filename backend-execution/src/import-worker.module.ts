@@ -1,3 +1,4 @@
+import { PageStatusWorkerService } from "./page-status/page-status-worker.service.js";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
@@ -18,6 +19,6 @@ import { RemoteWorkRetentionService } from "./worker-nodes/remote-work-retention
     SemanticExportWorkerModule,
     StorageModule
   ],
-  providers: [KeywordResearchImportService, FileRetentionService, RemoteWorkRetentionService]
+  providers: [PageStatusWorkerService, KeywordResearchImportService, FileRetentionService, RemoteWorkRetentionService]
 })
 export class ImportWorkerModule {}

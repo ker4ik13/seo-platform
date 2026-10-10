@@ -86,7 +86,7 @@ fi
 if [ "${SEO_PLATFORM_POSTGRES_TEST_SUITE:-full}" = remote-work ]; then
   export JOBS_REMOTE_WORK_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
   export JOBS_FREQUENCY_BATCH_TEST_DATABASE_URL="$JOBS_NOTIFICATION_TEST_DATABASE_URL"
-  pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/worker-nodes/remote-work-postgres.integration.test.ts src/frequency-collections/xmlstock-frequency-batch.postgres.integration.test.ts > "$test_root/remote-work-postgres.log" 2>&1
+  pnpm --filter @seo-platform/backend-execution exec node --import tsx --test src/worker-nodes/remote-work-postgres.integration.test.ts src/page-status/page-status-postgres.integration.test.ts src/frequency-collections/xmlstock-frequency-batch.postgres.integration.test.ts > "$test_root/remote-work-postgres.log" 2>&1
   printf '%s\n' 'postgres-tests result=passed (Gateway leases, receipts, fairness and XMLStock frequency waves)'
   exit 0
 fi

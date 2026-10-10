@@ -14,8 +14,9 @@ export async function crawlSiteFixture(t) {
   const html = (title, body, head = "") => `<!doctype html><html lang="ru"><head><title>${title}</title><meta name="description" content="Тестовые страницы для настоящей проверки обхода сайта, без пользовательских и платёжных данных.">${head}</head><body><h1>${title}</h1>${body}<p>${"Текст контрольной страницы. ".repeat(30)}</p></body></html>`;
   const server = http.createServer((request, response) => {
     const path = new URL(request.url, `http://${host}`).pathname;
-    const event = { path, method: request.method, status: 200, conditional: request.headers["if-none-match"] ?? null, agent: request.headers["user-agent"] ?? "" }; events.push(event);
-    const send = (code, type, body, headers = {}) => { event.status = code; response.writeHead(code, { "Content-Type": type, ...headers }); response.end(body); };
+    const event = { path, startedAt: Date.now(), finishedAt: undefined, method: request.method, status: 200, conditional: request.headers["if-none-match"] ?? null, agent: request.headers["user-agent"] ?? "" }; events.push(event);
+    const send = (code, type, body, headers = {}) => { event.status = code; event.finishedAt = Date.now(); response.writeHead(code, { "Content-Type": type, ...headers }); response.end(body); };
+    if (/^\/throughput\/(3|4)\/\d+$/u.test(path)) return setTimeout(() => send(200, "text/html", html(`Контроль скорости ${path}`, "")), 1200);
     if (path === "/robots.txt") return send(200, "text/plain", "User-agent: SeoPlatformCrawler\nDisallow: /blocked/\nUser-agent: Googlebot\nDisallow: /google-blocked/\nUser-agent: YandexBot\nDisallow: /yandex-blocked/\nUser-agent: *\nAllow: /\n");
     if (path === "/sitemap.xml") return send(200, "application/xml", `<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${["/services/", "/blocked/", "/header-only/"].map((path) => `<url><loc>http://${host}${path}</loc></url>`).join("")}</urlset>`);
     if (path === "/") return send(200, "text/html", html("Контрольный сайт", ["/services/", "/services/old/", "/blocked/", "/agent-meta/", "/header-only/", "/no-follow/", "/google-blocked/", "/yandex-blocked/"].map((url) => `<a href="${url}">Страница ${url}</a>`).join("")));

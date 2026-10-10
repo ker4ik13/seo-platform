@@ -15,7 +15,7 @@ export interface WorkerNodeConfiguration {
 }
 
 export interface WorkerNodeHeartbeat {
-  readonly protocolVersion: 1;
+  readonly protocolVersion: 1 | 2;
   readonly httpSlots: number;
   readonly rankSlots: number;
   readonly cpuSlots: number;
@@ -170,6 +170,7 @@ export function parseWorkerNodeView(value: unknown): WorkerNodeView {
 
 export function workerEffectiveCapabilitySlots(node:WorkerNodeView,capability:WorkerCapability):number {
   if(!node.enabled || node.draining || !node.online || !node.capabilities.includes(capability)) return 0;
+  if(capability==="CRAWL" && (node.protocolVersion ?? 1)<2) return 0;
   const reported=node.reportedCapabilitySlots?.[capability] ?? (capability==="RANK" ? node.reportedRankSlots : 0);
   const manual=node.useEnvCapacity===false;
   const parent=["IMPORT","EXPORT","INSPECTION"].includes(capability)

@@ -15,15 +15,17 @@ import { internalCreateSemanticExportInput } from "../semantic-exports/semantic-
 import { ClamdMalwareScannerAdapter } from "../malware/clamd-malware-scanner.adapter.js";
 import { jsonLines } from "./remote-artifact.js";
 
+import { RemoteCrawlRequestPacer } from "./remote-crawl-request-pacer.js";
+
 interface Result {readonly result:Readonly<Record<string,unknown>>;readonly parts?:readonly {partNumber:number;etag:string}[];}
 const encoder=new TextEncoder();
 const MAX_FILE=8n*1024n**3n;
 
-export async function executeRemoteWork(task:RemoteWorkTask,config:RemoteWorkerConfig,fetcher:typeof fetch=fetch,signal?:AbortSignal):Promise<Result> {
+export async function executeRemoteWork(task:RemoteWorkTask,config:RemoteWorkerConfig,fetcher:typeof fetch=fetch,signal?:AbortSignal,crawlPacer?:RemoteCrawlRequestPacer):Promise<Result> {
   const client=new WorkerHttpClient(config);
   switch(task.command) {
     case "PROVIDER_HTTP":return provider(task,client,fetcher,signal);
-    case "CRAWL_RESOURCE":return crawl(task,client);
+    case "CRAWL_RESOURCE":return crawl(task,client,crawlPacer,signal);
     case "IMPORT_ROWS":return importRows(task,client);
     case "EXPORT_FILE":return exportFile(task,client);
     case "UPLOAD_INSPECTION":return inspectUpload(task,config);
@@ -51,16 +53,19 @@ async function provider(task:RemoteWorkTask,client:WorkerHttpClient,fetcher:type
   return {result:{...metadata,artifact:uploaded.artifact},parts:uploaded.parts};
 }
 
-async function crawl(task:RemoteWorkTask,client:WorkerHttpClient):Promise<Result> {
+async function crawl(task:RemoteWorkTask,client:WorkerHttpClient,pacer?:RemoteCrawlRequestPacer,signal?:AbortSignal):Promise<Result> {
   const payload=task.payload,options=record(payload.options),url=string(payload.url,16*1024);
   const conditional=options.conditional===undefined ? undefined : stringRecord(options.conditional);
   const types=stringArray(options.allowedContentTypes,16,120);
+  const pacing=payload.requestPacing===undefined ? undefined : record(payload.requestPacing);
+  if(pacing && (Object.keys(pacing).length!==2 || typeof pacing.crawlId!=="string" || !/^[0-9a-f-]{36}$/iu.test(pacing.crawlId) || !pacer)) invalid();
+  const requestsPerMinute=pacing ? integer(pacing.requestsPerMinute,10,240) : undefined;
   let calls=0;
   const response=await fetchPublicResource(url,{
     timeoutMs:integer(options.timeoutMs,1_000,120_000),maxBytes:integer(options.maxBytes,1,128*1_048_576),maxRedirects:integer(options.maxRedirects,0,20),
     accept:string(options.accept,1_024),allowedContentTypes:types,userAgent:string(options.userAgent,1_024),
     ...(options.acceptAnyContentType===true ? {acceptAnyContentType:true} : {}),...(conditional ? {conditional} : {}),
-    beforeRequest:async()=>{if(calls++>0) await delay(integer(payload.redirectDelayMs,0,60_000));}
+    beforeRequest:async()=>{if(pacing && requestsPerMinute && pacer) await pacer.wait(String(pacing.crawlId),requestsPerMinute,Date.parse(task.deadline),signal);else if(calls++>0) await delay(integer(payload.redirectDelayMs,0,60_000));}
   });
   const {body,...metadata}=response;
   if(!technicalCrawlQueryPolicies.includes(payload.queryPolicy as TechnicalCrawlQueryPolicy)) invalid();

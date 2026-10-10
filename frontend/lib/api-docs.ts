@@ -361,6 +361,8 @@ export const apiEndpointCatalog: readonly ApiEndpointDoc[] = [
   endpoint("crawl-get", "GET", "/projects/{projectId}/crawls/{crawlId}", "audits:read", "Состояние обхода", "audits"),
   endpoint("crawl-result", "GET", "/projects/{projectId}/crawls/{crawlId}/result", "audits:read", "Постраничный результат обхода", "audits"),
   endpoint("crawl-cancel", "POST", "/projects/{projectId}/crawls/{crawlId}/cancel", "audits:run", "Отменить технический аудит", "audits"),
+  endpoint("page-status-create", "POST", "/projects/{projectId}/pages/status-jobs", "pages:write", "Фоновое архивирование или восстановление страниц", "project-data"),
+  endpoint("page-status-get", "GET", "/projects/{projectId}/pages/status-jobs/{jobId}", "pages:read", "Прогресс операции со страницами", "project-data"),
   endpoint("page-get", "GET", "/projects/{projectId}/pages/{pageId}", "pages:read", "Получить страницу проекта", "project-data"),
   endpoint("page-statistics", "GET", "/projects/{projectId}/pages/rank-statistics", "pages:read", "Пакетная статистика страниц; также нужен positions:read", "project-data"),
   endpoint("page-keyword-target", "GET", "/projects/{projectId}/pages/by-keyword/{keywordId}", "pages:read", "Целевая страница запроса; также нужен semantics:read", "project-data"),

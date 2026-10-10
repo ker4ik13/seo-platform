@@ -55,3 +55,9 @@ test("worker registration and heartbeat accept only bounded exact inputs", () =>
   }), BadRequestException);
   assert.throws(() => workerNodeId("not-an-id"), BadRequestException);
 });
+
+ test("worker protocol v2 advertises shared crawl pacing while v1 remains valid", () => {
+  const heartbeat = { protocolVersion: 2, httpSlots: 16, rankSlots: 0, cpuSlots: 1, memoryBytes: "1024", activeWorkItems: 0 };
+  assert.equal(workerNodeHeartbeat(heartbeat).protocolVersion, 2);
+  assert.throws(() => workerNodeHeartbeat({ ...heartbeat, protocolVersion: 3 }));
+});

@@ -77,6 +77,17 @@ test("real PostgreSQL page statistics, evidence, panels and URL path boundaries"
     assert.equal(scopedSorted.pages[0]?.id, page.id);
     await assert.rejects(pages.list(scope.workspaceId, scope.projectId, { limit: 1, sort: "HTTP", cursor: scopedSorted.nextCursor! }), /cursor/iu);
 
+    const prepared = await pages.prepareStatus({ ...scope, input: { operation: "archive", pathPrefix: "/services" } });
+    assert.ok(prepared.includes(page.id));
+    await assert.rejects(pages.applyStatus({ ...scope, input: { operation: "archive", pageIds: [page.id, randomUUID()] } }));
+    assert.equal((await pages.get(scope.workspaceId, scope.projectId, page.id)).lifecycleStatus, "ACTIVE");
+    const protectedCluster = await prisma.cluster.create({ data: { workspaceId: scope.workspaceId, projectId: scope.projectId, name: "Основной кластер", method: "MANUAL", primaryPageId: page.id } });
+    assert.deepEqual(await pages.applyStatus({ ...scope, input: { operation: "archive", pageIds: [page.id] } }), { changed: 0, blocked: 1 });
+    await prisma.cluster.delete({ where: { id: protectedCluster.id } });
+    assert.deepEqual(await pages.applyStatus({ ...scope, input: { operation: "archive", pageIds: [page.id] } }), { changed: 1, blocked: 0 });
+    assert.deepEqual(await pages.applyStatus({ ...scope, input: { operation: "archive", pageIds: [page.id] } }), { changed: 1, blocked: 0 });
+    assert.ok((await pages.list(scope.workspaceId, scope.projectId, { lifecycleStatus: "ARCHIVED", limit: 100 })).structureUrls?.includes(page.normalizedUrl));
+    assert.deepEqual(await pages.applyStatus({ ...scope, input: { operation: "restore", pageIds: [page.id] } }), { changed: 1, blocked: 0 });
   } finally { await prisma.$disconnect(); }
 });
 function withoutActor(scope: Readonly<{ workspaceId: string; projectId: string; actorId: string }>) { return { workspaceId: scope.workspaceId, projectId: scope.projectId }; }

@@ -1,3 +1,4 @@
+import { PageStatusService } from "../page-status/page-status.service.js";
 import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service.js";
 import { RankRunService } from "../rank-runs/rank-run.service.js";
@@ -12,7 +13,7 @@ import { SemanticImportService } from "../imports/semantic-import.service.js";
 /** Delegates cancellation to each existing owning workflow; never edits its state by hand. */
 @Injectable()
 export class OperationCancellationService {
-  public constructor(private readonly prisma: PrismaService, private readonly ranks: RankRunService, private readonly frequency: FrequencyCollectionService, private readonly ai: AiAnswerCollectionService, private readonly clustering: ClusteringRunService, private readonly research: KeywordResearchService, private readonly crawl: CrawlService, private readonly exports: SemanticExportService, private readonly imports: SemanticImportService) {}
+  public constructor(private readonly prisma: PrismaService, private readonly ranks: RankRunService, private readonly frequency: FrequencyCollectionService, private readonly ai: AiAnswerCollectionService, private readonly clustering: ClusteringRunService, private readonly research: KeywordResearchService, private readonly crawl: CrawlService, private readonly exports: SemanticExportService, private readonly imports: SemanticImportService, private readonly pageStatus: PageStatusService) {}
   public async cancel(id: string, actorId: string, requestId: string): Promise<void> {
     const job = await this.prisma.job.findUnique({ where: { id }, select: { workspaceId: true, projectId: true, type: true, version: true, technicalCrawl: { select: { id: true, version: true } }, keywordResearchRun: { select: { id: true, version: true } } } });
     if (!job) {
@@ -24,6 +25,7 @@ export class OperationCancellationService {
     if (!job?.projectId) throw new NotFoundException("Operation not found");
     const scope = { workspaceId: job.workspaceId, projectId: job.projectId, actorId };
     switch (job.type) {
+      case "PAGE_STATUS_CHANGE": await this.pageStatus.cancel(id); break;
       case "MANUAL_RANK_CHECK": await this.ranks.cancel({ ...scope, jobId: id }); break;
       case "FREQUENCY_COLLECTION": await this.frequency.cancel(id, scope); break;
       case "AI_ANSWER_COLLECTION": await this.ai.cancel(id, scope); break;

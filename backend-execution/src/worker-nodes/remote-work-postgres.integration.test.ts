@@ -28,7 +28,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
     capabilities:["WORDSTAT"],idempotencyKey:randomUUID(),requestFingerprint:randomBytes(32),fingerprintKeyVersion:1}});
   const physical=crypto.decrypt(workspaceId,"XMLSTOCK",credentialId,encrypted).rateLimitScopeId!;
   const node=await nodes.create({name:"Gateway SQL fixture",capabilities:["WORDSTAT","EXPORT"],maxHttpSlots:8,maxCpuSlots:2,capabilityLimits:{WORDSTAT:2,EXPORT:1},useEnvCapacity:false});
-  await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
+  await nodes.heartbeat(node.node.id,node.token,{protocolVersion:2,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
   await nodes.setEnabled(node.node.id,true);
   t.after(async()=>{await prisma.executionWorkerNode.updateMany({where:{id:node.node.id,deletedAt:null},data:{enabled:false,draining:true}});await prisma.$disconnect();});
 
@@ -53,7 +53,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
     const idle=await nodes.create({name:"Idle Wordstat SQL fixture",capabilities:["WORDSTAT"],
       maxHttpSlots:8,maxCpuSlots:2,capabilityLimits:{WORDSTAT:8},useEnvCapacity:false});
     try {
-      await nodes.heartbeat(idle.node.id,idle.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,
+      await nodes.heartbeat(idle.node.id,idle.token,{protocolVersion:2,httpSlots:8,rankSlots:0,cpuSlots:2,
         memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8}});
       await nodes.setEnabled(idle.node.id,true);
       const pinned=await enqueue(source.scope,payload("second fenced request") as unknown as Record<string,unknown>);
@@ -61,7 +61,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
       const claimed=await gateway.claim(node.node.id,node.token,{httpSlots:8,cpuSlots:0,capabilitySlots:{WORDSTAT:8}});
       assert.deepEqual(new Set(claimed.map(task=>task.id)),new Set([first.id,pinned.id]));
       for(const task of claimed)await gateway.complete(node.node.id,node.token,task.ticket,undefined,undefined,"WORKER_NOT_STARTED");
-      await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,
+      await nodes.heartbeat(node.node.id,node.token,{protocolVersion:2,httpSlots:8,rankSlots:0,cpuSlots:2,
         memoryBytes:8n*1024n**3n,activeWorkItems:8,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
       const switched=await enqueue(source.scope,payload("next batch on idle node") as unknown as Record<string,unknown>);
       assert.equal(switched.nodeId,idle.node.id,"the next safe batch uses the less busy node");
@@ -71,7 +71,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
       await gateway.complete(idle.node.id,idle.token,next[0]!.ticket,undefined,undefined,"WORKER_NOT_STARTED");
     } finally {
       await nodes.remove(idle.node.id);
-      await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,
+      await nodes.heartbeat(node.node.id,node.token,{protocolVersion:2,httpSlots:8,rankSlots:0,cpuSlots:2,
         memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
       await prisma.job.update({where:{id:source.id},data:{status:"CANCEL_REQUESTED",cancelRequestedAt:new Date(),version:{increment:1}}});
     }
@@ -115,7 +115,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
     const receipt=await gateway.receipts([{id:assignment.id,token:assignment.readToken}],0);assert.equal(receipt[0]?.state,"COMPLETED");
     const recovered=await enqueue(source.scope,{...request,admitBefore:new Date().toISOString()});assert.equal(recovered.id,assignment.id);assert.equal(recovered.readToken,assignment.readToken);
     await assert.rejects(prisma.remoteWorkTask.update({where:{id:assignment.id},data:{payload:{changed:true}}}));
-    await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
+    await nodes.heartbeat(node.node.id,node.token,{protocolVersion:2,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:8,EXPORT:2}});
     await prisma.job.update({where:{id:source.id},data:{status:"COMPLETED",finishedAt:new Date(),leaseOwner:null,leaseExpiresAt:null,version:{increment:1}}});
     assert.equal(await prisma.remoteOperationAssignment.count({where:{jobId:source.id}}),0);
   });
@@ -166,7 +166,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
       ciphertext:Uint8Array.from(arsEncrypted.ciphertext),nonce:Uint8Array.from(arsEncrypted.nonce),authTag:Uint8Array.from(arsEncrypted.authTag),encryptedDataKey:Uint8Array.from(arsEncrypted.encryptedDataKey),dataKeyNonce:Uint8Array.from(arsEncrypted.dataKeyNonce),dataKeyAuthTag:Uint8Array.from(arsEncrypted.dataKeyAuthTag)}});
     await nodes.configure(node.node.id,{name:node.node.name,capabilities:["WORDSTAT","AI_ANSWER","CLUSTERING","EXPORT"],maxHttpSlots:8,maxCpuSlots:2});
     const capacities={WORDSTAT:2,AI_ANSWER:2,CLUSTERING:2,EXPORT:1};
-    await nodes.heartbeat(node.node.id,node.token,{protocolVersion:1,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:capacities});
+    await nodes.heartbeat(node.node.id,node.token,{protocolVersion:2,httpSlots:8,rankSlots:0,cpuSlots:2,memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:capacities});
     for(const [type,capability,tool] of [["FREQUENCY_COLLECTION","WORDSTAT","wordstat"],["AI_ANSWER_COLLECTION","AI_ANSWER","ai-serp"],["CLUSTERING_RUN","CLUSTERING","clustering"]] as const) {
       const source=await job(type),itemId=randomUUID();
       await prisma.job.update({where:{id:source.id},data:{provider:"ARSENKIN",scopeSnapshot:{credentialId:arsenkinId}}});
@@ -201,7 +201,7 @@ test("Gateway work leases, receipts, fairness, worker loss and caller permission
   await t.test("one healthy node claims and receives 64 independent provider items",async()=>{
     const batchNode=await nodes.create({name:"Gateway batch fixture",capabilities:["WORDSTAT"],
       maxHttpSlots:64,maxCpuSlots:2,capabilityLimits:{WORDSTAT:64},useEnvCapacity:false});
-    await nodes.heartbeat(batchNode.node.id,batchNode.token,{protocolVersion:1,httpSlots:64,rankSlots:0,cpuSlots:2,
+    await nodes.heartbeat(batchNode.node.id,batchNode.token,{protocolVersion:2,httpSlots:64,rankSlots:0,cpuSlots:2,
       memoryBytes:8n*1024n**3n,activeWorkItems:0,capabilitySlots:{WORDSTAT:64}});
     await nodes.setEnabled(batchNode.node.id,true);
     try {
